@@ -1198,36 +1198,29 @@ function Reveal({
         </Text>
       </View>
 
-      <Text variant="title2" style={styles.centre}>
-        {displayTitle}
-      </Text>
-
       {/**
-       * **Score, then what it landed between, then whatever rank is worth naming**
-       * (founder, 2026-09-05, from a physical Android pass).
+       * **The title and its placement are one block** (founder, physical Android,
+       * 2026-09-07).
        *
-       * The score stays the hero and the count-up is untouched. The anticipation the
-       * ranking flow builds is "what am I going to give this", and the number answers
-       * it. Nothing here competes with the panel above.
+       * The order was already score, title, placement, anchors — and on a device it
+       * still did not read that way, because the *spacing* said something else. The
+       * reveal's own `space[6]` sat between the title and the placement while only
+       * `space[2]` sat between the placement and the two names beneath it, so `#6 Drama`
+       * looked like the first line of the anchor block rather than the subtitle of the
+       * title above it. Structure was right and grouping was wrong, which is a thing a
+       * tree-order test cannot see and a physical pass can.
        *
-       * **The anchors have moved above the ordinal**, and the ordinal has become
-       * conditional. Both changes answer the same complaint: the block was four lines
-       * of number under a score, led by `#19 in Movies` — the largest of them and the
-       * one saying least, because a placement outside the top ten is a fact about how
-       * much the reader has ranked rather than about the film. It is now hidden past
-       * ten, and the two names either side lead instead. They are the half of this
-       * block that is about the film, and the half a ranked title always has.
-       *
-       * Underneath, together, comes whichever rank survives the rule: the overall
-       * placement inside the top ten, otherwise up to two top-ten genre placements,
-       * otherwise nothing and no reserved gap. See the selection above the return for
-       * the whole rule and why it is `hero-rank.ts`'s, shared rather than restated.
-       *
-       * Every name comes off the list this screen already reads for those genre ranks,
-       * so the block costs no second request, adds no poster fetch, and cannot disagree
-       * with the ordinal beneath it.
+       * So the subtitle now lives *inside* the title's own block at `space[1]`, and the
+       * anchors are a sibling of that block, taking the reveal's full `space[6]`. The
+       * gap that used to be above the placement is now below it, which is the whole
+       * correction: what a reader sees is a title with a placement attached, then some
+       * air, then where it landed.
        */}
-      <View style={styles.placement}>
+      <View style={styles.identity}>
+        <Text variant="title2" style={styles.centre}>
+          {displayTitle}
+        </Text>
+
         {/**
          * **The placement leads again, directly under the title** (founder, physical
          * Android, 2026-09-06) — where it was before 2026-09-05 and where the founder
@@ -1267,51 +1260,54 @@ function Reveal({
             {genreContext}
           </Text>
         ) : null}
-
-        {/**
-         * The two names either side, last and quietest.
-         *
-         * "#7" is abstract and "below Dune, above The Batman" is an opinion — which is
-         * why they are here at all — but they are context for the placement above them
-         * rather than the headline, and the founder's order says so.
-         *
-         * Nothing is invented to sit above a #1 or below a last place. The line that
-         * would name it is simply absent.
-         */}
-        {higher || lower ? (
-          <View style={styles.anchors}>
-            {higher ? (
-              <Text
-                variant="footnote"
-                tone="tertiary"
-                style={styles.centre}
-                numberOfLines={1}
-                accessibilityElementsHidden
-              >
-                Below{' '}
-                <Text variant="subhead" tone="secondary">
-                  {higher.name}
-                </Text>
-              </Text>
-            ) : null}
-
-            {lower ? (
-              <Text
-                variant="footnote"
-                tone="tertiary"
-                style={styles.centre}
-                numberOfLines={1}
-                accessibilityElementsHidden
-              >
-                Above{' '}
-                <Text variant="subhead" tone="secondary">
-                  {lower.name}
-                </Text>
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
       </View>
+
+      {/**
+       * The two names either side, last and quietest — and now a block of their own.
+       *
+       * "#7" is abstract and "below Dune, above The Batman" is an opinion, which is why
+       * they are here at all. But they are context for the placement above them rather
+       * than part of it, and while they shared a container with the placement at
+       * `space[2]` the four lines read as one undifferentiated column of small type.
+       * Out here they take the reveal's `space[6]`, which is the breathing room the
+       * founder asked for and the thing that makes the placement read as a subtitle.
+       *
+       * Nothing is invented to sit above a #1 or below a last place. The line that
+       * would name it is simply absent.
+       */}
+      {higher || lower ? (
+        <View style={styles.anchors}>
+          {higher ? (
+            <Text
+              variant="footnote"
+              tone="tertiary"
+              style={styles.centre}
+              numberOfLines={1}
+              accessibilityElementsHidden
+            >
+              Below{' '}
+              <Text variant="subhead" tone="secondary">
+                {higher.name}
+              </Text>
+            </Text>
+          ) : null}
+
+          {lower ? (
+            <Text
+              variant="footnote"
+              tone="tertiary"
+              style={styles.centre}
+              numberOfLines={1}
+              accessibilityElementsHidden
+            >
+              Above{' '}
+              <Text variant="subhead" tone="secondary">
+                {lower.name}
+              </Text>
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {/**
        * **Nothing is said here about Too tough** (founder, 2026-08-30).
@@ -1510,12 +1506,20 @@ const styles = StyleSheet.create({
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
   centre: { textAlign: 'center' },
-  // The placement, its anchors and the genre line are one block, set apart from the
-  // title above them. The reveal's own gap is space[6], which would read as three
-  // unrelated things.
-  placement: { alignSelf: 'stretch', gap: theme.space[2] },
-  // Tighter again inside, so the two names read as a pair hanging off the ordinal
-  // rather than as two more facts.
+  /**
+   * The title and the placement beneath it: one block, tight (founder, 2026-09-07).
+   *
+   * `space[1]` is a *line* gap rather than a section gap, which is the whole point — a
+   * subtitle is set close enough to what it describes that the eye never asks which of
+   * the two things above it the line belongs to. It replaces `placement`, which held the
+   * ordinal, the genre line and the anchors together at `space[2]` and sat a full
+   * `space[6]` below the title, so the placement grouped downward with the anchors
+   * instead of upward with the title it names.
+   */
+  identity: { alignSelf: 'stretch', gap: theme.space[1] },
+  // The two names, now a sibling of the block above and separated from it by the
+  // reveal's own space[6]. Tight inside, so they read as a pair rather than as two
+  // more facts.
   anchors: { alignSelf: 'stretch', gap: theme.space[1] },
   centredBox: {
     alignItems: 'center',

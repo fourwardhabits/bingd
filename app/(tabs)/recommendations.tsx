@@ -53,7 +53,8 @@ import {
   HeaderBoundary,
   PosterGrid,
   Screen,
-  SegmentedTabs,
+  MediumSelector,
+  type MediumSelectorOption,
   SkeletonRow,
   Text,
 } from '@/ui/components';
@@ -94,13 +95,12 @@ export default function RecommendationsScreen() {
   /**
    * Whether the People suggestions are showing instead of the title wall.
    *
-   * **A boolean rather than a third value in a category enum** (founder, 2026-09-06).
-   * People was one of three options in the media selector, which made it a peer of the
-   * media universe — and it is not one: it is a different *kind* of answer to "what
-   * next", not a different kind of title. Modelling it as a peer is exactly what made it
-   * look like one. It is a chip in the utility row now, beside Sent to you, which is the
-   * screen's other control that changes what *class* of thing is on screen rather than
-   * narrowing what is already there.
+   * **A boolean, with the selector's third option derived from it** (2026-09-07).
+   * People is an option in the dropdown again — it is an answer to "what am I looking
+   * at", which is the question that control asks — but it is deliberately not a value
+   * `medium` can hold. Keeping it as its own flag is what stops a glance at People from
+   * moving the slate query to Movies and throwing away a TV wall somebody scrolled; see
+   * `category` below, which is the one place the two are combined.
    *
    * State rather than a route, unchanged: a route would put People in the back stack and
    * make the tab bar's "back to the top of For You" gesture land somewhere the reader
@@ -163,10 +163,22 @@ export default function RecommendationsScreen() {
    * Choosing a media tab also leaves People, because tapping Movies while looking at a
    * list of people plainly means "show me the films".
    */
-  const changeMedium = (next: Medium) => {
-    setPeopleOpen(false);
-    setMedium(next);
+  const changeCategory = (next: ForYouCategory) => {
+    setPeopleOpen(next === 'people');
+    // People is not a medium, so it leaves `medium` alone — which is what keeps the
+    // wall, its filters and its per-medium depth exactly where the reader left them.
+    if (next !== 'people') setMedium(next);
   };
+
+  /**
+   * What the selector shows, derived rather than stored.
+   *
+   * Two pieces of state (is People showing, which media side) and one control over
+   * both, so the control's value is computed from them instead of being a third thing
+   * that could disagree with either. This is the seam that lets People be an option in
+   * the dropdown without being a `medium` the slate query could ever be asked for.
+   */
+  const category: ForYouCategory = peopleOpen ? 'people' : medium;
 
   /**
    * Filters, and the page count that has to move with them.
@@ -426,49 +438,33 @@ export default function RecommendationsScreen() {
        * own two options and its own label — see `MediumSelector`.
        */}
       {/**
-       * **Movies and TV shows are visible peer tabs**, the same control Collection
-       * leads with, in the same place, doing the same job (founder addendum,
-       * 2026-09-06). A dropdown hid one of two constant choices behind a tap and a
-       * sheet; these are the primary content universe and they read like it.
+       * **Restored, with People back in it** (founder, physical Android, 2026-09-07).
        *
-       * **People left this row and did not leave the screen.** It was a third option
-       * here, which made it a peer of the media universe — and it is not one: it is a
-       * different *kind* of answer to "what next", not a different kind of title. It is
-       * a chip in the utility row below now, beside Sent to you, which is the row this
-       * screen already uses for the one other control that changes what class of thing
-       * is on screen. Nothing is orphaned: `PeopleDiscovery` suggests people from the
-       * follow graph and from taste matches, which Search cannot do — Search finds a
-       * person you can already name.
+       * These were visible tabs for a day, and People was demoted to a chip beside Sent
+       * to you. On a device the tab row drew differently here than on Collection — the
+       * two screens are supposed to lead with the same control — and People as a chip
+       * sat in a row of *filters*, where a thing that replaces the entire wall does not
+       * belong. Both problems are the same problem: the screen has one question at the
+       * top, and splitting it across two control languages is what made it look split.
+       *
+       * The dropdown is also the only one of the two that scales. Movies and TV shows
+       * are not necessarily the last categories this screen will offer, and a fourth
+       * tab is a wrapped row where a fourth sheet row is a fourth sheet row.
        */}
-      <SegmentedTabs
-        variant="primary"
-        options={FOR_YOU_MEDIA_TABS}
-        value={medium}
-        onChange={changeMedium}
-        accessibilityLabel="Media type"
+      <MediumSelector
+        value={category}
+        onChange={changeCategory}
+        options={FOR_YOU_CATEGORIES}
       />
       {/* Outside the branch, because the selector above it is now the screen's entire
       header and the seam it marks is the same one whichever category is showing. */}
       <HeaderBoundary />
 
       {peopleOpen ? (
-        <>
-          {/* The chip that opened this, still on screen, still selected — because it is
-              the way back. A mode whose only exit is a *different* mode is a trap, and
-              the media tabs above leaving People is a convenience rather than the
-              answer. Alone in the row: none of the genre filters narrows a list of
-              people, and drawing them here would offer controls that do nothing. */}
-          <View style={styles.filterRow}>
-            <FilterChip
-              icon="people"
-              label="People"
-              accessibilityLabel="People you may want to follow"
-              selected
-              onPress={() => setPeopleOpen(false)}
-            />
-          </View>
-          <PeopleDiscovery viewerId={profile.id} />
-        </>
+        // No filter row: none of the genre chips narrows a list of people, and drawing
+        // them here would offer controls that do nothing. The way back is the selector
+        // above, which reads "People" with its chevron — the same control that got here.
+        <PeopleDiscovery viewerId={profile.id} />
       ) : (
         <>
           {/* Above the filters, and only when something is waiting.
@@ -499,18 +495,10 @@ export default function RecommendationsScreen() {
               selected={sentOnly}
               onPress={() => setSentOnly((on) => !on)}
             />
-            {/* People, demoted out of the primary tabs (founder, 2026-09-06) and kept
-                exactly where the screen's other content-class control lives. It is not a
-                narrowing of the wall, which is why it sits beside Sent to you rather
-                than beside the genre chips — and it is not a peer of Movies and TV,
-                which is the whole reason it moved. */}
-            <FilterChip
-              icon={peopleOpen ? 'people' : 'people-outline'}
-              label="People"
-              accessibilityLabel="People you may want to follow"
-              selected={peopleOpen}
-              onPress={() => setPeopleOpen((open) => !open)}
-            />
+            {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
+                entire wall, and every other control here narrows the wall that is
+                already showing — it belongs in the selector at the top with the other
+                answers to "what am I looking at", and that is where it lives again. */}
             {/* An action chip rather than a filter: it opens the flow that answers "what
             should this group watch together". Deliberately not a fourth MediumSelector
             segment and not a tab — a group is a momentary question, and this row is
@@ -753,9 +741,12 @@ export default function RecommendationsScreen() {
  * translation existed only because the control was shared. The control is a tab row now
  * and takes this screen's own ids directly.
  */
-const FOR_YOU_MEDIA_TABS: readonly { id: Medium; label: string }[] = [
+type ForYouCategory = Medium | 'people';
+
+const FOR_YOU_CATEGORIES: readonly MediumSelectorOption<ForYouCategory>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV shows' },
+  { id: 'people', label: 'People' },
 ];
 
 /**

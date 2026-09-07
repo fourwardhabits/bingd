@@ -62,22 +62,25 @@ const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
  * {@link TWO_COLUMN_MAX_FONT_SCALE}, the two units become two full-width rows. Same
  * composition, more room: the fallback is a wider line, not a different design.
  *
- * **No heading, and the rule sits *beneath* the row** (founder, physical Android,
- * 2026-09-06). It opened with an inset hairline and a `SCORES` label, which together put
- * a visible seam between the title's metadata and the numbers — and the numbers are part
- * of what the title *is* on bingd., not a lower section about it. The founder's
- * screenshot read as: title, a gap, a heading, then the scores. It reads as one block
- * now: name, year, runtime and director, then what everybody made of it.
+ * **No heading, and the rule sits above the row** (founder, 2026-09-06 and 2026-09-07).
  *
- * The rule is kept and moved to the bottom, where it does the separating that matters —
- * core identity above, descriptive content (synopsis, genres) below. One rule, not two.
- * The units name themselves ("bingd.", "Following", the count or "Not enough ratings"),
- * so nothing a screen reader needed was in the heading; it was chrome. `WhereToWatch`
- * still opens with its own inset rule, unchanged.
+ * The `SCORES` label is gone for good: the units name themselves ("bingd.",
+ * "Following", the count or "Not enough ratings"), so nothing a screen reader needed was
+ * in the heading — it was chrome, and it made the block read as a lower section *about*
+ * the title rather than part of the page.
+ *
+ * The rule moved twice and is back where it started, which is worth recording so it does
+ * not move a third time. On 2026-09-06 the block sat directly under the title's metadata
+ * and the rule went *beneath* it, closing the title's identity off from the description.
+ * On 2026-09-07 the founder reconverged the page — hero, title, metadata, genres,
+ * synopsis, **then** scores — and with the block back in the lower half its job changed
+ * with its position: it now separates the descriptive content above from the utility
+ * block below, so the rule belongs above it again. `WhereToWatch` draws its own beneath
+ * this one, which is what keeps the two utility rows apart.
  *
  * **No background wash.** Tried without one first, per the founder's default: the
- * circles, the alignment under the metadata and the tighter spacing carry the hierarchy
- * on their own, and a tinted band would be a card in everything but name.
+ * circles, the section's own spacing and the rule above carry the hierarchy on their
+ * own, and a tinted band would be a card in everything but name.
  *
  * **Your own score is not here, and that is the founder's correction of 2026-08-18.**
  * It leads the hero, opposite the poster, with the rank context and the Ranked control
@@ -117,6 +120,12 @@ export function ScoresSection({ bingd, following, onPressFollowing }: ScoresSect
 
   return (
     <View testID="scores-section" style={styles.section}>
+      {/* Decorative and inset, and *above* the row: it closes the descriptive content —
+          synopsis, genres — off from the utility block the page ends with. No
+          accessibility role: a screen reader announcing a separator here would put a
+          word between the description and the scores where the design puts a pause. */}
+      <View testID="scores-divider" style={styles.divider} />
+
       {/* One container either way. The testID is how the layout test tells them apart:
           there is no role for "two columns", and reading it off the tree by shape made
           the test agree with any stack that happened to have a row in it. */}
@@ -144,12 +153,6 @@ export function ScoresSection({ bingd, following, onPressFollowing }: ScoresSect
           />
         ) : null}
       </View>
-
-      {/* Decorative and inset, and *after* the row: it closes the title's core identity
-          — name, metadata, scores — off from the descriptive content beneath. No
-          accessibility role: a screen reader announcing a separator here would put a
-          word between the scores and the synopsis where the design puts a pause. */}
-      <View testID="scores-divider" style={styles.divider} />
     </View>
   );
 }
@@ -244,21 +247,19 @@ function ratingsDetail(ratingCount: number): string {
 }
 
 const styles = StyleSheet.create({
-  /**
-   * Tight to the metadata above — `space[3]`, not the `space[5]` a new section gets —
-   * because this is the same block continuing rather than a section starting. The
-   * heading's own `gap` already steps its lines; this is one more of those steps,
-   * slightly larger, and not a band.
-   */
-  section: { paddingTop: theme.space[3], gap: theme.space[2] },
+  /** A section's own top padding, since the page's reconvergence put this back in the
+   *  lower half as one of two utility blocks rather than as a continuation of the
+   *  title's identity. */
+  section: { paddingTop: theme.space[5], gap: theme.space[3] },
 
   /** Inset to the gutter, at the app's hairline. Doubled because a single
    *  `hairlineWidth` rounds away to nothing on some Android densities, which is the
-   *  same reason every other rule in the app is drawn this way. Beneath the row now,
-   *  so the air goes above the rule; the synopsis block carries its own top padding. */
+   *  same reason every other rule in the app is drawn this way. Above the row, with the
+   *  air beneath it, so the rule reads as the end of the description rather than as the
+   *  start of a card. */
   divider: {
     marginHorizontal: theme.layout.gutter,
-    marginTop: theme.space[3],
+    marginBottom: theme.space[4],
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
   },

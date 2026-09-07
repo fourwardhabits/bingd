@@ -68,47 +68,47 @@ export function StreakLine({ userId }: StreakLineProps) {
     });
   }, [data, daysLeft]);
 
-  // Nothing to say, and three different reasons for it — still loading, failed, or an
-  // account that has not ranked anything yet. All three are the same answer here.
-  if (!data?.hasHistory) return null;
+  // Nothing to say, and four different reasons for it — still loading, failed, an
+  // account that has not ranked anything yet, or a run that is currently zero weeks
+  // long. All four are the same answer here, and the last one matters: "🔥 0 week
+  // streak" is the app telling somebody they are failing at something.
+  if (!data?.hasHistory || data.weeks === 0) return null;
 
   const run = data.weeks === 1 ? 'A one week streak' : `A ${data.weeks} week streak`;
-  const state = line(data.weeks, data.rankedThisWeek, daysLeft);
+  const state = data.rankedThisWeek ? 'This week ✓' : null;
 
   return (
     <View style={styles.row}>
-      {/* One line, not two. The flame and the number are the fact; what follows the
-          middle dot is its state. A separator rather than a second line, because this
-          row sits under the goal bars and a two-line block there would rebuild the
-          section the founder just collapsed. */}
+      {/**
+       * One line, and often only half of one (founder, physical Android, 2026-09-07).
+       *
+       * The row says `🔥 4 week streak`, and appends `· This week ✓` only once the week
+       * has actually been earned. It said `Ranked this week ✓`, which spent three words
+       * restating the verb the whole feature is about; and when the week was *not* yet
+       * earned it appended a nudge — "Rank something in the next 2 days to keep it
+       * going." — which is the row turning into a task the moment somebody has not done
+       * it. The founder's rule: no status, no dot and no check after the count unless
+       * there is a real one to report.
+       *
+       * That leaves the open week saying nothing, which is correct. An open week is not
+       * a lost one and does not need announcing; the streak itself is unchanged, and the
+       * grace it runs on still lives in `streak.ts`.
+       */}
       <Text
         variant="callout"
         // The flame is decoration beside a number that already says it. Read out, it
-        // would be "fire, four weeks".
-        accessibilityLabel={`${run}. ${state}`}
+        // would be "fire, four week streak".
+        accessibilityLabel={state ? `${run}. ${state}` : run}
       >
-        {`🔥 ${data.weeks} ${data.weeks === 1 ? 'week' : 'weeks'}`}
-        <Text variant="callout" tone="secondary">
-          {` · ${state}`}
-        </Text>
+        {`🔥 ${data.weeks} week streak`}
+        {state ? (
+          <Text variant="callout" tone="secondary">
+            {` · ${state}`}
+          </Text>
+        ) : null}
       </Text>
     </View>
   );
-}
-
-/**
- * The second line, and there are exactly three of them.
- *
- * Safe, at risk, and broken — said plainly and without a countdown. "Rank something in
- * the next 2 days" is a fact; "2 days left!" is pressure, and the difference is the
- * whole of what keeps this from being the mechanic the founder ruled out.
- */
-function line(weeks: number, rankedThisWeek: boolean, daysLeft: number): string {
-  if (rankedThisWeek) return 'Ranked this week ✓';
-  if (weeks === 0) return 'Rank something this week to start a new one.';
-  return daysLeft === 1
-    ? 'Rank something today to keep it going.'
-    : `Rank something in the next ${daysLeft} days to keep it going.`;
 }
 
 const styles = StyleSheet.create({

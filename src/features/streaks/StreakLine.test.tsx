@@ -76,59 +76,60 @@ describe('when the section appears at all', () => {
   });
 });
 
-describe('what the second line says', () => {
-  it('confirms a week that is already safe', async () => {
+/**
+ * **The row says the run, and a state only when there is one** (founder, physical
+ * Android, 2026-09-07).
+ *
+ * It used to append a sentence in every case: `Ranked this week ✓` when the week was
+ * earned, and otherwise a nudge — "Rank something in the next 2 days to keep it going."
+ * The nudge is the row turning into a task the moment somebody has not done it, and the
+ * founder cut it: an open week is not a lost one, and does not need announcing.
+ *
+ * What survives is `🔥 4 week streak`, with `· This week ✓` after it once the week is
+ * genuinely earned. Nothing here is a countdown, and there is still no loss state.
+ */
+describe('what the row says', () => {
+  it('names the run as a streak, not as a bare count of weeks', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/🔥 4 week streak/)).toBeTruthy());
+  });
+
+  it('confirms a week that is already earned, in two words', async () => {
     mockStreak = settled(streak({ rankedThisWeek: true }));
     const view = await open();
 
-    await waitFor(() => expect(view.getByText(/Ranked this week ✓/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/This week ✓/)).toBeTruthy());
+    // Not "Ranked this week": three words to restate the verb the feature is about.
+    expect(view.queryByText(/Ranked this week/)).toBeNull();
   });
 
-  /**
-   * The clock is pinned for these two, and it has to be: the copy branches on how much
-   * of the week is left, so an unpinned test asserts whichever sentence the day it ran
-   * on happened to produce — and passes six days in seven while proving nothing about
-   * the seventh.
-   */
-  it('says how many days are left when a live streak is still open', async () => {
-    // A Wednesday: five days left, counting today.
+  it('appends nothing at all while the week is still open', async () => {
+    // The founder’s rule: no status, no dot, no check unless there is a real one. A
+    // clock is pinned because the old copy branched on how much of the week was left,
+    // and the point is that nothing branches now.
     jest.useFakeTimers().setSystemTime(new Date(2026, 8, 2, 12));
     try {
       const view = await open();
 
-      // A fact, not a countdown: "5 days left!" is pressure and this is not.
-      await waitFor(() =>
-        expect(
-          view.getByText(/Rank something in the next 5 days to keep it going./),
-        ).toBeTruthy(),
-      );
+      await waitFor(() => expect(view.getByText(/🔥 4 week streak/)).toBeTruthy());
+      expect(view.queryByText(/keep it going/)).toBeNull();
+      expect(view.queryByText(/·/)).toBeNull();
+      expect(view.queryByText(/✓/)).toBeNull();
+      expect(view.queryByText(/days/)).toBeNull();
     } finally {
       jest.useRealTimers();
     }
   });
 
-  it('says today on the last day of the week, rather than "1 days"', async () => {
-    jest.useFakeTimers().setSystemTime(new Date(2026, 8, 6, 12));
-    try {
-      const view = await open();
-
-      await waitFor(() =>
-        expect(view.getByText(/Rank something today to keep it going./)).toBeTruthy(),
-      );
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  it('invites a new one rather than mourning the old one', async () => {
-    // No "you lost your streak", no loss animation. The run is over; the sentence is
-    // about the week that is still available.
+  it('says nothing whatever about a run that is over', async () => {
+    // No "you lost your streak", no loss animation — and no "🔥 0 week streak", which
+    // is the app telling somebody they are failing at something.
     mockStreak = settled(streak({ weeks: 0, best: 6 }));
     const view = await open();
 
-    await waitFor(() =>
-      expect(view.getByText(/Rank something this week to start a new one./)).toBeTruthy(),
-    );
+    expect(view.queryByText(/week streak/)).toBeNull();
+    expect(view.queryByText(/start a new one/)).toBeNull();
   });
 
   it('agrees with itself about one week', async () => {
@@ -136,6 +137,7 @@ describe('what the second line says', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText(/^A one week streak/)).toBeTruthy());
+    expect(view.getByText(/🔥 1 week streak/)).toBeTruthy();
   });
 });
 
@@ -161,11 +163,9 @@ describe('the restraint the founder asked for', () => {
   it('reads the streak out in words, so the flame is decoration', async () => {
     const view = await open();
 
-    // The run and its state in one spoken sentence, so neither the flame nor the middle
-    // dot that joins them is ever read out as punctuation.
-    await waitFor(() =>
-      expect(view.getByLabelText(/^A 4 week streak\. Rank something/)).toBeTruthy(),
-    );
+    // The run in words, so the flame is never read out as "fire". With nothing to
+    // report about the open week, the spoken label is the run and only the run.
+    await waitFor(() => expect(view.getByLabelText('A 4 week streak')).toBeTruthy());
   });
 });
 

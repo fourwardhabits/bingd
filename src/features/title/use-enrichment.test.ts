@@ -84,10 +84,54 @@ describe('seasonListIsStale', () => {
   });
 
   it('takes the clock as an argument, so the window is testable at its edge', () => {
-    const written = Date.parse('2026-08-01T00:00:00.000Z');
-    const seasons = [{ fetched_at: '2026-08-01T00:00:00.000Z' }];
-    expect(seasonListIsStale(seasons, written + SEASON_LIST_MAX_AGE_MS)).toBe(false);
-    expect(seasonListIsStale(seasons, written + SEASON_LIST_MAX_AGE_MS + 1)).toBe(true);
+    const written = '2026-08-01T00:00:00.000Z';
+    const at0 = Date.parse(written);
+    const seasons = [{ fetched_at: written }];
+    expect(seasonListIsStale(seasons, undefined, at0 + SEASON_LIST_MAX_AGE_MS)).toBe(false);
+    expect(seasonListIsStale(seasons, undefined, at0 + SEASON_LIST_MAX_AGE_MS + 1)).toBe(true);
+  });
+
+  /**
+   * **The series’ own timestamp is the list’s** (founder, physical Android, 2026-09-07).
+   *
+   * Review 77b filed this as narrow: a season enriched on its own moves the maximum, so
+   * a series could hold its list fresh while it was not. For a one-season show it is not
+   * narrow — it is every open of the page, because the only season is the one being
+   * enriched. Dan Da Dan had a season re-enriched hours earlier and a list last read
+   * eight days earlier, and this function called it fresh.
+   */
+  describe('when the series’ own timestamp is available', () => {
+    const seasons = [{ fetched_at: at(1000) }]; // enriched a moment ago
+
+    it('is stale when the list is old, however recently a season was enriched', () => {
+      // The exact shape of the founder’s case.
+      expect(seasonListIsStale(seasons, at(8 * DAY))).toBe(true);
+    });
+
+    it('is fresh when the list itself was written inside the window', () => {
+      expect(seasonListIsStale(seasons, at(DAY))).toBe(false);
+    });
+
+    it('ignores the seasons entirely, in both directions', () => {
+      // A list written a moment ago is fresh even where every season row is ancient —
+      // which is review 77’s dropped-season case, still terminating.
+      expect(seasonListIsStale([{ fetched_at: at(300 * DAY) }], at(1000))).toBe(false);
+    });
+
+    it('still says nothing about a series with no seasons', () => {
+      expect(seasonListIsStale([], at(300 * DAY))).toBe(false);
+    });
+
+    it('treats a missing or unreadable series timestamp as stale', () => {
+      expect(seasonListIsStale(seasons, null)).toBe(true);
+      expect(seasonListIsStale(seasons, 'not a date')).toBe(true);
+    });
+
+    it('falls back to the seasons when no series row is in hand', () => {
+      // `SeasonPicker` is handed a search result rather than a catalogue row.
+      expect(seasonListIsStale([{ fetched_at: at(30 * DAY) }], undefined)).toBe(true);
+      expect(seasonListIsStale([{ fetched_at: at(DAY) }], undefined)).toBe(false);
+    });
   });
 
   it('is a week, and not the 150-day descriptive window', () => {

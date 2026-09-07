@@ -1,4 +1,5 @@
 import { Image } from 'expo-image';
+import { useState } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { posterUri } from '@/lib/images';
@@ -39,10 +40,37 @@ export type CelebrationBackdropProps = {
  */
 export function CelebrationBackdrop({ grid }: CelebrationBackdropProps) {
   const { width, height } = useWindowDimensions();
+  /**
+   * The height of the area this actually fills, measured rather than assumed.
+   *
+   * **This is the founder's grey band** (physical Android, 2026-09-07). The wall was
+   * centred against the *window* height while the view it lives in is inset by the modal
+   * header — so a 3×3 wall on a 390pt-wide phone came out 585pt tall against an 844pt
+   * window and was pushed 129pt down, leaving a tall strip of Paper between the app bar
+   * and the first row of posters. The screen had already stopped adding a top inset of
+   * its own (#111) and the band survived, because the band was never the inset.
+   *
+   * Null until the first layout, which is one frame behind a wall that is about to be
+   * covered by a 72% scrim anyway.
+   */
+  const [measured, setMeasured] = useState<number | null>(null);
+  const available = measured ?? height;
 
-  // Wide enough that the columns reach both edges, then a little more so the last one
-  // is cut rather than flush. The height follows from the poster ratio.
-  const cell = Math.ceil(width / grid.columns);
+  /**
+   * Wide enough that the columns reach both edges, and **tall enough that the rows
+   * always cover** — whichever demands more.
+   *
+   * Sizing from width alone is what allowed a wall shorter than its container. The
+   * component's own rule is that the wall is cropped rather than framed ("a grid that
+   * fits exactly reads as a diagram"), and a wall that does not reach the edges cannot
+   * be cropped by them. So a small collection gets larger posters rather than a border
+   * of background colour, which behind a scrim is the difference between atmosphere and
+   * a mistake.
+   */
+  const cell = Math.max(
+    Math.ceil(width / grid.columns),
+    Math.ceil((available / grid.rows) * theme.layout.aspect.poster),
+  );
   const cellHeight = Math.ceil(cell / theme.layout.aspect.poster);
   const wallHeight = cellHeight * grid.rows;
 
@@ -50,6 +78,7 @@ export function CelebrationBackdrop({ grid }: CelebrationBackdropProps) {
     <View
       style={StyleSheet.absoluteFill}
       pointerEvents="none"
+      onLayout={(event) => setMeasured(event.nativeEvent.layout.height)}
       // One decorative object. Twenty posters announced one at a time, in front of the
       // thing the screen is actually about, is the worst possible reading order.
       accessibilityElementsHidden
@@ -61,10 +90,10 @@ export function CelebrationBackdrop({ grid }: CelebrationBackdropProps) {
           {
             width: cell * grid.columns,
             height: wallHeight,
-            // Centred vertically and allowed to run off both ends. A wall shorter than
-            // the screen sits in the middle with the page's own colour around it, which
-            // is the honest look for a small collection.
-            top: Math.round((height - wallHeight) / 2),
+            // Centred vertically and allowed to run off both ends. The cell size above
+            // guarantees the wall is at least as tall as this view, so this offset is
+            // never positive and there is no strip of background above the first row.
+            top: Math.min(0, Math.round((available - wallHeight) / 2)),
           },
         ]}
       >

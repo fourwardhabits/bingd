@@ -40,6 +40,7 @@ import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
+import { GenreRow } from '@/features/title/GenreRow';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
@@ -59,7 +60,6 @@ import { relativeTime } from '@/features/recommendations/use-sent-to-you';
 import { compactName } from '@/lib/titles';
 import {
   CastStrip,
-  Chip,
   DetailHeaderBackground,
   DetailHeaderTitle,
   Divider,
@@ -97,15 +97,6 @@ type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
  * reveals the rest, and no metadata is dropped on the way.
  */
 const EPISODES_FIRST_PAGE = 50;
-
-/**
- * How many genre chips the page draws before it counts the rest.
- *
- * Three fit one row at every width this app supports. A fourth does not, and wrapping it
- * produced the two-line block of metadata the founder rejected on a device — see the
- * `+N` beside them.
- */
-const GENRE_CHIPS = 3;
 
 /**
  * The title page (screens.md §6), rebuilt after the founder's device test.
@@ -231,7 +222,7 @@ export default function TitleScreen() {
         .select(
           // The parent's artwork comes with it: a season has no backdrop of its own
           // (TMDB publishes none) and borrows the series' — see `lib/hero.ts`.
-          'id, kind, title, season_number, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, parent:parent_id(id, title, poster_path, backdrop_path, genres, original_language)',
+          'id, kind, title, season_number, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, fetched_at, parent:parent_id(id, title, poster_path, backdrop_path, genres, original_language)',
         )
         .eq('id', id ?? '')
         .single();
@@ -334,7 +325,12 @@ export default function TitleScreen() {
   const seasonListNeedsReading =
     data?.title?.kind === 'series' &&
     seasons.isFetched &&
-    ((seasons.data ?? []).length === 0 || seasonListIsStale(seasons.data ?? []));
+    ((seasons.data ?? []).length === 0 ||
+      // The **series'** timestamp, not the seasons': the adapter writes the series row
+      // and the whole season list in one request, so this is when the list was last
+      // asked for. Reading it off the seasons let a one-season show vouch for a list it
+      // had never re-read — see `seasonListIsStale`.
+      seasonListIsStale(seasons.data ?? [], data?.title?.fetched_at ?? null));
   const { enriching } = useTitleEnrichment(
     data?.title ?? null,
     videos.data === null || seasonListNeedsReading,
@@ -931,50 +927,6 @@ export default function TitleScreen() {
           {recommendedBy && !hero.uri ? <RecommendedCallout label={recommendedBy} /> : null}
         </View>
 
-        {/* **Directly beneath the metadata, as part of the title's identity** (founder,
-            physical Android, 2026-09-06).
-
-            The scores sat below the transient notices with a SCORES heading and a rule
-            above them, which read on a device as a separate lower section about the
-            title. They are not: what everybody made of a film is part of what the film
-            *is* on bingd., the same way its runtime and director are. So the row follows
-            the metadata line with nothing between them - no heading, no rule - and the
-            one rule sits *beneath* the scores, closing off core identity from the
-            descriptive content (synopsis, genres) that follows. ScoresSection draws it.
-
-            Above the tabs, and never inside them, is still the founder's standing rule:
-            scores are core bingd. data and must not appear and disappear as somebody
-            looks at the cast. The page order is fixed - hero, metadata, scores,
-            description, genres, where to watch, tabs - so a reader scrolling to the
-            number finds it in the same place every time.
-
-            A series has no aggregate of its own, because it cannot be ranked (PRD s10),
-            so it gets no row rather than a permanent "Not enough ratings".
-
-            **The reader's own score is not in here.** It is in the hero, opposite the
-            poster, with the rank context and the Ranked control beside it. It led this
-            row as well until 2026-08-18, which put the same number on the page twice
-            and made the second copy the weaker one. Founder correction. */}
-        {!isSeries ? (
-          <ScoresSection
-            // Everybody's, then the reader's own people — the founder's order from the
-            // Preview pass. Both units are always drawn: a grey circle and "Not enough
-            // ratings" is a real answer, and a unit that appears when the data does is
-            // a page that moves under the reader.
-            bingd={{
-              score: community.data?.score ?? null,
-              ratingCount: community.data?.ratingCount ?? 0,
-            }}
-            following={{
-              score: following.data?.score ?? null,
-              ratingCount: following.data?.ratingCount ?? 0,
-            }}
-            // §13: the aggregate opens its members. Only offered once the count is
-            // real — ScoresSection itself refuses a tap on an empty unit.
-            onPressFollowing={() => setFollowingRatingsOpen(true)}
-          />
-        ) : null}
-
         {actionError ? (
           <View style={styles.block}>
             <Text variant="footnote" tone="action">
@@ -1016,6 +968,20 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
+        {/* **Above the synopsis, one measured row** (founder reconvergence, 2026-09-07).
+
+            The order reads outward — what the thing is called, what it is, what it is
+            about — so the genres sit between the metadata and the description. They led
+            the synopsis until 2026-09-06, moved below it to get the scores nearer the
+            top, and return with the scores now in the page’s lower half.
+
+            **The row measures itself**, which is the founder’s other correction: a fixed
+            three chips plus `+N` wrapped the marker onto a second line whenever the
+            third chip fitted and the marker did not — Dan Da Dan, exactly. `GenreRow`
+            keeps as many as fit and puts the count on the same line, always. Tapping any
+            chip or the count opens the full list; Details still lists them all too. */}
+        <GenreRow genres={descriptive.genres} />
+
         {title.overview ? (
           <Pressable
             accessibilityRole="button"
@@ -1036,46 +1002,53 @@ export default function TitleScreen() {
           </Pressable>
         ) : null}
 
-        {/* Under the description, which is where the founder's final order puts them. The
-            founder's order is metadata → genres → description, which reads outward from
-            what the thing *is* to what it is *about*; underneath the description they
-            were a footnote to a paragraph nobody had finished reading.
+        {/* **After the synopsis, in the page’s lower half** (founder reconvergence,
+            physical Android, 2026-09-07).
 
-            **Three, not five, and one row is the design** (hierarchy pass). Five chips
-            wrapped to two and sometimes three rows on a 360pt Android screen, which put
-            a block of metadata between the title and the actions and pushed the score
-            below the fold on the founder's device. Three is what fits one row at the
-            widths this app supports; the wrap survives as the guard for a large text
-            size, exactly as it does on the action row below. Nothing is lost — Details
-            still lists every genre, joined, under its own label. */}
-        {descriptive.genres.length ? (
-          <View style={styles.pills}>
-            {descriptive.genres.slice(0, GENRE_CHIPS).map((genre: string) => (
-              <Chip key={genre} label={genre} />
-            ))}
-            {/**
-             * **`+N` rather than a second row** (founder, 2026-09-06).
-             *
-             * Three chips fit one row at every width this app supports; a fourth does
-             * not, and wrapping it produced the two-line block of metadata the founder
-             * rejected. The overflow is *stated* instead — a reader can see that there
-             * are more without the page growing a band to prove it — and Details still
-             * lists every genre, joined, under its own label.
-             *
-             * Not a chip: it is a count, not a genre, and a reader must not be able to
-             * mistake `+2` for something a title is.
-             */}
-            {descriptive.genres.length > GENRE_CHIPS ? (
-              <Text
-                variant="footnote"
-                tone="tertiary"
-                style={styles.genreOverflow}
-                accessibilityLabel={`And ${descriptive.genres.length - GENRE_CHIPS} more genres`}
-              >
-                {`+${descriptive.genres.length - GENRE_CHIPS}`}
-              </Text>
-            ) : null}
-          </View>
+            This block has now sat in three places, so the reasoning is worth stating
+            once. It began under the tabs (wrong: scores vanished when somebody looked at
+            the cast). It moved to directly under the title’s metadata on 2026-09-06,
+            on the argument that what everybody made of a film is part of what the film
+            *is*. That is still true, and it lost to a bigger problem: the page had been
+            cut into six small bands with rules between them, and the founder’s reading
+            of it on a device is that the earlier rhythm was better.
+
+            So the order is hero, title and year, metadata, genres, synopsis, scores,
+            where to watch, tabs — outward from what the thing is called, to what it is,
+            to what it is about, and only then to what other people made of it and where
+            to find it. The two lower blocks are utilities and read as a pair.
+
+            Still above the tabs and never inside them, which is the standing rule:
+            scores are core bingd. data and must not appear and disappear as somebody
+            looks at the cast. Still no SCORES heading. The one rule ScoresSection draws
+            is above itself again, because from here its job is to close the description
+            off rather than to close the title off.
+
+            A series has no aggregate of its own, because it cannot be ranked (PRD §10),
+            so it gets no row rather than a permanent "Not enough ratings".
+
+            **The reader’s own score is not in here.** It is in the hero, opposite the
+            poster, with the rank context and the Ranked control beside it. It led this
+            row as well until 2026-08-18, which put the same number on the page twice
+            and made the second copy the weaker one. Founder correction. */}
+        {!isSeries ? (
+          <ScoresSection
+            // Everybody's, then the reader's own people — the founder's order from the
+            // Preview pass. Both units are always drawn: a grey circle and "Not enough
+            // ratings" is a real answer, and a unit that appears when the data does is
+            // a page that moves under the reader.
+            bingd={{
+              score: community.data?.score ?? null,
+              ratingCount: community.data?.ratingCount ?? 0,
+            }}
+            following={{
+              score: following.data?.score ?? null,
+              ratingCount: following.data?.ratingCount ?? 0,
+            }}
+            // §13: the aggregate opens its members. Only offered once the count is
+            // real — ScoresSection itself refuses a tap on an empty unit.
+            onPressFollowing={() => setFollowingRatingsOpen(true)}
+          />
         ) : null}
 
         {/* Under the description, over the tabs, and on every kind of title — including
@@ -1490,33 +1463,81 @@ export default function TitleScreen() {
 
             <MenuGroup title="Ranking" />
             {/**
-             * **Rank again means you watched it again.**
+             * **Three intents, and the founder pressed the wrong one because the labels
+             * did not distinguish them** (physical Android, 2026-09-07).
              *
-             * That is the product definition (`docs/product/prd.md` §10), and it is why
-             * this row is the one place in the app that declares a second viewing:
-             * completing it writes exactly one new `title_ranked` activity, where
-             * Change your rating below writes none.
+             * The report: ranked *Terrace House: Tokyo 2019-2020, S1*, adjusted the
+             * placement a minute later, and the feed showed two "ranked" rows for one
+             * watch — 8.3 and then 8.6.
              *
-             * `rank_again` (20260825000200, re-signed 20260826000500) opens a
-             * comparison session **over the position the title already has**. Nothing
-             * the reader can see moves until they finish: close the sheet, lose the
-             * network, kill the app, and the score, the band and the place in the list
-             * are exactly where they were. The founder's device pass found the
-             * opposite — the score vanished the moment this row was tapped — and that
-             * was the server unranking before it opened the session.
+             * Nothing was broken underneath. The database has had the right rule since
+             * 20260826000500: `_rank_finalize` posts `title_ranked` only `if p_new_watch
+             * or not v_replaced`, so a rerank over an existing position writes no
+             * activity. One `rankings` row and one `user_media` row is all that exists
+             * for that season, checked directly. What produced the second activity was
+             * this menu: the row that *reads* like "redo my ranking" was **Rank again**,
+             * which this app defines as a second viewing (PRD §10) and which therefore
+             * earns an activity by design. The product definition was correct and lived
+             * only in a doc; the label invited the other reading.
              *
-             * The client writer is `session.rankAgain`, reached by opening the ranking
-             * sheet in `again` mode, which is the *only* way this app is allowed to do
-             * it. Composing `rank_unrank` and `rank_start` here would be two calls with
-             * a window between them in which the title has no position and no session.
+             * So the menu names the intent rather than the mechanism, and the three
+             * modes are now each reachable and each unmistakable:
              *
-             * The bucket is passed straight through from `rankings.bucket`, so this row
-             * decides no rating — it redoes the comparisons inside the band that is
-             * already chosen.
+             *   Adjust placement   same watch, redo the comparisons — `rerank`, no
+             *                      activity, and the row this bug needed to exist.
+             *   I watched it again a genuine rewatch — `again`, exactly one activity.
+             *   Change your rating a different band — `rebucket` via the log sheet.
+             *
+             * The labels carry the whole distinction and there is no secondary line: a
+             * `value` on a `SheetRow` sets beside the label on one line and truncates at
+             * phone width, which is a founder decision this menu already carries. That is
+             * why the rewatch row is named for what the reader did rather than for what
+             * the app will do about it — a verb alone ("Rank again") cannot say whose
+             * watch it is, and a sentence explaining it cannot be read.
+             *
+             * Nothing about the ranking maths, the score or the schema changes.
+             */}
+            <SheetRow
+              icon="swap-vertical-outline"
+              label="Adjust placement"
+              onPress={
+                rankedBucket
+                  ? () => {
+                      setManaging(false);
+                      setActionError(null);
+                      setRankedTitle(loggable);
+                      setRankingSubject({
+                        id: title.id,
+                        title: title.title,
+                        bucket: rankedBucket,
+                        posterUri: posterUri(title.poster_path, 'card'),
+                        // `rankAgain` with `newWatch: false`: the session runs over the
+                        // position the title already holds, and finishing replaces it
+                        // without announcing anything. See `RankingSheet`’s `mode`.
+                        mode: 'rerank',
+                      });
+                    }
+                  : undefined
+              }
+              disabledReason={rankedBucket ? undefined : 'Loading'}
+            />
+            {/**
+             * The explicit rewatch, and the only row in the app that declares one.
+             *
+             * Completing it writes exactly one new `title_ranked` activity, which is the
+             * whole difference from the row above — and the reason the label now says
+             * what happened rather than what the app will do about it. Two genuine
+             * rewatches are still two activities; that is not a duplicate.
+             *
+             * `rank_again` opens the session **over** the position the title already
+             * has, so nothing the reader can see moves until they finish: close the
+             * sheet, lose the network, kill the app, and the score, band and place are
+             * where they were. The bucket passes straight through from
+             * `rankings.bucket`, so this row decides no rating.
              */}
             <SheetRow
               icon="repeat-outline"
-              label="Rank again"
+              label="I watched it again"
               onPress={
                 rankedBucket
                   ? () => {
@@ -1535,10 +1556,10 @@ export default function TitleScreen() {
               }
               disabledReason={rankedBucket ? undefined : 'Loading'}
             />
-            {/* The other half of the pair, and not a synonym for it: this changes the
-                *band* — loved, fine, not for me — which is a correction to an opinion
-                already recorded rather than a second viewing. It writes no new activity
-                and it does not surrender the current position while it runs. */}
+            {/* The third intent: a different *band* — loved, fine, not for me — which is
+                a correction to an opinion already recorded rather than a second viewing.
+                It writes no new activity and does not surrender the current position
+                while it runs. */}
             <SheetRow
               icon="star-outline"
               label="Change your rating"
@@ -1839,11 +1860,20 @@ const styles = StyleSheet.create({
    * stack competing with the score above them, and gapped generously enough that two
    * 24pt glyphs with slop cannot overlap targets.
    */
-  heroActions: { flexDirection: 'row', gap: theme.space[5], paddingTop: theme.space[3] },
+  heroActions: {
+    flexDirection: 'row',
+    // **The same right spine as the score and the Rank control** (founder, physical
+    // Android, 2026-09-07). Without this the row stretched the full width of a `flex: 1`
+    // column, so the two glyphs started hard against the poster while everything above
+    // them hung from the opposite edge — which is what made them read as floating
+    // somewhere unrelated rather than as part of the cluster they belong to.
+    alignSelf: 'flex-end',
+    gap: theme.space[5],
+    paddingTop: theme.space[3],
+  },
   heroAction: { alignItems: 'center', justifyContent: 'center' },
   // Aligned to the chips rather than to the row: a count is not a chip and must not
   // wear a chip's box, but it does have to sit on the same line as one.
-  genreOverflow: { alignSelf: 'center' },
   heading: {
     paddingHorizontal: theme.layout.gutter,
     // Halved in the hierarchy pass (16 → 8): with the poster overlapping the hero

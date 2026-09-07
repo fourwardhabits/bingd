@@ -189,3 +189,49 @@ describe('a pool too small to rotate through', () => {
     expect(appearingAtLeast(runs, 3).length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * **The A/B/A/B question** (founder audit, 2026-09-07).
+ *
+ * Turnover between *consecutive* refreshes is measured above and is high. That is not
+ * the same question as whether the wall is *cycling*: an engine that alternated between
+ * two arrangements would pass every test in this file — consecutive overlap would be
+ * near zero every time — while a reader pressing Refresh four times saw two walls twice.
+ *
+ * So this compares each generation to the one two before it, and to the first. If the
+ * wall cycled with period two, generation 3 would match generation 1 and the numbers
+ * below would be at or near nine.
+ *
+ * Audit only: nothing here changes weights, anchors, exposure tiers or sources.
+ */
+describe('whether the wall cycles rather than moves on', () => {
+  const overlap = (a: readonly string[], b: readonly string[]) => {
+    const set = new Set(b);
+    return a.filter((id) => set.has(id)).length;
+  };
+
+  it('does not return to an earlier wall two refreshes later', () => {
+    const runs = generations(scoredPool(), 6);
+
+    // Period-two cycling would put generation n back on generation n-2.
+    const twoBack = runs.slice(2).map((run, i) => overlap(run, runs[i]!));
+    for (const kept of twoBack) expect(kept).toBeLessThanOrEqual(4);
+  });
+
+  it('keeps drifting away from the first wall rather than orbiting it', () => {
+    const runs = generations(scoredPool(), 6);
+
+    // Against the opening wall, every later generation stays a minority of nine.
+    const againstFirst = runs.slice(1).map((run) => overlap(run, runs[0]!));
+    for (const kept of againstFirst) expect(kept).toBeLessThanOrEqual(4);
+  });
+
+  it('visits more distinct titles than two walls could hold', () => {
+    // Six generations of nine. Two alternating arrangements would show at most 18
+    // distinct titles however many times they were refreshed.
+    const runs = generations(scoredPool(), 6);
+    const distinct = new Set(runs.flat());
+
+    expect(distinct.size).toBeGreaterThan(18);
+  });
+});

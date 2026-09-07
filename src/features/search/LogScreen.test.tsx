@@ -1279,3 +1279,227 @@ describe('the two controls are independent', () => {
     expect(view.getByLabelText(/^Log The Assassination of Jesse James/)).toBeTruthy();
   });
 });
+
+/**
+ * **A series says what the reader has already done with it** (founder, physical Android,
+ * 2026-09-07).
+ *
+ * The exact report: the reader had ranked *Terrace House: Aloha State* S1, Collection
+ * showed the ranked season correctly, and searching the show returned a series row with
+ * a bare `+` that looked like a title they had never opened. Two surfaces disagreeing
+ * about the same fact, at the same moment, in the same session.
+ *
+ * The cause was structural rather than cosmetic: the fact is recorded against the
+ * *season* and the row is about the *series*, and the logged-collection read carried the
+ * parent's title but never the parent's id — so Search had no way to ask which series a
+ * logged season belonged to. It carries `seriesId` now.
+ *
+ * What a series must still never do is show a score. Seasons are the rankable unit
+ * (PRD §10), so the `+` stays — it opens the season picker, which is the right next step
+ * for a reader with one season ranked and two to go.
+ */
+describe('a series whose seasons the reader has already watched', () => {
+  /** The Terrace House shape: one series, two seasons, S1 ranked. */
+  const terraceHouse = () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({
+            data: [
+              {
+                id: 'series-th',
+                kind: 'series',
+                title: 'Terrace House: Aloha State',
+                release_date: '2016-11-01',
+                poster_path: null,
+                provenance: 'wikidata',
+              },
+            ],
+            error: null,
+          })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+    tableRows.media_items = [
+      { id: 'series-th', genres: ['Reality'], runtime_minutes: null, kind: 'series' },
+      {
+        id: 'th-s1',
+        parent_id: 'series-th',
+        season_number: 1,
+        title: 'Season 1',
+        release_date: '2016-11-01',
+        poster_path: null,
+        kind: 'season',
+        fetched_at: new Date().toISOString(),
+      },
+      {
+        id: 'th-s2',
+        parent_id: 'series-th',
+        season_number: 2,
+        title: 'Season 2',
+        release_date: '2017-05-30',
+        poster_path: null,
+        kind: 'season',
+        fetched_at: new Date().toISOString(),
+      },
+    ];
+  };
+
+  /** One logged season, in the shape the collection read returns it. */
+  const loggedSeason = (id: string) => ({
+    user_id: 'user-1',
+    media_item_id: id,
+    bucket: 'loved',
+    watched_on: '2026-08-01',
+    created_at: '2026-08-01T00:00:00Z',
+    media_items: {
+      title: 'Season 1',
+      season_number: 1,
+      release_date: '2016-11-01',
+      poster_path: null,
+      genres: ['Reality'],
+      runtime_minutes: null,
+      kind: 'season',
+      parent_id: 'series-th',
+    },
+  });
+
+  it('says how many of its seasons the reader has ranked', async () => {
+    terraceHouse();
+    tableRows.user_media = [loggedSeason('th-s1')];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'th-s1',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_seasons',
+      },
+    ];
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Terrace House: Aloha State, 2016, Series · 2 seasons · 1 ranked'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('says watched for a season logged without a ranking', async () => {
+    terraceHouse();
+    tableRows.user_media = [loggedSeason('th-s1')];
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Terrace House: Aloha State, 2016, Series · 2 seasons · 1 watched'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('still shows no score and no Rank badge, because a series has neither', async () => {
+    terraceHouse();
+    tableRows.user_media = [loggedSeason('th-s1')];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'th-s1',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_seasons',
+      },
+    ];
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(view.getByLabelText(/^Terrace House: Aloha State/)).toBeTruthy(),
+    );
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+  });
+
+  it('keeps the + as the way into season selection', async () => {
+    // The canonical action still works, which is what makes the new clause information
+    // rather than a dead end: one season ranked, two to go, and the way to the second
+    // is the same control it always was.
+    terraceHouse();
+    tableRows.user_media = [loggedSeason('th-s1')];
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Log Terrace House: Aloha State')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Log Terrace House: Aloha State'));
+
+    await waitFor(() => expect(view.getByText('Season 2')).toBeTruthy());
+  });
+
+  it('says nothing extra about a series the reader has never touched', async () => {
+    terraceHouse();
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Terrace House: Aloha State, 2016, Series · 2 seasons'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('does not attribute one series’ seasons to another', async () => {
+    // Aloha State and Tokyo are different shows with identically-named seasons. The
+    // join is on the parent id for exactly this reason: titles are not identifiers.
+    terraceHouse();
+    tableRows.user_media = [
+      {
+        ...loggedSeason('tokyo-s1'),
+        media_items: {
+          ...loggedSeason('tokyo-s1').media_items,
+          parent_id: 'series-th-tokyo',
+        },
+      },
+    ];
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Terrace House: Aloha State, 2016, Series · 2 seasons'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('leaves the watchlist control second, after the ranking state', async () => {
+    /**
+     * The founder's order, asserted off the tree rather than by presence: ranking leads
+     * because ranking is what the app is for, and saving-for-later follows it. Presence
+     * tests are what let the two swap silently, which is how the row came to read
+     * bookmark-then-plus in the first place.
+     */
+    terraceHouse();
+    tableRows.user_media = [loggedSeason('th-s1')];
+
+    const view = await search('terrace');
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Log Terrace House: Aloha State')).toBeTruthy(),
+    );
+
+    const labels: string[] = [];
+    const walk = (node: unknown): void => {
+      if (!node || typeof node === 'string') return;
+      if (Array.isArray(node)) return void node.forEach(walk);
+      const n = node as { props?: { accessibilityLabel?: string }; children?: unknown[] };
+      if (n.props?.accessibilityLabel) labels.push(n.props.accessibilityLabel);
+      walk(n.children ?? []);
+    };
+    walk(view.toJSON());
+
+    expect(labels.indexOf('Log Terrace House: Aloha State')).toBeGreaterThanOrEqual(0);
+    expect(labels.indexOf('Log Terrace House: Aloha State')).toBeLessThan(
+      labels.indexOf('Add Terrace House: Aloha State to Watchlist'),
+    );
+  });
+});

@@ -1709,3 +1709,127 @@ describe('celebrating what the ranking earned', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * **The placement is the title's subtitle, and the grouping has to say so** (founder,
+ * physical Android, 2026-09-07).
+ *
+ * The render order was already score, title, placement, anchors, and two passes of
+ * physical QA still reported that `#6 Drama` did not read as belonging to the title. The
+ * reason was spacing rather than order: the reveal's `space[6]` sat between the title and
+ * the placement, and only `space[2]` between the placement and the two names below it, so
+ * the eye grouped the placement downward into the anchors.
+ *
+ * Order tests could not see that, which is why these assert containment: the placement
+ * shares a parent with the title, and the anchors do not. That is the property the
+ * founder is actually asking for, and it is the one that broke.
+ */
+describe('the reveal reads title, then placement, then where it landed', () => {
+  const movies = [
+    { mediaItemId: 'm1', position: 1, kind: 'movie', title: 'Heat', genres: [] },
+    { mediaItemId: 'm2', position: 2, kind: 'movie', title: 'Sicario', genres: [] },
+    { mediaItemId: 'film-a', position: 3, kind: 'movie', title: 'Film A', genres: [] },
+    { mediaItemId: 'm4', position: 4, kind: 'movie', title: 'Collateral', genres: [] },
+  ];
+
+  /** Every text under one node, in tree order — children only, never other props. */
+  const textIn = (node: unknown): string[] => {
+    if (node == null) return [];
+    if (typeof node === 'string') return [node];
+    if (Array.isArray(node)) return node.flatMap(textIn);
+    return textIn((node as { children?: unknown[] }).children ?? []);
+  };
+
+  /**
+   * The block a line of text sits *inside* — the parent of the node whose whole text is
+   * `needle`. Containment rather than depth: the question these tests ask is which lines
+   * share a container, and the deepest match is always the `Text` itself.
+   */
+  const blockHolding = (root: unknown, needle: string): unknown => {
+    let found: unknown = null;
+    const walk = (node: unknown, parent: unknown) => {
+      if (found || !node || typeof node === 'string') return;
+      if (Array.isArray(node)) return void node.forEach((child) => walk(child, parent));
+      const n = node as { children?: unknown[] };
+      const own = textIn(n);
+      if (own.length === 1 && own[0] === needle) {
+        found = parent;
+        return;
+      }
+      walk(n.children ?? [], n);
+    };
+    walk(root, null);
+    return found;
+  };
+
+  const revealOf = async () => {
+    mockRanked.mockReturnValue({ data: movies });
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    return sheet;
+  };
+
+  it('puts the placement in the same block as the title', async () => {
+    const sheet = await revealOf();
+
+    // The block that holds the title also holds the placement: they are one unit, which
+    // is what makes the second read as a subtitle of the first.
+    const identity = blockHolding(sheet.toJSON(), 'Film A');
+    expect(textIn(identity)).toEqual(expect.arrayContaining(['Film A', '#3 in Movies']));
+  });
+
+  it('keeps the anchors out of that block', async () => {
+    const sheet = await revealOf();
+
+    // Below/Above are context for the placement, not part of it. Sharing a container is
+    // exactly what made four lines of small type read as one column.
+    const identity = textIn(blockHolding(sheet.toJSON(), 'Film A'));
+    expect(identity.join(' ')).not.toContain('Sicario');
+    expect(identity.join(' ')).not.toContain('Collateral');
+  });
+
+  it('still reads score, title, placement, then the neighbours', async () => {
+    const sheet = await revealOf();
+
+    const order = textIn(sheet.toJSON());
+    const at = (needle: string) => order.findIndex((t) => t.includes(needle));
+    expect(at('8.7')).toBeLessThan(at('Film A'));
+    expect(at('Film A')).toBeLessThan(at('#3 in Movies'));
+    expect(at('#3 in Movies')).toBeLessThan(at('Sicario'));
+    expect(at('Sicario')).toBeLessThan(at('Collateral'));
+  });
+
+  it('ends in exactly two controls, Add details then Done', async () => {
+    // `onFinishLog` is what puts Add details on screen — every screen that mounts the
+    // sheet passes it, and the reveal falls back to Done alone if one ever does not.
+    mockRanked.mockReturnValue({ data: movies });
+    answering(placement);
+    const sheet = await openSheet({ onFinishLog: jest.fn() });
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(sheet.getByRole('button', { name: 'Add details' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy();
+    expect(sheet.queryByRole('button', { name: 'Rank another' })).toBeNull();
+  });
+
+  it('leaves the title alone when there is no placement worth naming', async () => {
+    // Past the top ten the ordinal is withheld, and the block is a title on its own
+    // rather than a title with a reserved gap under it.
+    mockRanked.mockReturnValue({
+      data: Array.from({ length: 40 }, (_, i) => ({
+        mediaItemId: i === 19 ? 'film-a' : `m${i}`,
+        position: i + 1,
+        kind: 'movie',
+        title: i === 19 ? 'Film A' : `Other ${i}`,
+        genres: [],
+      })),
+    });
+    answering({ ...placement, data: { ...placement.data, position: 20 } });
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    expect(sheet.queryByText('#20 in Movies', { includeHiddenElements: true })).toBeNull();
+    expect(sheet.getByText('Film A', { includeHiddenElements: true })).toBeTruthy();
+  });
+});

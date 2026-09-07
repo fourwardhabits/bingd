@@ -151,17 +151,13 @@ const open = async () => {
 const tab = (view: Awaited<ReturnType<typeof open>>, name: string) =>
   view.queryByRole('tab', { name });
 
-/**
- * The media control is a visible tab row (founder addendum, 2026-09-06).
- *
- * It was a dropdown — open it, then choose — which is two taps and a sheet for a choice
- * a reader makes constantly, with one of the two options hidden until they do. Both
- * options are on screen now, so switching is one press. The `tab` role is what tells
- * this apart from the Watched/Watchlist row below it, which uses the same role and is
- * found by name.
- */
-const switchTo = async (view: Awaited<ReturnType<typeof open>>, medium: 'Movies' | 'TV') => {
-  await fireEvent.press(view.getByRole('tab', { name: medium }));
+/** The category control is a dropdown: open it, then choose. */
+const switchTo = async (
+  view: Awaited<ReturnType<typeof open>>,
+  medium: 'Movies' | 'TV',
+) => {
+  await fireEvent.press(view.getByLabelText(/^Showing /));
+  await fireEvent.press(view.getByRole('button', { name: medium }));
 };
 
 describe('the Unranked tab', () => {
@@ -283,26 +279,14 @@ describe('switching category while standing on Unranked', () => {
  * is remembered locally, per account.
  */
 describe('the remembered category', () => {
-  /**
-   * Which media tab is selected, read off the tab row that replaced the dropdown.
-   *
-   * The dropdown announced itself as "Showing TV" because a closed control has to say
-   * what it is closed on. A tab row says it structurally instead: both options are
-   * visible and one carries . Same question, and now the
-   * assertion is about the thing a sighted reader can also see.
-   */
-  const showing = (view: Awaited<ReturnType<typeof open>>) => {
-    for (const name of ['Movies', 'TV'] as const) {
-      if (view.getByRole('tab', { name }).props.accessibilityState?.selected) return name;
-    }
-    throw new Error('no media tab is selected');
-  };
+  const showing = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getByLabelText(/^Showing /).props.accessibilityLabel;
 
   it('opens on Movies when this account has never chosen', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    expect(showing(view)).toBe('Movies');
+    expect(showing(view)).toBe('Showing Movies');
   });
 
   it('reopens on TV when that is where the reader last was', async () => {
@@ -310,7 +294,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
   });
 
   it('records the switch, so the next launch starts there', async () => {
@@ -336,7 +320,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
   });
 
   /**
@@ -350,9 +334,9 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
     // And still TV after the preference read has certainly resolved.
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
   });
 
   /** Arriving from a control is a choice about this visit, not a new device habit. */
@@ -361,7 +345,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
     expect(mockPrefWrites).not.toContainEqual({ name: MEDIUM_KEY, value: 'tv_seasons' });
   });
 
@@ -371,7 +355,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    expect(showing(view)).toBe('Movies');
+    expect(showing(view)).toBe('Showing Movies');
   });
 
   it('goes back to Movies when the reader does, rather than remembering only TV', async () => {
@@ -379,14 +363,15 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
     await switchTo(view, 'Movies');
 
     await waitFor(() =>
       expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'movies' }),
     );
-    expect(showing(view)).toBe('Movies');
+    expect(showing(view)).toBe('Showing Movies');
   });
+
 
   /** A key left by an older build must not put the selector in a state it cannot draw. */
   it('ignores a stored value that is not a category', async () => {
@@ -394,7 +379,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
-    expect(showing(view)).toBe('Movies');
+    expect(showing(view)).toBe('Showing Movies');
   });
 
   /**
@@ -421,7 +406,7 @@ describe('the remembered category', () => {
     mockProfile.id = 'user-2';
     await view.rerender(<CollectionScreen />);
 
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
   });
 
   it('falls back to Movies for a next account that has no stored side', async () => {
@@ -429,12 +414,12 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
 
     const view = await open();
-    await waitFor(() => expect(showing(view)).toBe('TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
 
     mockProfile.id = 'user-3';
     await view.rerender(<CollectionScreen />);
 
-    await waitFor(() => expect(showing(view)).toBe('Movies'));
+    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
   });
 });
 

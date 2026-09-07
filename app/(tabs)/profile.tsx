@@ -316,25 +316,36 @@ export default function ProfileScreen() {
           }
         />
 
-        {/* Above Goals, and that order is the product decision rather than a layout
-            one: an award is something earned and finished, a goal is something in
-            progress. Identity before intention. */}
-        <ProfileAwards
-          viewerId={profile.id}
-          userId={profile.id}
-          onSeeAll={() => setAwardsOpen(true)}
-        />
+        {/* **Your 2026 leads, and bingd. Awards follows it** (founder, physical Android,
+            2026-09-07).
 
+            The order was awards then goals, on the argument that an award is something
+            earned and finished where a goal is in progress — identity before intention.
+            The founder reversed it after a device pass, and the reason is what an owner
+            opens their own profile *for*: the year they are having. This is the reader’s
+            personal record, in progress, and it is the half of the page that changes
+            week to week; the awards shelf is the settled half and reads better after it.
 
-        {/* Above Top ranked, below the stats. A goal is about the year in progress
-            and the stats are about all time, so this is where the page stops being a
-            summary and starts being about now. */}
+            Both still sit under the identity, stats and actions, which is unchanged: the
+            page says who you are, then how you are doing, then what you have won.
+
+            Movies goal, TV goal, then the weekly streak — all three inside this one
+            section rather than the streak having a heading of its own. */}
         <GoalsSection
           userId={profile.id}
           onPressTitle={(id) => router.push(`/title/${id}`)}
           /* Own profile only. See GoalsSectionProps.streakUserId. */
           streakUserId={profile.id}
         />
+
+        {/* After Your 2026: the settled half of the page, below the half that is still
+            moving. See all opens the same sheet the old header button did. */}
+        <ProfileAwards
+          viewerId={profile.id}
+          userId={profile.id}
+          onSeeAll={() => setAwardsOpen(true)}
+        />
+
 
         {/**
          * **See all goes to the Collection tab, not to a second list of the same

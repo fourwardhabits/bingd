@@ -259,14 +259,14 @@ describe('tier boundaries', () => {
   it('is locked below the first threshold', () => {
     const result = movieMuncher(49);
     expect(result.earnedTier).toBeNull();
-    expect(result.detailLine).toBe('Next: Movie Muncher Bronze · Watch 50 movies');
+    expect(result.detailLine).toBe('Next: Watch 50 movies');
     expect(result.countLabel).toBe('49 / 50');
   });
 
   it('is earned exactly at the first threshold', () => {
     const result = movieMuncher(50);
     expect(result.earnedTier?.label).toBe('Bronze');
-    expect(result.detailLine).toBe('Next: Movie Muncher Silver · Watch 200 movies');
+    expect(result.detailLine).toBe('Next: Watch 200 movies');
   });
 
   it('is earned exactly at the third threshold, and says what earned it', () => {
@@ -1282,7 +1282,7 @@ describe('a track the viewer is not entitled to read', () => {
     expect(result.withheld).toBe(false);
     expect(result.value).toBe(2);
     expect(result.countLabel).toBe('2 / 3');
-    expect(result.detailLine).toBe('Next: Invite Instigator Bronze · Bring 3 people to bingd.');
+    expect(result.detailLine).toBe('Next: Bring 3 people to bingd.');
   });
 
   it('names no invitee in a visitor’s Invite Instigator breakdown', () => {
@@ -1294,5 +1294,92 @@ describe('a track the viewer is not entitled to read', () => {
     expect(rows[0]?.weight).toBe(2);
     expect(rows[0]?.link ?? null).toBeNull();
     expect(rows[0]?.avatarPath ?? null).toBeNull();
+  });
+});
+
+/**
+ * **`Next:` names the award, and never a generic tier word** (founder, 2026-09-07).
+ *
+ * The dots beside the row already say which of three positions the reader is working
+ * toward, so a line that spends its first word on "Bronze" is spending it twice. What a
+ * reader cannot get anywhere else is the *name* of the thing — `Cackle`, `Moonwalker` —
+ * and where the definitions have no such name, the criteria alone is the honest line.
+ *
+ * Swept across all twenty families rather than asserted on one, because this went wrong
+ * as a per-track detail twice: first `Next: Watch 25 comedies` under a heading nobody
+ * could place, then `Next: Movie Muncher Silver`, which put the heading and a metal in
+ * front of the requirement. The sweep is what makes it a rule.
+ */
+describe('the line that names the next award', () => {
+  /**
+   * Every tier of every track as the *next* one, with the line it produces.
+   *
+   * Measured one short of each threshold, which is what makes that tier the one being
+   * worked toward: at the threshold itself it is already earned and the line has moved
+   * on to the tier above it.
+   */
+  const everyNextLine = () =>
+    AWARD_TRACKS.flatMap((t) =>
+      t.tiers.map((tier) => ({
+        track: t,
+        tier,
+        line: evaluate(t, forced(t, tier.threshold - 1)).detailLine,
+      })),
+    );
+
+  it('never says Bronze, Silver or Gold', () => {
+    for (const { track: t, line } of everyNextLine()) {
+      expect([t.key, line]).toEqual([t.key, expect.not.stringMatching(/Bronze|Silver|Gold/)]);
+    }
+  });
+
+  it('names the tier exactly as the definitions spell it, where it has a name', () => {
+    for (const { track: t, tier, line } of everyNextLine()) {
+      if (t.metalTiers) continue;
+      // The canonical name, unaltered — not a paraphrase and not the family name.
+      expect([t.key, line]).toEqual([t.key, expect.stringContaining(`Next: ${tier.label} · `)]);
+    }
+  });
+
+  it('gives a metal track its criteria alone, under a heading that already names it', () => {
+    const metal = AWARD_TRACKS.filter((t) => t.metalTiers);
+    expect(metal.map((t) => t.key)).toEqual([
+      'movie-muncher',
+      'season-snacker',
+      'invite-instigator',
+    ]);
+
+    for (const { track: t, tier, line } of everyNextLine()) {
+      if (!t.metalTiers) continue;
+      expect([t.key, line]).toEqual([t.key, `Next: ${t.next(tier.threshold)}`]);
+      // And never the family name repeated out of the heading beside it.
+      expect([t.key, line]).toEqual([
+        t.key,
+        expect.not.stringContaining(`Next: ${t.displayName}`),
+      ]);
+    }
+  });
+
+  it('always carries the criteria, whichever shape the line takes', () => {
+    for (const { track: t, tier, line } of everyNextLine()) {
+      expect([t.key, line]).toEqual([
+        t.key,
+        expect.stringContaining(t.next(tier.threshold)),
+      ]);
+    }
+  });
+
+  it('reads the way the founder wrote it', () => {
+    // The two examples from the brief, end to end.
+    const lolMode = evaluate(track('lol-mode'), forced(track('lol-mode'), 25));
+    expect(lolMode.detailLine).toBe('Next: Cackle · Watch 100 comedies');
+  });
+
+  it('states what was done once there is nothing left to aim at', () => {
+    const top = track('movie-muncher').tiers[2]!;
+    const done = evaluate(track('movie-muncher'), forced(track('movie-muncher'), top.threshold));
+
+    expect(done.detailLine).not.toContain('Next:');
+    expect(done.detailLine).toBe('Watched 1,000 movies');
   });
 });

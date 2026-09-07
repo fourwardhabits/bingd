@@ -217,21 +217,53 @@ export const SEASON_LIST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  * as stale: asking once more is cheap, and a rule that quietly stopped asking is the
  * defect this replaces.
  *
- * **The limit of this signal, stated because review 77b named it.** A season enriched on
- * its own also moves the maximum, so a series with one permanently thin season that
- * somebody opens weekly could hold the whole list fresh while it is not. That is narrow
- * — a season stops being thin the moment it is enriched, so it needs a season TMDB has
- * no artwork or overview for at all — and the server-side reconciliation
- * (`season_hydration_due`) is the belt to this brace. Closing it properly needs a record
- * of when the *list* was last asked for, which is a column this table does not have and
- * is not worth adding on the strength of that case.
+ * **The signal is the series’ own `fetched_at`, not the seasons'** (founder, physical
+ * Android, 2026-09-07). It was the newest timestamp across the season rows, and review
+ * 77b had already named the hole that leaves: "a season enriched on its own also moves
+ * the maximum, so a series with one permanently thin season that somebody opens weekly
+ * could hold the whole list fresh while it is not". That was filed as narrow. It is not:
+ * for a **one-season series it is the ordinary case**, because the only season is also
+ * the one being enriched, so opening the page vouches for the very list it never asked
+ * about. Such a series can never learn that it has gained a second season.
+ *
+ * Dan Da Dan is where this surfaced. Its single season row had been re-enriched hours
+ * before the founder looked at it, while the season *list* had last been read eight days
+ * earlier — stale by this module’s own rule, and reported fresh.
+ *
+ * The series’ `fetched_at` is the honest timestamp and needs no new column, because the
+ * adapter writes the two together and only together: `enrich` stores the series through
+ * `upsertTitles` and then, in the same request, rewrites the whole list through
+ * `upsertSeasons` (`tmdb-adapter/index.ts`). The series’ timestamp moves exactly when
+ * the list is rewritten — not sooner, not later, and never for a single season’s own
+ * enrichment.
+ *
+ * A caller with no series row falls back to the old reading, which is what `SeasonPicker`
+ * does: it is handed a search result rather than a catalogue row. The fallback is weaker
+ * in exactly the way described above, and the picker is not the surface where a reader
+ * reads a season list — it is where they pick from one, and having picked, they arrive on
+ * the title page this signal is now correct for.
+ *
+ * A series with no seasons is **not** stale — that is the other gate’s question, and
+ * answering it here as well would ask twice. An unparseable or missing timestamp reads as
+ * stale: asking once more is cheap, and a rule that quietly stopped asking is the defect
+ * this replaces.
  */
 export function seasonListIsStale(
   seasons: readonly { fetched_at?: string | null }[],
+  /** The series row’s own `fetched_at` — when the list was last written whole. */
+  seriesFetchedAt?: string | null,
   now: number = Date.now(),
 ): boolean {
   if (!seasons.length) return false;
 
+  if (seriesFetchedAt !== undefined) {
+    const at = seriesFetchedAt ? Date.parse(seriesFetchedAt) : NaN;
+    if (Number.isNaN(at)) return true;
+    return now - at > SEASON_LIST_MAX_AGE_MS;
+  }
+
+  // The fallback, for a caller holding no series row. See the header for why it is
+  // weaker and why the surface that uses it can afford that.
   let newest = -Infinity;
   for (const season of seasons) {
     const at = season.fetched_at ? Date.parse(season.fetched_at) : NaN;

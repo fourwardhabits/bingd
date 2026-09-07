@@ -74,11 +74,11 @@ export function PersonalState({
         // it is the reader's own number, in the cluster whose button says Rank, and the
         // spoken label below still says "out of 10" — nothing is lost to a screen
         // reader by dropping a line the eye had to step over.
-        <ScoreBadge score={score} bucket={bucket} size="xl" />
+        <ScoreBadge score={score} bucket={bucket} size="lg" />
       ) : (
         // Not the dashed "Rank" ring: the button under it already says that, and two
         // invitations stacked on top of each other is one more than the region needs.
-        <EmptyScoreBadge size="xl" label="You have not ranked this yet" />
+        <EmptyScoreBadge size="lg" label="You have not ranked this yet" />
       )}
       {ordinal ? (
         <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.ordinal}>
