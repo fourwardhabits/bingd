@@ -114,13 +114,32 @@ export function GenreRow({ genres }: GenreRowProps) {
             <View
               key={genre}
               testID={`genre-measure-${index}`}
-              onLayout={(event) =>
+              onLayout={(event) => {
+                /**
+                 * **Read the event now. Never inside the updater.**
+                 *
+                 * This is the title-page crash — `TypeError: Cannot read property 'layout'
+                 * of null`, named off the founder's device on 2026-09-07 after weeks as an
+                 * unnamed boundary. React Native pools synthetic events: once the handlers
+                 * for an event have run it is released, and `SyntheticEvent.destructor()`
+                 * sets `nativeEvent` to null. A functional `setState` updater does not run
+                 * in the handler — React runs it later, during render, whenever it cannot
+                 * compute it eagerly, which is exactly when another update is already
+                 * queued on this component. So the first chip's width was read while the
+                 * event was alive and every later chip's was read off a destroyed one: one
+                 * genre never crashed, two or more crashed whenever their layouts landed
+                 * in a batch. Thrown during render, it reached the error boundary and not
+                 * the red box, which is the "loads for a moment, then the apology" the
+                 * founder saw.
+                 *
+                 * The updater closes over a number now. `GenreRow.test.tsx` reproduces the
+                 * failure's own shape and keeps it from coming back.
+                 */
+                const { width } = event.nativeEvent.layout;
                 setWidths((current) =>
-                  current[index] != null
-                    ? current
-                    : { ...current, [index]: event.nativeEvent.layout.width },
-                )
-              }
+                  current[index] != null ? current : { ...current, [index]: width },
+                );
+              }}
             >
               <Chip label={genre} />
             </View>
@@ -222,6 +241,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
+    // Breathing room under the synopsis, which this row follows directly (founder,
+    // physical Android, 2026-09-07). The chips sat on the paragraph's last line. Twelve
+    // points keeps them associated with it — the genres are the paragraph's footnote —
+    // without becoming a section break.
+    paddingTop: theme.space[3],
   },
   /** Off the flow and invisible: it exists to be measured, never to be seen. */
   measure: {

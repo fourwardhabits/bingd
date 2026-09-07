@@ -629,8 +629,8 @@ describe('a title this user has ranked', () => {
     expect(view.getByText('Ranked')).toBeTruthy();
 
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    expect(view.getByText('Adjust placement')).toBeTruthy();
-    expect(view.getByText('I watched it again')).toBeTruthy();
+    expect(view.getByText('Rank it again')).toBeTruthy();
+    expect(view.getByText('Log another watch')).toBeTruthy();
   });
 
   it('offers the same menu from the overflow control in the bar', async () => {
@@ -639,7 +639,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    expect(view.getByText('Adjust placement')).toBeTruthy();
+    expect(view.getByText('Rank it again')).toBeTruthy();
   });
 
   /**
@@ -684,9 +684,9 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('I watched it again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Log another watch')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I watched it again'));
+    await fireEvent.press(view.getByLabelText('Log another watch'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('rank_again', expect.anything()));
     // One call, and the guarantee T2 bought: never the pair.
@@ -698,9 +698,9 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('I watched it again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Log another watch')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I watched it again'));
+    await fireEvent.press(view.getByLabelText('Log another watch'));
 
     // Rank again redoes the comparisons; it does not decide a rating. The bucket goes
     // straight through from `rankings.bucket`, in the database's own spelling.
@@ -732,7 +732,7 @@ describe('a title this user has ranked', () => {
     await fireEvent.press(view.getByTestId('title-more'));
 
     await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
-    expect(view.getByLabelText('I watched it again')).toBeTruthy();
+    expect(view.getByLabelText('Log another watch')).toBeTruthy();
     expect(view.queryByText('Pick a different loved, fine or not for me')).toBeNull();
     expect(view.queryByText('Compare it again in the same rating')).toBeNull();
   });
@@ -749,14 +749,14 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('I watched it again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Log another watch')).toBeTruthy());
     // This fixture holds a private note, so the one writing row reads Edit your note.
     // The headings and the last three rows are the same whichever state it is in.
     for (const label of [
       'Edit your note',
       'Who I watched with',
-      'Adjust placement',
-      'I watched it again',
+      'Rank it again',
+      'Log another watch',
       'Change your rating',
       'Remove from collection',
     ]) {
@@ -2530,8 +2530,8 @@ describe('the score row and what surrounds it', () => {
  *
  * The fix is that the menu now names the intent, and all three are reachable:
  *
- *   Adjust placement    `rerank` — same watch, no activity
- *   I watched it again  `again`  — a real rewatch, exactly one activity
+ *   Rank it again    `rerank` — same watch, no activity
+ *   Log another watch  `again`  — a real rewatch, exactly one activity
  *   Change your rating  the band, through the log sheet
  *
  * These tests pin the parameter that decides it, `p_new_watch`, because that single
@@ -2567,7 +2567,7 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Adjust placement')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rank it again')).toBeTruthy());
     return view;
   };
 
@@ -2578,8 +2578,8 @@ describe('adjusting a ranking versus watching it again', () => {
   it('offers both intents, named so neither can be mistaken for the other', async () => {
     const view = await openMenu();
 
-    expect(view.getByLabelText('Adjust placement')).toBeTruthy();
-    expect(view.getByLabelText('I watched it again')).toBeTruthy();
+    expect(view.getByLabelText('Rank it again')).toBeTruthy();
+    expect(view.getByLabelText('Log another watch')).toBeTruthy();
     // The old label is gone: it read as "redo my ranking" and meant "I watched it
     // again", which is exactly the ambiguity that produced the duplicate.
     expect(view.queryByLabelText('Rank again')).toBeNull();
@@ -2589,7 +2589,7 @@ describe('adjusting a ranking versus watching it again', () => {
     // `p_new_watch: false` is what makes `_rank_finalize` suppress the activity.
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Adjust placement'));
+    await fireEvent.press(view.getByLabelText('Rank it again'));
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(againCalls()[0]![1]).toEqual(
@@ -2600,7 +2600,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('declares a new watch only from the rewatch row', async () => {
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('I watched it again'));
+    await fireEvent.press(view.getByLabelText('Log another watch'));
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(againCalls()[0]![1]).toEqual(
@@ -2613,7 +2613,7 @@ describe('adjusting a ranking versus watching it again', () => {
     // Composing the pair here would lose the ranking outright on a dropped connection.
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Adjust placement'));
+    await fireEvent.press(view.getByLabelText('Rank it again'));
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
@@ -2623,7 +2623,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('keeps the band the title already has, rather than deciding a rating', async () => {
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Adjust placement'));
+    await fireEvent.press(view.getByLabelText('Rank it again'));
 
     // Straight through from `rankings.bucket`, in the database's own spelling. Adjusting
     // a placement is not an opinion about the band.
@@ -2635,7 +2635,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('carries one operation id per intent, so a retry is not a second opinion', async () => {
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Adjust placement'));
+    await fireEvent.press(view.getByLabelText('Rank it again'));
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     /**
@@ -2653,7 +2653,7 @@ describe('adjusting a ranking versus watching it again', () => {
 
   it('does not open a second session when the row is double-tapped', async () => {
     const view = await openMenu();
-    const row = view.getByLabelText('Adjust placement');
+    const row = view.getByLabelText('Rank it again');
 
     await fireEvent.press(row);
     await fireEvent.press(row);
@@ -2703,9 +2703,9 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Adjust placement')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Rank it again')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Adjust placement'));
+    await fireEvent.press(view.getByLabelText('Rank it again'));
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));

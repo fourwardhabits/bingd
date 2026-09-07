@@ -14,9 +14,9 @@ export type PersonalScoreProps = {
    *
    * A score is derived from the size of the band it sits in (`score.ts`), so the ranking
    * row can be in hand a moment before the band sizes are — and in that moment the two
-   * honest states say different things. The dashed ring reads "not ranked, rank it",
-   * which contradicts the Ranked control below it; the neutral empty circle reads "there
-   * is a score here and it has not arrived", which is what is true.
+   * honest states say different things. The dashed ring reads "not ranked", which
+   * contradicts the Ranked control on the page; the neutral empty circle reads "there is a
+   * score here and it has not arrived", which is what is true.
    */
   pending?: boolean;
   /** Leads where the Ranked control leads: the menu, or the log. */
@@ -24,40 +24,46 @@ export type PersonalScoreProps = {
 };
 
 /**
- * **My** score for this title, under its poster, with the word for whose it is.
+ * **My** score for this title, on the corner of its poster, with the word for whose it is.
  *
  * ---------------------------------------------------------------------------
- * WHAT THIS HAS BEEN, AND WHY IT IS NOW WORDS
+ * WHERE IT SITS, AND THE TWO PLACES IT DID NOT WORK
  *
  * The number sat in a detached column opposite the poster until 2026-09-07, and the
  * founder's reading on a device was that `10.0` up there is not self-evidently *mine* —
  * a bare number beside a film's artwork is exactly where every other product puts a
- * critics' aggregate, so the app's one genuinely distinctive fact was wearing the costume
- * of the least distinctive one.
+ * critics' aggregate. It then sat *under* the poster for one revision, which produced a
+ * tall empty column on the right of the page and a score that read as a separate block.
  *
- * The first answer was a `YOU` pill on the circle's lower edge. The founder rejected it
- * on review: a floating bubble on a badge is a sticker, and it reads as a notification
- * rather than as a label. The answer that stands is the plain one — **the words "Your
- * score", set quietly above the number.** Ownership is stated rather than symbolised,
- * nothing floats, and the number is still the dominant element in the block by an order
- * of magnitude of weight.
+ * It is anchored to the poster's lower-left corner now — the screen positions it, this
+ * component only draws it — about a third of the circle overhanging onto Paper. That is
+ * what attaches it to the artwork, the one thing on the page that can only be about this
+ * title, without costing the column below the poster a single point of height. The
+ * overhang onto Paper is what keeps the number legible whatever the artwork behind the
+ * rest of it is.
  *
- * It sits under the poster because the poster is the only thing on the page that can only
- * be about this title, and a score with no owner named beside artwork is precisely the
- * ambiguity the wording removes.
+ * ---------------------------------------------------------------------------
+ * WHY THE WORDS ARE UNDERNEATH, AND WHY THERE IS NO WORD IN THE RING
+ *
+ * `Your score`, in `caption`, immediately beneath the circle. Ownership is stated rather
+ * than symbolised — the floating `YOU` pill of the first redesign read as a sticker — and
+ * the number is the dominant element by an order of magnitude of weight. Beneath rather
+ * than above, because above the circle is the poster's artwork, and text over artwork is
+ * the thing the whole identity block was moved off the hero to avoid.
+ *
+ * The unranked state is the dashed ring **with nothing in it**. It carried the word
+ * "Rank" — the `ScoreBadge` unranked treatment — which, beside a button that says Rank,
+ * was the same invitation twice. The honest statement of "no score yet" is the empty ring;
+ * the button beside it is the invitation.
  *
  * ---------------------------------------------------------------------------
  * WHAT DID NOT CHANGE
  *
  * The number, the scale and where it comes from. It is still the derived 0–10 from the
  * title's position in its band (`score.ts`), still one decimal, still not a star rating
- * and still nothing this component computes or stores. The unranked state is still the
- * app's honest dashed ring — never a greyed `0.0`, never a faded number, because no score
- * has been earned and none of those say so (PRD §26.4).
- *
- * It is a control in both states, and leads where the Ranked control leads: the score is
- * the most useful state indicator this app has, so it is also a place to press to change
- * it. That rule is `ScoreBadge`'s own since 2026-09-06 and is kept.
+ * and still nothing this component computes or stores. It is a control in both states,
+ * and leads where the Ranked control leads: the score is the most useful state indicator
+ * this app has, so it is also a place to press to change it (`ScoreBadge`, 2026-09-06).
  */
 export function PersonalScore({ score, bucket, pending, onPress }: PersonalScoreProps) {
   const ranked = score != null;
@@ -86,28 +92,29 @@ export function PersonalScore({ score, bucket, pending, onPress }: PersonalScore
       hitSlop={theme.space[2]}
       style={({ pressed }) => [styles.column, pressed && styles.pressed]}
     >
-      {/* Quiet, small and above the number, which is the arrangement that reads as a
-          label rather than as a caption competing with it. Never over artwork: this is
-          the reason the whole identity row now starts below the hero. */}
-      <Text variant="caption" tone="tertiary">
-        Your score
-      </Text>
       {/* Named once, in the label above, rather than three times over: the badge sets its
           own spoken label and a reader who lands here should hear one thing. */}
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        {pending && !ranked ? (
-          <EmptyScoreBadge size="lg" label="Your score is loading" />
-        ) : (
+        {ranked ? (
           <ScoreBadge score={score} bucket={bucket} size="lg" />
+        ) : (
+          <EmptyScoreBadge
+            size="lg"
+            dashed={!pending}
+            label={pending ? 'Your score is loading' : 'No score yet'}
+          />
         )}
       </View>
+      <Text variant="caption" tone="tertiary">
+        Your score
+      </Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  // Centred under the poster, and gapped just enough that the words belong to the number
-  // rather than sitting on it.
-  column: { alignItems: 'center', gap: theme.space[1], paddingTop: theme.space[3] },
+  // Left-aligned with the circle, which is the edge that overhangs onto Paper: the words
+  // sit on the page, never on the artwork the circle's other side is over.
+  column: { alignItems: 'flex-start', gap: 2 },
   pressed: { opacity: 0.7 },
 });

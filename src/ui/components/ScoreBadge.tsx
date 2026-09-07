@@ -157,9 +157,20 @@ function UnrankedBadge({ diameter, onPress }: { diameter: number; onPress?: () =
 export function EmptyScoreBadge({
   size = 'md',
   label = 'No score yet',
+  dashed = false,
 }: {
   size?: ScoreBadgeSize;
   label?: string;
+  /**
+   * The reader's own unranked state, as a dashed ring with nothing in it.
+   *
+   * The title page's personal score used the `ScoreBadge` unranked ring, which carries
+   * the word "Rank" — right beside a button that says the same word (founder, physical
+   * Android, 2026-09-07). Solid grey is for other people's missing numbers; the dashed
+   * ring is the app's own "no score yet", and it needs no word when the invitation is
+   * already the control next to it.
+   */
+  dashed?: boolean;
 }) {
   const { diameter } = metrics(size);
 
@@ -168,7 +179,11 @@ export function EmptyScoreBadge({
       accessible
       accessibilityRole="text"
       accessibilityLabel={label}
-      style={[styles.circle, styles.empty, { width: diameter, height: diameter }]}
+      style={[
+        styles.circle,
+        dashed ? styles.unranked : styles.empty,
+        { width: diameter, height: diameter },
+      ]}
     />
   );
 }

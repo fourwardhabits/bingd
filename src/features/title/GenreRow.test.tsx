@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react-native';
+import { act, fireEvent, screen } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -24,7 +24,9 @@ const layout = async (rowWidth: number, chipWidth: (index: number) => number) =>
    */
   let index = 0;
   for (;;) {
-    const node = screen.queryByTestId(`genre-measure-${index}`, { includeHiddenElements: true });
+    const node = screen.queryByTestId(`genre-measure-${index}`, {
+      includeHiddenElements: true,
+    });
     if (!node) break;
     await fireEvent(node, 'layout', {
       nativeEvent: { layout: { width: chipWidth(index), height: 32 } },
@@ -114,9 +116,7 @@ describe('one row of genres', () => {
 
   it('counts the genres it never mounted, not just the ones it hid', async () => {
     // Six genres, four candidates, two shown: the marker says +4, not +2.
-    await renderWithProviders(
-      <GenreRow genres={['A', 'B', 'C', 'D', 'E', 'F']} />,
-    );
+    await renderWithProviders(<GenreRow genres={['A', 'B', 'C', 'D', 'E', 'F']} />);
     await layout(360, () => 150);
 
     expect(shown()).toHaveLength(2);
@@ -124,7 +124,9 @@ describe('one row of genres', () => {
   });
 
   it('opens the full list from a genre chip', async () => {
-    await renderWithProviders(<GenreRow genres={['Anime', 'Action & Adventure', 'Comedy', 'Sci-Fi']} />);
+    await renderWithProviders(
+      <GenreRow genres={['Anime', 'Action & Adventure', 'Comedy', 'Sci-Fi']} />,
+    );
     await layout(360, () => 70);
 
     await fireEvent.press(screen.getByLabelText('Anime. See all genres'));
@@ -137,7 +139,9 @@ describe('one row of genres', () => {
   });
 
   it('opens the same list from the count', async () => {
-    await renderWithProviders(<GenreRow genres={['Anime', 'Action & Adventure', 'Comedy', 'Sci-Fi']} />);
+    await renderWithProviders(
+      <GenreRow genres={['Anime', 'Action & Adventure', 'Comedy', 'Sci-Fi']} />,
+    );
     await layout(360, () => 150);
 
     await fireEvent.press(screen.getByLabelText(/^And \d+ more genres\. See all genres$/));
@@ -185,5 +189,60 @@ describe('the target each chip offers', () => {
     for (const control of controls) {
       expect(control.props.hitSlop).toEqual(theme.layout.chipHitSlop);
     }
+  });
+});
+
+/**
+ * **`TypeError: Cannot read property 'layout' of null`** — the title-page crash, finally
+ * named off the founder's device on 2026-09-07 after weeks of a boundary with no message.
+ *
+ * React Native's renderer **pools synthetic events**. Once the handlers for an event have
+ * run, `e.isPersistent() || e.constructor.release(e)` returns it to the pool, and
+ * `SyntheticEvent.destructor()` sets `this.nativeEvent = null`
+ * (`ReactFabric-prod.js`). Anything that reads `event.nativeEvent` *after the handler has
+ * returned* reads null.
+ *
+ * The measuring layer did exactly that. It read `event.nativeEvent.layout.width` inside a
+ * functional `setWidths` updater — and React runs an updater later, during render, whenever
+ * it cannot compute it eagerly, which is the moment another update is already queued on the
+ * same component. So the first chip's width was read while the event was alive and the
+ * second chip's was read off a destroyed one: a title with one genre never crashed, a title
+ * with two or more crashed whenever their layouts landed in one batch. Thrown during render
+ * rather than in the handler, it reached the error boundary instead of the red box — which
+ * is the "loads for a moment, then the apology" the founder saw, on the titles that had
+ * genres and not on the ones that did not.
+ *
+ * This test is the failure's own shape. Every chip reports in one `act`, and each event is
+ * destroyed the way the renderer destroys it before React applies the updaters.
+ */
+describe('the measuring pass and the event it is handed', () => {
+  it('survives the renderer releasing the layout event before the update is applied', async () => {
+    await renderWithProviders(<GenreRow genres={['Crime', 'Drama', 'Comedy']} />);
+
+    const measures = [0, 1, 2].map((index) =>
+      screen.getByTestId(`genre-measure-${index}`, { includeHiddenElements: true }),
+    );
+
+    await act(async () => {
+      const events = measures.map((node, index) => {
+        const event = {
+          nativeEvent: { layout: { x: 0, y: 0, width: [60, 70, 80][index], height: 32 } },
+        };
+        (node.props as { onLayout: (e: unknown) => void }).onLayout(event);
+        return event as { nativeEvent: unknown };
+      });
+      // What `SyntheticEvent.destructor()` does to every released event, before React has
+      // rendered and run the stored updaters.
+      for (const event of events) event.nativeEvent = null;
+    });
+
+    await fireEvent(screen.getByTestId('genre-row'), 'layout', {
+      nativeEvent: { layout: { width: 400, height: 32 } },
+    });
+
+    // All three widths were captured while the events were alive, so all three chips fit
+    // and the row is whole. With the deferred read, this render threw.
+    expect(shown()).toEqual(['Crime', 'Drama', 'Comedy']);
+    expect(marker()).toBeNull();
   });
 });

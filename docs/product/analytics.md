@@ -231,8 +231,8 @@ four acts completed, in the words the Ranked menu uses (2026-09-07):
 |---|---|---|
 | `start` | a first placement; the title had no position | yes |
 | `rebucket` | *Change your rating* into a different band | no |
-| `rerank` | *Adjust placement*, or *Change your rating* re-choosing the same band | no |
-| `again` | *I watched it again* — a second viewing | yes, exactly one |
+| `rerank` | *Rank it again*, or *Change your rating* re-choosing the same band | no |
+| `again` | *Log another watch* — a second viewing | yes, exactly one |
 
 It is there because the three completions of an already-ranked title reach the same
 `placed` answer as a first placement and, until 2026-09-07, were counted as one. A

@@ -495,11 +495,7 @@ export default function RecommendationsScreen() {
        * are not necessarily the last categories this screen will offer, and a fourth
        * tab is a wrapped row where a fourth sheet row is a fourth sheet row.
        */}
-      <MediumSelector
-        value={category}
-        onChange={changeCategory}
-        options={FOR_YOU_CATEGORIES}
-      />
+      <MediumSelector value={category} onChange={changeCategory} options={FOR_YOU_CATEGORIES} />
       {/* Outside the branch, because the selector above it is now the screen's entire
       header and the seam it marks is the same one whichever category is showing. */}
       <HeaderBoundary />
@@ -521,52 +517,78 @@ export default function RecommendationsScreen() {
             <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
           ) : null}
 
-          {/* One row, wrapping. Sent to you leads because it is the only chip that changes
-          what kind of thing is on screen; the rest narrow whatever is. Clear all appears
-          only when there is something to clear, and clears the *filters*: turning off
-          Sent to you as well would make one control mean two things. */}
-          <View style={styles.filterRow}>
-            <FilterChip
-              icon={sentOnly ? 'mail-open' : 'mail-outline'}
-              label={
-                unopened > 0 ? `Sent to you · ${unopened}${atLeast ? '+' : ''}` : 'Sent to you'
-              }
-              accessibilityLabel={
-                unopened > 0
-                  ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-                  : 'Sent to you'
-              }
-              selected={sentOnly}
-              onPress={() => setSentOnly((on) => !on)}
-            />
-            {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
+          {/**
+           * **One row, and never two** (founder, physical Android, 2026-09-07).
+           *
+           * Sent to you leads because it is the only chip that changes what kind of thing
+           * is on screen; the rest narrow whatever is. Clear all appears only when there is
+           * something to clear, and clears the *filters*: turning off Sent to you as well
+           * would make one control mean two things.
+           *
+           * The row used to wrap, and on a 360pt phone with a Sent to you count and a
+           * Filters count it did — three controls became two rows and the wall moved down
+           * to make room. The arithmetic does not allow a fit: `Sent to you · 12+`,
+           * `Group Picks` and `Filters · 2` at footnote size with their glyphs and chip
+           * padding come to more than the 328pt a 360pt screen has between its gutters,
+           * before Clear all is even drawn. So the row scrolls sideways instead. When the
+           * chips fit — every ordinary phone with no counts — the content is narrower than
+           * the viewport, it stays left-aligned and nothing about the layout changes;
+           * when they do not, the row scrolls rather than reflows, and the wall below it
+           * holds still. `alwaysBounceHorizontal={false}` so a row with nowhere to go
+           * does not rubber-band. The same arrangement `SegmentedTabs` uses, for the same
+           * reason.
+           */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            alwaysBounceHorizontal={false}
+            style={styles.filterScroller}
+            testID="for-you-controls-scroller"
+          >
+            <View style={styles.filterRow} testID="for-you-controls">
+              <FilterChip
+                icon={sentOnly ? 'mail-open' : 'mail-outline'}
+                label={
+                  unopened > 0
+                    ? `Sent to you · ${unopened}${atLeast ? '+' : ''}`
+                    : 'Sent to you'
+                }
+                accessibilityLabel={
+                  unopened > 0
+                    ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                    : 'Sent to you'
+                }
+                selected={sentOnly}
+                onPress={() => setSentOnly((on) => !on)}
+              />
+              {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
                 entire wall, and every other control here narrows the wall that is
                 already showing — it belongs in the selector at the top with the other
                 answers to "what am I looking at", and that is where it lives again. */}
-            {/* An action chip rather than a filter: it opens the flow that answers "what
+              {/* An action chip rather than a filter: it opens the flow that answers "what
             should this group watch together". Deliberately not a fourth MediumSelector
             segment and not a tab — a group is a momentary question, and this row is
             where the screen keeps its questions. The wall the chip sits on decides the
             medium the picks answer for. */}
-            <FilterChip
-              icon="people-outline"
-              label="Group Picks"
-              onPress={() => {
-                track({ name: 'group_picks_opened' });
-                setGroupPicking(true);
-              }}
-            />
-            {/* The collection's own sheet, which its header always intended this screen to
+              <FilterChip
+                icon="people-outline"
+                label="Group Picks"
+                onPress={() => {
+                  track({ name: 'group_picks_opened' });
+                  setGroupPicking(true);
+                }}
+              />
+              {/* The collection's own sheet, which its header always intended this screen to
             reuse rather than growing a second one. Genre, Language, Decade and Anime
             come with it. Rating filters are off: nothing on either list has been ranked
             by this reader. */}
-            <FilterChip
-              icon="options-outline"
-              label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
-              selected={activeCount > 0}
-              onPress={() => setFiltering(true)}
-            />
-            {/* **The Refresh chip was here, and it is gone** (founder §18).
+              <FilterChip
+                icon="options-outline"
+                label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
+                selected={activeCount > 0}
+                onPress={() => setFiltering(true)}
+              />
+              {/* **The Refresh chip was here, and it is gone** (founder §18).
 
             It existed because the wall could not rotate by itself: exposure was module
             state, so every launch drew from an un-penalised pool and produced the same
@@ -582,14 +604,15 @@ export default function RecommendationsScreen() {
             new slate still exists: pull-to-refresh on the wall, which runs the same
             `refreshRecommendations` this chip did. A gesture the screen already had for
             Sent to you, rather than a control competing with the filters. */}
-            {isFiltered(filters) ? (
-              <FilterChip
-                icon="close"
-                label="Clear all"
-                onPress={() => changeFilters(emptyFilters())}
-              />
-            ) : null}
-          </View>
+              {isFiltered(filters) ? (
+                <FilterChip
+                  icon="close"
+                  label="Clear all"
+                  onPress={() => changeFilters(emptyFilters())}
+                />
+              ) : null}
+            </View>
+          </ScrollView>
 
           {sentOnly ? (
             <SentList
@@ -976,12 +999,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     textAlign: 'center',
   },
+  // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
+  // into whatever the page offers it — the note `SegmentedTabs` carries.
+  filterScroller: { flexGrow: 0 },
+  /**
+   * `nowrap` is the contract. A wrapped chip row is the founder's rejected state, and
+   * the scroller around this is what makes one row possible at every width instead of a
+   * promise the arithmetic cannot keep on a 360pt phone.
+   */
   filterRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    columnGap: theme.space[2],
-    rowGap: theme.space[2],
+    gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
     paddingBottom: theme.space[2],

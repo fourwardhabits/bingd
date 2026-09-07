@@ -68,8 +68,8 @@ export type RankingSubject = {
    * `rerank` is *Change your rating* re-choosing the band it already has. `rankAgain`
    * with `newWatch: false`, because `rank_rebucket` refuses a bucket that is not moving.
    *
-   * `again` is *Rank again* from the Ranked menu, which means the reader watched it a
-   * second time. `rankAgain` with `newWatch: true`. Identical to `rerank` in every
+   * `again` is *Log another watch* from the Ranked menu, which means the reader watched it
+   * a second time. `rankAgain` with `newWatch: true`. Identical to `rerank` in every
    * respect a person can see, and different in the one they cannot: it earns a feed
    * activity and `rerank` does not.
    *
@@ -406,7 +406,7 @@ function Session({
         /**
          * A correction is not a ranking act, so it is not asked about the streak.
          *
-         * `rerank` (Adjust placement) and `rebucket` (Change your rating) replace a
+         * `rerank` (Rank it again) and `rebucket` (Change your rating) replace a
          * position and post no activity. Until `20260911000100` lands they also
          * re-insert the `rankings` row with `created_at = now()`, which is the column
          * the streak is derived from — so a correction in an otherwise empty week
@@ -467,7 +467,7 @@ function Session({
               rankStart(id, bucket, operationId);
     const attempt = () =>
       withIntent(
-        // The mode is in the intent key, so Rank again and Change your rating cannot
+        // The mode is in the intent key, so Log another watch and Change your rating cannot
         // share an operation id: they are different acts and one of them writes an
         // activity the other must not.
         `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}`,

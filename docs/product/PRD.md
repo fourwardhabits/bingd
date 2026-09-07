@@ -974,7 +974,8 @@ Three properties this is required to keep:
 >
 > | | What the reader is saying | Feed activity |
 > |---|---|---|
-> | **Rank again** | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
+> | **Log another watch** (was *Rank again*, then *I watched it again*; renamed 2026-09-07) | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
+> | **Rank it again** (was *Adjust placement*; renamed 2026-09-07) | same watch, the comparisons redone | **none** |
 > | **Change your rating** | the opinion I recorded was wrong | **none** — the original activity stands |
 >
 > A **band change** — loved to fine — is a Change your rating and writes no activity
@@ -1006,7 +1007,7 @@ Three properties this is required to keep:
 
 > **A ranking activity is a snapshot — founder decision 2026-09-07.** The score a
 > `title_ranked` activity shows is the score that was announced for *that* watch, written
-> into the event's payload at completion, and it is never rewritten. An *Adjust placement*
+> into the event's payload at completion, and it is never rewritten. A *Rank it again*
 > or a *Change your rating* later can move the title to a different score in the
 > Collection and on the title page — 8.3 in the feed, 8.6 on the title — and that is
 > correct, not drift: the feed says what was announced, the Collection says what is held

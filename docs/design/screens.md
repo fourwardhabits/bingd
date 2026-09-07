@@ -473,7 +473,7 @@ poster. The first action is the rank intent at whichever stage the title is in �
 (same watch, `mode: 'rerank'`) for a ranked title, **Rank** for an unranked one. Each glyph
 keeps a one-word caption, because a paper plane is Recommend here and Send everywhere else. A
 series gets Save alone (PRD §10). The rest of the ranking menu — the note, who I watched with,
-*I watched it again*, *Change your rating*, Remove — moved from the Ranked chip to the
+*Log another watch*, *Change your rating*, Remove — moved from the Ranked chip to the
 overflow `⋯` in the top bar, with the same reachability it had: present for a ranked title,
 absent otherwise.
 
@@ -587,8 +587,8 @@ intents behind one press is the founder's Terrace House bug rebuilt in a differe
 
 - **unranked** — filled Maroon `Rank`, opens the log sheet, where a band is chosen and a first
   ranking begins;
-- **ranked** — outlined `✓ Ranked`, opens the ranking-options menu, which is where *Adjust
-  placement*, *I watched it again* and *Change your rating* are each named and each chosen.
+- **ranked** — outlined `✓ Ranked`, opens the ranking-options menu, which is where *Rank it
+  again*, *Log another watch* and *Change your rating* are each named and each chosen.
 
 There is deliberately **no responsive switch** between a labelled button and an icon: a control
 that is a word on one phone and a symbol on another is two controls. The same menu is also
@@ -613,6 +613,41 @@ only while there is artwork behind the glyph.
 **The synopsis is four lines with `more` inline on the fourth, the genres follow it, and the
 Scores treatment is unchanged from the note above.** Those three were accepted as built.
 
+### As built — 2026-09-07, polish from the device: the score on the corner, one action row
+
+Three corrections after the first physical pass of the composition above, none of them a
+change of architecture.
+
+**The score is back on the poster.** It sat *under* the frame for one revision, which produced
+a tall empty column on the right of the page and a number that read as a separate block. It is
+anchored to the poster's **lower-left corner** now — about a third of the circle overhanging
+onto Paper, which keeps the number legible whatever the artwork behind the rest of it is — with
+`Your score` in `caption` beneath it. No floating pill. The unranked state is the dashed ring
+**with nothing in it**: the word `Rank` inside the circle duplicated the button beside it, and
+the honest statement of "no score yet" is the empty ring, not a second invitation.
+
+**The action row spans the content width.** `[ ✓ Ranked ] [🔖] [➤]` as one row directly after
+the identity block, the labelled control taking the width the two glyphs leave. Hung from the
+right under the poster it read as detached on the device — a cluster floating in a corner with
+a blank column above it. Control set, treatment and behaviour unchanged; the glyphs are still
+icon-only and each still clears 44pt through its own box.
+
+**The ranking menu says it in the app's own words.** *Adjust placement* is now **Rank it
+again**, and *I watched it again* is now **Log another watch**. Only the labels moved: `rerank`
+still passes `p_new_watch: false` and writes no activity, `again` still passes `true` and
+writes exactly one, *Change your rating* is untouched. The pair the founder rejected named the
+mechanism and a confession; these name the act, in the verbs the rest of the app uses.
+
+**Twelve points between the synopsis and the genres.** The chips sat directly on the
+paragraph's last line. A `space[3]` gap keeps them associated with it without becoming a
+section break.
+
+**For You's controls are one row, and scroll.** *Sent to you · N*, *Group Picks* and *Filters ·
+N* wrapped to two rows on a 360pt phone, and the arithmetic does not allow a fit at footnote
+size with counts. The row is a horizontal scroller with `nowrap` now — the same arrangement as
+the tab row — so on every ordinary phone nothing changes and on a narrow one it scrolls rather
+than reflows.
+
 ### The title-page crash — 2026-09-07
 
 The founder's report was two symptoms: a title page renders briefly and then the app's error
@@ -629,13 +664,32 @@ Back still returns to whatever pushed it, and `retry` re-renders in place. The r
 remains for everything a route boundary cannot catch — a throw in a layout, in the navigator
 itself, or on a screen that has not declared one.
 
-**The exception itself is not named here, because the repository could not name it.** The
-render path is null-safe under every optional-metadata shape a movie, season or series can
-present — pinned by `TitleScreenResilience.test.tsx` — and typecheck is clean. What was
-missing was any way to read the error off the device: a caught render error went only to
-Sentry, which this project has been unable to read for weeks. It now also goes to the flight
-recorder as a `render` event carrying the error's class and the route, and a beta build prints
-the class and message under the apology. One tap into Diagnostics names it.
+**The exception was not nameable from the repository, so the boundary was made to name it —
+and it did.** A caught render error had gone only to Sentry, which this project has been unable
+to read for weeks. It now also goes to the flight recorder as a `render` event carrying the
+error's class and the route, and a beta build prints the class and message under the apology.
+The first physical pass on that build read back:
+
+> `TypeError: Cannot read property 'layout' of null` — `title/[id]`
+
+**The root cause is `GenreRow`'s measuring pass reading a released synthetic event.** React
+Native's renderer pools synthetic events: once an event's handlers have run,
+`e.isPersistent() || e.constructor.release(e)` returns it to the pool and
+`SyntheticEvent.destructor()` sets `nativeEvent` to null (`ReactFabric-prod.js`). The
+measuring layer read `event.nativeEvent.layout.width` inside a functional `setWidths`
+updater, and React runs an updater *later*, during render, whenever it cannot compute it
+eagerly — which is the moment another update is already queued on the same component. So the
+first chip's width was read while the event was alive and every later chip's was read off a
+destroyed one: a title with one genre never crashed, and a title with two or more crashed
+whenever their layouts landed in one batch. Thrown during render rather than in the handler,
+it reached the error boundary instead of the red box — "loads for a moment, then the apology",
+on the titles that had genres. It shipped in #114 and was in the beta from the #122 update on.
+
+The fix is one line moved: the width is read synchronously in the handler and the updater
+closes over a number rather than an event. `GenreRow.test.tsx` reproduces the failure's own
+shape — three chips reporting in one batch, each event destroyed the way the renderer destroys
+it before the updaters run — and the route-local boundary and the diagnostic line stay,
+because the next unnamed exception deserves the same treatment.
 
 One suspect was removed on the way past rather than left standing: `GenreRow` mounted its
 "all genres" `Sheet` unconditionally, so every title page in the app carried a React Native

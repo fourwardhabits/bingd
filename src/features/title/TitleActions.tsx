@@ -55,11 +55,14 @@ export type TitleActionsProps = {
  * labelled button and an icon, because a control that is a word on one phone and a
  * symbol on another is two controls.
  *
- * **Three equal shares read as a toolbar.** Stretched across the content width they
- * became a band of chrome — the dashboard feeling this whole pass is removing. Sized to
- * their content and hung from the right, they sit under the poster and the score, which
- * is the cluster they belong to, and they fill the space the identity column's shorter
- * text leaves beside them.
+ * **Three equal shares read as a toolbar, and a right-hung cluster read as detached.**
+ * The first arrangement stretched three identical icon shares across the page — a band
+ * of chrome, the dashboard feeling this whole pass is removing. The second hung a
+ * content-sized cluster from the right under the poster, and on the device that floated
+ * in a corner with a blank column above it. This is the third and it is the ordinary
+ * one: a single row directly after the identity block, the labelled control taking the
+ * width the two glyphs leave. One row, one strong control, two quiet ones — and the
+ * synopsis begins a short way beneath.
  *
  * ---------------------------------------------------------------------------
  * WHY ONLY THE FIRST ONE IS LABELLED
@@ -160,19 +163,18 @@ function IconControl({
 
 const styles = StyleSheet.create({
   /**
-   * Hung from the right, under the poster, and only as wide as it needs to be.
+   * One row across the content width, directly after the identity block.
    *
-   * `flex-end` is the whole difference from the version this replaces: the cluster is an
-   * object beside the identity column rather than a band across the page.
+   * The top padding is also the clearance for the score, which overhangs the poster's
+   * lower edge by a few points on its caption; the row is the first thing beneath it.
    */
   cluster: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
-    alignSelf: 'flex-end',
     alignItems: 'center',
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
+    paddingTop: theme.space[5],
   },
   rank: {
     flexDirection: 'row',
@@ -180,9 +182,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: theme.space[2],
     minHeight: theme.layout.minTapTarget,
-    // Wide enough that `Rank` and `Ranked` are the same object at two lengths, rather
-    // than a control that resizes the moment you use it.
-    minWidth: 112,
+    // The width the two glyphs leave. It makes the labelled control unmistakably the
+    // primary act, and `Rank` and `Ranked` the same object at two lengths rather than a
+    // control that resizes the moment you use it.
+    flex: 1,
     paddingHorizontal: theme.space[4],
     borderRadius: theme.radius.control,
   },

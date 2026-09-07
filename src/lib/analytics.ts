@@ -102,13 +102,13 @@ export type Bucket = 'loved' | 'fine' | 'not_for_me';
  *
  * - `start` — a first placement. The title had no position; it has one now.
  * - `rebucket` — *Change your rating* into a different band. A correction, no activity.
- * - `rerank` — *Adjust placement*, or *Change your rating* re-choosing the band it
+ * - `rerank` — *Rank it again*, or *Change your rating* re-choosing the band it
  *   already has. A correction inside the band, no activity.
- * - `again` — *I watched it again*. A second viewing, and the one completion of an
+ * - `again` — *Log another watch*. A second viewing, and the one completion of an
  *   already-ranked title that writes a new `title_ranked` activity.
  *
  * **Without this, `rerank` and `again` were indistinguishable from `start`.** The event
- * carried only `rebucket: boolean`, so an Adjust placement — which the founder's own
+ * carried only `rebucket: boolean`, so a Rank it again — which the founder's own
  * Terrace House report is about — counted as a brand-new ranking in every funnel that
  * reads `ranking_completed` as "watched and placed a new title". The rerank-versus-rewatch
  * distinction lives in the database (`_rank_finalize`'s `p_new_watch`) and on the menu;

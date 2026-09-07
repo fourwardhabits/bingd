@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -407,7 +407,10 @@ describe('optional metadata that is absent in the catalogue', () => {
       {
         media_item_id: 'film-1',
         facet: 'credits',
-        payload: { cast: [{ id: 1, name: '', character: null, profile_path: null }], crew: null },
+        payload: {
+          cast: [{ id: 1, name: '', character: null, profile_path: null }],
+          crew: null,
+        },
       },
     ];
 
@@ -529,7 +532,9 @@ describe('the identity line', () => {
         facet: 'credits',
         payload: {
           cast: [],
-          crew: [{ id: 525, name: 'Christopher Nolan', job: 'Director', department: 'Directing' }],
+          crew: [
+            { id: 525, name: 'Christopher Nolan', job: 'Director', department: 'Directing' },
+          ],
         },
       },
     ];
@@ -590,7 +595,9 @@ describe('the identity line', () => {
 
     const view = await openOn(completeSeason, 'The Last of Us');
 
-    await waitFor(() => expect(view.getByTestId('title-context')).toHaveTextContent(/#1 in TV/));
+    await waitFor(() =>
+      expect(view.getByTestId('title-context')).toHaveTextContent(/#1 in TV/),
+    );
     expect(view.getByTestId('title-context')).toHaveTextContent(/Watched/);
   });
 });
@@ -674,20 +681,20 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
 
     // All three intents offered, and none of them taken by the press itself.
-    expect(view.getByText('Adjust placement')).toBeTruthy();
-    expect(view.getByText('I watched it again')).toBeTruthy();
+    expect(view.getByText('Rank it again')).toBeTruthy();
+    expect(view.getByText('Log another watch')).toBeTruthy();
     expect(view.getByText('Change your rating')).toBeTruthy();
     expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('enters the same-watch rerank from Adjust placement, declaring no new watch', async () => {
+  it('enters the same-watch rerank from Rank it again, declaring no new watch', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    await fireEvent.press(view.getByText('Adjust placement'));
+    await fireEvent.press(view.getByText('Rank it again'));
 
     // `rank_again` with `p_new_watch: false` — the session runs over the position the
     // title already holds, and `_rank_finalize` posts `title_ranked` only `if p_new_watch
@@ -711,7 +718,7 @@ describe('the action group', () => {
 
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    await fireEvent.press(view.getByText('I watched it again'));
+    await fireEvent.press(view.getByText('Log another watch'));
 
     // The one row in the app that declares a second viewing, and the only one that asks
     // for an activity. Exactly one, on completion.
@@ -833,5 +840,72 @@ describe('navigation', () => {
     await fireEvent.press(view.getByLabelText('The Last of Us, the series this belongs to'));
 
     expect(mockPush).toHaveBeenCalledWith('/title/series-1');
+  });
+});
+
+/** A style prop, flattened, whichever form the component passed it in. */
+const flat = (style: unknown): Record<string, unknown> =>
+  Array.isArray(style)
+    ? Object.assign({}, ...style.map(flat))
+    : ((style ?? {}) as Record<string, unknown>);
+
+describe('the score and the poster', () => {
+  const hidden = { includeHiddenElements: true } as const;
+
+  it('is anchored to the poster, overhanging its corner, rather than stacked beneath it', async () => {
+    /**
+     * **Structural, not pixel** (founder, physical Android, 2026-09-07). The score sat
+     * under the poster for one revision and produced a tall empty right-hand column. It
+     * belongs to the artwork: inside the poster's own column, absolutely positioned, and
+     * negative on both axes so the circle crosses the frame's lower-left corner onto Paper.
+     */
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByText('10.0', hidden)).toBeTruthy());
+
+    const column = view.getByTestId('title-poster-column');
+    const anchor = within(column).getByTestId('title-score-anchor');
+    const style = flat(anchor.props.style);
+
+    expect(style.position).toBe('absolute');
+    expect(style.left as number).toBeLessThan(0);
+    expect(style.bottom as number).toBeLessThan(0);
+    // Ownership in words, beneath the number, inside the same object.
+    expect(within(anchor).getByText('Your score')).toBeTruthy();
+    expect(view.queryByText('YOU')).toBeNull();
+  });
+
+  it('draws an empty ring for an unranked title, with no word inside it', async () => {
+    // The word "Rank" inside the circle duplicated the button beside it. The honest
+    // statement of "no score yet" is the empty dashed ring; the invitation is the button.
+    const view = await openOn(completeFilm, 'Inception');
+
+    const score = view.getByTestId('personal-score');
+    expect(within(score).queryByText('Rank', hidden)).toBeNull();
+    expect(within(score).queryByText(/\d\.\d/, hidden)).toBeNull();
+    expect(view.getByLabelText('You have not ranked this yet')).toBeTruthy();
+    expect(view.getByTestId('title-action-rank')).toBeTruthy();
+  });
+});
+
+describe('the ranking menu, in the founder’s words', () => {
+  it('names the three intents Rank it again, Log another watch and Change your rating', async () => {
+    /**
+     * Labels only (founder, 2026-09-07). *Adjust placement* named the mechanism and *I
+     * watched it again* was a confession; these name the act in the verbs the rest of the
+     * app uses. The rows' modes, RPCs and `p_new_watch` are pinned unchanged by the two
+     * tests in "the action group" above.
+     */
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-action-ranked'));
+
+    expect(view.getByText('Rank it again')).toBeTruthy();
+    expect(view.getByText('Log another watch')).toBeTruthy();
+    expect(view.getByText('Change your rating')).toBeTruthy();
+    expect(view.queryByText('Adjust placement')).toBeNull();
+    expect(view.queryByText('I watched it again')).toBeNull();
   });
 });

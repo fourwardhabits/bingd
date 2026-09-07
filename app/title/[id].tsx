@@ -889,19 +889,17 @@ export default function TitleScreen() {
   };
 
   /**
-   * **Adjust placement: the same watch, comparisons redone.**
+   * **Rank it again: the same watch, comparisons redone.**
    *
-   * One implementation, reached from two places — the first action in the group under
-   * the identity, and the *Adjust placement* row in the menu behind `⋯`. That is not
-   * tidiness: the whole point of the 2026-09-07 label pass was that the three ranking
-   * intents must be unmistakable, and two call sites each assembling their own
-   * `RankingSubject` is how a `mode` drifts.
+   * One implementation for the *Rank it again* row in the ranking-options menu, which is
+   * reachable from the Ranked control and from the overflow in the bar. One place, so a
+   * `mode` cannot drift between two call sites assembling their own `RankingSubject`.
    *
    * `mode: 'rerank'` is `rankAgain` with `newWatch: false`: the session runs over the
    * position the title already holds, and finishing replaces it **without announcing
    * anything**. `_rank_finalize` posts `title_ranked` only `if p_new_watch or not
    * v_replaced` (20260826000500), so no feed activity is written. The rewatch row —
-   * *I watched it again* — is the one place in the app that declares a second viewing,
+   * *Log another watch* — is the one place in the app that declares a second viewing,
    * and it is the only one that passes `mode: 'again'`.
    *
    * Nothing about the ranking maths, the score or the schema is touched by this pass.
@@ -1098,7 +1096,7 @@ export default function TitleScreen() {
             ) : null}
           </View>
 
-          <View style={styles.posterColumn}>
+          <View style={styles.posterColumn} testID="title-poster-column">
             <View style={styles.posterFrame}>
               <Poster
                 uri={posterUri(title.poster_path, 'card')}
@@ -1108,40 +1106,56 @@ export default function TitleScreen() {
                 size="md"
               />
             </View>
-            {/* Under the artwork it belongs to, right-aligned with it. A series has no
-                score because it cannot be ranked (PRD §10), so it gets nothing here
-                rather than an empty circle. */}
+            {/**
+             * **On the poster's lower-left corner, half on the artwork and half on Paper**
+             * (founder, physical Android, 2026-09-07).
+             *
+             * It sat *under* the poster for one revision, which produced a tall empty
+             * column on the right of the page and a score that read as a separate block
+             * rather than as the poster's. Anchored to the corner it is attached to the
+             * artwork — the one thing on the page that can only be about this title —
+             * and the column below the poster is no taller than the poster. The overhang
+             * onto Paper is what keeps the number legible whatever the artwork is.
+             *
+             * A series has no score because it cannot be ranked (PRD §10), so it gets no
+             * anchor rather than an empty one.
+             */}
             {rankable ? (
-              <PersonalScore
-                score={score}
-                // Ranked, but the band sizes that derive the number have not landed. The
-                // dashed ring reads "rank this", which would contradict the Ranked control
-                // below it; the neutral empty circle says the number has not arrived.
-                pending={Boolean(data.ranked) && score == null}
-                bucket={data.ranked?.bucket ?? null}
-                // Exactly where the old Ranked chip led: a ranked title opens its options,
-                // an unranked one opens the log. The score has been the place to press to
-                // change a rating since 2026-09-06 and still is.
-                onPress={() => (data.ranked ? setManaging(true) : openLog())}
-              />
+              <View
+                style={styles.scoreAnchor}
+                pointerEvents="box-none"
+                testID="title-score-anchor"
+              >
+                <PersonalScore
+                  score={score}
+                  // Ranked, but the band sizes that derive the number have not landed. The
+                  // neutral empty circle says the number has not arrived; the dashed ring
+                  // is for a title with no ranking at all.
+                  pending={Boolean(data.ranked) && score == null}
+                  bucket={data.ranked?.bucket ?? null}
+                  // Exactly where the Ranked control leads: a ranked title opens its
+                  // options, an unranked one opens the log. The score has been the place to
+                  // press to change a rating since 2026-09-06 and still is.
+                  onPress={() => (data.ranked ? setManaging(true) : openLog())}
+                />
+              </View>
             ) : null}
           </View>
         </View>
 
         {/**
-         * **Rank/Ranked, Save, Recommend — one compact cluster under the poster.**
+         * **Rank/Ranked, Save, Recommend — one row, directly after the identity block.**
          *
-         * Right-aligned and content-sized rather than three equal shares of the page:
-         * stretched across the full width they read as a toolbar, which is the
-         * dashboard feeling this pass is removing. Hung from the right they sit directly
-         * under the artwork and the score, which is the cluster they belong to, and they
-         * fill the space the left column's shorter text leaves.
+         * It was hung from the right under the poster for one revision, and on the device
+         * that read as detached: a cluster floating in the corner with a blank column
+         * above it. It is a full-width row now — the labelled control takes the width the
+         * two glyphs leave, so it is unmistakably the primary act, and the synopsis begins
+         * a short way beneath. See `TitleActions`.
          *
          * The Rank/Ranked control keeps its **text and its behaviour**: unranked opens the
-         * log, ranked opens the ranking-options menu. See `TitleActions` and §6 of the
-         * founder's direction — nothing here decides between adjusting a placement and
-         * declaring a rewatch, because that is the menu's job and the distinction is the
-         * whole point of it.
+         * log, ranked opens the ranking-options menu. Nothing here decides between ranking
+         * the same watch again and logging another watch, because that is the menu's job
+         * and the distinction is the whole point of it.
          */}
         <TitleActions
           rank={
@@ -1739,25 +1753,29 @@ export default function TitleScreen() {
              * only in a doc; the label invited the other reading.
              *
              * So the menu names the intent rather than the mechanism, and the three
-             * modes are now each reachable and each unmistakable:
+             * modes are each reachable and each unmistakable. **The labels are the
+             * founder's, revised on 2026-09-07 after the first pair was read on a
+             * device:**
              *
-             *   Adjust placement   same watch, redo the comparisons — `rerank`, no
-             *                      activity, and the row this bug needed to exist.
-             *   I watched it again a genuine rewatch — `again`, exactly one activity.
-             *   Change your rating a different band — `rebucket` via the log sheet.
+             *   Rank it again       same watch, redo the comparisons — `rerank`, no
+             *                       activity. Was "Adjust placement", which named the
+             *                       mechanism; this names the act in the app's own verb.
+             *   Log another watch   a genuine rewatch — `again`, exactly one activity.
+             *                       Was "I watched it again"; "log" is the word the rest
+             *                       of the app uses for recording a viewing.
+             *   Change your rating  a different band — `rebucket` via the log sheet.
              *
              * The labels carry the whole distinction and there is no secondary line: a
              * `value` on a `SheetRow` sets beside the label on one line and truncates at
-             * phone width, which is a founder decision this menu already carries. That is
-             * why the rewatch row is named for what the reader did rather than for what
-             * the app will do about it — a verb alone ("Rank again") cannot say whose
-             * watch it is, and a sentence explaining it cannot be read.
+             * phone width, which is a founder decision this menu already carries.
              *
-             * Nothing about the ranking maths, the score or the schema changes.
+             * **Only the words changed.** `mode`, the RPC each row calls, `p_new_watch`,
+             * and which of them writes an activity are exactly as they were. Nothing about
+             * the ranking maths, the score or the schema changes.
              */}
             <SheetRow
               icon="swap-vertical-outline"
-              label="Adjust placement"
+              label="Rank it again"
               // The same function the first action in the group calls, so the two doors
               // into this intent cannot drift apart in what they ask the server for.
               // See `adjustPlacement`.
@@ -1780,7 +1798,7 @@ export default function TitleScreen() {
              */}
             <SheetRow
               icon="repeat-outline"
-              label="I watched it again"
+              label="Log another watch"
               onPress={
                 rankedBucket
                   ? () => {
@@ -2102,13 +2120,25 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
   },
   /**
-   * The poster and the score beneath it, as one object on the right.
+   * The poster, with the score anchored to its corner, as one object on the right.
    *
    * The lift lives here rather than on the row, so the artwork crosses the hero's fade
-   * and the words do not. `alignItems: 'center'` centres the score under the frame; the
-   * frame's own width is what the column is.
+   * and the words do not. `position: 'relative'` is what the score's absolute anchor is
+   * measured against; the frame's own width is what the column is.
    */
-  posterColumn: { alignItems: 'center', marginTop: -POSTER_LIFT },
+  posterColumn: { position: 'relative', marginTop: -POSTER_LIFT },
+  /**
+   * The score, over the poster's lower-left corner.
+   *
+   * Negative on both axes so the circle crosses the frame's edge: about a third of it
+   * overhangs onto Paper to the left, which keeps the number legible whatever the
+   * artwork behind the rest of it is, and the caption beneath it hangs below the frame
+   * by a few points. The action row's own top padding is what gives that overhang room.
+   *
+   * `box-none` on the wrapper so only the badge takes touches: the anchor is a
+   * positioning device and must not become a second, invisible target on the poster.
+   */
+  scoreAnchor: { position: 'absolute', left: -24, bottom: -12 },
   /**
    * Everything that names the title, on the left.
    *
