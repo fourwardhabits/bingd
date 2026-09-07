@@ -2136,3 +2136,123 @@ describe('undo at the first comparison', () => {
     expect(callsTo('log_watched')).toHaveLength(0);
   });
 });
+
+/**
+ * **A Too tough whose reply was lost still counts exactly once** (Codex review of
+ * #122, 2026-09-07).
+ *
+ * `rank_skip` can commit and lose its reply. The ambiguous attempt counts nothing, the
+ * sheet offers Try again under the same operation id, and the server answers the retry
+ * from its stored result — one logical skip, however many attempts it took to hear it.
+ * The undercount this closes: the retry used to re-run an anonymous thunk that had
+ * forgotten it was a skip, so the session's one accepted Too tough was never counted.
+ */
+describe('a Too tough whose reply was lost', () => {
+  const LOST = { data: null, error: { code: '', message: 'TypeError: fail' } };
+  const completion = () =>
+    mockTrack.mock.calls.find(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    )?.[0] as { props: Record<string, unknown> } | undefined;
+  const completions = () =>
+    mockTrack.mock.calls.filter(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    );
+
+  const tooTough = async (sheet: Awaited<ReturnType<typeof openSheet>>) => {
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+  };
+
+  const retry = async (sheet: Awaited<ReturnType<typeof openSheet>>) => {
+    await waitFor(() => expect(sheet.getByText('Not sure that landed')).toBeTruthy());
+    await fireEvent.press(sheet.getByRole('button', { name: 'Try again' }));
+  };
+
+  it('counts an ordinary accepted skip once', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', skipped: true }), placement);
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ skips: 1 });
+  });
+
+  it('counts a skip that landed but lost its reply once, on the retry that hears it', async () => {
+    answering(comparison(), LOST, comparison({ pivot: 'film-q', skipped: true }), placement);
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await retry(sheet);
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(2));
+
+    // The same intent: the retry reuses the operation id, which is what makes the
+    // server answer it from the stored result rather than skipping twice.
+    const [first, second] = callsTo('rank_skip').map(([, args]) => args as { p_operation_id: string });
+    expect(second!.p_operation_id).toBe(first!.p_operation_id);
+
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ comparisons: 1, skips: 1 });
+    expect(completions()).toHaveLength(1);
+  });
+
+  it('cannot be turned into two skips by retrying twice', async () => {
+    answering(
+      comparison(),
+      LOST,
+      LOST,
+      comparison({ pivot: 'film-q', skipped: true }),
+      placement,
+    );
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await retry(sheet);
+    await retry(sheet);
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(3));
+    const ids = new Set(
+      callsTo('rank_skip').map(([, args]) => (args as { p_operation_id: string }).p_operation_id),
+    );
+    expect(ids.size).toBe(1);
+
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ skips: 1 });
+  });
+
+  it('still reports the skip when the retry itself places the title', async () => {
+    // The three-skip cap: the skip that was lost was the one that finalised, so the
+    // stored answer the retry hears is the placement.
+    answering(comparison(), LOST, placement);
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await retry(sheet);
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ comparisons: 0, skips: 1 });
+    expect(completions()).toHaveLength(1);
+  });
+
+  it('does not count a skip the server refused outright', async () => {
+    // A refusal is a refusal: nothing to retry, nothing skipped. The sheet has no
+    // completion to report here; the count is checked on the ref through the only
+    // window that exposes it, which is that no Try again is offered.
+    answering(comparison(), {
+      data: null,
+      error: { code: '40001', message: 'could not serialize access' },
+    });
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+
+    await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
+    expect(sheet.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(completions()).toHaveLength(0);
+  });
+});

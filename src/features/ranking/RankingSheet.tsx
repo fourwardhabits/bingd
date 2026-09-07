@@ -178,9 +178,22 @@ function Session({
    * because `useState` calls a bare function argument as an initialiser rather than
    * storing it.
    */
-  const [lastAttempt, setLastAttempt] = useState<{ run: () => Promise<SessionStep> } | null>(
-    null,
-  );
+  /**
+   * **`skip` travels with the attempt** (Codex review of #122, 2026-09-07).
+   *
+   * A `rank_skip` can commit and lose its reply. The first attempt then counts nothing
+   * — the outcome was unknown — and the retry re-runs the *same* operation id, which
+   * the server answers from its stored result. Without the flag the retry was an
+   * anonymous `run`, so the one accepted Too tough of that session was never counted
+   * and `ranking_completed.skips` undercounted the very control it exists to measure.
+   * Carrying the intent's meaning beside its thunk is what lets the retry apply the
+   * skip's contribution exactly once: the ambiguous attempt adds nothing, the resolving
+   * one adds one, and a second ambiguous retry still adds nothing until one resolves.
+   */
+  const [lastAttempt, setLastAttempt] = useState<{
+    run: () => Promise<SessionStep>;
+    skip: boolean;
+  } | null>(null);
 
   /**
    * One operation id per intent, for the ranking RPCs that gained one in
@@ -489,7 +502,7 @@ function Session({
         // Recorded here rather than before the call, so that the effect body stays free
         // of a synchronous setState. It lands in the same batch as `apply` below, which
         // is what the Try again button reads — see `lastAttempt`.
-        setLastAttempt({ run: attempt });
+        setLastAttempt({ run: attempt, skip: false });
         setBusy(false);
         apply(next);
         return;
@@ -509,7 +522,7 @@ function Session({
 
   const act = async (run: () => Promise<SessionStep>, progress = 0, skip = false) => {
     if (busy) return;
-    setLastAttempt({ run });
+    setLastAttempt({ run, skip });
     setBusy(true);
     const next = await run();
     setBusy(false);
@@ -517,7 +530,9 @@ function Session({
       answeredCount.current = Math.max(0, answeredCount.current + progress);
     }
     // A skip the server answered — with another pair, or with the placement the
-    // three-skip cap produces. A refused one was not a skip the session had.
+    // three-skip cap produces. A refused one was not a skip the session had, and a
+    // lost reply is not yet one: the retry under the same operation id, carrying the
+    // same `skip`, is what counts it when the stored answer comes back.
     if (skip && next.state !== 'failed') skipCount.current += 1;
     apply(next);
   };
@@ -677,8 +692,10 @@ function Session({
                 disabledReason="Still trying."
                 onPress={() => {
                   // No progress: a retry is the same comparison, not another one, and
-                  // counting it would inflate `ranking_completed`'s `comparisons`.
-                  void act(lastAttempt.run);
+                  // counting it would inflate `ranking_completed`'s `comparisons`. The
+                  // skip flag does travel, because the ambiguous attempt counted
+                  // nothing and this is the attempt that learns whether it landed.
+                  void act(lastAttempt.run, 0, lastAttempt.skip);
                 }}
               />
             ) : null}

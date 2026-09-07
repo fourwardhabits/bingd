@@ -669,17 +669,29 @@ export default function RecommendationsScreen() {
                * 2026-09-07).
                *
                * `lowData` is the hook's own word for a slate scored with no resolved
-               * anchors — a wall drawn from the popularity fallback and the genre
-               * affinity of a taste too thin to quote. A stranger who has ranked two
-               * films sees exactly this wall, and without a word for it the screen called
-               * For You is presenting last week's trending page as personalisation.
-               * One quiet line in the footnote register the exhausted notice already
-               * uses, above the artwork, and gone the moment an anchor resolves. Not a
-               * header, not a card, and nothing about the slate itself moved.
+               * anchors — a taste too thin to quote a title from. A stranger who has
+               * ranked two films sees exactly this wall, and without a word for it the
+               * screen called For You is presenting last week's trending page as
+               * personalisation. One quiet line in the footnote register the exhausted
+               * notice already uses, above the artwork, and gone the moment an anchor
+               * resolves. Not a header, not a card, and nothing about the slate moved.
+               *
+               * **Two sentences, because "popular" is a claim** (Codex review of #122).
+               * The pool takes `socialCandidates` as well as the trending fallback, so a
+               * reader with no anchor can be looking at titles the people they follow
+               * loved. `popularityOnly` is derived from the wall actually drawn: only
+               * when no anchor resolved *and* nothing social is on it does the line say
+               * the wall is popular; a thin taste with social titles on the wall gets
+               * the narrower truth, that bingd. is still learning, and no claim about
+               * where the titles came from.
                */}
-              {slate.data?.lowData ? (
+              {slate.data?.popularityOnly ? (
                 <Text variant="footnote" tone="tertiary" style={styles.lowData}>
                   Popular right now while bingd. learns your taste.
+                </Text>
+              ) : slate.data?.lowData ? (
+                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
+                  bingd. is still learning your taste.
                 </Text>
               ) : null}
               <PosterGrid

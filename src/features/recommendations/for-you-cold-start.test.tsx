@@ -61,7 +61,17 @@ jest.mock('expo-router', () => ({
     push: mockPush,
     replace: () => {},
     back: () => {},
-    setParams: (...args: unknown[]) => mockSetParams(...args),
+    // Behaves like the router: a consumed parameter is gone from the next read, which
+    // is what the already-mounted case below depends on.
+    setParams: (next: Record<string, string | undefined>) => {
+      mockSetParams(next);
+      const merged: Record<string, string> = { ...mockParams };
+      for (const [key, value] of Object.entries(next)) {
+        if (value === undefined) delete merged[key];
+        else merged[key] = value;
+      }
+      mockParams = merged;
+    },
   }),
   Stack: { Screen: () => null },
 }));
@@ -118,6 +128,7 @@ const mockSlate = {
   candidatePool: [],
   anchorsUsed: 1,
   lowData: false,
+  popularityOnly: false,
   taste: { genres: new Map(), languages: new Map(), sampleSize: 2 },
 };
 
@@ -147,6 +158,7 @@ beforeEach(() => {
   mockParams = {};
   dev.__DEV__ = false;
   mockSlate.lowData = false;
+  mockSlate.popularityOnly = false;
   mockSlate.anchorsUsed = 1;
   mockRpcResults = {
     my_notifications: [],
@@ -226,22 +238,41 @@ describe('why this tile is here, on a long press', () => {
 });
 
 describe('a wall that is not yet the reader’s', () => {
-  const LINE = 'Popular right now while bingd. learns your taste.';
+  const POPULAR = 'Popular right now while bingd. learns your taste.';
+  const LEARNING = 'bingd. is still learning your taste.';
 
-  it('says so, quietly, when the slate had no anchor to work from', async () => {
+  it('calls the wall popular only when it genuinely came from the popularity fallback', async () => {
+    // No anchor, and nothing social on the wall: the hook's `popularityOnly`.
     mockSlate.lowData = true;
+    mockSlate.popularityOnly = true;
     mockSlate.anchorsUsed = 0;
     const view = await open();
 
-    expect(view.getByText(LINE)).toBeTruthy();
+    expect(view.getByText(POPULAR)).toBeTruthy();
+    expect(view.queryByText(LEARNING)).toBeNull();
     // The wall itself is untouched: the same tile, drawn the same way.
+    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
+  });
+
+  it('does not call a wall popular when a followed reader’s title is on it', async () => {
+    // Codex review of #122: no anchor resolved, but `social_candidates` contributed a
+    // title that is on screen. Still a thin taste, so still worth a word — but not
+    // "popular", which would name a source the wall does not have.
+    mockSlate.lowData = true;
+    mockSlate.popularityOnly = false;
+    mockSlate.anchorsUsed = 0;
+    const view = await open();
+
+    expect(view.getByText(LEARNING)).toBeTruthy();
+    expect(view.queryByText(POPULAR)).toBeNull();
     expect(view.getByLabelText(/^Inception/)).toBeTruthy();
   });
 
   it('says nothing once an anchor has resolved', async () => {
     const view = await open();
 
-    expect(view.queryByText(LINE)).toBeNull();
+    expect(view.queryByText(POPULAR)).toBeNull();
+    expect(view.queryByText(LEARNING)).toBeNull();
   });
 });
 
@@ -263,5 +294,35 @@ describe('arriving to find people', () => {
 
     expect(showing(view)).toBe('Showing Movies');
     expect(mockSetParams).not.toHaveBeenCalled();
+  });
+
+  /**
+   * **The tab is already mounted when the Feed's Find people arrives** (Codex review of
+   * #122). A tab stays mounted, so an initial-state read alone would open nothing for a
+   * reader who had already looked at For You. The parameter has to be applied on change,
+   * consumed so it cannot re-fire, and must leave the selector free afterwards.
+   */
+  it('opens People on an already-mounted tab, consumes the parameter, and lets go', async () => {
+    const view = await open();
+    expect(showing(view)).toBe('Showing Movies');
+
+    // The Feed's action lands: the route's parameter changes under a mounted screen.
+    mockParams = { show: 'people' };
+    await view.rerender(<RecommendationsScreen />);
+
+    await waitFor(() => expect(showing(view)).toBe('Showing People'));
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
+    expect(mockParams).toEqual({});
+
+    // Not stuck: the selector still answers, and the consumed parameter does not put
+    // People back on the next render.
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: /^Movies/ }));
+    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
+    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
+
+    await view.rerender(<RecommendationsScreen />);
+    expect(showing(view)).toBe('Showing Movies');
+    expect(mockSetParams).toHaveBeenCalledTimes(1);
   });
 });

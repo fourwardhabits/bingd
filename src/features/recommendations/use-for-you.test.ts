@@ -2,7 +2,7 @@ import type { RankedEntry } from '@/features/collection/use-collection';
 
 import { applyFilters, emptyFilters, type CollectionFilters } from '@/features/collection/filters';
 
-import { anchorScope, anchorsFrom, asCollectionItem } from './use-for-you';
+import { anchorScope, anchorsFrom, asCollectionItem, popularityOnlyFor } from './use-for-you';
 import { ANCHOR_LIMIT } from './rank';
 
 /**
@@ -299,5 +299,39 @@ describe('a filtered TV wall', () => {
     });
     expect(applyFilters([candidate], comedy)).toHaveLength(1);
     expect(applyFilters([candidate], filters({ genres: ['Horror'] }))).toEqual([]);
+  });
+});
+
+/**
+ * **When a wall may be called "popular"** (Codex review of #122, 2026-09-07).
+ *
+ * `anchorsUsed === 0` answered whether a similarity anchor resolved, and the screen read
+ * it as "popularity-only". The pool also takes `social_candidates`, so the claim has to
+ * be checked against the wall actually drawn.
+ */
+describe('whether a drawn wall is honestly popular', () => {
+  const wall = (...ids: string[]) => ids.map((mediaItemId) => ({ mediaItemId }));
+
+  it('is popular when no anchor resolved and nothing social is on it', () => {
+    expect(popularityOnlyFor(0, [], wall('t1', 't2'))).toBe(true);
+  });
+
+  it('is popular when the social ids did not survive onto the wall', () => {
+    // A social candidate that scoring or the diversity ceilings left out is not on
+    // screen, so it is not a source the screen would be naming.
+    expect(popularityOnlyFor(0, ['s1'], wall('t1', 't2'))).toBe(true);
+  });
+
+  it('is not popular when a social title is on the wall, even with no anchor', () => {
+    expect(popularityOnlyFor(0, ['s1'], wall('t1', 's1'))).toBe(false);
+  });
+
+  it('is never popular once an anchor resolved', () => {
+    expect(popularityOnlyFor(1, [], wall('t1'))).toBe(false);
+    expect(popularityOnlyFor(3, ['s1'], wall('t1', 's1'))).toBe(false);
+  });
+
+  it('is popular for an empty wall with no anchor, which the screen never draws anyway', () => {
+    expect(popularityOnlyFor(0, ['s1'], [])).toBe(true);
   });
 });
