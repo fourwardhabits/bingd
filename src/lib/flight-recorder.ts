@@ -103,6 +103,15 @@ export type EventChannel =
   | 'push'
   | 'app'
   | 'store'
+  /**
+   * A render that threw and was caught by a boundary.
+   *
+   * The `detail` is the error's **class name and the route it happened on**, never its
+   * message — the same rule `NetworkRecord.errorClass` follows, and for the same reason:
+   * a message can echo input, and this log is copied out of the device by hand. The
+   * message is shown on the boundary itself on a beta build, where it stays on screen.
+   */
+  | 'render'
   /** Where a query *began*, which the network log cannot see — see `flight-queries.ts`. */
   | 'query';
 

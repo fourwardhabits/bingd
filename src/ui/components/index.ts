@@ -55,6 +55,7 @@ export { ReactionControl, type ReactionControlProps } from './ReactionControl';
 // measurement, for the same Android edge-to-edge reason. See the hook's own header.
 export { useKeyboardHeight } from './use-keyboard-height';
 export { Screen } from './Screen';
+export { ScreenError, type ScreenErrorProps } from './ScreenError';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
 export {
   EmptyScoreBadge,

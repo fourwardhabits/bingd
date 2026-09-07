@@ -1,35 +1,26 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { useWindowDimensions } from 'react-native';
 
 import { ScoresSection } from './ScoresSection';
 
 /**
- * The composition the founder asked for after the Android Preview, and the copy rules
- * that have to survive it.
+ * The composition, and the copy rules that have to survive every rearrangement of it.
  *
- * Three things changed: Bingd leads, each unit is a circle with its words beside it
- * rather than above them, and an inset rule separates the block from the actions over
- * it. What must *not* change is what the section is willing to claim. Below the sample
+ * As of the 2026-09-07 redesign: a SCORES heading, Following before bingd., each unit a
+ * circle with its words beside it, sized to its own content on a row that scrolls
+ * sideways rather than reflowing, and no rule and no wash at all.
+ *
+ * What must *not* change is what the section is willing to claim. Below the sample
  * threshold there is a grey circle and four words, and never a number, a countdown or a
  * faded figure standing in for one.
  */
-
-jest.mock('react-native/Libraries/Utilities/useWindowDimensions');
-
-const mockWindow = useWindowDimensions as unknown as jest.Mock;
-
-/** The device the founder is holding, unless a test says otherwise. */
-const setViewport = (width: number, fontScale = 1) =>
-  mockWindow.mockReturnValue({ width, height: 844, scale: 3, fontScale });
-
-beforeEach(() => setViewport(412));
 
 /** A style prop, flattened, whichever form the component passed it in. */
 const flatten = (style: unknown) =>
   (Array.isArray(style) ? Object.assign({}, ...style) : (style ?? {})) as Record<string, unknown>;
 
-/** Which layout was drawn, read off the container the two scores share. */
-const isSideBySide = () => flatten(screen.getByTestId('scores-layout').props.style).flexDirection === 'row';
+/** Whether the two units share one row, read off the container they sit in. */
+const isOneRow = () =>
+  flatten(screen.getByTestId('scores-layout').props.style).flexDirection === 'row';
 
 const both = {
   bingd: { score: null, ratingCount: 0 },
@@ -37,17 +28,23 @@ const both = {
 };
 
 describe('the scores row', () => {
-  it('puts Bingd and Following side by side on an ordinary phone', async () => {
+  it('puts both units on one row', async () => {
     await render(<ScoresSection {...both} />);
     expect(screen.getByText('bingd.')).toBeTruthy();
     expect(screen.getByText('Following')).toBeTruthy();
-    expect(isSideBySide()).toBe(true);
+    expect(isOneRow()).toBe(true);
   });
 
-  it('leads with bingd., then Following', async () => {
-    // The founder's ordering, and the one a screen reader walks in. Asserted on the
-    // rendered order rather than on the props, because the props are named and could be
-    // passed either way round without changing what anybody sees.
+  it('leads with Following, then bingd.', async () => {
+    /**
+     * **The founder's order as of 2026-09-07**, reversing the Preview pass. Which number
+     * is worth more to the person holding the phone decides: a mean over accounts they
+     * chose to follow is a signal about their own taste, and the app-wide mean is a fact
+     * about the app. The narrower, more personal reading leads.
+     *
+     * Asserted on the rendered order rather than on the props, because the props are
+     * named and could be passed either way round without changing what anybody sees.
+     */
     await render(
       <ScoresSection
         bingd={{ score: 7.4, ratingCount: 128 }}
@@ -57,7 +54,7 @@ describe('the scores row', () => {
     const labels = screen
       .getAllByText(/^(bingd.|Following)$/)
       .map((node) => node.props.children);
-    expect(labels).toEqual(['bingd.', 'Following']);
+    expect(labels).toEqual(['Following', 'bingd.']);
   });
 
   it('draws each circle beside its words rather than above them', async () => {
@@ -70,56 +67,33 @@ describe('the scores row', () => {
     for (const unit of units) {
       expect(flatten(unit.props.style).flexDirection).toBe('row');
     }
-    expect(isSideBySide()).toBe(true);
+    expect(isOneRow()).toBe(true);
   });
 
-  it('keeps the circle beside the words in the narrow fallback too', async () => {
-    // The fallback is a wider line, not a different design. This is the assertion that
-    // stops it drifting back to a stack the next time the breakpoint moves.
-    setViewport(320);
+  it('sizes each unit to its own content rather than to half the screen', async () => {
+    /**
+     * **This is what replaced the responsive fallback** (2026-09-07), and it is the
+     * property that made the fallback unnecessary.
+     *
+     * The units were two flex halves, which meant "Not enough ratings" had about ninety
+     * points to set in and broke mid-word — so the component grew a minimum width, a
+     * font-scale ceiling and a second stacked layout to avoid it. Sized to their content
+     * inside a scroller they cannot be cramped at any width or any text size, and a
+     * third unit can be added without re-deciding a breakpoint.
+     */
     await render(<ScoresSection {...both} />);
     for (const unit of screen.getAllByTestId('scores-unit')) {
-      expect(flatten(unit.props.style).flexDirection).toBe('row');
+      expect(flatten(unit.props.style).flex).toBeUndefined();
     }
   });
 
-  it('separates the block with an inset rule rather than a full-width one', async () => {
+  it('lets the empty line set on one line rather than clamping it', async () => {
+    // The clamp existed because a half-width unit could not fit the words. With the
+    // width free, a numberOfLines here would be truncating something that fits.
     await render(<ScoresSection {...both} />);
-    const divider = flatten(screen.getByTestId('scores-divider').props.style);
-    // Inset: it stops short of both screen edges by the page gutter.
-    expect(divider.marginHorizontal).toBe(16);
-    // Light: a hairline, and a top border rather than a filled bar.
-    expect(divider.borderTopWidth).toBeLessThanOrEqual(1);
-    expect(divider.borderTopColor).toBeTruthy();
-    expect(divider.height).toBeUndefined();
-    expect(divider.backgroundColor).toBeUndefined();
-  });
-
-  it('falls back to stacked rows on a narrow device rather than cramming', async () => {
-    setViewport(320);
-    await render(<ScoresSection {...both} />);
-    expect(isSideBySide()).toBe(false);
-    // Both are still present and still say the same thing. The fallback is a layout
-    // change, not a different answer.
-    expect(screen.getAllByText('Not enough ratings')).toHaveLength(2);
-  });
-
-  it('falls back when the reader has turned type size up', async () => {
-    setViewport(412, 1.5);
-    await render(<ScoresSection {...both} />);
-    expect(isSideBySide()).toBe(false);
-  });
-
-  it('keeps the order and the circle-first composition in the fallback', async () => {
-    setViewport(320);
-    await render(
-      <ScoresSection
-        bingd={{ score: 7.4, ratingCount: 128 }}
-        following={{ score: 8.2, ratingCount: 4 }}
-      />,
-    );
-    const labels = screen.getAllByText(/^(bingd.|Following)$/).map((n) => n.props.children);
-    expect(labels).toEqual(['bingd.', 'Following']);
+    for (const line of screen.getAllByText('Not enough ratings')) {
+      expect(line.props.numberOfLines).toBeUndefined();
+    }
   });
 
   it('says the same four words in both units when there is nothing to average', async () => {
@@ -217,46 +191,48 @@ describe('the people behind the Following number (founder, 2026-08-27 §13)', ()
 });
 
 /**
- * **No heading, and one inset rule** (founder, 2026-09-06 and 2026-09-07).
+ * **A heading, and no rule at all** (founder, 2026-09-07).
  *
- * The `SCORES` label is gone for good: the units name themselves, so it was chrome, and
- * it made the block read as a lower section *about* the title.
+ * The SCORES label was removed on 2026-09-06 on the argument that the units name
+ * themselves. That is true of each unit and not of the pair: two circles with words
+ * beside them, arriving under a synopsis with no heading, read as a continuation of the
+ * synopsis — and no arrangement of two units gives a screen reader a landmark.
  *
- * The rule has moved twice and is back above the row, which is worth a test rather than
- * only a comment. It went beneath on 2026-09-06, when the block sat directly under the
- * title’s metadata and its job was to close the title’s identity off from the
- * description. The page reconverged on 2026-09-07 — genres and synopsis now come first —
- * so from its new position the rule separates the description above from the utility
- * block below, and belongs above the row again.
+ * The rule went the other way. It moved twice — beneath the row, then above it — and is
+ * now gone: with a Maroon heading opening the section and a section's worth of air above
+ * it, a hairline as well is what left the whole page reading as a stack of bordered
+ * bands. The one rule on the title page is above the tab row.
  */
 describe('the section’s own shape', () => {
-  it('draws no heading', async () => {
+  it('opens with the app’s section heading, then the row', async () => {
     await render(<ScoresSection {...both} />);
 
-    expect(screen.queryByText('SCORES')).toBeNull();
-    expect(screen.queryByText('Scores')).toBeNull();
-    expect(screen.queryByRole('header')).toBeNull();
+    const heading = screen.getByText('SCORES');
+    // Casing is applied as a style rather than typed, so a screen reader does not spell
+    // the word out.
+    expect(flatten(heading.props.style).textTransform).toBe('uppercase');
+
+    // And it opens the section: the heading comes before the row in document order, which
+    // is what "opens" means to a reader and to a screen reader alike.
+    const nodes = screen.root!.queryAll(() => true);
+    const at = (match: (node: { props: Record<string, unknown> }) => boolean) =>
+      nodes.findIndex(match as never);
+    expect(at((node) => node.props.testID === 'scores-section')).toBeLessThan(
+      at((node) => node.props.children === 'SCORES'),
+    );
+    expect(at((node) => node.props.children === 'SCORES')).toBeLessThan(
+      at((node) => node.props.testID === 'scores-layout'),
+    );
   });
 
-  it('opens with its one rule, above the units', async () => {
+  it('draws no rule and no wash', async () => {
     await render(<ScoresSection {...both} />);
-    const section = screen.getByTestId('scores-section');
 
-    const ids = (section.children as { props?: { testID?: string } }[])
-      .map((child) => child?.props?.testID)
-      .filter(Boolean);
-    expect(ids).toEqual(['scores-divider', 'scores-layout']);
-  });
-
-  it('leaves the rule inset and hairline, unchanged by either move', async () => {
-    await render(<ScoresSection {...both} />);
-    const divider = flatten(screen.getByTestId('scores-divider').props.style);
-
-    expect(divider.marginHorizontal).toBe(16);
-    expect(divider.borderTopWidth).toBeLessThanOrEqual(1);
-    expect(divider.backgroundColor).toBeUndefined();
-    // No wash behind the row either: the founder’s default, and the one shipped.
+    expect(screen.queryByTestId('scores-divider')).toBeNull();
     const section = flatten(screen.getByTestId('scores-section').props.style);
     expect(section.backgroundColor).toBeUndefined();
+    expect(section.borderTopWidth).toBeUndefined();
+    expect(section.borderWidth).toBeUndefined();
+    expect(section.borderRadius).toBeUndefined();
   });
 });

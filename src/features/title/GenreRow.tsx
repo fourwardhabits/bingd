@@ -173,17 +173,28 @@ export function GenreRow({ genres }: GenreRowProps) {
 
       {/* The whole list, in the app's one sheet. Read-only: this is the rest of a fact
           the row summarised, not a set of controls — nothing here filters a page that is
-          already about one title. */}
-      <Sheet visible={open} onClose={() => setOpen(false)} label="All genres">
-        <View style={styles.sheet}>
-          <Text variant="title2">Genres</Text>
-          <View style={styles.sheetChips}>
-            {genres.map((genre) => (
-              <Chip key={genre} label={genre} />
-            ))}
+          already about one title.
+
+          **Mounted only while open**, which is what every other sheet on the title page
+          already does and this one did not. `Sheet` is a React Native `<Modal>`, and a
+          `<Modal>` that is merely `visible={false}` is still a mounted native dialog host
+          — here, one sitting inside the page's `ScrollView`, on every title page in the
+          app, permanently, for a list nobody had asked to see. It also kept a pair of
+          `Keyboard` listeners alive through `useKeyboardHeight` for a sheet with no text
+          field in it. Nothing is lost by mounting on demand: the sheet holds no state
+          worth preserving between openings. */}
+      {open ? (
+        <Sheet visible onClose={() => setOpen(false)} label="All genres">
+          <View style={styles.sheet}>
+            <Text variant="title2">Genres</Text>
+            <View style={styles.sheetChips}>
+              {genres.map((genre) => (
+                <Chip key={genre} label={genre} />
+              ))}
+            </View>
           </View>
-        </View>
-      </Sheet>
+        </Sheet>
+      ) : null}
     </>
   );
 }

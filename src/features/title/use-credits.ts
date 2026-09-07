@@ -13,6 +13,19 @@ export type CreditPerson = {
 export type CreditsResult = {
   cast: CreditPerson[];
   director: string | null;
+  /**
+   * The television equivalent of a director, from the crew already fetched.
+   *
+   * A season's identity line wants the person a reader would name if you asked them
+   * whose show it is, and TMDB does not publish a "showrunner" role — so this is the
+   * best available answer from the same payload, in the order the credit is usually
+   * meant: an explicit Creator, then an Executive Producer.
+   *
+   * **No second request.** It reads the `credits` facet this hook was already reading;
+   * the identity line falls back to it only when there is no director, and prints
+   * nothing when there is neither. A guess would be worse than a missing segment.
+   */
+  showrunner: string | null;
 };
 
 export function useCredits(mediaItemId: string | null) {
@@ -54,8 +67,12 @@ export function useCredits(mediaItemId: string | null) {
         payload.crew?.find((person) => person.job === 'Director')?.name ??
         payload.crew?.find((person) => person.department === 'Directing')?.name ??
         null;
+      const showrunner =
+        payload.crew?.find((person) => person.job === 'Creator')?.name ??
+        payload.crew?.find((person) => person.job === 'Executive Producer')?.name ??
+        null;
 
-      return { cast, director };
+      return { cast, director, showrunner };
     },
   });
 }

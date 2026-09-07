@@ -385,6 +385,163 @@ The JustWatch credit is on both surfaces because their terms require the source 
 wherever the data is shown — demoted, never hidden. See
 [`../reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
+### As built — 2026-09-07: the identity redesign
+
+The founder's redesign of the top half of this page, taken as a whole. Nothing about ranking,
+scoring, recommendation or the catalogue moves; this is composition, hierarchy and one crash.
+
+```
+   ╔════════════════════════════════════════════╗
+   ║ ‹                                       ⋯  ║  ← overlays the artwork, no bar
+   ║        backdrop, 16:9, behind the          ║
+   ║        status bar, scrim under chrome      ║
+   ╚════════════════════════════════════════════╝
+   ┌────────┐  The Last of Us
+   │        │  Season 1, 2023
+   │ poster │  TV-MA · 9 episodes · Craig Mazin
+   │  md    │  #1 in TV · Watched 12 Feb 2026
+   └──────⬤─┘
+         YOU        ← 10.0 in the circle, YOU on its lower edge
+
+      ⇅          ▢          ➤
+    Adjust      Save    Recommend
+
+   A thief who steals corporate secrets through dream-sharing technology
+   is given the inverse task of planting an idea into the mind of a chief
+   executive, but his tragic past may doom the project and his team to
+   disaster before they can even begin. … more      ← always on line four
+
+   [Drama] [Action & Adventure] [+2]
+
+   SCORES
+   ⬤ 9.1  Following        ⬤ 8.7  bingd.        →   ← scrolls sideways
+     2 people you follow      12 ratings
+
+   WHERE TO WATCH             [N] [tv] [a]  +2   ›
+   via JustWatch
+   ─────────────────────────────────────────────  ← the page's one hairline
+   Episodes    Cast    Reviews    Details
+```
+
+**Identity moved to poster-and-title side by side.** The poster used to sit alone under the
+hero with a detached score column opposite it, and the title, year and metadata began on a
+full-width band below both — three bands for one fact. They are one row now: the poster still
+straddles the hero's fade on its Paper mat, and everything that names the title sets beside it
+in a column, in the order a reader scans. For a season the heading is **the show** and the
+subtitle is `Season 1, 2023`; the show's name is also the link to the series page, which
+replaces the small Maroon line that used to sit above the heading. `POSTER_LIFT` is 88 with
+the poster at `md`, and the no-artwork band is the bar's height plus that lift, since the
+navigation now overlays the hero rather than sitting above it.
+
+The metadata line reads certification, then length, then a credit — `TV-MA · 9 episodes ·
+Craig Mazin`, `PG-13 · 145 min · Destin Daniel Cretton`. Two facts became available to it
+without a new request: a season now inherits its series' certification, because TMDB publishes
+a rating on the series and never on a season, and a season's length is its **episode count**
+rather than a runtime (`20260820000400`) — the line used to print a runtime column TMDB does
+not fill for seasons, so the segment was simply missing on every season page. Television's
+credit falls back from director to an explicit Creator and then an Executive Producer, read
+off the `credits` facet the screen was already fetching. Any part that is absent is dropped
+without leaving a separator, and a line with nothing in it is not rendered at all. The feed
+keeps `148m` in its own subheading: that is a two-line row with a poster, and this is a line
+with a column to itself.
+
+**The personal score now carries explicit `YOU` context, over the poster.** `10.0` in a
+detached upper-right column was not self-evidently the reader's own — a bare number beside
+artwork is where every other product puts a critics' aggregate. The circle moved onto the
+poster's lower outside corner with a `YOU` pill on its edge: Paper ground, Maroon hairline,
+Maroon capitals, not a second filled shape. The number, the scale and where it comes from are
+unchanged (PRD §10, `score.ts`), it is still not a star rating, and the logged-but-unranked
+state is still the honest dashed ring rather than a greyed zero. A ranked title whose band
+sizes have not landed draws the neutral empty circle, because the dashed ring reads "rank
+this" and would contradict the Adjust control beside it. The ordinal survives as a segment of
+the context line — `#1 in TV · Watched 12 Feb 2026` — rather than as a row of its own, and the
+watch date is on this page for the first time.
+
+**Rank/Save/Recommend became one compact action group.** They were three controls of three
+kinds in two places: a full-height `Ranked` chip with a tick, two unlabelled glyphs under it,
+and before that a row of Maroon chips further down. Now one row of three, equal shares, one
+baseline, one weight, each 44pt or more, never wrapping. **The `Ranked` button is gone**: a
+button whose job is to *report* is a button standing in for a fact, and the fact is on the
+poster. The first action is the rank intent at whichever stage the title is in — **Adjust**
+(same watch, `mode: 'rerank'`) for a ranked title, **Rank** for an unranked one. Each glyph
+keeps a one-word caption, because a paper plane is Recommend here and Send everywhere else. A
+series gets Save alone (PRD §10). The rest of the ranking menu — the note, who I watched with,
+*I watched it again*, *Change your rating*, Remove — moved from the Ranked chip to the
+overflow `⋯` in the top bar, with the same reachability it had: present for a ranked title,
+absent otherwise.
+
+**The overview precedes the genres and collapses to four lines with `more` inline.** `more`
+was a second `Text` under the prose, so a synopsis that filled its clamp spent a whole line on
+one word and pushed the genres away from the paragraph they belong beside. It is now a span
+*inside* the clamped `Text`, which is what makes the guarantee structural — React Native
+cannot put it on a fifth line, because `numberOfLines={4}` has not given the block one. Where
+to cut is **measured**, not counted: an invisible pass reports every line of the full synopsis
+with its own width, a second reports the width of ` … more`, and the fourth line is trimmed to
+a word boundary that leaves room for it. A character count would be right at one width and one
+text size and wrong at every other. A synopsis that already fits four lines shows no marker at
+all. Before the measurement lands, and if it never does, the block is the full text under a
+plain four-line clamp — honest, and still tappable.
+
+**Scores regained a heading and became horizontally extensible.** `SCORES`, in the app's
+section treatment. It was removed on 2026-09-06 because the units name themselves, which is
+true of each unit and not of the pair — two circles arriving under a synopsis with no heading
+read as a continuation of the synopsis, and no arrangement of two units gives a screen reader
+a landmark. **Following leads bingd.**, because a mean over accounts the reader chose is a
+signal about their own taste and the app-wide mean is a fact about the app. The row is a
+horizontal scroller sized to its content rather than a flex pair with a responsive stacked
+fallback: a third unit has been asked for twice, and content sizing means `Not enough ratings`
+can never break mid-word at any text size. No card, no wash, no rule. The reader's own score
+is still not in here (founder, 2026-08-18).
+
+**The hero navigation is transparent and gains opacity on scroll.** The route no longer draws
+a navigator header at all. Back and an overflow control overlay the artwork on `TitleHero`'s
+own top scrim — the app's existing contrast language — and one `Animated.Value` carries three
+things at once as the hero leaves: the Paper ground and its hairline arriving, the compact
+title fading up, and a crossfade between two copies of each glyph, light on artwork and Ink on
+Paper. The old arrangement mounted or unmounted a `headerBackground` on a boolean, which has
+no middle; and `headerTintColor` is a navigation option rather than an animatable value, so
+there was no way to make the icons change with the ground. **Navigation semantics are
+unchanged**: Back is `router.back()` and returns to whatever pushed the route, and the
+hardware back and edge-swipe gestures are the navigator's and untouched. The compact title is
+hidden from assistive technology until it is readable, crossed with hysteresis, so a screen
+reader does not meet the title twice on every page.
+
+**Section separation was reduced to one hairline.** Rules above the scores, above Where to
+watch, and between every pair of episodes are gone. Whitespace is the default separator and a
+Maroon section heading is what announces a block; the single rule left is above the tab row,
+which is the one place the page changes mode — above it the page is about the title, below it
+it is a set of lists you choose between.
+
+### The title-page crash — 2026-09-07
+
+The founder's report was two symptoms: a title page renders briefly and then the app's error
+boundary appears, and sometimes the reader ends up back on Feed rather than on the title page.
+
+**The second symptom is fully explained and fixed.** `RouteErrorBoundary` wraps `<Stack>` in
+`app/_layout.tsx`, so catching *anything* unmounts the navigator and the pushed route goes
+with it, along with everything behind it. Clearing the error mounts a fresh `<Stack>` at the
+root index; `nextRoute` reads the root index as `group === undefined` and returns
+`/(tabs)/feed` (`session.tsx`). No code decided to go to the feed — the back stack stopped
+existing. Expo Router lets a route module export `ErrorBoundary` and wraps only the route
+component in it, so `app/title/[id].tsx` now does: caught there, the route stays on the stack,
+Back still returns to whatever pushed it, and `retry` re-renders in place. The root boundary
+remains for everything a route boundary cannot catch — a throw in a layout, in the navigator
+itself, or on a screen that has not declared one.
+
+**The exception itself is not named here, because the repository could not name it.** The
+render path is null-safe under every optional-metadata shape a movie, season or series can
+present — pinned by `TitleScreenResilience.test.tsx` — and typecheck is clean. What was
+missing was any way to read the error off the device: a caught render error went only to
+Sentry, which this project has been unable to read for weeks. It now also goes to the flight
+recorder as a `render` event carrying the error's class and the route, and a beta build prints
+the class and message under the apology. One tap into Diagnostics names it.
+
+One suspect was removed on the way past rather than left standing: `GenreRow` mounted its
+"all genres" `Sheet` unconditionally, so every title page in the app carried a React Native
+`<Modal>` — and its keyboard listeners — inside the page's `ScrollView`, permanently, for a
+list nobody had asked to see. Every other sheet on this page mounts on demand; this one does
+now too.
+
 ---
 
 ## 7. Feed — reworked 2026-08-15
