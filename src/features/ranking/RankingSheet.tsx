@@ -341,11 +341,25 @@ function Session({
           })
           .catch(() => {});
 
-        void detectStreak()
-          .then((weeks) => {
-            if (weeks != null) enqueueCelebrations([{ kind: 'streak', weeks }]);
-          })
-          .catch(() => {});
+        /**
+         * A correction is not a ranking act, so it is not asked about the streak.
+         *
+         * `rerank` (Adjust placement) and `rebucket` (Change your rating) replace a
+         * position and post no activity. Until `20260911000100` lands they also
+         * re-insert the `rankings` row with `created_at = now()`, which is the column
+         * the streak is derived from — so a correction in an otherwise empty week
+         * read as "ranked this week" and this detector celebrated it. The migration
+         * keeps the date; this guard keeps the celebration honest on every build,
+         * including the ones running against a backend the migration has not
+         * reached. `start` and `again` are the two acts that place a title today.
+         */
+        if (subject.mode !== 'rerank' && subject.mode !== 'rebucket') {
+          void detectStreak()
+            .then((weeks) => {
+              if (weeks != null) enqueueCelebrations([{ kind: 'streak', weeks }]);
+            })
+            .catch(() => {});
+        }
       } else if (next.state === 'failed' && next.changed) {
         /**
          * **A failed answer can still have placed the title.**

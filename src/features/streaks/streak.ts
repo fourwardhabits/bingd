@@ -23,10 +23,18 @@
  *   - Re-ranking a title deletes and re-inserts it (`rank_again`), so its `created_at`
  *     moves forward and an old week can lose its only evidence.
  *
- * Both are rare, both make the streak *lower* rather than higher, and neither can
- * fabricate one. A durable per-act ledger would fix them and is a migration; if streaks
- * turn out to matter, that is the upgrade — and it can be made without changing anything
- * a reader sees, because this module takes timestamps and not a table.
+ * Both are rare and both make the streak *lower* rather than higher. **The first version
+ * of this header also claimed neither could fabricate one, and that was wrong in one
+ * direction** (hardening audit, 2026-09-07): the re-insert stamps `now()`, so an *Adjust
+ * placement* or *Change your rating* in an otherwise empty week read as "ranked this
+ * week" — a correction, which posts no activity and is not a watch, advancing a streak.
+ * `20260911000100` keeps the old `created_at` through a correction so the column means
+ * what the PRD's sort contract says it means (the instant the activity carries), and
+ * `RankingSheet` no longer asks this module about a correction at all. A rewatch (`again`)
+ * is a genuine new instant and still counts. A durable per-act ledger would close the
+ * two remaining edges and is a migration; if streaks turn out to matter, that is the
+ * upgrade — and it can be made without changing anything a reader sees, because this
+ * module takes timestamps and not a table.
  * ---------------------------------------------------------------------------
  */
 
