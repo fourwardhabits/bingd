@@ -34,7 +34,10 @@ jest.mock('@/lib/supabase', () => {
   const { createPostgrest } = require('@/test-utils/postgrest');
   const client = createPostgrest();
   (globalThis as { __pg?: unknown }).__pg = client;
-  return { supabase: { from: client.from, rpc: client.rpc }, startSessionRefresh: () => () => {} };
+  return {
+    supabase: { from: client.from, rpc: client.rpc },
+    startSessionRefresh: () => () => {},
+  };
 });
 
 const pg = () =>
@@ -223,7 +226,7 @@ describe('the sheet', () => {
   it('shows the goal still to reach, with the count beside it', async () => {
     seed('user_media', movies(7));
     await open();
-    expect(screen.getByText('Next: Bronze · Watch 50 movies')).toBeTruthy();
+    expect(screen.getByText('Next: Movie Muncher Bronze · Watch 50 movies')).toBeTruthy();
     expect(count('7 / 50')).toBeTruthy();
   });
 
@@ -250,8 +253,18 @@ describe('the sheet', () => {
   it('costs the awards made of the collection, and keeps the ones that are not', async () => {
     mockBroken().add('user_media');
     seed('follows', [
-      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
-      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+      {
+        follower_id: 'me',
+        followee_id: 'id-ada',
+        follower: profile('me'),
+        followee: profile('ada', 'Ada'),
+      },
+      {
+        follower_id: 'id-ada',
+        followee_id: 'me',
+        follower: profile('ada', 'Ada'),
+        followee: profile('me'),
+      },
     ]);
     await open();
 
@@ -304,7 +317,9 @@ describe('the sheet', () => {
     expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
     expect(screen.queryByLabelText('Comment Gremlin. Could not load this one')).toBeNull();
     expect(
-      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Whisper · Write 20 comments. 1 of 20'),
+      screen.getByLabelText(
+        'Comment Gremlin. Whisper locked. Next: Whisper · Write 20 comments. 1 of 20',
+      ),
     ).toBeTruthy();
   });
 });
@@ -466,7 +481,11 @@ describe('every award is explainable', () => {
     await open({ onPressTitle: () => {} });
     const awardRows = screen
       .getAllByRole('button')
-      .filter((node) => /\. (Next:|[A-Z][a-z]+ (earned|locked))/.test(String(node.props.accessibilityLabel ?? '')));
+      .filter((node) =>
+        /\. (Next:|[A-Z][a-z]+ (earned|locked))/.test(
+          String(node.props.accessibilityLabel ?? ''),
+        ),
+      );
     expect(awardRows).toHaveLength(20);
   });
 
@@ -620,8 +639,18 @@ describe('a key that is a pair', () => {
    */
   it('reads follows in one request, with both directions and both privacy markers', async () => {
     seed('follows', [
-      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
-      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+      {
+        follower_id: 'me',
+        followee_id: 'id-ada',
+        follower: profile('me'),
+        followee: profile('ada', 'Ada'),
+      },
+      {
+        follower_id: 'id-ada',
+        followee_id: 'me',
+        follower: profile('ada', 'Ada'),
+        followee: profile('me'),
+      },
     ]);
     await open();
 
@@ -638,7 +667,12 @@ describe('a key that is a pair', () => {
     // no window between the directions for it to happen in — the write below lands after
     // the only page has been served, so it cannot reach the intersection at all.
     seed('follows', [
-      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      {
+        follower_id: 'me',
+        followee_id: 'id-ada',
+        follower: profile('me'),
+        followee: profile('ada', 'Ada'),
+      },
     ]);
     pg().between = (table, requests, tables) => {
       if (table !== 'follows' || requests !== 1) return;
@@ -721,8 +755,18 @@ describe('a key that is a pair', () => {
 
   it('states the count when one request was enough, which is every real account', async () => {
     seed('follows', [
-      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
-      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+      {
+        follower_id: 'me',
+        followee_id: 'id-ada',
+        follower: profile('me'),
+        followee: profile('ada', 'Ada'),
+      },
+      {
+        follower_id: 'id-ada',
+        followee_id: 'me',
+        follower: profile('ada', 'Ada'),
+        followee: profile('me'),
+      },
     ]);
     await open();
 
@@ -752,7 +796,9 @@ describe('a key that is a pair', () => {
     expect(mockRequests().reactions).toBe(3);
     // The cursor is the pair, spelled the way PostgREST spells a tuple comparison.
     const second = pg().reads.filter((read) => read.table === 'reactions')[1]!;
-    expect(second.or).toMatch(/^feed_event_id\.gt\..+,and\(feed_event_id\.eq\..+,user_id\.gt\..+\)$/);
+    expect(second.or).toMatch(
+      /^feed_event_id\.gt\..+,and\(feed_event_id\.eq\..+,user_id\.gt\..+\)$/,
+    );
   }, 30_000);
 });
 
@@ -1290,22 +1336,30 @@ describe('somebody else’s awards', () => {
     // `logged_collection` still carries `has_public_note`; nothing on the client reads
     // it any more. A visitor's Comment Gremlin is their comments, which is the same
     // number the owner's own sheet shows — and neither of them is two.
-    seed('logged_collection', loggedMovies(2).map((row, i) => ({
-      ...row,
-      has_public_note: i === 0,
-    })));
+    seed(
+      'logged_collection',
+      loggedMovies(2).map((row, i) => ({
+        ...row,
+        has_public_note: i === 0,
+      })),
+    );
     await visit();
 
     expect(
-      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Whisper · Write 20 comments. 0 of 20'),
+      screen.getByLabelText(
+        'Comment Gremlin. Whisper locked. Next: Whisper · Write 20 comments. 0 of 20',
+      ),
     ).toBeTruthy();
   });
 
   it('feeds the genre tracks from the projection’s metadata', async () => {
-    seed('logged_collection', loggedMovies(2, {}).map((row, i) => ({
-      ...row,
-      media_items: media({ title: `Film ${i}`, genres: i === 0 ? ['Horror'] : [] }),
-    })));
+    seed(
+      'logged_collection',
+      loggedMovies(2, {}).map((row, i) => ({
+        ...row,
+        media_items: media({ title: `Film ${i}`, genres: i === 0 ? ['Horror'] : [] }),
+      })),
+    );
     await visit();
 
     expect(count('1 / 25')).toBeTruthy(); // Scream Snack sees the visitor-read genres

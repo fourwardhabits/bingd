@@ -89,10 +89,10 @@ export const ROOT_SCREEN_TITLES = {
    * The award payoff (`app/awards/celebrate.tsx`), reached from a ranking that crossed
    * a tier and from the congratulations in the inbox.
    *
-   * Titled rather than blank because it is a modal with a header, and "Award" is what
-   * the back gesture and the screen reader should call the thing being presented. The
+   * Titled rather than blank because it is a modal with a header. It said "Award", which
+   * named a category rather than the product; the founder corrected it to the brand. The
    * award's own name is on the card, where it is the message rather than chrome.
    */
-  'awards/celebrate': 'Award',
+  'awards/celebrate': 'bingd. Awards',
   settings: 'Settings',
 } as const;

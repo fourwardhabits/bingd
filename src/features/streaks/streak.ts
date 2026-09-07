@@ -165,3 +165,31 @@ function longestRun(weeks: ReadonlySet<string>): number {
 export function daysLeftInWeek(now: Date): number {
   return 7 - ((now.getDay() + 6) % 7);
 }
+
+/**
+ * Did this ranking start or extend a streak, and is that worth celebrating?
+ *
+ * ---------------------------------------------------------------------------
+ * ONLY THE FIRST RANKING OF A NEW QUALIFYING WEEK
+ *
+ * The founder's rule, and both halves matter. A streak advances once per week, so
+ * celebrating every ranking would celebrate the same fact five times on a busy Sunday —
+ * and it is the *advance* that is the achievement, not the ranking.
+ *
+ * **Week one is silent.** A first week is a streak of one, which is not a streak yet; it
+ * is somebody having used the app. Celebrating it would spend the mechanic's one moment
+ * on an event with no continuity behind it, which is exactly how a reward becomes noise.
+ * So: two weeks or more, and only on the ranking that got there.
+ * ---------------------------------------------------------------------------
+ *
+ * Both arguments come from the same `weeklyStreak` call, before and after the ranking,
+ * which is what makes "the first of the week" a fact rather than a guess about timing:
+ * the week was not ranked in, and now it is.
+ */
+export function streakAdvanced(before: WeeklyStreak, after: WeeklyStreak): number | null {
+  // Already safe this week, so this ranking is not the one that advanced anything.
+  if (before.rankedThisWeek) return null;
+  if (!after.rankedThisWeek) return null;
+  // A streak of one is a week, not a streak. See the header.
+  return after.weeks >= 2 ? after.weeks : null;
+}

@@ -44,15 +44,25 @@ describe('the notifications gear', () => {
     expect(view.queryByText('Settings')).toBeNull();
   });
 
-  it('reads as notification settings: a bell wearing a small gear', async () => {
-    // The bell names the subject and the gear names the action. A bare gear in this
-    // corner made the Profile control's claim — app settings — for a control that
-    // opens the notification preferences alone.
+  it('is the ordinary settings gear, not a composite glyph', async () => {
+    /**
+     * **The founder's physical Android pass, 2026-09-06.**
+     *
+     * It was a bell wearing a 12pt gear on its shoulder — the bell naming the subject
+     * and the gear naming the action. On a device the two glyphs overlapped into one
+     * shape and the gear read as punched through the bell: transparent, malformed, and
+     * the sort of thing somebody assumes is a rendering fault rather than a control.
+     *
+     * One glyph now, at `icon.md`, exactly what `AppHeader` puts in the Profile corner.
+     * Two gears in two places is not the ambiguity the composite was avoiding: this one
+     * lives inside the notifications screen, where the only settings to open are the
+     * notification ones, and the accessible name says so.
+     *
+     * Walked over the rendered JSON because a glyph has no role or label of its own —
+     * an icon's `size` lands as the glyph's fontSize, which is the trace it leaves.
+     */
     const view = await render(<NotificationSettingsButton />);
 
-    // Walked over the rendered JSON: what is being checked is which glyphs compose
-    // the control, and a glyph has no accessible role or label of its own. An icon's
-    // `size` lands as the glyph's fontSize, which is the trace it leaves in the tree.
     type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
     const flatten = (style: unknown): Record<string, unknown> => {
       if (Array.isArray(style)) return Object.assign({}, ...style.map(flatten));
@@ -69,25 +79,10 @@ describe('the notifications gear', () => {
     const glyphSizes = styles
       .map((style) => style.fontSize)
       .filter((size): size is number => typeof size === 'number');
-    // The bell at icon.md, and one smaller glyph — the gear annotation, not a
-    // second subject.
-    expect(glyphSizes).toContain(24);
-    expect(glyphSizes).toContain(12);
-    // No disc behind the gear: the founder's device read the Paper bubble as a badge
-    // background, so the gear now sits directly on the bell. The only filled circle
-    // in this control would be that bubble — assert it is gone.
-    expect(
-      styles.some((style) => style.borderRadius !== undefined && Boolean(style.backgroundColor)),
-    ).toBe(false);
-    // And the combined glyph pulls back by half the gear's overhang, so bell-plus-gear
-    // centres in the touch square rather than the bell alone.
-    expect(
-      styles.some((style) =>
-        (style.transform as { translateX?: number }[] | undefined)?.some(
-          (t) => typeof t.translateX === 'number' && t.translateX < 0,
-        ),
-      ),
-    ).toBe(true);
+
+    // One glyph, at the app's icon size. The 12pt annotation is what is gone.
+    expect(glyphSizes).toEqual([24]);
+    expect(glyphSizes).not.toContain(12);
   });
 
   it('pulls back exactly the box slack, so the glyph centres on the bar position', async () => {

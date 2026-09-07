@@ -90,24 +90,24 @@ export function AwardRow({ award, onPress }: AwardRowProps) {
 
       <View style={styles.copy}>
         {/**
-          * Ink once a tier is earned, muted until then.
-          *
-          * `secondary` rather than `tertiary`, and it is a deliberate choice between
-          * the two greys the system has. `tertiary` is the lighter one and is what the
-          * detail line beneath would then *outweigh* -- a row whose title is fainter than
-          * its own subtitle reads as broken rather than as locked. `secondary` is a
-          * clear step down from ink at 6.4:1, which keeps the requirement underneath
-          * fully readable: a locked row still has to say what would earn it.
-          *
-          * Tokens rather than a hex, so this follows the palette. There is deliberately
-          * no fourth, lighter text tone to reach for -- `tokens/color.ts` refuses one
-          * because it would fall under 4.5:1.
-          *
-          * `earned` is `award.earnedTier != null`, so this is "no tier on the ledger",
-          * not "not the top tier": the first tier flips the title to ink and every tier
-          * after it keeps it there, while the title itself changes to the tier's name on
-          * a creative track exactly as before.
-          */}
+         * Ink once a tier is earned, muted until then.
+         *
+         * `secondary` rather than `tertiary`, and it is a deliberate choice between
+         * the two greys the system has. `tertiary` is the lighter one and is what the
+         * detail line beneath would then *outweigh* -- a row whose title is fainter than
+         * its own subtitle reads as broken rather than as locked. `secondary` is a
+         * clear step down from ink at 6.4:1, which keeps the requirement underneath
+         * fully readable: a locked row still has to say what would earn it.
+         *
+         * Tokens rather than a hex, so this follows the palette. There is deliberately
+         * no fourth, lighter text tone to reach for -- `tokens/color.ts` refuses one
+         * because it would fall under 4.5:1.
+         *
+         * `earned` is `award.earnedTier != null`, so this is "no tier on the ledger",
+         * not "not the top tier": the first tier flips the title to ink and every tier
+         * after it keeps it there, while the title itself changes to the tier's name on
+         * a creative track exactly as before.
+         */}
         <Text variant="callout" tone={earned ? 'primary' : 'secondary'}>
           {award.title}
         </Text>

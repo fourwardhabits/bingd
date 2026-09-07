@@ -488,11 +488,6 @@ export default function TasteOnboardingScreen() {
           // placement that failed leaves the number where it was, which is the truth.
           void state.refetch();
         }}
-        onRankAnother={() => {
-          setRanking(null);
-          setInput('');
-          void state.refetch();
-        }}
         /**
          * **The same post-rank state the rest of the app gets, and deliberately not a
          * cut-down one.**

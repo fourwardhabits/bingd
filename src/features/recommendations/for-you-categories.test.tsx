@@ -8,7 +8,8 @@ import { renderWithProviders } from '@/test-utils/render';
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
 /**
- * **One selector, three categories** — the founder's final call on For You.
+ * **Two primary media tabs, and People beside them rather than among them** (founder
+ * addendum, 2026-09-06).
  *
  * People shipped as a `SegmentedControl` above the category dropdown, which left the
  * screen asking its one question twice: a Titles/People strip, and under it a
@@ -136,19 +137,37 @@ const recommendation = () => ({
 
 const open = async () => {
   const view = await renderWithProviders(<RecommendationsScreen />);
-  await waitFor(() => expect(view.getByLabelText(/^Showing /)).toBeTruthy());
+  await waitFor(() => expect(view.getByRole('tab', { name: 'Movies' })).toBeTruthy());
   return view;
 };
 
-/** The category control is a dropdown: open it, then choose — as Collection's is. */
-const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
-  await fireEvent.press(view.getByLabelText(/^Showing /));
-  await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${category}`) }));
+/**
+ * The media control is a visible tab row (founder addendum, 2026-09-06) — one press,
+ * both options always on screen, the same control Collection leads with.
+ */
+const choose = async (view: Awaited<ReturnType<typeof open>>, medium: 'Movies' | 'TV shows') => {
+  await fireEvent.press(view.getByRole('tab', { name: medium }));
 };
 
-/** What the trigger says it is showing, which is the only place the choice is stated. */
-const showing = (view: Awaited<ReturnType<typeof open>>) =>
-  view.getByLabelText(/^Showing /).props.accessibilityLabel;
+/** People is a chip in the utility row now, not a third tab. */
+const openPeople = async (view: Awaited<ReturnType<typeof open>>) => {
+  await fireEvent.press(view.getByText('People'));
+};
+
+/**
+ * What the screen is showing.
+ *
+ * The dropdown announced itself — a closed control has to say what it is closed on. The
+ * tab row says it structurally: both options visible, one carrying
+ * `accessibilityState.selected`. People is not one of them, so it is read off the chip.
+ */
+const showing = (view: Awaited<ReturnType<typeof open>>): string => {
+  if (view.queryByText('Mutuals')) return 'People';
+  for (const name of ['Movies', 'TV shows'] as const) {
+    if (view.getByRole('tab', { name }).props.accessibilityState?.selected) return name;
+  }
+  throw new Error('no media tab is selected');
+};
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -162,13 +181,13 @@ beforeEach(() => {
   };
 });
 
-describe('the one selector', () => {
+describe('the primary media tabs', () => {
   /**
    * The removed control, asserted by its absence in three ways: the word, the group
    * label it wore, and the role. `SegmentedControl` is a `radiogroup` of `radio`s, so a
    * screen with no radio on it cannot have grown a second copy of it under another name.
    */
-  it('offers no Titles/People strip beside the category control', async () => {
+  it('offers no Titles/People strip beside the media tabs', async () => {
     const view = await open();
 
     expect(view.queryByText('Titles')).toBeNull();
@@ -176,25 +195,30 @@ describe('the one selector', () => {
     expect(view.queryAllByRole('radio')).toHaveLength(0);
   });
 
-  it('offers Movies, TV shows and People, and nothing else', async () => {
+  it('offers exactly two, and People is not one of them', async () => {
+    /**
+     * **The founder's addendum, as an assertion.** Movies and TV switch the primary
+     * media universe, so they are visible peer tabs. People is a different *kind* of
+     * answer to "what next" rather than a different kind of title, so making it a third
+     * tab made it a peer of the media universe — which it is not. It is a chip below.
+     */
     const view = await open();
-    await fireEvent.press(view.getByLabelText(/^Showing /));
 
-    // Matched at the start rather than exactly: the chosen option carries a checkmark,
-    // and the glyph is a `Text` node that lands in the accessible name behind the label.
-    expect(view.getByRole('button', { name: /^Movies/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^TV shows/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^People/ })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Movies' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'TV shows' })).toBeTruthy();
+    expect(view.queryByRole('tab', { name: 'People' })).toBeNull();
     // The For You override. Collection lists the rankable unit, which is the season;
     // this wall holds series, and calling them seasons here would name something that is
     // not on screen.
-    expect(view.queryByRole('button', { name: /^TV seasons/ })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'TV seasons' })).toBeNull();
   });
 
-  it('opens on Movies and says which one it is showing', async () => {
+  it('opens on Movies, with both sides visible rather than one behind a sheet', async () => {
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Movies');
+    // The point of the change: the other side is readable without touching anything.
+    expect(view.getByRole('tab', { name: 'TV shows' })).toBeTruthy();
   });
 });
 
@@ -206,12 +230,36 @@ describe('People', () => {
     ];
 
     const view = await open();
-    await choose(view, 'People');
+    await openPeople(view);
 
     // The two discovery modes as chips — Mutuals showing, Matches one press away.
     await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
     expect(view.getByText('Matches')).toBeTruthy();
-    expect(showing(view)).toBe('Showing People');
+    expect(showing(view)).toBe('People');
+  });
+
+  it('keeps its own chip on screen, so the way in is also the way out', async () => {
+    // A mode whose only exit is a *different* mode is a trap. The chip stays, selected,
+    // and pressing it again returns to the wall the reader left.
+    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
+    const view = await open();
+
+    await openPeople(view);
+    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('People'));
+    await waitFor(() => expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy());
+  });
+
+  it('is left behind by choosing a media tab, because that plainly means "show me films"', async () => {
+    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
+    const view = await open();
+
+    await openPeople(view);
+    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
+
+    await choose(view, 'TV shows');
+    await waitFor(() => expect(showing(view)).toBe('TV shows'));
   });
 
   /**
@@ -226,7 +274,7 @@ describe('People', () => {
 
     const view = await open();
     await waitFor(() => expect(view.getByText(/^Sent to you/)).toBeTruthy());
-    await choose(view, 'People');
+    await openPeople(view);
 
     await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
     expect(view.queryByText(/^Sent to you/)).toBeNull();
@@ -253,7 +301,7 @@ describe('the title categories', () => {
     const view = await open();
     await choose(view, 'TV shows');
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV shows'));
+    await waitFor(() => expect(showing(view)).toBe('TV shows'));
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
     expect(view.getByText(/^Sent to you/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
@@ -278,7 +326,7 @@ describe('coming back from People', () => {
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
 
-    await choose(view, 'People');
+    await openPeople(view);
     await waitFor(() => expect(view.queryByText('Filters · 1')).toBeNull());
     await choose(view, 'Movies');
 
@@ -292,7 +340,7 @@ describe('coming back from People', () => {
     await fireEvent.press(view.getByText(/^Sent to you/));
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
 
-    await choose(view, 'People');
+    await openPeople(view);
     await waitFor(() => expect(view.queryByText('Heat (1995)')).toBeNull());
     await choose(view, 'Movies');
 
@@ -319,7 +367,7 @@ describe('the Group Picks chip', () => {
   it('is absent on People', async () => {
     mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
     const view = await open();
-    await choose(view, 'People');
+    await openPeople(view);
     await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
     expect(view.queryByText('Group Picks')).toBeNull();
   });

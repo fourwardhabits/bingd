@@ -6,15 +6,21 @@ import { useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
-import { useWatchlist } from '@/features/collection/use-collection';
+import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
+import { useMyScores, type MyScore } from '@/features/collection/use-score';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
-import { meaningfulMatch, useUserSearch, type UserResult } from '@/features/search/use-user-search';
+import {
+  meaningfulMatch,
+  useUserSearch,
+  type UserResult,
+} from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
@@ -25,6 +31,7 @@ import {
   Chip,
   EmptyState,
   Screen,
+  ScoreBadge,
   SearchField,
   SectionHeader,
   SkeletonRow,
@@ -102,6 +109,8 @@ export default function LogScreen() {
   const watchlistInFlight = useRef<string | null>(null);
 
   const queryClient = useQueryClient();
+  /** Drains the post-ranking celebration queue when the log flow ends. */
+  const celebrate = useCelebrationHandoff();
 
   /**
    * The reader's own watchlist, read through the same hook the Feed and For You read it
@@ -112,6 +121,26 @@ export default function LogScreen() {
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
     [watchlist.data],
+  );
+
+  /**
+   * The reader's own ranking state, which is what a search row now leads with.
+   *
+   * Two reads, both already cached app-wide by the time anybody reaches Search from an
+   * ordinary session: `useMyScores` keys on `['my-scores', id]` and `useLoggedCollection`
+   * on the collection key the Collection tab and For You both populate. Neither carries
+   * artwork — a search row needs a number and a yes/no, not a second copy of the
+   * collection.
+   *
+   * `watched` is *logged*, ranked or not. The difference between the two sets is exactly
+   * the watched-but-unranked state, which is the one the dashed `Rank` badge is for.
+   */
+  const myScores = useMyScores(profile.id);
+  const logged = useLoggedCollection(profile.id);
+  const scores = useMemo(() => myScores.data ?? new Map<string, MyScore>(), [myScores.data]);
+  const watchedIds = useMemo(
+    () => new Set((logged.data?.entries ?? []).map((entry) => entry.mediaItemId)),
+    [logged.data],
   );
 
   const { recent, remember, clear } = useRecentSearches(profile.id);
@@ -423,6 +452,8 @@ export default function LogScreen() {
         onOpenTitle={openTitle}
         onOpenLog={openLog}
         saved={saved}
+        scores={scores}
+        watched={watchedIds}
         watchlistBusy={watchlistBusy}
         onToggleWatchlist={toggleWatchlist}
       />
@@ -448,15 +479,19 @@ export default function LogScreen() {
 
       <LogSheet
         title={logging}
+        /* Both exits end the post-ranking flow, so both drain the celebration queue —
+           see the same pair on the title screen. Empty queue, nothing happens. */
         onClose={() => {
           setLogging(null);
           setPlacement(null);
+          celebrate();
         }}
         surface="search"
         postRank={placement}
         onDone={() => {
           setLogging(null);
           setPlacement(null);
+          celebrate();
         }}
         onRank={(bucket, mode) => {
           if (!logging) return;
@@ -477,7 +512,6 @@ export default function LogScreen() {
       <RankingSheet
         subject={ranking}
         onClose={() => setRanking(null)}
-        onRankAnother={() => setInput('')}
         // Back into the sheet the ranking came out of, on the title it was about.
         // `ranked` is that title held across the handoff — `logging` was cleared when the
         // comparison opened, because two stacked sheets is what screens.md §4 forbids.
@@ -524,6 +558,8 @@ function Results({
   onOpenTitle,
   onOpenLog,
   saved,
+  scores,
+  watched,
   watchlistBusy,
   onToggleWatchlist,
 }: {
@@ -552,6 +588,10 @@ function Results({
   onOpenTitle: (result: SearchResult) => void;
   /** Media ids on the reader's watchlist, from the canonical `useWatchlist`. */
   saved: Set<string>;
+  /** Every score this reader has given, by media id (`useMyScores`). */
+  scores: Map<string, MyScore>;
+  /** Media ids this reader has logged, ranked or not — the watched-but-unranked case. */
+  watched: Set<string>;
   /** The id of the title whose watchlist write is in flight, or null. */
   watchlistBusy: string | null;
   onToggleWatchlist: (result: SearchResult) => void;
@@ -566,7 +606,11 @@ function Results({
       >
         {recent.length > 0 ? (
           <>
-            <SectionHeader title="Recent searches" actionLabel="Clear" onPressAction={onClearRecent} />
+            <SectionHeader
+              title="Recent searches"
+              actionLabel="Clear"
+              onPressAction={onClearRecent}
+            />
             {recent.map((query) => (
               <Pressable
                 key={query}
@@ -698,7 +742,9 @@ function Results({
                 ? 'Check the spelling, or try the original title.'
                 : 'Try a shorter search.'
         }
-        action={providerFailed && !rateLimited ? { label: 'Try again', onPress: onRetry } : undefined}
+        action={
+          providerFailed && !rateLimited ? { label: 'Try again', onPress: onRetry } : undefined
+        }
       />
     );
   }
@@ -827,6 +873,9 @@ function Results({
             );
           }
           const title = item.result;
+          // The reader's own state for this title, which is what the leading control is.
+          const myScore = scores.get(title.id) ?? null;
+          const isWatched = watched.has(title.id);
           return (
             // Stale dims only what is stale — the title results lagging a beat behind
             // the keystroke, kept legible rather than blinking away. The person rows
@@ -855,24 +904,67 @@ function Results({
                   )
                 }
                 /**
-                 * **Two actions, and the order is the founder's**: bookmark then `+`.
+                 * **Ranking state first, Watchlist second** (founder, 2026-09-06).
                  *
-                 * Save-for-later on the left, log-and-rank-now on the right, with `+`
-                 * keeping the outer edge it has always had — so the control somebody has
-                 * learnt the position of does not move, and the new one arrives beside it
-                 * rather than in front of it.
+                 * The order was bookmark then `+`, and the founder's own use case is what
+                 * reversed it: see a title recommended somewhere else, search bingd., act,
+                 * leave. Ranking is what this app is for, so the ranking control leads and
+                 * saving-for-later follows it.
                  *
-                 * No labels, and the bookmark is `icon.md` against the `+`'s `icon.lg`:
-                 * ranking is what this screen is for and saving is the quicker, quieter
-                 * act. Both carry `hitSlop`, so each clears 44pt without the row growing —
-                 * the same rule the Feed's action strip follows.
+                 * **The leading control is the reader's own state, not a generic `+`.**
+                 * Three states, and each is the honest one:
                  *
-                 * The row itself still opens the title. Both of these are `Pressable`
-                 * children of `trailing`, which is outside `TitleRow`'s own press target,
-                 * so tapping either one cannot open the page underneath.
+                 *   ranked            their score, in the app's one score treatment. A
+                 *                     search row that showed a bare `+` over a title they
+                 *                     have already rated 9.0 was throwing away the single
+                 *                     most useful thing bingd. knows about them.
+                 *   watched, unranked the dashed `Rank` ring — the same badge the
+                 *                     collection draws for exactly this state.
+                 *   neither           `+`, the canonical log entry, unchanged.
+                 *
+                 * All three lead to the **same** `LogSheet` this screen already opened.
+                 * There is no Search-specific ranking path: the sheet knows how to open a
+                 * ranked title for a rebucket or a rerank, and inventing a second route
+                 * into ranking is how two flows come to disagree about what a re-rank is.
+                 *
+                 * **A series gets no score and no Rank ring** — it cannot be ranked
+                 * (PRD §10), so either badge there would be a control lying about what it
+                 * does. It keeps the `+`, which is not a ranking claim: it opens the
+                 * season picker, and the season is the rankable unit. Removing it would
+                 * take away the only fast path from "search Breaking Bad" to "rank the
+                 * season", which is the capture this whole row exists for.
+                 *
+                 * Both controls carry `hitSlop`, so each clears 44pt without the row
+                 * growing. The row itself still opens the title: these are `Pressable`
+                 * children of `trailing`, outside `TitleRow`'s own press target.
                  */
                 trailing={
                   <View style={styles.rowActions}>
+                    {title.kind !== 'series' && myScore ? (
+                      <ScoreBadge
+                        score={myScore.score}
+                        bucket={myScore.bucket}
+                        size="sm"
+                        onPress={() => onOpenLog(title)}
+                      />
+                    ) : title.kind !== 'series' && isWatched ? (
+                      <ScoreBadge size="sm" onPress={() => onOpenLog(title)} />
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Log ${title.title}`}
+                        onPress={() => onOpenLog(title)}
+                        hitSlop={theme.space[2]}
+                        style={styles.rowAction}
+                      >
+                        <Ionicons
+                          name="add-circle"
+                          size={theme.layout.icon.lg}
+                          color={theme.semantic.action}
+                        />
+                      </Pressable>
+                    )}
+
                     <Pressable
                       accessibilityRole="button"
                       accessibilityState={{
@@ -907,20 +999,6 @@ function Results({
                         color={
                           saved.has(title.id) ? theme.semantic.action : theme.text.secondary
                         }
-                      />
-                    </Pressable>
-
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Log ${title.title}`}
-                      onPress={() => onOpenLog(title)}
-                      hitSlop={theme.space[2]}
-                      style={styles.rowAction}
-                    >
-                      <Ionicons
-                        name="add-circle"
-                        size={theme.layout.icon.lg}
-                        color={theme.semantic.action}
                       />
                     </Pressable>
                   </View>

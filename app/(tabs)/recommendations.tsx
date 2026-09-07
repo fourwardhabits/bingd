@@ -51,14 +51,11 @@ import {
   EmptyState,
   FilterChip,
   HeaderBoundary,
-  MediumSelector,
-  MEDIUM_OPTIONS,
   PosterGrid,
   Screen,
+  SegmentedTabs,
   SkeletonRow,
   Text,
-  type Medium as CollectionMedium,
-  type MediumSelectorOption,
 } from '@/ui/components';
 
 /**
@@ -95,27 +92,34 @@ export default function RecommendationsScreen() {
   const notifications = useNotifications(profile.id);
 
   /**
-   * What the reader is looking at, and it is state rather than a route.
+   * Whether the People suggestions are showing instead of the title wall.
    *
-   * A route would put People in the back stack and make the tab bar's own "go back to
-   * the top of For You" gesture land somewhere the reader did not leave. It is a mode of
-   * one screen — the category selector is the whole navigation — and every filter and
-   * scroll position on the title side survives a look at People and back, which is the
-   * behaviour a control that sits *inside* a screen implies.
+   * **A boolean rather than a third value in a category enum** (founder, 2026-09-06).
+   * People was one of three options in the media selector, which made it a peer of the
+   * media universe — and it is not one: it is a different *kind* of answer to "what
+   * next", not a different kind of title. Modelling it as a peer is exactly what made it
+   * look like one. It is a chip in the utility row now, beside Sent to you, which is the
+   * screen's other control that changes what *class* of thing is on screen rather than
+   * narrowing what is already there.
+   *
+   * State rather than a route, unchanged: a route would put People in the back stack and
+   * make the tab bar's "back to the top of For You" gesture land somewhere the reader
+   * did not leave. Every filter and scroll position on the title side survives a look at
+   * People and back, which is what a control living *inside* a screen implies.
    *
    * Deliberately not persisted. Collection remembers its side because a TV-heavy reader
    * opens the same list every day; For You is a question asked fresh each visit, and an
-   * app that reopened it on People because somebody once looked there would be answering
-   * a question nobody asked twice.
+   * app that reopened on People because somebody once looked there would be answering a
+   * question nobody asked twice.
    */
-  const [category, setCategory] = useState<ForYouCategory>('movies');
+  const [peopleOpen, setPeopleOpen] = useState(false);
   /**
-   * The title side the reader was last on, held separately from the category.
+   * The title side the reader is on, and it is untouched by a visit to People.
    *
    * People is not a medium, so there is no honest value for this while it is showing —
    * and deriving one would silently move the slate query to Movies the moment somebody
-   * glanced at People from TV shows, throwing away a wall they had scrolled. Keeping the
-   * last title category means the visit to People costs the slate nothing at all.
+   * glanced at People from TV shows, throwing away a wall they had scrolled. Holding it
+   * separately means the visit costs the slate nothing at all.
    */
   const [medium, setMedium] = useState<Medium>('movies');
   /** The first chip. Not a tab: see the header. */
@@ -146,12 +150,22 @@ export default function RecommendationsScreen() {
    */
   const sweepIntent = useSweepIntent();
 
-  const changeCategory = (next: ForYouCategory) => {
-    setCategory(next);
-    if (next !== 'people') setMedium(SELECTOR_TO_MEDIUM[next]);
-    // A different medium is a different question, so the wall starts at page one rather
-    // than opening four pages deep into a slate this reader never scrolled.
-    setPages(1);
+  /**
+   * The media universe the wall is about — Movies or TV shows.
+   *
+   * **Switching sides no longer throws the other side's depth away** (founder,
+   * 2026-09-06). `pages` used to be one number reset to 1 on every change, so a reader
+   * four pages into Movies who glanced at TV and came back was handed page one again.
+   * The two sides keep their own depth now, which is what makes Movies → TV → Movies
+   * cost nothing: the slate itself was always cached per medium by React Query, and the
+   * page count was the only thing being discarded.
+   *
+   * Choosing a media tab also leaves People, because tapping Movies while looking at a
+   * list of people plainly means "show me the films".
+   */
+  const changeMedium = (next: Medium) => {
+    setPeopleOpen(false);
+    setMedium(next);
   };
 
   /**
@@ -164,7 +178,7 @@ export default function RecommendationsScreen() {
    */
   const changeFilters = (next: CollectionFilters) => {
     setFilters(next);
-    setPages(1);
+    resetPages();
   };
 
   /**
@@ -174,7 +188,25 @@ export default function RecommendationsScreen() {
    * filters is a new question, and arriving at page four of the old one would be the
    * scroll position surviving a change it should not have.
    */
-  const [pages, setPages] = useState(1);
+  /**
+   * **Per medium, since 2026-09-06.** It was one number reset to 1 whenever the reader
+   * changed sides, so glancing at TV and coming back handed a reader four pages into
+   * Movies their first page again. The slate itself was always cached per medium by
+   * React Query; the page count was the only thing a switch destroyed, and it did not
+   * have to.
+   *
+   * Filters and an explicit refresh still reset **both** sides, and that is correct:
+   * those change what the question *is*, and a stale depth into an answer to a
+   * different question is not depth worth keeping.
+   */
+  const [pagesByMedium, setPagesByMedium] = useState<Record<Medium, number>>({
+    movies: 1,
+    tv: 1,
+  });
+  const pages = pagesByMedium[medium];
+  const setPages = (next: number) =>
+    setPagesByMedium((current) => ({ ...current, [medium]: next }));
+  const resetPages = () => setPagesByMedium({ movies: 1, tv: 1 });
   const slate = useForYou(profile.id, medium, filters, pages);
   const logged = useLoggedCollection(profile.id);
   const sent = useSentToYou(profile.id);
@@ -242,12 +274,12 @@ export default function RecommendationsScreen() {
    * a control the reader has met rather than a new one.
    *
    * `refreshRecommendations` advances the seed and marks everything currently on screen
-   * as shown; `setPages(1)` puts the reader back at a first page, because a refreshed
+   * as shown; `resetPages()` puts the reader back at a first page, because a refreshed
    * wall they are four pages down inside is a wall whose change they cannot see.
    */
   const refreshSlate = () => {
     refreshRecommendations();
-    setPages(1);
+    resetPages();
   };
 
   // Filtered here rather than in the query, so turning the chip on cannot refetch and
@@ -393,18 +425,50 @@ export default function RecommendationsScreen() {
        * "similar" about a show and never about one of its seasons. Collection keeps its
        * own two options and its own label — see `MediumSelector`.
        */}
-      <MediumSelector
-        value={category}
-        onChange={changeCategory}
-        options={FOR_YOU_CATEGORIES}
-        labels={{ tv_seasons: 'TV shows' }}
+      {/**
+       * **Movies and TV shows are visible peer tabs**, the same control Collection
+       * leads with, in the same place, doing the same job (founder addendum,
+       * 2026-09-06). A dropdown hid one of two constant choices behind a tap and a
+       * sheet; these are the primary content universe and they read like it.
+       *
+       * **People left this row and did not leave the screen.** It was a third option
+       * here, which made it a peer of the media universe — and it is not one: it is a
+       * different *kind* of answer to "what next", not a different kind of title. It is
+       * a chip in the utility row below now, beside Sent to you, which is the row this
+       * screen already uses for the one other control that changes what class of thing
+       * is on screen. Nothing is orphaned: `PeopleDiscovery` suggests people from the
+       * follow graph and from taste matches, which Search cannot do — Search finds a
+       * person you can already name.
+       */}
+      <SegmentedTabs
+        variant="primary"
+        options={FOR_YOU_MEDIA_TABS}
+        value={medium}
+        onChange={changeMedium}
+        accessibilityLabel="Media type"
       />
       {/* Outside the branch, because the selector above it is now the screen's entire
       header and the seam it marks is the same one whichever category is showing. */}
       <HeaderBoundary />
 
-      {category === 'people' ? (
-        <PeopleDiscovery viewerId={profile.id} />
+      {peopleOpen ? (
+        <>
+          {/* The chip that opened this, still on screen, still selected — because it is
+              the way back. A mode whose only exit is a *different* mode is a trap, and
+              the media tabs above leaving People is a convenience rather than the
+              answer. Alone in the row: none of the genre filters narrows a list of
+              people, and drawing them here would offer controls that do nothing. */}
+          <View style={styles.filterRow}>
+            <FilterChip
+              icon="people"
+              label="People"
+              accessibilityLabel="People you may want to follow"
+              selected
+              onPress={() => setPeopleOpen(false)}
+            />
+          </View>
+          <PeopleDiscovery viewerId={profile.id} />
+        </>
       ) : (
         <>
           {/* Above the filters, and only when something is waiting.
@@ -434,6 +498,18 @@ export default function RecommendationsScreen() {
               }
               selected={sentOnly}
               onPress={() => setSentOnly((on) => !on)}
+            />
+            {/* People, demoted out of the primary tabs (founder, 2026-09-06) and kept
+                exactly where the screen's other content-class control lives. It is not a
+                narrowing of the wall, which is why it sits beside Sent to you rather
+                than beside the genre chips — and it is not a peer of Movies and TV,
+                which is the whole reason it moved. */}
+            <FilterChip
+              icon={peopleOpen ? 'people' : 'people-outline'}
+              label="People"
+              accessibilityLabel="People you may want to follow"
+              selected={peopleOpen}
+              onPress={() => setPeopleOpen((open) => !open)}
             />
             {/* An action chip rather than a filter: it opens the flow that answers "what
             should this group watch together". Deliberately not a fourth MediumSelector
@@ -591,18 +667,18 @@ export default function RecommendationsScreen() {
               />
 
               {/**
-                * The end of the wall, said once, quietly (§18).
-                *
-                * The founder's rule is not to keep recycling the same five cards at the
-                * bottom — so when the pool is out the wall simply stops, and this line
-                * says why in the one way that is both true and actionable. It is not a
-                * button: the reader is on a wall of recommendations and the thing to do
-                * about a thin one is to rank more, which the Log tab already offers.
-                *
-                * Only under a wall with something on it. Under an empty one `Nothing`
-                * has already said something better, and two explanations of the same
-                * absence is worse than either.
-                */}
+               * The end of the wall, said once, quietly (§18).
+               *
+               * The founder's rule is not to keep recycling the same five cards at the
+               * bottom — so when the pool is out the wall simply stops, and this line
+               * says why in the one way that is both true and actionable. It is not a
+               * button: the reader is on a wall of recommendations and the thing to do
+               * about a thin one is to rank more, which the Log tab already offers.
+               *
+               * Only under a wall with something on it. Under an empty one `Nothing`
+               * has already said something better, and two explanations of the same
+               * absence is worse than either.
+               */}
               {exhausted && items.length > 0 ? (
                 <Text variant="footnote" tone="tertiary" style={styles.exhausted}>
                   Rank a few more titles to sharpen your recommendations.
@@ -664,18 +740,23 @@ export default function RecommendationsScreen() {
  * so "Movies" cannot come to mean one thing on Collection and another here; People is
  * the addition, and the only one this screen owns.
  */
-type ForYouCategory = CollectionMedium | 'people';
-
-const FOR_YOU_CATEGORIES: readonly MediumSelectorOption<ForYouCategory>[] = [
-  ...MEDIUM_OPTIONS,
-  { id: 'people', label: 'People' },
+/**
+ * The two primary tabs, keyed by **this screen's** medium rather than the collection's.
+ *
+ * `Medium` here is `'movies' | 'tv'` and Collection's is `'movies' | 'tv_seasons'`,
+ * because the units genuinely differ: TMDB answers "similar" about a *show* and never
+ * about one of its seasons, so this wall holds series. That is also why the label reads
+ * "TV shows" and Collection's reads "TV" — one accurate word each, rather than one
+ * shared table forcing both to say the same slightly-wrong thing.
+ *
+ * The mapping table this replaced existed only to translate between the two, and the
+ * translation existed only because the control was shared. The control is a tab row now
+ * and takes this screen's own ids directly.
+ */
+const FOR_YOU_MEDIA_TABS: readonly { id: Medium; label: string }[] = [
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv', label: 'TV shows' },
 ];
-
-/** The screen's own medium and the shared selector's, which name different units. */
-const SELECTOR_TO_MEDIUM: Record<CollectionMedium, Medium> = {
-  movies: 'movies',
-  tv_seasons: 'tv',
-};
 
 /**
  * The human half.

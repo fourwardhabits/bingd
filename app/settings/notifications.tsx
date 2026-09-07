@@ -67,14 +67,19 @@ import { theme } from '@/ui/tokens';
  * control ends up shipping with no accessible name. Nothing else about it wants to be
  * separate; being nameable is the whole reason.
  *
- * **A bell wearing a small gear, not a bare gear.** A bare gear in this corner read as
- * the app's settings — the same glyph the Profile header carries — when what it opens
- * is the notification preferences alone. The bell names the subject and the gear names
- * the action, the way the unread badge already annotates the bell in `AppHeader`. The
- * gear sits directly on the bell's shoulder — no disc behind it: the founder's device
- * read the Paper bubble as a badge background, and at this weight the two glyphs
- * separate on their own. Same neutral ink and `icon.md` weight as the Profile gear,
- * so the two settings controls are visibly kin without being the same claim.
+ * **The ordinary settings gear, and the composite is gone** (founder, physical Android,
+ * 2026-09-06).
+ *
+ * It was a bell wearing a 12pt gear on its shoulder, on the reasoning that the bell
+ * names the subject and the gear names the action. On a device it did not read as an
+ * annotated bell: the two glyphs overlapped into one shape and the gear looked punched
+ * through the bell — transparent, malformed, and the sort of thing a reader assumes is a
+ * rendering fault rather than a control.
+ *
+ * So it is `settings-outline` at `icon.md` in neutral ink: the exact glyph `AppHeader`
+ * puts in the Profile corner. Two gears in two places is not the ambiguity the composite
+ * was avoiding — this one is *inside* the notifications screen, where the only settings
+ * there are to open are the notification ones, and the accessible name says so.
  */
 export function NotificationSettingsButton() {
   const router = useRouter();
@@ -86,30 +91,14 @@ export function NotificationSettingsButton() {
       onPress={() => router.push('/settings/notification-preferences')}
       style={({ pressed }) => [styles.gear, pressed && styles.gearPressed]}
     >
-      <View style={styles.bellWrap}>
-        <Ionicons
-          name="notifications-outline"
-          size={theme.layout.icon.md}
-          color={theme.text.secondary}
-        />
-        {/* The filled cut, not the outline: at this size an outlined gear is a
-            smudge. */}
-        <Ionicons
-          name="settings-sharp"
-          size={GEAR_BADGE_SIZE}
-          color={theme.text.secondary}
-          style={styles.gearGlyph}
-        />
-      </View>
+      <Ionicons
+        name="settings-outline"
+        size={theme.layout.icon.md}
+        color={theme.text.secondary}
+      />
     </Pressable>
   );
 }
-
-/** Small enough to read as an annotation on the bell, large enough to still be a gear. */
-const GEAR_BADGE_SIZE = 12;
-
-/** How far the gear pokes past the bell's lower-right corner. */
-const GEAR_OVERHANG = { x: 3, y: 2 };
 
 /**
  * The three shelves, in the small-caps maroon voice every section on this surface
@@ -557,7 +546,11 @@ export default function NotificationsScreen() {
                             size={theme.layout.avatar.sm}
                           />
                         ) : (
-                          <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
+                          <Avatar
+                            size="sm"
+                            uri={row.actorAvatarUri}
+                            name={row.actorName ?? ''}
+                          />
                         )}
                         <View style={styles.rowCopy}>
                           {/* The welcome is the one row whose sentence does not begin
@@ -658,12 +651,18 @@ export default function NotificationsScreen() {
                              */
                             <Text variant="callout" numberOfLines={2}>
                               <Text variant="callout">{row.actorName}</Text>
-                              <Text variant="callout" tone="secondary">{` ${sentence.lead}`}</Text>
+                              <Text
+                                variant="callout"
+                                tone="secondary"
+                              >{` ${sentence.lead}`}</Text>
                               {sentence.subject ? (
                                 <Text variant="callout">{` ${sentence.subject}`}</Text>
                               ) : null}
                               {sentence.tail ? (
-                                <Text variant="callout" tone="secondary">{` ${sentence.tail}`}</Text>
+                                <Text
+                                  variant="callout"
+                                  tone="secondary"
+                                >{` ${sentence.tail}`}</Text>
                               ) : null}
                             </Text>
                           )}
@@ -678,43 +677,43 @@ export default function NotificationsScreen() {
                             </Text>
                           ) : null}
                           {/**
-                            * **What was actually said** (founder, 2026-08-30).
-                            *
-                            * "Ravi commented on your activity" does not tell you whether
-                            * to open it. One line does.
-                            *
-                            * `numberOfLines={1}` is a shape contract as much as a style:
-                            * a comment is up to a thousand characters, and a row that
-                            * grew with it would break the scan rhythm of the whole
-                            * inbox. The server sends at most 140, so this is the last of
-                            * two bounds rather than the only one.
-                            *
-                            * **The text is never withheld here**, and that is deliberate:
-                            * a spoiler-marked or retracted comment arrives as `preview:
-                            * null` from `my_notifications`, so there is no string in this
-                            * component to leak. `previewHidden` is the server saying
-                            * *why*, and "Contains spoilers" is a useful thing to know
-                            * before tapping — where an absent second line reads as a
-                            * rendering bug.
-                            *
-                            * Caption rather than callout, so it sits under the sentence
-                            * as context and does not compete with it.
-                            */}
+                           * **What was actually said** (founder, 2026-08-30).
+                           *
+                           * "Ravi commented on your activity" does not tell you whether
+                           * to open it. One line does.
+                           *
+                           * `numberOfLines={1}` is a shape contract as much as a style:
+                           * a comment is up to a thousand characters, and a row that
+                           * grew with it would break the scan rhythm of the whole
+                           * inbox. The server sends at most 140, so this is the last of
+                           * two bounds rather than the only one.
+                           *
+                           * **The text is never withheld here**, and that is deliberate:
+                           * a spoiler-marked or retracted comment arrives as `preview:
+                           * null` from `my_notifications`, so there is no string in this
+                           * component to leak. `previewHidden` is the server saying
+                           * *why*, and "Contains spoilers" is a useful thing to know
+                           * before tapping — where an absent second line reads as a
+                           * rendering bug.
+                           *
+                           * Caption rather than callout, so it sits under the sentence
+                           * as context and does not compete with it.
+                           */}
                           {/**
-                            * **What was actually achieved**, on the two actorless rows
-                            * (founder, 2026-08-29).
-                            *
-                            * "You earned Whisper 🎉" does not say what Whisper was for,
-                            * and the feed row beside it used to answer with "Bronze",
-                            * which says less. Both lines now come from the same two
-                            * functions the feed reads — `awardAnnouncement` off the
-                            * canonical thresholds, `goalAchievement` off the target the
-                            * completion froze — so the inbox and the feed cannot quote
-                            * different numbers for one event.
-                            *
-                            * Caption and secondary, in the slot a comment preview uses
-                            * on the rows that have one: these two never do.
-                            */}
+                           * **What was actually achieved**, on the two actorless rows
+                           * (founder, 2026-08-29).
+                           *
+                           * "You earned Whisper 🎉" does not say what Whisper was for,
+                           * and the feed row beside it used to answer with "Bronze",
+                           * which says less. Both lines now come from the same two
+                           * functions the feed reads — `awardAnnouncement` off the
+                           * canonical thresholds, `goalAchievement` off the target the
+                           * completion froze — so the inbox and the feed cannot quote
+                           * different numbers for one event.
+                           *
+                           * Caption and secondary, in the slot a comment preview uses
+                           * on the rows that have one: these two never do.
+                           */}
                           {row.kind === 'award_earned' && row.award?.achievement ? (
                             <Text variant="caption" tone="secondary" numberOfLines={1}>
                               {row.award.achievement}
@@ -783,7 +782,9 @@ export default function NotificationsScreen() {
                                 : hintFor(row)
                             }
                             onPress={() =>
-                              relationshipAction.actionable ? void followBack(row) : openRow(row)
+                              relationshipAction.actionable
+                                ? void followBack(row)
+                                : openRow(row)
                             }
                             disabled={busy && relationshipAction.actionable}
                             disabledReason="One at a time"
@@ -791,32 +792,32 @@ export default function NotificationsScreen() {
                         </View>
                       ) : null}
                       {/**
-                        * **Rank, on a watched-with row for a title the reader has not
-                        * placed** (founder, 2026-08-30).
-                        *
-                        * Somebody has just said they watched this with you; the useful
-                        * next act is to place it, and before this the row was a sentence
-                        * with nothing to do about it. In the same grammar as Follow back
-                        * — a small secondary button in the row's action slot — because
-                        * it is the same kind of thing: one optional act, offered where
-                        * the news arrives.
-                        *
-                        * **It opens the title page and not the ranking sheet**, which is
-                        * the founder's instruction and not a shortcut. A notification is
-                        * a claim about something that may have happened days ago;
-                        * dropping the reader straight into a comparison session from a
-                        * Bell tap is a modal state entered by accident. The title page's
-                        * own Rank button is what takes the next step, and it is where
-                        * every ranking in this app begins.
-                        *
-                        * The same destination the row itself already has, so this is a
-                        * second door onto one place rather than a second behaviour —
-                        * which is also why it is `openRow` and not a route built here.
-                        *
-                        * `canRankFromRow` reads `viewerRanked`, resolved server-side in
-                        * the read that drew the row. So the control disappears on the
-                        * next refetch after they rank it, with nothing to invalidate.
-                        */}
+                       * **Rank, on a watched-with row for a title the reader has not
+                       * placed** (founder, 2026-08-30).
+                       *
+                       * Somebody has just said they watched this with you; the useful
+                       * next act is to place it, and before this the row was a sentence
+                       * with nothing to do about it. In the same grammar as Follow back
+                       * — a small secondary button in the row's action slot — because
+                       * it is the same kind of thing: one optional act, offered where
+                       * the news arrives.
+                       *
+                       * **It opens the title page and not the ranking sheet**, which is
+                       * the founder's instruction and not a shortcut. A notification is
+                       * a claim about something that may have happened days ago;
+                       * dropping the reader straight into a comparison session from a
+                       * Bell tap is a modal state entered by accident. The title page's
+                       * own Rank button is what takes the next step, and it is where
+                       * every ranking in this app begins.
+                       *
+                       * The same destination the row itself already has, so this is a
+                       * second door onto one place rather than a second behaviour —
+                       * which is also why it is `openRow` and not a route built here.
+                       *
+                       * `canRankFromRow` reads `viewerRanked`, resolved server-side in
+                       * the read that drew the row. So the control disappears on the
+                       * next refetch after they rank it, with nothing to invalidate.
+                       */}
                       {canRankFromRow(row) ? (
                         <View style={styles.rowAction}>
                           <Button
@@ -871,27 +872,6 @@ const styles = StyleSheet.create({
     marginRight: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
   },
   gearPressed: { opacity: 0.6 },
-  // The glyph's own box, so the gear's absolute offsets measure from the bell
-  // rather than from the 44pt touch square around it. The translate is half the
-  // gear's overhang, so the *combined* glyph — bell plus the gear poking past its
-  // lower-right corner — centres in the touch square rather than the bell alone.
-  bellWrap: {
-    width: theme.layout.icon.md,
-    height: theme.layout.icon.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    transform: [{ translateX: -GEAR_OVERHANG.x / 2 }, { translateY: -GEAR_OVERHANG.y / 2 }],
-  },
-  /**
-   * The gear, riding the bell's lower-right shoulder directly — no disc behind it.
-   * The founder's device read the old Paper bubble as a badge background; at this
-   * weight the filled gear separates from the bell's strokes on its own.
-   */
-  gearGlyph: {
-    position: 'absolute',
-    right: -GEAR_OVERHANG.x,
-    bottom: -GEAR_OVERHANG.y,
-  },
   unread: { backgroundColor: theme.surface.raised },
 
   dot: {

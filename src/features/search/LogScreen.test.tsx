@@ -1107,3 +1107,175 @@ describe('saving from a search result', () => {
     expect(callsTo('set_watchlist')[0]![1]).toMatchObject({ p_media_item_id: 'film-2' });
   });
 });
+
+/**
+ * **Ranking state first, Watchlist second** (founder, 2026-09-06).
+ *
+ * The founder's own use case is what settled the order: see a title recommended
+ * somewhere else, search bingd., act, leave. Ranking is what the app is for, so the
+ * ranking control leads — and it is not a generic `+`. A row that showed a bare plus over
+ * a title the reader has already rated 9.0 was throwing away the single most useful thing
+ * bingd. knows about them.
+ *
+ * Three leading states, each honest about what pressing it does, and all three opening
+ * the **same** `LogSheet` every other entry point opens. There is no Search-specific
+ * ranking path: the sheet already knows how to reopen a ranked title for a rebucket or a
+ * rerank, and a second route into ranking is how two flows come to disagree.
+ */
+describe('the leading action is the reader’s own ranking state', () => {
+  /** A film this reader has ranked. `rankings` is what turns logged into ranked. */
+  const rankedFilm = () => {
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'loved' }];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+      },
+    ];
+  };
+
+  it('shows the personal score on a ranked movie', async () => {
+    rankedFilm();
+    const view = await search('inception');
+
+    // One title in a one-title band is the top of it: 10.0.
+    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+  });
+
+  it('opens the canonical log sheet when the score is pressed, not a search-only rerank', async () => {
+    rankedFilm();
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(/^10\.0 out of 10/));
+
+    // The same sheet `+` opens, which is the sheet that knows about rebucket and rerank.
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+  });
+
+  it('shows the dashed Rank badge for a title watched but never ranked', async () => {
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: null }];
+    tableRows.rankings = [];
+    const view = await search('inception');
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Not ranked. Rank this title.')).toBeTruthy(),
+    );
+  });
+
+  it('leads an unlogged title with the ordinary log action', async () => {
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+  });
+
+  it('never puts a score or a Rank badge on a series', async () => {
+    /**
+     * A series cannot be ranked (PRD §10), so either badge would be a control lying
+     * about what it does. It keeps `+`, which is not a ranking claim — it opens the
+     * season picker, and the season is the rankable unit. Removing it would take away
+     * the only fast path from "search Breaking Bad" to "rank the season".
+     */
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'series-1', bucket: 'loved' }];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'series-1',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_seasons',
+      },
+    ];
+    const view = await search('breaking');
+
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    expect(view.getByLabelText('Log Breaking Bad')).toBeTruthy();
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+  });
+
+  it('offers no watchlist or ranking control on a person', async () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_users'
+        ? Promise.resolve({
+            data: [
+              {
+                user_id: 'anna-id',
+                username: 'anna',
+                display_name: 'Anna',
+                avatar_path: null,
+                visibility: 'public',
+              },
+            ],
+            error: null,
+          })
+        : Promise.resolve({ data: [], error: null }),
+    );
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    expect(view.queryByLabelText(/to Watchlist$/)).toBeNull();
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+  });
+});
+
+describe('the two controls are independent', () => {
+  it('saves to the watchlist without touching the ranking state', async () => {
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'loved' }];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+      },
+    ];
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText('Add Inception to Watchlist')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
+
+    // The score is still the score. A watchlist write is not a ranking write, and the
+    // two controls sharing a row must not mean sharing an outcome.
+    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+    expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything());
+  });
+
+  it('offers the watchlist on a title that has never been ranked', async () => {
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText('Add Inception to Watchlist')).toBeTruthy());
+    expect(view.getByLabelText('Log Inception')).toBeTruthy();
+  });
+
+  it('keeps both controls reachable on a long title', async () => {
+    // The row is a fixed leading badge and a fixed trailing bookmark with the name
+    // between them; a name that grows must take the middle rather than push either off.
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({
+            data: [
+              {
+                ...film,
+                title:
+                  'The Assassination of Jesse James by the Coward Robert Ford, Extended Edition',
+              },
+            ],
+            error: null,
+          })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+    const view = await search('jesse');
+
+    await waitFor(() =>
+      expect(view.getByLabelText(/^Add The Assassination of Jesse James/)).toBeTruthy(),
+    );
+    expect(view.getByLabelText(/^Log The Assassination of Jesse James/)).toBeTruthy();
+  });
+});

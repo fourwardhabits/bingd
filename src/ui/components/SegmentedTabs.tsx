@@ -5,10 +5,37 @@ import { Text } from './Text';
 
 export type SegmentOption<T extends string> = { id: T; label: string };
 
+/**
+ * How loudly a tab row reads, and the two classes bingd. has.
+ *
+ * `secondary` — the default, and what every caller before 2026-09-06 got. Subordinate,
+ * mutually-exclusive state *within* whatever universe is already selected: Watched and
+ * Watchlist inside a collection, Cast and Reviews inside a title. `callout`, with the
+ * unselected label in tertiary grey and a 2pt rule.
+ *
+ * `primary` — the control that switches the **primary content universe** being browsed.
+ * Movies and TV on Collection and For You, and nothing else. It replaced a dropdown, so
+ * it has to hold the position and the weight a screen title held: `title2`, ink when
+ * selected, and a 3pt rule.
+ *
+ * **The distinction is semantic, not decorative** (founder addendum, 2026-09-06). A
+ * reader should be able to tell "take me to this content" from "narrow what I am looking
+ * at" without reading the labels, which is also why Search's All/Movies/TV/People stayed
+ * filter *chips* and did not become either of these.
+ */
+export type SegmentedTabsVariant = 'primary' | 'secondary';
+
 export type SegmentedTabsProps<T extends string> = {
   options: readonly SegmentOption<T>[];
   value: T;
   onChange: (next: T) => void;
+  /**
+   * Defaults to `secondary`, which is exactly what every existing caller was drawn as
+   * before this prop existed — so adding it changed no screen that did not ask.
+   */
+  variant?: SegmentedTabsVariant;
+  /** Announced to screen readers as the name of the tab set. */
+  accessibilityLabel?: string;
 };
 
 /**
@@ -39,7 +66,15 @@ export type SegmentedTabsProps<T extends string> = {
  * the accessibility tree keeps the shape it had: a list of tabs, not a scroll area
  * that happens to contain some.
  */
-export function SegmentedTabs<T extends string>({ options, value, onChange }: SegmentedTabsProps<T>) {
+export function SegmentedTabs<T extends string>({
+  options,
+  value,
+  onChange,
+  variant = 'secondary',
+  accessibilityLabel,
+}: SegmentedTabsProps<T>) {
+  const primary = variant === 'primary';
+
   return (
     <ScrollView
       horizontal
@@ -47,7 +82,11 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: Se
       alwaysBounceHorizontal={false}
       style={styles.scroll}
     >
-      <View style={styles.row} accessibilityRole="tablist">
+      <View
+        style={[styles.row, primary && styles.rowPrimary]}
+        accessibilityRole="tablist"
+        accessibilityLabel={accessibilityLabel}
+      >
         {options.map((option) => {
           const selected = option.id === value;
           return (
@@ -58,10 +97,26 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: Se
               onPress={() => onChange(option.id)}
               style={styles.tab}
             >
-              <Text variant="callout" tone={selected ? 'primary' : 'tertiary'}>
+              <Text
+                variant={primary ? 'title2' : 'callout'}
+                /**
+                 * **Both peers read as peers.** The unselected primary tab is
+                 * `secondary`, not `tertiary`: at `title2` the lighter grey makes the
+                 * inactive side look disabled rather than merely not-current, and
+                 * Movies and TV are equally important modes — the founder's rule that
+                 * Movies must not be privileged for being first.
+                 */
+                tone={selected ? 'primary' : primary ? 'secondary' : 'tertiary'}
+              >
                 {option.label}
               </Text>
-              <View style={[styles.underline, selected && styles.underlineActive]} />
+              <View
+                style={[
+                  styles.underline,
+                  primary && styles.underlinePrimary,
+                  selected && styles.underlineActive,
+                ]}
+              />
             </Pressable>
           );
         })}
@@ -86,6 +141,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.space[1],
   },
+  /**
+   * The primary row sits where a screen title used to and carries that weight, so it
+   * gets a title's air above it and a wider gap between two large words. Not taller
+   * overall than the dropdown it replaced: `MediumSelector` at `title` size drew a
+   * `title1` line plus a chevron in this same band.
+   */
+  rowPrimary: { gap: theme.space[6], paddingTop: theme.space[2] },
   // Always present, so selecting a tab does not shift the row by two points.
   underline: {
     height: 2,
@@ -93,5 +155,8 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.full,
     backgroundColor: 'transparent',
   },
+  // One point thicker under a much larger word, so the primary rule reads as the
+  // heavier of the two when both rows are stacked on Collection.
+  underlinePrimary: { height: 3 },
   underlineActive: { backgroundColor: theme.semantic.action },
 });

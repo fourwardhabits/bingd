@@ -2,7 +2,7 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { StreakSection } from './StreakSection';
+import { StreakLine } from './StreakLine';
 import type { WeeklyStreak } from './streak';
 
 /**
@@ -29,7 +29,7 @@ const streak = (over: Partial<WeeklyStreak> = {}): WeeklyStreak => ({
 
 const settled = (data: WeeklyStreak) => ({ data, isPending: false, isError: false });
 
-const open = () => renderWithProviders(<StreakSection userId="user-1" />);
+const open = () => renderWithProviders(<StreakLine userId="user-1" />);
 
 beforeEach(() => {
   mockTrack.mockReset();
@@ -46,7 +46,7 @@ describe('when the section appears at all', () => {
     mockStreak = settled(streak({ hasHistory: false, weeks: 0, best: 0 }));
     const view = await open();
 
-    expect(view.queryByText(/Weekly streak/i)).toBeNull();
+    expect(view.queryByLabelText(/week streak/)).toBeNull();
     expect(view.queryByText(/0 weeks/)).toBeNull();
   });
 
@@ -71,8 +71,8 @@ describe('when the section appears at all', () => {
   it('appears with a run to show', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('WEEKLY STREAK')).toBeTruthy());
-    expect(view.getByText('🔥 4 weeks')).toBeTruthy();
+    await waitFor(() => expect(view.getByLabelText(/week streak/)).toBeTruthy());
+    expect(view.getByLabelText(/^A 4 week streak/)).toBeTruthy();
   });
 });
 
@@ -81,7 +81,7 @@ describe('what the second line says', () => {
     mockStreak = settled(streak({ rankedThisWeek: true }));
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Ranked this week ✓')).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/Ranked this week ✓/)).toBeTruthy());
   });
 
   /**
@@ -98,7 +98,9 @@ describe('what the second line says', () => {
 
       // A fact, not a countdown: "5 days left!" is pressure and this is not.
       await waitFor(() =>
-        expect(view.getByText('Rank something in the next 5 days to keep it going.')).toBeTruthy(),
+        expect(
+          view.getByText(/Rank something in the next 5 days to keep it going./),
+        ).toBeTruthy(),
       );
     } finally {
       jest.useRealTimers();
@@ -111,7 +113,7 @@ describe('what the second line says', () => {
       const view = await open();
 
       await waitFor(() =>
-        expect(view.getByText('Rank something today to keep it going.')).toBeTruthy(),
+        expect(view.getByText(/Rank something today to keep it going./)).toBeTruthy(),
       );
     } finally {
       jest.useRealTimers();
@@ -125,7 +127,7 @@ describe('what the second line says', () => {
     const view = await open();
 
     await waitFor(() =>
-      expect(view.getByText('Rank something this week to start a new one.')).toBeTruthy(),
+      expect(view.getByText(/Rank something this week to start a new one./)).toBeTruthy(),
     );
   });
 
@@ -133,7 +135,7 @@ describe('what the second line says', () => {
     mockStreak = settled(streak({ weeks: 1, best: 1 }));
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('🔥 1 week')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/^A one week streak/)).toBeTruthy());
   });
 });
 
@@ -141,7 +143,7 @@ describe('the restraint the founder asked for', () => {
   it('offers no points, coins or level of any kind', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('WEEKLY STREAK')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/week streak/)).toBeTruthy());
     for (const word of [/points?/i, /coins?/i, /\bXP\b/, /level/i, /freeze/i]) {
       expect(view.queryByText(word)).toBeNull();
     }
@@ -152,14 +154,18 @@ describe('the restraint the founder asked for', () => {
     // answers nothing about whether streaks are worth keeping.
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('WEEKLY STREAK')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/week streak/)).toBeTruthy());
     expect(view.queryByRole('button')).toBeNull();
   });
 
   it('reads the streak out in words, so the flame is decoration', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('A 4 week streak')).toBeTruthy());
+    // The run and its state in one spoken sentence, so neither the flame nor the middle
+    // dot that joins them is ever read out as punctuation.
+    await waitFor(() =>
+      expect(view.getByLabelText(/^A 4 week streak\. Rank something/)).toBeTruthy(),
+    );
   });
 });
 
@@ -182,7 +188,7 @@ describe('what it reports', () => {
     const view = await open();
 
     await waitFor(() => expect(mockTrack).toHaveBeenCalledTimes(1));
-    view.rerender(<StreakSection userId="user-1" />);
+    view.rerender(<StreakLine userId="user-1" />);
     expect(mockTrack).toHaveBeenCalledTimes(1);
   });
 

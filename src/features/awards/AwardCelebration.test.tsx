@@ -111,11 +111,20 @@ describe('several awards from one ranking', () => {
     await waitFor(() => expect(view.getByText('1 of 2')).toBeTruthy());
   });
 
-  it('ends in one Done, not one per award', async () => {
+  it('says Next until the last page, then Done', async () => {
+    /**
+     * A reader with two awards and a streak is never told the flow has ended before it
+     * has. One control that advances and then finishes, rather than a Done on every page
+     * that would dismiss the rest of what they just earned.
+     */
     mockParams = { awards: 'movie-muncher:bronze,two-screen-life:tourist' };
     const view = await open();
 
-    await waitFor(() => expect(view.getAllByText('Done')).toHaveLength(1));
+    await waitFor(() => expect(view.getByText('Next')).toBeTruthy());
+    expect(view.queryByText('Done')).toBeNull();
+
+    await fireEvent.press(view.getByText('Next'));
+    await waitFor(() => expect(view.getByText('Done')).toBeTruthy());
   });
 });
 

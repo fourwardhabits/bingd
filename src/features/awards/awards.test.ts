@@ -259,14 +259,14 @@ describe('tier boundaries', () => {
   it('is locked below the first threshold', () => {
     const result = movieMuncher(49);
     expect(result.earnedTier).toBeNull();
-    expect(result.detailLine).toBe('Next: Bronze · Watch 50 movies');
+    expect(result.detailLine).toBe('Next: Movie Muncher Bronze · Watch 50 movies');
     expect(result.countLabel).toBe('49 / 50');
   });
 
   it('is earned exactly at the first threshold', () => {
     const result = movieMuncher(50);
     expect(result.earnedTier?.label).toBe('Bronze');
-    expect(result.detailLine).toBe('Next: Silver · Watch 200 movies');
+    expect(result.detailLine).toBe('Next: Movie Muncher Silver · Watch 200 movies');
   });
 
   it('is earned exactly at the third threshold, and says what earned it', () => {
@@ -405,7 +405,13 @@ describe('the award number is the breakdown', () => {
       watched: [
         title({ genres: ['Horror', 'Thriller'], language: 'ja', year: 1985 }),
         title({ genres: ['Comedy'], watchedOn: '2026-02-03' }),
-        title({ kind: 'season', genres: ['Drama'], seriesTitle: 'The Last of Us', seasonNumber: 1, year: 2023 }),
+        title({
+          kind: 'season',
+          genres: ['Drama'],
+          seriesTitle: 'The Last of Us',
+          seasonNumber: 1,
+          year: 2023,
+        }),
         title({ genres: ['Animation', 'Documentary'], language: 'fr' }),
       ],
       rankings: ranked(3),
@@ -567,7 +573,10 @@ describe('what each metric counts', () => {
  */
 describe('what a row is called', () => {
   const gremlin = (n: number) =>
-    award('genre-gremlin', facts({ watched: CANONICAL_GENRES.slice(0, n).map((g) => title({ genres: [g] })) }));
+    award(
+      'genre-gremlin',
+      facts({ watched: CANONICAL_GENRES.slice(0, n).map((g) => title({ genres: [g] })) }),
+    );
 
   it('shows the family name before the first tier', () => {
     const locked = gremlin(6);
@@ -631,7 +640,12 @@ describe('what a row is called', () => {
     for (const key of ['movie-muncher', 'season-snacker', 'invite-instigator']) {
       const t = track(key);
       expect([key, t.metalTiers]).toEqual([key, true]);
-      for (const value of [0, t.tiers[0].threshold, t.tiers[1].threshold, t.tiers[2].threshold]) {
+      for (const value of [
+        0,
+        t.tiers[0].threshold,
+        t.tiers[1].threshold,
+        t.tiers[2].threshold,
+      ]) {
         expect([key, value, evaluate(t, forced(t, value)).title]).toEqual([
           key,
           value,
@@ -724,7 +738,10 @@ describe('Invite Instigator', () => {
   });
 
   it('never describes the number as links, sharing or sending', () => {
-    const copy = [track('invite-instigator').next(3), track('invite-instigator').earned(50)].join(' ');
+    const copy = [
+      track('invite-instigator').next(3),
+      track('invite-instigator').earned(50),
+    ].join(' ');
     expect(copy).toBe('Bring 3 people to bingd. Brought 50 people to bingd.');
     for (const word of ['link', 'share', 'sent', 'invited']) {
       expect(copy.toLowerCase()).not.toContain(word);
@@ -740,7 +757,12 @@ describe('Invite Instigator', () => {
 
   it('lists the people once there are any, with when they joined', () => {
     const input = facts({
-      invitedSignups: [{ person: person({ name: 'Ada', username: 'ada' }), activatedAt: '2026-03-04T00:00:00Z' }],
+      invitedSignups: [
+        {
+          person: person({ name: 'Ada', username: 'ada' }),
+          activatedAt: '2026-03-04T00:00:00Z',
+        },
+      ],
     });
     const { rows, progress } = rowsFor('invite-instigator', input);
     expect(progress.value).toBe(1);
@@ -801,7 +823,12 @@ describe('mutual follows', () => {
   });
 
   it('waits for five, because one person following back is not a social life', () => {
-    expect(award('mutual-mania', facts({ mutualFollows: [person(), person(), person(), person(), person()] })).earnedTier?.label).toBe('Hello');
+    expect(
+      award(
+        'mutual-mania',
+        facts({ mutualFollows: [person(), person(), person(), person(), person()] }),
+      ).earnedTier?.label,
+    ).toBe('Hello');
     expect(award('mutual-mania', facts({ mutualFollows: [person()] })).earnedTier).toBeNull();
   });
 
@@ -842,7 +869,9 @@ describe('Heart Magnet', () => {
   it('says what was reacted to and never who reacted', () => {
     const { rows } = rowsFor(
       'heart-magnet',
-      facts({ reactionsReceived: [{ key: 'e1', title: title({ title: 'Heat' }), reactions: 3 }] }),
+      facts({
+        reactionsReceived: [{ key: 'e1', title: title({ title: 'Heat' }), reactions: 3 }],
+      }),
     );
     expect(rows[0]?.label).toBe('Heat');
     expect(rows[0]?.avatarPath).toBeUndefined();
@@ -857,8 +886,18 @@ describe('Comment Gremlin', () => {
     // fact type carries comments alone now, so this is the shape as well as the count.
     const input = facts({
       written: [
-        { key: 'comment:c1', kind: 'comment', title: title({ title: 'Heat' }), writtenAt: '2026-01-02T00:00:00Z' },
-        { key: 'comment:c2', kind: 'comment', title: title({ title: 'Arrival' }), writtenAt: '2026-01-03T00:00:00Z' },
+        {
+          key: 'comment:c1',
+          kind: 'comment',
+          title: title({ title: 'Heat' }),
+          writtenAt: '2026-01-02T00:00:00Z',
+        },
+        {
+          key: 'comment:c2',
+          kind: 'comment',
+          title: title({ title: 'Arrival' }),
+          writtenAt: '2026-01-03T00:00:00Z',
+        },
       ],
     });
     const { progress, rows } = rowsFor('comment-gremlin', input);
@@ -871,7 +910,12 @@ describe('Comment Gremlin', () => {
       'comment-gremlin',
       facts({
         written: [
-          { key: 'comment:c1', kind: 'comment', title: title({ title: 'Arrival' }), writtenAt: null },
+          {
+            key: 'comment:c1',
+            kind: 'comment',
+            title: title({ title: 'Arrival' }),
+            writtenAt: null,
+          },
         ],
       }),
     );
@@ -898,7 +942,12 @@ describe('Hype Courier', () => {
   it('counts in-app recommendations and names the recipient', () => {
     const input = facts({
       recommendationsSent: [
-        { key: 'r1', title: title({ title: 'Heat' }), recipient: person({ name: 'Ada' }), sentAt: '2026-01-02T00:00:00Z' },
+        {
+          key: 'r1',
+          title: title({ title: 'Heat' }),
+          recipient: person({ name: 'Ada' }),
+          sentAt: '2026-01-02T00:00:00Z',
+        },
       ],
     });
     const { progress, rows } = rowsFor('hype-courier', input);
@@ -1027,7 +1076,9 @@ describe('sorting', () => {
   });
 
   it('keeps a pinned track pinned even when its number could not be read', () => {
-    const list = awardsFor(facts({ unavailable: new Set<keyof AwardFacts>(['invitedSignups']) }));
+    const list = awardsFor(
+      facts({ unavailable: new Set<keyof AwardFacts>(['invitedSignups']) }),
+    );
     expect(keys(list)[2]).toBe('invite-instigator');
     expect(list[2]?.unavailable).toBe(true);
   });
@@ -1102,7 +1153,10 @@ describe('a track whose number could not be read', () => {
   });
 
   it('costs only the tracks that needed that field', () => {
-    const input = facts({ watched: many(60), unavailable: new Set<keyof AwardFacts>(['mutualFollows']) });
+    const input = facts({
+      watched: many(60),
+      unavailable: new Set<keyof AwardFacts>(['mutualFollows']),
+    });
     const list = awardsFor(input);
     expect(unavailableCount(list)).toBe(1);
     expect(list.find((a) => a.trackKey === 'movie-muncher')?.earnedTier?.label).toBe('Bronze');
@@ -1140,7 +1194,9 @@ describe('the badge manifest', () => {
 
   it('has sixty entries and not one more, so nothing is mapped to a tier that is gone', () => {
     expect(Object.keys(BADGES)).toHaveLength(60);
-    const valid = new Set(AWARD_TRACKS.flatMap((t) => t.tiers.map((tier) => `${t.key}-${tier.key}`)));
+    const valid = new Set(
+      AWARD_TRACKS.flatMap((t) => t.tiers.map((tier) => `${t.key}-${tier.key}`)),
+    );
     expect(Object.keys(BADGES).filter((key) => !valid.has(key))).toEqual([]);
   });
 
@@ -1226,7 +1282,7 @@ describe('a track the viewer is not entitled to read', () => {
     expect(result.withheld).toBe(false);
     expect(result.value).toBe(2);
     expect(result.countLabel).toBe('2 / 3');
-    expect(result.detailLine).toBe('Next: Bronze · Bring 3 people to bingd.');
+    expect(result.detailLine).toBe('Next: Invite Instigator Bronze · Bring 3 people to bingd.');
   });
 
   it('names no invitee in a visitor’s Invite Instigator breakdown', () => {

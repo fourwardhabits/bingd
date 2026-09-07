@@ -1,4 +1,11 @@
-import { daysLeftInWeek, weeklyStreak, weekKey, weekStart } from './streak';
+import {
+  daysLeftInWeek,
+  streakAdvanced,
+  weeklyStreak,
+  weekKey,
+  weekStart,
+  type WeeklyStreak,
+} from './streak';
 
 /**
  * The weekly ranking streak, which is derived and stores nothing.
@@ -185,5 +192,67 @@ describe('how long is left', () => {
     for (let day = 31; day <= 37; day += 1) {
       expect(daysLeftInWeek(at(2026, 8, day))).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('when a ranking advances the streak', () => {
+  /**
+   * **Only the first ranking of a new qualifying week**, and only from week two.
+   *
+   * A streak advances once per week, so celebrating every ranking would celebrate the
+   * same fact five times on a busy Sunday — and it is the advance that is the
+   * achievement, not the ranking. A first week is a streak of one, which is somebody
+   * having used the app rather than a run; spending the mechanic's one moment on it is
+   * how a reward becomes noise.
+   */
+  const state = (over: Partial<WeeklyStreak> = {}): WeeklyStreak => ({
+    weeks: 0,
+    rankedThisWeek: false,
+    best: 0,
+    hasHistory: true,
+    ...over,
+  });
+
+  it('celebrates the first ranking of the second week', () => {
+    const before = state({ weeks: 1, rankedThisWeek: false, best: 1 });
+    const after = state({ weeks: 2, rankedThisWeek: true, best: 2 });
+
+    expect(streakAdvanced(before, after)).toBe(2);
+  });
+
+  it('says nothing on the very first week, because one week is not a streak', () => {
+    const before = state({ weeks: 0, hasHistory: false });
+    const after = state({ weeks: 1, rankedThisWeek: true, best: 1 });
+
+    expect(streakAdvanced(before, after)).toBeNull();
+  });
+
+  it('says nothing for the second ranking of the same week', () => {
+    // The week was already safe, so this ranking advanced nothing.
+    const before = state({ weeks: 4, rankedThisWeek: true, best: 4 });
+    const after = state({ weeks: 4, rankedThisWeek: true, best: 4 });
+
+    expect(streakAdvanced(before, after)).toBeNull();
+  });
+
+  it('says nothing when the ranking did not land in this week at all', () => {
+    const before = state({ weeks: 3, rankedThisWeek: false, best: 3 });
+    const after = state({ weeks: 3, rankedThisWeek: false, best: 3 });
+
+    expect(streakAdvanced(before, after)).toBeNull();
+  });
+
+  it('celebrates a run restarted after a gap once it reaches two', () => {
+    const before = state({ weeks: 1, rankedThisWeek: false, best: 6 });
+    const after = state({ weeks: 2, rankedThisWeek: true, best: 6 });
+
+    expect(streakAdvanced(before, after)).toBe(2);
+  });
+
+  it('reports the run’s length, which is what the card says', () => {
+    const before = state({ weeks: 8, rankedThisWeek: false, best: 8 });
+    const after = state({ weeks: 9, rankedThisWeek: true, best: 9 });
+
+    expect(streakAdvanced(before, after)).toBe(9);
   });
 });

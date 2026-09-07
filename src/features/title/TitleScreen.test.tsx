@@ -336,14 +336,71 @@ describe('the page hierarchy', () => {
     );
   });
 
-  it('puts the genres and the actions above the scores', async () => {
-    // Outward from what the thing *is* to what it is *about*: metadata, genres, the
-    // things you can do to it, then what it scores.
+  it('puts the scores above the synopsis and the genres under it', async () => {
+    /**
+     * **The founder's final order** (2026-09-06): hero, title, scores, synopsis,
+     * genres, where to watch, tabs.
+     *
+     * Genres moved *below* the synopsis on this pass. They led it before, on the
+     * argument that a page should read outward from what a thing is to what it is
+     * about — and on a device that put a row of metadata between the title and the one
+     * number nobody else's page has.
+     */
     const view = await open();
     await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
 
-    expect(positionOf(view, 'Science Fiction')).toBeLessThan(positionOf(view, 'Watchlist'));
-    expect(positionOf(view, 'Watchlist')).toBeLessThan(positionOf(view, 'bingd.'));
+    expect(positionOf(view, 'bingd.')).toBeLessThan(
+      positionOf(view, 'A thief who steals corporate secrets'),
+    );
+    expect(positionOf(view, 'A thief who steals corporate secrets')).toBeLessThan(
+      positionOf(view, 'Science Fiction'),
+    );
+  });
+
+  it('keeps Watchlist and Recommend in the hero, not in a row of their own', async () => {
+    /**
+     * The founder's physical Android complaint, as an assertion. They were labelled
+     * chips under the description: a chip the size of a button competed with Rank for
+     * the page's primary action, and the band it occupied pushed the scores below the
+     * fold. They are glyphs in the score cluster now — same acts, same names to a
+     * screen reader, no band.
+     */
+    const view = await open();
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+
+    // Still there, still named for a screen reader — the acts are unchanged.
+    expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
+    expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy();
+    // But no longer labelled chips: the words are gone from the page itself, which is
+    // what gives back the band they occupied.
+    expect(view.queryByText('Watchlist')).toBeNull();
+    expect(view.queryByText('Recommend')).toBeNull();
+  });
+
+  it('counts the genres it does not draw, rather than wrapping to a second row', async () => {
+    /**
+     * **`+N` rather than a second row** (founder, 2026-09-06). Three chips fit one row
+     * at every width this app supports; a fourth wraps, and the two-line block of
+     * metadata that produced is what the founder rejected on a device.
+     *
+     * Not a chip itself: it is a count, not a genre, and a reader must not be able to
+     * mistake `+2` for something the film is.
+     */
+    tableRows.media_items = [
+      { ...film, genres: ['Science Fiction', 'Action', 'Adventure', 'Thriller', 'Drama'] },
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('+2')).toBeTruthy());
+    expect(view.getByLabelText('And 2 more genres')).toBeTruthy();
+  });
+
+  it('counts nothing when every genre fits', async () => {
+    tableRows.media_items = [{ ...film, genres: ['Science Fiction', 'Action'] }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Science Fiction')).toBeTruthy());
+    expect(view.queryByText(/^\+\d/)).toBeNull();
   });
 
   it('draws at most three genre chips, and keeps the rest in Details', async () => {
@@ -858,30 +915,7 @@ describe('a title this user has ranked', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('puts the watch date where it answers "have I seen this"', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByText(/Watched/)).toBeTruthy());
-  });
 
-  it('demotes the exact date below the description, under the hero that already answers it', async () => {
-    // It used to be the first line under the title — the most prominent thing on the
-    // page was a date the reader already knew. The hero answers "have I seen this"
-    // first now, with a score and an ordinal beside the poster; the exact date is a
-    // footnote after the synopsis. Still on the page, because the companions are on
-    // the same line and nobody would go looking for those behind a tab.
-    const view = await open();
-    await waitFor(() => expect(view.getByText(/Watched/)).toBeTruthy());
-
-    const order = readingOrder(view.toJSON());
-    const at = (needle: string) => {
-      const index = order.findIndex((text) => text.includes(needle));
-      expect(index).toBeGreaterThanOrEqual(0);
-      return index;
-    };
-    // "Watched " rather than the formatted date itself: `toLocaleDateString` resolves
-    // against the runtime's ICU data, and the assertion is about position, not spelling.
-    expect(at('A thief who steals corporate secrets')).toBeLessThan(at('Watched '));
-  });
 
   it('keeps the ordinal with its denominator in Details', async () => {
     const view = await open();

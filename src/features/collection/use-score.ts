@@ -83,3 +83,91 @@ export function useTitleScore(
     isPending: false,
   };
 }
+
+/** One ranked title of the reader's own, reduced to what a list row needs. */
+export type MyScore = {
+  score: number;
+  category: RankingCategory;
+  bucket: Bucket;
+  position: number;
+};
+
+/**
+ * Every score this reader has given, as a lookup by media id.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A LIST NEEDS ITS OWN READ AND CANNOT LOOP `useTitleScore`
+ *
+ * A score is not stored. It is `scoreFor(bucket, position, bandSizes)` — a position
+ * within a band, divided by the size of that band — so a row showing one title still
+ * depends on how many titles are in the whole category. `useTitleScore` answers that for
+ * a single title by fetching the band sizes; twenty search results would be twenty
+ * copies of the same question, and a hook cannot be called in a loop anyway.
+ *
+ * So this reads the whole of `rankings` once — four columns, no joins, no metadata — and
+ * derives both halves from the same rows: the band sizes per category, then a score per
+ * title. One read, one source, and the count a band is divided by is the count the rows
+ * actually have.
+ *
+ * **Deliberately not `useRankedCollection`.** That one carries posters, genres, runtimes
+ * and a parent embed per row, because it draws a collection. A search row needs a number.
+ *
+ * **Paged through `readAllByKey`, and that is load-bearing rather than tidy.** An
+ * unbounded PostgREST select silently truncates at 1,000 rows, which here would not error
+ * — it would hand a band one member short and quietly make every score in it wrong.
+ * `use-read-all.ts` has the whole argument; `useBandSizes` above pays the same cost for
+ * the same reason.
+ */
+export function useMyScores(userId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['my-scores', userId],
+    enabled: enabled && Boolean(userId),
+    queryFn: async (): Promise<Map<string, MyScore>> => {
+      const { data, error } = await readAllByKey<{
+        media_item_id: string;
+        bucket: Bucket;
+        position: number;
+        category: RankingCategory;
+      }>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('rankings')
+              .select('media_item_id, bucket, position, category')
+              .eq('user_id', userId),
+            'media_item_id',
+            cursor,
+          )
+            .order('media_item_id', { ascending: true })
+            .limit(limit),
+        (row) => [row.media_item_id],
+      );
+      if (error) throw error;
+
+      const rows = data ?? [];
+      // Per category, because a band is a band *within* Movies or within TV seasons —
+      // one pooled set of sizes would score a film against the television it shares a
+      // bucket name with.
+      const sizes = new Map<RankingCategory, BandSizes>();
+      for (const category of ['movies', 'tv_seasons'] as const) {
+        sizes.set(category, bandSizes(rows.filter((row) => row.category === category)));
+      }
+
+      return new Map(
+        rows.map((row) => [
+          row.media_item_id,
+          {
+            score: scoreFor(
+              row.bucket,
+              row.position,
+              sizes.get(row.category) ?? emptyBandSizes(),
+            ),
+            category: row.category,
+            bucket: row.bucket,
+            position: row.position,
+          },
+        ]),
+      );
+    },
+  });
+}
