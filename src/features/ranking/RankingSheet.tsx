@@ -300,6 +300,11 @@ function Session({
             surface,
             comparisons: answeredCount.current,
             rebucket: subject.mode === 'rebucket',
+            // The act, in the same four words this component opens the session with.
+            // `rerank` and `again` reach the identical `placed` answer as a first
+            // placement and used to be counted as one; the menu tells them apart and
+            // so, now, does the event (`RankingMode`).
+            mode: subject.mode ?? 'start',
           },
         });
         /**

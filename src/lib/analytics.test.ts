@@ -170,6 +170,32 @@ describe('the privacy boundary', () => {
   });
 });
 
+describe('ranking_completed', () => {
+  /**
+   * The four completions, told apart on the wire.
+   *
+   * `rerank` and `again` reach the same `placed` answer as a first placement and used to
+   * be reported as one, because the event carried only `rebucket`. The founder's own
+   * Adjust placement on Terrace House would have counted as a brand-new ranking in every
+   * funnel reading this event. `mode` is the whole fix, and `rebucket` stays exactly
+   * derivable from it so nothing already charted moves.
+   */
+  it.each([
+    ['start', false],
+    ['rebucket', true],
+    ['rerank', false],
+    ['again', false],
+  ] as const)('carries mode %s through the allowlist', (mode, rebucket) => {
+    mockCapture.mockClear();
+    track({
+      name: 'ranking_completed',
+      props: { media_kind: 'movie', surface: 'title', comparisons: 3, rebucket, mode },
+    });
+
+    expect(propertiesOf()).toMatchObject({ mode, rebucket, comparisons: 3 });
+  });
+});
+
 describe('release identity', () => {
   it('travels with every event', () => {
     track({ name: 'watchlist_added', props: { surface: 'feed' } });
