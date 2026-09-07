@@ -1107,8 +1107,8 @@ export default function TitleScreen() {
               />
             </View>
             {/**
-             * **On the poster's lower-left corner, half on the artwork and half on Paper**
-             * (founder, physical Android, 2026-09-07).
+             * **On the poster's lower-left corner, overhanging onto Paper** (founder,
+             * physical Android, 2026-09-07).
              *
              * It sat *under* the poster for one revision, which produced a tall empty
              * column on the right of the page and a score that read as a separate block
@@ -2130,15 +2130,23 @@ const styles = StyleSheet.create({
   /**
    * The score, over the poster's lower-left corner.
    *
-   * Negative on both axes so the circle crosses the frame's edge: about a third of it
-   * overhangs onto Paper to the left, which keeps the number legible whatever the
-   * artwork behind the rest of it is, and the caption beneath it hangs below the frame
-   * by a few points. The action row's own top padding is what gives that overhang room.
+   * Negative on both axes so the circle crosses the frame's edge: twelve points of it
+   * overhang onto Paper to the left, which keeps the number legible whatever the artwork
+   * behind the rest of it is, and the caption beneath it hangs below the frame by a few
+   * points. The action row's own top padding is what gives that overhang room.
+   *
+   * **The overhang is bounded by the row's gap, and this is the review finding it
+   * answers** (Codex, review 75). The identity column and the poster are `space[4]`
+   * apart; an overhang wider than that puts the badge over the last words of a long
+   * title and, because the poster column is the later sibling, lets the badge take a
+   * press meant for the linked series name. Twelve points is inside sixteen with four to
+   * spare, and `PersonalScore` carries no hit slop of its own for the same reason — the
+   * circle is already past the 44pt target without it.
    *
    * `box-none` on the wrapper so only the badge takes touches: the anchor is a
    * positioning device and must not become a second, invisible target on the poster.
    */
-  scoreAnchor: { position: 'absolute', left: -24, bottom: -12 },
+  scoreAnchor: { position: 'absolute', left: -12, bottom: -12 },
   /**
    * Everything that names the title, on the left.
    *

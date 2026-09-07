@@ -620,8 +620,10 @@ change of architecture.
 
 **The score is back on the poster.** It sat *under* the frame for one revision, which produced
 a tall empty column on the right of the page and a number that read as a separate block. It is
-anchored to the poster's **lower-left corner** now — about a third of the circle overhanging
-onto Paper, which keeps the number legible whatever the artwork behind the rest of it is — with
+anchored to the poster's **lower-left corner** now — twelve points of the circle overhanging
+onto Paper, which keeps the number legible whatever the artwork behind the rest of it is, and
+inside the row's 16pt gap so it can neither cover a long title's last words nor take a press
+meant for the linked series name (review 75) — with
 `Your score` in `caption` beneath it. No floating pill. The unranked state is the dashed ring
 **with nothing in it**: the word `Rank` inside the circle duplicated the button beside it, and
 the honest statement of "no score yet" is the empty ring, not a second invitation.

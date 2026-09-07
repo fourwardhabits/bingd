@@ -870,6 +870,11 @@ describe('the score and the poster', () => {
     expect(style.position).toBe('absolute');
     expect(style.left as number).toBeLessThan(0);
     expect(style.bottom as number).toBeLessThan(0);
+    // And bounded: the overhang stays inside the 16pt gap between the poster and the
+    // identity column, so the badge can neither cover a long title's last words nor take
+    // a press meant for the linked series name (review 75). No slop for the same reason.
+    expect(style.left as number).toBeGreaterThanOrEqual(-16);
+    expect(view.getByTestId('personal-score').props.hitSlop).toBeUndefined();
     // Ownership in words, beneath the number, inside the same object.
     expect(within(anchor).getByText('Your score')).toBeTruthy();
     expect(view.queryByText('YOU')).toBeNull();

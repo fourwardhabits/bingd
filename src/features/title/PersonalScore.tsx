@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import type { Bucket } from '@/features/collection/score';
 import { BUCKET_LABEL, formatScore } from '@/features/collection/score';
 import { EmptyScoreBadge, ScoreBadge, Text } from '@/ui/components';
-import { theme } from '@/ui/tokens';
 
 export type PersonalScoreProps = {
   /** Null when this reader has not ranked it. Never a stand-in number. */
@@ -36,11 +35,12 @@ export type PersonalScoreProps = {
  * tall empty column on the right of the page and a score that read as a separate block.
  *
  * It is anchored to the poster's lower-left corner now — the screen positions it, this
- * component only draws it — about a third of the circle overhanging onto Paper. That is
- * what attaches it to the artwork, the one thing on the page that can only be about this
- * title, without costing the column below the poster a single point of height. The
+ * component only draws it — with twelve points of the circle overhanging onto Paper. That
+ * is what attaches it to the artwork, the one thing on the page that can only be about
+ * this title, without costing the column below the poster a single point of height. The
  * overhang onto Paper is what keeps the number legible whatever the artwork behind the
- * rest of it is.
+ * rest of it is, and it stays inside the gap between the poster and the identity column,
+ * so it can neither cover the last words of a long title nor take a press meant for them.
  *
  * ---------------------------------------------------------------------------
  * WHY THE WORDS ARE UNDERNEATH, AND WHY THERE IS NO WORD IN THE RING
@@ -89,7 +89,9 @@ export function PersonalScore({ score, bucket, pending, onPress }: PersonalScore
         ranked || pending ? 'Opens your rating options' : 'Opens the rating sheet'
       }
       onPress={onPress}
-      hitSlop={theme.space[2]}
+      // No slop. The circle is 56pt and the caption beneath it makes the control taller
+      // still, so the 44pt target is met without it — and slop here would reach past the
+      // gap into the identity column, which is the overlap review 75 found.
       style={({ pressed }) => [styles.column, pressed && styles.pressed]}
     >
       {/* Named once, in the label above, rather than three times over: the badge sets its
