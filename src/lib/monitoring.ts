@@ -118,11 +118,17 @@ export function initMonitoring(): void {
  *
  * **Plenty of query functions do throw one** — every `if (error) throw error` in a
  * `queryFn`, which is most of them. What keeps those out of Sentry today is that React
- * Query catches them and turns them into an error state a screen renders; no call site
- * forwards one on, and `reportHandled` has no callers at all. That is a property of the
- * current call sites rather than of this file, so it is written down rather than assumed:
- * the first `reportHandled(supabaseError)` anybody adds inherits this exposure. Recorded
- * as debt, not closed here.
+ * Query catches them and turns them into an error state a screen renders, and no call
+ * site forwards one on. That is a property of the current call sites rather than of this
+ * file, so it is written down rather than assumed: the first `reportHandled(supabaseError)`
+ * anybody adds inherits this exposure. Recorded as debt, not closed here.
+ *
+ * **The two callers `reportHandled` does have both pass a synthetic error on purpose**,
+ * and neither inherits it. `RequestDeadlineError` carries a number of milliseconds.
+ * `BackendContractError` carries a SQLSTATE and one identifier that `readContractBreach`
+ * extracted with a strict pattern — never PostgREST's message, which is exactly the
+ * echo this paragraph is about. Anything added beside them should be read the same way:
+ * hand this function something built here, not something the server wrote.
  */
 export function scrub(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
   if (event.user) {

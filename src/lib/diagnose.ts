@@ -64,3 +64,57 @@ export const isSchemaDrift = (error: unknown): boolean => {
   const code = (error as { code?: string } | null)?.code;
   return code === '42703' || code === 'PGRST202' || code === 'PGRST205';
 };
+
+/**
+ * The same three codes as a set, so a body that has just been parsed can be asked the
+ * question `isSchemaDrift` asks of a thrown error.
+ *
+ * `isSchemaDrift` takes an error object because that is what a screen holds. The fetch
+ * chokepoint in `lib/supabase.ts` holds a *response*, one layer below any of that, and
+ * it reaches the same three codes by the same reasoning: a missing column, function or
+ * table is the client and the database disagreeing about the schema, and nothing else
+ * here is.
+ */
+export const SCHEMA_DRIFT_CODES: ReadonlySet<string> = new Set([
+  '42703',
+  'PGRST202',
+  'PGRST205',
+]);
+
+/** A backend-contract failure, reduced to the two things that are safe to carry. */
+export type ContractBreach = {
+  /** One of `SCHEMA_DRIFT_CODES`. */
+  code: string;
+  /**
+   * The schema object the backend does not have — `public.rank_again`, `media_items.foo`.
+   * Null when the message did not name one in a shape this is willing to read.
+   */
+  symbol: string | null;
+};
+
+/**
+ * The one identifier a drift message names, and nothing else from the message.
+ *
+ * **The message is never forwarded whole**, and that is the whole point of this
+ * function. `diagnose` above already refuses to put arbitrary PostgREST messages on
+ * screen because Postgres echoes rejected input in constraint and cast errors, and
+ * `lib/monitoring.ts`'s header records the same exposure for anything that reaches
+ * Sentry. These three codes name schema *shape* — that is why they are the three
+ * `diagnose` is willing to print — but the safe reading of that is to extract the
+ * identifier and drop the prose, rather than to trust every future wording of it.
+ *
+ * So: a strict identifier, optionally schema-qualified, and a length cap. Anything the
+ * pattern does not match becomes `symbol: null`, which still reports *that* a contract
+ * broke and under which code.
+ */
+const SYMBOL = /\b(?:function|table|relation|column)\s+['"]?([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)/i;
+
+export function readContractBreach(body: unknown): ContractBreach | null {
+  if (!body || typeof body !== 'object') return null;
+
+  const { code, message } = body as { code?: unknown; message?: unknown };
+  if (typeof code !== 'string' || !SCHEMA_DRIFT_CODES.has(code)) return null;
+
+  const named = typeof message === 'string' ? SYMBOL.exec(message)?.[1] : undefined;
+  return { code, symbol: named && named.length <= 120 ? named : null };
+}

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { AppState } from 'react-native';
 
+import { readContractBreach } from './diagnose';
 import { env } from './env';
 import { recordRequest } from './flight-recorder';
 import { reportHandled } from './monitoring';
@@ -67,6 +68,117 @@ const lastReported = new Map<RequestLane, number>();
 export function resetExpiryReports() {
   lastReported.clear();
 }
+/**
+ * Backend-contract failures already reported, once each, for the life of the process.
+ *
+ * A missing function is not a transient: every mount, every retry and every screen that
+ * asks for it fails the same way for as long as the build and the database disagree. The
+ * per-minute throttle `reportExpiry` uses is the wrong shape for that — it would report
+ * one absent RPC sixty times an hour, for days. Once per distinct breach is the whole
+ * signal, because the second occurrence adds nothing the first did not say.
+ */
+const reportedBreaches = new Set<string>();
+
+/** Test seam, for the same reason `resetExpiryReports` is one. */
+export function resetContractReports() {
+  reportedBreaches.clear();
+}
+
+/** What a backend that does not have what this build asked for is reported as. */
+export class BackendContractError extends Error {
+  override readonly name = 'BackendContractError';
+  constructor(
+    readonly code: string,
+    readonly symbol: string | null,
+  ) {
+    super(`The backend does not have ${symbol ?? 'something this build asked for'} (${code}).`);
+  }
+}
+
+/** The RPC a REST URL names, which is a function name and never a row or a query. */
+const rpcOf = (url: string): string | null =>
+  /\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/.exec(url)?.[1] ?? null;
+
+/**
+ * Says that this build asked the backend for something it does not have.
+ *
+ * **The gap this closes.** `lib/diagnose.ts` turns exactly these three codes into a
+ * sentence a developer can read, and `isSchemaDrift` stops a screen offering a retry
+ * against them — so a person holding the phone can see that the backend is behind. But
+ * `diagnose` returns null in production, no call site forwards a Supabase error on, and
+ * `reportHandled` had one caller (the deadline above). So the one failure that is *not*
+ * the network and *not* the user — the client and the database disagreeing about the
+ * schema — reached Sentry through no path at all. That is a failure mode this project
+ * has structurally, on purpose: the Android beta moves by OTA, iOS sits on an older
+ * runtime, and migrations are deliberately held. A held migration plus a shipped client
+ * is a missing RPC on somebody's phone, and nothing was watching for it.
+ *
+ * **What travels.** The code, the identifier `readContractBreach` extracted, the RPC
+ * named by the URL path, and the lane. No query string, no headers, no token, no row, no
+ * account, and never the message itself — see `readContractBreach`, which exists to make
+ * that a property of the code rather than of the current wording of a PostgREST error.
+ * The build and the update are already on every event as tags (`releaseTags`), so "which
+ * runtime is asking for this" is answered without adding anything here.
+ */
+function reportContractBreach(url: string, code: string, symbol: string | null) {
+  const lane = laneOf(url);
+  const rpc = rpcOf(url);
+  const key = `${code}:${symbol ?? '?'}:${rpc ?? '?'}`;
+  if (reportedBreaches.has(key)) return;
+  reportedBreaches.add(key);
+
+  reportHandled(new BackendContractError(code, symbol), {
+    scope: 'backend.contract',
+    lane,
+    code,
+    symbol: symbol ?? 'unnamed',
+    rpc: rpc ?? 'none',
+  });
+}
+
+/**
+ * Reads a failed REST answer far enough to know whether it was a contract breach.
+ *
+ * Deliberately narrow, and every clause is a cost being refused:
+ *
+ *   * **`rest` only.** A 400 from GoTrue is a bad password, not a schema.
+ *   * **400 and 404 only.** PostgREST answers `PGRST202`/`PGRST205` with 404 and a
+ *     `42703` with 400. A 401, a 403 and a 409 are refusals this app raises on purpose,
+ *     already classified by `write-outcome.ts`; parsing their bodies would be work done
+ *     on every ordinary rate-limit and RLS denial to learn nothing.
+ *   * **A clone.** The original response is untouched, so the caller reads its own body
+ *     exactly as before.
+ *
+ * Fire-and-forget, and it cannot fail the request: every step is guarded and the promise
+ * is detached. A crash reporter that can break the call it is watching is worse than no
+ * crash reporter.
+ */
+function inspectForContractBreach(response: Response, url: string): void {
+  try {
+    if (response.ok) return;
+    if (response.status !== 400 && response.status !== 404) return;
+    if (laneOf(url) !== 'rest') return;
+    if (typeof response.clone !== 'function') return;
+
+    void response
+      .clone()
+      .text()
+      .then((text) => {
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          return;
+        }
+        const breach = readContractBreach(body);
+        if (breach) reportContractBreach(url, breach.code, breach.symbol);
+      })
+      .catch(() => {});
+  } catch {
+    // Nothing here is worth a thrown error on the response path.
+  }
+}
+
 
 /**
  * Says that a lane stopped answering, at most once a minute, and says nothing else.
@@ -160,6 +272,7 @@ export const requestWithDeadline: typeof fetch = (input, init) => {
     .then(
       (response) => {
         record.settled({ status: response.status });
+        inspectForContractBreach(response, url);
         return response;
       },
       (error: unknown) => {
