@@ -26,6 +26,8 @@ import {
   type Scored,
   type Taste,
 } from './rank';
+import { track } from '@/lib/analytics';
+
 import { noteImpressions } from './impressions';
 import { noteSlateOnScreen, useRecommendationArrangement } from './session-seed';
 import { useDismissedTitles } from './use-dismissed';
@@ -746,6 +748,10 @@ export function useForYou(
    * re-offering the bottom half as though it were new.
    */
   const items = slate.data?.items;
+  // Read once per process (see `useRecommendationExposure`), which is exactly the
+  // baseline this measurement wants: how repetitive the wall is against what previous
+  // sessions showed, not against what this render just recorded.
+  const exposureAtLaunch = exposure.data;
   useEffect(() => {
     if (!items) return;
     const ids = items.map((item) => item.mediaItemId);
@@ -759,8 +765,22 @@ export function useForYou(
      * swallowed: nothing on screen depends on it, and the exposure it feeds is read once
      * at launch and never during this session, so there is nothing here to invalidate.
      */
-    void noteImpressions(wallKey, ids);
-  }, [wallKey, items]);
+    void noteImpressions(wallKey, ids).then((recorded) => {
+      // Only a genuinely new slate, on the impression writer's own guard — so this
+      // cannot count a re-render, and it cannot disagree with what was recorded.
+      if (recorded.length === 0) return;
+      track({
+        name: 'for_you_slate_shown',
+        props: {
+          medium,
+          size: ids.length,
+          // How much of this wall the reader had already been shown. The number the
+          // founder's "Jobs and Creed III again" becomes.
+          repeat_count: ids.filter((id) => (exposureAtLaunch?.get(id) ?? 0) > 0).length,
+        },
+      });
+    });
+  }, [wallKey, items, medium, exposureAtLaunch]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.
