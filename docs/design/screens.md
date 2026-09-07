@@ -387,6 +387,13 @@ wherever the data is shown — demoted, never hidden. See
 
 ### As built — 2026-09-07: the identity redesign
 
+> **Partly superseded by the note below it** — the founder reviewed this composition and
+> corrected four things: the poster moved to the right, the identity block came off the
+> artwork, the floating `YOU` pill became the words "Your score", and Rank/Ranked kept its
+> label and its menu instead of becoming an Adjust glyph. Everything else here is what
+> shipped. This note stays because the reasoning that produced the rejected version is what
+> makes the correction legible.
+
 The founder's redesign of the top half of this page, taken as a whole. Nothing about ranking,
 scoring, recommendation or the catalogue moves; this is composition, hierarchy and one crash.
 
@@ -511,6 +518,100 @@ watch, and between every pair of episodes are gone. Whitespace is the default se
 Maroon section heading is what announces a block; the single rule left is above the tab row,
 which is the one place the page changes mode — above it the page is about the title, below it
 it is a set of lists you choose between.
+
+### As built — 2026-09-07, final: identity left, poster right
+
+The founder's review of the composition above, and the direction that supersedes it. Everything
+in the note before this one still describes what changed and why *except* the four points
+corrected here — they are kept rather than rewritten, because the reasoning that produced the
+rejected version is what makes this one legible.
+
+```
+   ╔════════════════════════════════════════════╗
+   ║ ‹                                       ⋯  ║  ← discs on artwork, no bar,
+   ║        backdrop, 16:9, behind the          ║    old compact height
+   ║        status bar and the controls         ║
+   ╚════════════════════════════════════════════╝
+   The Last of Us                    ┌────────┐
+   Season 1, 2023                    │        │
+   TV-MA · 9 episodes · Craig Mazin  │ poster │
+   #1 in TV · Watched Feb 12, 2026   │  md    │
+                                     └────────┘
+                                     Your score
+                                        10.0
+
+                       [ ✓ Ranked ]   🔖   ➤
+
+   Twenty years after a fungal outbreak ravages the planet, a hardened
+   smuggler is hired to escort a teenage girl out of a brutal quarantine
+   zone, and what begins as a small job becomes a journey across a
+   broken country. … more                    ← always on line four
+
+   [Drama] [Action & Adventure] [+2]
+
+   SCORES
+   ⬤ 9.1  Following        ⬤ 8.7  bingd.        →
+
+   WHERE TO WATCH             [N] [tv] [a]  +2   ›
+   via JustWatch
+   ─────────────────────────────────────────────  ← the page's one hairline
+   Episodes    Cast    Reviews    Details
+```
+
+**The poster is right of the identity block, and the identity block is on Paper.** The pass
+above put the poster left and pulled the whole row up into the artwork. Two corrections, and
+they are one: **primary title text must not depend on being readable over a backdrop nobody
+chose.** A hero is a night scene, a white sky, a face — a serif title set on it is legible on
+the artwork the designer happened to be looking at and nowhere else. So the identity row now
+begins at the hero's lower edge and every word of it sets on the page's own surface. The poster
+keeps its overlap, at a shallower `POSTER_LIFT` of 56, because artwork over artwork is fine and
+it is the one object on this page allowed to cross the fade. The row aligns on its top rather
+than its bottom, so a one-line film title and a wrapped three-line one both start level with
+the artwork instead of the block sliding up and down with the length of a name.
+
+**The primary title remains on the normal content surface** in every state, including a title
+with no backdrop at all, where the hero is the bar's height plus a short warm band.
+
+**The personal score is associated with the poster and says whose it is in words.** It sits
+under the frame, centred on it: `Your score` in `caption`/tertiary, then the filled Maroon
+circle. The floating `YOU` pill from the pass above is gone — a bubble on a badge reads as a
+sticker or a notification rather than as a label, which was the founder's objection. Ownership
+is now stated, nothing floats, and the number is still the dominant element in the block by an
+order of magnitude of weight. The scale, the derivation (`score.ts`) and the honest dashed
+unranked state are untouched; it is still not a star rating.
+
+**Rank/Ranked keeps its word, its treatment and its menu.** The intermediate pass replaced it
+with an `Adjust` glyph that went straight to a same-watch rerank. That is rejected: choosing
+between adjusting a placement and declaring a rewatch is the reader's decision, and putting two
+intents behind one press is the founder's Terrace House bug rebuilt in a different shape. So:
+
+- **unranked** — filled Maroon `Rank`, opens the log sheet, where a band is chosen and a first
+  ranking begins;
+- **ranked** — outlined `✓ Ranked`, opens the ranking-options menu, which is where *Adjust
+  placement*, *I watched it again* and *Change your rating* are each named and each chosen.
+
+There is deliberately **no responsive switch** between a labelled button and an icon: a control
+that is a word on one phone and a symbol on another is two controls. The same menu is also
+reachable from the overflow in the top bar.
+
+**Rank/Ranked, Save and Recommend are one compact cluster**, right-aligned under the poster and
+the score rather than three equal shares of the content width — stretched across the page they
+read as a toolbar, which is the dashboard feeling this whole pass removes. Only the rank
+control is labelled, because only it is the primary act; the two glyphs keep their full spoken
+names and each clears 44pt through its own box rather than through slop, so neighbouring targets
+cannot overlap.
+
+**The top bar keeps the compact height it had before the redesign** — `insets.top` plus 44 on
+iOS and 56 on Android, exactly the navigator header's own metrics — and reserves nothing,
+because it is absolutely positioned over the artwork. What changed is only how it behaves. It
+begins fully transparent, and each control sits on a small Ink disc while it is over artwork:
+`TitleHero`'s top scrim is a gradient across the whole width, which is right for a bar and
+weakest exactly where a single glyph is smallest, so a local disc carries the contrast a pale
+backdrop needs. The disc fades out on the same value the Paper ground fades in on, so it exists
+only while there is artwork behind the glyph.
+
+**The synopsis is four lines with `more` inline on the fourth, the genres follow it, and the
+Scores treatment is unchanged from the note above.** Those three were accepted as built.
 
 ### The title-page crash — 2026-09-07
 

@@ -46,7 +46,7 @@ import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
 import { PersonalScore } from '@/features/title/PersonalScore';
 import { Synopsis } from '@/features/title/Synopsis';
-import { TitleActions, type TitleAction } from '@/features/title/TitleActions';
+import { TitleActions } from '@/features/title/TitleActions';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { useCredits } from '@/features/title/use-credits';
@@ -922,72 +922,6 @@ export default function TitleScreen() {
     });
   };
 
-  /**
-   * The three things you can do to this title, as one group (`TitleActions`).
-   *
-   * **The first one is the rank intent, and which intent depends on whether there is a
-   * ranking to adjust.** A ranked title's first action redoes the comparisons for the
-   * watch it already has; an unranked one's opens the log, which is where a rating is
-   * chosen and a first ranking begins. They are the same position because they are the
-   * same act at two stages, which is what the old arrangement — a Maroon `Rank` button
-   * that turned into an outlined `✓ Ranked` chip in a different place — could not say.
-   *
-   * A series gets Save alone: it cannot be ranked or recommended (PRD §10), which is
-   * the same rule the labelled row this replaces applied.
-   */
-  const actions: TitleAction[] = [
-    ...(rankable
-      ? [
-          data.ranked
-            ? ({
-                id: 'adjust',
-                icon: 'swap-vertical-outline',
-                label: 'Adjust',
-                accessibilityLabel: `Adjust where ${displayTitle ?? title.title} sits in your ranking`,
-                onPress: adjustPlacement,
-                // The band arrives with the personal read. Pressing before it lands would
-                // open a session with no bucket to run it in.
-                disabled: !rankedBucket,
-              } as const)
-            : ({
-                id: 'rank',
-                icon: 'star-outline',
-                label: 'Rank',
-                accessibilityLabel: `Rank ${displayTitle ?? title.title}`,
-                onPress: () => openLog(),
-              } as const),
-        ]
-      : []),
-    {
-      id: 'save',
-      icon: isWatchlisted ? 'bookmark' : 'bookmark-outline',
-      label: isWatchlisted ? 'Saved' : 'Save',
-      // The sentences the labelled control used, unchanged: a screen reader's name for
-      // this control is what says which way the toggle goes.
-      accessibilityLabel: isWatchlisted
-        ? `Remove ${title.title} from your watchlist`
-        : `Add ${title.title} to your watchlist`,
-      onPress: () => void toggleWatchlist(),
-      selected: isWatchlisted,
-      disabled: watchlistBusy,
-    },
-    ...(rankable
-      ? [
-          {
-            id: 'recommend',
-            icon: 'paper-plane-outline',
-            label: 'Recommend',
-            accessibilityLabel: `Recommend ${title.title} to a friend`,
-            onPress: () => {
-              setActionError(null);
-              setRecommendedTo(null);
-              setRecommending(true);
-            },
-          } as const,
-        ]
-      : []),
-  ];
-
   return (
     <Screen includeBottomInset edges={[]}>
       {/**
@@ -1102,53 +1036,27 @@ export default function TitleScreen() {
         </View>
 
         {/**
-         * **Poster left, identity right** (founder redesign, 2026-09-07).
+         * **Identity left, poster right, and every word of it on Paper** (founder, final
+         * direction, 2026-09-07).
          *
-         * The poster used to sit alone under the hero with a detached score column
-         * opposite it, and the title, year and metadata began on a full-width band
-         * below both. Three bands, for one fact: what this is and what I made of it.
+         * The first pass of this redesign put the poster on the left and the words on the
+         * right, with the whole row pulled up into the artwork. The founder's correction is
+         * two changes and they are really one: **primary title text must not depend on
+         * being readable over a backdrop nobody chose.** A hero is unpredictable — a night
+         * scene, a white sky, a face — and a serif title set on it is legible on the
+         * artwork the designer happened to be looking at.
          *
-         * They are one row now. The poster rises into the artwork as before — the page
-         * keeps its one straddling object — and everything that names the title sets
-         * beside it, in a column, in the order a reader scans: what it is called, which
-         * part of it this is, what it is, and then where it sits for them.
+         * So the row starts at the hero's lower edge and everything in the left column
+         * sets on the page's own Paper. The poster keeps the overlap, because a poster is
+         * artwork and artwork may cross the fade; it is the one object on this page allowed
+         * to (`POSTER_LIFT`). The result is the composition the brief asks for: image-led
+         * at the top, then a calm editorial column with the artwork anchored opposite it.
          *
-         * The score comes with the poster rather than the words, anchored to its lower
-         * corner, because it is a fact about *this* title and the poster is the only
-         * thing on the page that can only be about this title. See `PersonalScore`.
+         * The score comes with the poster rather than with the words — it is a fact about
+         * *this* title, and the poster is the only thing on the page that can only be about
+         * this title.
          */}
         <View style={styles.identity}>
-          <View style={styles.posterColumn}>
-            <View style={styles.posterFrame}>
-              <Poster
-                uri={posterUri(title.poster_path, 'card')}
-                title={title.title}
-                // `md`, down from `lg`. The poster is no longer the page's only object
-                // at this height — it now shares the row with the whole identity — and a
-                // 132pt frame left a column too narrow to set a serif title in.
-                size="md"
-              />
-            </View>
-            {/* Over the poster's lower outside corner, half on and half off. A series
-                has no score because it cannot be ranked (PRD §10), so it gets no anchor
-                rather than an empty one. */}
-            {rankable ? (
-              <View style={styles.scoreAnchor} pointerEvents="box-none">
-                <PersonalScore
-                  score={score}
-                  // Ranked, but the band sizes that derive the number have not landed.
-                  // A dashed "Rank" ring here would contradict the Adjust control beside
-                  // it; an empty circle says "there is a score, it is not here yet".
-                  pending={Boolean(data.ranked) && score == null}
-                  bucket={data.ranked?.bucket ?? null}
-                  // Where the Ranked chip led, unchanged: a ranked title opens its
-                  // options, an unranked one opens the log.
-                  onPress={() => (data.ranked ? setManaging(true) : openLog())}
-                />
-              </View>
-            ) : null}
-          </View>
-
           <View style={styles.identityCopy}>
             {/* For a season the heading is the show, and the show is also the way to
                 the series page — so the heading is the link rather than a small line
@@ -1189,11 +1097,90 @@ export default function TitleScreen() {
               </Text>
             ) : null}
           </View>
+
+          <View style={styles.posterColumn}>
+            <View style={styles.posterFrame}>
+              <Poster
+                uri={posterUri(title.poster_path, 'card')}
+                title={title.title}
+                // `md`. The poster shares the row with the whole identity now, and a 132pt
+                // frame left too little width to set a serif title in beside it.
+                size="md"
+              />
+            </View>
+            {/* Under the artwork it belongs to, right-aligned with it. A series has no
+                score because it cannot be ranked (PRD §10), so it gets nothing here
+                rather than an empty circle. */}
+            {rankable ? (
+              <PersonalScore
+                score={score}
+                // Ranked, but the band sizes that derive the number have not landed. The
+                // dashed ring reads "rank this", which would contradict the Ranked control
+                // below it; the neutral empty circle says the number has not arrived.
+                pending={Boolean(data.ranked) && score == null}
+                bucket={data.ranked?.bucket ?? null}
+                // Exactly where the old Ranked chip led: a ranked title opens its options,
+                // an unranked one opens the log. The score has been the place to press to
+                // change a rating since 2026-09-06 and still is.
+                onPress={() => (data.ranked ? setManaging(true) : openLog())}
+              />
+            ) : null}
+          </View>
         </View>
 
-        {/* Adjust or Rank, Save, Recommend — one group, one baseline, one weight.
-            See `TitleActions` for why the giant Ranked button is not among them. */}
-        <TitleActions actions={actions} />
+        {/**
+         * **Rank/Ranked, Save, Recommend — one compact cluster under the poster.**
+         *
+         * Right-aligned and content-sized rather than three equal shares of the page:
+         * stretched across the full width they read as a toolbar, which is the
+         * dashboard feeling this pass is removing. Hung from the right they sit directly
+         * under the artwork and the score, which is the cluster they belong to, and they
+         * fill the space the left column's shorter text leaves.
+         *
+         * The Rank/Ranked control keeps its **text and its behaviour**: unranked opens the
+         * log, ranked opens the ranking-options menu. See `TitleActions` and §6 of the
+         * founder's direction — nothing here decides between adjusting a placement and
+         * declaring a rewatch, because that is the menu's job and the distinction is the
+         * whole point of it.
+         */}
+        <TitleActions
+          rank={
+            rankable
+              ? {
+                  ranked: Boolean(data.ranked),
+                  accessibilityLabel: data.ranked
+                    ? 'Ranked. Change or remove this.'
+                    : `Rank ${displayTitle ?? title.title}`,
+                  accessibilityHint: data.ranked
+                    ? 'Opens rating and collection options'
+                    : 'Opens the rating sheet',
+                  onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                }
+              : null
+          }
+          save={{
+            selected: isWatchlisted,
+            // The sentences the labelled control used, unchanged: a screen reader's name
+            // for this control is what says which way the toggle goes.
+            accessibilityLabel: isWatchlisted
+              ? `Remove ${title.title} from your watchlist`
+              : `Add ${title.title} to your watchlist`,
+            onPress: () => void toggleWatchlist(),
+            disabled: watchlistBusy,
+          }}
+          recommend={
+            rankable
+              ? {
+                  accessibilityLabel: `Recommend ${title.title} to a friend`,
+                  onPress: () => {
+                    setActionError(null);
+                    setRecommendedTo(null);
+                    setRecommending(true);
+                  },
+                }
+              : null
+          }
+        />
 
         {/* The no-artwork case for the recommendation callout. Same object, laid out in
             the flow rather than over a hero that is not there. */}
@@ -2058,17 +2045,19 @@ function formatAirDate(date: string | null) {
 /**
  * How far the poster rises into the hero.
  *
- * Raised from 64 with the taller hero, then to 120 in the hierarchy pass, and reduced to
- * 88 with the poster itself (2026-09-07). The framed poster is 140pt tall at `md`, so the
- * lift decides how much of it hangs *below* the artwork — 52pt here — and the identity
- * column beside it hangs from the same lower edge. A lift deeper than the poster is tall
- * would put its top above the page, which is why this and the collapsed band move together.
+ * It has been 64, then 120, then 88, and is now **56** — and the reason it came down is
+ * that it stopped carrying the whole row. The identity row used to rise with the poster,
+ * so the lift decided how much of the *page* sat on artwork; the row now starts at the
+ * hero's lower edge and only the poster is pulled up, so the lift decides one thing:
+ * how much of the frame crosses the fade.
  *
- * The founder's original note was that the poster sat "beneath a separate strip" rather
- * than in the artwork, and it still does not: it straddles the fade, on its Paper mat,
- * which is the one object on this page allowed to cross the boundary.
+ * 56 of a 140pt frame is enough for the poster to read as straddling the boundary — the
+ * founder's original note was that it sat "beneath a separate strip" rather than in the
+ * artwork — while leaving its top in the part of the fade that is already mostly Paper.
+ * It is the one object on this page allowed to cross that line, because it is artwork;
+ * the words are not.
  */
-const POSTER_LIFT = 88;
+const POSTER_LIFT = 56;
 
 /**
  * How much warm band sits *below the navigation* when a title has no artwork at all.
@@ -2093,44 +2082,40 @@ const REVEAL_WINDOW = 96;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
+  /**
+   * **The row starts where the hero ends** (founder, final direction, 2026-09-07).
+   *
+   * No negative margin on the row itself, which is the whole of "the title must not rely
+   * on being readable over the backdrop": every word in the left column sets on Paper.
+   * The poster is lifted on its own, below, because artwork over artwork is fine and text
+   * over artwork is a gamble on which backdrop the reader happened to open.
+   *
+   * `flex-start`, not `flex-end`: the title and the top of the poster begin on the same
+   * line, so a one-line film title and a wrapped three-line one both start level with the
+   * artwork rather than the block sliding up and down with the length of a name.
+   */
   identity: {
     flexDirection: 'row',
-    // Baselines, not centres: the poster is the dominant object and the identity beside
-    // it hangs from its lower edge, which is where the page resumes.
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     gap: theme.space[4],
     paddingHorizontal: theme.layout.gutter,
-    marginTop: -POSTER_LIFT,
+    paddingTop: theme.space[3],
   },
-  /** The poster and the score that is anchored to it, as one object. */
-  posterColumn: { position: 'relative' },
   /**
-   * The score, over the poster's lower outside corner.
+   * The poster and the score beneath it, as one object on the right.
    *
-   * Overlapping rather than inside or beside: a badge fully within the frame is a sticker
-   * on the artwork, and one fully outside is back to being the detached number the
-   * founder rejected.
-   *
-   * The offsets are bounded by what is next to it. `right` is less than the row's own
-   * `space[4]` gap, so the badge crosses the poster's edge into the gutter between the
-   * poster and the identity column and stops short of the text — a wider overhang would
-   * be painted over by the column, which is a later sibling. `bottom` is small for the
-   * same reason downwards: the `YOU` pill hangs below the badge, and the action group
-   * beneath the row carries the clearance for it.
-   *
-   * `box-none` on the wrapper so only the badge itself takes touches: the anchor is a
-   * positioning device and must not become a second, invisible target beside the poster.
+   * The lift lives here rather than on the row, so the artwork crosses the hero's fade
+   * and the words do not. `alignItems: 'center'` centres the score under the frame; the
+   * frame's own width is what the column is.
    */
-  scoreAnchor: { position: 'absolute', right: -12, bottom: -8 },
+  posterColumn: { alignItems: 'center', marginTop: -POSTER_LIFT },
   /**
-   * Everything that names the title.
+   * Everything that names the title, on the left.
    *
    * `flex: 1` so it takes the width the poster leaves and a long name wraps inside it
-   * rather than pushing the row wider than the gutters allow. Bottom-aligned with the
-   * poster through the row's own `flex-end`, so a one-line film title and a wrapped
-   * three-line one both finish level with the artwork.
+   * rather than pushing the row wider than the gutters allow.
    */
-  identityCopy: { flex: 1, gap: theme.space[1], paddingBottom: theme.space[1] },
+  identityCopy: { flex: 1, gap: theme.space[1] },
   /**
    * A Paper mat around the artwork, the way a print is framed.
    *

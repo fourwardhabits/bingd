@@ -6,7 +6,7 @@ import { renderWithProviders } from '@/test-utils/render';
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
 // app-directory.test.ts.
-import TitleScreen from '../../../app/title/[id]';
+import TitleScreen, { ErrorBoundary } from '../../../app/title/[id]';
 
 const mockPush = jest.fn();
 const mockBack = jest.fn();
@@ -444,6 +444,42 @@ describe('optional metadata that is absent in the catalogue', () => {
     await waitFor(() => expect(view.getByText('Episode 1')).toBeTruthy());
   });
 
+  it('renders a title with no synopsis at all', async () => {
+    // Omit the paragraph; never a placeholder line, and never an empty `Text`, which is
+    // a line box with the body's height rather than nothing.
+    const view = await openOn(
+      { ...completeFilm, id: 'film-quiet', overview: null },
+      'Inception',
+    );
+
+    expect(view.queryByTestId('synopsis-column')).toBeNull();
+    expect(view.queryByTestId('synopsis-more')).toBeNull();
+  });
+
+  it('renders a provider whose name and logo both came back empty', async () => {
+    /**
+     * The availability block reaches the page straight off the adapter's reply,
+     * unvalidated, and **after the first frame** — so a dereference in it throws in the
+     * middle of a render the reader is already looking at. That is the shape of the
+     * founder's report, which is why this shape is pinned rather than assumed benign.
+     */
+    mockFetchWatchProviders.mockResolvedValue({
+      region: 'US',
+      link: null,
+      providers: [
+        { provider_id: 1, name: null, logo_path: null, offers: ['stream'] },
+        { provider_id: 8, name: 'Netflix', logo_path: null, offers: ['stream'] },
+      ],
+    });
+
+    const view = await openOn(completeFilm, 'Inception');
+
+    await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
+    // The one it can name is named; the one it cannot is drawn as an empty well rather
+    // than spoken as "null".
+    expect(view.getByLabelText(/Where to watch\. Netflix\./)).toBeTruthy();
+  });
+
   it('renders a ranked title placed outside the top ten, where the genre path runs', async () => {
     // `heroRankFor` only reaches `genreRanksFor` for a placement past the tenth, so this
     // is the branch a single ranked fixture never exercises.
@@ -576,13 +612,18 @@ describe('the personal score', () => {
 
     const view = await openOn(completeFilm, 'Inception');
 
-    // The visible treatment: `YOU` on the circle. A naked 10.0 is what the founder
-    // rejected, and it is what a critics' aggregate looks like everywhere else. Waiting
-    // on the number rather than on the word, because the word is drawn in both states —
-    // that is the point of it, and it makes the region hold still.
+    /**
+     * **The words, not a badge on a badge.** A naked 10.0 beside artwork is what every
+     * other product's critics' aggregate looks like, and the first answer to that — a
+     * floating `YOU` pill on the circle — read as a sticker. Ownership is stated instead.
+     *
+     * Waiting on the number rather than on the words, because the words are drawn in both
+     * states: that is the point of them, and it is what makes the region hold still.
+     */
     await waitFor(() => expect(view.getByText('10.0', drawn)).toBeTruthy());
-    expect(view.getByText('YOU')).toBeTruthy();
-    // And the spoken one, which leads with whose score it is rather than with the number.
+    expect(view.getByText('Your score')).toBeTruthy();
+    expect(view.queryByText('YOU')).toBeNull();
+    // And the spoken label, which leads with whose score it is rather than with the number.
     expect(view.getByLabelText(/^Your score: 10\.0 out of 10/)).toBeTruthy();
   });
 
@@ -605,24 +646,48 @@ describe('the personal score', () => {
 });
 
 describe('the action group', () => {
-  it('offers Adjust, Save and Recommend for a ranked title, and no Ranked button', async () => {
+  it('reads Ranked, Save and Recommend for a ranked title', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-action-adjust')).toBeTruthy());
+    // The rank control keeps its **word** in both states, at every width. There is no
+    // responsive switch to a glyph: a control that is a word on one phone and a symbol
+    // on another is two controls.
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    expect(view.getByText('Ranked')).toBeTruthy();
     expect(view.getByTestId('title-action-save')).toBeTruthy();
     expect(view.getByTestId('title-action-recommend')).toBeTruthy();
-    // The score already proves the title is ranked; a button that only reports is gone.
-    expect(view.queryByText('Ranked')).toBeNull();
     expect(view.queryByTestId('title-action-rank')).toBeNull();
   });
 
-  it('enters the same-watch rerank from the first action, declaring no new watch', async () => {
+  it('opens the ranking-options menu from Ranked, and decides no intent itself', async () => {
+    /**
+     * **The interaction contract, unchanged.** Ranked opens the menu, and the menu is
+     * where the reader says which of the three things they mean. A control that went
+     * straight to a rerank — or straight to a rewatch — would be the founder's Terrace
+     * House bug rebuilt in a different shape: two intents behind one press.
+     */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-action-adjust')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-action-adjust'));
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-action-ranked'));
+
+    // All three intents offered, and none of them taken by the press itself.
+    expect(view.getByText('Adjust placement')).toBeTruthy();
+    expect(view.getByText('I watched it again')).toBeTruthy();
+    expect(view.getByText('Change your rating')).toBeTruthy();
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
+  });
+
+  it('enters the same-watch rerank from Adjust placement, declaring no new watch', async () => {
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-action-ranked'));
+    await fireEvent.press(view.getByText('Adjust placement'));
 
     // `rank_again` with `p_new_watch: false` — the session runs over the position the
     // title already holds, and `_rank_finalize` posts `title_ranked` only `if p_new_watch
@@ -633,13 +698,39 @@ describe('the action group', () => {
         expect.objectContaining({ p_new_watch: false }),
       ),
     );
-    expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.objectContaining({ p_new_watch: true }));
+    expect(mockRpc).not.toHaveBeenCalledWith(
+      'rank_again',
+      expect.objectContaining({ p_new_watch: true }),
+    );
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
+  });
+
+  it('declares a new watch only from the rewatch row', async () => {
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-action-ranked'));
+    await fireEvent.press(view.getByText('I watched it again'));
+
+    // The one row in the app that declares a second viewing, and the only one that asks
+    // for an activity. Exactly one, on completion.
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_again',
+        expect.objectContaining({ p_new_watch: true }),
+      ),
+    );
+    expect(mockRpc).not.toHaveBeenCalledWith(
+      'rank_again',
+      expect.objectContaining({ p_new_watch: false }),
+    );
   });
 
   it('opens the log rather than a comparison for an unranked title', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
+    expect(view.getByText('Rank')).toBeTruthy();
     await fireEvent.press(view.getByTestId('title-action-rank'));
 
     // The bucket chooser, which is where a first ranking begins. Nothing is ranked yet,
@@ -705,6 +796,35 @@ describe('navigation', () => {
     const view = await openOn(completeFilm, 'Inception');
 
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+  });
+
+  it('catches a render error on the route without navigating anywhere', async () => {
+    /**
+     * **The route-local boundary, and the whole reason it exists.**
+     *
+     * The root `RouteErrorBoundary` wraps `<Stack>`, so catching there unmounts the
+     * navigator: the pushed route goes, everything behind it goes, and clearing the error
+     * mounts a fresh `<Stack>` at the root index — which `nextRoute` reads as
+     * `group === undefined` and answers with `/(tabs)/feed`. Nothing chose the feed; the
+     * back stack stopped existing.
+     *
+     * Expo Router wraps a route's `ErrorBoundary` export around the route component and
+     * nothing above it. What is asserted here is the part that matters to a reader: it
+     * draws, it offers a retry, and **it navigates nowhere at all** — not to the feed, not
+     * anywhere. Where the reader is stays the navigator's business.
+     */
+    const retry = jest.fn();
+    const view = await renderWithProviders(
+      <ErrorBoundary error={new Error('boom')} retry={retry} />,
+    );
+
+    expect(view.getByText('Something went wrong')).toBeTruthy();
+    await fireEvent.press(view.getByText('Try again'));
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockBack).not.toHaveBeenCalled();
   });
 
   it('opens the series from a season’s heading', async () => {

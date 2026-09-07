@@ -15,32 +15,36 @@ export type PersonalScoreProps = {
    * A score is derived from the size of the band it sits in (`score.ts`), so the ranking
    * row can be in hand a moment before the band sizes are — and in that moment the two
    * honest states say different things. The dashed ring reads "not ranked, rank it",
-   * which contradicts the *Adjust* control beside it; the neutral empty circle reads
-   * "there is a score here and it has not arrived", which is what is true.
+   * which contradicts the Ranked control below it; the neutral empty circle reads "there
+   * is a score here and it has not arrived", which is what is true.
    */
   pending?: boolean;
-  /** Leads into the rank intent — the same door the first action opens. */
+  /** Leads where the Ranked control leads: the menu, or the log. */
   onPress: () => void;
 };
 
 /**
- * **My** score for this title, over the corner of its poster.
+ * **My** score for this title, under its poster, with the word for whose it is.
  *
  * ---------------------------------------------------------------------------
- * WHAT THIS REPLACES, AND THE FOUNDER'S OBJECTION TO IT
+ * WHAT THIS HAS BEEN, AND WHY IT IS NOW WORDS
  *
- * The number used to sit in a detached column on the right of the hero, opposite the
- * poster, with `#1 in TV` under it and a `✓ Ranked` button under that. The founder's
- * reading on a device: *`10.0` up there is not self-evidently mine.* And it is not —
+ * The number sat in a detached column opposite the poster until 2026-09-07, and the
+ * founder's reading on a device was that `10.0` up there is not self-evidently *mine* —
  * a bare number beside a film's artwork is exactly where every other product puts a
- * critics' aggregate, so the app's one genuinely distinctive fact was wearing the
- * costume of the least distinctive one.
+ * critics' aggregate, so the app's one genuinely distinctive fact was wearing the costume
+ * of the least distinctive one.
  *
- * So the number moves onto the poster, which is the one place on the page that can only
- * be about this title, and it carries the word **YOU**. The word is the whole point of
- * the change and is not decoration: it is what stops `10.0` reading as a rating somebody
- * else gave. bingd.'s distinctive element is the reader's ranked relationship to a
- * title, and this is where the page says so.
+ * The first answer was a `YOU` pill on the circle's lower edge. The founder rejected it
+ * on review: a floating bubble on a badge is a sticker, and it reads as a notification
+ * rather than as a label. The answer that stands is the plain one — **the words "Your
+ * score", set quietly above the number.** Ownership is stated rather than symbolised,
+ * nothing floats, and the number is still the dominant element in the block by an order
+ * of magnitude of weight.
+ *
+ * It sits under the poster because the poster is the only thing on the page that can only
+ * be about this title, and a score with no owner named beside artwork is precisely the
+ * ambiguity the wording removes.
  *
  * ---------------------------------------------------------------------------
  * WHAT DID NOT CHANGE
@@ -48,12 +52,12 @@ export type PersonalScoreProps = {
  * The number, the scale and where it comes from. It is still the derived 0–10 from the
  * title's position in its band (`score.ts`), still one decimal, still not a star rating
  * and still nothing this component computes or stores. The unranked state is still the
- * app's honest dashed ring — never a greyed `0.0`, never a faded number, because no
- * score has been earned and none of those say so (PRD §26.4).
+ * app's honest dashed ring — never a greyed `0.0`, never a faded number, because no score
+ * has been earned and none of those say so (PRD §26.4).
  *
- * It is a control in both states, and leads where the first action leads: the score is
- * the most useful state indicator this app has, so it is also the place to press to
- * change it. That rule is `ScoreBadge`'s own since 2026-09-06 and is kept.
+ * It is a control in both states, and leads where the Ranked control leads: the score is
+ * the most useful state indicator this app has, so it is also a place to press to change
+ * it. That rule is `ScoreBadge`'s own since 2026-09-06 and is kept.
  */
 export function PersonalScore({ score, bucket, pending, onPress }: PersonalScoreProps) {
   const ranked = score != null;
@@ -64,9 +68,9 @@ export function PersonalScore({ score, bucket, pending, onPress }: PersonalScore
       accessibilityRole="button"
       accessibilityState={{ selected: ranked }}
       /**
-       * The whole sentence, because to a screen reader the badge is a circle and the
-       * pill is three letters. "Your score" first: whose it is, is the fact the visual
-       * treatment exists to carry, so it is the fact the spoken one leads with.
+       * The whole sentence, because to a screen reader the badge is a circle. "Your score"
+       * first: whose it is, is the fact this block exists to carry, so it is the fact the
+       * spoken label leads with — exactly as the visible one does.
        */
       accessibilityLabel={
         ranked
@@ -82,9 +86,14 @@ export function PersonalScore({ score, bucket, pending, onPress }: PersonalScore
       hitSlop={theme.space[2]}
       style={({ pressed }) => [styles.column, pressed && styles.pressed]}
     >
-      {/* Named once, above, rather than three times over — the badge sets its own
-          spoken label and the pill is a word, and a reader who lands here should hear
-          one thing. */}
+      {/* Quiet, small and above the number, which is the arrangement that reads as a
+          label rather than as a caption competing with it. Never over artwork: this is
+          the reason the whole identity row now starts below the hero. */}
+      <Text variant="caption" tone="tertiary">
+        Your score
+      </Text>
+      {/* Named once, in the label above, rather than three times over: the badge sets its
+          own spoken label and a reader who lands here should hear one thing. */}
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {pending && !ranked ? (
           <EmptyScoreBadge size="lg" label="Your score is loading" />
@@ -92,44 +101,13 @@ export function PersonalScore({ score, bucket, pending, onPress }: PersonalScore
           <ScoreBadge score={score} bucket={bucket} size="lg" />
         )}
       </View>
-
-      {/**
-       * `YOU`, on the ring rather than beside it.
-       *
-       * Overlapping the circle's lower edge makes the two one object: a caption set
-       * under a badge is a second element the eye has to associate, and the founder's
-       * note is that a naked `10.0` is not sufficient — so the word has to arrive with
-       * the number rather than after it.
-       *
-       * Paper ground with a Maroon hairline, not a second filled Maroon shape: the
-       * circle is already the page's chromatic element and a filled pill on top of it
-       * would be two.
-       */}
-      <View style={styles.you}>
-        <Text variant="caption" tone="action" allowFontScaling={false} style={styles.youInk}>
-          YOU
-        </Text>
-      </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  column: { alignItems: 'center' },
-  you: {
-    // Onto the circle's lower edge. The pill is 18pt tall, so a third of it overlaps.
-    marginTop: -6,
-    paddingHorizontal: theme.space[2],
-    height: 18,
-    justifyContent: 'center',
-    borderRadius: theme.radius.full,
-    backgroundColor: theme.surface.base,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.semantic.action,
-  },
-  // Tight and letter-spaced: three capitals reading as a label rather than as a word in
-  // a sentence. `allowFontScaling` is off for the same reason the badge's number is —
-  // the pill is sized for this string and the ratio is what keeps it round.
-  youInk: { fontSize: 10, lineHeight: 12, letterSpacing: 0.8 },
+  // Centred under the poster, and gapped just enough that the words belong to the number
+  // rather than sitting on it.
+  column: { alignItems: 'center', gap: theme.space[1], paddingTop: theme.space[3] },
   pressed: { opacity: 0.7 },
 });

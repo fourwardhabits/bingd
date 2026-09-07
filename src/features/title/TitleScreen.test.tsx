@@ -385,9 +385,12 @@ describe('the page hierarchy', () => {
     expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
     expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy();
 
-    // And in one group, above the synopsis rather than in a band of their own below it.
+    // And in one cluster, above the synopsis rather than in a band of their own below
+    // it. Only the rank control carries a word — the other two are glyphs with spoken
+    // names — so the cluster is found by its own id rather than by reading text.
     expect(view.getByTestId('title-actions')).toBeTruthy();
-    expect(positionOf(view, 'Recommend')).toBeLessThan(
+    expect(view.getByTestId('title-action-rank')).toBeTruthy();
+    expect(positionOf(view, 'Rank')).toBeLessThan(
       positionOf(view, 'A thief who steals corporate secrets'),
     );
   });
@@ -590,7 +593,9 @@ describe('a title this user has ranked', () => {
     // above a button named Rank, does not need a caption to say whose score it is —
     // and the Scores section carried a second copy under those words until 2026-08-18.
     expect(view.getAllByLabelText('Your score: 10.0 out of 10, I liked it')).toHaveLength(1);
-    expect(view.queryByText('Your score')).toBeNull();
+    // One copy of the number, and one place the words "Your score" appear — beneath the
+    // poster. The Scores section is what everybody *else* thought and never restates it.
+    expect(view.getAllByText('Your score')).toHaveLength(1);
     // The section is what everybody *else* thought, and those are its only two rows.
     expect(view.getByText('Following')).toBeTruthy();
     expect(view.getByText('bingd.')).toBeTruthy();
@@ -607,20 +612,33 @@ describe('a title this user has ranked', () => {
     );
   });
 
-  it('opens the rating and collection menu from the overflow control', async () => {
+  it('shows a Ranked control that opens the rating and collection menu', async () => {
     /**
-     * The menu moved from the Ranked chip to `⋯` in the top bar (founder redesign,
-     * 2026-09-07), with the same rows and the same reachability: a ranked title has one
-     * and nothing else does. What is gone is the chip — a full-height button whose job
-     * was to *report* that the title is ranked, standing in for a fact the score on the
-     * poster already carries.
+     * **The control and its contract are the ones this page has always had** (founder,
+     * final direction, 2026-09-07). An intermediate pass replaced it with an Adjust glyph
+     * that went straight to a same-watch rerank; that was rejected, because choosing
+     * between adjusting a placement and declaring a rewatch is the reader's decision and
+     * the menu is where they make it.
+     *
+     * The menu is reachable two ways and both open the same sheet: the control itself,
+     * and the overflow in the top bar.
      */
     const view = await open();
 
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    expect(view.queryByText('Ranked')).toBeNull();
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+    expect(view.getByText('Ranked')).toBeTruthy();
 
+    await fireEvent.press(view.getByTestId('title-action-ranked'));
+    expect(view.getByText('Adjust placement')).toBeTruthy();
+    expect(view.getByText('I watched it again')).toBeTruthy();
+  });
+
+  it('offers the same menu from the overflow control in the bar', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
+
     expect(view.getByText('Adjust placement')).toBeTruthy();
   });
 

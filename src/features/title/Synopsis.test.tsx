@@ -106,6 +106,52 @@ describe('the collapse arithmetic', () => {
   });
 });
 
+describe('the contract at other widths and text sizes', () => {
+  /**
+   * The measurement is in points, so a narrow screen and a large text size are the same
+   * question asked twice: less room per line, and a marker that costs the same width it
+   * always did. Both are cases the old character-count approach could not have answered,
+   * which is why they are asserted against measured widths rather than against a render.
+   */
+  it('trims harder on a narrow screen, because there is less line to give', () => {
+    const lines = [
+      line('one ', 300),
+      line('two ', 300),
+      line('three ', 300),
+      line('alpha beta gamma', 320),
+      line('delta', 60),
+    ];
+
+    // A line that exactly fills a 320pt column has nothing left for a 40pt marker, so the
+    // last word goes and the cut lands on the space before it.
+    expect(collapse({ lines, markerWidth: 40, available: 320 })?.prose).toBe(
+      'one two three alpha beta',
+    );
+  });
+
+  it('reserves the marker’s own measured width, whatever the text size made it', () => {
+    const lines = [
+      line('one ', 200),
+      line('two ', 200),
+      line('three ', 200),
+      line('alpha beta gamma delta', 220),
+      line('tail', 60),
+    ];
+
+    // The same prose in the same column, with the marker set at two text sizes. At the
+    // small one it fits beside the whole line; at the large one it buys itself room by
+    // taking a word of prose with it — which is the behaviour a character count cannot
+    // have, because the count does not know how wide `more` came out.
+    const small = collapse({ lines, markerWidth: 30, available: 300 })?.prose;
+    const large = collapse({ lines, markerWidth: 120, available: 300 })?.prose;
+
+    expect(small).toBe('one two three alpha beta gamma delta');
+    expect(large).toBe('one two three alpha beta gamma');
+    // Whole words at either size, and no trailing space for the marker to sit after.
+    expect(large!.endsWith(' ')).toBe(false);
+  });
+});
+
 describe('the rendered synopsis', () => {
   /**
    * Drives the two measurements the component waits for, in the order a device would.

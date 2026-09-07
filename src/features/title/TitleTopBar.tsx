@@ -3,14 +3,38 @@ import { Animated, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/ui/components';
-import { theme } from '@/ui/tokens';
+import { inkAlpha, theme } from '@/ui/tokens';
 
 /**
- * The bar height above the status bar, per platform — the same pair `TitleHero` and
- * `DetailHeader` already use, and stated here rather than imported for the reason they
- * both give: the number is the platform's, not any one module's.
+ * The bar height above the status bar, per platform.
+ *
+ * **The same pair the navigator's own header used**, and the same pair `TitleHero` and
+ * `DetailHeader` state — 44 on iOS, 56 on Android's toolbar convention. Drawing this bar
+ * ourselves changed how it behaves and deliberately not how tall it is: the founder's
+ * direction is that title detail keeps the compact height it had before the redesign, and
+ * this is that height, to the point.
+ *
+ * It also reserves nothing. The bar is absolutely positioned over the artwork, so the
+ * hero still begins at the top of the display and no content moved down to make room for
+ * the transparency.
  */
 export const NAV_BAR_HEIGHT = Platform.select({ android: 56, default: 44 }) as number;
+
+/**
+ * A disc of Ink under each glyph while it is over artwork.
+ *
+ * `TitleHero`'s top scrim is the app's existing contrast language and it is a *gradient
+ * across the whole width* — which is the right treatment for a bar and not quite enough
+ * for a single glyph on a bright backdrop, where the scrim is at its weakest exactly
+ * where the icon is smallest. A local disc is the standard answer and the founder's
+ * direction names it. It fades out with the same value the ground fades in on, so it
+ * exists only while there is artwork behind the glyph and never over Paper.
+ *
+ * Deliberately low: enough to separate a Parchment glyph from a pale sky, not enough to
+ * read as a button. Two overlapping circles would be chrome; two barely-there ones are a
+ * shadow the eye does not name.
+ */
+const DISC = inkAlpha(0.28);
 
 export type TitleTopBarProps = {
   /**
@@ -184,7 +208,11 @@ function BarButton({
       style={({ pressed }) => [styles.control, pressed && styles.pressed]}
     >
       <Animated.View style={[styles.glyph, { opacity: onArtwork }]}>
-        <Ionicons name={icon} size={theme.layout.icon.lg} color={theme.text.inverse} />
+        {/* The disc and the light glyph fade together, because they are one treatment:
+            a Parchment icon needs the disc and an Ink one on Paper must not have it. */}
+        <View style={styles.disc}>
+          <Ionicons name={icon} size={theme.layout.icon.md} color={theme.text.inverse} />
+        </View>
       </Animated.View>
       <Animated.View style={[styles.glyph, { opacity: progress }]}>
         <Ionicons name={icon} size={theme.layout.icon.lg} color={theme.text.primary} />
@@ -216,6 +244,21 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  /**
+   * The disc, sized to the glyph rather than to the target.
+   *
+   * 32pt around a 24pt icon: the touch target is the control's own 44pt box, and a disc
+   * that filled it would be a button. The icon steps down to `md` inside the disc and
+   * back up to `lg` without one, so the two treatments read at the same visual size.
+   */
+  disc: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: DISC,
   },
   // Both copies occupy the same box, so the crossfade does not move the glyph by a pixel.
   glyph: {

@@ -315,16 +315,43 @@ function ProviderLogo({ provider, size }: { provider: WatchProvider; size: numbe
         />
       ) : (
         <Text variant="caption" tone="tertiary">
-          {provider.name.trim().charAt(0).toUpperCase()}
+          {initialOf(provider.name)}
         </Text>
       )}
     </View>
   );
 }
 
-/** "Netflix, Apple TV and 3 more." One sentence for one accessibility stop. */
-function listOf(names: string[], overflow: number): string {
-  const parts = [...names];
+/**
+ * The letter a service is drawn as when TMDB publishes no logo for it.
+ *
+ * **Defensive about the name, and this is not theoretical tidiness.** `providers` reaches
+ * this component straight off the adapter's reply — `data.providers ?? []`, unvalidated,
+ * because it is a provider's payload rather than the app's own data — and it arrives
+ * *after* the page's first frame. A row whose `name` came back null would therefore throw
+ * on `.trim()` in the middle of a render the reader is already looking at, which is the
+ * exact shape of the founder's crash report.
+ *
+ * That is not evidence that it *is* the crash: nothing in the log says this happened, and
+ * TMDB has always sent a name. It is a render-time dereference of unvalidated data in a
+ * block that loads late, found while looking for that class of thing (§12), and it costs
+ * one function to remove.
+ *
+ * An empty string is the honest answer for a service with no name and no logo: an empty
+ * 28pt well reads as a service the app could not identify, which is what it is.
+ */
+function initialOf(name: string | null | undefined): string {
+  return (name ?? '').trim().charAt(0).toUpperCase();
+}
+
+/**
+ * "Netflix, Apple TV and 3 more." One sentence for one accessibility stop.
+ *
+ * Nameless services are dropped rather than spoken as "null": the sentence names what it
+ * can, and the count of what it cannot is already carried by the overflow.
+ */
+function listOf(names: (string | null | undefined)[], overflow: number): string {
+  const parts = names.filter((name): name is string => Boolean(name && name.trim()));
   if (overflow > 0) parts.push(`${overflow} more`);
   if (parts.length <= 1) return `${parts[0] ?? ''}.`;
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}.`;
