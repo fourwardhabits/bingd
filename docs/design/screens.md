@@ -82,6 +82,11 @@ Beli also asks what you dislike during onboarding ([`references/beli-20-onboardi
 
 The user lands on an empty Collection with one clear next action, never on an empty Feed.
 
+**As built — 2026-09-07, the pre-GTM convergence.** Two things the shipped flow says that the specification above did not, both from the product audit of what a stranger meets in the first minute.
+
+- **What a score is, before the first one appears.** The intro of Build your taste reads *"Rank five films you have seen. bingd. learns from how they compare to each other, not from stars. Each one gets a score from where it lands, and that score can move as you rank more."* A first liked film reveals `10.0` and `#1 in Movies`, and the second ranking moves it; without that sentence the reveal read as a star rating the app had assigned and then changed its mind about. The reveal repeats it once, quietly — see §4.
+- **The summary offers Explore For You and Find people.** *See my collection* is gone from the second slot: the Collection is one tap away on the bar for the rest of this person's life, and the moment five films are placed is the one moment the app can say "now find the people whose rankings you will see". Find people lands on For You opened on People (`PEOPLE_DISCOVERY` in `lib/routes.ts`, the tab with `show=people`), which is the existing discovery surface and not a screen of its own. The empty Feed offers the same action to the same place (§7).
+
 ---
 
 ## 4. The log and rank loop
@@ -173,6 +178,10 @@ Four lines of ordinal under a score, and the largest number on the screen was th
 Nothing about the arithmetic moved — same `rankings.position`, same genre ordering off the same cached list, same neighbours. `TOP_RANK_SHOWN` lives in `genre-rank.ts` so the hero and the reveal read one number.
 
 Below the panel, three actions: **Share**, **Rank another**, and **Done**. **Share is absent as built (2026-08-14)** — share cards do not exist, and an action that does nothing is worse than one that has not arrived. Beli celebrates the first rank specifically ([`references/beli-229-first-rank-celebration.jpg`](./references/beli-229-first-rank-celebration.jpg)) and Bingd should too — the first reveal is the moment the product explains itself, and it is worth a distinct line of copy.
+
+**That line exists as built (2026-09-07), and it is the explanation rather than a celebration.** Under the anchors, in `footnote`/`tertiary`, onboarding's reveals carry *"Your score comes from where this lands in your rankings. It can move as you rank more."* The condition is the `surface` the sheet already carries for analytics — `onboarding` is exactly "the first five rankings this account will ever see" — so no first-reveal flag is persisted, reset on a second device, or got wrong. An ordinary reveal, the one a reader with two hundred rankings meets from Search or a title page, does not carry it; the intro of Build your taste says the same thing once before the first comparison (§3). Nothing about the score, the placement or the arithmetic moved.
+
+**Undo at the first comparison says what it left behind (2026-09-07).** `rank_back` with nothing to reverse ends the session, and the sheet used to say *"Still in your collection — stays logged. You can rank it whenever you like."*, which a stranger read as finished. It now reads **Logged, not ranked yet** over *"{title} is saved in your Collection without a bingd. score. Rank it from your Collection or its title page whenever you like."* Copy only: the unranked contract, the bucket and the session are untouched.
 
 ---
 
@@ -426,6 +435,8 @@ Where an actor genuinely cannot be resolved, the item is **omitted**. A feed wit
 
 Empty feed for a user following nobody: an invitation to find friends, not a spinner and not a blank page.
 
+**As built — 2026-09-07.** The quiet feed — *"Your feed is quiet right now. Rank a title, or follow someone, and activity will appear here."* — carries one action, **Find people**, into For You opened on People (`PEOPLE_DISCOVERY`). The copy had said "follow someone" for weeks while nothing on the screen led to anybody: People lives behind For You's category selector, which a stranger on an empty Feed had no reason to open. It is the same destination onboarding's summary offers, by the same parameter. It is not an Everyone feed, not a contacts import, and not a banner — the branch is gone the moment there is activity to show.
+
 ### The row as it stands — 2026-08-20
 
 The anatomy above is the 2026-08-15 decision and is kept for its reasoning. Three device passes have moved the composition since, and this is where it landed:
@@ -464,6 +475,11 @@ Shelf titles are rendered from stored evidence and never composed on the client 
 **One shelf gets the detailed treatment**: the top slate keeps v1's card form — `poster.lg`, title, and the full sentence, "Because you ranked *Sinners* #2 and Jordan ranked this #1" — because the first recommendation should show its work. The shelves beneath it are for browsing.
 
 Before the threshold is reached, the tab shows what is missing and the fastest way to get there, which is the one place the milestone tracker from §5 belongs.
+
+**As built — 2026-09-07: what a long press says, and what a thin wall admits.**
+
+- **A long press on a poster gives the reason and nothing else.** `headlineFor` derives one sentence from whichever term carried the score — *"Because you loved Heat"*, *"More drama, which you rank highly"*, *"Popular right now"* — and that sentence is the whole of what a store build shows. It used to append `score 0.412`, the anchor contributions, the genre and language affinities and the popularity prior: the engine's working, in `rank.ts` vocabulary, on a production long press. The working survives under `__DEV__` only — a dev client attached to Metro — and on no built binary, the community beta included (founder decision, 2026-09-07). It is deliberately narrower than the Diagnostics sheet's own gate.
+- **A thin-taste wall says so, and only a genuinely popular one says "popular".** When the slate resolved no anchor (`lowData`) — a reader who has ranked two films, or ranked nothing they loved — one line in the footnote register sits above the artwork. Which line depends on what is actually on the wall (Codex review of #122, same day): the pool also takes `social_candidates`, the titles people the reader follows put in their top band, so "no anchor" is not "popularity-only". `popularityOnly` is derived in the hook's `select` from the drawn items — no anchor *and* no social id on the wall — and only then does the line read *"Popular right now while bingd. learns your taste."* A thin taste with a followed reader's title on the wall reads *"bingd. is still learning your taste."*, which claims nothing about where the titles came from. Both are gone the moment an anchor resolves. Nothing about the slate, its weights, its sources or its exposure window moved; this is a label on a wall that was already being drawn.
 
 ---
 
@@ -512,6 +528,8 @@ The **+** tab opens here with the field focused. A separate people-search lives 
 ### The idle state is not empty
 
 An autofocused field over a blank screen is the most common state of this tab and v1 gave it a single line of prompt copy. **Recent searches** fill it instead: a section header, the last several queries as tappable rows, and a way to clear them. This is Spotify's library pattern and it is worth having because film search is genuinely repetitive — people look for the same title across several sessions before they watch it.
+
+**The prompt for somebody with no history, as built (2026-09-07):** *"What did you watch?"* over *"Search for a film or show you have watched, then tap + to rank it. Shows are ranked by season."* It read *"Search for a title, open it, then log it with +."* until the pre-GTM audit — two taps the row no longer asks for, since + acts from the result: a film goes straight to its bucket, a show asks which season first (`SeasonPicker`).
 
 ### Filters
 

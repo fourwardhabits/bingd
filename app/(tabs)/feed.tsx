@@ -56,6 +56,7 @@ import { track } from '@/lib/analytics';
 import { readPref, writePref } from '@/lib/prefs';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
+import { PEOPLE_DISCOVERY } from '@/lib/routes';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import {
   ActivityRow,
@@ -690,12 +691,23 @@ export default function FeedScreen() {
             ) : feed.isPending ? (
               <SkeletonRow count={5} />
             ) : events.length === 0 ? (
+              /**
+               * **One action, into People** (pre-GTM audit, 2026-09-07).
+               *
+               * The copy already said "follow someone", and nothing on the screen led to
+               * anybody: People lives behind For You's category selector, which a
+               * stranger on an empty Feed has no reason to open. This is the same
+               * destination onboarding's summary now offers, on the same parameter — not
+               * an Everyone feed, not a contacts import, and not a banner that survives
+               * the first activity, because this branch is gone the moment there is one.
+               */
               <View style={styles.pad}>
                 <EmptyState
                   kind="nothingYet"
                   compact
                   title="Your feed is quiet right now."
                   body="Rank a title, or follow someone, and activity will appear here."
+                  action={{ label: 'Find people', onPress: () => router.push(PEOPLE_DISCOVERY) }}
                 />
               </View>
             ) : (

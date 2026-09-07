@@ -168,6 +168,17 @@ export type AnalyticsEvent =
    */
   | { name: 'signup_completed'; props?: undefined }
   /**
+   * The first-run taste flow genuinely became active for this account, on this device.
+   *
+   * **Once**, from `useBeginTasteOnboarding`, at the moment the phase is written as
+   * `active` — not on every mount of the screen, not on a resume of a flow that was
+   * already active, and not on a rerender. It is the denominator `onboarding_completed`
+   * never had: without it, an account that saw "Build your taste" and closed the app is
+   * indistinguishable from one that was never offered it. No properties, because at this
+   * moment nothing about the flow has happened yet.
+   */
+  | { name: 'onboarding_started'; props?: undefined }
+  /**
    * The first-run taste flow ended, by either exit.
    *
    * `skipped` is what distinguishes them, and it is one event rather than two so the
@@ -187,6 +198,21 @@ export type AnalyticsEvent =
       props: { media_kind: MediaKind; surface: Surface; bucket: Bucket };
     }
   /**
+   * A ranking session opened: the server answered the opening call with a comparison
+   * to show, or with a placement outright (an empty band needs no comparison).
+   *
+   * **Not** the Rank tap, and not the sheet mounting — a `rank_start` that is refused
+   * emits nothing. Once per session, on whichever attempt first succeeds: a retry
+   * after a lost reply that then opens is one start, and a pivot, a skip and an undo
+   * inside the session are none. Paired with `ranking_completed` it is the abandonment
+   * rate, which is the number the pre-GTM audit found the beta could not state. Same
+   * `mode` vocabulary as the completion, so the two join on it.
+   */
+  | {
+      name: 'ranking_started';
+      props: { media_kind: MediaKind; surface: Surface; mode: RankingMode };
+    }
+  /**
    * One canonical exact ranking completed: the server answered `placed`, and the title
    * has a position.
    *
@@ -197,6 +223,13 @@ export type AnalyticsEvent =
    * saved queries written against it: it is exactly `mode === 'rebucket'`, and a
    * second spelling of one fact is tolerable where removing the first would cut a
    * series in two.
+   *
+   * `skips` is how many *Too tough* presses the server accepted during the session
+   * (2026-09-07). Counted on the client from the answered `rank_skip` calls, because
+   * `_rank_finalize` does not return the session's skip count — an Undo after a skip
+   * does not subtract, so this is the number of times the control was used rather than
+   * the net. It is the one number that says whether Too tough is a control people lean
+   * on or one they never find.
    */
   | {
       name: 'ranking_completed';
@@ -206,6 +239,7 @@ export type AnalyticsEvent =
         comparisons: number;
         rebucket: boolean;
         mode: RankingMode;
+        skips: number;
       };
     }
   /**
@@ -381,6 +415,12 @@ export type AnalyticsEvent =
    * A wall that re-renders, or grows by a page it has already recorded, emits nothing —
    * the guard is `noteImpressions`' own returned set, so the event and the impression
    * cannot disagree about what "shown" means. No title id travels.
+   *
+   * **`size: 0` is a real value** (2026-09-07): the slate query settled successfully
+   * and scored nothing for the *unfiltered* wall, so the reader met an empty For You.
+   * Emitted once per wall key from the hook's own guard rather than from the impression
+   * writer, which has nothing to record. Never while the query is pending, never for a
+   * failed request, and never for a wall the reader emptied with their own filters.
    */
   | {
       name: 'for_you_slate_shown';
@@ -424,8 +464,10 @@ export type SupportTopicName = 'feedback' | 'problem';
 export const ANALYTICS_EVENTS = [
   'sign_in_completed',
   'signup_completed',
+  'onboarding_started',
   'onboarding_completed',
   'title_logged',
+  'ranking_started',
   'ranking_completed',
   'watchlist_added',
   'follow_created',
@@ -501,6 +543,8 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   // Which act a ranking completion was (`RankingMode`). A closed set of four words;
   // never a title, an id or a person.
   'mode',
+  // How many Too tough presses a completed session had (2026-09-07). A count.
+  'skips',
   'state',
   'position',
   'has_title',

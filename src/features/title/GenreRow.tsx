@@ -139,6 +139,8 @@ export function GenreRow({ genres }: GenreRowProps) {
             accessibilityRole="button"
             accessibilityLabel={`${genre}. See all genres`}
             onPress={() => setOpen(true)}
+            // A 32pt chip answering a 44pt thumb, the same way every chip row does.
+            hitSlop={theme.layout.chipHitSlop}
           >
             <Chip label={genre} />
           </Pressable>
@@ -156,7 +158,11 @@ export function GenreRow({ genres }: GenreRowProps) {
             accessibilityRole="button"
             accessibilityLabel={`And ${hidden} more ${hidden === 1 ? 'genre' : 'genres'}. See all genres`}
             onPress={() => setOpen(true)}
-            hitSlop={theme.space[2]}
+            // As tall as the chips beside it, then the chips' own slop — so the marker
+            // meets the 44pt target the same way they do, and its slop no longer
+            // crosses into the last chip's.
+            hitSlop={theme.layout.chipHitSlop}
+            style={styles.markerControl}
           >
             <Text variant="footnote" tone="tertiary" style={styles.marker}>
               {`+${hidden}`}
@@ -216,6 +222,7 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
   },
   marker: { minWidth: theme.space[4] },
+  markerControl: { minHeight: theme.layout.control.chipHeight, justifyContent: 'center' },
   sheet: { gap: theme.space[4], paddingBottom: theme.space[4] },
   sheetChips: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
 });

@@ -489,6 +489,14 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > member you can already name; People is for the ones you cannot. The specification is
 > PRD §13 As-built; the row is an avatar, a name, a handle, one line of context and a
 > Follow control, and nothing else.
+>
+> **And, since 2026-09-07, somewhere to lead *from*.** Two surfaces send an isolated
+> account here directly: the end of onboarding (its second action, **Find people**) and the
+> empty Feed (its one action). Both arrive on the For You tab with `show=people`
+> (`PEOPLE_DISCOVERY` in `lib/routes.ts`), which the screen consumes on arrival the way the
+> profile tab consumes its `awards` parameter — so a mounted tab opens on People too, and
+> choosing Movies afterwards is not undone by a value still in the URL. People remains a
+> state of this tab, not a screen; nothing was duplicated.
 
 > ### As built — 2026-08-27: Search compacts into its header, **People** is a chip, and profile stats open
 >
@@ -687,6 +695,39 @@ Comments, DMs, discussion boards, and long-form reviews. Destination-specific so
 
 > **Required.** No Early Access label, *Coming soon* note, or premium message may appear before the first ranking reveal.
 
+> ### As built — 2026-09-07: the first minute says what a score is, and where the people are
+>
+> Two comprehension gaps from the pre-GTM product audit, closed with copy and one
+> parameter rather than a redesign. Neither touches ranking math, score derivation or the
+> five-film mechanic.
+>
+> **The score is explained before the first one appears, and once more under it.** A
+> stranger's first liked film reveals `10.0` and `#1 in Movies`, and their second ranking
+> moves it — which §10's "a score moves when the list moves" has always required and
+> nothing on screen had ever said. Build your taste now reads *"…not from stars. Each one
+> gets a score from where it lands, and that score can move as you rank more."*, and
+> onboarding's reveals carry one quiet line, *"Your score comes from where this lands in
+> your rankings. It can move as you rank more."* The reveal condition is the surface the
+> sheet already carries for analytics (`onboarding`), not a persisted first-reveal flag;
+> an established reader's reveals are unchanged. [`screens.md`](../design/screens.md)
+> §3–§4.
+>
+> **Step 5's "follow someone" has a door.** The summary's second action is **Find
+> people** (replacing *See my collection*, which the bar already offers permanently), and
+> it lands on For You opened on People — the existing discovery surface, reached by a
+> parameter on the existing tab (`PEOPLE_DISCOVERY`). The empty Feed offers the same
+> action to the same place. No Everyone feed, no contacts import, no sixth tab; §13
+> As-built still holds.
+>
+> **A brand-new account is not stranded on the Feed by a slow first-run check.** The
+> check is bounded at four seconds and a timeout answers "not needed", which is right for
+> the population and wrong for the one account that `create_profile` has just answered
+> `created` for. That screen now seeds the check's cache with `needed: true` on `created`
+> only — the same answer two counts would give, without the round trips or the deadline.
+> The residual: a new account signing in on a *second* device whose counts time out still
+> lands on the Feed for that session and is asked again on the next launch, exactly as
+> before ([`deferred-roadmap.md`](./deferred-roadmap.md) §58).
+
 ### Log and rank a title
 
 1. Search and select. Global search requires connectivity; the cached own collection remains searchable offline.
@@ -880,7 +921,7 @@ A title alone in its band scores that band's high. Ranges do not overlap, so a b
 Three properties this is required to keep:
 
 - **Comparisons are still the only source.** The score is a function of `rankings.position` and the band sizes, and a position is only ever written by a comparison session (§11). No rating, import, or estimate can produce one.
-- **A score moves when the list moves.** Ranking a new title reflows the scores around it, because the number was always a statement about relative position. The interface never presents a score as a fixed property of the film.
+- **A score moves when the list moves.** Ranking a new title reflows the scores around it, because the number was always a statement about relative position. The interface never presents a score as a fixed property of the film. **Said to the reader since 2026-09-07:** Build your taste states it before the first comparison, and onboarding's reveals repeat it once under the score (§9 As-built).
 - **Scores are never aggregated across users.** There is no public average, no community score, and no per-title score on any surface that is not scoped to one person's list. Averaging would turn a personal ordering into the calibrated rating this product exists to avoid.
 
 > **Required.** Do **not** display a 0–100 score or a percentile anywhere. The exact ordinal remains available as secondary detail on a title page, in the form `#18 of 142 in Movies` — with the denominator, because a bare ordinal is unreadable without it.

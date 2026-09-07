@@ -448,10 +448,14 @@ function SaveAction({
       hitSlop={theme.space[3]}
       style={({ pressed }) => [styles.save, (pressed || busy) && styles.pressed]}
     >
+      {/* Filled Maroon when saved, outlined and secondary otherwise — Search's pair,
+          which is the app's one watchlist treatment. This drew Maroon in both states,
+          so an unsaved bookmark on a person page read as already selected while the
+          same control on Search did not (pre-GTM audit, 2026-09-07). */}
       <Ionicons
         name={saved ? 'bookmark' : 'bookmark-outline'}
         size={theme.layout.icon.md}
-        color={theme.semantic.action}
+        color={saved ? theme.semantic.action : theme.text.secondary}
       />
     </Pressable>
   );

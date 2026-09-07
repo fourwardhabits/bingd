@@ -52,7 +52,15 @@ export function SectionHeader({
         {exactCase ? title : title.toUpperCase()}
       </Text>
       {actionLabel && onPressAction ? (
-        <Pressable accessibilityRole="button" onPress={onPressAction}>
+        // The row is already 44pt tall; the control fills that height rather than
+        // hugging one line of footnote, and the slop covers its narrow width. Nothing
+        // visible changes — the label sits where it sat (design-system.md §10).
+        <Pressable
+          accessibilityRole="button"
+          onPress={onPressAction}
+          hitSlop={theme.space[2]}
+          style={styles.action}
+        >
           <Text variant="footnote" tone="action">
             {actionLabel}
           </Text>
@@ -70,4 +78,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: theme.layout.gutter,
   },
+  action: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
 });

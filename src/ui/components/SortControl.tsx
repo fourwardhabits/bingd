@@ -118,6 +118,8 @@ export function SortMenu<Axis extends string>({
             accessibilityState={{ selected }}
             accessibilityLabel={words ? `${option.label}, ${words}` : option.label}
             onPress={() => press(option.axis)}
+            // The same chip, the same slop: a 32pt row in a wrapping `space[2]` grid.
+            hitSlop={theme.layout.chipHitSlop}
             style={({ pressed }) => [
               styles.option,
               selected && styles.selected,

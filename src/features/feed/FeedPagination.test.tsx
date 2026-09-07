@@ -1,6 +1,7 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { BackHandler } from 'react-native';
 
+import { PEOPLE_DISCOVERY } from '@/lib/routes';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -33,6 +34,8 @@ import FeedScreen from '../../../app/(tabs)/feed';
  */
 
 const PAGE = 20;
+
+const mockPush = jest.fn();
 
 /** Every read of `feed_events`, with the keyset the caller asked for. */
 const mockFeedReads: { or: string | null }[] = [];
@@ -75,7 +78,7 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: (...a: unknown[]) => mockPush(...a) }),
   useFocusEffect: (callback: () => void) => callback(),
   useNavigation: () => ({ addListener: () => () => {}, isFocused: () => true }),
 }));
@@ -302,6 +305,31 @@ describe('the true end', () => {
 
     await waitFor(() => expect(view.getByText(/quiet right now/i)).toBeTruthy());
     expect(view.queryByText(/all caught up/i)).toBeNull();
+  });
+
+  /**
+   * **The quiet feed leads somewhere** (pre-GTM audit, 2026-09-07). The copy said
+   * "follow someone" and nothing on the screen led to anybody; the one action goes to
+   * For You opened on People — the same destination onboarding's summary offers, by
+   * the same parameter, and no Everyone feed.
+   */
+  it('offers Find people, into For You opened on People', async () => {
+    mockFeedQueue = [{ rows: [] }];
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/quiet right now/i)).toBeTruthy());
+
+    mockPush.mockClear();
+    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
+
+    expect(mockPush).toHaveBeenCalledWith(PEOPLE_DISCOVERY);
+  });
+
+  it('offers no such action once there is activity to show', async () => {
+    mockFeedQueue = [{ rows: fullPage() }];
+    const view = await open();
+    await seeRow(view, 0);
+
+    expect(view.queryByRole('button', { name: 'Find people' })).toBeNull();
   });
 });
 

@@ -1,6 +1,8 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -479,5 +481,39 @@ describe('a person somebody else is already fetching', () => {
     await renderWithProviders(<PersonScreen />);
 
     await waitFor(() => expect(mockCachePerson).toHaveBeenCalledWith(6193));
+  });
+});
+
+/**
+ * **The bookmark's two states, in Search's colours** (pre-GTM audit, 2026-09-07).
+ *
+ * This row drew Maroon in both states, so an unsaved bookmark on a person page read as
+ * already selected while the same control on Search did not. Filled Maroon when saved,
+ * outlined and secondary otherwise: the app's one watchlist treatment.
+ */
+describe('the bookmark on a credit row', () => {
+  /** The glyph's colour: an icon renders as one host Text, and its colour is in the style. */
+  const glyphColor = (control: {
+    queryAll: (p: (n: { type: string }) => boolean) => { props: Record<string, unknown> }[];
+  }) =>
+    StyleSheet.flatten(
+      control.queryAll((node) => node.type === 'Text')[0]?.props.style as TextStyle,
+    ).color;
+
+  it('draws an unsaved bookmark quietly', async () => {
+    const view = await open();
+
+    const add = await view.findByLabelText('Add Inception to your watchlist');
+
+    expect(glyphColor(add)).toBe(theme.text.secondary);
+  });
+
+  it('draws a saved one in Maroon', async () => {
+    tableRows.watchlist = [{ user_id: 'user-1', media_item_id: 'film-1', media_items: items[0] }];
+    const view = await open();
+
+    const remove = await view.findByLabelText('Remove Inception from your watchlist');
+
+    expect(glyphColor(remove)).toBe(theme.semantic.action);
   });
 });

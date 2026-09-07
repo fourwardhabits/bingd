@@ -267,6 +267,20 @@ describe('before anything is typed', () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it('describes the flow the row actually has, with + acting from the result', async () => {
+    // "Search for a title, open it, then log it with +" described two taps the app no
+    // longer asks for (pre-GTM audit, 2026-09-07). + is on the row; a show asks for the
+    // season first.
+    const view = await renderWithProviders(<LogScreen />);
+
+    expect(
+      view.getByText(
+        'Search for a film or show you have watched, then tap + to rank it. Shows are ranked by season.',
+      ),
+    ).toBeTruthy();
+    expect(view.queryByText(/open it, then log it/)).toBeNull();
+  });
+
   it('offers the last search back rather than the prompt', async () => {
     mockPrefs.set('user-1.search.recent', ['breaking bad']);
     const view = await renderWithProviders(<LogScreen />);

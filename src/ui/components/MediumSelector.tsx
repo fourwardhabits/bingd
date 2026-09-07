@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
 import { Text } from './Text';
@@ -90,6 +91,16 @@ export function MediumSelector<T extends string = Medium>({
 }: MediumSelectorProps<T>) {
   const [open, setOpen] = useState(false);
   /**
+   * The foot of the option sheet, by `Sheet`'s rule (2026-09-07).
+   *
+   * It was a fixed `space[10]`, which is generous on a phone with a home indicator and
+   * short on an Android device whose navigation bar reports a larger inset now that the
+   * app draws edge to edge. Never less than what it had — the sheet does not get
+   * visibly shorter anywhere — and never under the bar.
+   */
+  const insets = useSafeAreaInsets();
+  const bottomPadding = Math.max(insets.bottom + theme.space[4], theme.space[10]);
+  /**
    * The cast is the seam between a concrete default and a caller that has widened `T`,
    * and it is safe in the only direction that matters: every id in `MEDIUM_OPTIONS` is a
    * `Medium`, and a caller who omits `options` leaves `T` inferred as `Medium` — the
@@ -132,10 +143,18 @@ export function MediumSelector<T extends string = Medium>({
         transparent
         animationType="fade"
         onRequestClose={() => setOpen(false)}
+        /**
+         * `Sheet`'s treatment, and the reason it was missing here was that this modal
+         * predates it. Without it an Android modal is laid out *below* the status bar,
+         * so the scrim stopped short of the top of the screen and the bar kept the
+         * page's colour over a dimmed page — the one sheet in the app that did not dim
+         * the whole screen (pre-GTM audit, 2026-09-07).
+         */
+        statusBarTranslucent
       >
         <Pressable style={styles.scrim} onPress={() => setOpen(false)} accessibilityLabel="Close">
           {/* Stops a tap inside the sheet from closing it. */}
-          <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable style={[styles.sheet, { paddingBottom: bottomPadding }]} onPress={() => {}}>
             {table.map((option) => {
               const selected = option.id === value;
               return (
@@ -189,7 +208,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: theme.radius.sheet,
     borderTopRightRadius: theme.radius.sheet,
     paddingTop: theme.space[3],
-    paddingBottom: theme.space[10],
+    // `paddingBottom` is set inline from the safe-area inset — see `bottomPadding`.
     paddingHorizontal: theme.layout.gutter,
     gap: theme.space[1],
     ...theme.elevation.e2,

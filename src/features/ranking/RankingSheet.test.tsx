@@ -135,7 +135,13 @@ jest.mock('@/features/auth', () => ({
 let issuedIds = 0;
 jest.mock('expo-crypto', () => ({ randomUUID: () => `op-${(issuedIds += 1)}` }));
 
-const subject = { id: 'film-a', title: 'Film A', bucket: 'loved' as const, posterUri: null };
+const subject = {
+  id: 'film-a',
+  title: 'Film A',
+  bucket: 'loved' as const,
+  posterUri: null,
+  kind: 'movie' as const,
+};
 
 /** What `renderWithProviders` passes; repeated here for the one test that owns its client. */
 const METRICS = {
@@ -617,7 +623,7 @@ describe('closing', () => {
 
     await sheet.ready('Film P');
     await fireEvent.press(sheet.getByLabelText('Undo the last comparison'));
-    await waitFor(() => expect(sheet.getByText('Still in your collection')).toBeTruthy());
+    await waitFor(() => expect(sheet.getByText('Logged, not ranked yet')).toBeTruthy());
 
     await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
 
@@ -1940,5 +1946,313 @@ describe('which completions ask about the streak', () => {
       await act(async () => {});
       expect(mockDetectStreak).not.toHaveBeenCalled();
     }
+  });
+});
+
+/**
+ * **When a ranking is reported as started** (pre-GTM analytics, 2026-09-07).
+ *
+ * `ranking_completed` alone cannot say how many sessions were abandoned, because a
+ * session that never completed was never counted anywhere. `ranking_started` is the
+ * denominator, and it has to be a *session* rather than a tap: the server answering the
+ * opening call with a comparison — or, for an empty band, with the placement outright.
+ * Once per mount, on whichever attempt first opens; nothing inside the session is one.
+ */
+describe('when a ranking is reported as started', () => {
+  const events = (name: string) =>
+    mockTrack.mock.calls.filter(([event]) => (event as { name: string }).name === name);
+
+  it('reports a start once the server has a comparison to show', async () => {
+    answering(comparison());
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+
+    expect(events('ranking_started')).toHaveLength(1);
+    expect(events('ranking_started')[0][0]).toEqual({
+      name: 'ranking_started',
+      props: { media_kind: 'movie', surface: 'search', mode: 'start' },
+    });
+  });
+
+  it('reports a start for an empty band, where the server places outright', async () => {
+    answering(placement);
+    const sheet = await openSheet({ subject: { ...subject, mode: 'again' } });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(events('ranking_started')).toHaveLength(1);
+    expect(events('ranking_started')[0][0]).toMatchObject({ props: { mode: 'again' } });
+    // And the completion follows it: a start with no comparisons is still a session.
+    expect(events('ranking_completed')).toHaveLength(1);
+  });
+
+  it('names a season from the subject, since a comparison carries no category', async () => {
+    answering(comparison());
+    const sheet = await openSheet({
+      subject: { ...subject, kind: 'season' },
+      surface: 'title',
+    });
+
+    await sheet.ready('Film P');
+
+    expect(events('ranking_started')[0][0]).toMatchObject({
+      props: { media_kind: 'tv_season', surface: 'title' },
+    });
+  });
+
+  it('reports nothing for an opening the server refused', async () => {
+    answering({ data: null, error: { code: '42501', message: 'suspended' } });
+    const sheet = await openSheet();
+
+    await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
+
+    expect(events('ranking_started')).toHaveLength(0);
+  });
+
+  it('reports one start however many comparisons follow', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q' }), comparison({ pivot: 'film-r' }));
+    const sheet = await openSheet();
+
+    await fireEvent.press(await sheet.ready('Film A'));
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    await fireEvent.press(await sheet.ready('Film A'));
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(2));
+
+    expect(events('ranking_started')).toHaveLength(1);
+  });
+
+  it('reports one start when a lost opening is retried and then opens', async () => {
+    // The lost-reply case at the opening call: no code, so `classifyWrite` reads it as
+    // unknown and the sheet offers Try again under the same operation id.
+    answering({ data: null, error: { code: '', message: 'TypeError: fail' } }, comparison());
+    const sheet = await openSheet();
+
+    await waitFor(() => expect(sheet.getByText('Not sure that landed')).toBeTruthy());
+    expect(events('ranking_started')).toHaveLength(0);
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Try again' }));
+    await sheet.ready('Film P');
+
+    expect(events('ranking_started')).toHaveLength(1);
+  });
+});
+
+/**
+ * **How many Too tough presses a completion carries** (2026-09-07).
+ *
+ * The server returns no skip count at finalize, so the sheet counts the `rank_skip`
+ * calls it was answered for. It is the number of times the control was *used*, which is
+ * the question: whether Too tough is something people lean on or never find.
+ */
+describe('how many Too tough presses a completion carries', () => {
+  const completion = () =>
+    mockTrack.mock.calls.find(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    )?.[0] as { props: Record<string, unknown> } | undefined;
+
+  it('counts each skip the server accepted', async () => {
+    answering(
+      comparison(),
+      comparison({ pivot: 'film-q', skipped: true }),
+      comparison({ pivot: 'film-r', skipped: true }),
+      placement,
+    );
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(2));
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ comparisons: 1, skips: 2 });
+  });
+
+  it('carries zero when the control was never used', async () => {
+    answering(comparison(), placement);
+    const sheet = await openSheet();
+
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ comparisons: 1, skips: 0 });
+  });
+});
+
+/**
+ * **What the first reveals say about the number** (pre-GTM audit, 2026-09-07).
+ *
+ * A stranger's first liked film reveals 10.0 and #1, and the second ranking moves it.
+ * Onboarding's reveals carry one quiet line saying what the score is; an ordinary
+ * reveal, the surface a reader with two hundred rankings meets, does not.
+ */
+describe('what the first reveals say about the number', () => {
+  const LINE = /Your score comes from where this lands in your rankings/;
+
+  it('explains the score during onboarding', async () => {
+    answering(placement);
+    const sheet = await openSheet({ surface: 'onboarding' });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(sheet.getByText(LINE)).toBeTruthy();
+    expect(sheet.getByText(/It can move as you rank more/)).toBeTruthy();
+  });
+
+  it('says nothing of the kind on an ordinary reveal', async () => {
+    answering(placement);
+    const sheet = await openSheet({ surface: 'search' });
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(sheet.queryByText(LINE)).toBeNull();
+  });
+});
+
+/**
+ * **Undo at the first comparison leaves a title Logged and unranked, and says so**
+ * (pre-GTM audit, 2026-09-07). "Stays logged" read as finished; a stranger has to be
+ * told there is no score yet, and where to come back for one.
+ */
+describe('undo at the first comparison', () => {
+  it('says the title is logged, has no score, and where to rank it', async () => {
+    answering(comparison(), { data: { done: false, cancelled: true }, error: null });
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Undo the last comparison'));
+
+    await waitFor(() => expect(sheet.getByText('Logged, not ranked yet')).toBeTruthy());
+    expect(
+      sheet.getByText(/Film A is saved in your Collection without a bingd\. score/),
+    ).toBeTruthy();
+    expect(sheet.getByText(/Rank it from your Collection or its title page/)).toBeTruthy();
+    // Copy only: nothing was written on the way.
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+});
+
+/**
+ * **A Too tough whose reply was lost still counts exactly once** (Codex review of
+ * #122, 2026-09-07).
+ *
+ * `rank_skip` can commit and lose its reply. The ambiguous attempt counts nothing, the
+ * sheet offers Try again under the same operation id, and the server answers the retry
+ * from its stored result — one logical skip, however many attempts it took to hear it.
+ * The undercount this closes: the retry used to re-run an anonymous thunk that had
+ * forgotten it was a skip, so the session's one accepted Too tough was never counted.
+ */
+describe('a Too tough whose reply was lost', () => {
+  const LOST = { data: null, error: { code: '', message: 'TypeError: fail' } };
+  const completion = () =>
+    mockTrack.mock.calls.find(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    )?.[0] as { props: Record<string, unknown> } | undefined;
+  const completions = () =>
+    mockTrack.mock.calls.filter(
+      ([event]) => (event as { name: string }).name === 'ranking_completed',
+    );
+
+  const tooTough = async (sheet: Awaited<ReturnType<typeof openSheet>>) => {
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+  };
+
+  const retry = async (sheet: Awaited<ReturnType<typeof openSheet>>) => {
+    await waitFor(() => expect(sheet.getByText('Not sure that landed')).toBeTruthy());
+    await fireEvent.press(sheet.getByRole('button', { name: 'Try again' }));
+  };
+
+  it('counts an ordinary accepted skip once', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', skipped: true }), placement);
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ skips: 1 });
+  });
+
+  it('counts a skip that landed but lost its reply once, on the retry that hears it', async () => {
+    answering(comparison(), LOST, comparison({ pivot: 'film-q', skipped: true }), placement);
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await retry(sheet);
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(2));
+
+    // The same intent: the retry reuses the operation id, which is what makes the
+    // server answer it from the stored result rather than skipping twice.
+    const [first, second] = callsTo('rank_skip').map(([, args]) => args as { p_operation_id: string });
+    expect(second!.p_operation_id).toBe(first!.p_operation_id);
+
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ comparisons: 1, skips: 1 });
+    expect(completions()).toHaveLength(1);
+  });
+
+  it('cannot be turned into two skips by retrying twice', async () => {
+    answering(
+      comparison(),
+      LOST,
+      LOST,
+      comparison({ pivot: 'film-q', skipped: true }),
+      placement,
+    );
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await retry(sheet);
+    await retry(sheet);
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(3));
+    const ids = new Set(
+      callsTo('rank_skip').map(([, args]) => (args as { p_operation_id: string }).p_operation_id),
+    );
+    expect(ids.size).toBe(1);
+
+    await fireEvent.press(await sheet.ready('Film A'));
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ skips: 1 });
+  });
+
+  it('still reports the skip when the retry itself places the title', async () => {
+    // The three-skip cap: the skip that was lost was the one that finalised, so the
+    // stored answer the retry hears is the placement.
+    answering(comparison(), LOST, placement);
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+    await retry(sheet);
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+    expect(completion()?.props).toMatchObject({ comparisons: 0, skips: 1 });
+    expect(completions()).toHaveLength(1);
+  });
+
+  it('does not count a skip the server refused outright', async () => {
+    // A refusal is a refusal: nothing to retry, nothing skipped. The sheet has no
+    // completion to report here; the count is checked on the ref through the only
+    // window that exposes it, which is that no Try again is offered.
+    answering(comparison(), {
+      data: null,
+      error: { code: '40001', message: 'could not serialize access' },
+    });
+    const sheet = await openSheet();
+
+    await tooTough(sheet);
+
+    await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
+    expect(sheet.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(completions()).toHaveLength(0);
   });
 });

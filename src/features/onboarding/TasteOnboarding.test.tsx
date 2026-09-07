@@ -2,7 +2,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { TAB_ROUTES } from '@/lib/routes';
+import { PEOPLE_DISCOVERY, TAB_ROUTES } from '@/lib/routes';
 
 import { resetTasteIntent } from './use-taste-onboarding';
 
@@ -174,6 +174,38 @@ const search = async (view: Awaited<ReturnType<typeof open>>, term: string) => {
   await waitFor(() => expect(view.getByLabelText(/Inception, 2010/)).toBeTruthy());
 };
 
+/**
+ * **What the flow says a score is, before the first one appears** (pre-GTM audit,
+ * 2026-09-07). The reveal echoes it once, under the first scores; see
+ * `RankingSheet.test.tsx`. This is the sentence it echoes.
+ *
+ * Placed ahead of the resume tests deliberately: "stops resuming onto the summary once it
+ * has done so" leaves this module unable to draw the flow for anything rendered after it,
+ * and a test of copy should not inherit that.
+ */
+describe('what the flow says a score is', () => {
+  it('explains, before the first comparison, that scores come from placement and move', async () => {
+    const view = await open();
+
+    expect(view.getByText(/not from stars/)).toBeTruthy();
+    expect(
+      view.getByText(
+        /Each one gets a score from where it lands, and that score can move as you rank more/,
+      ),
+    ).toBeTruthy();
+  });
+
+  it('no longer offers the collection from the summary, which the bar already has', async () => {
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
+    const view = await renderWithProviders(<TasteScreen />);
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    expect(view.queryByRole('button', { name: 'See my collection' })).toBeNull();
+    expect(view.getByRole('button', { name: 'Find people' })).toBeTruthy();
+  });
+});
+
 describe('the first five', () => {
   it('starts at zero of five', async () => {
     const view = await open();
@@ -243,7 +275,7 @@ describe('the first five', () => {
 
     await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Explore For You' })).toBeTruthy();
-    expect(view.getByRole('button', { name: 'See my collection' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Find people' })).toBeTruthy();
   });
 
   it('does not claim to know what kind of viewer five films makes somebody', async () => {
@@ -519,13 +551,13 @@ describe('where onboarding lets go', () => {
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/recommendations'));
   });
 
-  it('still sends See my collection to the collection', async () => {
+  it('sends Find people into For You, opened on People', async () => {
     const view = await finished();
     await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
 
-    await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY));
   });
 
   /**
@@ -584,17 +616,17 @@ describe('the notification step on the way out', () => {
     expect(mockReplace).not.toHaveBeenCalledWith(TAB_ROUTES.feed);
   });
 
-  it('keeps See my collection pointed at the collection through Not now', async () => {
+  it('keeps Find people pointed at People through Not now', async () => {
     mockPushEnv.permission = 'undetermined';
     const view = await finished();
     await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
 
-    await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
     await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
 
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY));
   });
 });
 
@@ -671,9 +703,9 @@ describe('recovery after a crash during the notification step', () => {
     const view = await reopened();
     await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
 
-    await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY));
   });
 
   /** The escape route reaches this screen too — see `UseDifferentAccountButton`. */
@@ -742,7 +774,7 @@ describe('the frames between the press and the navigation', () => {
       mockReadHangs.add('push.offered');
       const view = await atSummary();
 
-      await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+      await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
       await act(async () => {});
 
       // Mid-exit, with the offer decision still hanging: still the summary.
@@ -753,7 +785,7 @@ describe('the frames between the press and the navigation', () => {
         // The offer-decision grace in `app/onboarding/taste.tsx`.
         jest.advanceTimersByTime(3000);
       });
-      expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection);
+      expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY);
     } finally {
       jest.useRealTimers();
     }
