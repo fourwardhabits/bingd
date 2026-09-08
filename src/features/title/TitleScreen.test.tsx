@@ -1616,9 +1616,16 @@ describe('the following score', () => {
     // still waiting on the label.
     await waitFor(() => expect(view.getByText('8.6')).toBeTruthy());
     expect(view.getByText('Following')).toBeTruthy();
-    // "3 people you follow" rather than "3 ratings": the population is the whole point
-    // of the number, and it is a different population from the row underneath.
-    expect(view.getByText('3 people you follow')).toBeTruthy();
+    /**
+     * `3 ratings`, not `3 people you follow` (founder, physical Android, 2026-09-08).
+     *
+     * Counting people was more specific and measurably worse: in a third of the content
+     * width it set on two lines and pushed the whole row taller, and every word past the
+     * number restated the `Following` label directly above it. The label is what says
+     * *whose* ratings these are; the line beneath it says how many.
+     */
+    expect(view.getByText('3 ratings')).toBeTruthy();
+    expect(view.queryByText(/people you follow/)).toBeNull();
     expect(view.getByText('bingd.')).toBeTruthy();
   });
 
@@ -1627,8 +1634,8 @@ describe('the following score', () => {
     const view = await open();
 
     // One account you chose to follow is not a weak estimate of a crowd; it is their
-    // opinion, and it is the only case a new account can produce at all.
-    await waitFor(() => expect(view.getByText('1 person you follow')).toBeTruthy());
+    // opinion, and it is the only case a new account can produce at all. Singular.
+    await waitFor(() => expect(view.getByText('1 rating')).toBeTruthy());
     expect(view.getByText('9.1')).toBeTruthy();
   });
 
@@ -1650,12 +1657,15 @@ describe('the following score', () => {
     // and the circle. A row that appears when the data does is a page that moves under
     // somebody reading it.
     //
-    // The *words* changed on 2026-09-07: Following says its own sentence now rather than
-    // borrowing bingd.'s four. "Not enough ratings" is a fact about the app's sample;
-    // this is a fact about who the reader follows, and it is the only one of the two they
-    // can do anything about.
+    // The *words* are still Following's own rather than bingd.'s: "Not enough ratings" is
+    // a fact about the app's sample, and this is a fact about the people the reader chose.
+    // Shortened on 2026-09-08 — the label above already says whose ratings these are — but
+    // the two rows still never share a string.
     expect(view.getByText('Following')).toBeTruthy();
-    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('No ratings yet')).toBeTruthy();
+    // bingd. has a 7.4 to report here, so its own words are nowhere on the page: the two
+    // rows never share a string in either direction.
+    expect(view.queryByText('Not enough ratings')).toBeNull();
   });
 
   it('never calls it a friend score, because following is not mutual', async () => {
@@ -1811,7 +1821,7 @@ describe('the following score with nothing to say', () => {
      * real defect. Same class as the one `PrivacyScreen.test.tsx` records.
      */
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('No ratings yet')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
     // And it is Following's own sentence: bingd. has a 7.4 to report, so its empty words
     // are nowhere on the page. The two rows no longer share a string.
@@ -1833,7 +1843,7 @@ describe('the following score with nothing to say', () => {
     // Anchored on the community score for the reason the test above records: the
     // "Following" heading is drawn before either number arrives.
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('No ratings yet')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
   });
 
@@ -1847,7 +1857,7 @@ describe('the following score with nothing to say', () => {
     // Each row in its own words, and each circle carrying an em dash rather than being
     // blank: "no blank cream disc that looks like broken content" is the founder's exact
     // constraint, and an empty circle is indistinguishable from one that failed to load.
-    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('No ratings yet')).toBeTruthy();
     expect(view.getByText('Not enough ratings')).toBeTruthy();
     // Never a zero, and never a real number greyed out to say "do not trust this".
     expect(view.queryByText('0.0')).toBeNull();
@@ -2539,7 +2549,7 @@ describe('the score row and what surrounds it', () => {
     // three different facts: the reader has not ranked it, nobody they follow has, and
     // the app is short of a sample. Only the middle one is something they can act on.
     await waitFor(() => expect(view.getByText('Not enough ratings')).toBeTruthy());
-    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('No ratings yet')).toBeTruthy();
     expect(view.getByText('Not ranked yet')).toBeTruthy();
 
     expect(view.queryByText(/more needed/)).toBeNull();
@@ -2548,10 +2558,12 @@ describe('the score row and what surrounds it', () => {
   it('still opens the people behind the Following number', async () => {
     mockRpcResults.following_score = [{ score: '8.6', rating_count: 3, following_count: 9 }];
     const view = await open();
-    await waitFor(() => expect(view.getByText('3 people you follow')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('3 ratings')).toBeTruthy());
 
+    // The spoken label names the number before the sample, since a Pressable with its own
+    // label absorbs its children's and the 8.6 would otherwise never be read out.
     await fireEvent.press(
-      view.getByRole('button', { name: /^Following\. 3 people you follow/ }),
+      view.getByRole('button', { name: /^Following\. 8\.6 out of 10\. 3 ratings$/ }),
     );
 
     await waitFor(() =>
@@ -2567,7 +2579,9 @@ describe('the score row and what surrounds it', () => {
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
     expect(view.getByText('12 ratings')).toBeTruthy();
     expect(view.getByText('9.1')).toBeTruthy();
-    expect(view.getByText('1 person you follow')).toBeTruthy();
+    // Both aggregates count ratings the same way since 2026-09-08; the labels are what
+    // distinguish the two populations.
+    expect(view.getByText('1 rating')).toBeTruthy();
     expect(view.getByText('bingd.')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
   });

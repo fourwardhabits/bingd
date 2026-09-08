@@ -687,7 +687,8 @@ qualification of an aggregate.
 **Each unit says its own empty state.** They shared `Not enough ratings`, which hid a real
 distinction — the app being short of a sample, nobody the reader follows having seen it, and the
 reader not having ranked it are three different facts and only the middle one is actionable. So:
-`Not ranked yet`, `None of your friends have ranked this`, `Not enough ratings`. Every empty
+`Not ranked yet`, `No ratings yet`, `Not enough ratings` (shortened on 2026-09-08; see below).
+Every empty
 circle carries an **em dash** in a plain neutral ring, never the cream `empty` disc, which is
 indistinguishable from a circle whose contents failed to load.
 
@@ -704,9 +705,9 @@ else in the app), `outlined` (somebody else's score with enough behind it), and 
 ring, neutral ink). Three identical filled Maroon circles say the three claims are
 interchangeable, which is the opposite of what the section exists to say. `quiet` applies to
 **bingd. below two ratings** — the founder's rule is "do not make one person's score look
-statistically authoritative" — and never to Following, where `1 person you follow` names a human
-the reader chose. It is a visual demotion only; whether there is a number at all is still the
-server's decision.
+statistically authoritative" — and never to Following, whose sample is people the reader chose
+rather than a statistic about strangers. It is a visual demotion only; whether there is a number
+at all is still the server's decision.
 
 **The actions live inside the identity column — REVISION.** The specification pinned the
 identity row to 150pt so the action group landed at the same y on every title; the founder
@@ -777,6 +778,63 @@ at all when the provider has no answer — there is no invented *In theaters* st
 app has no theatrical-availability data. The tab set, the tab contents, the genre row's position
 and neutral chip styling, the ranking menu's copy and every one of its semantics, and For You's
 single scrolling control row are all as they were.
+
+### As built — 2026-09-08: the poster joins the identity block, and the scores stop arguing with themselves
+
+Four corrections from the second physical pass. None changes the composition above.
+
+**The poster no longer rises into the hero.** It was pulled up across the fade by a negative
+margin, and that margin has been 64, 120, 88 and 56 in turn. The founder's reading ends the
+sequence: whatever the number, a poster that crosses the fade **belongs to the hero**, and so
+it reads as detached from a title sitting level with its middle. No lift is small enough to fix
+that, because the defect is which block the artwork is a member of rather than how far it
+travels.
+
+The offset is positive now and it is four points — enough for the poster's top rule to meet the
+title's **cap height** rather than its line box. `title1` is 28pt of DM Serif on a 34pt line, so
+about six points of leading sit in that box and half of them above the capitals; aligned to the
+box the poster measures level with the ascent and reads high. The size is unchanged at
+`poster.detail`, 100 × 150.
+
+Two things that depended on the lift are now stated on their own terms: the collapsed no-artwork
+band keeps 56 as its own number, and the "Recommended by" overlay sits `space[3]` off the hero's
+lower edge instead of clearing a poster that no longer rises.
+
+**The synopsis clears both columns, structurally.** The identity row is a plain flex row with no
+height, no minimum, nothing absolutely positioned and no negative margin anywhere inside it — so
+its height is exactly the taller of its two children, and the synopsis, being the row's sibling
+rather than a child of either column, cannot begin before both have finished. That holds for a
+one-line film that clears the poster's 154 and for a wrapped two-line season whose left stack
+wins instead, with nothing having to compute which. There is still no fixed identity height.
+
+**A ranked title said `7.0`, `Your score` and `Not ranked yet` at once.** The badge and the
+sub-label were chosen by two different expressions: the caller passed the personal unit's
+*empty* copy as its `detail`, and `detail` is what a unit with a number prints. One derivation
+now decides the badge, the copy and the spoken label together, and it is `score != null` rather
+than a truthiness check, because `0.0` is a real score at the bottom of the *Not for me* band. A
+ranked personal unit draws **no second line at all**.
+
+**The supporting copy is a count.** `1 person you follow` and `None of your friends have ranked
+this` set on two and three lines in a third of the content width and made the section read as
+noise. Both aggregates count the same way now:
+
+| unit | with data | without |
+|---|---|---|
+| Your score | *(nothing)* | `Not ranked yet` |
+| Following | `1 rating` / `N ratings` | `No ratings yet` |
+| bingd. | `1 rating` / `N ratings` | `Not enough ratings` |
+
+The labels are what say *whose* ratings these are, which is exactly what the longer copy was
+spending extra lines restating. The three still never share a string: the reader not having
+ranked it, nobody they follow having rated it, and the app being short of a sample are three
+different facts. The visual hierarchy is untouched — filled Maroon for the reader's own,
+outlined for Following at any count, outlined for bingd. at two ratings or more and quiet below
+that.
+
+One accessibility improvement came with the label rework: a `Pressable` with its own
+`accessibilityLabel` absorbs its children's, so a screen reader pressing a unit heard the sample
+and never the number. The spoken label now names the score first — `Following. 8.6 out of 10.
+3 ratings`.
 
 ### The title-page crash — 2026-09-07
 

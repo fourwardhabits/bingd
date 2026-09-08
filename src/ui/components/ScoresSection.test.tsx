@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, within } from '@testing-library/react-native';
 
+import { theme } from '../tokens';
 import { ScoresSection } from './ScoresSection';
 
 /**
@@ -115,26 +116,48 @@ describe('the scores row', () => {
     await render(<ScoresSection {...all} />);
     for (const line of [
       screen.getByText('Not ranked yet'),
-      screen.getByText('None of your friends have ranked this'),
+      screen.getByText('No ratings yet'),
       screen.getByText('Not enough ratings'),
     ]) {
       expect(line.props.numberOfLines).toBeUndefined();
     }
   });
+
+  it('keeps every supporting line short enough not to wrap the row', async () => {
+    /**
+     * **The founder's 2026-09-08 correction, as a measurement.** The first pass wrote
+     * sentences here — `1 person you follow`, `None of your friends have ranked this` —
+     * and in a third of a 358pt content width those set on two and three lines and made
+     * the section read as noise.
+     *
+     * Four words is the ceiling. It is a proxy for "fits a 114pt column at the default
+     * text size", which a unit test cannot measure directly, and it fails on every string
+     * that caused the defect.
+     */
+    await render(<ScoresSection {...all} />);
+
+    for (const line of [
+      screen.getByText('Not ranked yet'),
+      screen.getByText('No ratings yet'),
+      screen.getByText('Not enough ratings'),
+    ]) {
+      expect(String(line.props.children).split(' ').length).toBeLessThanOrEqual(4);
+    }
+  });
 });
 
 describe('what each unit says when it has nothing', () => {
-  it('gives every unit its own sentence rather than one shared four words', async () => {
+  it('gives every unit its own words rather than one shared four', async () => {
     /**
      * They all said `Not enough ratings`, which hid a real distinction: the app being
-     * short of a sample, nobody the reader follows having seen it, and the reader not
+     * short of a sample, nobody the reader follows having rated it, and the reader not
      * having ranked it are three different facts, and only the middle one is something
-     * they can act on.
+     * they can act on. The 2026-09-08 pass shortened them; it did not merge them.
      */
     await render(<ScoresSection {...all} />);
 
     expect(screen.getByText('Not ranked yet')).toBeTruthy();
-    expect(screen.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(screen.getByText('No ratings yet')).toBeTruthy();
     expect(screen.getByText('Not enough ratings')).toBeTruthy();
   });
 
@@ -155,9 +178,7 @@ describe('what each unit says when it has nothing', () => {
     await render(<ScoresSection {...all} />);
 
     expect(screen.getByLabelText('Your score: Not ranked yet')).toBeTruthy();
-    expect(
-      screen.getByLabelText('Following: None of your friends have ranked this'),
-    ).toBeTruthy();
+    expect(screen.getByLabelText('Following: No ratings yet')).toBeTruthy();
     expect(screen.getByLabelText('bingd.: Not enough ratings')).toBeTruthy();
     expect(screen.getAllByText('—')).toHaveLength(3);
   });
@@ -233,8 +254,8 @@ describe('how much authority each circle claims', () => {
   });
 
   it('leaves Following outlined at a single rating', async () => {
-    // Not the same claim as bingd.'s: "1 person you follow" names a human the reader
-    // chose to follow, which is the most useful signal on this page.
+    // Not the same claim as bingd.'s: Following's sample is people the reader chose, which
+    // is the most useful signal on this page and never a thin statistic about strangers.
     await render(
       <ScoresSection
         you={{ score: null }}
@@ -243,11 +264,12 @@ describe('how much authority each circle claims', () => {
       />,
     );
 
-    expect(screen.getByText('1 person you follow')).toBeTruthy();
-    expect(treatmentOf('8.2 out of 10').borderColor).toBe(
-      // The same ring Following draws at six raters: one followee is not a thin sample.
-      flatten(screen.getByLabelText('8.2 out of 10').props.style).borderColor,
-    );
+    expect(screen.getByText('1 rating')).toBeTruthy();
+    const ring = treatmentOf('8.2 out of 10');
+    expect(ring.backgroundColor).toBeUndefined();
+    expect(ring.borderWidth).toBeGreaterThan(0);
+    // Maroon, not the neutral hairline bingd. gets at the same count.
+    expect(ring.borderColor).toBe(theme.semantic.score);
   });
 });
 
@@ -261,14 +283,14 @@ describe('what the aggregates report', () => {
       />,
     );
 
-    expect(screen.getByText('1 person you follow')).toBeTruthy();
+    expect(screen.getByText('1 rating')).toBeTruthy();
     expect(screen.getByText('Not enough ratings')).toBeTruthy();
     // The count behind a withheld mean is not shown either — that was the countdown in
     // another form.
     expect(screen.queryByText('9 ratings')).toBeNull();
   });
 
-  it('shows the sample behind a number once there is one', async () => {
+  it('shows the sample behind a number once there is one, and counts ratings not people', async () => {
     await render(
       <ScoresSection
         you={{ score: null }}
@@ -278,7 +300,23 @@ describe('what the aggregates report', () => {
     );
 
     expect(screen.getByText('128 ratings')).toBeTruthy();
-    expect(screen.getByText('4 people you follow')).toBeTruthy();
+    expect(screen.getByText('4 ratings')).toBeTruthy();
+    // Following counted people until 2026-09-08. The label above it already says whose
+    // ratings these are, so the words were restating it at the cost of two extra lines.
+    expect(screen.queryByText(/people you follow/)).toBeNull();
+  });
+
+  it('says one rating in the singular, in both aggregates', async () => {
+    await render(
+      <ScoresSection
+        you={{ score: null }}
+        bingd={{ score: 7.4, ratingCount: 1 }}
+        following={{ score: 8.2, ratingCount: 1 }}
+      />,
+    );
+
+    expect(screen.getAllByText('1 rating')).toHaveLength(2);
+    expect(screen.queryByText('1 ratings')).toBeNull();
   });
 
   it('is absent entirely when there is nothing to put in it', async () => {
@@ -299,6 +337,92 @@ describe('what the aggregates report', () => {
 
     expect(screen.queryByText('Your score')).toBeNull();
     expect(screen.getAllByTestId(/^scores-unit/)).toHaveLength(2);
+  });
+});
+
+/**
+ * **The founder's physical-QA defect, and the shape of it** (2026-09-08).
+ *
+ * The device showed `7.0`, `Your score` and `Not ranked yet` stacked in one unit. The badge
+ * and the sub-label were chosen by two different expressions — the caller passed the unit's
+ * *empty* copy as its `detail`, and `detail` is what a unit with a number prints — so a
+ * ranked title stated its score and denied it in the same breath.
+ *
+ * These pin the fix at the level it was made: one `score == null` decides the badge, the
+ * copy and the spoken label together.
+ */
+describe('a numeric personal score and the words under it', () => {
+  it('never says Not ranked yet when there is a number', async () => {
+    await render(
+      <ScoresSection
+        you={{ score: 7 }}
+        following={{ score: null, ratingCount: 0 }}
+        bingd={{ score: null, ratingCount: 0 }}
+      />,
+    );
+
+    expect(screen.getByLabelText('7.0 out of 10')).toBeTruthy();
+    expect(screen.getByText('Your score')).toBeTruthy();
+    expect(screen.queryByText('Not ranked yet')).toBeNull();
+    expect(screen.queryByText('Score loading')).toBeNull();
+  });
+
+  it('holds at a score of zero, which is what a truthiness check would drop', async () => {
+    /**
+     * `0.0` is a real score — the bottom of the *Not for me* band — and it is falsy. A
+     * guard written `score ? … : …` rather than `score != null` passes every other test
+     * here and then tells the one reader who hated a film hardest that they never ranked
+     * it.
+     */
+    await render(
+      <ScoresSection
+        you={{ score: 0 }}
+        following={{ score: null, ratingCount: 0 }}
+        bingd={{ score: null, ratingCount: 0 }}
+      />,
+    );
+
+    expect(screen.getByLabelText('0.0 out of 10')).toBeTruthy();
+    expect(
+      within(screen.getByTestId('scores-unit-you')).queryByText('Not ranked yet'),
+    ).toBeNull();
+  });
+
+  it('draws no second line at all under a ranked score', async () => {
+    /**
+     * Every candidate for that line has been cut in turn: the bucket word, the rank, the
+     * watch date, and finally `Ranked` itself — a filled Maroon circle with a number in it
+     * has already said so.
+     */
+    await render(
+      <ScoresSection
+        you={{ score: 9.4 }}
+        following={{ score: 8.7, ratingCount: 6 }}
+        bingd={{ score: null, ratingCount: 0 }}
+      />,
+    );
+
+    const unit = screen.getByTestId('scores-unit-you');
+    // The label, and nothing beneath it.
+    expect(within(unit).getByText('Your score')).toBeTruthy();
+    expect(within(unit).queryByText('Ranked')).toBeNull();
+    expect(within(unit).queryByText(/rating/)).toBeNull();
+    expect(within(unit).queryByText('Not ranked yet')).toBeNull();
+  });
+
+  it('says Not ranked yet only when there is genuinely no number', async () => {
+    await render(
+      <ScoresSection
+        you={{ score: null }}
+        following={{ score: null, ratingCount: 0 }}
+        bingd={{ score: null, ratingCount: 0 }}
+      />,
+    );
+
+    const unit = screen.getByTestId('scores-unit-you');
+    expect(within(unit).getByText('Not ranked yet')).toBeTruthy();
+    expect(within(unit).getByText('—')).toBeTruthy();
+    expect(within(unit).queryByText(/\d\.\d/)).toBeNull();
   });
 });
 
@@ -350,7 +474,12 @@ describe('the people behind the Following number (founder, 2026-08-27 §13)', ()
       />,
     );
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Following. 3 people you follow' }));
+    // The spoken label names the number before the sample. A Pressable with its own label
+    // absorbs its children's, so without that a screen reader pressing this unit heard the
+    // count and never the 8.2 the row exists to state.
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Following. 8.2 out of 10. 3 ratings' }),
+    );
     expect(onPressFollowing).toHaveBeenCalled();
   });
 
@@ -396,7 +525,7 @@ describe('the reader’s own unit as a control', () => {
       />,
     );
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Your score. Not ranked yet' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Your score. 9.4 out of 10' }));
     expect(onPress).toHaveBeenCalled();
   });
 

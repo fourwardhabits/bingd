@@ -1083,15 +1083,14 @@ export default function TitleScreen() {
               Solid rather than translucent: legibility over a photograph cannot depend on
               what the photograph happens to be.
 
-              Anchored above the poster rather than at the top of the hero, which keeps it
-              clear of the transparent navigation bar without having to guess at its
+              Anchored to the hero's lower edge rather than its top, which keeps it clear
+              of the transparent navigation bar without having to guess at that bar's
               height on a device this code cannot measure.
 
-              Only where there *is* artwork. The collapsed band is exactly POSTER_LIFT
-              tall and the poster rises the whole way into it, so a title with no
-              backdrop has no hero to overlay — an absolute callout there would sit on
-              the poster or above the screen. That case gets the same callout inline,
-              under the heading. */}
+              Only where there *is* artwork. The collapsed band is short and the identity
+              block starts immediately beneath it, so a title with no backdrop has no hero
+              worth overlaying — an absolute callout there would sit on the title. That
+              case gets the same callout inline, under the heading. */}
           {recommendedBy && hero.uri ? (
             <RecommendedCallout label={recommendedBy} overlay />
           ) : null}
@@ -1111,10 +1110,23 @@ export default function TitleScreen() {
          * serif title set on it is legible on the artwork the designer happened to be
          * looking at.
          *
-         * So the row starts at the hero's lower edge and everything in the left column
-         * sets on the page's own Paper. The poster keeps the overlap, because a poster is
-         * artwork and artwork may cross the fade; it is the one object on this page
-         * allowed to (`POSTER_LIFT`).
+         * So the row starts at the hero's lower edge and everything in it sets on the
+         * page's own Paper — **including the poster**, since 2026-09-08. It used to be
+         * pulled up across the fade on the argument that artwork may cross a line the
+         * words may not, and on the device that made it a member of the hero rather than
+         * of this block: level with the middle of the title instead of with its first
+         * line. Nothing crosses the fade now. See `TITLE_CAP_OFFSET`.
+         *
+         * ---------------------------------------------------------------------------
+         * THE ROW IS A PLAIN FLEX ROW, AND THAT IS WHAT KEEPS THE SYNOPSIS CLEAR
+         *
+         * `flexDirection: 'row'` with `alignItems: 'flex-start'`, no height, no minimum,
+         * nothing absolutely positioned and no negative margin anywhere inside it. So the
+         * row's height is exactly the taller of its two children, and the synopsis — the
+         * next sibling — begins below **both** the poster and the left stack without
+         * anything having to compute which of them won. A one-line film with no credit
+         * clears the poster's 154; a wrapped two-line season title with five metadata
+         * lines and the action row clears the left stack instead.
          *
          * ---------------------------------------------------------------------------
          * THE ACTIONS ARE IN THIS COLUMN, AND THE ROW HAS NO FIXED HEIGHT
@@ -2173,33 +2185,49 @@ function formatAirDate(date: string | null) {
 }
 
 /**
- * How far the poster rises into the hero.
+ * **The poster does not rise into the hero any more** (founder, physical Android,
+ * 2026-09-08).
  *
- * It has been 64, then 120, then 88, and is now **56** — and the reason it came down is
- * that it stopped carrying the whole row. The identity row used to rise with the poster,
- * so the lift decided how much of the *page* sat on artwork; the row now starts at the
- * hero's lower edge and only the poster is pulled up, so the lift decides one thing:
- * how much of the frame crosses the fade.
+ * There was a lift, and it was 64, then 120, then 88, then 56. The founder's reading on
+ * the device is the one that ends the sequence: whatever the number, a poster pulled up
+ * across the hero's fade **belongs to the hero**, and it therefore reads as detached from
+ * the title sitting level with its middle. No lift is small enough to fix that, because
+ * the defect is which block the artwork is a member of rather than how far it travels.
  *
- * 56 of a 140pt frame is enough for the poster to read as straddling the boundary — the
- * founder's original note was that it sat "beneath a separate strip" rather than in the
- * artwork — while leaving its top in the part of the fade that is already mostly Paper.
- * It is the one object on this page allowed to cross that line, because it is artwork;
- * the words are not.
+ * The poster is part of the identity block now. Its top edge is optically aligned with the
+ * first line of the title, and {@link TITLE_CAP_OFFSET} is the whole of the adjustment.
+ *
+ * Two things that used to depend on the lift are now stated on their own terms, below:
+ * the collapsed band's height, and where the recommendation callout sits.
  */
-const POSTER_LIFT = 56;
-
 /**
  * How much warm band sits *below the navigation* when a title has no artwork at all.
  *
  * The seed catalogue ships without posters or backdrops, so this is a real state and not
- * a failure one — it draws no grey box and never a poster stretched to fill. It is the
- * poster's own lift, so the poster still overlaps something and the page does not become
- * a different design; the bar's height is added to it at the call site, because the
- * navigation overlays the band and a band shorter than the bar would put the poster's top
- * underneath the back control.
+ * a failure one — it draws no grey box and never a poster stretched to fill. The bar's
+ * height is added to it at the call site, because the navigation overlays the band and a
+ * band shorter than the bar would put the identity block under the back control.
+ *
+ * 56 is what shipped as the poster's lift and is kept as the band's own number now that
+ * nothing overlaps it: it is enough Parchment to read as a deliberate surface rather than
+ * as a hairline, and short enough that a title with no artwork does not spend a third of
+ * the screen saying so.
  */
-const HERO_COLLAPSED_BAND = POSTER_LIFT;
+const HERO_COLLAPSED_BAND = 56;
+
+/**
+ * How far the poster sits below the top of the identity row, so its top rule meets the
+ * title's **cap height** rather than its line box.
+ *
+ * `title1` is 28pt of DM Serif on a 34pt line, so the line box carries about six points of
+ * leading and roughly half of that sits above the capitals. Aligned to the box, the poster
+ * measures level with the title's *ascent* and reads as sitting a few points high; aligned
+ * to the caps, the two objects start on the same line the way a reader sees it.
+ *
+ * Four points rather than a measurement, because the leading is a property of the type
+ * token and not of the string: it is the same on every title in the catalogue.
+ */
+const TITLE_CAP_OFFSET = theme.space[1];
 /**
  * Over how many points the navigation finishes becoming a header.
  *
@@ -2238,7 +2266,16 @@ const styles = StyleSheet.create({
    * and the words do not. It carries nothing but the artwork now — the score that used to
    * be anchored to its corner is the first unit of the Scores section.
    */
-  posterColumn: { marginTop: -POSTER_LIFT },
+  /**
+   * The poster, level with the title's first line.
+   *
+   * A positive offset, and a small one. It used to be `-POSTER_LIFT`, which pulled the
+   * frame up across the hero's fade — see the note on {@link TITLE_CAP_OFFSET} for why
+   * that had to go rather than shrink. Nothing here is absolutely positioned and the
+   * column has no containing block, so the poster cannot overlay anything and the row's
+   * height is simply the taller of its two children.
+   */
+  posterColumn: { marginTop: TITLE_CAP_OFFSET },
   /**
    * Everything that names the title *and everything you can do to it*, on the left.
    *
@@ -2301,17 +2338,22 @@ const styles = StyleSheet.create({
     ...theme.elevation.e1,
   },
   /**
-   * On the hero, above the poster.
+   * On the hero, at its lower edge.
    *
-   * `bottom` is measured from the hero's lower edge and clears the poster, which rises
-   * `POSTER_LIFT` into it. Applied only where there is artwork to sit on: the collapsed
-   * band is the same height as the lift, so there is nothing left to overlay.
+   * `bottom` used to be `POSTER_LIFT + space[3]`, and the lift was the whole of it: the
+   * callout had to clear a poster that rose into the artwork. Nothing rises now, so it is
+   * a plain `space[3]` off the hero's own lower edge — where the Paper fade has almost
+   * finished, which is exactly where a solid raised card reads best.
+   *
+   * Applied only where there is artwork to sit on. The collapsed band is short and the
+   * identity block starts immediately under it, so a title with no backdrop gets the same
+   * callout inline instead.
    */
   recommendedOverlay: {
     position: 'absolute',
     left: theme.layout.gutter,
     right: theme.layout.gutter,
-    bottom: POSTER_LIFT + theme.space[3],
+    bottom: theme.space[3],
     marginTop: 0,
   },
   // Takes the width the glyph leaves, so a long name truncates rather than pushing the

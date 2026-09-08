@@ -1,5 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { formatScore } from '@/features/collection/score';
+
 import { theme } from '../tokens';
 import { EmptyScoreBadge, ScoreBadge, type ScoreBadgeVariant } from './ScoreBadge';
 import { Text } from './Text';
@@ -41,18 +43,19 @@ export type ScoresSectionProps = {
   onPressFollowing?: () => void;
 };
 
-/** bingd.'s empty state: the app has nothing to report yet. */
+/** bingd.'s empty state: the app is short of a sample, which is not the same as nobody. */
 const NOT_ENOUGH = 'Not enough ratings';
 
 /**
- * Following's empty state, in the founder's own words (2026-09-07).
+ * Following's empty state (founder, physical Android, 2026-09-08).
  *
- * It said `Not enough ratings`, the same four words bingd. says, and that was wrong in a
- * way a shared string hides: the app being short of a sample and *nobody the reader
- * chose having seen this* are different facts, and only the second one is actionable.
- * The reader can go and follow somebody.
+ * It read `None of your friends have ranked this` for one build, and on the device that
+ * sentence set on three lines in a 114pt column and dragged the whole row taller. **The
+ * heading has already said whose ratings these are** — the unit is labelled `Following` —
+ * so the sentence was spending three lines restating its own label. Four words, one line,
+ * and the same shape as the count it replaces.
  */
-const NO_FOLLOWING = 'None of your friends have ranked this';
+const NO_FOLLOWING = 'No ratings yet';
 
 /** The reader's own empty state. A statement about them, so it is in the second person. */
 const NOT_RANKED = 'Not ranked yet';
@@ -68,9 +71,9 @@ const SCORE_LOADING = 'Score loading';
  * and one person's opinion rendered in the same Maroon ring as twelve hundred is the
  * page telling a lie about its own confidence. At two the ring goes on.
  *
- * It governs **bingd. only**. Following is not the same claim: `1 person you follow`
- * already names the sample as a single named human the reader chose to follow, which is
- * the most useful signal on this page and is not pretending to be a statistic.
+ * It governs **bingd. only**. Following is not the same claim: its sample is people the
+ * reader chose to follow, which is the most useful signal on this page and is not
+ * pretending to be a statistic about anybody else.
  *
  * Purely a *visual* threshold. Whether there is a number at all is the server's
  * decision (`score.community_min_ratings`) and this component still does not know it.
@@ -158,15 +161,24 @@ const AUTHORITATIVE_MIN_RATINGS = 2;
  * bingd. into something the reader had to discover by swiping.
  *
  * Stacked, a unit is as wide as its column and overflows *downward*, by wrapping its own
- * sub-label, which is what a column is for. The row takes its height from the tallest,
- * so `None of your friends have ranked this` setting on three lines makes the row taller
- * and never makes it scroll. That is why the scroller is gone rather than retained: with
- * this composition there is nothing left for it to rescue.
+ * sub-label, which is what a column is for. The row takes its height from the tallest and
+ * never scrolls. That is why the scroller is gone rather than retained: with this
+ * composition there is nothing left for it to rescue.
  *
- * **Each unit says its own empty state in its own words.** They shared four — `Not enough
- * ratings` — and that hid a real distinction: the app being short of a sample, nobody the
- * reader follows having seen it, and the reader not having ranked it are three different
- * facts and only one of them is about the app. See `NO_FOLLOWING`, `NOT_RANKED`.
+ * **The supporting copy is a count, and it is short** (founder, physical Android,
+ * 2026-09-08). Every unit's second line is now at most three words, because the first pass
+ * wrote sentences — `1 person you follow`, `None of your friends have ranked this` — that
+ * set on two and three lines in a third of the content width and made the whole section
+ * read as noise. Both aggregates count ratings the same way; the labels above them are
+ * what say *whose*.
+ *
+ * **Each unit still says its own empty state**, because the app being short of a sample,
+ * nobody the reader follows having rated it, and the reader not having ranked it are three
+ * different facts. What changed is their length, not the distinction. See `NO_FOLLOWING`,
+ * `NOT_RANKED`, `NOT_ENOUGH`.
+ *
+ * **A ranked personal score has no second line at all.** See the `detail` prop on `Score`
+ * for the list of things that have been tried there and cut.
  *
  * Neither aggregate counts down: `2 more needed` turns a reader into a spectator of a
  * figure they cannot move. The threshold that decides whether there is a number at all is
@@ -207,12 +219,21 @@ export function ScoresSection({
               score={you.score}
               variant="filled"
               label="Your score"
-              // No bucket word. `Loved` under a 9.4 was in the design draft and the
-              // founder cut it: it restates the number in the app's own jargon on a
-              // screen that has never used that vocabulary. And no rank and no watch
-              // date — those stayed in the identity block, where they describe the
-              // reader's history with the title rather than qualify an aggregate.
-              detail={you.pending ? SCORE_LOADING : NOT_RANKED}
+              /**
+               * **Nothing under the label when there is a score**, and this null is the
+               * fix for the founder's `7.0 / Your score / Not ranked yet` (2026-09-08).
+               *
+               * Every candidate for this line has been cut in turn: the bucket word,
+               * because it restates the number in jargon this screen has never used; the
+               * rank and the watch date, because those are the reader's history with the
+               * title and live in the identity block; and finally the word `Ranked`
+               * itself, because a filled Maroon circle with a number in it has said so.
+               *
+               * It used to be passed the *empty* copy, which `Score` printed whenever
+               * there was a number — the two states were chosen by two expressions. They
+               * are one now; see `Score`.
+               */
+              detail={null}
               emptyLabel={you.pending ? SCORE_LOADING : NOT_RANKED}
               onPress={you.onPress}
             />
@@ -220,11 +241,13 @@ export function ScoresSection({
           {following ? (
             <Score
               score={following.score}
-              // Outlined even at one rating: `1 person you follow` is a named human the
-              // reader chose, not a thin statistic. See `AUTHORITATIVE_MIN_RATINGS`.
+              // Outlined at any count. Following is people the reader chose, and the
+              // low-confidence treatment is bingd.'s alone — see `AUTHORITATIVE_MIN_RATINGS`.
               variant="outlined"
               label="Following"
-              detail={followingDetail(following.ratingCount)}
+              // The same words bingd. uses. The label above already says whose ratings
+              // these are, so counting people spent two extra lines restating it.
+              detail={ratingsDetail(following.ratingCount)}
               emptyLabel={NO_FOLLOWING}
               onPress={
                 following.ratingCount > 0 && onPressFollowing ? onPressFollowing : undefined
@@ -251,12 +274,21 @@ export function ScoresSection({
 }
 
 /**
- * One score: the circle, then the label and the sample beside it.
+ * One score: the circle, then the label and, where there is one, the sample beneath it.
  *
- * Sized to its own content. Inside a horizontal scroller there is no half-width to set
- * in, so the copy rules that used to differ between two layouts are now one rule — which
- * is what removed `numberOfLines` from the line below. `Not enough ratings` sets on one
- * line at every text size because it is given the width it needs.
+ * ---------------------------------------------------------------------------
+ * **ONE DERIVATION, SO THE NUMBER AND THE WORDS CANNOT DISAGREE** (founder, physical
+ * Android, 2026-09-08).
+ *
+ * The device showed `7.0` above `Your score` above `Not ranked yet`, all at once, and the
+ * cause was that the badge and the sub-label were chosen by two different expressions.
+ * The caller passed the personal unit's *empty* copy as its `detail`, and `detail` is what
+ * a unit with a number prints — so a ranked title stated its score and denied it in the
+ * same breath.
+ *
+ * `ranked` below is computed once and decides all three things: which badge is drawn,
+ * which line of copy sits under the label, and what a screen reader is told. A future
+ * caller can pass whatever it likes; it can no longer make them contradict.
  */
 function Score({
   score,
@@ -269,14 +301,21 @@ function Score({
 }: {
   score: number | null;
   label: string;
-  /** How big the sample behind the number is. Only ever drawn when there is a number. */
-  detail: string;
+  /**
+   * How big the sample behind the number is, drawn only when there *is* a number.
+   *
+   * **Null is a real answer**, and it is the personal unit's: a ranked title says `Your
+   * score` and nothing else. The founder cut every candidate for that line in turn — the
+   * bucket word, the rank, the watch date, and finally the word `Ranked` itself, which
+   * restates the filled circle beside it.
+   */
+  detail: string | null;
   /**
    * What this unit says when there is no number, in its own words.
    *
-   * One string per unit rather than one shared across the row: "nobody you follow has
-   * seen this" and "bingd. has too few ratings" and "you have not ranked this" are three
-   * different facts, and the row said the same four words for all of them.
+   * One string per unit rather than one shared across the row: the reader not having
+   * ranked it, nobody they follow having rated it, and bingd. being short of a sample are
+   * three different facts.
    */
   emptyLabel: string;
   /** Filled for the reader's own; outlined or quiet for everybody else's. */
@@ -285,24 +324,30 @@ function Score({
   onPress?: () => void;
   testID?: string;
 }) {
-  const badge =
-    score != null ? (
-      <ScoreBadge score={score} bucket={null} size="detail" variant={variant} />
-    ) : (
-      // `dash`, never the cream `empty` disc and never the dashed ring: an em dash in a
-      // plain neutral ring is a *stated* absence, where a blank circle is
-      // indistinguishable from one whose contents failed to arrive.
-      <EmptyScoreBadge size="detail" dash label={`${label}: ${emptyLabel}`} />
-    );
+  /** The one question this component asks. Everything below is an answer to it. */
+  const ranked = score != null;
+  /** The line under the label, or nothing at all. */
+  const support = ranked ? detail : emptyLabel;
+
+  const badge = ranked ? (
+    <ScoreBadge score={score} bucket={null} size="detail" variant={variant} />
+  ) : (
+    // `dash`, never the cream `empty` disc and never the dashed ring: an em dash in a
+    // plain neutral ring is a *stated* absence, where a blank circle is
+    // indistinguishable from one whose contents failed to arrive.
+    <EmptyScoreBadge size="detail" dash label={`${label}: ${emptyLabel}`} />
+  );
 
   const body = (
     <>
       {badge}
       <View style={styles.copy}>
         <Text variant="callout">{label}</Text>
-        <Text variant="footnote" tone="secondary">
-          {score == null ? emptyLabel : detail}
-        </Text>
+        {support ? (
+          <Text variant="footnote" tone="secondary">
+            {support}
+          </Text>
+        ) : null}
       </View>
     </>
   );
@@ -315,13 +360,22 @@ function Score({
     );
   }
 
-  // The whole unit is the target — a chevron or a link word would be a second
-  // element competing with the number, and the hint carries what tapping does.
+  /**
+   * The whole unit is the target — a chevron or a link word would be a second element
+   * competing with the number, and the hint carries what tapping does.
+   *
+   * The spoken label is assembled from the same `ranked`, and it names the **number**
+   * before the sample. A `Pressable` with its own label absorbs its children's, so
+   * without this a screen reader pressing a unit heard `Following. 6 ratings` and never
+   * the 8.7 the row exists to state.
+   */
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={`${label}. ${score == null ? emptyLabel : detail}`}
+      accessibilityLabel={[label, ranked ? `${formatScore(score)} out of 10` : null, support]
+        .filter(Boolean)
+        .join('. ')}
       accessibilityHint={
         testID === 'scores-unit-you'
           ? 'Opens your rating options'
@@ -335,18 +389,19 @@ function Score({
   );
 }
 
-/** How many of the reader's own people are behind the number. */
-function followingDetail(ratingCount: number): string {
-  return ratingCount === 1 ? '1 person you follow' : `${ratingCount} people you follow`;
-}
-
 /**
- * "128 ratings".
+ * "128 ratings". "1 rating".
+ *
+ * **Both aggregates say it the same way** (founder, 2026-09-08). Following used to count
+ * people — `1 person you follow`, `6 people you follow` — which was more specific and
+ * measurably worse: it wrapped to two and three lines in a third of the content width,
+ * and every word past the number was restating the label directly above it. The unit is
+ * called `Following`; the reader knows whose ratings they are.
  *
  * Only reached with a number beside it, which since 2026-09-05 means from the first
- * rating. Below the threshold the unit says {@link NOT_ENOUGH} and stops: no
- * countdown, because "2 more needed" invites the reader to watch a figure they cannot
- * move and the exact shortfall is a property of a config value rather than of the film.
+ * rating. Below the threshold the unit says {@link NOT_ENOUGH} and stops: no countdown,
+ * because "2 more needed" invites the reader to watch a figure they cannot move and the
+ * exact shortfall is a property of a config value rather than of the film.
  */
 function ratingsDetail(ratingCount: number): string {
   return ratingCount === 1 ? '1 rating' : `${ratingCount} ratings`;

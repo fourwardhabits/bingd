@@ -838,7 +838,14 @@ describe('the personal score', () => {
 
     await waitFor(() => expect(view.getByText('10.0', drawn)).toBeTruthy());
     expect(view.queryByText(/star/i, drawn)).toBeNull();
-    expect(view.getByLabelText(/out of 10/)).toBeTruthy();
+    /**
+     * `getAll`, because since 2026-09-08 two nodes carry the phrase and both should: the
+     * circle names itself `10.0 out of 10`, and the pressable unit around it names itself
+     * `Your score. 10.0 out of 10`. A Pressable with its own label absorbs its children's,
+     * so without the second one a screen reader pressing the unit would hear no number.
+     */
+    expect(view.getAllByLabelText(/out of 10/).length).toBeGreaterThan(0);
+    expect(view.getByLabelText('Your score. 10.0 out of 10')).toBeTruthy();
   });
 
   it('draws the honest empty state for a title nobody has ranked', async () => {
@@ -1054,6 +1061,22 @@ const flat = (style: unknown): Record<string, unknown> =>
     : ((style ?? {}) as Record<string, unknown>);
 
 /**
+ * Every testID in the rendered tree, depth-first.
+ *
+ * Document order, which is what a "comes after" assertion needs and what a query by id
+ * cannot give: `getByTestId` finds a node, not its position among its siblings.
+ */
+const testIds = (node: unknown): string[] => {
+  if (!node || typeof node === 'string') return [];
+  if (Array.isArray(node)) return node.flatMap(testIds);
+  const n = node as { props?: { testID?: string }; children?: unknown };
+  const own = n.props?.testID ? [n.props.testID] : [];
+  return [...own, ...testIds(n.children ?? [])];
+};
+
+const structure = (view: { toJSON: () => unknown }) => testIds(view.toJSON());
+
+/**
  * **The poster carries artwork and nothing else** (founder lock, 2026-09-07).
  *
  * The score has now been in four places: a detached column opposite the poster, stacked
@@ -1163,6 +1186,86 @@ describe('where the action row lives', () => {
     // Top-aligned, so the title and the poster begin on the same line rather than the
     // column sliding down to meet the artwork.
     expect(row.alignItems).toBe('flex-start');
+    expect(row.flexDirection).toBe('row');
+  });
+
+  it('sits the poster level with the title rather than up inside the hero', async () => {
+    /**
+     * **The founder's 2026-09-08 correction, and the end of a four-value sequence.**
+     *
+     * The poster was pulled up across the hero's fade by a negative margin — 64, then 120,
+     * then 88, then 56 — on the argument that artwork may cross a line the words may not.
+     * On the device that made the poster a member of the *hero*, sitting level with the
+     * middle of the title instead of with its first line, and no value of the lift fixes
+     * that because the defect is membership rather than distance.
+     *
+     * A **positive** offset now, and a small one: enough to meet the title's cap height
+     * rather than its line box. `title1` is 28pt on a 34pt line, so a poster aligned to
+     * the box measures level with the ascent and reads a few points high.
+     */
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+
+    const column = flat(view.getByTestId('title-poster-column').props.style);
+    const offset = (column.marginTop ?? 0) as number;
+
+    // Positive and small. Negative is the defect; more than a line's leading is a gap.
+    expect(offset).toBeGreaterThan(0);
+    expect(offset).toBeLessThanOrEqual(theme.space[2]);
+    // And nothing else displaces it: no lift by another name, and no overlay anchor.
+    expect(column.top).toBeUndefined();
+    expect(column.transform).toBeUndefined();
+    expect(column.position).toBeUndefined();
+  });
+
+  it('starts the synopsis below both the poster and the left stack', async () => {
+    /**
+     * The structural guarantee, rather than a pixel one. The identity row is a plain flex
+     * row with no height, no minimum and nothing absolutely positioned or negatively
+     * margined inside it, so its height is exactly the taller of its two children — and
+     * the synopsis, being the row's *sibling* rather than a child of either column, cannot
+     * begin before both have finished.
+     *
+     * That is what makes it hold for a one-line film and a wrapped two-line season alike,
+     * without anything having to compute which column won.
+     */
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+
+    const order = structure(view);
+    const identity = order.indexOf('title-identity');
+    const poster = order.indexOf('title-poster-column');
+    const actions = order.indexOf('title-actions');
+    const synopsis = order.indexOf('synopsis-column');
+
+    expect(identity).toBeGreaterThanOrEqual(0);
+    expect(synopsis).toBeGreaterThan(poster);
+    expect(synopsis).toBeGreaterThan(actions);
+    // The poster and the actions are both inside the identity row; the synopsis is not.
+    expect(poster).toBeGreaterThan(identity);
+    expect(actions).toBeGreaterThan(identity);
+
+    // The synopsis is full width: gutter padding only, and no width the poster could
+    // have taken from it.
+    const block = flat(view.getByTestId('synopsis-column').props.style);
+    expect(block.width).toBeUndefined();
+    expect(block.marginRight).toBeUndefined();
+  });
+
+  it('holds that order for a season whose title wraps to two lines', async () => {
+    // The other shape of the same guarantee. A long season heading makes the left stack
+    // the taller column, so the synopsis now clears *it* rather than the poster — and the
+    // structural answer is identical because nothing in the row is measured.
+    const view = await openOn(
+      { ...completeSeason, parent: [{ ...completeSeason.parent[0], title: 'The Last of Us' }] },
+      'The Last of Us',
+    );
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+
+    const order = structure(view);
+    expect(order.indexOf('synopsis-column')).toBeGreaterThan(order.indexOf('title-poster-column'));
+    expect(order.indexOf('synopsis-column')).toBeGreaterThan(order.indexOf('title-actions'));
+    expect(view.getByTestId('title-name').props.numberOfLines).toBe(2);
   });
 
   it('keeps the rank control content-sized rather than full width', async () => {
