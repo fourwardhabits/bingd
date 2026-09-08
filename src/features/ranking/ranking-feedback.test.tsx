@@ -345,7 +345,16 @@ describe('the placement landing', () => {
     answering(comparison, placement);
     const sheet = await openSheet();
     await sheet.ready('Film A');
+    /**
+     * **Cleared here, which is what makes the `setValue` assertion below discriminating**
+     * (independent review 78c, P2). `Animated.Value.prototype.setValue` is global, and
+     * with Reduce Motion resolved true every mounted `usePressScale` puts its own scale
+     * back to 1 — the comparison cards do exactly that on this very render. Clearing at
+     * this instant means anything recorded afterwards belongs to what the *reveal* did:
+     * the cards unmount as it mounts, and nothing else on screen holds a press scale.
+     */
     timingSpy.mockClear();
+    setValueSpy.mockClear();
 
     await fireEvent.press(sheet.card('Film A'));
     await waitFor(() => expect(sheet.getByLabelText(REVEAL)).toBeTruthy());

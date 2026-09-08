@@ -52,16 +52,20 @@ export function useReducedMotionState() {
      * and let the entrance run.
      */
     let eventSeen = false;
-    let initialSettled = false;
+    let readSettled = false;
+    // Declared before the handlers that clear it; assigned below, after the subscription.
+    let fallback: ReturnType<typeof setTimeout>;
 
     const fromEvent = (reduced: boolean) => {
       eventSeen = true;
+      clearTimeout(fallback);
       if (live) setState({ reduced, known: true });
     };
 
     const fromInitialRead = (reduced: boolean) => {
-      if (eventSeen || initialSettled || !live) return;
-      initialSettled = true;
+      if (eventSeen || readSettled || !live) return;
+      readSettled = true;
+      clearTimeout(fallback);
       setState({ reduced, known: true });
     };
 
@@ -73,17 +77,32 @@ export function useReducedMotionState() {
     const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', fromEvent);
 
     /**
-     * **And a bounded fallback, because "never answers" must not mean "never appears".**
+     * **A bounded fallback, because "never answers" must not mean "never appears".**
      *
      * The whole point of `known` is that a one-shot entrance waits for it — so a promise
      * that never settles would leave the ranking reveal at opacity 0 permanently, which
      * is a blank score panel and by some distance the worst outcome this pass could
-     * produce. After this long, an unanswered platform is treated as having no preference.
+     * produce.
      *
-     * Short enough that a reader never sees the wait — the panel is at opacity 0 for it,
-     * and a real answer arrives in a frame or two on every platform that has one.
+     * **It releases `known` and nothing else**, and that distinction is independent
+     * review 78c's P1. The first version answered `false` through the same path a real
+     * read takes, which set `readSettled` — so a genuine `true` arriving at 260ms was
+     * discarded and a reader with Reduce Motion on was left permanently marked as not
+     * having it. Now the real read still applies whenever it lands, and if it says `true`
+     * the reveal's effect re-runs and cuts the entrance short.
+     *
+     * The trade is deliberate and it is the honest one: on a platform slow to answer, a
+     * Reduce Motion reader may see a fraction of an entrance before it snaps to rest.
+     * That is worse than perfect and much better than either alternative — a blank panel
+     * for ever, or a preference silently stuck at the wrong value.
+     *
+     * Cleared as soon as either real source answers, so a screen full of chips and tiles
+     * does not leave a timer per control queued to do nothing.
      */
-    const fallback = setTimeout(() => fromInitialRead(false), UNANSWERED_FALLBACK_MS);
+    fallback = setTimeout(() => {
+      if (!live || eventSeen || readSettled) return;
+      setState((current) => ({ ...current, known: true }));
+    }, UNANSWERED_FALLBACK_MS);
 
     return () => {
       live = false;
