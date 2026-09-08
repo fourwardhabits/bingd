@@ -32,6 +32,42 @@ const deferred = () => {
 
 let notify: ((reduced: boolean) => void) | undefined;
 
+/**
+ * Watches for the hook's own fallback timer and whether it was cancelled.
+ *
+ * Keyed on the 250ms delay, which is the only timer this hook arms. `jest.getTimerCount()`
+ * cannot answer this: under fake timers it also counts React Query's and `waitFor`'s, so
+ * it is never zero in a rendered test.
+ */
+const trackTimers = () => {
+  const armed: unknown[] = [];
+  const cleared: unknown[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+
+  jest.spyOn(globalThis, 'setTimeout').mockImplementation(((
+    handler: TimerHandler,
+    delay?: number,
+    ...rest: unknown[]
+  ) => {
+    const handle = (realSetTimeout as never as (...a: unknown[]) => unknown)(
+      handler,
+      delay,
+      ...rest,
+    );
+    if (delay === 250) armed.push(handle);
+    return handle;
+  }) as never);
+
+  jest.spyOn(globalThis, 'clearTimeout').mockImplementation(((handle: unknown) => {
+    cleared.push(handle);
+  }) as never);
+
+  return {
+    fallbackCleared: () =>
+      armed.length > 0 && armed.every((handle) => cleared.includes(handle)),
+  };
+};
+
 beforeEach(() => {
   jest.useFakeTimers();
   notify = undefined;
@@ -169,15 +205,44 @@ describe('when nobody answers at all', () => {
     expect(result.current).toEqual({ reduced: true, known: true });
   });
 
-  it('cancels the fallback once a real source has spoken', async () => {
-    // One timer per hook instance, and this hook is used by every chip, tile and card on
-    // screen. A settled read must not leave a timer queued to do nothing.
+  it('cancels the fallback when the initial read answers', async () => {
+    /**
+     * One timer per hook instance, and this hook is used by every chip, tile and card on
+     * screen — so a settled read must not leave a timer queued to do nothing.
+     *
+     * Asserted on the **specific handle** rather than on `clearTimeout` merely having
+     * been called, which is independent review 78d's P2: the weaker version passed if
+     * production cleared no handle or the wrong one. `jest.getTimerCount()` is not the
+     * measure either — under fake timers it counts React Query's and `waitFor`'s own
+     * timers, so it is never zero in a rendered test.
+     */
     jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
-    const clear = jest.spyOn(globalThis, 'clearTimeout');
+    const timers = trackTimers();
 
     const { result } = await renderHookWithProviders(() => useReducedMotionState());
     await waitFor(() => expect(result.current.known).toBe(true));
 
-    expect(clear).toHaveBeenCalled();
+    expect(timers.fallbackCleared()).toBe(true);
+  });
+
+  it('cancels the fallback when the event arrives synchronously from subscribing', async () => {
+    /**
+     * **The ordering half of review 78d's P2.** A platform that delivers the first event
+     * synchronously from `addEventListener` answers before the timer would have been
+     * created — so the timer must be armed *first*, or it is created after the answer and
+     * sits for the full 250ms. The weaker version of this test could not see that,
+     * because it only exercised the initial read.
+     */
+    jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockReturnValue(deferred().promise);
+    jest.spyOn(AccessibilityInfo, 'addEventListener').mockImplementation((_event, handler) => {
+      (handler as unknown as (reduced: boolean) => void)(true);
+      return { remove: jest.fn() } as never;
+    });
+    const timers = trackTimers();
+
+    const { result } = await renderHookWithProviders(() => useReducedMotionState());
+
+    await waitFor(() => expect(result.current).toEqual({ reduced: true, known: true }));
+    expect(timers.fallbackCleared()).toBe(true);
   });
 });

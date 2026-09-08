@@ -74,8 +74,6 @@ export function useReducedMotionState() {
       // A platform that cannot answer has no preference to honour.
       .catch(() => fromInitialRead(false));
 
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', fromEvent);
-
     /**
      * **A bounded fallback, because "never answers" must not mean "never appears".**
      *
@@ -103,6 +101,16 @@ export function useReducedMotionState() {
       if (!live || eventSeen || readSettled) return;
       setState((current) => ({ ...current, known: true }));
     }, UNANSWERED_FALLBACK_MS);
+
+    /**
+     * Subscribed **after** the timer exists, which is independent review 78d's P2. A
+     * platform that delivers the first event synchronously from `addEventListener` would
+     * otherwise answer while `fallback` is still `undefined` — the `clearTimeout` in
+     * `fromEvent` would be a harmless no-op, and the timer created afterwards would sit
+     * for the full 250ms doing nothing. Ordering it this way makes the cancellation
+     * unconditional rather than usually true.
+     */
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', fromEvent);
 
     return () => {
       live = false;
