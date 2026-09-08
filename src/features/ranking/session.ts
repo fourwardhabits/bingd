@@ -290,19 +290,25 @@ export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId:
 /**
  * Ranks an already-ranked title **again, inside the band it is already in**.
  *
- * Two callers, two meanings, and the boolean is what separates them.
+ * Two callers, two meanings, and the boolean is what separates them. Both are rows in the
+ * title page's Ranked menu, which since 2026-09-08 has exactly two.
  *
- * *Rank again*, from the Ranked menu, is **another watch**: the reader saw the film a
- * second time and is placing it a second time. `newWatch` is true, and completing it
- * writes exactly one new `title_ranked` activity.
+ * *Log another watch* is **another watch**: the reader saw the film a second time and is
+ * placing it a second time. `newWatch` is true, and completing it writes exactly one new
+ * `title_ranked` activity.
  *
- * *Change your rating* re-choosing the band it already has is a **correction**. The
+ * *Update your rating* re-choosing the band it already has is a **correction**. The
  * founder reproduced the original bug on the device — a Loved title, Change your
- * rating, Loved, and nothing happened, because `LogSheet` read "same bucket" as "no
- * change" and returned before anything ran. It is not no change: a reader re-opening a
- * rating they already gave is saying the *position* is wrong. But it is not a viewing
- * either, so `newWatch` is false and no activity is written — which is the founder's
- * four-War-Dogs report, where changing a rating posted a duplicate every time.
+ * rating (as the row was then called), Loved, and nothing happened, because `LogSheet`
+ * read "same bucket" as "no change" and returned before anything ran. It is not no
+ * change: a reader re-opening a rating they already gave is saying the *position* is
+ * wrong. But it is not a viewing either, so `newWatch` is false and no activity is
+ * written — which is the founder's four-War-Dogs report, where changing a rating posted a
+ * duplicate every time.
+ *
+ * A third row, *Rank it again*, reached this same `newWatch: false` call directly until
+ * 2026-09-08. It was consolidated away — the two rows were one act behind two names — and
+ * nothing about this function moved with it.
  *
  * `rank_rebucket` can serve neither: it raises 22023 on a bucket that is not moving, by
  * design, because it exists to change a band.

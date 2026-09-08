@@ -615,8 +615,17 @@ function Body({
    *     which is what the old 55000 note was really about;
    *   - ranked, different bucket: ask first, then move the band.
    *
-   * Both ranked branches discard the position before a comparison is answered, so both
-   * confirm — what differs is the call behind the confirmation and the sentence on it.
+   * **Both ranked branches are reached from one row.** Since 2026-09-08 the Ranked menu
+   * offers *Update your rating*, which lands here, and *Log another watch*, which does
+   * not — the second and third cases above are the two halves of that one correction, and
+   * the chooser is where the reader says which they meant.
+   *
+   * Both confirm, because both re-run the comparisons and that is worth asking about.
+   * **Neither discards anything to begin**, and this comment said the opposite until
+   * 2026-09-08: `20260826000500` made the server run a session *over* the position the
+   * title holds, so the score, band and place survive until a new placement completes.
+   * What differs between the two is the call behind the confirmation and the sentence on
+   * it.
    */
   const choose = async (chosen: BucketId) => {
     if (saving) return;
@@ -717,9 +726,14 @@ function Body({
    * Confirmed re-rank, in either direction.
    *
    * Nothing is written here. Each mode is one server call the ranking sheet makes when
-   * it opens — `rank_rebucket` for a band change, unrank-then-`rank_start` for a
-   * re-rank inside the same band — and the sheet is what drives a session. Writing the
-   * bucket first would only earn a 55000.
+   * it opens — `rank_rebucket` for a band change, `rank_again` with `p_new_watch: false`
+   * for a re-rank inside the same band — and the sheet is what drives a session. Writing
+   * the bucket first would only earn a 55000.
+   *
+   * The same-band call was `rank_unrank` then `rank_start` when this comment was written,
+   * and that pair is exactly what `20260825000200` replaced with one atomic call and
+   * `20260826000500` made cost nothing until it succeeds. Neither mode gives up the
+   * position to begin any more.
    */
   const rebucket = () => {
     const next = confirmRebucket;
@@ -1288,14 +1302,23 @@ function Body({
             {/* Two sentences for two different acts. “Changing this” is untrue of a
                 re-rank in the same bucket — nothing about the rating changes — and a
                 confirmation that misdescribes what it is confirming is worse than none.
-                The second line is the same either way, because the consequence is. */}
+                The second line is the same either way, because the consequence is.
+
+                **And the second line said the position was discarded, which stopped
+                being true on 2026-08-26** (`20260826000500`, corrected here 2026-09-08).
+                The server runs the session *over* the placement the title holds, so
+                cancelling, closing the sheet or losing the connection leaves the score,
+                the band and the place exactly as they were. Warning a reader they are
+                about to lose something they cannot lose is the founder's disappearing
+                score in another form — the fear survived the fix, in copy. What is
+                genuinely being asked for is the comparisons, so that is what it says. */}
             <Text variant="callout">
               {confirmRebucket === state.bucket
                 ? `Rank ${title.title} again?`
                 : `Changing this will re-rank ${title.title}.`}
             </Text>
             <Text variant="footnote" tone="secondary">
-              Its current position is discarded and you will compare it again.
+              You will compare it again. Nothing changes until you finish.
             </Text>
             <View style={styles.confirmActions}>
               <Button label="Re-rank" onPress={rebucket} />
