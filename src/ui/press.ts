@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, Easing } from 'react-native';
 
 import { useReducedMotion } from './motion';
@@ -109,8 +109,27 @@ export function usePressScale({ enabled = true }: { enabled?: boolean } = {}) {
   const [scale] = useState(() => new Animated.Value(1));
   const active = enabled && !reducedMotion;
 
-  const to = (value: number, duration: number) => {
-    if (!active) return;
+  /**
+   * **Rest is restored unconditionally, and that is independent review 78's third P1.**
+   *
+   * The first version returned early from *both* handlers when animation was off, which
+   * has a sequence: press in, the control starts travelling to 0.975, Reduce Motion is
+   * switched on — or the asynchronous first read of it lands — and press-out returns
+   * without doing anything. The control stays visibly shrunk, permanently, until the
+   * screen is rebuilt.
+   *
+   * So `active` decides *how* the value returns to rest, never *whether* it does. When
+   * animation is off the scale is set to 1 outright, which is also the correct behaviour
+   * for a reader who turned Reduce Motion on mid-press: the movement stops at once
+   * rather than easing out politely.
+   */
+  const settle = (value: number, duration: number) => {
+    scale.stopAnimation();
+    if (!active) {
+      // Never mid-shrink: with animation off the only legal resting state is 1.
+      scale.setValue(1);
+      return;
+    }
     Animated.timing(scale, {
       toValue: value,
       duration,
@@ -119,9 +138,20 @@ export function usePressScale({ enabled = true }: { enabled?: boolean } = {}) {
     }).start();
   };
 
+  /**
+   * And if the preference changes while a control happens to be held down, the value is
+   * put back without waiting for a press-out that may never come — the reader may lift
+   * their thumb outside the target, or the sheet under it may close.
+   */
+  useEffect(() => {
+    if (active) return;
+    scale.stopAnimation();
+    scale.setValue(1);
+  }, [active, scale]);
+
   return {
-    onPressIn: () => to(PRESSED_SCALE, DOWN_MS),
-    onPressOut: () => to(1, UP_MS),
+    onPressIn: () => settle(PRESSED_SCALE, DOWN_MS),
+    onPressOut: () => settle(1, UP_MS),
     /**
      * Spread into the control's own style array, last, so it composes with whatever the
      * control's `style` function already returns rather than replacing it.

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, Animated } from 'react-native';
 
 import { PeoplePicker } from '@/features/people/PeoplePicker';
 
@@ -211,7 +211,9 @@ describe('the press feedback is invisible to everything but a thumb', () => {
 
     const chip = screen.getByRole('button', { name: 'Filters' });
     const style = (
-      Array.isArray(chip.props.style) ? Object.assign({}, ...chip.props.style) : chip.props.style
+      Array.isArray(chip.props.style)
+        ? Object.assign({}, ...chip.props.style)
+        : chip.props.style
     ) as Record<string, unknown>;
 
     expect(style.minHeight).toBeDefined();
@@ -235,9 +237,17 @@ describe('the press feedback is invisible to everything but a thumb', () => {
     expect(chip.props.hitSlop).toBeDefined();
   });
 
-  it('presses and releases without touching the act', async () => {
-    // A press-in that threw, or a press-out that did not fire, would leave a control
-    // visually stuck at 0.975 — invisible to a snapshot and obvious on a device.
+  it('actually travels down and back, and does not touch the act', async () => {
+    /**
+     * **Asserted on the animation rather than on the callback** (independent review 78,
+     * P2). The first version of this only checked that `onPress` still fired, which would
+     * have passed with the whole transform deleted — or, worse, with a press-in that
+     * animates and a press-out that does not, which leaves the control visibly stuck at
+     * 0.975 for ever.
+     *
+     * `Animated.timing` is the seam: one call down to 0.975, one call back to 1.
+     */
+    const timing = jest.spyOn(Animated, 'timing');
     const onPress = jest.fn();
     await render(<FilterChip icon="options-outline" label="Group Picks" onPress={onPress} />);
     const chip = screen.getByRole('button', { name: 'Group Picks' });
@@ -246,7 +256,17 @@ describe('the press feedback is invisible to everything but a thumb', () => {
     await fireEvent(chip, 'pressOut');
     await fireEvent.press(chip);
 
+    const targets = timing.mock.calls.map(([, config]) => config.toValue);
+    expect(targets).toEqual([0.975, 1]);
+    // Down fast, back slower — the asymmetry that makes it read as a surface.
+    const [down, up] = timing.mock.calls.map(([, config]) => config.duration);
+    expect(down).toBeLessThan(up as number);
+    expect(up).toBeLessThanOrEqual(200);
+    // Off the JS thread, so a press during a resolving query still feels immediate.
+    expect(timing.mock.calls.every(([, config]) => config.useNativeDriver)).toBe(true);
+
     expect(onPress).toHaveBeenCalledTimes(1);
+    timing.mockRestore();
   });
 
   it('leaves `Button` out of it entirely, and that is deliberate', async () => {
@@ -284,6 +304,35 @@ describe('Reduce Motion', () => {
    * render in the same file inherited a half-restored spy and failed on the cleanup of
    * the first. One render, both assertions.
    */
+  it('suppresses the transform outright and still restores rest', async () => {
+    /**
+     * **Reduce Motion is honoured by not animating, never by animating slower** — and the
+     * control must still end up at rest. The sequence independent review 78 found is the
+     * reason the second half is here: an early return from *both* handlers leaves a
+     * control that was mid-shrink permanently shrunk when the preference flips.
+     */
+    const isEnabled = jest
+      .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+      .mockResolvedValue(true);
+    const subscribe = jest
+      .spyOn(AccessibilityInfo, 'addEventListener')
+      .mockReturnValue({ remove: jest.fn() } as never);
+    const timing = jest.spyOn(Animated, 'timing');
+
+    await render(<FilterChip icon="options-outline" label="Filters" onPress={jest.fn()} />);
+    const chip = screen.getByRole('button', { name: 'Filters' });
+
+    await fireEvent(chip, 'pressIn');
+    await fireEvent(chip, 'pressOut');
+
+    // Nothing moved.
+    expect(timing).not.toHaveBeenCalled();
+
+    isEnabled.mockRestore();
+    subscribe.mockRestore();
+    timing.mockRestore();
+  });
+
   it('is consulted, subscribed to, and does not silence the haptic', async () => {
     /**
      * The transform itself is driven natively and is not observable from here, so what is

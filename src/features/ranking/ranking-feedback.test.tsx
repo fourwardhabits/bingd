@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { AccessibilityInfo, Animated } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -122,7 +123,29 @@ const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === f
  */
 const REVEAL = 'Film A scored 8.7 out of 10. #3 in Movies.';
 
+/**
+ * **The spies are installed once per test and torn down once per test.**
+ *
+ * They were installed and restored inside individual test bodies, and that is what made
+ * this suite order-dependent: a `mockRestore()` in a test body runs *before* React Native
+ * Testing Library's own cleanup, so the next render inherits a half-restored global and
+ * assertions about call counts stop being about what they name. `afterEach` is the only
+ * place a global spy may be put back.
+ */
+let timingSpy: jest.SpyInstance;
+let reduceMotionSpy: jest.SpyInstance;
+
 beforeEach(() => {
+  timingSpy = jest.spyOn(Animated, 'timing');
+  reduceMotionSpy = jest
+    .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+    .mockResolvedValue(false);
+  jest
+    .spyOn(AccessibilityInfo, 'addEventListener')
+    .mockReturnValue({ remove: jest.fn() } as never);
+  mockHaptics.selection.mockReset();
+  mockHaptics.impact.mockReset();
+  mockHaptics.notification.mockReset();
   mockRpc.mockReset();
   mockPivotRead.mockReset();
   mockPivotRead.mockResolvedValue({
@@ -157,6 +180,10 @@ beforeEach(() => {
     },
     error: null,
   });
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 const openSheet = async (props: Partial<RankingSheetProps> = {}) => {
@@ -253,6 +280,55 @@ describe('the placement landing', () => {
     expect(callsTo('rank_answer')).toHaveLength(1);
     expect(callsTo('rank_start')).toHaveLength(1);
     expect(callsTo('rank_cancel')).toHaveLength(0);
+  });
+
+  it('arrives rather than appearing, and settles at rest', async () => {
+    /**
+     * **The entrance, asserted on the animation** (independent review 78, P2). Presence
+     * and a haptic count would both pass with the entrance deleted — or, worse, with a
+     * panel left at opacity 0, which is a blank reveal and the single worst outcome this
+     * change could have.
+     *
+     * `Animated.timing` is the seam: one run, to 1, natively driven, inside the founder's
+     * "a few hundred milliseconds at most".
+     */
+    answering(comparison, placement);
+    const sheet = await openSheet();
+    await sheet.ready('Film A');
+    timingSpy.mockClear();
+
+    await fireEvent.press(sheet.card('Film A'));
+    await waitFor(() => expect(sheet.getByLabelText(REVEAL)).toBeTruthy());
+
+    const entrance = timingSpy.mock.calls.filter(([, config]) => config.toValue === 1);
+    expect(entrance).toHaveLength(1);
+    expect(entrance[0]![1].duration).toBeLessThanOrEqual(400);
+    expect(entrance[0]![1].useNativeDriver).toBe(true);
+  });
+
+  it('does not move at all when the reader asked for stillness', async () => {
+    /**
+     * **The P1 this replaced.** `useReducedMotion` resolves asynchronously and reads
+     * `false` until it has an answer, so an entrance that started on mount started before
+     * anybody had been asked — and a reader with Reduce Motion on got the full 280ms
+     * every time. The reveal now waits for `known` before starting.
+     *
+     * The haptic is asserted in the same render, because it must **not** be suppressed:
+     * Reduce Motion is a motion setting and the system's haptic switch is a different
+     * one.
+     */
+    reduceMotionSpy.mockResolvedValue(true);
+
+    answering(comparison, placement);
+    const sheet = await openSheet();
+    await sheet.ready('Film A');
+    timingSpy.mockClear();
+
+    await fireEvent.press(sheet.card('Film A'));
+    await waitFor(() => expect(sheet.getByLabelText(REVEAL)).toBeTruthy());
+
+    expect(timingSpy.mock.calls.filter(([, config]) => config.toValue === 1)).toHaveLength(0);
+    expect(mockHaptics.notification).toHaveBeenCalledTimes(1);
   });
 
   it('does not block the way out', async () => {

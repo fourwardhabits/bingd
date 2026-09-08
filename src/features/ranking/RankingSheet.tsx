@@ -28,7 +28,7 @@ import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { compactName } from '@/lib/titles';
 import { hapticDecision, hapticSuccess } from '@/ui/haptics';
-import { useReducedMotion } from '@/ui/motion';
+import { useReducedMotion, useReducedMotionState } from '@/ui/motion';
 import { usePressScale } from '@/ui/press';
 import { theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
@@ -1075,7 +1075,19 @@ function Card({
        * catching deliberate taps, and this gesture is not one anybody is in a hurry to
        * complete.
        */}
-      <Animated.View style={press.pressStyle}>
+      {/**
+       * **The wrapper has to stretch, and forgetting that was independent review 78's
+       * first P1.** `styles.card` is `alignItems: 'center'` and `styles.cardPress`
+       * answers it with `alignSelf: 'stretch'` — so inserting a styleless view between
+       * them moved the stretch inside the wrapper and let the wrapper itself shrink to
+       * its content. With a `width="fill"` poster inside, that narrows the primary
+       * target of the whole comparison screen.
+       *
+       * The transform composes with the stretch rather than replacing it. Every other
+       * wrapper in this pass sits around a control that is already content-sized or
+       * explicitly sized, which is why this is the only one that needs a style.
+       */}
+      <Animated.View style={[styles.cardStretch, press.pressStyle]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Choose ${title}`}
@@ -1302,20 +1314,51 @@ function Reveal({
    * `step?.state === 'placed'`, which happens exactly once per completed placement, so a
    * re-render cannot repeat it and a second ranking gets its own mount.
    *
-   * Reduce Motion: the entrance is skipped outright — the value starts and stays at 1 —
-   * and **the haptic still fires**, because it is not motion. That is the whole point of
-   * keeping the two settings separate.
+   * Reduce Motion: the entrance is skipped outright — the value is set to 1 and nothing
+   * moves — and **the haptic still fires**, because it is not motion. That is the whole
+   * point of keeping the two settings separate.
+   *
+   * ---------------------------------------------------------------------------
+   * **WAITING TO BE TOLD, WHICH IS INDEPENDENT REVIEW 78'S SECOND P1**
+   *
+   * The first version read `useReducedMotion()` and animated on mount. That hook resolves
+   * *asynchronously* and returns `false` until it has an answer — so a reader with Reduce
+   * Motion switched on got the entrance anyway, every time, because the mount-only effect
+   * had already started it before anybody was asked and would not run again.
+   *
+   * `useReducedMotionState` reports whether the answer has arrived. The entrance waits for
+   * it, which costs one frame nobody can see; the panel is already at opacity 0 in that
+   * frame, and it is one frame. And because the effect now re-runs when the preference
+   * changes, turning it on *during* the 280ms stops the animation and snaps to rest rather
+   * than politely finishing the movement somebody just asked not to see.
+   *
+   * `started` is what keeps it a one-shot across those re-runs: an entrance that replayed
+   * every time the preference flipped would be a panel that re-arrives while it is being
+   * read. The haptic is in its own mount-only effect for the same reason, and because it
+   * is governed by a different switch entirely.
    */
-  const reducedMotion = useReducedMotion();
+  const { reduced: reducedMotion, known: motionKnown } = useReducedMotionState();
   const [entrance] = useState(() => new Animated.Value(0));
+  const started = useRef(false);
 
   useEffect(() => {
+    // One placement, one success. `Reveal` is mounted by `step?.state === 'placed'`,
+    // which happens exactly once per completed ranking.
     hapticSuccess();
+  }, []);
+
+  useEffect(() => {
+    if (!motionKnown) return;
 
     if (reducedMotion) {
+      // Covers both "on before the reveal opened" and "switched on halfway through it".
+      entrance.stopAnimation();
       entrance.setValue(1);
       return;
     }
+
+    if (started.current) return;
+    started.current = true;
 
     Animated.timing(entrance, {
       toValue: 1,
@@ -1323,10 +1366,7 @@ function Reveal({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-    // Mount only, deliberately: this is the arrival of one placement, and re-running it
-    // when Reduce Motion changes mid-reveal would re-animate a panel already on screen.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [motionKnown, reducedMotion, entrance]);
 
   const entranceStyle = {
     opacity: entrance,
@@ -1690,6 +1730,10 @@ const styles = StyleSheet.create({
   // from `card` so the recall affordance below can be its own control rather than a
   // second gesture on the same one.
   cardPress: { alignSelf: 'stretch', alignItems: 'center', gap: theme.space[2] },
+  // The press-feedback wrapper, which must be transparent to layout — see the note at
+  // the wrapper itself. `card` centres its children, so without this the wrapper hugs
+  // its content and takes `cardPress`'s stretch away from the poster.
+  cardStretch: { alignSelf: 'stretch' },
   // Caption, tertiary, no border, no background. It has to be reachable and it must
   // not compete: the two things that look like buttons on this screen are the posters.
   // A row, so the glyph and the word read as one control rather than as an icon that
