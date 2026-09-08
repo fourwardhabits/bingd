@@ -953,36 +953,14 @@ export default function TitleScreen() {
   };
 
   /**
-   * **Rank it again: the same watch, comparisons redone.**
+   * **There was a third door into `rerank`, and it is gone** (founder, 2026-09-08).
    *
-   * One implementation for the *Rank it again* row in the ranking-options menu, which is
-   * reachable from the Ranked control and from the overflow in the bar. One place, so a
-   * `mode` cannot drift between two call sites assembling their own `RankingSubject`.
-   *
-   * `mode: 'rerank'` is `rankAgain` with `newWatch: false`: the session runs over the
-   * position the title already holds, and finishing replaces it **without announcing
-   * anything**. `_rank_finalize` posts `title_ranked` only `if p_new_watch or not
-   * v_replaced` (20260826000500), so no feed activity is written. The rewatch row —
-   * *Log another watch* — is the one place in the app that declares a second viewing,
-   * and it is the only one that passes `mode: 'again'`.
-   *
-   * Nothing about the ranking maths, the score or the schema is touched by this pass.
+   * `adjustPlacement` opened a `mode: 'rerank'` session straight from the menu, behind a
+   * row called *Rank it again*. The mode is untouched and still reachable — *Update your
+   * rating* re-choosing the band it already has is the same `rankAgain(newWatch: false)`
+   * call, made by `LogSheet` — but the menu no longer offers two rows for it. See the
+   * `Ranking` group below for why one entry point is the whole of the change.
    */
-  const adjustPlacement = () => {
-    if (!rankedBucket) return;
-    setManaging(false);
-    setActionError(null);
-    setRankedTitle(loggable);
-    setRankingSubject({
-      id: title.id,
-      title: title.title,
-      bucket: rankedBucket,
-      posterUri: posterUri(title.poster_path, 'card'),
-      // Only a film or a season is ever ranked; a series has no menu.
-      kind: title.kind === 'season' ? 'season' : 'movie',
-      mode: 'rerank',
-    });
-  };
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -1859,60 +1837,87 @@ export default function TitleScreen() {
 
             <MenuGroup title="Ranking" />
             {/**
-             * **Three intents, and the founder pressed the wrong one because the labels
-             * did not distinguish them** (physical Android, 2026-09-07).
+             * **Two rows, because there were only ever two acts** (founder, physical QA,
+             * 2026-09-08).
              *
-             * The report: ranked *Terrace House: Tokyo 2019-2020, S1*, adjusted the
-             * placement a minute later, and the feed showed two "ranked" rows for one
-             * watch — 8.3 and then 8.6.
+             * ---------------------------------------------------------------------------
+             * WHAT WAS HERE, AND WHY THREE WAS ONE TOO MANY
              *
-             * Nothing was broken underneath. The database has had the right rule since
-             * 20260826000500: `_rank_finalize` posts `title_ranked` only `if p_new_watch
-             * or not v_replaced`, so a rerank over an existing position writes no
-             * activity. One `rankings` row and one `user_media` row is all that exists
-             * for that season, checked directly. What produced the second activity was
-             * this menu: the row that *reads* like "redo my ranking" was **Rank again**,
-             * which this app defines as a second viewing (PRD §10) and which therefore
-             * earns an activity by design. The product definition was correct and lived
-             * only in a doc; the label invited the other reading.
+             * The menu offered *Rank it again*, *Log another watch* and *Change your
+             * rating*. The middle one is a real, separate act — a second viewing — and the
+             * outer two were **two doors into the same correction**, named so similarly
+             * that no ordinary reader could say which one they wanted. "Rank it again"
+             * and "Change your rating" describe the same intent in two vocabularies; the
+             * only difference was mechanical, and mechanical differences are exactly what
+             * the 2026-09-07 pass had already decided this menu must stop exposing.
              *
-             * So the menu names the intent rather than the mechanism, and the three
-             * modes are each reachable and each unmistakable. **The labels are the
-             * founder's, revised on 2026-09-07 after the first pair was read on a
-             * device:**
+             * (That pass is worth keeping in the record: the founder ranked a season,
+             * adjusted it a minute later, and saw two "ranked" rows in the feed for one
+             * watch. Nothing was broken underneath — `_rank_finalize` has posted
+             * `title_ranked` only `if p_new_watch or not v_replaced` since
+             * 20260826000500 — the row named *Rank again* simply meant "another viewing"
+             * and read like "redo my ranking". Renaming it to *Rank it again* fixed the
+             * misfire and left two correction rows behind. This removes one.)
              *
-             *   Rank it again       same watch, redo the comparisons — `rerank`, no
-             *                       activity. Was "Adjust placement", which named the
-             *                       mechanism; this names the act in the app's own verb.
-             *   Log another watch   a genuine rewatch — `again`, exactly one activity.
-             *                       Was "I watched it again"; "log" is the word the rest
-             *                       of the app uses for recording a viewing.
-             *   Change your rating  a different band — `rebucket` via the log sheet.
+             * ---------------------------------------------------------------------------
+             * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
+             *
+             * **`Update your rating` is the single same-watch correction path, and it can
+             * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
+             * has had three branches since 2026-08-15 and keeps all of them:
+             *
+             *   a *different* band   → `rank_rebucket`. The band moves and the comparisons
+             *                          are re-run, because a band change cannot be
+             *                          estimated (PRD §10).
+             *   the *same* band      → `rankAgain(newWatch: false)` — which is precisely
+             *                          what *Rank it again* called. Re-opening a rating you
+             *                          already gave means the *position* is wrong, and this
+             *                          is how a reader says so.
+             *   neither, then close  → nothing at all. Since 20260826000500 the session
+             *                          runs over the position the title holds, so opening
+             *                          this and changing your mind costs nothing.
+             *
+             * So placement can still be corrected for the same watch, and nobody is made
+             * to log a viewing they did not have in order to do it. The one extra tap is
+             * the band chooser, which is also the screen that tells the reader which of
+             * the two things they meant.
+             *
+             * ---------------------------------------------------------------------------
+             * THE SEMANTICS ARE UNTOUCHED
+             *
+             *   Update your rating   corrects the current watch. `p_new_watch` false, no
+             *                        new watch record, no feed activity, no timestamp
+             *                        heuristic anywhere.
+             *   Log another watch    an explicit second viewing. `p_new_watch` true, and
+             *                        exactly one `title_ranked` on completion.
+             *
+             * No RPC, argument, migration or piece of ranking maths changes in this pass,
+             * and no historical activity is rewritten or de-duplicated. `rerank` still
+             * exists and is still reached; it is reached through one row instead of two.
              *
              * The labels carry the whole distinction and there is no secondary line: a
-             * `value` on a `SheetRow` sets beside the label on one line and truncates at
-             * phone width, which is a founder decision this menu already carries.
-             *
-             * **Only the words changed.** `mode`, the RPC each row calls, `p_new_watch`,
-             * and which of them writes an activity are exactly as they were. Nothing about
-             * the ranking maths, the score or the schema changes.
+             * `value` on a `SheetRow` sets beside the label and truncates at phone width,
+             * which is a founder decision this menu already carries.
              */}
+            {/* The star is kept from the row this replaces, and so is its behaviour:
+                straight into the log sheet, where the band chooser is. Leads the group
+                because correcting a rating is the common act and logging a second
+                viewing is the rare one. */}
             <SheetRow
-              icon="swap-vertical-outline"
-              label="Rank it again"
-              // The same function the first action in the group calls, so the two doors
-              // into this intent cannot drift apart in what they ask the server for.
-              // See `adjustPlacement`.
-              onPress={rankedBucket ? adjustPlacement : undefined}
-              disabledReason={rankedBucket ? undefined : 'Loading'}
+              icon="star-outline"
+              label="Update your rating"
+              onPress={() => {
+                setManaging(false);
+                openLog();
+              }}
             />
             {/**
              * The explicit rewatch, and the only row in the app that declares one.
              *
              * Completing it writes exactly one new `title_ranked` activity, which is the
-             * whole difference from the row above — and the reason the label now says
-             * what happened rather than what the app will do about it. Two genuine
-             * rewatches are still two activities; that is not a duplicate.
+             * whole difference from the row above — and the reason the label says what
+             * happened rather than what the app will do about it. Two genuine rewatches
+             * are still two activities; that is not a duplicate.
              *
              * `rank_again` opens the session **over** the position the title already
              * has, so nothing the reader can see moves until they finish: close the
@@ -1942,18 +1947,6 @@ export default function TitleScreen() {
                   : undefined
               }
               disabledReason={rankedBucket ? undefined : 'Loading'}
-            />
-            {/* The third intent: a different *band* — loved, fine, not for me — which is
-                a correction to an opinion already recorded rather than a second viewing.
-                It writes no new activity and does not surrender the current position
-                while it runs. */}
-            <SheetRow
-              icon="star-outline"
-              label="Change your rating"
-              onPress={() => {
-                setManaging(false);
-                openLog();
-              }}
             />
 
             <MenuGroup title="Collection" />

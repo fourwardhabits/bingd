@@ -473,7 +473,7 @@ poster. The first action is the rank intent at whichever stage the title is in �
 (same watch, `mode: 'rerank'`) for a ranked title, **Rank** for an unranked one. Each glyph
 keeps a one-word caption, because a paper plane is Recommend here and Send everywhere else. A
 series gets Save alone (PRD §10). The rest of the ranking menu — the note, who I watched with,
-*Log another watch*, *Change your rating*, Remove — moved from the Ranked chip to the
+*Update your rating*, *Log another watch*, Remove — moved from the Ranked chip to the
 overflow `⋯` in the top bar, with the same reachability it had: present for a ranked title,
 absent otherwise.
 
@@ -587,8 +587,8 @@ intents behind one press is the founder's Terrace House bug rebuilt in a differe
 
 - **unranked** — filled Maroon `Rank`, opens the log sheet, where a band is chosen and a first
   ranking begins;
-- **ranked** — outlined `✓ Ranked`, opens the ranking-options menu, which is where *Rank it
-  again*, *Log another watch* and *Change your rating* are each named and each chosen.
+- **ranked** — outlined `✓ Ranked`, opens the ranking-options menu, which is where *Update your
+  rating* and *Log another watch* are each named and each chosen.
 
 There is deliberately **no responsive switch** between a labelled button and an icon: a control
 that is a word on one phone and a symbol on another is two controls. The same menu is also
@@ -634,11 +634,33 @@ right under the poster it read as detached on the device — a cluster floating 
 a blank column above it. Control set, treatment and behaviour unchanged; the glyphs are still
 icon-only and each still clears 44pt through its own box.
 
-**The ranking menu says it in the app's own words.** *Adjust placement* is now **Rank it
-again**, and *I watched it again* is now **Log another watch**. Only the labels moved: `rerank`
+**The ranking menu says it in the app's own words.** *Adjust placement* became **Rank it
+again**, and *I watched it again* became **Log another watch**. Only the labels moved: `rerank`
 still passes `p_new_watch: false` and writes no activity, `again` still passes `true` and
-writes exactly one, *Change your rating* is untouched. The pair the founder rejected named the
-mechanism and a confession; these name the act, in the verbs the rest of the app uses.
+writes exactly one. The pair the founder rejected named the mechanism and a confession; these
+name the act, in the verbs the rest of the app uses.
+
+**And then the menu went from three rows to two** (founder, 2026-09-08). *Rank it again* and
+*Change your rating* were two doors into one act — both correct a rating already given, both
+leave `p_new_watch` false, both write no activity — separated only by whether the band chooser
+was skipped, which is a mechanism, which is exactly what the rename above had decided this menu
+must stop exposing. The founder's menu is:
+
+> **RANKING**
+> ★ Update your rating
+> ↻ Log another watch
+
+**It is an entry-point consolidation, not a loss of capability.** *Update your rating* opens the
+log sheet's band chooser, which has had three branches since 2026-08-15 and keeps all of them:
+a **different** band is `rank_rebucket`; the **same** band is `rankAgain(newWatch: false)` —
+precisely the call *Rank it again* used to make in one tap; and closing without choosing does
+nothing at all, because since `20260826000500` the session runs over the position the title
+already holds. So placement can still be corrected for the same watch, and nobody is made to log
+a viewing they did not have in order to do it. The one extra tap is the band chooser, which is
+also the screen that tells the reader which of the two things they meant.
+
+No RPC, argument, migration or piece of ranking maths moved with this, and no historical
+activity was rewritten or de-duplicated.
 
 **Twelve points between the synopsis and the genres.** The chips sat directly on the
 paragraph's last line. A `space[3]` gap keeps them associated with it without becoming a
@@ -648,7 +670,58 @@ section break.
 N* wrapped to two rows on a 360pt phone, and the arithmetic does not allow a fit at footnote
 size with counts. The row is a horizontal scroller with `nowrap` now — the same arrangement as
 the tab row — so on every ordinary phone nothing changes and on a narrow one it scrolls rather
-than reflows.
+than reflows. Compaction was reconsidered on 2026-09-08 and rejected: every value in the chip
+is already on the 4pt scale, and buying back the sixteen points the arithmetic is short would
+mean taking the control off the grid the rest of this document is built on. **It never wraps
+to two lines under any circumstances.**
+
+### As built — 2026-09-08: For You's header and control row
+
+Three founder findings from physical QA, all on the same strip of screen.
+
+**The bell comes off For You.** It carried one; Collection and Search did not; and on the
+device it did not optically centre against the wordmark beside it. Three of the five root tabs
+therefore disagreed about whether a header carries a control at all. The resolution is
+subtractive — remove it from For You rather than add it to the two screens that never had it —
+and notification *behaviour* is untouched: the inbox is still reached from Feed, which is the
+social surface it belongs to, and from Profile beside the gear.
+
+**Feature, feature, utility.** *Sent to you* and *Group Picks* are two of the things this app
+has that others do not, and they were drawn in exactly the grey of the *Filters* button beside
+them. They now take a Maroon glyph, a Maroon label and a `actionSubtle` hairline; *Filters*
+stays neutral. That is the whole treatment — no filled pill, no card, no badge, no second row,
+and **no extra height**, which was the founder's explicit constraint. Emphasis composes with
+selection rather than competing with it: an emphasised chip that is also *on* still takes the
+full-strength ring and the Parchment fill, so "this is a feature" and "this is applied" stay
+two readable states.
+
+**Sixteen points under the row.** The wall has no top padding of its own, so the row's
+`paddingBottom` is the entire seam, and at `space[2]` the first poster row touched the chips —
+which made the controls read as part of the wall rather than as what governs it. `space[4]`, the
+top of the *control row → the content it governs* interval in
+[`design-system.md` §5](./design-system.md).
+
+**Collection's header is deliberately unchanged.** Moving *Watched | Watchlist* up beside
+*Movies ▼* was considered and rejected: the combined row is not reliably width-safe on smaller
+iPhones without responsive typography or awkward compression, and responsive font sizing is not
+worth introducing for one row.
+
+### As built — 2026-09-08: Group Picks' first screen
+
+**One sentence saying what it is.** The sheet opened on a title, a question and a list of
+faces, which assumes the reader already knows what Group Picks does — and it is one of the few
+things in bingd. with no equivalent elsewhere, so it is exactly the screen that cannot assume
+it. *"Pick who's watching and bingd. will find movies you can all agree on."*, above
+*Who's watching?* and not in place of it. The noun follows the wall the sheet was opened from —
+*shows* on TV — because a sentence promising movies over a list of series answers a different
+question from the one being asked. Deliberately not a carousel, a tutorial or a dismissible tip.
+
+**The disabled button asks for what is missing.** The reader is in seat one from the moment the
+sheet opens, so the button read *Get picks for 1* and was dead: a control offering to do the
+thing, for the number of people currently chosen, that refuses. Below the minimum it now says
+**Add someone to get picks**; at or above it, *Get picks for N*. The minimum-participant rule is
+unchanged — two people, now named `GROUP_PICKS_MIN_MEMBERS` rather than written as
+`selected.size === 0` on the button.
 
 ### As built — 2026-09-07, final: the score moves into Scores, and the actions move up
 
@@ -688,9 +761,8 @@ qualification of an aggregate.
 distinction — the app being short of a sample, nobody the reader follows having seen it, and the
 reader not having ranked it are three different facts and only the middle one is actionable. So:
 `Not ranked yet`, `No ratings yet`, `Not enough ratings` (shortened on 2026-09-08; see below).
-Every empty
-circle carries an **em dash** in a plain neutral ring, never the cream `empty` disc, which is
-indistinguishable from a circle whose contents failed to load.
+Every empty circle is a **filled `scoreEmpty` disc with nothing inside it** — see the
+2026-09-08 entry below, which replaced the em dash that stood there for a day.
 
 **Three units stack; two did not have to.** A circle with its words *beside* it needs about 170pt,
 so three ran off a 358pt content width and the horizontal scroller that used to rescue the
@@ -776,8 +848,9 @@ exactly like a heading and its own content.
 **Unchanged, deliberately.** Where to watch keeps its restrained module and still draws nothing
 at all when the provider has no answer — there is no invented *In theaters* state, because the
 app has no theatrical-availability data. The tab set, the tab contents, the genre row's position
-and neutral chip styling, the ranking menu's copy and every one of its semantics, and For You's
-single scrolling control row are all as they were.
+and neutral chip styling, the ranking menu's *semantics*, and For You's single scrolling control
+row are all as they were. (The ranking menu's **copy** was as it was on 2026-09-07 and is not on
+2026-09-08 — see the two-row consolidation above. Its semantics still are.)
 
 ### As built — 2026-09-08: the poster joins the identity block, and the scores stop arguing with themselves
 
@@ -827,9 +900,24 @@ noise. Both aggregates count the same way now:
 The labels are what say *whose* ratings these are, which is exactly what the longer copy was
 spending extra lines restating. The three still never share a string: the reader not having
 ranked it, nobody they follow having rated it, and the app being short of a sample are three
-different facts. The visual hierarchy is untouched — filled Maroon for the reader's own,
-outlined for Following at any count, outlined for bingd. at two ratings or more and quiet below
-that.
+different facts.
+
+**And then colour was reduced to meaning one thing** (founder, later the same day). The
+hierarchy above ran filled Maroon for the reader's own, outlined for Following at any count, and
+outlined for bingd. at two ratings or more with a *quiet* neutral treatment below that. The quiet
+one is gone. On a device a real number in grey reads as a score that failed to load or went
+stale, because grey on this row already means *no score* — so the rule is now one sentence with
+no exceptions in it:
+
+> **A real score is Maroon. No score is a filled grey disc.**
+
+bingd. is outlined at every count, including one. Sample depth is stated in the words directly
+under the number, where `1 rating` is more precise than any colour and legible to somebody who
+cannot tell two greys apart. And the empty circle lost its em dash: a mark inside a circle is how
+this page states a number, so the dash was the last thing still blurring the two states
+together. It is `scoreEmpty`, filled, with **no dash, no line, no icon and no zero**. The three
+empty *sentences* still differ, because the three absences do; only the shape is now identical.
+`ScoreBadge`'s `quiet` variant was deleted from the type rather than left unused.
 
 One accessibility improvement came with the label rework: a `Pressable` with its own
 `accessibilityLabel` absorbs its children's, so a screen reader pressing a unit heard the sample

@@ -659,7 +659,7 @@ describe('a title this user has ranked', () => {
     expect(view.getByText('Ranked')).toBeTruthy();
 
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    expect(view.getByText('Rank it again')).toBeTruthy();
+    expect(view.getByText('Update your rating')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
   });
 
@@ -669,7 +669,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    expect(view.getByText('Rank it again')).toBeTruthy();
+    expect(view.getByText('Update your rating')).toBeTruthy();
   });
 
   /**
@@ -691,7 +691,7 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
     // Five rows in one column with no structure is a list you read rather than a menu
     // you use, and the destructive one has to be last and on its own.
     expect(view.getByText('YOUR LOG')).toBeTruthy();
@@ -743,26 +743,38 @@ describe('a title this user has ranked', () => {
   });
 
   /**
-   * The two are not synonyms and the menu has to say which is which. Rank again is
-   * another watch; Change your rating corrects a rating already given.
+   * **The Ranking group is two rows, and it is the founder's list** (2026-09-08).
    *
-   * **The subtext under each of them is gone, and this test now says so.** It asserted
-   * both sentences were present, and the founder's device pass is the reason it does the
-   * opposite: `SheetRow` puts the label and its secondary sentence on one line, so at
-   * the width of a phone every explanation in this menu truncated. Five rows of clipped
-   * grey text under five clear labels is worse than no explanation, because the reader
-   * can see something was meant to be said and cannot read it. The distinction the
-   * sentences were drawing is now drawn by the flow itself — Rank again opens
-   * comparisons, Change your rating opens the bucket chooser — and is stated in the
-   * PRD.
+   *   ★ Update your rating   the current watch, corrected
+   *   ↻ Log another watch    an explicit second viewing
+   *
+   * It was three. *Rank it again* and *Change your rating* were two doors into the same
+   * correction, distinguished only by a mechanism — one skipped the band chooser — and
+   * no ordinary reader could say which of the two they wanted from the labels. The
+   * founder's consolidation keeps the act and drops the second door.
+   *
+   * **The subtext under each row is gone, and this test says so too.** It asserted both
+   * sentences were present, and the founder's device pass is the reason it does the
+   * opposite: `SheetRow` puts the label and its secondary sentence on one line, so at the
+   * width of a phone every explanation in this menu truncated. Rows of clipped grey text
+   * under clear labels are worse than no explanation, because the reader can see
+   * something was meant to be said and cannot read it.
    */
-  it('keeps Change your rating as the band control, distinct from Rank again', async () => {
+  it('offers exactly two ranking rows, and neither of the retired labels', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
 
-    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
+
+    // The two labels the founder retired, in both the forms they were ever drawn in.
+    expect(view.queryByText('Rank it again')).toBeNull();
+    expect(view.queryByLabelText('Rank it again')).toBeNull();
+    expect(view.queryByText('Change your rating')).toBeNull();
+    expect(view.queryByLabelText('Change your rating')).toBeNull();
+    expect(view.queryByLabelText('Rank again')).toBeNull();
+
     expect(view.queryByText('Pick a different loved, fine or not for me')).toBeNull();
     expect(view.queryByText('Compare it again in the same rating')).toBeNull();
   });
@@ -785,9 +797,8 @@ describe('a title this user has ranked', () => {
     for (const label of [
       'Edit your note',
       'Who I watched with',
-      'Rank it again',
+      'Update your rating',
       'Log another watch',
-      'Change your rating',
       'Remove from collection',
     ]) {
       expect(view.getByLabelText(label)).toBeTruthy();
@@ -818,7 +829,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
     return view;
   };
 
@@ -1004,7 +1015,7 @@ describe('a title this user has ranked', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
 
     expect(view.queryByLabelText('Remove ranking')).toBeNull();
     expect(view.queryByText('Keeps it in your collection')).toBeNull();
@@ -2601,15 +2612,33 @@ describe('the score row and what surrounds it', () => {
  * **Rank again**, which the product defines as a second viewing and which therefore
  * earns an activity by design.
  *
- * The fix is that the menu now names the intent, and all three are reachable:
+ * The fix was to name the intent, and the menu carried three rows for a day:
  *
- *   Rank it again    `rerank` — same watch, no activity
+ *   Rank it again      `rerank` — same watch, no activity
  *   Log another watch  `again`  — a real rewatch, exactly one activity
  *   Change your rating  the band, through the log sheet
  *
- * These tests pin the parameter that decides it, `p_new_watch`, because that single
- * boolean is the whole difference between the two intents and nothing on screen shows
- * it. Server behaviour is not re-tested here — it is SQL, and it was already correct.
+ * ---------------------------------------------------------------------------
+ * **AND THEN THERE WERE TWO** (founder, 2026-09-08)
+ *
+ * The first and third were two doors into one act. Both correct a rating already given,
+ * both leave `p_new_watch` false, both write no activity; the only difference was that
+ * one skipped the band chooser — a mechanism, which is precisely what the 2026-09-07
+ * pass had decided this menu must stop exposing. So the menu is:
+ *
+ *   Update your rating  the same-watch correction, whole. Opens the log sheet's band
+ *                       chooser, from which a *different* band is `rank_rebucket` and
+ *                       the *same* band is `rankAgain(newWatch: false)` — which is
+ *                       exactly the call *Rank it again* used to make directly.
+ *   Log another watch   `again` — a real rewatch, exactly one activity.
+ *
+ * **Nothing under the menu changed.** No RPC, no argument, no migration, no ranking
+ * maths, and no historical activity. `rerank` is still reached; it is reached through
+ * one row instead of two, and the tests below reach it the way a reader now does.
+ *
+ * These pin the parameter that decides it, `p_new_watch`, because that single boolean is
+ * the whole difference between the two intents and nothing on screen shows it. Server
+ * behaviour is not re-tested here — it is SQL, and it was already correct.
  */
 describe('adjusting a ranking versus watching it again', () => {
   /** A ranked film, which is the only state this menu exists in. */
@@ -2640,8 +2669,27 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Rank it again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
     return view;
+  };
+
+  /**
+   * **The same-watch correction, taken the way a reader now takes it.**
+   *
+   * *Update your rating* opens the log sheet's band chooser; re-choosing the band the
+   * title already has is the correction — `LogSheet` confirms it, because the position is
+   * re-derived either way, and then calls `rankAgain(newWatch: false)`. That is the exact
+   * call the retired *Rank it again* row made in one tap, which is what makes this a
+   * consolidated entry point rather than a lost capability.
+   *
+   * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
+   */
+  const correctTheRating = async (view: Awaited<ReturnType<typeof openMenu>>) => {
+    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
+    await fireEvent.press(view.getByText('I liked it'));
+    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
+    await fireEvent.press(view.getByText('Re-rank'));
   };
 
   /** Every `rank_again` call the screen made, with its arguments. */
@@ -2651,23 +2699,33 @@ describe('adjusting a ranking versus watching it again', () => {
   it('offers both intents, named so neither can be mistaken for the other', async () => {
     const view = await openMenu();
 
-    expect(view.getByLabelText('Rank it again')).toBeTruthy();
+    expect(view.getByLabelText('Update your rating')).toBeTruthy();
     expect(view.getByLabelText('Log another watch')).toBeTruthy();
-    // The old label is gone: it read as "redo my ranking" and meant "I watched it
-    // again", which is exactly the ambiguity that produced the duplicate.
+    // Every label this row has ever worn that meant "another viewing" while reading like
+    // "redo my ranking", plus the second correction door the founder consolidated away.
     expect(view.queryByLabelText('Rank again')).toBeNull();
+    expect(view.queryByLabelText('Rank it again')).toBeNull();
+    expect(view.queryByLabelText('Change your rating')).toBeNull();
   });
 
-  it('adjusts the placement without declaring a new watch', async () => {
-    // `p_new_watch: false` is what makes `_rank_finalize` suppress the activity.
+  it('corrects the placement of the same watch, without declaring a new one', async () => {
+    /**
+     * **The capability the consolidation had to keep.** `p_new_watch: false` is what
+     * makes `_rank_finalize` suppress the activity, and re-running the comparisons is
+     * what re-establishes the position — so this one assertion is the whole of "the
+     * reader can still fix where a title sits without pretending to have watched it
+     * again".
+     */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Rank it again'));
+    await correctTheRating(view);
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(againCalls()[0]![1]).toEqual(
       expect.objectContaining({ p_new_watch: false, p_bucket: 'loved' }),
     );
+    // And it is a correction end to end: no band change went with it.
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
   });
 
   it('declares a new watch only from the rewatch row', async () => {
@@ -2686,7 +2744,7 @@ describe('adjusting a ranking versus watching it again', () => {
     // Composing the pair here would lose the ranking outright on a dropped connection.
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Rank it again'));
+    await correctTheRating(view);
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
@@ -2696,10 +2754,11 @@ describe('adjusting a ranking versus watching it again', () => {
   it('keeps the band the title already has, rather than deciding a rating', async () => {
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Rank it again'));
+    await correctTheRating(view);
 
-    // Straight through from `rankings.bucket`, in the database's own spelling. Adjusting
-    // a placement is not an opinion about the band.
+    // Straight through from `rankings.bucket`, in the database's own spelling. Correcting
+    // a placement is not an opinion about the band, even though the reader now passes
+    // through the band chooser to say so.
     await waitFor(() =>
       expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_bucket: 'loved' })),
     );
@@ -2708,7 +2767,7 @@ describe('adjusting a ranking versus watching it again', () => {
   it('carries one operation id per intent, so a retry is not a second opinion', async () => {
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Rank it again'));
+    await correctTheRating(view);
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     /**
@@ -2724,9 +2783,9 @@ describe('adjusting a ranking versus watching it again', () => {
     expect(Object.keys(againCalls()[0]![1] as object)).toContain('p_operation_id');
   });
 
-  it('does not open a second session when the row is double-tapped', async () => {
+  it('does not open a second session when the rewatch row is double-tapped', async () => {
     const view = await openMenu();
-    const row = view.getByLabelText('Rank it again');
+    const row = view.getByLabelText('Log another watch');
 
     await fireEvent.press(row);
     await fireEvent.press(row);
@@ -2776,22 +2835,52 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Rank it again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Rank it again'));
+    await correctTheRating(view);
 
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
   });
 
-  it('leaves Change your rating as the band control, writing no ranking call itself', async () => {
-    // The third intent. It opens the log sheet's bucket chooser; the ranking call that
-    // follows is decided there, by whether the band actually moved.
+  it('writes no ranking call from the row itself, only from what follows it', async () => {
+    /**
+     * *Update your rating* opens the log sheet's band chooser and stops there. The
+     * ranking call is decided by what the reader chooses next — the same band is a
+     * correction, a different one is a rebucket — and a row that fired one on the way in
+     * would be deciding a rating on the reader's behalf.
+     */
     const view = await openMenu();
 
-    await fireEvent.press(view.getByLabelText('Change your rating'));
+    await fireEvent.press(view.getByLabelText('Update your rating'));
 
     expect(againCalls()).toHaveLength(0);
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
+  });
+
+  it('moves the band from the same row, which is the other half of the correction', async () => {
+    /**
+     * **The capability check the consolidation exists to survive.** One row now has to
+     * carry both same-watch corrections: the position, above, and the band, here. A
+     * different band is `rank_rebucket`, which re-runs the comparisons because PRD §10
+     * refuses to estimate a new position for a moved band — and it is still not a
+     * viewing, so it writes no activity of its own.
+     */
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Update your rating'));
+    await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
+    await fireEvent.press(view.getByText('It was fine'));
+    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
+    await fireEvent.press(view.getByText('Re-rank'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_rebucket',
+        expect.objectContaining({ p_bucket: 'fine' }),
+      ),
+    );
+    // A band change is its own call; it never routes through the rewatch one.
+    expect(againCalls()).toHaveLength(0);
   });
 });

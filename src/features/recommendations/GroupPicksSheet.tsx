@@ -33,6 +33,7 @@ import { theme } from '@/ui/tokens';
 
 import {
   GROUP_PICKS_MIN,
+  GROUP_PICKS_MIN_MEMBERS,
   hasSharedSaves,
   reasonFor,
   selectGroupPicks,
@@ -143,6 +144,27 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
       <Sheet visible onClose={onClose} label="Group Picks">
         <View style={styles.header}>
           <Text variant="headline">Group Picks</Text>
+          {/**
+           * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
+           *
+           * The sheet opened on a title, a question and a list of faces, which assumes
+           * the reader already knows what Group Picks does. It is one of the few things
+           * in bingd. that has no equivalent elsewhere, so it is precisely the screen
+           * that cannot assume it — and the cost of explaining it is one line.
+           *
+           * Deliberately not a carousel, a tutorial or a dismissible tip. It sits above
+           * the question rather than replacing it: this line says what will happen, and
+           * `Who's watching?` is still the instruction for the control underneath.
+           *
+           * The noun follows the wall the sheet was opened from, because a sentence
+           * promising movies over a list of series answers a different question from the
+           * one being asked.
+           */}
+          <Text variant="footnote" tone="secondary">
+            {medium === 'tv'
+              ? 'Pick who’s watching and bingd. will find shows you can all agree on.'
+              : 'Pick who’s watching and bingd. will find movies you can all agree on.'}
+          </Text>
           <Text variant="footnote" tone="tertiary">
             Who&apos;s watching?
           </Text>
@@ -192,11 +214,30 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
 
         {people.length > 0 ? (
           <View style={styles.actions}>
+            {/**
+             * **The disabled button asks for what is missing** (founder, physical QA,
+             * 2026-09-08).
+             *
+             * The sheet opens with the reader already in seat one, so the button used to
+             * read `Get picks for 1` and be dead — a control offering to do the thing,
+             * for the number of people currently chosen, that refuses to do it. On a
+             * device that reads as broken rather than as unmet, and the reader is left to
+             * infer the rule from a greyed-out number.
+             *
+             * So below the minimum it states the requirement as an instruction, and at or
+             * above it counts. `GROUP_PICKS_MIN_MEMBERS` is the same rule the disabled
+             * state has always enforced — named, not changed. Nothing about who is asked
+             * for or what the server is sent moves.
+             */}
             <Button
-              label={`Get picks for ${groupSize}`}
+              label={
+                groupSize < GROUP_PICKS_MIN_MEMBERS
+                  ? 'Add someone to get picks'
+                  : `Get picks for ${groupSize}`
+              }
               fit
               onPress={() => setConfirmed([...selected])}
-              disabled={selected.size === 0}
+              disabled={groupSize < GROUP_PICKS_MIN_MEMBERS}
               disabledReason="Choose at least one person to watch with."
             />
           </View>

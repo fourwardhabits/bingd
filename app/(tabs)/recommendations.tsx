@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { CollectionFilterSheet } from '@/features/collection/CollectionFilterSheet';
 import {
   applyFilters,
@@ -90,7 +89,6 @@ export default function RecommendationsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
-  const notifications = useNotifications(profile.id);
 
   /**
    * Whether the People suggestions are showing instead of the title wall.
@@ -457,12 +455,20 @@ export default function RecommendationsScreen() {
 
   return (
     <Screen>
-      <AppHeader
-        notifications={{
-          count: unreadCount(notifications.data),
-          onPress: () => router.push('/settings/notifications'),
-        }}
-      />
+      {/**
+       * **No bell on this screen** (founder, physical QA, 2026-09-08).
+       *
+       * It was here, and Collection and Search had nothing in the same corner — so three
+       * of the five root tabs disagreed about whether their header carried a control at
+       * all, and this one's bell did not optically centre against the wordmark beside it.
+       * The founder's resolution is the simplifying one: take it off For You rather than
+       * add it to the two screens that never had it.
+       *
+       * Nothing about notifications changed. The inbox is still reached from Feed, which
+       * is the social surface it belongs to, and from Profile beside the gear. This is a
+       * header losing a control, not a navigation redesign.
+       */}
+      <AppHeader />
 
       {/**
        * **Movies, TV shows, People** — one selector, and the founder's answer to Bingd
@@ -559,6 +565,9 @@ export default function RecommendationsScreen() {
                     : 'Sent to you'
                 }
                 selected={sentOnly}
+                // A social feature, not a filter — see the note above `emphasis` on
+                // `FilterChip`, and `Group Picks` two chips down, which is the other one.
+                emphasis="social"
                 onPress={() => setSentOnly((on) => !on)}
               />
               {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
@@ -573,6 +582,10 @@ export default function RecommendationsScreen() {
               <FilterChip
                 icon="people-outline"
                 label="Group Picks"
+                // The row's other social feature. It shares Sent to you's treatment
+                // exactly, so the two read as one family and Filters reads as the
+                // utility beside them.
+                emphasis="social"
                 onPress={() => {
                   track({ name: 'group_picks_opened' });
                   setGroupPicking(true);
@@ -1014,6 +1027,15 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
+    /**
+     * **16, and it was 8** (founder, physical QA, 2026-09-08).
+     *
+     * On the device the first row of posters sat directly under the chips with no seam
+     * between them, so the controls read as part of the wall rather than as the thing
+     * that governs it. `space[4]` is the top of the design system's *control row → the
+     * content it governs* interval (design-system.md §5), which is what this seam is:
+     * the wall has no top padding of its own, so this padding is the whole gap.
+     */
+    paddingBottom: theme.space[4],
   },
 });

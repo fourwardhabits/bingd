@@ -19,7 +19,7 @@ For every `(user_id, category)` pair, at all times outside a transaction:
 | **I4** | No two titles share a position | `unique (user_id, category, position)` |
 | **I5** | A retried ranking mutation applies exactly once — no second movement, feed event, comparison or activation | `_claim_operation_result` (§9) |
 | **I6** | Re-ranking is **provisional**: the previous position, band, score and collection row survive until a new placement completes, and an abandoned or failed attempt leaves all of them standing | `rank_again` and `rank_rebucket` (§7), `_rank_finalize` (§6) |
-| **I7** | One completed ranking is one feed activity: a first ranking and a **Rank again** each post exactly one `title_ranked`, a **Change your rating** posts none, and a retry posts none | `_rank_finalize` (§6), `_claim_operation_result` (§9) |
+| **I7** | One completed ranking is one feed activity: a first ranking and a **Log another watch** each post exactly one `title_ranked`, an **Update your rating** posts none, and a retry posts none | `_rank_finalize` (§6), `_claim_operation_result` (§9) |
 
 I1 and I2 cannot be expressed as constraints. They hold because **every write goes through the functions in this document** (AD-4), and because `assert_ranking_valid()` in §8 checks them in tests and on a schedule.
 
@@ -299,7 +299,7 @@ Two things follow from leaving the subject in place, and both are mechanical:
 
 **Why it matters more than atomicity did.** `20260825000200` made this one transaction, which was real and is unchanged. But atomicity is a promise about crashes, not about intent: the transaction committed the destruction the instant the sheet opened, and the founder's device pass found exactly that — tap **Rank again**, and the score disappears from Collection, the profile and the title page before a single comparison has been answered. Close the sheet and it stays gone.
 
-**`new_watch` is the product distinction, carried on the wire.** Two controls reach this RPC — *Rank again*, which means the reader watched it again, and *Change your rating* re-choosing the band it already has, which means the rating was wrong. Only the first is a viewing, and only the first posts an activity. It defaults to **false**, because the friend-beta build installed on two devices calls the three-argument form from both places and under-posting is the recoverable direction.
+**`new_watch` is the product distinction, carried on the wire.** Two controls reach this RPC — *Log another watch*, which means the reader watched it again, and *Update your rating* re-choosing the band it already has, which means the rating was wrong. Only the first is a viewing, and only the first posts an activity. (A third row, *Rank it again*, reached the `newWatch: false` side directly until the menu was consolidated to two rows on 2026-09-08. The call is unchanged; it has one caller instead of two.) It defaults to **false**, because the friend-beta build installed on two devices calls the three-argument form from both places and under-posting is the recoverable direction.
 
 **It was two client calls until `20260825000200`**, `rank_unrank` then `rank_start`, with no transaction around them. Nobody's data was ever wrong — the gap between them is Logged and Unranked, a state the app has a name and a queue for — but a reader who pressed one button and lost their network in the middle got half of what they asked for, and the only repair was to notice. Client compensation is not atomicity.
 

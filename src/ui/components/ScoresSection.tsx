@@ -64,23 +64,6 @@ const NOT_RANKED = 'Not ranked yet';
 const SCORE_LOADING = 'Score loading';
 
 /**
- * Below this, a mean is drawn `quiet` rather than `outlined`.
- *
- * **Two, and it is the founder's sentence rather than a statistical choice**: "do not
- * make one person's score look statistically authoritative". One rating is one person,
- * and one person's opinion rendered in the same Maroon ring as twelve hundred is the
- * page telling a lie about its own confidence. At two the ring goes on.
- *
- * It governs **bingd. only**. Following is not the same claim: its sample is people the
- * reader chose to follow, which is the most useful signal on this page and is not
- * pretending to be a statistic about anybody else.
- *
- * Purely a *visual* threshold. Whether there is a number at all is the server's
- * decision (`score.community_min_ratings`) and this component still does not know it.
- */
-const AUTHORITATIVE_MIN_RATINGS = 2;
-
-/**
  * What other people made of this title.
  *
  * ---------------------------------------------------------------------------
@@ -188,6 +171,24 @@ const AUTHORITATIVE_MIN_RATINGS = 2;
  * unit that moves, and the empty circle is itself the honest statement that there is a
  * score-shaped hole here rather than a score. What it must never do is put a faded or
  * greyed *number* in that hole.
+ *
+ * ---------------------------------------------------------------------------
+ * COLOUR MEANS ONE THING HERE (founder, physical QA, 2026-09-08)
+ *
+ * **A real score is Maroon. No score is a filled grey disc.** Nothing else is encoded in
+ * the colour of a circle on this row — not how large the sample behind a number is, not
+ * how recent it is, not how much the app trusts it.
+ *
+ * Two things changed to make that sentence true. bingd. used to go neutral below two
+ * ratings, which put a real number in the same grey the empty state uses; it is outlined
+ * Maroon at every count now, and the sample is stated in words underneath, where `1
+ * rating` is more precise than any colour could be. And the empty circle used to hold an
+ * em dash, which is a mark inside a circle — the one gesture this page reserves for
+ * stating a number. It is empty.
+ *
+ * The three empty *sentences* still differ, because the three absences do. It is only
+ * the shape that is now identical, which is the point: the reader sorts the row by
+ * colour in a glance and reads the words for the rest.
  */
 export function ScoresSection({
   you,
@@ -241,8 +242,8 @@ export function ScoresSection({
           {following ? (
             <Score
               score={following.score}
-              // Outlined at any count. Following is people the reader chose, and the
-              // low-confidence treatment is bingd.'s alone — see `AUTHORITATIVE_MIN_RATINGS`.
+              // Outlined at any count, as bingd. now is too: there is one treatment for
+              // a stated number on this row and one for the absence of one.
               variant="outlined"
               label="Following"
               // The same words bingd. uses. The label above already says whose ratings
@@ -257,9 +258,18 @@ export function ScoresSection({
           {bingd ? (
             <Score
               score={bingd.score}
-              variant={
-                bingd.ratingCount >= AUTHORITATIVE_MIN_RATINGS ? 'outlined' : 'quiet'
-              }
+              /**
+               * **Outlined at every count, including one** (founder, 2026-09-08).
+               *
+               * A thin sample used to draw a neutral ring and a neutral number. The
+               * founder's ruling is that a real number must never go grey merely because
+               * N is low: on the device that is indistinguishable from a score that
+               * failed to load, and this row now has exactly one grey shape in it, which
+               * means *no score*. How deep the sample is is stated in words on the line
+               * below — `1 rating`, `128 ratings` — where it is precise rather than
+               * implied, and legible to somebody who cannot tell two greys apart.
+               */
+              variant="outlined"
               // The product's own name, written the way the wordmark writes it. It sits
               // beside "Following", so the two labels name two populations — and this one
               // is the whole of bingd. rather than a generic "community".
@@ -318,7 +328,7 @@ function Score({
    * three different facts.
    */
   emptyLabel: string;
-  /** Filled for the reader's own; outlined or quiet for everybody else's. */
+  /** Filled for the reader's own; outlined for everybody else's. There is no third. */
   variant: ScoreBadgeVariant;
   /** Makes the unit a button into the list behind the number. See the section props. */
   onPress?: () => void;
@@ -332,10 +342,20 @@ function Score({
   const badge = ranked ? (
     <ScoreBadge score={score} bucket={null} size="detail" variant={variant} />
   ) : (
-    // `dash`, never the cream `empty` disc and never the dashed ring: an em dash in a
-    // plain neutral ring is a *stated* absence, where a blank circle is
-    // indistinguishable from one whose contents failed to arrive.
-    <EmptyScoreBadge size="detail" dash label={`${label}: ${emptyLabel}`} />
+    /**
+     * **A filled grey disc with nothing in it** (founder, 2026-09-08).
+     *
+     * `muted`, never the cream `empty` disc, never the dashed ring, and — as of this
+     * pass — never the em dash it carried for a day. The rule the row now states is a
+     * single sentence: a real score is Maroon, and no score is grey. A dash is a mark
+     * inside a circle, and a mark inside a circle is how this page states a number, so
+     * the dash was the last thing still blurring the two states together.
+     *
+     * The absence is named in the words beside it and, for a screen reader, in this
+     * label — which is the only place the distinction between the three empty states
+     * can be carried, since to a screen reader the shape says nothing at all.
+     */
+    <EmptyScoreBadge size="detail" muted label={`${label}: ${emptyLabel}`} />
   );
 
   const body = (

@@ -14,11 +14,16 @@ import { ScoresSection } from './ScoresSection';
  *
  *   - the order, because it is a hierarchy of relevance to one reader (me, then the
  *     people I chose, then the room) and not a leaderboard;
- *   - what the section is willing to claim: below the sample threshold there is a dash
- *     and a sentence, and never a number, a countdown or a faded figure standing in for
- *     one;
- *   - which unit is filled. Exactly one circle on the page is solid Maroon and it is
- *     always the reader's own.
+ *   - what the section is willing to claim: below the sample threshold there is an empty
+ *     circle and a sentence, and never a number, a countdown or a faded figure standing
+ *     in for one;
+ *   - which unit is filled Maroon. Exactly one circle on the page is solid Maroon and it
+ *     is always the reader's own.
+ *
+ * And, since 2026-09-08, the rule that governs all of it: **colour means one thing here.
+ * A real score is Maroon; no score is a filled grey disc.** Sample size is stated in
+ * words and never in the colour of a circle. `what colour is allowed to mean` below is
+ * the founder's rule written as assertions, and it is the part to read first.
  */
 
 /** A style prop, flattened, whichever form the component passed it in. */
@@ -169,18 +174,38 @@ describe('what each unit says when it has nothing', () => {
     expect(screen.queryByText(/\d+ more/)).toBeNull();
   });
 
-  it('draws a stated absence rather than a blank disc or a faded number', async () => {
+  it('draws a filled grey disc with nothing at all inside it', async () => {
     /**
-     * The founder's constraint is exact: "no blank cream disc that looks like broken
-     * content". An empty circle is indistinguishable from one whose contents failed to
-     * load; an em dash is somebody having decided there is nothing here.
+     * **The founder's 2026-09-08 rule, at the level it is enforced.**
+     *
+     * The empty circle has been a dashed ring, a cream disc and an em dash in a neutral
+     * ring, and every one of those is *a mark inside a circle* — which is exactly how
+     * this page states a number. So the three read as quiet scores rather than as no
+     * score, which is the confusion the whole pass exists to remove.
+     *
+     * Filled and genuinely empty is the one treatment that cannot be misread. The
+     * distinction between the three absences is carried by the words beside the circle,
+     * and for a screen reader by the label on it, which is asserted here too because it
+     * is the only place a non-sighted reader can get it.
      */
     await render(<ScoresSection {...all} />);
 
-    expect(screen.getByLabelText('Your score: Not ranked yet')).toBeTruthy();
-    expect(screen.getByLabelText('Following: No ratings yet')).toBeTruthy();
-    expect(screen.getByLabelText('bingd.: Not enough ratings')).toBeTruthy();
-    expect(screen.getAllByText('—')).toHaveLength(3);
+    for (const name of [
+      'Your score: Not ranked yet',
+      'Following: No ratings yet',
+      'bingd.: Not enough ratings',
+    ]) {
+      const disc = screen.getByLabelText(name);
+      // Filled, in the one grey this app spends on an absent score.
+      expect(flatten(disc.props.style).backgroundColor).toBe(theme.semantic.scoreEmpty);
+      // And empty: no dash, no line, no glyph, no zero. Nothing is rendered inside it.
+      expect(disc.children).toHaveLength(0);
+    }
+
+    // Belt and braces on the character the row carried until this pass, so a future
+    // edit that reintroduces it fails here rather than on a device.
+    expect(screen.queryByText('—')).toBeNull();
+    expect(screen.queryByText('-')).toBeNull();
   });
 
   it('says the number is loading rather than that it is not ranked', async () => {
@@ -222,11 +247,19 @@ describe('how much authority each circle claims', () => {
     }
   });
 
-  it('quiets bingd. when one person is the whole sample', async () => {
+  it('keeps a real bingd. score Maroon however thin the sample is', async () => {
     /**
-     * The founder's sentence, as a measurement: "do not make one person's score look
-     * statistically authoritative". The number is still shown — withholding it would be
-     * a different lie — but the ring and the ink go neutral.
+     * **The reversal, 2026-09-08.** bingd. used to go neutral below two ratings, on the
+     * reading that one person's opinion should not look statistically authoritative.
+     *
+     * The founder's ruling on the device is that this costs more than it buys: grey on
+     * this row now means *no score*, so a real number in grey reads as one that failed to
+     * load or went stale, and the reader is left guessing between three greys. How deep
+     * the sample is is stated in words directly underneath — `1 rating` — which is more
+     * precise than any colour and survives being unable to tell two greys apart.
+     *
+     * The variant that drew it was deleted rather than left unused, so the treatment
+     * cannot be reintroduced by passing a string.
      */
     await render(
       <ScoresSection
@@ -237,20 +270,20 @@ describe('how much authority each circle claims', () => {
     );
 
     expect(screen.getByText('1 rating')).toBeTruthy();
-    const quiet = treatmentOf('9.1 out of 10');
-    expect(quiet.backgroundColor).toBeUndefined();
-    expect(quiet.borderWidth).toBeGreaterThan(0);
+    const thin = treatmentOf('9.1 out of 10');
+    expect(thin.backgroundColor).toBeUndefined();
+    expect(thin.borderColor).toBe(theme.semantic.score);
 
-    // And it is a different ring from the outlined one: the whole point is that the two
-    // are distinguishable at a glance.
+    // Identical at a large sample. The count says how much is behind it; the ring says
+    // only that there is a number.
     await render(
       <ScoresSection
         you={{ score: null }}
         following={{ score: null, ratingCount: 0 }}
-        bingd={{ score: 9.1, ratingCount: 2 }}
+        bingd={{ score: 9.1, ratingCount: 1284 }}
       />,
     );
-    expect(treatmentOf('9.1 out of 10').borderColor).not.toBe(quiet.borderColor);
+    expect(treatmentOf('9.1 out of 10').borderColor).toBe(thin.borderColor);
   });
 
   it('leaves Following outlined at a single rating', async () => {
@@ -421,8 +454,46 @@ describe('a numeric personal score and the words under it', () => {
 
     const unit = screen.getByTestId('scores-unit-you');
     expect(within(unit).getByText('Not ranked yet')).toBeTruthy();
-    expect(within(unit).getByText('—')).toBeTruthy();
     expect(within(unit).queryByText(/\d\.\d/)).toBeNull();
+    // The circle is drawn and it is empty. See `draws a filled grey disc`.
+    expect(screen.getByLabelText('Your score: Not ranked yet').children).toHaveLength(0);
+  });
+});
+
+/**
+ * **The rule, stated once, in the terms the founder stated it in** (2026-09-08).
+ *
+ * > REAL SCORE = Maroon. NO SCORE = filled neutral grey.
+ *
+ * Everything else on this row — how many ratings, whose they are, how recent — is words.
+ * These four assertions are the whole of it, and they are deliberately about the palette
+ * rather than about which component was used, so a rewrite of the badge that keeps the
+ * meaning keeps passing and one that quietly reintroduces a third colour does not.
+ */
+describe('what colour is allowed to mean', () => {
+  const treatmentOf = (name: string) => flatten(screen.getByLabelText(name).props.style);
+
+  it('paints every stated number Maroon and every absence grey, in one render', async () => {
+    await render(
+      <ScoresSection
+        you={{ score: 9.4 }}
+        following={{ score: null, ratingCount: 0 }}
+        bingd={{ score: 6.2, ratingCount: 1 }}
+      />,
+    );
+
+    // The reader's own, stated: solid Maroon.
+    expect(treatmentOf('9.4 out of 10').backgroundColor).toBe(theme.semantic.score);
+    // bingd.'s, stated, on a sample of exactly one: a Maroon ring, not a grey one.
+    expect(treatmentOf('6.2 out of 10').borderColor).toBe(theme.semantic.score);
+    // Following's, absent: the grey disc, and no ring at all.
+    const empty = treatmentOf('Following: No ratings yet');
+    expect(empty.backgroundColor).toBe(theme.semantic.scoreEmpty);
+    expect(empty.borderWidth).toBeUndefined();
+
+    // And the grey is used for nothing else: no stated number wears it.
+    expect(treatmentOf('9.4 out of 10').backgroundColor).not.toBe(theme.semantic.scoreEmpty);
+    expect(treatmentOf('6.2 out of 10').borderColor).not.toBe(theme.semantic.scoreEmpty);
   });
 });
 

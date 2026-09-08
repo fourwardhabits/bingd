@@ -26,17 +26,27 @@ export type ScoreBadgeSize = 'md' | 'sm' | 'lg' | 'detail';
  *
  *   `filled`   the reader's own score. Parchment on Maroon, 7.4:1, unchanged, and still
  *              what every badge outside this one row draws.
- *   `outlined` somebody else's score, with enough behind it to state plainly. Maroon
- *              ring, Maroon number, no fill.
- *   `quiet`    somebody else's score with almost nothing behind it. Neutral ring,
- *              neutral number. The number is still shown — withholding it would be a
- *              different lie — but it stops looking like a verdict.
+ *   `outlined` somebody else's score. Maroon ring, Maroon number, no fill.
  *
- * `quiet` is the answer to "do not make one person's score look statistically
- * authoritative". It is a *visual* demotion only: the threshold that decides whether
- * there is a number at all remains the server's.
+ * ---------------------------------------------------------------------------
+ * THERE WAS A THIRD, AND SAMPLE SIZE IS WHY IT IS GONE (founder, 2026-09-08)
+ *
+ * `quiet` drew a neutral ring and a neutral number for an aggregate with almost nothing
+ * behind it — one rating, say — on the reading that one person's opinion should not look
+ * statistically authoritative. On a device that reads as a *broken or stale* score
+ * rather than a thin one, because grey on this page already means something else.
+ *
+ * The founder's rule is now one sentence with no exceptions in it: **a real score is
+ * Maroon and no score is grey**. How deep the sample is is stated in words directly
+ * under the number — `1 rating`, `128 ratings` — which is both more precise than a
+ * colour and readable by somebody who cannot tell two greys apart. Whether there is a
+ * number at all is still the server's decision (`score.community_min_ratings`), and
+ * below it the unit draws {@link EmptyScoreBadge}'s grey disc and says so.
+ *
+ * The variant is deleted rather than left unused, so a later caller cannot reintroduce
+ * confidence-by-colour by passing a string.
  */
-export type ScoreBadgeVariant = 'filled' | 'outlined' | 'quiet';
+export type ScoreBadgeVariant = 'filled' | 'outlined';
 
 export type ScoreBadgeProps = {
   /** Omit for a title that is logged but not yet compared. */
@@ -203,7 +213,7 @@ export function EmptyScoreBadge({
   size = 'md',
   label = 'No score yet',
   dashed = false,
-  dash = false,
+  muted = false,
 }: {
   size?: ScoreBadgeSize;
   label?: string;
@@ -218,20 +228,25 @@ export function EmptyScoreBadge({
    */
   dashed?: boolean;
   /**
-   * An em dash inside a plain neutral ring.
+   * **A filled, muted grey disc with nothing inside it** — the Scores row's no-score
+   * state (founder, physical QA, 2026-09-08).
    *
-   * This is the title page's empty score, in both places it occurs: the reader has not
-   * ranked this, or nobody they follow has. The founder's constraint is exact — "no
-   * blank cream disc that looks like broken content" — and a genuinely empty circle is
-   * indistinguishable from a circle whose contents failed to load. A dash is a stated
-   * absence: somebody decided there is nothing here.
+   * The founder's rule for that row is one sentence a reader should be able to state
+   * after two seconds: *a real score is Maroon, no score is grey*. Anything drawn inside
+   * the circle competes with that, because a mark inside a circle is exactly how this
+   * page states a number — so there is **no dash, no line, no icon and no zero** here.
    *
-   * Not `0.0`, which is a verdict, and not the word "Rank", which is the invitation the
-   * button beside it already carries.
+   * It carried an em dash until now, on the argument that a blank circle is
+   * indistinguishable from one whose contents failed to load. That argument is answered
+   * by the fill rather than by a glyph: `empty` is a cream disc that reads as unpainted
+   * content, and this is a *solid grey* one, which reads as a slot that is deliberately
+   * empty. The words beside it — `Not ranked yet`, `No ratings yet`, `Not enough
+   * ratings` — say which absence it is, and `label` says it to a screen reader, to which
+   * the shape says nothing at all.
    */
-  dash?: boolean;
+  muted?: boolean;
 }) {
-  const { diameter, fontSize } = metrics(size);
+  const { diameter } = metrics(size);
 
   return (
     <View
@@ -240,28 +255,12 @@ export function EmptyScoreBadge({
       accessibilityLabel={label}
       style={[
         styles.circle,
-        dashed ? styles.unranked : dash ? styles.quiet : styles.empty,
+        dashed ? styles.unranked : muted ? styles.muted : styles.empty,
         { width: diameter, height: diameter },
       ]}
-    >
-      {dash ? (
-        <Text
-          variant="score"
-          numberOfLines={1}
-          style={[styles.quietInk, { fontSize, lineHeight: Math.round(fontSize * 1.15) }]}
-          // The circle already grew with the font scale; see the note on the filled
-          // badge's number, which this mirrors so the two never disagree in a row.
-          allowFontScaling={false}
-        >
-          {EM_DASH}
-        </Text>
-      ) : null}
-    </View>
+    />
   );
 }
-
-/** The character, named, so it cannot be typed as a hyphen by a later edit. */
-const EM_DASH = '—';
 
 /**
  * How wide `10.0` is, as a multiple of the font size, in Inter SemiBold with
@@ -344,14 +343,15 @@ const styles = StyleSheet.create({
   outlined: { borderWidth: 2, borderColor: theme.semantic.score },
   outlinedInk: { color: theme.semantic.score },
   /**
-   * Almost nothing behind it: a neutral ring and a neutral number.
+   * No score at all: a filled muted grey disc, no ring and nothing inside.
    *
-   * No fill, which is what separates it from `empty` — the cream disc `empty` draws is
-   * exactly the "blank disc that looks like broken content" the founder ruled out for
-   * the title page. This is a ring around a stated value, or around a stated absence.
+   * Filled rather than ringed on purpose. A ring around emptiness is still a ring, and
+   * on this row the ring is what says *there is a number here* — Maroon for a stated one,
+   * and until 2026-09-08 neutral for a thin one. With `quiet` gone from the Scores row
+   * the ring means one thing again, and the absence of a score is a solid shape rather
+   * than an outline of one.
    */
-  quiet: { borderWidth: 2, borderColor: theme.border.strong },
-  quietInk: { color: theme.text.tertiary },
+  muted: { backgroundColor: theme.semantic.scoreEmpty },
   pressed: { opacity: 0.7 },
 });
 
@@ -365,11 +365,9 @@ const styles = StyleSheet.create({
 const VARIANT_RING: Record<ScoreBadgeVariant, object> = {
   filled: styles.filled,
   outlined: styles.outlined,
-  quiet: styles.quiet,
 };
 
 const VARIANT_INK: Record<ScoreBadgeVariant, object> = {
   filled: styles.ink,
   outlined: styles.outlinedInk,
-  quiet: styles.quietInk,
 };

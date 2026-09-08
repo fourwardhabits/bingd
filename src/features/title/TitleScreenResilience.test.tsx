@@ -881,9 +881,9 @@ describe('the action group', () => {
   it('opens the ranking-options menu from Ranked, and decides no intent itself', async () => {
     /**
      * **The interaction contract, unchanged.** Ranked opens the menu, and the menu is
-     * where the reader says which of the three things they mean. A control that went
-     * straight to a rerank — or straight to a rewatch — would be the founder's Terrace
-     * House bug rebuilt in a different shape: two intents behind one press.
+     * where the reader says which of the two things they mean. A control that went
+     * straight to a correction — or straight to a rewatch — would be the founder's
+     * Terrace House bug rebuilt in a different shape: two intents behind one press.
      */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
@@ -891,21 +891,30 @@ describe('the action group', () => {
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
 
-    // All three intents offered, and none of them taken by the press itself.
-    expect(view.getByText('Rank it again')).toBeTruthy();
+    // Both intents offered, and neither of them taken by the press itself.
+    expect(view.getByText('Update your rating')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
-    expect(view.getByText('Change your rating')).toBeTruthy();
     expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('enters the same-watch rerank from Rank it again, declaring no new watch', async () => {
+  it('enters the same-watch rerank from Update your rating, declaring no new watch', async () => {
+    /**
+     * **The capability the 2026-09-08 consolidation had to keep.** *Rank it again* used
+     * to make this call in one tap and is gone; *Update your rating* opens the log
+     * sheet's band chooser, and re-choosing the band the title already has is the same
+     * `rankAgain(newWatch: false)`. The fixture is Loved, so `I liked it` is that band.
+     */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
-    await fireEvent.press(view.getByText('Rank it again'));
+    await fireEvent.press(view.getByText('Update your rating'));
+    await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
+    await fireEvent.press(view.getByText('I liked it'));
+    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
+    await fireEvent.press(view.getByText('Re-rank'));
 
     // `rank_again` with `p_new_watch: false` — the session runs over the position the
     // title already holds, and `_rank_finalize` posts `title_ranked` only `if p_new_watch
@@ -1293,12 +1302,18 @@ describe('where the action row lives', () => {
 });
 
 describe('the ranking menu, in the founder’s words', () => {
-  it('names the three intents Rank it again, Log another watch and Change your rating', async () => {
+  it('names the two intents Update your rating and Log another watch, and nothing else', async () => {
     /**
-     * Labels only (founder, 2026-09-07). *Adjust placement* named the mechanism and *I
-     * watched it again* was a confession; these name the act in the verbs the rest of the
-     * app uses. The rows' modes, RPCs and `p_new_watch` are pinned unchanged by the two
-     * tests in "the action group" above.
+     * **The founder's menu, 2026-09-08.** It was three rows for a day: *Rank it again*,
+     * *Log another watch* and *Change your rating*. The first and third were two doors
+     * into one act — both correct a rating already given, both leave `p_new_watch` false,
+     * both write no activity — separated only by whether the band chooser was skipped,
+     * which is a mechanism, and naming mechanisms is what the 2026-09-07 rename had
+     * already decided this menu must stop doing.
+     *
+     * Copy only, again. The rows' modes, RPCs and `p_new_watch` are pinned unchanged by
+     * the tests in "the action group" above, and `rerank` is still reached — through one
+     * row instead of two.
      */
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
@@ -1306,9 +1321,11 @@ describe('the ranking menu, in the founder’s words', () => {
     await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-action-ranked'));
 
-    expect(view.getByText('Rank it again')).toBeTruthy();
+    expect(view.getByText('Update your rating')).toBeTruthy();
     expect(view.getByText('Log another watch')).toBeTruthy();
-    expect(view.getByText('Change your rating')).toBeTruthy();
+    // Every label this group has ever carried and no longer does.
+    expect(view.queryByText('Rank it again')).toBeNull();
+    expect(view.queryByText('Change your rating')).toBeNull();
     expect(view.queryByText('Adjust placement')).toBeNull();
     expect(view.queryByText('I watched it again')).toBeNull();
   });
