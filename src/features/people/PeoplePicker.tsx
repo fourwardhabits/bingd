@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar, SearchField, Text } from '@/ui/components';
+import { hapticSelection } from '@/ui/haptics';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -154,7 +155,19 @@ export function PeoplePicker({
                 accessibilityState={{ checked, disabled: rowDisabled }}
                 accessibilityLabel={`${person.name}, @${person.username}`}
                 disabled={rowDisabled}
-                onPress={() => onToggle(person.id)}
+                /**
+                 * **Selection** (founder premium pass, 2026-09-08). Adding somebody to a
+                 * group pick, or to a recommendation, is a lightweight reversible
+                 * statement — the same class as a chip, and the same haptic.
+                 *
+                 * The row is not given a press *scale*: it is a list row whose ordinary
+                 * behaviour already feels right, and animating it would be motion added
+                 * because it was available. The opacity change it already has is enough.
+                 */
+                onPress={() => {
+                  hapticSelection();
+                  onToggle(person.id);
+                }}
                 style={({ pressed }) => [
                   styles.row,
                   pressed && styles.pressed,

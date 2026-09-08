@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/ui/components';
+import { hapticSelection } from '@/ui/haptics';
+import { usePressScale, usePulse } from '@/ui/press';
 import { theme } from '@/ui/tokens';
 
 export type RankAction = {
@@ -87,39 +89,53 @@ export type TitleActionsProps = {
  * button hierarchy (design-system.md §8) and is unchanged from before this redesign.
  */
 export function TitleActions({ rank, save, recommend }: TitleActionsProps) {
+  /**
+   * **The page's primary act gives under a thumb** (founder premium pass, 2026-09-08).
+   *
+   * Rank is the button the whole title page is arranged around, and Ranked is the door
+   * into the ranking menu. The two icon controls beside it take the same treatment
+   * through `IconControl`, so the cluster answers a thumb as one surface rather than as
+   * one animated control standing next to two that do not move.
+   */
+  const rankPress = usePressScale();
+
   return (
     <View testID="title-actions" style={styles.cluster}>
       {rank ? (
-        <Pressable
-          testID={rank.ranked ? 'title-action-ranked' : 'title-action-rank'}
-          accessibilityRole="button"
-          accessibilityState={{ selected: rank.ranked }}
-          accessibilityLabel={rank.accessibilityLabel}
-          accessibilityHint={rank.accessibilityHint}
-          onPress={rank.onPress}
-          style={({ pressed }) => [
-            styles.rank,
-            rank.ranked ? styles.ranked : styles.unranked,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Ionicons
-            name={rank.ranked ? 'checkmark-circle' : 'star-outline'}
-            size={theme.layout.icon.sm}
-            color={rank.ranked ? theme.semantic.action : theme.semantic.actionText}
-          />
-          {/* One line, always. The button is content-sized with a ceiling, so the only
+        <Animated.View style={rankPress.pressStyle}>
+          <Pressable
+            testID={rank.ranked ? 'title-action-ranked' : 'title-action-rank'}
+            accessibilityRole="button"
+            accessibilityState={{ selected: rank.ranked }}
+            accessibilityLabel={rank.accessibilityLabel}
+            accessibilityHint={rank.accessibilityHint}
+            onPress={rank.onPress}
+            onPressIn={rankPress.onPressIn}
+            onPressOut={rankPress.onPressOut}
+            style={({ pressed }) => [
+              styles.rank,
+              rank.ranked ? styles.ranked : styles.unranked,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons
+              name={rank.ranked ? 'checkmark-circle' : 'star-outline'}
+              size={theme.layout.icon.sm}
+              color={rank.ranked ? theme.semantic.action : theme.semantic.actionText}
+            />
+            {/* One line, always. The button is content-sized with a ceiling, so the only
               way the label could break is at a text size where it meets that ceiling —
               and a two-line `Ranked` is a control that has changed shape rather than a
               label that has grown. */}
-          <Text
-            variant="headline"
-            numberOfLines={1}
-            tone={rank.ranked ? 'action' : 'inverse'}
-          >
-            {rank.ranked ? 'Ranked' : 'Rank'}
-          </Text>
-        </Pressable>
+            <Text
+              variant="headline"
+              numberOfLines={1}
+              tone={rank.ranked ? 'action' : 'inverse'}
+            >
+              {rank.ranked ? 'Ranked' : 'Rank'}
+            </Text>
+          </Pressable>
+        </Animated.View>
       ) : null}
 
       <IconControl
@@ -154,27 +170,53 @@ function IconControl({
   icon: React.ComponentProps<typeof Ionicons>['name'];
   action: IconAction;
 }) {
+  const press = usePressScale({ enabled: !action.disabled });
+  const pop = usePulse();
+
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityState={{
-        selected: Boolean(action.selected),
-        disabled: Boolean(action.disabled),
-      }}
-      accessibilityLabel={action.accessibilityLabel}
-      onPress={action.onPress}
-      disabled={action.disabled}
-      style={({ pressed }) => [styles.icon, pressed && styles.pressed]}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.md}
-        // Maroon when held, neutral otherwise — the app's one selected-control treatment,
-        // the same pair the feed row and the search row draw.
-        color={action.selected ? theme.semantic.action : theme.text.secondary}
-      />
-    </Pressable>
+    <Animated.View style={press.pressStyle}>
+      <Pressable
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityState={{
+          selected: Boolean(action.selected),
+          disabled: Boolean(action.disabled),
+        }}
+        accessibilityLabel={action.accessibilityLabel}
+        /**
+         * **Selection, and a pulse on the way on** (founder premium pass, 2026-09-08).
+         *
+         * Both controls this draws — bookmark and recommend — are the reader saving or
+         * sending, which is the `selection` class in `ui/haptics.ts`: light, and the same
+         * word every other bookmark in the app now speaks.
+         *
+         * The pulse fires only when the control is turning *on*. `action.selected` is the
+         * state before the press, so `!action.selected` is the press that adds something —
+         * and un-saving gets no celebration, because a flourish for undoing is the app
+         * disagreeing with the reader. Recommend has no selected state, so it pulses on
+         * every press, which is correct: sending is always an addition.
+         */
+        onPress={() => {
+          hapticSelection();
+          if (!action.selected) pop.pulse();
+          action.onPress();
+        }}
+        disabled={action.disabled}
+        onPressIn={press.onPressIn}
+        onPressOut={press.onPressOut}
+        style={({ pressed }) => [styles.icon, pressed && styles.pressed]}
+      >
+        <Animated.View style={pop.pulseStyle}>
+          <Ionicons
+            name={icon}
+            size={theme.layout.icon.md}
+            // Maroon when held, neutral otherwise — the app's one selected-control treatment,
+            // the same pair the feed row and the search row draw.
+            color={action.selected ? theme.semantic.action : theme.text.secondary}
+          />
+        </Animated.View>
+      </Pressable>
+    </Animated.View>
   );
 }
 
