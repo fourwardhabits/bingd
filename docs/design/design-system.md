@@ -574,7 +574,7 @@ Beyond the contrast work in §1 and §2.
 
 **A poster grid tile carries the label the grid does not show.** §8's grid has no titles by design, which is a visual decision and must not become an accessibility one: every tile exposes the film's name and year.
 
-**Motion respects the system setting**, including the reveal.
+**Motion respects the system setting**, including the reveal. `useReducedMotion` (`src/ui/motion.ts`) reads it *and* subscribes to it, because somebody turning it on mid-session is very likely doing so because of something they are looking at right now. Every animation added by the 2026-09-08 interaction pass honours it by not running at all — a slower shrink is still a shrink. **Haptics do not consult it**: it is a motion setting, and the system's own haptic switch is the one that governs those. Conflating the two would take feedback away from a reader who asked only for stillness.
 
 **Dynamic Type is supported to 200%.** Rankings, comparison, and settings are the screens most likely to break and are the ones to test first. The compact row (§8) joins that list: it is built to a 60pt rhythm, and the poster must not clip the text block when type scales — the poster's height is fixed, so the row grows and the artwork stays where it is.
 
@@ -624,6 +624,44 @@ as a source — the `bingd.` score beside `Following` is one, because there the 
 distinguishing two populations. It does not belong to every sentence that happens to
 contain the word. A screen where three unrelated phrases are maroon has no hierarchy
 left to spend.
+
+## 10b. Interaction motion and haptics — the doctrine (2026-09-08)
+
+Added after the pre-launch premium pass. `expo-haptics` and `react-native-reanimated` had both been dependencies since the first build and neither had ever been imported by `src/`; this section exists so that what was added stays a system rather than becoming a habit.
+
+**Six rules.**
+
+1. **Motion explains a state or a change.** If it is not saying *this became that*, or *this is the surface you pressed*, it does not go in. Decorative motion is the failure mode, not the ambition.
+2. **High-frequency controls get consistent physical feedback.** A chip, a button, a poster tile and the Rank control are all *things you press*, so they all give by the same amount. One control that responds and its neighbour that does not reads as the second one being broken.
+3. **Haptic intensity maps to the importance of the act**, and the mapping lives in one file. Light for a reversible state change, medium for a judgement, success for a completion. Nothing else, and nothing chosen at a call site.
+4. **Animation is short and subtle.** 90–160ms for a press, ~280ms for the one entrance in the app. Nothing overshoots; nothing blocks; nothing loops.
+5. **Reduce Motion is respected by not animating**, never by animating slower. Haptics are separately governed by the system's own haptic switch — see §10.
+6. **Prefer a shared primitive to a one-off value.** A magic `0.96` in a screen is how the second screen gets `0.94`.
+
+**The shared primitives, by name.**
+
+| | Where it lives | What it is |
+|---|---|---|
+| `hapticSelection` | `src/ui/haptics.ts` | A lightweight, reversible state change the reader made — bookmark, filter chip, a person added to a group. |
+| `hapticDecision` | `src/ui/haptics.ts` | A judgement that goes to the server. In practice: answering a ranking comparison, and nothing else. |
+| `hapticSuccess` | `src/ui/haptics.ts` | An act completing. One thing in this app is one: a ranking arriving at a score. |
+| `usePressScale` | `src/ui/press.ts` | The press give: scale to **0.975**, 90ms down on `Easing.out`, 160ms back. Returns `onPressIn` / `onPressOut` / `pressStyle`. |
+| `usePulse` | `src/ui/press.ts` | A one-shot 1 → 1.18 → 1 acknowledgement for a control that has just turned *on*. |
+| `useReducedMotion` | `src/ui/motion.ts` | Pre-existing. Both hooks above consult it. |
+
+**What must never buzz**: scrolling, navigation in either direction, an ordinary `Button`, and anything the app does on its own — a query resolving, a cache filling, a screen appearing. A haptic answers something the reader *did*. `src/ui/interaction.test.tsx` asserts the silences as hard as the sounds, because the likely failure is not a missing buzz but haptics spreading until the phone buzzes at everything and the vocabulary means nothing.
+
+**Where the press give is applied**: `FilterChip`, the poster-wall tile, the ranking comparison card, the Rank/Ranked control and the title page's icon actions. Deliberately **not** every `Pressable` — a list row whose ordinary behaviour already feels right is left alone.
+
+**`Button` is deliberately excluded, and the reason is structural rather than aesthetic.** It was included for one round. `Button`'s *parentage* is load-bearing: callers put two of them in a row inside `flex: 1` slots, and four suites assert exactly that — `expect(rank.parent).toBe(notNow.parent)` for a pair that must share a row, `button.parent.style.flex === 1` for a pair that must take equal halves. A wrapper gives each button a parent of its own and breaks five such assertions, all of them founder locks about layout. Shipping the scale would have meant weakening the only guard the repo has that two controls still share a row, in exchange for a fraction of a point of travel on a control that already dims under a thumb. Revisit it by giving `Button` a layout-forwarding wrapper and updating those locks deliberately.
+
+**One implementation note that cost a rewrite.** The transform is on a bare `Animated.View` *wrapping* each control, not on `Animated.createAnimatedComponent(Pressable)`. The animated component is correct at runtime and does not expose `style` on its host node to the test renderer, so ten existing assertions about founder-locked geometry and colour — the chip's 32pt height and 44pt slop, the Rank button's 150–170 max width, the social chips' Maroon hairline — silently stopped being able to see what they were about. A wrapper costs one styleless host `View` and keeps every one of them. The reasoning is recorded in `src/ui/press.ts`.
+
+**The ranking payoff.** The reveal is the one entrance in the app: opacity 0→1, scale 0.94→1 and a 10pt rise over 280ms on `Easing.out(cubic)`, applied to the score panel and the identity block but **not** to the buttons beneath them — a control that slides while a thumb is travelling toward it is the one kind of motion that costs something. The success haptic fires from the same mount effect. No confetti, no bounce, no stagger, nothing blocking. `src/features/ranking/ranking-feedback.test.tsx` pins the RPC counts alongside the buzz, because a completion animation is exactly the shape of change that could produce a duplicated ranking.
+
+**Explicitly deferred** and not to be added without real-user evidence: shared-element poster-to-title transitions, parallax, animated tab navigation, page-enter/exit animation, blur-heavy effects, illustrations, and any second animation library.
+
+---
 
 ## 11. Keeping the system honest
 

@@ -1,8 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import {
+  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { formatScore, type Bucket } from '@/features/collection/score';
 
+import { hapticSelection } from '../haptics';
+import { usePressScale, usePulse } from '../press';
 import { inkAlpha, theme } from '../tokens';
 import { Poster } from './Poster';
 import { SectionHeader } from './SectionHeader';
@@ -69,7 +78,10 @@ export function PosterShelf({
   // Solve for a card width that leaves `peek` of one visible at the right edge:
   // gutter + n cards + n gaps + peek*card = width.
   const available = width - theme.layout.gutter;
-  const columns = Math.max(2, Math.round((available + gap) / (theme.poster.md.width + gap) - peek));
+  const columns = Math.max(
+    2,
+    Math.round((available + gap) / (theme.poster.md.width + gap) - peek),
+  );
   const cardWidth = Math.floor((available - columns * gap) / (columns + peek));
 
   if (tiles.length === 0) return null;
@@ -201,72 +213,113 @@ function Tile({
   onDismiss?: () => void;
 }) {
   const { score } = tile;
+  /**
+   * **The wall is the app's most-pressed surface** (founder premium pass, 2026-09-08).
+   *
+   * For You, Collection's wall and every poster shelf are the same tile, and opening a
+   * title from one of them is the commonest tap in the product. The opacity change alone
+   * is what a *link* does; the scale is what makes a piece of artwork feel like an object
+   * that was pushed.
+   */
+  const press = usePressScale();
+  const bookmark = usePulse();
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={labelFor(tile)}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      style={({ pressed }) => [{ width }, pressed && styles.pressed]}
-    >
-      <Poster uri={tile.posterUri} title={tile.title} blurhash={tile.blurhash} width={width} />
-      {onToggleSave ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: Boolean(tile.saved) }}
-          accessibilityLabel={
-            tile.saved ? `Remove ${tile.title} from watchlist` : `Save ${tile.title} to watchlist`
-          }
-          onPress={onToggleSave}
-          // A tile in a three-column grid is about 115pt wide, and a 44pt visual
-          // control on it would cover most of the artwork. The glyph is 28pt and the
-          // *touch target* is grown to the minimum with hitSlop, which is the only
-          // way to keep both design-system.md §8's tap-target rule and a wall that
-          // still reads as artwork.
-          hitSlop={8}
-          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
-        >
-          <Ionicons
-            name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-            size={16}
-            color={theme.text.inverse}
-          />
-        </Pressable>
-      ) : null}
-      {onDismiss ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Not interested in ${tile.title}`}
-          accessibilityHint="Removes it from your recommendations"
-          onPress={onDismiss}
-          // Same 28pt-glyph-with-grown-target treatment as the bookmark above; a
-          // second 44pt control would cover half the artwork. Quiet rather than
-          // Maroon: dismissal is an exit, not the primary act of the wall.
-          hitSlop={8}
-          style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
-        >
-          <Ionicons name="close" size={16} color={theme.text.inverse} />
-        </Pressable>
-      ) : null}
-      {score != null ? (
-        <View
-          // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
-          // wall the old bucket tint was at its worst: nine tiles, three colours,
-          // none of them the poster's, all of them restating a number already
-          // printed on top of them.
-          style={styles.chip}
-          // Already in the label above, and a chip that announces itself
-          // separately makes every tile two stops instead of one.
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        >
-          <Text variant="caption" tone="inverse" allowFontScaling={false}>
-            {formatScore(score)}
-          </Text>
-        </View>
-      ) : null}
-    </Pressable>
+    <Animated.View style={press.pressStyle}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={labelFor(tile)}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        onPressIn={press.onPressIn}
+        onPressOut={press.onPressOut}
+        style={({ pressed }) => [{ width }, pressed && styles.pressed]}
+      >
+        <Poster
+          uri={tile.posterUri}
+          title={tile.title}
+          blurhash={tile.blurhash}
+          width={width}
+        />
+        {onToggleSave ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: Boolean(tile.saved) }}
+            accessibilityLabel={
+              tile.saved
+                ? `Remove ${tile.title} from watchlist`
+                : `Save ${tile.title} to watchlist`
+            }
+            /**
+             * **Saving is a state change, so it pulses and it buzzes** (2026-09-08).
+             *
+             * The glyph swap happens between two frames: `bookmark-outline` becomes
+             * `bookmark` with no moment at which anything moved, so on a device the change
+             * is something a reader notices a beat later rather than something they see
+             * happen. One small pulse plus the lightest haptic is what turns it into an
+             * acknowledgement.
+             *
+             * **On the way on only.** `usePulse` gets the *new* state, and celebrating the
+             * removal of a bookmark would be the app disagreeing with the reader. The
+             * haptic fires either way, because both directions are the reader having done
+             * something.
+             */
+            onPress={() => {
+              hapticSelection();
+              if (!tile.saved) bookmark.pulse();
+              onToggleSave();
+            }}
+            // A tile in a three-column grid is about 115pt wide, and a 44pt visual
+            // control on it would cover most of the artwork. The glyph is 28pt and the
+            // *touch target* is grown to the minimum with hitSlop, which is the only
+            // way to keep both design-system.md §8's tap-target rule and a wall that
+            // still reads as artwork.
+            hitSlop={8}
+            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+          >
+            <Animated.View style={bookmark.pulseStyle}>
+              <Ionicons
+                name={tile.saved ? 'bookmark' : 'bookmark-outline'}
+                size={16}
+                color={theme.text.inverse}
+              />
+            </Animated.View>
+          </Pressable>
+        ) : null}
+        {onDismiss ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Not interested in ${tile.title}`}
+            accessibilityHint="Removes it from your recommendations"
+            onPress={onDismiss}
+            // Same 28pt-glyph-with-grown-target treatment as the bookmark above; a
+            // second 44pt control would cover half the artwork. Quiet rather than
+            // Maroon: dismissal is an exit, not the primary act of the wall.
+            hitSlop={8}
+            style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
+          >
+            <Ionicons name="close" size={16} color={theme.text.inverse} />
+          </Pressable>
+        ) : null}
+        {score != null ? (
+          <View
+            // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
+            // wall the old bucket tint was at its worst: nine tiles, three colours,
+            // none of them the poster's, all of them restating a number already
+            // printed on top of them.
+            style={styles.chip}
+            // Already in the label above, and a chip that announces itself
+            // separately makes every tile two stops instead of one.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text variant="caption" tone="inverse" allowFontScaling={false}>
+              {formatScore(score)}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+    </Animated.View>
   );
 }
 

@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet } from 'react-native';
+import { Animated, Pressable, StyleSheet } from 'react-native';
 
+import { hapticSelection } from '../haptics';
+import { usePressScale } from '../press';
 import { theme } from '../tokens';
 import { Text } from './Text';
 
@@ -55,34 +57,54 @@ export function FilterChip({
   // Maroon for both, and the two are still told apart by the ring and the fill `on`
   // adds — see `emphasis`. Computed once so the glyph and the word cannot disagree.
   const action = selected || emphasis === 'social';
+  const press = usePressScale();
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      // 32pt drawn, 44pt pressed. It was `space[1]` all round, which made the chip 40pt
-      // tall to a thumb — short of the target by the four points the audit measured.
-      hitSlop={theme.layout.chipHitSlop}
-      style={({ pressed }) => [
-        styles.chip,
-        // Order matters: emphasis tints the hairline, and `on` overrides it with the
-        // full-strength ring, so a selected feature chip reads as selected.
-        emphasis === 'social' && styles.social,
-        selected && styles.on,
-        pressed && styles.pressed,
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.sm}
-        color={action ? theme.semantic.action : theme.text.secondary}
-      />
-      <Text variant="footnote" tone={action ? 'action' : 'secondary'}>
-        {label}
-      </Text>
-    </Pressable>
+    <Animated.View style={press.pressStyle}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? label}
+        accessibilityState={{ selected }}
+        /**
+         * **Selection, the lightest haptic there is** (founder premium pass, 2026-09-08).
+         *
+         * A chip row is where somebody says what they want to look at, and every chip in it
+         * is a small reversible statement — which is exactly the `selection` case in
+         * `ui/haptics.ts`. It fires on *every* chip rather than only on the toggles: to a
+         * thumb the row is one control surface, and a row where two of five buzz would read
+         * as three of them being broken.
+         *
+         * Before `onPress`, not after, and not inside it: the feedback is answering the
+         * touch, and a sheet that takes 40ms to mount must not be what the reader feels.
+         */
+        onPress={() => {
+          hapticSelection();
+          onPress();
+        }}
+        onPressIn={press.onPressIn}
+        onPressOut={press.onPressOut}
+        // 32pt drawn, 44pt pressed. It was `space[1]` all round, which made the chip 40pt
+        // tall to a thumb — short of the target by the four points the audit measured.
+        hitSlop={theme.layout.chipHitSlop}
+        style={({ pressed }) => [
+          styles.chip,
+          // Order matters: emphasis tints the hairline, and `on` overrides it with the
+          // full-strength ring, so a selected feature chip reads as selected.
+          emphasis === 'social' && styles.social,
+          selected && styles.on,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Ionicons
+          name={icon}
+          size={theme.layout.icon.sm}
+          color={action ? theme.semantic.action : theme.text.secondary}
+        />
+        <Text variant="footnote" tone={action ? 'action' : 'secondary'}>
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 

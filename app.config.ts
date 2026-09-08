@@ -154,12 +154,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // has to be a new one whether it goes to review today or in a week. A patch rather than
   // a minor: everything between the two is correction and polish on shipped surfaces.
   //
-  // **This moves the fingerprint, and that has one consequence worth stating.** The
-  // Android closed-test build 8 runs runtime `7f813c4a`, which is what `main` has
-  // fingerprinted to since 2026-09-03 — so `eas update` from this commit onward will not
-  // reach it, and the founder's Android device needs a new build to keep receiving
-  // over-the-air fixes. Nothing already installed changes: a build keeps the runtime it
-  // was compiled with.
+  // **This moves the fingerprint**, measured rather than assumed: on the beta lane for
+  // Android, `9053d59` fingerprints to `59ce4030` at 1.0.0 and to `138b0655` at 1.0.1.
+  //
+  // It does **not** strand the Android closed test, because that was already stranded.
+  // Build 8 runs runtime `7f813c4a` and `main` had moved off it before this line changed;
+  // an over-the-air update from `main` has not reached that binary for some time, and the
+  // Android device needs a new build regardless. Nothing already installed changes either
+  // way: a build keeps the runtime it was compiled with.
   version: '1.0.1',
   orientation: 'portrait',
   scheme: current.scheme,

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -27,7 +27,9 @@ import { invalidateAfterCollectionChange } from '@/features/collection/invalidat
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { compactName } from '@/lib/titles';
-import { useReducedMotion } from '@/ui/motion';
+import { hapticDecision, hapticSuccess } from '@/ui/haptics';
+import { useReducedMotion, useReducedMotionState } from '@/ui/motion';
+import { usePressScale } from '@/ui/press';
 import { theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
@@ -720,8 +722,8 @@ function Session({
               Logged, not ranked yet
             </Text>
             <Text variant="body" tone="secondary" style={styles.centre}>
-              {subject.title} is saved in your Collection without a bingd. score. Rank it
-              from your Collection or its title page whenever you like.
+              {subject.title} is saved in your Collection without a bingd. score. Rank it from
+              your Collection or its title page whenever you like.
             </Text>
             <Button label="Done" onPress={() => void close()} />
           </Centred>
@@ -1055,6 +1057,8 @@ function Card({
   onPress: () => void;
   onRecall: () => void;
 }) {
+  const press = usePressScale({ enabled: !disabled });
+
   return (
     <View style={styles.card}>
       {/**
@@ -1071,21 +1075,54 @@ function Card({
        * catching deliberate taps, and this gesture is not one anybody is in a hurry to
        * complete.
        */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Choose ${title}`}
-        disabled={disabled}
-        onPress={onPress}
-        onLongPress={onRecall}
-        style={({ pressed }) => [styles.cardPress, pressed && styles.pressed]}
-      >
-        <Poster uri={posterUri} title={title} width="fill" size="md" />
-        <View style={styles.cardTitleBox}>
-          <Text variant="callout" numberOfLines={2} style={styles.centre}>
-            {title}
-          </Text>
-        </View>
-      </Pressable>
+      {/**
+       * **The wrapper has to stretch, and forgetting that was independent review 78's
+       * first P1.** `styles.card` is `alignItems: 'center'` and `styles.cardPress`
+       * answers it with `alignSelf: 'stretch'` — so inserting a styleless view between
+       * them moved the stretch inside the wrapper and let the wrapper itself shrink to
+       * its content. With a `width="fill"` poster inside, that narrows the primary
+       * target of the whole comparison screen.
+       *
+       * The transform composes with the stretch rather than replacing it. Every other
+       * wrapper in this pass sits around a control that is already content-sized or
+       * explicitly sized, which is why this is the only one that needs a style.
+       */}
+      <Animated.View style={[styles.cardStretch, press.pressStyle]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Choose ${title}`}
+          disabled={disabled}
+          /**
+           * **The one tap in this app that is an opinion** (founder premium pass,
+           * 2026-09-08).
+           *
+           * `decision`, not `selection`: answering a comparison is a judgement that goes to
+           * the server and moves the reader's whole list, and it should land with more
+           * weight than saving a film for later. It is also the ritual the product is
+           * built around, so it is the one place a medium impact is earned.
+           *
+           * Fired here rather than inside `onPick` so it answers the *touch*: `onPick`
+           * runs an RPC, and feedback that waits for a network round trip is feedback
+           * about the network. `disabled` covers the busy case, so a tap that will not be
+           * acted on cannot buzz.
+           */
+          onPress={() => {
+            hapticDecision();
+            onPress();
+          }}
+          onLongPress={onRecall}
+          onPressIn={press.onPressIn}
+          onPressOut={press.onPressOut}
+          style={({ pressed }) => [styles.cardPress, pressed && styles.pressed]}
+        >
+          <Poster uri={posterUri} title={title} width="fill" size="md" />
+          <View style={styles.cardTitleBox}>
+            <Text variant="callout" numberOfLines={2} style={styles.centre}>
+              {title}
+            </Text>
+          </View>
+        </Pressable>
+      </Animated.View>
 
       {/**
        * The same thing again, as something you can reach.
@@ -1246,6 +1283,104 @@ function Reveal({
   const displayTitle = (subjectRow ? compactName(subjectRow) : null) ?? title;
 
   /**
+   * ---------------------------------------------------------------------------
+   * **THE PAYOFF** (founder premium pass, 2026-09-08)
+   *
+   * Ranking is the ritual this product is built on, and until now its ending had no
+   * moment in it: the last comparison was answered and the reveal was simply *there* on
+   * the next frame, at full size, in full colour. The score is the thing a reader worked
+   * three or four comparisons to earn and it arrived like a re-render, because that is
+   * what it was.
+   *
+   * One entrance, on the panel and the copy together, saying **your ranking has been
+   * established**:
+   *
+   *   opacity 0 → 1        so it arrives rather than replaces
+   *   scale    0.94 → 1    so it settles into place instead of appearing at it
+   *   translateY 10 → 0    a hand's-breadth of rise, which is what stops the scale
+   *                        reading as a zoom
+   *
+   * 280ms on `Easing.out(cubic)` — most of the distance is covered in the first third,
+   * so it is *quick* and only the settle is visible. The brief's ceiling is "a few
+   * hundred milliseconds at most" and this is inside it.
+   *
+   * **What it deliberately is not.** No confetti, no bounce, no spring overshoot, no
+   * staggered lines, and nothing blocking: the panel is interactive from frame one, so a
+   * reader who presses Done immediately is not waiting on an animation to finish. Nothing
+   * about the placement, the score, the RPC or the telemetry is inside this — it is a
+   * transform and an opacity on content that was already computed and already correct.
+   *
+   * The success haptic fires from the same effect, once, on mount. `Reveal` is mounted by
+   * `step?.state === 'placed'`, which happens exactly once per completed placement, so a
+   * re-render cannot repeat it and a second ranking gets its own mount.
+   *
+   * Reduce Motion: the entrance is skipped outright — the value is set to 1 and nothing
+   * moves — and **the haptic still fires**, because it is not motion. That is the whole
+   * point of keeping the two settings separate.
+   *
+   * ---------------------------------------------------------------------------
+   * **WAITING TO BE TOLD, WHICH IS INDEPENDENT REVIEW 78'S SECOND P1**
+   *
+   * The first version read `useReducedMotion()` and animated on mount. That hook resolves
+   * *asynchronously* and returns `false` until it has an answer — so a reader with Reduce
+   * Motion switched on got the entrance anyway, every time, because the mount-only effect
+   * had already started it before anybody was asked and would not run again.
+   *
+   * `useReducedMotionState` reports whether the answer has arrived. The entrance waits for
+   * it, which costs one frame nobody can see; the panel is already at opacity 0 in that
+   * frame, and it is one frame. And because the effect now re-runs when the preference
+   * changes, turning it on *during* the 280ms stops the animation and snaps to rest rather
+   * than politely finishing the movement somebody just asked not to see.
+   *
+   * `started` is what keeps it a one-shot across those re-runs: an entrance that replayed
+   * every time the preference flipped would be a panel that re-arrives while it is being
+   * read. The haptic is in its own mount-only effect for the same reason, and because it
+   * is governed by a different switch entirely.
+   */
+  const { reduced: reducedMotion, known: motionKnown } = useReducedMotionState();
+  const [entrance] = useState(() => new Animated.Value(0));
+  const started = useRef(false);
+
+  useEffect(() => {
+    // One placement, one success. `Reveal` is mounted by `step?.state === 'placed'`,
+    // which happens exactly once per completed ranking.
+    hapticSuccess();
+  }, []);
+
+  useEffect(() => {
+    if (!motionKnown) return;
+
+    if (reducedMotion) {
+      // Covers both "on before the reveal opened" and "switched on halfway through it".
+      entrance.stopAnimation();
+      entrance.setValue(1);
+      return;
+    }
+
+    if (started.current) return;
+    started.current = true;
+
+    Animated.timing(entrance, {
+      toValue: 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [motionKnown, reducedMotion, entrance]);
+
+  const entranceStyle = {
+    opacity: entrance,
+    transform: [
+      {
+        scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }),
+      },
+      {
+        translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }),
+      },
+    ],
+  };
+
+  /**
    * The two names either side of it, off the same list, so this costs no second read.
    * Empty until that list has refetched, which is why the block below renders nothing
    * rather than a placeholder: an absent neighbour line is invisible, and a skeleton
@@ -1297,15 +1432,19 @@ function Reveal({
 
   return (
     <View style={styles.reveal}>
-      <View
-        style={styles.panel}
+      {/* The entrance is on the panel and the identity block together rather than on the
+          whole reveal, so the buttons at the bottom of the sheet do not move — a control
+          that slides while a thumb is travelling toward it is the one kind of motion that
+          costs something. See `entranceStyle`. */}
+      <Animated.View
+        style={[styles.panel, entranceStyle]}
         accessibilityRole="summary"
         accessibilityLabel={spokenPlacement}
       >
         <Text variant="reveal" tone="inverse" accessibilityElementsHidden>
           {formatScore(shown)}
         </Text>
-      </View>
+      </Animated.View>
 
       {/**
        * **The title and its placement are one block** (founder, physical Android,
@@ -1325,7 +1464,7 @@ function Reveal({
        * correction: what a reader sees is a title with a placement attached, then some
        * air, then where it landed.
        */}
-      <View style={styles.identity}>
+      <Animated.View style={[styles.identity, entranceStyle]}>
         <Text variant="title2" style={styles.centre}>
           {displayTitle}
         </Text>
@@ -1369,7 +1508,7 @@ function Reveal({
             {genreContext}
           </Text>
         ) : null}
-      </View>
+      </Animated.View>
 
       {/**
        * The two names either side, last and quietest — and now a block of their own.
@@ -1440,8 +1579,7 @@ function Reveal({
        */}
       {surface === 'onboarding' ? (
         <Text variant="footnote" tone="tertiary" style={styles.centre}>
-          Your score comes from where this lands in your rankings. It can move as you rank
-          more.
+          Your score comes from where this lands in your rankings. It can move as you rank more.
         </Text>
       ) : null}
 
@@ -1592,6 +1730,10 @@ const styles = StyleSheet.create({
   // from `card` so the recall affordance below can be its own control rather than a
   // second gesture on the same one.
   cardPress: { alignSelf: 'stretch', alignItems: 'center', gap: theme.space[2] },
+  // The press-feedback wrapper, which must be transparent to layout — see the note at
+  // the wrapper itself. `card` centres its children, so without this the wrapper hugs
+  // its content and takes `cardPress`'s stretch away from the poster.
+  cardStretch: { alignSelf: 'stretch' },
   // Caption, tertiary, no border, no background. It has to be reachable and it must
   // not compete: the two things that look like buttons on this screen are the posters.
   // A row, so the glyph and the word read as one control rather than as an icon that
