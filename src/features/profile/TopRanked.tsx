@@ -35,10 +35,23 @@ export type TopRankedProps = {
  * the wall had already said better. The founder's correction is one wall.
  *
  * The filter now changes the wall rather than switching to a different component.
- * **All** is the default and is the addition that made the rest coherent: movies and
- * seasons are separate rankings and a position only means anything inside its category
- * (PRD §11), so a mixed wall cannot be *ordered* — but it can show each category's best,
- * which is what somebody browsing a profile is looking for.
+ * **All** is the default, and it is one list ordered by score.
+ *
+ * It used to order by `position` — rank inside its own category — on the argument that a
+ * #1 season and a #1 film are both somebody's best, and that a mixed wall therefore
+ * cannot be *ordered* at all (PRD §11). Positions genuinely are not comparable across
+ * categories, but that was the wrong conclusion, because the thing the wall prints is not
+ * a position: every tile carries a score, and a score is comparable. Ordering by position
+ * put a 9.9 above a 10.0 whenever the two bands were different sizes, which is what
+ * physical QA found on somebody else's profile — a *loved* band of 61 seasons beside one
+ * of 44 films makes season #2 a 10.0 and film #2 a 9.9, and the interleave printed the
+ * film first. A number on screen above a larger number on screen is wrong however it is
+ * defended, and it was only ever invisible on profiles whose two bands happened to be
+ * close in size.
+ *
+ * So All collects both categories, orders by the score each tile shows, and only then
+ * takes the six. **Movies and TV still order themselves**, where position order and score
+ * order are the same thing by construction.
  *
  * Scores are computed per category against that category's whole band, never against
  * the slice on screen. Scoring six titles against themselves would give all six a 10.
@@ -75,15 +88,25 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
       return seasonRows.slice(0, WALL).map((row) => toTile(row, seasonSizes));
     }
 
-    // All: each category's best, interleaved so the wall does not become "all the
-    // films, then all the seasons" — which is the segmented control by another name.
-    const top = [
-      ...movieRows.slice(0, WALL).map((row) => ({ tile: toTile(row, movieSizes), rank: row.position })),
-      ...seasonRows.slice(0, WALL).map((row) => ({ tile: toTile(row, seasonSizes), rank: row.position })),
-    ];
-    // By position within their own category, which is the only comparison that means
-    // anything across the two — a #1 season and a #1 film are both somebody's best.
-    return top.sort((a, b) => a.rank - b.rank).slice(0, WALL).map((entry) => entry.tile);
+    // All: both categories as one list, ordered by the score the tile will print.
+    //
+    // Neither half is sliced before the sort. Taking six from each first is safe today —
+    // a global top six cannot contain a seventh of either category — but it is safe by an
+    // argument about `WALL` rather than by construction, and the defect this replaced was
+    // exactly a limit applied before an order. The lists are already read in full to size
+    // their bands; there is nothing to save by cutting them here.
+    return [
+      ...movieRows.map((row) => ({ row, sizes: movieSizes })),
+      ...seasonRows.map((row) => ({ row, sizes: seasonSizes })),
+    ]
+      .map((entry) => ({ ...entry, score: scoreFor(entry.row.bucket, entry.row.position, entry.sizes) }))
+      // Highest first, then by id — the tiebreak `RankedTitlesSheet` already uses, for its
+      // reason: two 10.0s are ordinary here, since each category's best scores its band's
+      // high and so does a band of one. Without it the wall could reorder itself between
+      // renders on nothing but which half of the read resolved first.
+      .sort((a, b) => b.score - a.score || a.row.mediaItemId.localeCompare(b.row.mediaItemId))
+      .slice(0, WALL)
+      .map((entry) => toTile(entry.row, entry.sizes));
   }, [filter, movies.data, seasons.data]);
 
   const loading = movies.isPending || seasons.isPending;
@@ -110,10 +133,10 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
    * accounts.
    *
    * Which category it opens follows the filter the reader is already looking at. Under
-   * **All** there is no single answer, because All is deliberately not one ordered list
-   * (movies and seasons are separate rankings and a position only means anything inside
-   * its own category), so it opens whichever half actually has more to show — Movies
-   * first when both qualify, which is the order the tabs themselves are in.
+   * **All** there is still no single answer: the wall is one ordered list, but the sheet
+   * behind it is not — it is per category, because a *position* is only meaningful inside
+   * its own ranking even though a score is not. So All opens whichever half actually has
+   * more to show — Movies first when both qualify, which is the order the tabs are in.
    */
   const seeAll = (() => {
     if (!onSeeAll || failed || loading) return null;
