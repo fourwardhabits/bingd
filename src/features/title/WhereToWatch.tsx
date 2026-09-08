@@ -54,14 +54,18 @@ const OFFERS: { offer: WatchOffer; label: string }[] = [
  * italic and tertiary on the row, in full in the sheet. Demoting it is allowed; moving
  * it behind the sheet would leave the visible half of the feature uncredited.
  *
- * **The heading is the app's section treatment and there is no second divider**
- * (founder, physical Android, 2026-09-05). The row read as part of the Scores section
- * above it, because its label was a `callout` in full ink — a row's weight, not a
- * section's. Small maroon caps is how every other section in the app announces itself,
- * and it separates this one at no cost in height, which is the constraint: the block is
- * a row and must stay a row. A rule beneath the scores was the other candidate and was
- * not taken, because `SectionHeader` without one is the app's dominant convention and
- * the hairline in `ScoresSection` is the exception rather than the pattern.
+ * **The heading is the app's section treatment, and it is now the only separator**
+ * (founder, physical Android, 2026-09-05, tightened 2026-09-07). The row read as part of
+ * the Scores section above it, because its label was a `callout` in full ink — a row's
+ * weight, not a section's. Small maroon caps is how every other section in the app
+ * announces itself, and it separates this one at no cost in height, which is the
+ * constraint: the block is a row and must stay a row.
+ *
+ * A hairline was added above it on 2026-09-06 and removed again on 2026-09-07. Both the
+ * heading and the rule were answers to the same question, and running both is what left
+ * the page reading as a stack of bordered bands. Scores now carries a heading of its
+ * own, so two Maroon labels and a section's worth of air between them do the separating,
+ * and the page's one remaining hairline is above the tab row.
  */
 export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
   const [open, setOpen] = useState(false);
@@ -78,22 +82,19 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
   return (
     <>
       {/**
-       * **The same inset hairline the Scores section draws above itself** (founder,
-       * physical Android, 2026-09-06).
+       * **The hairline is gone, and the air replaced it** (founder, 2026-09-07).
        *
-       * The maroon heading was the right change and was not enough on the device: with
-       * the two score units directly above it and nothing between them, the block still
-       * read as a continuation of Scores rather than as a section after it. The rule is
-       * the app's existing one, borrowed rather than invented — gutter-inset, doubled
-       * hairline, because a single one rounds away to nothing on some Android densities
-       * — and it costs one pixel of height.
+       * There was a rule here, and one above the scores, and one above the tabs, and one
+       * between every pair of episodes — which is the "too many competing horizontal
+       * separations" the founder read on the device. A page that draws a rule at every
+       * seam has told the reader nothing about which seams matter.
        *
-       * Decorative, and no accessibility role: a screen reader announcing a separator
-       * here would put a word between the scores and the availability where the design
-       * puts a pause. `ScoresSection` states the same thing about its own.
+       * What this block needed was never a rule: it was to stop reading as a third unit
+       * of the Scores section, and it now has a Maroon section heading above a block that
+       * also has one, with a section's worth of air between them. Whitespace is the
+       * app's default separator from here on, and the one hairline left on this page is
+       * above the tab row, where the page genuinely changes mode.
        */}
-      <View testID="where-to-watch-divider" style={styles.divider} />
-
       <Pressable
         testID="where-to-watch"
         accessibilityRole="button"
@@ -314,16 +315,43 @@ function ProviderLogo({ provider, size }: { provider: WatchProvider; size: numbe
         />
       ) : (
         <Text variant="caption" tone="tertiary">
-          {provider.name.trim().charAt(0).toUpperCase()}
+          {initialOf(provider.name)}
         </Text>
       )}
     </View>
   );
 }
 
-/** "Netflix, Apple TV and 3 more." One sentence for one accessibility stop. */
-function listOf(names: string[], overflow: number): string {
-  const parts = [...names];
+/**
+ * The letter a service is drawn as when TMDB publishes no logo for it.
+ *
+ * **Defensive about the name, and this is not theoretical tidiness.** `providers` reaches
+ * this component straight off the adapter's reply — `data.providers ?? []`, unvalidated,
+ * because it is a provider's payload rather than the app's own data — and it arrives
+ * *after* the page's first frame. A row whose `name` came back null would therefore throw
+ * on `.trim()` in the middle of a render the reader is already looking at, which is the
+ * exact shape of the founder's crash report.
+ *
+ * That is not evidence that it *is* the crash: nothing in the log says this happened, and
+ * TMDB has always sent a name. It is a render-time dereference of unvalidated data in a
+ * block that loads late, found while looking for that class of thing (§12), and it costs
+ * one function to remove.
+ *
+ * An empty string is the honest answer for a service with no name and no logo: an empty
+ * 28pt well reads as a service the app could not identify, which is what it is.
+ */
+function initialOf(name: string | null | undefined): string {
+  return (name ?? '').trim().charAt(0).toUpperCase();
+}
+
+/**
+ * "Netflix, Apple TV and 3 more." One sentence for one accessibility stop.
+ *
+ * Nameless services are dropped rather than spoken as "null": the sentence names what it
+ * can, and the count of what it cannot is already carried by the overflow.
+ */
+function listOf(names: (string | null | undefined)[], overflow: number): string {
+  const parts = names.filter((name): name is string => Boolean(name && name.trim()));
   if (overflow > 0) parts.push(`${overflow} more`);
   if (parts.length <= 1) return `${parts[0] ?? ''}.`;
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}.`;
@@ -337,22 +365,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
-    // Half of what it was: the rule above now carries the section's top spacing, and
-    // keeping the full gap here as well would put the heading adrift below its own line.
-    paddingTop: theme.space[2],
+    // A section's worth of air, since the rule that used to carry it is gone. This is
+    // now the only thing separating Where to watch from the scores above it, which is
+    // the whole of the founder's 2026-09-07 note about density. `space[7]` rather than
+    // `space[6]`: it is the page's one section interval, and the Scores block above it
+    // opens with the same value, so every seam on this page measures the same.
+    paddingTop: theme.space[7],
     minHeight: theme.layout.rowMinHeight,
-  },
-  /**
-   * Inset to the gutter, at the app's hairline, and doubled — `ScoresSection`'s rule
-   * verbatim, because a single `hairlineWidth` rounds away to nothing on some Android
-   * densities. The top padding lives on the row below, so this sits tight to the
-   * section it opens rather than floating between two.
-   */
-  divider: {
-    marginHorizontal: theme.layout.gutter,
-    marginTop: theme.space[5],
-    borderTopWidth: StyleSheet.hairlineWidth * 2,
-    borderTopColor: theme.border.hairline,
   },
   copy: { flex: 1, gap: 2 },
   /** A source note, and it should read as one. See the block above it. */

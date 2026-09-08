@@ -1,15 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   Alert,
+  Animated,
   Linking,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -41,6 +44,9 @@ import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
+import { Synopsis } from '@/features/title/Synopsis';
+import { TitleActions } from '@/features/title/TitleActions';
+import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
@@ -60,15 +66,12 @@ import { relativeTime } from '@/features/recommendations/use-sent-to-you';
 import { compactName } from '@/lib/titles';
 import {
   CastStrip,
-  DetailHeaderBackground,
-  DetailHeaderTitle,
-  Divider,
   EmptyState,
   EpisodeRow,
   LoadingScreen,
-  PersonalState,
   Poster,
   Screen,
+  ScreenError,
   ScoresSection,
   SegmentedTabs,
   Sheet,
@@ -77,9 +80,25 @@ import {
   Text,
   TitleHero,
   TitleRow,
-  useDetailHeader,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+
+/**
+ * What this route shows when its own render throws.
+ *
+ * Expo Router wraps the route component in this and **nothing above it**, which is the
+ * whole reason it exists: the root `RouteErrorBoundary` wraps `<Stack>`, so catching
+ * there takes the navigator down and the reader loses the page they were on and
+ * everything behind it — which is what put the founder back on Feed after a title-page
+ * crash rather than on the title page. Caught here, the route stays on the stack, Back
+ * still returns to whatever pushed it, and `retry` re-renders in place.
+ *
+ * See `lib/render-errors.ts` for what is reported, and `ScreenError` for why the
+ * exception is named on a beta build and not on a store one.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return <ScreenError error={error} retry={retry} />;
+}
 
 type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
 
@@ -97,6 +116,34 @@ type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
  * reveals the rest, and no metadata is dropped on the way.
  */
 const EPISODES_FIRST_PAGE = 50;
+
+/**
+ * The one joiner in the identity block: space, middle dot, space.
+ *
+ * Written down once because the founder's grammar lock is that all three lines below the
+ * title read as one statement — `Season 1 · 2024`, `TV-MA · 24 episodes`, `#2 in TV ·
+ * Watched Aug 17, 2026`. The subtitle used a comma until 2026-09-07, which made two
+ * adjacent lines of the same metadata look like two different kinds of claim.
+ *
+ * Every line that uses it is assembled by filtering first, so a missing segment can never
+ * leave a stray separator at either end.
+ */
+const SEP = ' · ';
+
+/**
+ * How many lines the identity heading takes before it truncates (founder lock,
+ * 2026-09-07).
+ *
+ * Two, and the type does **not** shrink to avoid reaching it. A serif display face set
+ * smaller to fit a long name gives a page whose heading is a different size on every
+ * title, which reads as a bug rather than as a fit; three lines of `title1` in a 242pt
+ * column push the metadata and the whole action row down past the poster.
+ *
+ * `The Wolf of Wall Street` sets on exactly two. Longer names lose their tail, which is
+ * the honest trade: the compact navigation bar carries the full name once the reader
+ * scrolls past the hero, so nothing is unreachable.
+ */
+const TITLE_LINES = 2;
 
 /**
  * The title page (screens.md §6), rebuilt after the founder's device test.
@@ -138,13 +185,15 @@ export default function TitleScreen() {
   /** Drains the post-ranking celebration queue when the log flow ends. */
   const celebrate = useCelebrationHandoff();
   const router = useRouter();
-  // For the hero: the header is transparent, so the artwork's own top would sit under
-  // the status bar without it (TitleHero's `topInset`).
+  // For the hero and the bar over it: the navigation overlays the artwork, so both need
+  // to know how much of the top belongs to the status bar (TitleHero's `topInset`).
   const insets = useSafeAreaInsets();
+  // The hero is the backdrop's own 16:9, so the width decides where it ends — which is
+  // where the navigation has finished becoming a header.
+  const { width: screenWidth } = useWindowDimensions();
   const hasId = Boolean(id);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
   // Reset by leaving the screen and nothing else. A reader who asked to see all of a
   // long season should not have it collapse again when they visit Cast and come back.
   const [showAllEpisodes, setShowAllEpisodes] = useState(false);
@@ -222,7 +271,15 @@ export default function TitleScreen() {
         .select(
           // The parent's artwork comes with it: a season has no backdrop of its own
           // (TMDB publishes none) and borrows the series' — see `lib/hero.ts`.
-          'id, kind, title, season_number, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, fetched_at, parent:parent_id(id, title, poster_path, backdrop_path, genres, original_language)',
+          //
+          // `episode_count` and the parent's `certification` are the two columns the
+          // identity line needs and did not have (2026-09-07). A season's length is its
+          // episode count rather than a runtime (`20260820000400`), and TMDB publishes a
+          // rating on the *series* and never on a season — so `effectiveCertification`
+          // could not inherit one, and every season page read as having no rating at
+          // all. Two more columns on a read that was already being made: no new request,
+          // no new dependency.
+          'id, kind, title, season_number, release_date, runtime_minutes, episode_count, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, fetched_at, parent:parent_id(id, title, poster_path, backdrop_path, genres, original_language, certification)',
         )
         .eq('id', id ?? '')
         .single();
@@ -388,9 +445,31 @@ export default function TitleScreen() {
     [rankedSeasons.data],
   );
 
-  // Above the early returns, because the empty and loading states below are also
-  // renders and a hook cannot be called from only some of them.
-  const header = useDetailHeader();
+  /**
+   * How far the page has scrolled, as one animated value.
+   *
+   * Above the early returns for the reason the comment below already gives, and held in
+   * state rather than in a ref because a ref read during render is what `react-hooks/refs`
+   * forbids — `DetailHeaderTitle` uses the same lazy initialiser for the same reason.
+   *
+   * Everything the navigation does on the way past the hero is an interpolation of this:
+   * the Paper ground arriving, the compact title fading up, and the crossfade between the
+   * light glyphs on artwork and the Ink ones on Paper. One value, so none of the three can
+   * be at a different point in the transition from the others — which is what a boolean
+   * threshold could not promise, because a boolean has no middle.
+   */
+  const [scrollY] = useState(() => new Animated.Value(0));
+  /**
+   * The same crossing, as a boolean, for assistive technology alone.
+   *
+   * The bar's compact title is always mounted so it can fade, which means a screen reader
+   * would meet the title twice on every title page — once in the bar and once in the
+   * identity block below it. That is exactly the duplication the detail-header rule exists
+   * to prevent, and an animated opacity cannot express it, because the accessibility tree
+   * has no half-way. So the eye gets the interpolation and the tree gets this, crossed
+   * with hysteresis in the scroll listener below.
+   */
+  const [barRevealed, setBarRevealed] = useState(false);
 
   const cast = useMemo(
     () =>
@@ -459,6 +538,13 @@ export default function TitleScreen() {
     kind: title.kind,
     genres: title.genres,
     original_language: title.original_language,
+    // Selected since 2026-09-07, and passed here since the identity line started reading
+    // its rating from the resolver rather than from the column. Without it
+    // `effectiveCertification` sees an absent field on every kind of title and answers
+    // null, which silently dropped `PG-13` from every film as well as failing to inherit
+    // `TV-MA` for a season — the resolver is structural, so an unpassed field and a null
+    // one are the same answer to it.
+    certification: title.certification,
     parent: title.parent ?? null,
   });
   // A season borrows its series' key art, because TMDB publishes no season backdrop
@@ -469,8 +555,43 @@ export default function TitleScreen() {
     parentBackdropPath: parent?.backdrop_path ?? null,
     parentPosterPath: parent?.poster_path ?? null,
   });
-  // The page shows the series' own name in the hierarchy above the season, so the
-  // heading itself stays short: "Season 2", under "Parks and Recreation".
+  /**
+   * Where the navigation finishes turning into a header.
+   *
+   * `TitleHero` sizes its frame from the artwork's own 16:9, or falls back to the
+   * collapsed band when there is none, so the same arithmetic gives the right answer for
+   * a film with a backdrop, a season borrowing its series' key art, and a seeded row with
+   * no image at all. Minus the bar's own height, because the bar is *over* the hero: the
+   * transition should be finished when the artwork has reached the bottom of the bar, not
+   * when it has reached the top of the screen.
+   *
+   * Two points is the floor rather than zero, so the interpolation's input range is
+   * always strictly increasing — a hero shorter than the bar is a real case (the
+   * collapsed band on a small display) and an equal pair would be a runtime error rather
+   * than a wrong fade.
+   */
+  const barHeight = insets.top + NAV_BAR_HEIGHT;
+  /**
+   * The hero's height when there is no artwork: the bar, plus a band under it.
+   *
+   * Measured rather than constant, because the navigation now overlays the hero instead
+   * of sitting above it — a fixed band shorter than the bar would put the poster's top
+   * under the back control on a device with a tall status bar.
+   */
+  const collapsedHero = barHeight + HERO_COLLAPSED_BAND;
+  const revealEnd = Math.max(
+    (hero.uri ? screenWidth / theme.layout.aspect.backdrop : collapsedHero) - barHeight,
+    2,
+  );
+  const revealStart = Math.max(revealEnd - REVEAL_WINDOW, 0);
+  /**
+   * The short name of this exact entity — `Season 1` for a season, the film's own title
+   * for a film.
+   *
+   * Still what the compact bar says once the page has stopped naming itself, and still
+   * what every sheet and alert on this page calls the thing. What changed on 2026-09-07
+   * is where it sits *in the identity block*: see `primaryName` below.
+   */
   const displayTitle = compactName(
     {
       kind: title.kind,
@@ -514,16 +635,122 @@ export default function TitleScreen() {
     : null;
   const year = yearOf(title.release_date);
 
-  // Certification first. It is the fact somebody scans for before deciding whether to put
-  // a film on, and TMDB only started supplying it here on 2026-08-17 — before that the
-  // line began with a runtime.
-  const metaLine = [
-    title.certification,
-    title.runtime_minutes ? `${title.runtime_minutes}m` : null,
-    credits.data?.director,
+  /**
+   * **What the page calls the thing, and what it calls the part of it you are on**
+   * (founder redesign, 2026-09-07).
+   *
+   * The identity block is now poster-left, words-right, so the words have a column
+   * rather than a full-width band — and in a column the hierarchy has to be the one a
+   * reader scans. For a season that is *the show* first and the season second: somebody
+   * arriving at this page is arriving at The Last of Us, and which season they are on is
+   * the qualifier.
+   *
+   * It ran the other way until now — a small Maroon series line above `Season 1, 2023`
+   * in `title1` — which put the least identifying string on the page in the largest type
+   * it has. The series name is still the way to the series page; it is now the heading
+   * that leads there rather than a link above the heading.
+   *
+   * A film has no such split, so it is its own name over its own year.
+   */
+  const primaryName = (isSeason ? (parent?.title ?? title.title) : title.title) || title.title;
+  /**
+   * `Season 1 · 2024`, or `2013`.
+   *
+   * **One separator for the whole identity block** (founder grammar lock, 2026-09-07).
+   * It was a comma here and a middle dot on the line below, which made two adjacent lines
+   * of the same metadata look like two different kinds of statement. The middle dot is
+   * what the metadata line already used and it is now the block's only joiner, so
+   * `Season 1 · 2024` and `TV-MA · 24 episodes` read as one grammar.
+   *
+   * The em-dash form the log sheet uses — "Parks and Recreation — Season 2" — is for
+   * surfaces with one line to say the whole name in. Here there is a hierarchy to put it
+   * in.
+   */
+  const identitySubtitle = isSeason
+    ? [displayTitle ?? title.title, year].filter(Boolean).map(String).join(SEP)
+    : year
+      ? String(year)
+      : null;
+
+  /**
+   * `TV-MA · 9 episodes · Craig Mazin`, or `PG-13 · 145 min · Destin Daniel Cretton`.
+   *
+   * Certification first: it is the fact somebody scans for before deciding whether to put
+   * a film on. `descriptive.certification` rather than the column, so a season inherits
+   * its series' rating — TMDB publishes one on the series and never on a season, and the
+   * line read as ratingless on every season page until the parent embed started carrying
+   * it (`lib/media-metadata.ts`).
+   *
+   * Then the length, which is a *different measure* per kind: a film's runtime, a
+   * season's episode count. That is the rule `20260820000400` established for the feed,
+   * applied here for the first time — the line used to print a runtime for a season,
+   * which is a column TMDB does not fill, so the segment was simply missing.
+   *
+   * Then the credit, **and which credit is decided by the kind of title, with no
+   * cross-fallback in either direction** (founder grammar lock, 2026-09-07).
+   *
+   *   film        the `Director`, or nothing.
+   *   television  an explicit `Creator`, or nothing.
+   *
+   * It used to read `director ?? showrunner` for every kind, and on a season that is the
+   * bug the founder named: the `Director` credit on a season payload is the person who
+   * directed *one episode*, and the line presented them in the slot a reader reads as
+   * "whose show is this". `To Kill a Monkey` and every other season page were printing an
+   * episode director as a showrunner. Falling the other way is no better — a film has no
+   * creator credit worth the name — so neither kind borrows the other's.
+   *
+   * Where the credit is missing the segment is simply absent: `TV-MA · 24 episodes` is
+   * the founder's rule and it is better than a confident falsehood in the one place on
+   * the page a reader has no way to check. `useCredits` narrows the television answer to
+   * `Creator` for the same reason.
+   *
+   * Built by filtering, so a missing part never leaves a stray separator, and the whole
+   * line is absent rather than empty when all three are: an empty `Text` is a line box
+   * with the footnote's height, which reads as a gap under the title.
+   */
+  const lengthLabel = lengthOf(title.kind, title.runtime_minutes, title.episode_count);
+  const credit =
+    title.kind === 'movie' ? (credits.data?.director ?? null) : (credits.data?.showrunner ?? null);
+  const metaLine = [descriptive.certification, lengthLabel, credit].filter(Boolean).join(SEP);
+
+  /**
+   * The reader's own context under the metadata: where it sits, and when they saw it.
+   *
+   * `#2 in Movies · Watched Aug 17, 2026`.
+   *
+   * ---------------------------------------------------------------------------
+   * IT STAYS HERE, AND IT IS THE OVERALL RANK (founder, 2026-09-07)
+   *
+   * The design draft proposed moving both halves into the Scores section, under `Your
+   * score`. The founder cut that and the reason is what each fact is *about*: a score is
+   * an aggregate, and a placement and a date are the reader's history with this title.
+   * They belong beside the title, not beneath a number. They also do not fit that cell —
+   * a score unit is a circle and two short lines.
+   *
+   * **Overall only.** `heroRankFor` answers with the top-ten overall placement where
+   * there is one and otherwise with the best top-ten *genre* placement, and this line now
+   * takes the first and discards the second. `#3 in Drama` beside a film's title reads as
+   * that film's standing when it is really the standing of a slice the reader never
+   * chose, and swapping to it precisely when the overall number is weaker is the page
+   * flattering itself. Where there is no top-ten overall placement the segment is absent
+   * and the line is the watch date alone.
+   *
+   * The genre reading is not deleted — `heroRankFor` still computes it and the
+   * post-ranking reveal still uses it, which is a surface where the reader has just
+   * finished the comparison that produced it.
+   *
+   * Built by filtering, so a title ranked outside the top ten and never dated produces no
+   * line at all rather than a dangling separator.
+   */
+  const watchedLine = data.logged?.watched_on
+    ? `Watched ${formatShortDate(data.logged.watched_on)}`
+    : null;
+  const contextLine = [
+    heroRank?.basis === 'overall' ? heroRank.label : null,
+    watchedLine,
   ]
     .filter(Boolean)
-    .join(' · ');
+    .join(SEP);
 
   // A tab whose content does not exist is not rendered. An always-empty tab is
   // worse than a missing one: it invites a tap that leads nowhere. Videos is here
@@ -725,39 +952,81 @@ export default function TitleScreen() {
     );
   };
 
+  /**
+   * **There was a third door into `rerank`, and it is gone** (founder, 2026-09-08).
+   *
+   * `adjustPlacement` opened a `mode: 'rerank'` session straight from the menu, behind a
+   * row called *Rank it again*. The mode is untouched and still reachable — *Update your
+   * rating* re-choosing the band it already has is the same `rankAgain(newWatch: false)`
+   * call, made by `LogSheet` — but the menu no longer offers two rows for it. See the
+   * `Ranking` group below for why one entry point is the whole of the change.
+   */
+
   return (
     <Screen includeBottomInset edges={[]}>
-      <Stack.Screen
-        options={{
-          title: title.title,
-          headerShown: true,
-          // Transparent, and transparent in both states. Toggling it once the title
-          // appears would change the content inset and jog the whole page at exactly
-          // the moment the reader is looking at it, so the opaque ground arrives as a
-          // background view instead. Without transparency at all, the app's one
-          // full-bleed image would start below a solid bar and not be full-bleed.
-          headerTransparent: true,
-          // Empty until the heading below has scrolled under the bar. See
-          // `useDetailHeader` for why both detail routes now behave this way.
-          headerTitle: header.revealed
-            ? () => (
-                <DetailHeaderTitle
-                  // The same pair the heading shows, in the same relationship: a season
-                  // is "Season 2" under "Parks and Recreation", never the flattened
-                  // "Parks and Recreation — Season 2", which would not fit a bar and
-                  // would say the series name twice on the way past.
-                  title={displayTitle ?? title.title}
-                  subtitle={parent?.title ?? null}
-                />
-              )
-            : '',
-          headerBackground: header.revealed ? () => <DetailHeaderBackground /> : undefined,
-        }}
+      {/**
+       * **No navigator header on this route** (founder redesign, 2026-09-07).
+       *
+       * It was `headerTransparent` with a `headerBackground` that was mounted or not
+       * according to a boolean, which gives two states and nothing between them: the
+       * ground and the title arrived at a threshold, in one frame. The brief asks for a
+       * surface that *gains* opacity as the hero leaves, and for the icon treatment to
+       * change with it — and `headerTintColor` is a navigation option rather than a value
+       * that can be animated.
+       *
+       * So the bar is drawn by the page, over the artwork, from one `Animated.Value`
+       * (`TitleTopBar`). The route keeps its `title` because on iOS a route's title is the
+       * back label of whatever is pushed *on top* of it — a person page opened from the
+       * cast strip says `‹ Title` and not `‹ title/[id]`.
+       */}
+      <Stack.Screen options={{ title: title.title, headerShown: false }} />
+
+      <TitleTopBar
+        progress={scrollY.interpolate({
+          // Zero while the hero is whole; one by the time it has left. The window is the
+          // last 96 points of the hero's own height, so a tall backdrop and the short
+          // collapsed band both finish the transition at the moment the artwork does —
+          // which is what "by the time the hero is leaving the viewport" means on a
+          // device this code cannot measure in advance.
+          inputRange: [revealStart, revealEnd],
+          outputRange: [0, 1],
+          extrapolate: 'clamp',
+        })}
+        revealed={barRevealed}
+        // `router.back()` and nothing else. The native control this replaces did exactly
+        // this, so a title opened from Search returns to Search and one opened from the
+        // feed returns to the feed — the route stack decides, not this screen.
+        onBack={() => router.back()}
+        // The menu, where the Ranked control used to keep it. Present only where there is
+        // something to manage, which is a ranked title — the same reachability the chip
+        // had, moved rather than widened.
+        onMore={data.ranked ? () => setManaging(true) : undefined}
+        title={displayTitle ?? title.title}
+        subtitle={parent?.title ?? null}
       />
-      <ScrollView
+
+      <Animated.ScrollView
         contentContainerStyle={styles.content}
-        onScroll={header.onScroll}
-        scrollEventThrottle={header.scrollEventThrottle}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          // Opacity is one of the properties the native driver can carry, so the bar's
+          // transition runs on the UI thread and keeps up with a page that is also laying
+          // out a season's worth of episode stills.
+          useNativeDriver: true,
+          /**
+           * The accessibility half, and the only thing on this path that touches React
+           * state. Hysteresis on the two ends of the fade rather than a single threshold,
+           * so a finger resting on the crossing point cannot make the compact title enter
+           * and leave the tree on every pixel of movement — the same dead band
+           * `useDetailHeader` uses, expressed as the window the fade already has.
+           * `setState` with an unchanged value is a no-op, so an ordinary scroll re-renders
+           * this screen exactly twice: once on the way in and once on the way out.
+           */
+          listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const y = event.nativeEvent.contentOffset.y;
+            setBarRevealed((was) => (was ? y > revealStart : y >= revealEnd));
+          },
+        })}
+        scrollEventThrottle={16}
         // The Seasons empty state has said "pull down to try again in a moment"
         // since the series redesign, and until now that was a gesture the app did
         // not have. Copy that names a gesture is a promise; this is the gesture.
@@ -769,6 +1038,9 @@ export default function TitleScreen() {
               void seasons.refetch();
               void personal.refetch();
             }}
+            // Below the transparent bar, so the spinner is not drawn under the back
+            // control on a screen whose content starts at the top of the display.
+            progressViewOffset={insets.top + NAV_BAR_HEIGHT}
             tintColor={theme.semantic.action}
             colors={[theme.semantic.action]}
           />
@@ -778,7 +1050,7 @@ export default function TitleScreen() {
           <TitleHero
             uri={hero.uri}
             blurred={hero.treatment === 'poster'}
-            collapsedHeight={HERO_COLLAPSED}
+            collapsedHeight={collapsedHero}
             topInset={insets.top}
           />
           {/* Who sent this and how long ago, over the artwork they sent it about.
@@ -789,143 +1061,233 @@ export default function TitleScreen() {
               Solid rather than translucent: legibility over a photograph cannot depend on
               what the photograph happens to be.
 
-              Anchored above the poster rather than at the top of the hero, which keeps it
-              clear of the transparent navigation bar without having to guess at its
+              Anchored to the hero's lower edge rather than its top, which keeps it clear
+              of the transparent navigation bar without having to guess at that bar's
               height on a device this code cannot measure.
 
-              Only where there *is* artwork. The collapsed band is exactly POSTER_LIFT
-              tall and the poster rises the whole way into it, so a title with no
-              backdrop has no hero to overlay — an absolute callout there would sit on
-              the poster or above the screen. That case gets the same callout inline,
-              under the heading. */}
+              Only where there *is* artwork. The collapsed band is short and the identity
+              block starts immediately beneath it, so a title with no backdrop has no hero
+              worth overlaying — an absolute callout there would sit on the title. That
+              case gets the same callout inline, under the heading. */}
           {recommendedBy && hero.uri ? (
             <RecommendedCallout label={recommendedBy} overlay />
           ) : null}
         </View>
 
-        {/* The poster rises into the hero and the score sits opposite it, so the
-            two anchor the same band rather than stacking. Negative margin rather
-            than absolute positioning, so everything below still flows from it. */}
-        <View style={styles.identity}>
-          <View style={styles.posterFrame}>
-            <Poster uri={posterUri(title.poster_path, 'card')} title={title.title} size="lg" />
-          </View>
-          {/* My relationship to this title, and nothing else. The community's
-              number moved to its own section further down — beside this one the two
-              were the same shape at the same weight, and the reader's own score is
-              what this half of the page is for. */}
-          <View style={styles.scoreColumn}>
-            <PersonalState
-              score={score}
-              bucket={data.ranked?.bucket ?? null}
-              ordinal={heroRank?.label ?? null}
-              onPress={() => openLog()}
-              // Ranked is a fact with more than one thing to do to it, so it opens a menu
-              // rather than jumping straight back into the comparison. Long press was
-              // considered and rejected: an interaction nobody can see is not a way out of
-              // a mistake somebody is trying to undo.
-              onPressRanked={() => setManaging(true)}
-              rankable={rankable}
-            />
+        {/**
+         * **Identity left, poster right, actions inside the left column, and every word
+         * of it on Paper** (founder, final direction, 2026-09-07).
+         *
+         * ---------------------------------------------------------------------------
+         * WHY THE WORDS ARE NOT ON THE ARTWORK
+         *
+         * The first pass of this redesign put the poster on the left and the words on the
+         * right, with the whole row pulled up into the artwork. The founder's correction:
+         * **primary title text must not depend on being readable over a backdrop nobody
+         * chose.** A hero is unpredictable — a night scene, a white sky, a face — and a
+         * serif title set on it is legible on the artwork the designer happened to be
+         * looking at.
+         *
+         * So the row starts at the hero's lower edge and everything in it sets on the
+         * page's own Paper — **including the poster**, since 2026-09-08. It used to be
+         * pulled up across the fade on the argument that artwork may cross a line the
+         * words may not, and on the device that made it a member of the hero rather than
+         * of this block: level with the middle of the title instead of with its first
+         * line. Nothing crosses the fade now. See `TITLE_CAP_OFFSET`.
+         *
+         * ---------------------------------------------------------------------------
+         * THE ROW IS A PLAIN FLEX ROW, AND THAT IS WHAT KEEPS THE SYNOPSIS CLEAR
+         *
+         * `flexDirection: 'row'` with `alignItems: 'flex-start'`, no height, no minimum,
+         * nothing absolutely positioned and no negative margin anywhere inside it. So the
+         * row's height is exactly the taller of its two children, and the synopsis — the
+         * next sibling — begins below **both** the poster and the left stack without
+         * anything having to compute which of them won. A one-line film with no credit
+         * clears the poster's 154; a wrapped two-line season title with five metadata
+         * lines and the action row clears the left stack instead.
+         *
+         * ---------------------------------------------------------------------------
+         * THE ACTIONS ARE IN THIS COLUMN, AND THE ROW HAS NO FIXED HEIGHT
+         *
+         * They were a full-width row *after* the whole identity region, which meant they
+         * waited for the bottom of a 150pt poster before they could be drawn. On a short
+         * title — a one-line name, a year, a length, no credit — that left an obvious
+         * empty band beside the poster and pushed the page's primary control down past
+         * it. The design draft's answer was to pin the row to 150pt so the button always
+         * landed at the same y; the founder rejected that as the same dead space made
+         * deliberate.
+         *
+         * The row is content-driven instead. The stack is title, subtitle, metadata,
+         * personal context, actions — all inside the column beside the poster — so the
+         * button rises on a short title and sits lower on a long one, and the space
+         * beside the poster is used rather than reserved. Identical action-row
+         * coordinates across the catalogue were never the goal; a consistent rhythm was.
+         *
+         * The synopsis still begins full width, below whichever of the two columns is
+         * taller.
+         *
+         * ---------------------------------------------------------------------------
+         * THE POSTER CARRIES ARTWORK AND NOTHING ELSE
+         *
+         * No score, no `Your score` caption, no dashed ring, no rank badge. The reader's
+         * own number is the first unit of the Scores section now (`ScoresSection`), where
+         * it has the two things it never had on the poster: a label saying whose it is,
+         * and something to be compared against. What sat here was a badge overhanging a
+         * corner with a caption under it, and every revision of it fought the artwork it
+         * was pinned to.
+         */}
+        <View style={styles.identity} testID="title-identity">
+          <View style={styles.identityCopy} testID="title-identity-copy">
+            {/* For a season the heading is the show, and the show is also the way to
+                the series page — so the heading is the link rather than a small line
+                above it. A film's name leads nowhere and is not a control. */}
+            {isSeason && parent?.id ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${primaryName}, the series this belongs to`}
+                onPress={() => router.push(`/title/${parent.id}`)}
+                hitSlop={theme.space[1]}
+              >
+                <Text testID="title-name" variant="title1" numberOfLines={TITLE_LINES}>
+                  {primaryName}
+                </Text>
+              </Pressable>
+            ) : (
+              <Text testID="title-name" variant="title1" numberOfLines={TITLE_LINES}>
+                {primaryName}
+              </Text>
+            )}
+            {identitySubtitle ? (
+              <Text
+                testID="title-subtitle"
+                variant="callout"
+                tone="secondary"
+                // Every line of the identity block is one line. A season name long
+                // enough to wrap turns the subtitle into a paragraph under the heading.
+                numberOfLines={1}
+              >
+                {identitySubtitle}
+              </Text>
+            ) : null}
+            {/* Built before it is rendered, because all three parts can be missing at
+                once — an obscure title with no certification, no length and no credit —
+                and an empty `Text` is not nothing on screen. It is a line box with the
+                footnote's height, which reads as a gap under the title. Review 17e. */}
+            {metaLine ? (
+              <Text
+                testID="title-meta"
+                variant="footnote"
+                tone="secondary"
+                // One line, always. A creative credit long enough to wrap turns a
+                // three-part metadata line into a two-line paragraph, which is the
+                // founder's "prefer truncation over wrapping the metadata".
+                numberOfLines={1}
+              >
+                {metaLine}
+              </Text>
+            ) : null}
+            {contextLine ? (
+              <Text
+                testID="title-context"
+                variant="caption"
+                tone="tertiary"
+                numberOfLines={1}
+                style={styles.contextLine}
+              >
+                {contextLine}
+              </Text>
+            ) : null}
+
             {/**
-             * **Watchlist and Recommend, icon-only, beside the rank control**
-             * (founder, physical Android, 2026-09-06).
+             * **Rank/Ranked, Save, Recommend — inside this column, directly under the
+             * personal-context line** (founder, 2026-09-07).
              *
-             * They were a labelled `[ Watchlist ] [ Recommend ]` row in the body,
-             * under the description. The founder rejected it on the device for two
-             * reasons that are really one: a chip the size of a button, in Maroon,
-             * competed with Rank for the page's primary action, and the row cost a
-             * band of vertical space that pushed the scores below the fold.
+             * Not after the whole identity region, which is where it was: there it had to
+             * wait for the bottom of the poster, so on a short title an empty band opened
+             * up beside the artwork and the page's primary control sat below it. Here it
+             * rises with the copy above it and fills the column the poster leaves.
              *
-             * As glyphs they are what they always were — secondary acts on a title —
-             * and they sit where the acts about *this reader and this title* belong,
-             * which is the cluster the score is already in. Rank keeps its label
-             * because it is the page's one primary action and a bare glyph would not
-             * say so.
-             *
-             * Both keep their full accessible names, their 44pt targets through
-             * `hitSlop`, and their exact behaviour. A series gets Watchlist alone: it
-             * cannot be ranked or recommended (PRD §10), which is the same rule the
-             * labelled row applied.
+             * The Rank/Ranked control keeps its **text and its behaviour**: unranked opens
+             * the log, ranked opens the ranking-options menu. Nothing here decides between
+             * ranking the same watch again and logging another watch, because that is the
+             * menu's job and the distinction is the whole point of it.
              */}
-            <View style={styles.heroActions}>
-              <HeroAction
-                icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
-                selected={isWatchlisted}
-                accessibilityLabel={
-                  isWatchlisted
-                    ? `Remove ${title.title} from your watchlist`
-                    : `Add ${title.title} to your watchlist`
+            <View style={styles.actionsRow}>
+              <TitleActions
+                rank={
+                  rankable
+                    ? {
+                        ranked: Boolean(data.ranked),
+                        accessibilityLabel: data.ranked
+                          ? 'Ranked. Change or remove this.'
+                          : `Rank ${displayTitle ?? title.title}`,
+                        accessibilityHint: data.ranked
+                          ? 'Opens rating and collection options'
+                          : 'Opens the rating sheet',
+                        onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                      }
+                    : null
                 }
-                onPress={() => void toggleWatchlist()}
-                disabled={watchlistBusy}
+                save={{
+                  selected: isWatchlisted,
+                  // The sentences the labelled control used, unchanged: a screen reader's
+                  // name for this control is what says which way the toggle goes.
+                  accessibilityLabel: isWatchlisted
+                    ? `Remove ${title.title} from your watchlist`
+                    : `Add ${title.title} to your watchlist`,
+                  onPress: () => void toggleWatchlist(),
+                  disabled: watchlistBusy,
+                }}
+                recommend={
+                  rankable
+                    ? {
+                        accessibilityLabel: `Recommend ${title.title} to a friend`,
+                        onPress: () => {
+                          setActionError(null);
+                          setRecommendedTo(null);
+                          setRecommending(true);
+                        },
+                      }
+                    : null
+                }
               />
-              {rankable ? (
-                <HeroAction
-                  icon="paper-plane-outline"
-                  accessibilityLabel={`Recommend ${title.title} to a friend`}
-                  onPress={() => {
-                    setActionError(null);
-                    setRecommendedTo(null);
-                    setRecommending(true);
-                  }}
-                />
-              ) : null}
+            </View>
+          </View>
+
+          <View style={styles.posterColumn} testID="title-poster-column">
+            <View style={styles.posterFrame}>
+              <Poster
+                /**
+                 * The season's own artwork, then the series'.
+                 *
+                 * A season with no poster of its own is a real state in this catalogue,
+                 * and before this it fell straight through to the branded placeholder
+                 * while the series' perfectly good key art sat one row away — the same
+                 * inheritance `heroArtwork` already does for the backdrop. The placeholder
+                 * is still the answer when neither exists; it is never a stretched or
+                 * letterboxed stand-in.
+                 */
+                uri={
+                  posterUri(title.poster_path, 'card') ??
+                  posterUri(parent?.poster_path ?? null, 'card')
+                }
+                title={displayTitle ?? title.title}
+                // `detail` — 100×150. `md` was 88 wide, which read as a thumbnail left
+                // beside the title rather than as the counterweight to it; `lg` at 132
+                // left too little width to set a serif title in.
+                size="detail"
+              />
             </View>
           </View>
         </View>
 
-        {/* The identity, for the header's purposes: everything down to and including
-            the title itself. Once its bottom edge passes under the bar, the bar says
-            the title instead. */}
-        <View style={styles.heading} onLayout={header.onIdentityLayout}>
-          {/* A season says which show it belongs to, above its own name. The feed
-              writes that as one string because it has no room; here there is a
-              hierarchy to put it in. */}
-          {parent?.title ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${parent.title}, the series this belongs to`}
-              onPress={() => router.push(`/title/${parent.id}`)}
-            >
-              <Text variant="callout" tone="action" numberOfLines={1}>
-                {parent.title}
-              </Text>
-            </Pressable>
-          ) : null}
-          {/* The year sits *inside* the heading, muted, rather than starting the line
-              below it. The founder's hierarchy is "The Dark Tower  2017" on one line
-              and "PG-13 · 95m · Nikolaj Arcel" on the next — which separates what the
-              thing is called from what it is, instead of running a year, a runtime and
-              a director together as one undifferentiated string. */}
-          {/* "Season 1, 2023" for a season, under the show’s own name on the line above.
-              The em dash form the log sheet uses — "Parks and Recreation — Season 2" — is
-              for surfaces with one line to say the whole name in. Here there is a
-              hierarchy to put it in, and a comma is what joins a season to its year in
-              every other place anybody writes one down. */}
-          <Text variant="title1">
-            {displayTitle ?? title.title}
-            {year ? (
-              <Text variant="title1" tone="tertiary">
-                {isSeason ? `, ${year}` : `  ${year}`}
-              </Text>
-            ) : null}
-          </Text>
-          {/* Built before it is rendered, because all three parts can be missing at once
-              — an obscure title with no certification, no runtime and no director credit
-              — and an empty `Text` is not nothing on screen. It is a line box with the
-              footnote's height, which reads as a gap under the title and is the same
-              defect as the dead score space the founder's corrections removed from the
-              hero. Independent review 17e. */}
-          {metaLine ? (
-            <Text testID="title-meta" variant="footnote" tone="secondary">
-              {metaLine}
-            </Text>
-          ) : null}
-          {/* The no-artwork case. Same object, laid out in the flow rather than over a
-              hero that is not there. */}
-          {recommendedBy && !hero.uri ? <RecommendedCallout label={recommendedBy} /> : null}
-        </View>
+        {/* The no-artwork case for the recommendation callout. Same object, laid out in
+            the flow rather than over a hero that is not there. */}
+        {recommendedBy && !hero.uri ? (
+          <View style={styles.block}>
+            <RecommendedCallout label={recommendedBy} />
+          </View>
+        ) : null}
 
         {actionError ? (
           <View style={styles.block}>
@@ -968,75 +1330,81 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
-        {/* **Above the synopsis, one measured row** (founder reconvergence, 2026-09-07).
+        {/**
+         * **The description, then the genres** (founder redesign, 2026-09-07).
+         *
+         * They have been the other way round twice, and the argument for genres-first was
+         * that the page reads outward — what the thing is called, what it is, what it is
+         * about. It is a good argument and it lost to what the page actually looked like:
+         * a row of chips between the title and the prose put a band of metadata in the
+         * one place a reader is trying to start reading.
+         *
+         * The order now is prose then chips, and the two sit close together because the
+         * `more` marker is guaranteed to be *on* the fourth line rather than under it
+         * (`Synopsis`). That is the whole reason this pair could be tightened: the old
+         * clamp routinely spent a fifth line on one word, and genres set below an
+         * almost-empty line read as a third block rather than as the footnote to the
+         * paragraph they are.
+         */}
+        {title.overview ? <Synopsis text={title.overview} /> : null}
 
-            The order reads outward — what the thing is called, what it is, what it is
-            about — so the genres sit between the metadata and the description. They led
-            the synopsis until 2026-09-06, moved below it to get the scores nearer the
-            top, and return with the scores now in the page’s lower half.
-
-            **The row measures itself**, which is the founder’s other correction: a fixed
-            three chips plus `+N` wrapped the marker onto a second line whenever the
-            third chip fitted and the marker did not — Dan Da Dan, exactly. `GenreRow`
-            keeps as many as fit and puts the count on the same line, always. Tapping any
-            chip or the count opens the full list; Details still lists them all too. */}
+        {/**
+         * **One measured row**, and the count is always on it.
+         *
+         * A fixed three chips plus `+N` wrapped the marker onto a second line whenever
+         * the third chip fitted and the marker did not — Dan Da Dan, exactly. `GenreRow`
+         * keeps as many as fit and puts the count on the same line, always. Tapping any
+         * chip or the count opens the full list; Details still lists them all too.
+         *
+         * Genres stay neutral metadata. They are chips rather than Maroon pills because
+         * a genre is a fact about the title and not something to do to it.
+         */}
         <GenreRow genres={descriptive.genres} />
 
-        {title.overview ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={expanded ? 'Collapse description' : 'Expand description'}
-            onPress={() => setExpanded((open) => !open)}
-            style={styles.block}
-          >
-            <Text variant="body" numberOfLines={expanded ? undefined : 3}>
-              {title.overview}
-            </Text>
-            {/* No "less". Once it is open the whole thing is visible and the
-                control has nothing left to promise. */}
-            {expanded ? null : (
-              <Text variant="callout" tone="action">
-                more
-              </Text>
-            )}
-          </Pressable>
-        ) : null}
-
-        {/* **After the synopsis, in the page’s lower half** (founder reconvergence,
-            physical Android, 2026-09-07).
-
-            This block has now sat in three places, so the reasoning is worth stating
-            once. It began under the tabs (wrong: scores vanished when somebody looked at
-            the cast). It moved to directly under the title’s metadata on 2026-09-06,
-            on the argument that what everybody made of a film is part of what the film
-            *is*. That is still true, and it lost to a bigger problem: the page had been
-            cut into six small bands with rules between them, and the founder’s reading
-            of it on a device is that the earlier rhythm was better.
-
-            So the order is hero, title and year, metadata, genres, synopsis, scores,
-            where to watch, tabs — outward from what the thing is called, to what it is,
-            to what it is about, and only then to what other people made of it and where
-            to find it. The two lower blocks are utilities and read as a pair.
-
-            Still above the tabs and never inside them, which is the standing rule:
-            scores are core bingd. data and must not appear and disappear as somebody
-            looks at the cast. Still no SCORES heading. The one rule ScoresSection draws
-            is above itself again, because from here its job is to close the description
-            off rather than to close the title off.
-
-            A series has no aggregate of its own, because it cannot be ranked (PRD §10),
-            so it gets no row rather than a permanent "Not enough ratings".
-
-            **The reader’s own score is not in here.** It is in the hero, opposite the
-            poster, with the rank context and the Ranked control beside it. It led this
-            row as well until 2026-08-18, which put the same number on the page twice
-            and made the second copy the weaker one. Founder correction. */}
+        {/**
+         * **`SCORES`, with its heading back and Following leading** (founder redesign,
+         * 2026-09-07).
+         *
+         * The block has now sat in three places and the reasoning is worth stating once.
+         * It began under the tabs — wrong, because the scores vanished when somebody
+         * looked at the cast. It moved directly under the title's metadata on 2026-09-06,
+         * on the argument that what everybody made of a film is part of what the film
+         * *is*; that is still true and it lost to a bigger problem, which is that the
+         * page had been cut into six small bands. It is in the lower half now, after the
+         * description, where it is the first thing that stops being about the title and
+         * starts being about what other people made of it — which is exactly why it has a
+         * heading again. See `ScoresSection`.
+         *
+         * Still above the tabs and never inside them, which is the standing rule: scores
+         * are core bingd. data and must not appear and disappear as somebody looks at the
+         * cast.
+         *
+         * A series has no aggregate of its own, because it cannot be ranked (PRD §10), so
+         * it gets no row rather than a permanent "Not enough ratings".
+         *
+         * **The reader's own score leads this row** (founder, 2026-09-07). It was on the
+         * poster and is not any more; the poster carries artwork and nothing else. Three
+         * units, in one fixed order — `Your score`, `Following`, `bingd.` — which is a
+         * hierarchy of relevance to one reader rather than a leaderboard: me, then the
+         * people I chose, then the room. The number is stated once on this page, here.
+         */}
         {!isSeries ? (
           <ScoresSection
-            // Everybody's, then the reader's own people — the founder's order from the
-            // Preview pass. Both units are always drawn: a grey circle and "Not enough
-            // ratings" is a real answer, and a unit that appears when the data does is
-            // a page that moves under the reader.
+            you={
+              rankable
+                ? {
+                    score,
+                    // Ranked, but the band sizes that derive the number have not landed
+                    // yet. `Score loading` rather than `Not ranked yet`, which would
+                    // contradict the Ranked control a few points above it.
+                    pending: Boolean(data.ranked) && score == null,
+                    // Exactly where the Ranked control leads: a ranked title opens its
+                    // options, an unranked one opens the log. The score has been a place
+                    // to press to change a rating since 2026-09-06 and still is.
+                    onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                  }
+                : null
+            }
             bingd={{
               score: community.data?.score ?? null,
               ratingCount: community.data?.ratingCount ?? 0,
@@ -1051,7 +1419,7 @@ export default function TitleScreen() {
           />
         ) : null}
 
-        {/* Under the description, over the tabs, and on every kind of title — including
+        {/* Under the scores, over the tabs, and on every kind of title — including
             a series, which has no score block of its own because it cannot be ranked.
 
             The founder's placement decision, and the reason it is not a tab: a film
@@ -1089,7 +1457,12 @@ export default function TitleScreen() {
                   // rather than losing a real episode to tidy up a display key.
                   key={`${episode.episode_number}-${index}`}
                 >
-                  {index > 0 ? <Divider /> : null}
+                  {/* No rule between episodes (founder, 2026-09-07). A hairline every
+                      row turned a season page into a table, which is the density note
+                      that runs through this whole pass: whitespace is the separator, and
+                      a rule marks a module rather than a sibling. `EpisodeRow`'s own
+                      vertical padding already puts 32 points between two of them, and
+                      the still and the number make the boundary obvious besides. */}
                   <EpisodeRow
                     episodeNumber={episode.episode_number}
                     title={episode.title}
@@ -1283,7 +1656,7 @@ export default function TitleScreen() {
             </Text>
           ) : null}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
 
       <LogSheet
         title={loggingTitle}
@@ -1464,73 +1837,87 @@ export default function TitleScreen() {
 
             <MenuGroup title="Ranking" />
             {/**
-             * **Three intents, and the founder pressed the wrong one because the labels
-             * did not distinguish them** (physical Android, 2026-09-07).
+             * **Two rows, because there were only ever two acts** (founder, physical QA,
+             * 2026-09-08).
              *
-             * The report: ranked *Terrace House: Tokyo 2019-2020, S1*, adjusted the
-             * placement a minute later, and the feed showed two "ranked" rows for one
-             * watch — 8.3 and then 8.6.
+             * ---------------------------------------------------------------------------
+             * WHAT WAS HERE, AND WHY THREE WAS ONE TOO MANY
              *
-             * Nothing was broken underneath. The database has had the right rule since
-             * 20260826000500: `_rank_finalize` posts `title_ranked` only `if p_new_watch
-             * or not v_replaced`, so a rerank over an existing position writes no
-             * activity. One `rankings` row and one `user_media` row is all that exists
-             * for that season, checked directly. What produced the second activity was
-             * this menu: the row that *reads* like "redo my ranking" was **Rank again**,
-             * which this app defines as a second viewing (PRD §10) and which therefore
-             * earns an activity by design. The product definition was correct and lived
-             * only in a doc; the label invited the other reading.
+             * The menu offered *Rank it again*, *Log another watch* and *Change your
+             * rating*. The middle one is a real, separate act — a second viewing — and the
+             * outer two were **two doors into the same correction**, named so similarly
+             * that no ordinary reader could say which one they wanted. "Rank it again"
+             * and "Change your rating" describe the same intent in two vocabularies; the
+             * only difference was mechanical, and mechanical differences are exactly what
+             * the 2026-09-07 pass had already decided this menu must stop exposing.
              *
-             * So the menu names the intent rather than the mechanism, and the three
-             * modes are now each reachable and each unmistakable:
+             * (That pass is worth keeping in the record: the founder ranked a season,
+             * adjusted it a minute later, and saw two "ranked" rows in the feed for one
+             * watch. Nothing was broken underneath — `_rank_finalize` has posted
+             * `title_ranked` only `if p_new_watch or not v_replaced` since
+             * 20260826000500 — the row named *Rank again* simply meant "another viewing"
+             * and read like "redo my ranking". Renaming it to *Rank it again* fixed the
+             * misfire and left two correction rows behind. This removes one.)
              *
-             *   Adjust placement   same watch, redo the comparisons — `rerank`, no
-             *                      activity, and the row this bug needed to exist.
-             *   I watched it again a genuine rewatch — `again`, exactly one activity.
-             *   Change your rating a different band — `rebucket` via the log sheet.
+             * ---------------------------------------------------------------------------
+             * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
+             *
+             * **`Update your rating` is the single same-watch correction path, and it can
+             * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
+             * has had three branches since 2026-08-15 and keeps all of them:
+             *
+             *   a *different* band   → `rank_rebucket`. The band moves and the comparisons
+             *                          are re-run, because a band change cannot be
+             *                          estimated (PRD §10).
+             *   the *same* band      → `rankAgain(newWatch: false)` — which is precisely
+             *                          what *Rank it again* called. Re-opening a rating you
+             *                          already gave means the *position* is wrong, and this
+             *                          is how a reader says so.
+             *   neither, then close  → nothing at all. Since 20260826000500 the session
+             *                          runs over the position the title holds, so opening
+             *                          this and changing your mind costs nothing.
+             *
+             * So placement can still be corrected for the same watch, and nobody is made
+             * to log a viewing they did not have in order to do it. The one extra tap is
+             * the band chooser, which is also the screen that tells the reader which of
+             * the two things they meant.
+             *
+             * ---------------------------------------------------------------------------
+             * THE SEMANTICS ARE UNTOUCHED
+             *
+             *   Update your rating   corrects the current watch. `p_new_watch` false, no
+             *                        new watch record, no feed activity, no timestamp
+             *                        heuristic anywhere.
+             *   Log another watch    an explicit second viewing. `p_new_watch` true, and
+             *                        exactly one `title_ranked` on completion.
+             *
+             * No RPC, argument, migration or piece of ranking maths changes in this pass,
+             * and no historical activity is rewritten or de-duplicated. `rerank` still
+             * exists and is still reached; it is reached through one row instead of two.
              *
              * The labels carry the whole distinction and there is no secondary line: a
-             * `value` on a `SheetRow` sets beside the label on one line and truncates at
-             * phone width, which is a founder decision this menu already carries. That is
-             * why the rewatch row is named for what the reader did rather than for what
-             * the app will do about it — a verb alone ("Rank again") cannot say whose
-             * watch it is, and a sentence explaining it cannot be read.
-             *
-             * Nothing about the ranking maths, the score or the schema changes.
+             * `value` on a `SheetRow` sets beside the label and truncates at phone width,
+             * which is a founder decision this menu already carries.
              */}
+            {/* The star is kept from the row this replaces, and so is its behaviour:
+                straight into the log sheet, where the band chooser is. Leads the group
+                because correcting a rating is the common act and logging a second
+                viewing is the rare one. */}
             <SheetRow
-              icon="swap-vertical-outline"
-              label="Adjust placement"
-              onPress={
-                rankedBucket
-                  ? () => {
-                      setManaging(false);
-                      setActionError(null);
-                      setRankedTitle(loggable);
-                      setRankingSubject({
-                        id: title.id,
-                        title: title.title,
-                        bucket: rankedBucket,
-                        posterUri: posterUri(title.poster_path, 'card'),
-                        // Only a film or a season is ever ranked; a series has no menu.
-                        kind: title.kind === 'season' ? 'season' : 'movie',
-                        // `rankAgain` with `newWatch: false`: the session runs over the
-                        // position the title already holds, and finishing replaces it
-                        // without announcing anything. See `RankingSheet`’s `mode`.
-                        mode: 'rerank',
-                      });
-                    }
-                  : undefined
-              }
-              disabledReason={rankedBucket ? undefined : 'Loading'}
+              icon="star-outline"
+              label="Update your rating"
+              onPress={() => {
+                setManaging(false);
+                openLog();
+              }}
             />
             {/**
              * The explicit rewatch, and the only row in the app that declares one.
              *
              * Completing it writes exactly one new `title_ranked` activity, which is the
-             * whole difference from the row above — and the reason the label now says
-             * what happened rather than what the app will do about it. Two genuine
-             * rewatches are still two activities; that is not a duplicate.
+             * whole difference from the row above — and the reason the label says what
+             * happened rather than what the app will do about it. Two genuine rewatches
+             * are still two activities; that is not a duplicate.
              *
              * `rank_again` opens the session **over** the position the title already
              * has, so nothing the reader can see moves until they finish: close the
@@ -1540,7 +1927,7 @@ export default function TitleScreen() {
              */}
             <SheetRow
               icon="repeat-outline"
-              label="I watched it again"
+              label="Log another watch"
               onPress={
                 rankedBucket
                   ? () => {
@@ -1560,18 +1947,6 @@ export default function TitleScreen() {
                   : undefined
               }
               disabledReason={rankedBucket ? undefined : 'Loading'}
-            />
-            {/* The third intent: a different *band* — loved, fine, not for me — which is
-                a correction to an opinion already recorded rather than a second viewing.
-                It writes no new activity and does not surrender the current position
-                while it runs. */}
-            <SheetRow
-              icon="star-outline"
-              label="Change your rating"
-              onPress={() => {
-                setManaging(false);
-                openLog();
-              }}
             />
 
             <MenuGroup title="Collection" />
@@ -1678,57 +2053,6 @@ function Detail({ label, value }: { label: string; value: string | null }) {
 }
 
 /**
- * A secondary act on this title, as a glyph beside the score.
- *
- * **Icon-only, and that is the founder's 2026-09-06 correction.** Watchlist and Recommend
- * were labelled chips in a row of their own under the description. On a device that row
- * did two things wrong at once: a chip the size of a button competed with Rank for the
- * page's primary action, and the band it occupied pushed the scores below the fold.
- *
- * As glyphs they are what they always were — things you can do to a title, subordinate to
- * ranking it — and they sit in the cluster that is already about this reader and this
- * title. Rank keeps its label because it is the one primary action here and a bare glyph
- * would not say so.
- *
- * The accessible name is the whole sentence, because to a screen reader the glyph says
- * nothing at all. `hitSlop` rather than a larger box: the control clears 44pt without the
- * hero band growing, which is the same rule `ActivityRow`'s strip follows.
- */
-function HeroAction({
-  icon,
-  accessibilityLabel,
-  onPress,
-  disabled,
-  selected,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  accessibilityLabel: string;
-  onPress: () => void;
-  disabled?: boolean;
-  selected?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ selected: Boolean(selected), disabled: Boolean(disabled) }}
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={theme.space[3]}
-      style={({ pressed }) => [styles.heroAction, pressed && styles.pressed]}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.md}
-        // Maroon when held, neutral otherwise — the app's one watchlist treatment, the
-        // same pair the feed row and the search row draw.
-        color={selected ? theme.semantic.action : theme.text.secondary}
-      />
-    </Pressable>
-  );
-}
-
-/**
  * Where a video plays, as a word rather than a hostname.
  *
  * A map rather than the raw value so an unrecognised site still renders — TMDB's `site`
@@ -1760,6 +2084,61 @@ function videoTitle(video: { name: string; type: string; official: boolean }) {
   // bare "Trailer" that TMDB marks official gains the word that distinguishes it from
   // the fan uploads beside it.
   return video.official ? `Official ${video.type}` : video.type;
+}
+
+/**
+ * How long the thing is, in whichever unit its kind is measured in.
+ *
+ * `145 min` for a film, `9 episodes` for a season, and nothing at all for a series —
+ * neither number a series could print is the truth, since the rankable unit is the
+ * season (PRD §10) and a series' total episode count is not what anybody is deciding on.
+ *
+ * **Zero is not one and not none.** A season TMDB reports as having no episodes has not
+ * aired, and `0 episodes` on this line reads as a fact about the show rather than as data
+ * nobody has yet, so it is omitted like every other missing segment. That rule and the
+ * `episode_count` column are `20260820000400`'s, and `feed/activity.ts` applies the same
+ * one to a feed card's subheading.
+ *
+ * The spelling differs from the feed's on purpose. A feed row prints `148m` because it is
+ * a row with two lines and a poster; the title page has a line to itself, and `145 min`
+ * is what the founder's redesign specifies for it.
+ */
+function lengthOf(
+  kind: 'movie' | 'season' | 'series',
+  runtimeMinutes: number | null | undefined,
+  episodeCount: number | null | undefined,
+): string | null {
+  if (kind === 'movie') {
+    return positive(runtimeMinutes) ? `${Math.trunc(runtimeMinutes as number)} min` : null;
+  }
+  if (kind === 'season') {
+    if (!positive(episodeCount)) return null;
+    const count = Math.trunc(episodeCount as number);
+    return `${count} ${count === 1 ? 'episode' : 'episodes'}`;
+  }
+  return null;
+}
+
+/** A number worth printing. See {@link lengthOf} for why zero is excluded. */
+const positive = (value: number | null | undefined): boolean =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+/**
+ * A watch date on the identity line — `12 Feb 2026`.
+ *
+ * The same UTC-pinned construction the Details panel uses, with a short month: a bare
+ * `new Date('2026-02-12')` is midnight UTC and renders as the day before west of
+ * Greenwich, and this sits in a caption beside an ordinal rather than under a heading
+ * with room for `February`.
+ */
+function formatShortDate(date: string | null) {
+  if (!date) return null;
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 function yearOf(date: string | null) {
@@ -1798,39 +2177,128 @@ function formatAirDate(date: string | null) {
   });
 }
 
-/** Tall enough that the poster still overlaps something when there is no
- *  backdrop, so the page does not become a different design. Tracks POSTER_LIFT:
- *  a lift deeper than this band would put the poster's top above the page. */
-const HERO_COLLAPSED = 120;
+/**
+ * **The poster does not rise into the hero any more** (founder, physical Android,
+ * 2026-09-08).
+ *
+ * There was a lift, and it was 64, then 120, then 88, then 56. The founder's reading on
+ * the device is the one that ends the sequence: whatever the number, a poster pulled up
+ * across the hero's fade **belongs to the hero**, and it therefore reads as detached from
+ * the title sitting level with its middle. No lift is small enough to fix that, because
+ * the defect is which block the artwork is a member of rather than how far it travels.
+ *
+ * The poster is part of the identity block now. Its top edge is optically aligned with the
+ * first line of the title, and {@link TITLE_CAP_OFFSET} is the whole of the adjustment.
+ *
+ * Two things that used to depend on the lift are now stated on their own terms, below:
+ * the collapsed band's height, and where the recommendation callout sits.
+ */
+/**
+ * How much warm band sits *below the navigation* when a title has no artwork at all.
+ *
+ * The seed catalogue ships without posters or backdrops, so this is a real state and not
+ * a failure one — it draws no grey box and never a poster stretched to fill. The bar's
+ * height is added to it at the call site, because the navigation overlays the band and a
+ * band shorter than the bar would put the identity block under the back control.
+ *
+ * 56 is what shipped as the poster's lift and is kept as the band's own number now that
+ * nothing overlaps it: it is enough Parchment to read as a deliberate surface rather than
+ * as a hairline, and short enough that a title with no artwork does not spend a third of
+ * the screen saying so.
+ */
+const HERO_COLLAPSED_BAND = 56;
 
 /**
- * How far the poster rises into the hero.
+ * How far the poster sits below the top of the identity row, so its top rule meets the
+ * title's **cap height** rather than its line box.
  *
- * Raised from 64 with the taller hero, then from 96 to 120 in the hierarchy pass.
- * The founder's original note was that the poster sat "beneath a separate strip"
- * rather than in the artwork; the follow-up was that a band of low-information
- * space still sat between the hero composition and the title. The framed poster is
- * 206pt tall, so the lift decides how much of it hangs *below* the hero — 110pt at
- * 96, 86pt at 120 — and every extra point of lift is a point of page the title gets
- * back without the hero giving up any artwork. 120 keeps the poster's top clear of
- * the un-faded upper artwork (the fade's first working stop is at 74% of the frame;
- * on a 393pt-wide phone the poster's top sits below it at either value), and the
- * hero's own growth (`TitleHero` now adds the status-bar inset to the frame) more
- * than covers the deeper overlap.
+ * `title1` is 28pt of DM Serif on a 34pt line, so the line box carries about six points of
+ * leading and roughly half of that sits above the capitals. Aligned to the box, the poster
+ * measures level with the title's *ascent* and reads as sitting a few points high; aligned
+ * to the caps, the two objects start on the same line the way a reader sees it.
+ *
+ * Four points rather than a measurement, because the leading is a property of the type
+ * token and not of the string: it is the same on every title in the catalogue.
  */
-const POSTER_LIFT = 120;
+const TITLE_CAP_OFFSET = theme.space[1];
+/**
+ * Over how many points the navigation finishes becoming a header.
+ *
+ * The last stretch of the hero's own height, so the ground has arrived by the time the
+ * artwork has. Short enough that the transition reads as a response to the scroll rather
+ * than as a slow dissolve, long enough that it is a fade and not a switch — which is the
+ * whole of the founder's objection to the boolean it replaces.
+ */
+const REVEAL_WINDOW = 96;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
+  /**
+   * **The row starts where the hero ends** (founder, final direction, 2026-09-07).
+   *
+   * No negative margin on the row itself, which is the whole of "the title must not rely
+   * on being readable over the backdrop": every word in the left column sets on Paper.
+   * The poster is lifted on its own, below, because artwork over artwork is fine and text
+   * over artwork is a gamble on which backdrop the reader happened to open.
+   *
+   * `flex-start`, not `flex-end`: the title and the top of the poster begin on the same
+   * line, so a one-line film title and a wrapped three-line one both start level with the
+   * artwork rather than the block sliding up and down with the length of a name.
+   */
   identity: {
     flexDirection: 'row',
-    // Baselines, not centres: the poster is the dominant object and everything
-    // beside it hangs from its lower edge, which is where the page resumes.
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     gap: theme.space[4],
     paddingHorizontal: theme.layout.gutter,
-    marginTop: -POSTER_LIFT,
+    paddingTop: theme.space[3],
   },
+  /**
+   * The poster, as one object on the right.
+   *
+   * The lift lives here rather than on the row, so the artwork crosses the hero's fade
+   * and the words do not. It carries nothing but the artwork now — the score that used to
+   * be anchored to its corner is the first unit of the Scores section.
+   */
+  /**
+   * The poster, level with the title's first line.
+   *
+   * A positive offset, and a small one. It used to be `-POSTER_LIFT`, which pulled the
+   * frame up across the hero's fade — see the note on {@link TITLE_CAP_OFFSET} for why
+   * that had to go rather than shrink. Nothing here is absolutely positioned and the
+   * column has no containing block, so the poster cannot overlay anything and the row's
+   * height is simply the taller of its two children.
+   */
+  posterColumn: { marginTop: TITLE_CAP_OFFSET },
+  /**
+   * Everything that names the title *and everything you can do to it*, on the left.
+   *
+   * `flex: 1` so it takes the width the poster leaves and a long name wraps inside it
+   * rather than pushing the row wider than the gutters allow. `minWidth: 0` because a
+   * flex child's default minimum is its content, and without it a long unbroken title
+   * pushes the poster off the right gutter instead of wrapping.
+   *
+   * The `gap` is the founder's 4–6 for the metadata stack. Two children take more than
+   * that and add their own margin on top of it: see `contextLine` and `actionsRow`.
+   */
+  identityCopy: { flex: 1, minWidth: 0, gap: theme.space[1] },
+  /**
+   * `space[1]` on top of the column's own `space[1]` gap, so the personal context sits 8
+   * below the metadata.
+   *
+   * The founder's contract asks for 6–8 here, and the reason it is more than the 4 above
+   * it is that this line is a different kind of fact: everything above it is about the
+   * title and this is about the reader.
+   */
+  contextLine: { marginTop: theme.space[1] },
+  /**
+   * `space[2]` on top of the column's `space[1]` gap: 12 from the line above.
+   *
+   * The founder's contract asks for 12–16 between the personal context and the actions,
+   * and this is the interval that stops the row reading as glued to the text. It is set
+   * here rather than inside `TitleActions` because the distance is one term in a spacing
+   * contract this screen holds, not a property of a button cluster.
+   */
+  actionsRow: { marginTop: theme.space[2] },
   /**
    * A Paper mat around the artwork, the way a print is framed.
    *
@@ -1845,71 +2313,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.base,
     ...theme.elevation.e2,
   },
-  // Sits in the poster's lower half, where the hero has already faded to Paper —
-  // nothing legible may sit on artwork.
   /**
-   * Sits in the poster's lower half, where the hero has already faded to Paper —
-   * nothing legible may sit on artwork.
+   * "Recommended by Ada · 2d ago", as an object on the page.
    *
-   * `justifyContent: 'flex-end'` is what stops the unranked state leaving a tall empty
-   * channel. The row aligns on the poster's baseline, so a short column now hangs from
-   * the bottom of the band with the button beside the poster's lower edge, rather than
-   * starting at the top and leaving the gap the founder's Ant-Man and Dark Tower
-   * screenshots showed.
+   * Solid rather than translucent, because legibility over a photograph cannot depend on
+   * what the photograph happens to be — the overlay variant below sits on artwork.
    */
-  scoreColumn: { flex: 1, justifyContent: 'flex-end', paddingBottom: theme.space[3] },
-  /**
-   * The two secondary glyphs, under the score cluster they belong to.
-   *
-   * A row rather than a column so they read as a pair of small acts rather than as a
-   * stack competing with the score above them, and gapped generously enough that two
-   * 24pt glyphs with slop cannot overlap targets.
-   */
-  heroActions: {
-    flexDirection: 'row',
-    // **The same right spine as the score and the Rank control** (founder, physical
-    // Android, 2026-09-07). Without this the row stretched the full width of a `flex: 1`
-    // column, so the two glyphs started hard against the poster while everything above
-    // them hung from the opposite edge — which is what made them read as floating
-    // somewhere unrelated rather than as part of the cluster they belong to.
-    alignSelf: 'flex-end',
-    gap: theme.space[5],
-    paddingTop: theme.space[3],
-  },
-  heroAction: { alignItems: 'center', justifyContent: 'center' },
-  // Aligned to the chips rather than to the row: a count is not a chip and must not
-  // wear a chip's box, but it does have to sit on the same line as one.
-  heading: {
-    paddingHorizontal: theme.layout.gutter,
-    // Halved in the hierarchy pass (16 → 8): with the poster overlapping the hero
-    // more deeply, this gap was the last of the dead band between the artwork
-    // composition and the title, and the identity row's own baseline padding
-    // already separates the two.
-    paddingTop: theme.space[2],
-    gap: theme.space[1],
-  },
-  /**
-   * Wraps rather than overflows.
-   *
-   * Two chips fit on every width this app supports, and that is the design. The wrap is
-   * the guard for the case the design cannot control: a reader at a large text size, on a
-   * narrow device, in a language where "Watchlist" is two words. Without it the second
-   * chip is simply cut off at the screen edge, which is what the founder found.
-   *
-   * The genre row above uses the same arrangement for the same reason — see `pills`.
-   */
-  actionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: theme.space[3],
-    rowGap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    // Tightened in the hierarchy pass (16 → 12). The row used to follow a paragraph of
-    // synopsis and needed the air to separate itself from it; it now follows a single
-    // row of genre chips, and belongs to the identity cluster above rather than
-    // floating between two blocks.
-    paddingTop: theme.space[3],
-  },
   recommendedCallout: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1922,17 +2331,22 @@ const styles = StyleSheet.create({
     ...theme.elevation.e1,
   },
   /**
-   * On the hero, above the poster.
+   * On the hero, at its lower edge.
    *
-   * `bottom` is measured from the hero's lower edge and clears the poster, which rises
-   * `POSTER_LIFT` into it. Applied only where there is artwork to sit on: the collapsed
-   * band is the same height as the lift, so there is nothing left to overlay.
+   * `bottom` used to be `POSTER_LIFT + space[3]`, and the lift was the whole of it: the
+   * callout had to clear a poster that rose into the artwork. Nothing rises now, so it is
+   * a plain `space[3]` off the hero's own lower edge — where the Paper fade has almost
+   * finished, which is exactly where a solid raised card reads best.
+   *
+   * Applied only where there is artwork to sit on. The collapsed band is short and the
+   * identity block starts immediately under it, so a title with no backdrop gets the same
+   * callout inline instead.
    */
   recommendedOverlay: {
     position: 'absolute',
     left: theme.layout.gutter,
     right: theme.layout.gutter,
-    bottom: POSTER_LIFT + theme.space[3],
+    bottom: theme.space[3],
     marginTop: 0,
   },
   // Takes the width the glyph leaves, so a long name truncates rather than pushing the
@@ -1946,44 +2360,27 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[4],
     paddingBottom: theme.space[1],
   },
-  rowAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[2],
-    minHeight: theme.layout.minTapTarget,
-    paddingHorizontal: theme.space[4],
-    borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
-  },
-  // Saved reads as a held state, so it takes the warm surface rather than a second
-  // colour the palette does not have to spend.
-  rowActionOn: { backgroundColor: theme.surface.sunken, borderColor: theme.semantic.action },
-  // Recommend, filled: the primary social act of this row, per the button hierarchy.
-  rowActionPrimary: {
-    backgroundColor: theme.semantic.action,
-    borderColor: theme.semantic.action,
-  },
   block: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
     gap: theme.space[1],
   },
   /**
-   * One row, and the wrap is the guard rather than the design — the same arrangement as
-   * `actionRow`, for the same reason. Three chips fit at 360pt; a reader at a large text
-   * size gets a second row instead of a chip cut off at the screen edge.
+   * **The page's one hairline** (founder, 2026-09-07).
+   *
+   * Every other rule on this screen is gone — above the scores, above Where to watch,
+   * between every pair of episodes — because a page that draws a rule at every seam has
+   * told the reader nothing about which seams matter. This one is kept because the tab
+   * row is the one place the page genuinely changes mode: above it the page is about the
+   * title, below it the page is a set of lists you choose between.
+   *
+   * Doubled, because a single `hairlineWidth` rounds away to nothing on some Android
+   * densities — the reason every rule in this app is drawn that way.
    */
-  pills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-  },
   tabs: {
-    marginTop: theme.space[5],
+    // The page's section interval, the same one the Scores block and Where to watch
+    // open with, plus the rule.
+    marginTop: theme.space[7],
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
     paddingTop: theme.space[1],
@@ -1998,15 +2395,6 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.rowMinHeight,
   },
   videoCopy: { flex: 1, gap: 2 },
-  section: { paddingTop: theme.space[6], gap: theme.space[2] },
-  note: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[3],
-    gap: theme.space[2],
-    borderBottomWidth: StyleSheet.hairlineWidth * 2,
-    borderBottomColor: theme.border.hairline,
-  },
-  noteHead: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   footer: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[6],

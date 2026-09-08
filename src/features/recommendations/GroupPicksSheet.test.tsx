@@ -169,16 +169,74 @@ describe('choosing the group', () => {
     expect(you.props.accessibilityState.disabled).toBe(true);
   });
 
-  it('holds the button until at least one other person is chosen', async () => {
+  it('says what Group Picks does before asking who is in it', async () => {
+    /**
+     * **The founder's first-screen finding** (physical QA, 2026-09-08). The sheet opened
+     * on a title, a question and a list of faces, which assumes the reader already knows
+     * what Group Picks is — and it is one of the few things in this app with no
+     * equivalent anywhere else, so it is exactly the screen that cannot assume it.
+     *
+     * One sentence, above the question and not in place of it. Deliberately not a
+     * carousel, a tutorial or a dismissible tip.
+     */
+    await renderWithProviders(<GroupPicksSheet {...props()} />);
+
+    expect(
+      screen.getByText('Pick who’s watching and bingd. will find movies you can all agree on.'),
+    ).toBeTruthy();
+    // The instruction for the control underneath survives it.
+    expect(screen.getByText("Who's watching?")).toBeTruthy();
+  });
+
+  it('promises shows rather than movies when it was opened from the TV wall', async () => {
+    // A sentence promising movies over a list of series answers a different question
+    // from the one being asked. The wall the sheet was opened from decides the noun, the
+    // same way it already decides what the server is asked for.
+    await renderWithProviders(<GroupPicksSheet {...props()} medium="tv" />);
+
+    expect(
+      screen.getByText('Pick who’s watching and bingd. will find shows you can all agree on.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/will find movies/)).toBeNull();
+  });
+
+  it('asks for a second person rather than offering to work for one', async () => {
+    /**
+     * **`Get picks for 1` read as broken** (founder, physical QA, 2026-09-08).
+     *
+     * The reader is in seat one from the moment the sheet opens, so the disabled button
+     * offered to do the thing, for the number of people currently chosen, and refused —
+     * which looks like a bug rather than an unmet requirement, and leaves the rule to be
+     * inferred from a greyed-out number.
+     *
+     * The rule itself is untouched: two people, `GROUP_PICKS_MIN_MEMBERS`, exactly as
+     * `selected.size === 0` enforced before it had a name.
+     */
     await renderWithProviders(<GroupPicksSheet {...props()} />);
     await screen.findByLabelText('Abby, @abby');
 
-    const cta = screen.getByRole('button', { name: 'Get picks for 1' });
+    const cta = screen.getByRole('button', { name: 'Add someone to get picks' });
     expect(cta.props.accessibilityState.disabled).toBe(true);
+    // The number that looked like a promise is gone from the disabled state entirely.
+    expect(screen.queryByText('Get picks for 1')).toBeNull();
 
     await fireEvent.press(screen.getByLabelText('Abby, @abby'));
     const armed = screen.getByRole('button', { name: 'Get picks for 2' });
     expect(armed.props.accessibilityState.disabled).toBe(false);
+    expect(screen.queryByText('Add someone to get picks')).toBeNull();
+  });
+
+  it('goes back to asking if the group falls below two again', async () => {
+    // Deselecting is the same state arrived at from the other direction, and a label
+    // computed at mount rather than from the current size would miss it.
+    await renderWithProviders(<GroupPicksSheet {...props()} />);
+    await screen.findByLabelText('Abby, @abby');
+
+    await fireEvent.press(screen.getByLabelText('Abby, @abby'));
+    expect(screen.getByText('Get picks for 2')).toBeTruthy();
+
+    await fireEvent.press(screen.getByLabelText('Abby, @abby'));
+    expect(screen.getByRole('button', { name: 'Add someone to get picks' })).toBeTruthy();
   });
 
   it('counts the reader in the button label', async () => {

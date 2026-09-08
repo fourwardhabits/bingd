@@ -442,31 +442,36 @@ describe('the section treatment', () => {
     expect(await view.findByText('Availability data provided by JustWatch.')).toBeTruthy();
   });
 
-  it('opens with the app hairline, above the row and inset to the gutter', async () => {
-    // The heading alone was the 2026-09-05 answer and the founder rejected it on a
-    // device: with the two score units directly above and nothing between them, the
-    // block still read as a continuation of Scores. This is `ScoresSection`'s own rule
-    // borrowed rather than a new one, and it costs a pixel of height.
+  it('opens with a heading and air rather than a hairline', async () => {
+    /**
+     * **The rule is gone** (founder, 2026-09-07).
+     *
+     * It was added on 2026-09-06 because the heading alone had not separated this block
+     * from the two score units directly above it. Scores now carries a Maroon heading of
+     * its own, so two headings and a section's worth of air do the separating — and
+     * running the hairline as well is what left the whole page reading as a stack of
+     * bordered bands. The title page's one remaining rule is above the tab row.
+     */
     const view = await open();
-    const rule = flat(view.getByTestId('where-to-watch-divider'));
 
-    expect(rule.borderTopWidth).toBe(StyleSheet.hairlineWidth * 2);
-    expect(rule.borderTopColor).toBe(theme.border.hairline);
-    expect(rule.marginHorizontal).toBe(theme.layout.gutter);
+    expect(view.queryByTestId('where-to-watch-divider')).toBeNull();
+    // The air that replaced it lives on the row, which is the block's own top padding.
+    // `space[7]` since 2026-09-07: it is the title page's one section interval, and the
+    // Scores block above it and the tab row below it open with the same value, so every
+    // seam on the page measures the same.
+    expect(flat(view.getByTestId('where-to-watch')).paddingTop).toBe(theme.space[7]);
   });
 
-  it('draws the rule above the row rather than around it', async () => {
+  it('is a row and not a card, with no border of its own', async () => {
     // A border on the row itself would box the block, which is the card treatment this
-    // is deliberately not.
+    // is deliberately not — and it is the treatment removing the rule must not invite.
     const view = await open();
     const row = flat(view.getByTestId('where-to-watch'));
 
     expect(row.borderTopWidth).toBeUndefined();
     expect(row.borderBottomWidth).toBeUndefined();
-
-    const nodes = view.root!.queryAll(() => true);
-    const at = (id: string) =>
-      nodes.findIndex((node) => (node.props as { testID?: string }).testID === id);
-    expect(at('where-to-watch-divider')).toBeLessThan(at('where-to-watch'));
+    expect(row.borderWidth).toBeUndefined();
+    expect(row.backgroundColor).toBeUndefined();
+    expect(row.borderRadius).toBeUndefined();
   });
 });

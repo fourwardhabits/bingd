@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -92,7 +92,10 @@ const poolItem = (id: string, title: string, genre: string) => ({
 
 const mockSlate = {
   items: [{ mediaItemId: 'film-1', title: 'Inception', year: 2010, posterPath: null }],
-  candidatePool: [poolItem('pool-1', 'A Comedy', 'Comedy'), poolItem('pool-2', 'A Horror', 'Horror')],
+  candidatePool: [
+    poolItem('pool-1', 'A Comedy', 'Comedy'),
+    poolItem('pool-2', 'A Horror', 'Horror'),
+  ],
   anchorsUsed: 0,
   lowData: true,
   taste: null,
@@ -244,10 +247,11 @@ describe('the title categories', () => {
   it('still draws the wall and the filter row on Movies', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
+    );
     expect(view.getByText(/^Sent to you/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
-
   });
 
   it('still draws them on TV shows', async () => {
@@ -258,7 +262,6 @@ describe('the title categories', () => {
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
     expect(view.getByText(/^Sent to you/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
-
   });
 });
 
@@ -323,5 +326,37 @@ describe('the Group Picks chip', () => {
     await choose(view, 'People');
     await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
     expect(view.queryByText('Group Picks')).toBeNull();
+  });
+});
+
+/**
+ * **The top controls are one row, and never two** (founder, physical Android, 2026-09-07).
+ *
+ * `Sent to you · N`, `Group Picks` and `Filters · N` wrapped onto two rows on a 360pt
+ * phone, and the arithmetic does not allow them to fit at footnote size with counts. The
+ * row is `nowrap` inside a horizontal scroller now — the same arrangement as the tab row —
+ * so on every ordinary phone nothing changes and on a narrow one the row scrolls rather
+ * than reflows. This test pins the contract rather than a width: no layout engine runs
+ * here, so what can be asserted is that wrapping is structurally impossible and that the
+ * overflow has somewhere to go.
+ */
+describe('the top controls', () => {
+  it('are one row that scrolls sideways rather than wrapping', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Group Picks')).toBeTruthy());
+
+    const row = view.getByTestId('for-you-controls');
+    const style = Array.isArray(row.props.style)
+      ? Object.assign({}, ...row.props.style)
+      : row.props.style;
+    expect(style.flexDirection).toBe('row');
+    expect(style.flexWrap).toBe('nowrap');
+
+    const scroller = view.getByTestId('for-you-controls-scroller');
+    expect(scroller.props.horizontal).toBe(true);
+    // All three, in the row, in the founder's order.
+    expect(within(row).getByText(/^Sent to you/)).toBeTruthy();
+    expect(within(row).getByText('Group Picks')).toBeTruthy();
+    expect(within(row).getByText(/^Filters/)).toBeTruthy();
   });
 });

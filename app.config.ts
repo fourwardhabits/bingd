@@ -147,7 +147,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // auto-increments and this marketing version does not: changing it is this line and
   // nothing else. It moves the fingerprint, which is why it belongs in the same window as
   // the production ref rather than afterwards.
-  version: '1.0.0',
+  //
+  // **1.0.1 on 2026-09-08, for the first TestFlight candidate after the public launch.**
+  // 1.0.0 (7) is what is on the App Store, built from `ba14bd0` on 2026-08-31, and a
+  // released marketing version cannot be submitted a second time — so the next candidate
+  // has to be a new one whether it goes to review today or in a week. A patch rather than
+  // a minor: everything between the two is correction and polish on shipped surfaces.
+  //
+  // **This moves the fingerprint, and that has one consequence worth stating.** The
+  // Android closed-test build 8 runs runtime `7f813c4a`, which is what `main` has
+  // fingerprinted to since 2026-09-03 — so `eas update` from this commit onward will not
+  // reach it, and the founder's Android device needs a new build to keep receiving
+  // over-the-air fixes. Nothing already installed changes: a build keeps the runtime it
+  // was compiled with.
+  version: '1.0.1',
   orientation: 'portrait',
   scheme: current.scheme,
   userInterfaceStyle: 'light',

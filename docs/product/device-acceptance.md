@@ -483,14 +483,19 @@ titles as A, so do that early: it is what makes Match calculable at all.
 ### The Ranked menu
 
 - [ ] Open a title you have ranked and tap the **Ranked** chip. The menu reads:
-      `YOUR LOG` — write/edit review, add/edit private note · `RANKING` — **Rank again**,
-      **Change your rating** · `COLLECTION` — Remove from collection.
+      `YOUR LOG` — write/edit review, add/edit private note, who I watched with ·
+      `RANKING` — **★ Update your rating**, **↻ Log another watch** ·
+      `COLLECTION` — Remove from collection.
+- [ ] ⚠ **There is no *Rank it again* row and no *Change your rating* row** (consolidated
+      2026-09-08). Two rows in `RANKING`, not three.
 - [ ] **No row has a grey sentence beside its label.** This is the finding: every one of
       them truncated at phone width. If any row shows clipped grey text, it has come back.
 
-### Rank again keeps your score
+### Update your rating keeps your score
 
-- [ ] Note the score and the position of a ranked film. Tap **Rank again**.
+- [ ] Note the score and the position of a ranked film. Tap **Update your rating**, then
+      choose **the band it is already in** — this is the same-watch correction, and it is
+      the path the retired *Rank it again* row used to take in one tap.
 - [ ] ⚠ **The score must still be there.** Before this pass it disappeared the moment the
       sheet opened. Swipe the sheet away *without answering anything* and check the title
       page, Collection and your profile: the score, the position and the band are all
@@ -504,11 +509,11 @@ titles as A, so do that early: it is what makes Match calculable at all.
 ### One activity per watch
 
 - [ ] Open **Feed** on B (who follows A). Count A's `ranked` entries for one film.
-- [ ] On A, **Change your rating** on that film — pick the same band, finish the
+- [ ] On A, **Update your rating** on that film — pick the same band, finish the
       comparisons. Refresh B's feed. ⚠ **No new entry.** Repeat twice more: still none.
 - [ ] On A, change it to a *different* band and finish. Still **no new entry**.
-- [ ] On A, use **Rank again** and finish. ⚠ **Exactly one** new entry, and only after the
-      comparisons are done — not when the sheet opened.
+- [ ] On A, use **Log another watch** and finish. ⚠ **Exactly one** new entry, and only
+      after the comparisons are done — not when the sheet opened.
 
 ### Notifications primer
 
@@ -628,3 +633,72 @@ mutual follows (Mutual Mania's first tier) is the cheapest honest one.
   rollout working.
 - A tier skipped past in one leap announces only the highest tier crossed. The lower
   ones are recorded, silently, and that is by design.
+
+---
+
+## Pre-launch UI closeout — 2026-09-08
+
+Five founder findings from physical QA, all cosmetic or copy, all on surfaces that ship in
+the next iOS candidate. Nothing here touches the backend.
+
+### The SCORES row: one rule about colour
+
+- [ ] Open a title you have **ranked**, where **nobody you follow** has rated it and
+      bingd. has too few ratings. Three circles:
+      ⚠ your own is **solid Maroon with your number in it**; the other two are
+      **filled, muted grey, and completely empty**.
+- [ ] ⚠ **There is no dash, no line, no icon and no zero inside either grey circle.** An
+      em dash there is the state this pass removed.
+- [ ] The words beneath still differ: `Your score` / *(nothing)*, `Following` /
+      `No ratings yet`, `bingd.` / `Not enough ratings`.
+- [ ] Find a title with a **real bingd. score on one rating** (`1 rating` under it).
+      ⚠ **The number and its ring are Maroon**, exactly as they are at `128 ratings`.
+      A grey number there is the regression: sample size is stated in words, never in
+      colour.
+- [ ] With VoiceOver / TalkBack on, each empty circle still says which absence it is —
+      "Following: No ratings yet", and so on.
+
+### The Ranked menu is two rows
+
+Covered in *The Ranked menu* above; the short version is **★ Update your rating** and
+**↻ Log another watch**, and nothing else in `RANKING`.
+
+- [ ] **Update your rating → the same band → finish.** ⚠ The position may move; **no new
+      feed entry** appears on a follower's device. This is the same-watch correction, and
+      it is the capability the removed *Rank it again* row used to reach in one tap.
+- [ ] **Update your rating → a different band → finish.** Still ⚠ **no new feed entry**.
+- [ ] **Log another watch → finish.** ⚠ **Exactly one** new entry.
+
+### For You's header and controls
+
+- [ ] ⚠ **There is no bell on For You.** Collection and Search still have none either.
+- [ ] The bell is still on **Feed** and on **Profile**, and still opens the inbox with its
+      unread count. Nothing about notification delivery changed.
+- [ ] *Sent to you* and *Group Picks* are drawn in **Maroon** — glyph, label and a tinted
+      hairline. *Filters* stays **grey**. ⚠ None of the three is taller than it was, and
+      the row is still **one line**.
+- [ ] Turn *Sent to you* **on**: it takes the full-strength ring and the Parchment fill,
+      and is still visibly distinguishable from *Group Picks* beside it.
+- [ ] On the narrowest phone available, ⚠ **the row never wraps to two lines.** If the
+      three controls do not fit it scrolls sideways; that is correct.
+- [ ] ⚠ There is a visible gap between the control row and the first row of posters. They
+      must not touch.
+
+### Group Picks' first screen
+
+- [ ] Open **Group Picks** from the Movies wall. Under the title:
+      ⚠ *"Pick who's watching and bingd. will find movies you can all agree on."*, then
+      *Who's watching?*.
+- [ ] Open it from the **TV** wall: the same sentence, ending *"…find shows you can all
+      agree on."*
+- [ ] With only yourself selected, the button reads ⚠ **Add someone to get picks** and is
+      disabled. It must **not** say *Get picks for 1*.
+- [ ] Choose one person: **Get picks for 2**, enabled. Choose another: **Get picks for 3**.
+      Deselect back down to yourself: it returns to **Add someone to get picks**.
+
+### Collection, deliberately unchanged
+
+- [ ] Collection still reads: the wordmark, **Movies ▼**, then **Watched | Watchlist**,
+      then its filter and sort controls — on separate rows. ⚠ *Watched | Watchlist* has
+      **not** moved up beside *Movies ▼*; that was considered and rejected as not
+      width-safe on smaller iPhones.

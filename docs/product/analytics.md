@@ -230,9 +230,9 @@ four acts completed, in the words the Ranked menu uses (2026-09-07):
 | `mode` | The act | Writes a `title_ranked` activity |
 |---|---|---|
 | `start` | a first placement; the title had no position | yes |
-| `rebucket` | *Change your rating* into a different band | no |
-| `rerank` | *Adjust placement*, or *Change your rating* re-choosing the same band | no |
-| `again` | *I watched it again* — a second viewing | yes, exactly one |
+| `rebucket` | *Update your rating* into a different band | no |
+| `rerank` | *Update your rating* re-choosing the same band. Reached from the *Rank it again* row too, until that row was consolidated away on 2026-09-08 | no |
+| `again` | *Log another watch* — a second viewing | yes, exactly one |
 
 It is there because the three completions of an already-ranked title reach the same
 `placed` answer as a first placement and, until 2026-09-07, were counted as one. A

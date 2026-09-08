@@ -91,6 +91,45 @@ export const semantic = {
    */
   score: brand.maroon,
   scoreInk: brand.parchment,
+  /**
+   * The score-shaped hole: a filled, muted grey disc with nothing in it (founder,
+   * physical QA, 2026-09-08).
+   *
+   * The rule the founder wants a reader to be able to state after two seconds on the
+   * page is **a real score is Maroon and no score is grey**. Nothing else may encode
+   * anything — not the size of the sample behind a number, not how fresh it is.
+   *
+   * So the empty state had to stop being a *variation on a score*. It has been a dashed
+   * ring, a cream `surface.sunken` disc, and most recently an em dash inside a neutral
+   * ring; each of those is a circle with a mark in it, and a circle with a mark in it is
+   * what this page uses to state a number. Filled and empty is the one treatment that
+   * cannot be misread as a quiet score.
+   *
+   * Ink at 16% over Paper, resolved to a literal rather than left as `inkAlpha(0.16)`:
+   * an alpha fill takes its colour from whatever is behind it, and this disc appears on
+   * Paper and on Parchment both. Never carries text — there is nothing inside it — so it
+   * is not a certified pair and has no contrast obligation.
+   */
+  scoreEmpty: '#D9D6D3',
+  /**
+   * Maroon, softened to a border weight: the hairline on a control that is a *feature*
+   * rather than a utility (For You's control row, founder, 2026-09-08).
+   *
+   * Sent to you and Group Picks are two of the things this app has that others do not,
+   * and they sat in the same neutral grey as the Filters button beside them. They are
+   * marked out by their glyph and label going Maroon plus this border; the third stays
+   * grey. That is the whole hierarchy — **feature, feature, utility** — and it costs the
+   * row no height, no second line and no card.
+   *
+   * Deliberately weaker than `action`, and deliberately not the selected treatment: a
+   * chip that is *emphasised* and a chip that is *on* have to stay distinguishable, so
+   * emphasis takes the border alone and `on` keeps the full-strength ring and the
+   * Parchment fill.
+   *
+   * Maroon at 35% over Paper, resolved to a literal for the reason `scoreEmpty` is: an
+   * alpha border picks up whatever surface is behind it, and chips sit on both.
+   */
+  actionSubtle: '#CDB4B6',
   /** Milestone fills. Never text. */
   emphasis: brand.amber,
   /** Watched, completed, sync success. Never text. */

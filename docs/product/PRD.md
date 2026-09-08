@@ -974,11 +974,29 @@ Three properties this is required to keep:
 >
 > | | What the reader is saying | Feed activity |
 > |---|---|---|
-> | **Rank again** | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
-> | **Change your rating** | the opinion I recorded was wrong | **none** — the original activity stands |
+> | **Log another watch** (was *Rank again*, then *I watched it again*; renamed 2026-09-07) | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
+> | **Update your rating** (see the 2026-09-08 note below) | the opinion I recorded was wrong, or it is in the wrong place | **none** — the original activity stands |
 >
-> A **band change** — loved to fine — is a Change your rating and writes no activity
+> A **band change** — loved to fine — is an Update your rating and writes no activity
 > either. Moving a title between bands is a correction to a rating, not a second viewing.
+>
+> > **As built — 2026-09-08: two rows, not three.** The menu carried *Rank it again*
+> > (`rerank`), *Log another watch* (`again`) and *Change your rating* (`rebucket` or
+> > `rerank`, decided by the band chooser). The first and third were **two doors into one
+> > act**: both correct a rating already given, both leave `p_new_watch` false, both write
+> > no activity, and they were separated only by whether the band chooser was skipped —
+> > a mechanism, which is what the 2026-09-07 rename had already decided this menu must
+> > stop exposing. The founder consolidated them into **Update your rating**.
+> >
+> > **The capability is intact.** *Update your rating* opens the log sheet's band chooser,
+> > and a **different** band is `rank_rebucket` while the **same** band is
+> > `rankAgain(newWatch: false)` — precisely the call *Rank it again* made directly. So a
+> > reader can still change their band, and can still re-establish the placement of the
+> > same watch, without logging a viewing they did not have. `rerank` is not removed; it
+> > has one entry point instead of two.
+> >
+> > Nothing under the menu moved: no RPC, no argument, no migration, no ranking maths, and
+> > no historical activity rewritten or de-duplicated.
 >
 > **Starting either one changes nothing anybody can see.** This is the founder's device
 > finding and the contract that replaces the behaviour it found: until the new placement
@@ -1006,8 +1024,8 @@ Three properties this is required to keep:
 
 > **A ranking activity is a snapshot — founder decision 2026-09-07.** The score a
 > `title_ranked` activity shows is the score that was announced for *that* watch, written
-> into the event's payload at completion, and it is never rewritten. An *Adjust placement*
-> or a *Change your rating* later can move the title to a different score in the
+> into the event's payload at completion, and it is never rewritten. An *Update your rating*
+> later can move the title to a different score in the
 > Collection and on the title page — 8.3 in the feed, 8.6 on the title — and that is
 > correct, not drift: the feed says what was announced, the Collection says what is held
 > now. Two invariants carry it. **A correction never creates a feed post**, which is what

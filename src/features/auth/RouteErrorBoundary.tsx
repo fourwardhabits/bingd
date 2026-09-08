@@ -1,7 +1,7 @@
 import { Component, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { reportHandled } from '@/lib/monitoring';
+import { errorLineFor, recordRenderError } from '@/lib/render-errors';
 import { Button, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -52,6 +52,34 @@ import { theme } from '@/ui/tokens';
  * one makes *any* unknown throw survivable. A pre-RC build with no boundary at all is a
  * build where the next unhandled render error is a permanent blank screen for whoever
  * finds it.
+ *
+ * ---------------------------------------------------------------------------
+ * **CATCHING HERE COSTS THE BACK STACK, WHICH IS WHY A ROUTE MAY CATCH FIRST**
+ * (founder, physical Android, 2026-09-07)
+ *
+ * The report was "the title page shows the boundary, and sometimes I end up back on
+ * Feed instead of on the title page". The second half is this component, and it is not a
+ * navigation decision anybody wrote:
+ *
+ *   1. this boundary wraps `<Stack>`, so catching **unmounts the navigator** and the
+ *      pushed route goes with it — there is no longer a title page to be on, and no
+ *      entry behind it to go back to;
+ *   2. clearing the error (Try again, or `resetKey` changing) mounts a *new* `<Stack>`,
+ *      which starts at the root index;
+ *   3. `nextRoute` reads the root index as `group === undefined` and returns
+ *      `/(tabs)/feed` (`session.tsx`), so `useAuthRouting` replaces to the feed.
+ *
+ * Every step is correct on its own and the sum is a reader losing their place. The right
+ * answer is not to weaken any of them: it is that a **screen's** render error should be
+ * caught by the screen, inside the navigator, where the route survives and Back still
+ * goes where it went before. Expo Router supports exactly that — a route module may
+ * export `ErrorBoundary`, and the router wraps the route component in it. `app/title/
+ * [id].tsx` does, and any screen may.
+ *
+ * So the layering is now: a route's own boundary catches that route's render errors and
+ * keeps the stack; this one catches everything a route boundary cannot — a throw in a
+ * layout, in the navigator itself, or on a screen that has not declared one — and
+ * accepts the reset, because at that point there is nothing left to preserve.
  */
 type Props = { children: ReactNode; resetKey: string };
 type State = { error: Error | null };
@@ -79,13 +107,16 @@ export class RouteErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error) {
-    // A render error nobody hears about is a crash report the founder cannot ask a
-    // tester about. `reportHandled` is a no-op with no Sentry key configured.
-    reportHandled(error, { stage: 'route_render' });
+    // Sentry *and* the flight recorder. A render error nobody can read is a crash report
+    // the founder cannot ask a tester about, and Sentry is the half this project has not
+    // been able to read. See `lib/render-errors.ts`.
+    recordRenderError(error, 'route_render');
   }
 
   override render() {
     if (!this.state.error) return this.props.children;
+
+    const line = errorLineFor(this.state.error);
 
     return (
       <View style={styles.fill}>
@@ -95,6 +126,14 @@ export class RouteErrorBoundary extends Component<Props, State> {
         <Text variant="body" tone="secondary" style={styles.centred}>
           Your films are safe. This screen stopped, not your account.
         </Text>
+        {/* Beta and below. It is the difference between a report that says "the title
+            page crashed" and one that names the exception, and it costs a stranger's
+            build nothing because they never see it. */}
+        {line ? (
+          <Text testID="boundary-error" variant="caption" tone="tertiary" style={styles.centred}>
+            {line}
+          </Text>
+        ) : null}
         <Button label="Try again" onPress={() => this.setState({ error: null })} />
       </View>
     );

@@ -8,6 +8,20 @@ export const space = {
   4: 16,
   5: 20,
   6: 24,
+  /**
+   * The interval between two *sections* of a reading page (title detail, 2026-09-07).
+   *
+   * `space[6]` separates blocks inside a section and was doing section duty as well, so
+   * "genres, then SCORES" was spaced exactly like "heading, then the heading's own
+   * content" — and the title page read as one undifferentiated column rather than as a
+   * sequence of answers to different questions.
+   *
+   * 28 is the next step on the same 4pt grid every other key here sits on, so this is a
+   * scale entry and not a one-off constant: the founder's spacing contract asks for
+   * 24–28 at every section seam, and this is the top of that range, used where no rule
+   * carries the change.
+   */
+  7: 28,
   8: 32,
   10: 40,
   12: 48,
@@ -36,7 +50,26 @@ export const layout = {
    */
   avatar: { xxs: 18, xs: 24, sm: 32, md: 44, lg: 72 },
   icon: { sm: 20, md: 24, lg: 28 },
-  control: { searchFieldHeight: 40, chipHeight: 32, headerHeight: 44 },
+  control: {
+    searchFieldHeight: 40,
+    chipHeight: 32,
+    headerHeight: 44,
+    /**
+     * The ceiling on a **content-sized** button standing in a row beside icon controls
+     * (title detail, founder lock, 2026-09-07).
+     *
+     * The Rank/Ranked control took `flex: 1` and therefore the whole content width, which
+     * the founder rejected on the device: a full-width primary reads as a form's submit
+     * button, and it is the reason the row below the identity block looked like chrome.
+     * It is sized by its own label now, and this is only the guard at the top end — at
+     * large text sizes a label-sized button can otherwise walk across the whole column.
+     *
+     * 168 is the top of the founder's 150–170 range. `Ranked` sets to about 132 at the
+     * default text size, so on an ordinary phone this never binds; it exists for 130%
+     * type, where it is the difference between a compact control and a full-width one.
+     */
+    inlineButtonMaxWidth: 168,
+  },
   /**
    * What lifts a 32pt chip to the 44pt target without drawing it any larger
    * (2026-09-07). Vertical is the arithmetic, `(44 - 32) / 2`; horizontal is half of
@@ -62,10 +95,22 @@ export const layout = {
    * Four points of diameter buys two of type and the badge reads as the row's
    * anchor again.
    */
-  // `xl` exists for exactly one place: the title page's personal-score cluster,
-  // where the founder's hierarchy pass made the reader's own number the anchor of
-  // the hero band (2026-08-27). Lists stay on `md`/`sm`.
-  scoreBadge: { xl: 64, lg: 56, md: 44, sm: 40 },
+  /**
+   * `detail` is the title page's Scores row, and all three units share it — the
+   * reader's own score, the mean over the people they follow, and bingd.'s.
+   *
+   * **It replaces `xl` (64), which is deleted rather than deprecated.** `xl` existed for
+   * exactly one place: the personal-score cluster that hung off the poster's corner, and
+   * the founder's 2026-09-07 direction moves the reader's own number into the Scores row
+   * with the other two. Nothing else ever used it, so leaving it would leave a size in
+   * the system that documents a composition the app no longer has.
+   *
+   * 48 rather than `lg` (56) or `md` (44): three of these sit across a 358pt content
+   * width with their labels beside them, and at 56 the row runs out of column before the
+   * third label is set. The hierarchy between the three is carried by *fill*, not by
+   * diameter — see `ScoreBadge`'s `variant`.
+   */
+  scoreBadge: { lg: 56, detail: 48, md: 44, sm: 40 },
   /**
    * The award badge's well (Bingd Awards, 2026-08-18).
    *
@@ -129,6 +174,17 @@ export const poster = {
   xs: { width: 40, height: 60 },
   sm: { width: 56, height: 84 },
   md: { width: 88, height: 132 },
+  /**
+   * The title page's identity poster, on the right of the title block.
+   *
+   * Between `md` and `lg` because neither worked: at 88 the artwork stopped being the
+   * counterweight to a serif title and read as a thumbnail somebody had left there, and
+   * at 132 the column left too little width to set that title in beside it.
+   *
+   * At 100 wide it takes `radius.card` and a shadow from the rules below with no new
+   * branch in either, which is the test of whether a size belongs on this scale.
+   */
+  detail: { width: 100, height: 150 },
   lg: { width: 132, height: 198 },
   xl: { width: 180, height: 270 },
 } as const;

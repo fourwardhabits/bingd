@@ -385,6 +385,594 @@ The JustWatch credit is on both surfaces because their terms require the source 
 wherever the data is shown — demoted, never hidden. See
 [`../reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
+### As built — 2026-09-07: the identity redesign
+
+> **Partly superseded by the note below it** — the founder reviewed this composition and
+> corrected four things: the poster moved to the right, the identity block came off the
+> artwork, the floating `YOU` pill became the words "Your score", and Rank/Ranked kept its
+> label and its menu instead of becoming an Adjust glyph. Everything else here is what
+> shipped. This note stays because the reasoning that produced the rejected version is what
+> makes the correction legible.
+
+The founder's redesign of the top half of this page, taken as a whole. Nothing about ranking,
+scoring, recommendation or the catalogue moves; this is composition, hierarchy and one crash.
+
+```
+   ╔════════════════════════════════════════════╗
+   ║ ‹                                       ⋯  ║  ← overlays the artwork, no bar
+   ║        backdrop, 16:9, behind the          ║
+   ║        status bar, scrim under chrome      ║
+   ╚════════════════════════════════════════════╝
+   ┌────────┐  The Last of Us
+   │        │  Season 1, 2023
+   │ poster │  TV-MA · 9 episodes · Craig Mazin
+   │  md    │  #1 in TV · Watched 12 Feb 2026
+   └──────⬤─┘
+         YOU        ← 10.0 in the circle, YOU on its lower edge
+
+      ⇅          ▢          ➤
+    Adjust      Save    Recommend
+
+   A thief who steals corporate secrets through dream-sharing technology
+   is given the inverse task of planting an idea into the mind of a chief
+   executive, but his tragic past may doom the project and his team to
+   disaster before they can even begin. … more      ← always on line four
+
+   [Drama] [Action & Adventure] [+2]
+
+   SCORES
+   ⬤ 9.1  Following        ⬤ 8.7  bingd.        →   ← scrolls sideways
+     2 people you follow      12 ratings
+
+   WHERE TO WATCH             [N] [tv] [a]  +2   ›
+   via JustWatch
+   ─────────────────────────────────────────────  ← the page's one hairline
+   Episodes    Cast    Reviews    Details
+```
+
+**Identity moved to poster-and-title side by side.** The poster used to sit alone under the
+hero with a detached score column opposite it, and the title, year and metadata began on a
+full-width band below both — three bands for one fact. They are one row now: the poster still
+straddles the hero's fade on its Paper mat, and everything that names the title sets beside it
+in a column, in the order a reader scans. For a season the heading is **the show** and the
+subtitle is `Season 1, 2023`; the show's name is also the link to the series page, which
+replaces the small Maroon line that used to sit above the heading. `POSTER_LIFT` is 88 with
+the poster at `md`, and the no-artwork band is the bar's height plus that lift, since the
+navigation now overlays the hero rather than sitting above it.
+
+The metadata line reads certification, then length, then a credit — `TV-MA · 9 episodes ·
+Craig Mazin`, `PG-13 · 145 min · Destin Daniel Cretton`. Two facts became available to it
+without a new request: a season now inherits its series' certification, because TMDB publishes
+a rating on the series and never on a season, and a season's length is its **episode count**
+rather than a runtime (`20260820000400`) — the line used to print a runtime column TMDB does
+not fill for seasons, so the segment was simply missing on every season page. Television's
+credit falls back from director to an explicit Creator and then an Executive Producer, read
+off the `credits` facet the screen was already fetching. Any part that is absent is dropped
+without leaving a separator, and a line with nothing in it is not rendered at all. The feed
+keeps `148m` in its own subheading: that is a two-line row with a poster, and this is a line
+with a column to itself.
+
+**The personal score now carries explicit `YOU` context, over the poster.** `10.0` in a
+detached upper-right column was not self-evidently the reader's own — a bare number beside
+artwork is where every other product puts a critics' aggregate. The circle moved onto the
+poster's lower outside corner with a `YOU` pill on its edge: Paper ground, Maroon hairline,
+Maroon capitals, not a second filled shape. The number, the scale and where it comes from are
+unchanged (PRD §10, `score.ts`), it is still not a star rating, and the logged-but-unranked
+state is still the honest dashed ring rather than a greyed zero. A ranked title whose band
+sizes have not landed draws the neutral empty circle, because the dashed ring reads "rank
+this" and would contradict the Adjust control beside it. The ordinal survives as a segment of
+the context line — `#1 in TV · Watched 12 Feb 2026` — rather than as a row of its own, and the
+watch date is on this page for the first time.
+
+**Rank/Save/Recommend became one compact action group.** They were three controls of three
+kinds in two places: a full-height `Ranked` chip with a tick, two unlabelled glyphs under it,
+and before that a row of Maroon chips further down. Now one row of three, equal shares, one
+baseline, one weight, each 44pt or more, never wrapping. **The `Ranked` button is gone**: a
+button whose job is to *report* is a button standing in for a fact, and the fact is on the
+poster. The first action is the rank intent at whichever stage the title is in — **Adjust**
+(same watch, `mode: 'rerank'`) for a ranked title, **Rank** for an unranked one. Each glyph
+keeps a one-word caption, because a paper plane is Recommend here and Send everywhere else. A
+series gets Save alone (PRD §10). The rest of the ranking menu — the note, who I watched with,
+*Update your rating*, *Log another watch*, Remove — moved from the Ranked chip to the
+overflow `⋯` in the top bar, with the same reachability it had: present for a ranked title,
+absent otherwise.
+
+**The overview precedes the genres and collapses to four lines with `more` inline.** `more`
+was a second `Text` under the prose, so a synopsis that filled its clamp spent a whole line on
+one word and pushed the genres away from the paragraph they belong beside. It is now a span
+*inside* the clamped `Text`, which is what makes the guarantee structural — React Native
+cannot put it on a fifth line, because `numberOfLines={4}` has not given the block one. Where
+to cut is **measured**, not counted: an invisible pass reports every line of the full synopsis
+with its own width, a second reports the width of ` … more`, and the fourth line is trimmed to
+a word boundary that leaves room for it. A character count would be right at one width and one
+text size and wrong at every other. A synopsis that already fits four lines shows no marker at
+all. Before the measurement lands, and if it never does, the block is the full text under a
+plain four-line clamp — honest, and still tappable.
+
+**Scores regained a heading and became horizontally extensible.** `SCORES`, in the app's
+section treatment. It was removed on 2026-09-06 because the units name themselves, which is
+true of each unit and not of the pair — two circles arriving under a synopsis with no heading
+read as a continuation of the synopsis, and no arrangement of two units gives a screen reader
+a landmark. **Following leads bingd.**, because a mean over accounts the reader chose is a
+signal about their own taste and the app-wide mean is a fact about the app. The row is a
+horizontal scroller sized to its content rather than a flex pair with a responsive stacked
+fallback: a third unit has been asked for twice, and content sizing means `Not enough ratings`
+can never break mid-word at any text size. No card, no wash, no rule. The reader's own score
+is still not in here (founder, 2026-08-18).
+
+**The hero navigation is transparent and gains opacity on scroll.** The route no longer draws
+a navigator header at all. Back and an overflow control overlay the artwork on `TitleHero`'s
+own top scrim — the app's existing contrast language — and one `Animated.Value` carries three
+things at once as the hero leaves: the Paper ground and its hairline arriving, the compact
+title fading up, and a crossfade between two copies of each glyph, light on artwork and Ink on
+Paper. The old arrangement mounted or unmounted a `headerBackground` on a boolean, which has
+no middle; and `headerTintColor` is a navigation option rather than an animatable value, so
+there was no way to make the icons change with the ground. **Navigation semantics are
+unchanged**: Back is `router.back()` and returns to whatever pushed the route, and the
+hardware back and edge-swipe gestures are the navigator's and untouched. The compact title is
+hidden from assistive technology until it is readable, crossed with hysteresis, so a screen
+reader does not meet the title twice on every page.
+
+**Section separation was reduced to one hairline.** Rules above the scores, above Where to
+watch, and between every pair of episodes are gone. Whitespace is the default separator and a
+Maroon section heading is what announces a block; the single rule left is above the tab row,
+which is the one place the page changes mode — above it the page is about the title, below it
+it is a set of lists you choose between.
+
+### As built — 2026-09-07, final: identity left, poster right
+
+The founder's review of the composition above, and the direction that supersedes it. Everything
+in the note before this one still describes what changed and why *except* the four points
+corrected here — they are kept rather than rewritten, because the reasoning that produced the
+rejected version is what makes this one legible.
+
+```
+   ╔════════════════════════════════════════════╗
+   ║ ‹                                       ⋯  ║  ← discs on artwork, no bar,
+   ║        backdrop, 16:9, behind the          ║    old compact height
+   ║        status bar and the controls         ║
+   ╚════════════════════════════════════════════╝
+   The Last of Us                    ┌────────┐
+   Season 1, 2023                    │        │
+   TV-MA · 9 episodes · Craig Mazin  │ poster │
+   #1 in TV · Watched Feb 12, 2026   │  md    │
+                                     └────────┘
+                                     Your score
+                                        10.0
+
+                       [ ✓ Ranked ]   🔖   ➤
+
+   Twenty years after a fungal outbreak ravages the planet, a hardened
+   smuggler is hired to escort a teenage girl out of a brutal quarantine
+   zone, and what begins as a small job becomes a journey across a
+   broken country. … more                    ← always on line four
+
+   [Drama] [Action & Adventure] [+2]
+
+   SCORES
+   ⬤ 9.1  Following        ⬤ 8.7  bingd.        →
+
+   WHERE TO WATCH             [N] [tv] [a]  +2   ›
+   via JustWatch
+   ─────────────────────────────────────────────  ← the page's one hairline
+   Episodes    Cast    Reviews    Details
+```
+
+**The poster is right of the identity block, and the identity block is on Paper.** The pass
+above put the poster left and pulled the whole row up into the artwork. Two corrections, and
+they are one: **primary title text must not depend on being readable over a backdrop nobody
+chose.** A hero is a night scene, a white sky, a face — a serif title set on it is legible on
+the artwork the designer happened to be looking at and nowhere else. So the identity row now
+begins at the hero's lower edge and every word of it sets on the page's own surface. The poster
+keeps its overlap, at a shallower `POSTER_LIFT` of 56, because artwork over artwork is fine and
+it is the one object on this page allowed to cross the fade. The row aligns on its top rather
+than its bottom, so a one-line film title and a wrapped three-line one both start level with
+the artwork instead of the block sliding up and down with the length of a name.
+
+**The primary title remains on the normal content surface** in every state, including a title
+with no backdrop at all, where the hero is the bar's height plus a short warm band.
+
+**The personal score is associated with the poster and says whose it is in words.** It sits
+under the frame, centred on it: `Your score` in `caption`/tertiary, then the filled Maroon
+circle. The floating `YOU` pill from the pass above is gone — a bubble on a badge reads as a
+sticker or a notification rather than as a label, which was the founder's objection. Ownership
+is now stated, nothing floats, and the number is still the dominant element in the block by an
+order of magnitude of weight. The scale, the derivation (`score.ts`) and the honest dashed
+unranked state are untouched; it is still not a star rating.
+
+**Rank/Ranked keeps its word, its treatment and its menu.** The intermediate pass replaced it
+with an `Adjust` glyph that went straight to a same-watch rerank. That is rejected: choosing
+between adjusting a placement and declaring a rewatch is the reader's decision, and putting two
+intents behind one press is the founder's Terrace House bug rebuilt in a different shape. So:
+
+- **unranked** — filled Maroon `Rank`, opens the log sheet, where a band is chosen and a first
+  ranking begins;
+- **ranked** — outlined `✓ Ranked`, opens the ranking-options menu, which is where *Update your
+  rating* and *Log another watch* are each named and each chosen.
+
+There is deliberately **no responsive switch** between a labelled button and an icon: a control
+that is a word on one phone and a symbol on another is two controls. The same menu is also
+reachable from the overflow in the top bar.
+
+**Rank/Ranked, Save and Recommend are one compact cluster**, right-aligned under the poster and
+the score rather than three equal shares of the content width — stretched across the page they
+read as a toolbar, which is the dashboard feeling this whole pass removes. Only the rank
+control is labelled, because only it is the primary act; the two glyphs keep their full spoken
+names and each clears 44pt through its own box rather than through slop, so neighbouring targets
+cannot overlap.
+
+**The top bar keeps the compact height it had before the redesign** — `insets.top` plus 44 on
+iOS and 56 on Android, exactly the navigator header's own metrics — and reserves nothing,
+because it is absolutely positioned over the artwork. What changed is only how it behaves. It
+begins fully transparent, and each control sits on a small Ink disc while it is over artwork:
+`TitleHero`'s top scrim is a gradient across the whole width, which is right for a bar and
+weakest exactly where a single glyph is smallest, so a local disc carries the contrast a pale
+backdrop needs. The disc fades out on the same value the Paper ground fades in on, so it exists
+only while there is artwork behind the glyph.
+
+**The synopsis is four lines with `more` inline on the fourth, the genres follow it, and the
+Scores treatment is unchanged from the note above.** Those three were accepted as built.
+
+### As built — 2026-09-07, polish from the device: the score on the corner, one action row
+
+Three corrections after the first physical pass of the composition above, none of them a
+change of architecture.
+
+**The score is back on the poster.** It sat *under* the frame for one revision, which produced
+a tall empty column on the right of the page and a number that read as a separate block. It is
+anchored to the poster's **lower-left corner** now — twelve points of the circle overhanging
+onto Paper, which keeps the number legible whatever the artwork behind the rest of it is, and
+inside the row's 16pt gap so it can neither cover a long title's last words nor take a press
+meant for the linked series name (review 75) — with
+`Your score` in `caption` beneath it. No floating pill. The unranked state is the dashed ring
+**with nothing in it**: the word `Rank` inside the circle duplicated the button beside it, and
+the honest statement of "no score yet" is the empty ring, not a second invitation.
+
+**The action row spans the content width.** `[ ✓ Ranked ] [🔖] [➤]` as one row directly after
+the identity block, the labelled control taking the width the two glyphs leave. Hung from the
+right under the poster it read as detached on the device — a cluster floating in a corner with
+a blank column above it. Control set, treatment and behaviour unchanged; the glyphs are still
+icon-only and each still clears 44pt through its own box.
+
+**The ranking menu says it in the app's own words.** *Adjust placement* became **Rank it
+again**, and *I watched it again* became **Log another watch**. Only the labels moved: `rerank`
+still passes `p_new_watch: false` and writes no activity, `again` still passes `true` and
+writes exactly one. The pair the founder rejected named the mechanism and a confession; these
+name the act, in the verbs the rest of the app uses.
+
+**And then the menu went from three rows to two** (founder, 2026-09-08). *Rank it again* and
+*Change your rating* were two doors into one act — both correct a rating already given, both
+leave `p_new_watch` false, both write no activity — separated only by whether the band chooser
+was skipped, which is a mechanism, which is exactly what the rename above had decided this menu
+must stop exposing. The founder's menu is:
+
+> **RANKING**
+> ★ Update your rating
+> ↻ Log another watch
+
+**It is an entry-point consolidation, not a loss of capability.** *Update your rating* opens the
+log sheet's band chooser, which has had three branches since 2026-08-15 and keeps all of them:
+a **different** band is `rank_rebucket`; the **same** band is `rankAgain(newWatch: false)` —
+precisely the call *Rank it again* used to make in one tap; and closing without choosing does
+nothing at all, because since `20260826000500` the session runs over the position the title
+already holds. So placement can still be corrected for the same watch, and nobody is made to log
+a viewing they did not have in order to do it. The one extra tap is the band chooser, which is
+also the screen that tells the reader which of the two things they meant.
+
+No RPC, argument, migration or piece of ranking maths moved with this, and no historical
+activity was rewritten or de-duplicated.
+
+**Twelve points between the synopsis and the genres.** The chips sat directly on the
+paragraph's last line. A `space[3]` gap keeps them associated with it without becoming a
+section break.
+
+**For You's controls are one row, and scroll.** *Sent to you · N*, *Group Picks* and *Filters ·
+N* wrapped to two rows on a 360pt phone, and the arithmetic does not allow a fit at footnote
+size with counts. The row is a horizontal scroller with `nowrap` now — the same arrangement as
+the tab row — so on every ordinary phone nothing changes and on a narrow one it scrolls rather
+than reflows. Compaction was reconsidered on 2026-09-08 and rejected: every value in the chip
+is already on the 4pt scale, and buying back the sixteen points the arithmetic is short would
+mean taking the control off the grid the rest of this document is built on. **It never wraps
+to two lines under any circumstances.**
+
+### As built — 2026-09-08: For You's header and control row
+
+Three founder findings from physical QA, all on the same strip of screen.
+
+**The bell comes off For You.** It carried one; Collection and Search did not; and on the
+device it did not optically centre against the wordmark beside it. Three of the five root tabs
+therefore disagreed about whether a header carries a control at all. The resolution is
+subtractive — remove it from For You rather than add it to the two screens that never had it —
+and notification *behaviour* is untouched: the inbox is still reached from Feed, which is the
+social surface it belongs to, and from Profile beside the gear.
+
+**Feature, feature, utility.** *Sent to you* and *Group Picks* are two of the things this app
+has that others do not, and they were drawn in exactly the grey of the *Filters* button beside
+them. They now take a Maroon glyph, a Maroon label and a `actionSubtle` hairline; *Filters*
+stays neutral. That is the whole treatment — no filled pill, no card, no badge, no second row,
+and **no extra height**, which was the founder's explicit constraint. Emphasis composes with
+selection rather than competing with it: an emphasised chip that is also *on* still takes the
+full-strength ring and the Parchment fill, so "this is a feature" and "this is applied" stay
+two readable states.
+
+**Sixteen points under the row.** The wall has no top padding of its own, so the row's
+`paddingBottom` is the entire seam, and at `space[2]` the first poster row touched the chips —
+which made the controls read as part of the wall rather than as what governs it. `space[4]`, the
+top of the *control row → the content it governs* interval in
+[`design-system.md` §5](./design-system.md).
+
+**Collection's header is deliberately unchanged.** Moving *Watched | Watchlist* up beside
+*Movies ▼* was considered and rejected: the combined row is not reliably width-safe on smaller
+iPhones without responsive typography or awkward compression, and responsive font sizing is not
+worth introducing for one row.
+
+### As built — 2026-09-08: Group Picks' first screen
+
+**One sentence saying what it is.** The sheet opened on a title, a question and a list of
+faces, which assumes the reader already knows what Group Picks does — and it is one of the few
+things in bingd. with no equivalent elsewhere, so it is exactly the screen that cannot assume
+it. *"Pick who's watching and bingd. will find movies you can all agree on."*, above
+*Who's watching?* and not in place of it. The noun follows the wall the sheet was opened from —
+*shows* on TV — because a sentence promising movies over a list of series answers a different
+question from the one being asked. Deliberately not a carousel, a tutorial or a dismissible tip.
+
+**The disabled button asks for what is missing.** The reader is in seat one from the moment the
+sheet opens, so the button read *Get picks for 1* and was dead: a control offering to do the
+thing, for the number of people currently chosen, that refuses. Below the minimum it now says
+**Add someone to get picks**; at or above it, *Get picks for N*. The minimum-participant rule is
+unchanged — two people, now named `GROUP_PICKS_MIN_MEMBERS` rather than written as
+`selected.size === 0` on the button.
+
+### As built — 2026-09-07, final: the score moves into Scores, and the actions move up
+
+The founder reviewed the composition above against a full visual specification and approved
+it **with revisions**. This is what shipped. Two of the revisions overrule the specification
+itself, and they are marked.
+
+**The hero is a fixed 16:9 band.** `width / layout.aspect.backdrop`, about 220pt at 390,
+whatever the artwork is. The compact navigation overlays it, gains its Paper ground on scroll,
+and keeps its existing physical height — there is no navigation spacer. Artwork resolves in a
+fixed order (`lib/hero.ts`): the title's own backdrop, the parent series' backdrop where that
+is semantically valid, then a poster blurred and held at 0.9 opacity so it reads as a *field*
+rather than as a picture somebody stretched, then a Parchment band. A portrait poster is never
+drawn raw inside the landscape frame. The poster slot inherits the same way: the season's own
+artwork, then the series', then the branded placeholder.
+
+**The poster carries artwork and nothing else.** No score, no `Your score` caption, no dashed
+ring, no rank badge. `posterColumn` has no `position: 'relative'` any more, so there is nothing
+for an overlay to be anchored against — which is a harder thing to reintroduce by accident than
+a deleted component. `PersonalScore` is deleted and `scoreBadge.xl` (64) with it; both existed
+only for the cluster this removes. The poster is `poster.detail`, 100 × 150 — a new size between
+`md` and `lg`, because at 88 the artwork read as a thumbnail left beside the title and at 132
+the column had too little width to set a serif title in.
+
+**The reader's own score is the first of three units in `SCORES`.** `Your score → Following →
+bingd.`, in that fixed order, which is a hierarchy of relevance to one reader and not a
+leaderboard: me, then the people I chose, then the room. On the poster the number had nothing to
+be measured against; here it is the first term of a comparison read straight across. It is stated
+**once** on the page.
+
+The units carry **no bucket word, no rank and no watch date**. All three were in the
+specification's `Your score` cell and all three were cut: `Loved` is jargon this screen has never
+spoken, and the placement and the date are the reader's *history* with the title rather than a
+qualification of an aggregate.
+
+**Each unit says its own empty state.** They shared `Not enough ratings`, which hid a real
+distinction — the app being short of a sample, nobody the reader follows having seen it, and the
+reader not having ranked it are three different facts and only the middle one is actionable. So:
+`Not ranked yet`, `No ratings yet`, `Not enough ratings` (shortened on 2026-09-08; see below).
+Every empty circle is a **filled `scoreEmpty` disc with nothing inside it** — see the
+2026-09-08 entry below, which replaced the em dash that stood there for a day.
+
+**Three units stack; two did not have to.** A circle with its words *beside* it needs about 170pt,
+so three ran off a 358pt content width and the horizontal scroller that used to rescue the
+two-unit row turned bingd. into something a reader discovered by swiping. Each unit is now a
+circle with its words *beneath* it on one of three equal columns; the row overflows downward by
+wrapping its own sub-label, and the scroller is gone because there is nothing left for it to
+rescue.
+
+**Fill carries the hierarchy, and this overrides §8's one-Maroon-fill rule inside this row.**
+`ScoreBadge` takes a `variant`: `filled` (the reader's own, and still the default everywhere
+else in the app), `outlined` (somebody else's score with enough behind it), and `quiet` (neutral
+ring, neutral ink). Three identical filled Maroon circles say the three claims are
+interchangeable, which is the opposite of what the section exists to say. `quiet` applies to
+**bingd. below two ratings** — the founder's rule is "do not make one person's score look
+statistically authoritative" — and never to Following, whose sample is people the reader chose
+rather than a statistic about strangers. It is a visual demotion only; whether there is a number
+at all is still the server's decision.
+
+**The actions live inside the identity column — REVISION.** The specification pinned the
+identity row to 150pt so the action group landed at the same y on every title; the founder
+rejected that as dead space made deliberate, and it is. The row is content-driven: title,
+subtitle, metadata, personal context, **actions**, all in the left column beside the poster, so
+the group rises on a short title and fills the space the poster leaves. Consistency of rhythm,
+not of coordinates. The synopsis still begins full width, below whichever column is taller.
+
+**The Rank/Ranked control is content-sized — REVISION of the shipped build.** It took `flex: 1`
+and therefore the whole width the two glyphs left, and a full-width primary at the top of a
+reading page reads as a form's submit button. It is `flexShrink: 1` with
+`layout.control.inlineButtonMaxWidth` (168) as the guard at 130% type; `Rank` measures about 104
+and `Ranked` about 132. The trailing space to its right is the signal that the group has ended.
+Height stays 44 so it shares a centre line with the two 44pt icon boxes. Treatment, behaviour and
+the word in both states are unchanged, and there is still no responsive switch to a glyph.
+
+**One metadata grammar, and a credit rule per kind.**
+
+| | subtitle | metadata line |
+|---|---|---|
+| film | `2013` | `R · 180 min · Martin Scorsese` |
+| season | `Season 1 · 2024` | `TV-MA · 9 episodes · Craig Mazin` |
+
+The subtitle joined with a comma and the line below with a middle dot, which made two adjacent
+lines of the same metadata look like two different kinds of claim; one separator now. The credit
+is **the film's `Director` or the season's `Creator`, with no fallback in either direction**. The
+line read `director ?? showrunner` for every kind, and on a season the `Director` credit is the
+person who directed *one episode of nine* — every season page was presenting them where a reader
+reads "whose show is this". The Executive Producer fallback went with it: on television that is
+routinely a financier or a star with a production deal. `TV-MA · 24 episodes` is better than a
+confident falsehood in the one place on the page nobody can check. Every line is built by
+filtering, so a missing segment never leaves a stray separator, and every line is clamped to one:
+the heading takes two before truncating and does **not** shrink its type to fit.
+
+**The personal context stays beside the title, and it is the overall rank.** `#2 in Movies ·
+Watched Aug 17, 2026`, in `caption`/tertiary under the metadata. The specification moved both
+halves under `Your score`; the founder kept them here, because a placement and a date are the
+reader's history with the title and not an aggregate's qualification. `heroRankFor` still answers
+with the best top-ten *genre* placement where there is no top-ten overall one, and this line now
+**discards that**: `#3 in Drama` beside a title reads as that title's standing when it is really
+the standing of a slice the reader never chose, and swapping to it exactly when the overall
+number is weaker is the page flattering itself. No overall placement means no segment. The genre
+reading survives for the post-ranking reveal, where the reader has just done the comparison that
+produced it.
+
+**The spacing contract.** `space[7]` (28) is new — the next step on the same 4pt grid — and it is
+the page's one *section* interval, used at genres → `SCORES`, scores → Where to watch, and Where
+to watch → the tab row. `space[6]` had been doing both jobs, so a section change was spaced
+exactly like a heading and its own content.
+
+| from → to | gap |
+|---|---|
+| hero → identity | 16 |
+| within the metadata stack | 4 |
+| metadata → personal context | 8 |
+| personal context → actions | 12 |
+| between action controls | 8 |
+| identity/poster region → synopsis | 16 |
+| synopsis → genres | 12 |
+| genres → `SCORES` | 28 |
+| `SCORES` → the row | 16 |
+| circle → its label | 10 |
+| scores → Where to watch | 28 |
+| Where to watch → the tab rule | 28 |
+
+**Unchanged, deliberately.** Where to watch keeps its restrained module and still draws nothing
+at all when the provider has no answer — there is no invented *In theaters* state, because the
+app has no theatrical-availability data. The tab set, the tab contents, the genre row's position
+and neutral chip styling, the ranking menu's *semantics*, and For You's single scrolling control
+row are all as they were. (The ranking menu's **copy** was as it was on 2026-09-07 and is not on
+2026-09-08 — see the two-row consolidation above. Its semantics still are.)
+
+### As built — 2026-09-08: the poster joins the identity block, and the scores stop arguing with themselves
+
+Four corrections from the second physical pass. None changes the composition above.
+
+**The poster no longer rises into the hero.** It was pulled up across the fade by a negative
+margin, and that margin has been 64, 120, 88 and 56 in turn. The founder's reading ends the
+sequence: whatever the number, a poster that crosses the fade **belongs to the hero**, and so
+it reads as detached from a title sitting level with its middle. No lift is small enough to fix
+that, because the defect is which block the artwork is a member of rather than how far it
+travels.
+
+The offset is positive now and it is four points — enough for the poster's top rule to meet the
+title's **cap height** rather than its line box. `title1` is 28pt of DM Serif on a 34pt line, so
+about six points of leading sit in that box and half of them above the capitals; aligned to the
+box the poster measures level with the ascent and reads high. The size is unchanged at
+`poster.detail`, 100 × 150.
+
+Two things that depended on the lift are now stated on their own terms: the collapsed no-artwork
+band keeps 56 as its own number, and the "Recommended by" overlay sits `space[3]` off the hero's
+lower edge instead of clearing a poster that no longer rises.
+
+**The synopsis clears both columns, structurally.** The identity row is a plain flex row with no
+height, no minimum, nothing absolutely positioned and no negative margin anywhere inside it — so
+its height is exactly the taller of its two children, and the synopsis, being the row's sibling
+rather than a child of either column, cannot begin before both have finished. That holds for a
+one-line film that clears the poster's 154 and for a wrapped two-line season whose left stack
+wins instead, with nothing having to compute which. There is still no fixed identity height.
+
+**A ranked title said `7.0`, `Your score` and `Not ranked yet` at once.** The badge and the
+sub-label were chosen by two different expressions: the caller passed the personal unit's
+*empty* copy as its `detail`, and `detail` is what a unit with a number prints. One derivation
+now decides the badge, the copy and the spoken label together, and it is `score != null` rather
+than a truthiness check, because `0.0` is a real score at the bottom of the *Not for me* band. A
+ranked personal unit draws **no second line at all**.
+
+**The supporting copy is a count.** `1 person you follow` and `None of your friends have ranked
+this` set on two and three lines in a third of the content width and made the section read as
+noise. Both aggregates count the same way now:
+
+| unit | with data | without |
+|---|---|---|
+| Your score | *(nothing)* | `Not ranked yet` |
+| Following | `1 rating` / `N ratings` | `No ratings yet` |
+| bingd. | `1 rating` / `N ratings` | `Not enough ratings` |
+
+The labels are what say *whose* ratings these are, which is exactly what the longer copy was
+spending extra lines restating. The three still never share a string: the reader not having
+ranked it, nobody they follow having rated it, and the app being short of a sample are three
+different facts.
+
+**And then colour was reduced to meaning one thing** (founder, later the same day). The
+hierarchy above ran filled Maroon for the reader's own, outlined for Following at any count, and
+outlined for bingd. at two ratings or more with a *quiet* neutral treatment below that. The quiet
+one is gone. On a device a real number in grey reads as a score that failed to load or went
+stale, because grey on this row already means *no score* — so the rule is now one sentence with
+no exceptions in it:
+
+> **A real score is Maroon. No score is a filled grey disc.**
+
+bingd. is outlined at every count, including one. Sample depth is stated in the words directly
+under the number, where `1 rating` is more precise than any colour and legible to somebody who
+cannot tell two greys apart. And the empty circle lost its em dash: a mark inside a circle is how
+this page states a number, so the dash was the last thing still blurring the two states
+together. It is `scoreEmpty`, filled, with **no dash, no line, no icon and no zero**. The three
+empty *sentences* still differ, because the three absences do; only the shape is now identical.
+`ScoreBadge`'s `quiet` variant was deleted from the type rather than left unused.
+
+One accessibility improvement came with the label rework: a `Pressable` with its own
+`accessibilityLabel` absorbs its children's, so a screen reader pressing a unit heard the sample
+and never the number. The spoken label now names the score first — `Following. 8.6 out of 10.
+3 ratings`.
+
+### The title-page crash — 2026-09-07
+
+The founder's report was two symptoms: a title page renders briefly and then the app's error
+boundary appears, and sometimes the reader ends up back on Feed rather than on the title page.
+
+**The second symptom is fully explained and fixed.** `RouteErrorBoundary` wraps `<Stack>` in
+`app/_layout.tsx`, so catching *anything* unmounts the navigator and the pushed route goes
+with it, along with everything behind it. Clearing the error mounts a fresh `<Stack>` at the
+root index; `nextRoute` reads the root index as `group === undefined` and returns
+`/(tabs)/feed` (`session.tsx`). No code decided to go to the feed — the back stack stopped
+existing. Expo Router lets a route module export `ErrorBoundary` and wraps only the route
+component in it, so `app/title/[id].tsx` now does: caught there, the route stays on the stack,
+Back still returns to whatever pushed it, and `retry` re-renders in place. The root boundary
+remains for everything a route boundary cannot catch — a throw in a layout, in the navigator
+itself, or on a screen that has not declared one.
+
+**The exception was not nameable from the repository, so the boundary was made to name it —
+and it did.** A caught render error had gone only to Sentry, which this project has been unable
+to read for weeks. It now also goes to the flight recorder as a `render` event carrying the
+error's class and the route, and a beta build prints the class and message under the apology.
+The first physical pass on that build read back:
+
+> `TypeError: Cannot read property 'layout' of null` — `title/[id]`
+
+**The root cause is `GenreRow`'s measuring pass reading a released synthetic event.** React
+Native's renderer pools synthetic events: once an event's handlers have run,
+`e.isPersistent() || e.constructor.release(e)` returns it to the pool and
+`SyntheticEvent.destructor()` sets `nativeEvent` to null (`ReactFabric-prod.js`). The
+measuring layer read `event.nativeEvent.layout.width` inside a functional `setWidths`
+updater, and React runs an updater *later*, during render, whenever it cannot compute it
+eagerly — which is the moment another update is already queued on the same component. So the
+first chip's width was read while the event was alive and every later chip's was read off a
+destroyed one: a title with one genre never crashed, and a title with two or more crashed
+whenever their layouts landed in one batch. Thrown during render rather than in the handler,
+it reached the error boundary instead of the red box — "loads for a moment, then the apology",
+on the titles that had genres. It shipped in #114 and was in the beta from the #122 update on.
+
+The fix is one line moved: the width is read synchronously in the handler and the updater
+closes over a number rather than an event. `GenreRow.test.tsx` reproduces the failure's own
+shape — three chips reporting in one batch, each event destroyed the way the renderer destroys
+it before the updaters run — and the route-local boundary and the diagnostic line stay,
+because the next unnamed exception deserves the same treatment.
+
+One suspect was removed on the way past rather than left standing: `GenreRow` mounted its
+"all genres" `Sheet` unconditionally, so every title page in the app carried a React Native
+`<Modal>` — and its keyboard listeners — inside the page's `ScrollView`, permanently, for a
+list nobody had asked to see. Every other sheet on this page mounts on demand; this one does
+now too.
+
 ---
 
 ## 7. Feed — reworked 2026-08-15

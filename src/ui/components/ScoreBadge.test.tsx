@@ -22,7 +22,10 @@ import { ScoreBadge, scoreBadgeMetrics, type ScoreBadgeSize } from './ScoreBadge
  * without the diameter, and a new size added with neither thought through.
  */
 
-const SIZES: ScoreBadgeSize[] = ['lg', 'md', 'sm'];
+// Every size the app draws. `detail` is the title page's Scores row, added 2026-09-07
+// when the reader's own score moved into it — and it is the one size where three badges
+// sit side by side, so a `10.0` that does not fit is three broken circles rather than one.
+const SIZES: ScoreBadgeSize[] = ['lg', 'detail', 'md', 'sm'];
 
 /** Inter SemiBold's own advances: 0.60em for a tabular digit, 0.28em for a period. */
 const widthOf = (text: string, fontSize: number) =>

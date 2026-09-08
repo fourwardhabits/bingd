@@ -118,12 +118,16 @@ export const semantic = {
   actionText:    '#F5EBDD',
   score:         brand.maroon,      // every stated 0–10 score: badge, community, reveal
   scoreInk:      '#F5EBDD',         // 7.4:1 on score
+  scoreEmpty:    '#D9D6D3',         // the score-shaped hole: filled, muted, empty inside
+  actionSubtle:  '#CDB4B6',         // Maroon at border weight, for an emphasised control
   emphasis:      brand.amber,       // milestone fills
   progress:      brand.sage,        // watched, completed, sync success
   danger:        brand.maroon,      // destructive confirmation
   focusRing:     brand.maroon,
 } as const;
 ```
+
+`scoreEmpty` and `actionSubtle` are resolved literals rather than alpha helpers, deliberately: both are drawn on Paper and on Parchment, and an alpha fill takes its colour from whatever happens to be behind it. `scoreEmpty` is Ink at 16% over Paper; `actionSubtle` is Maroon at 35% over Paper. Neither ever carries text, so neither is a certified pair.
 
 Destructive actions reuse Maroon rather than introducing red. The palette has no red, a new one would compete with the brand color, and destructive actions in this product are rare and always confirmed with words. The confirm button is labeled with the verb — "Delete list" — never a bare "OK," so color is never the only signal that something is irreversible.
 
@@ -188,13 +192,33 @@ Both are bundled as local assets and never fetched at runtime — the same failu
 
 ## 5. Space
 
-A 4pt base. Screen gutter 16. Gap between sections 24. Card padding 16.
+A 4pt base. Screen gutter 16. Gap between blocks inside a section 24, between sections 28. Card padding 16.
 
 ```ts
-export const space = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 8: 32, 10: 40, 12: 48, 16: 64 };
+export const space = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 7: 28, 8: 32, 10: 40, 12: 48, 16: 64 };
 ```
 
+`space[7]` arrived on 2026-09-07 with the title-page lock. `space[6]` had been doing two jobs — separating blocks inside a section *and* separating the sections themselves — so "genres, then `SCORES`" was spaced exactly like "a heading, then the heading's own content", and the page read as one undifferentiated column rather than as a sequence of answers to different questions. 28 is the next step on the same 4pt grid every other key sits on, so it is a scale entry and not a one-off constant, and it is used at every section seam that has no rule to carry it.
+
 PRD §5 asks for airy onboarding, comparison, reveal, and share surfaces, and efficient rows on Rankings and Search. In practice that means those two groups use different vertical rhythms: **airy surfaces** use 24 and 32 between elements and center their content vertically; **efficient surfaces** use 12 between rows with a 56pt minimum row height.
+
+### Screen rhythm: every adjacent pair has a stated relationship (2026-09-08)
+
+Two rounds of physical QA — the title-page redesign and For You — turned up the same defect twice in different clothes: a gap that was whatever the last inline margin happened to leave. On the title page it was `SCORES` sitting on top of the genre chips; on For You it was the first row of posters touching the control chips, because the row's `paddingBottom` was 8 and the wall has no top padding of its own. Neither was a wrong *number* so much as a number nobody had chosen.
+
+So the seams between major components are named. These are intervals on the 4pt scale, not a demand that every screen use identical margins:
+
+| Seam | Interval | Token |
+|---|---|---|
+| Screen or header → the first controls under it | ~16 | `space[4]` |
+| Control row → the content it governs | 12–16 | `space[3]`–`space[4]` |
+| Section heading → that section's own content | 12–16 | `space[3]`–`space[4]` |
+| Major section → the next major section | 24–28 | `space[6]`–`space[7]` |
+| Compact, closely related controls | 8–12 | `space[2]`–`space[3]` |
+
+**The rule is the relationship, not the number.** Every adjacent pair of major components should have a gap that some rule in this table explains, expressed with the token that names it, rather than an inline margin chosen to make one screenshot look right. Where two components could each own the seam — a scroller's `paddingBottom` and a list's `paddingTop`, say — exactly one of them owns it, and the one that does says so in a comment, because two half-gaps is how a seam ends up at 8 without anyone deciding on 8.
+
+Applied to the surfaces the 2026-09-08 pass touched and to this document. It is deliberately **not** a licence to sweep the app re-spacing screens nobody has complained about: an existing gap that reads correctly on a device is evidence, and this table is for the next argument, not a refactor.
 
 ### The bottom edge belongs to whatever is at the bottom (2026-08-15)
 
@@ -233,7 +257,8 @@ Artwork always renders 2:3, the TMDB standard. Anything else is letterboxed agai
 | `poster.xs` | 40 × 60 | Feed title cards, tag rows |
 | `poster.sm` | 56 × 84 | Anywhere a row is deliberately roomier than the default |
 | `poster.md` | 88 × 132 | Shelves, list previews |
-| `poster.lg` | 132 × 198 | Title detail, recommendation cards |
+| `poster.detail` | 100 × 150 | The title page's identity block, opposite the title (2026-09-07) |
+| `poster.lg` | 132 × 198 | Recommendation cards |
 | `poster.xl` | 180 × 270 | Comparison cards, share cards |
 
 `poster.row` exists because the row was being sized by its artwork. A `poster.sm` thumbnail is 84pt tall, so pinning a row's text block to the poster height produced an 84pt row for two lines of type — artwork dictating rhythm. At 38 × 57 the poster is a shade shorter than a two-line text block, so the type sets the row height and the image fits inside it. This is the Letterboxd diary row, and it is the densest legible form of "a film in a list."
@@ -262,7 +287,7 @@ Four kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised`
 
 Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. Disabled state reduces opacity to 40% **and** the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
 
-**Which kind an action takes — canonical, 2026-08-27, revised the same day.** The Maroon fill marks **the primary action of the current context** — not "the primary social act everywhere", which is what the first wording of this rule licensed and the founder's title-page pass caught: Recommend carried the only fill in the action row while Rank, the act the whole page exists for, read smaller than it. On a title page the primary context is the personal score/Rank cluster in the hero — the reader's score circle at `xl` (§8), the Rank/Ranked control at full 44pt height with a `headline` label — so **Recommend in the action row is outlined** there, and filled Maroon again inside the Recommend sheet, where sending *is* the context's primary act. Watchlist is unchanged. **Never two equally dominant Maroon CTAs in one view.** The named examples stand where their context agrees: **Follow**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**; everything that is utility, exit, or settled state stays outlined or quiet — **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names a judgement about a context, not a licence to repaint every control that feels important.
+**Which kind an action takes — canonical, 2026-08-27, revised the same day.** The Maroon fill marks **the primary action of the current context** — not "the primary social act everywhere", which is what the first wording of this rule licensed and the founder's title-page pass caught: Recommend carried the only fill in the action row while Rank, the act the whole page exists for, read smaller than it. On a title page the primary context is the Rank/Ranked control in the identity column — content-sized, 44pt tall, with a `headline` label — so **Recommend in the action row is icon-only and quiet** there, and filled Maroon again inside the Recommend sheet, where sending *is* the context's primary act. (The cluster this rule was first written against — a `xl` score circle beside the control in the hero — is gone as of 2026-09-07; the reader's score is the first unit of `SCORES` now, and the judgement about the context is unchanged.) Watchlist is unchanged. **Never two equally dominant Maroon CTAs in one view.** The named examples stand where their context agrees: **Follow**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**; everything that is utility, exit, or settled state stays outlined or quiet — **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names a judgement about a context, not a licence to repaint every control that feels important.
 
 **A pair of actions in one row — canonical, 2026-08-27.** Two buttons side by side take **equal halves** (`flex: 1` each) and both carry `fit`. Below the width where both labels fit at their natural size, the pair becomes **two full-width rows with the primary on top** — it never shrinks one column to buy the other room.
 
@@ -288,16 +313,32 @@ A **filled circle** in the title's bucket color, with the score in `score` type 
 
 | Size | Diameter | Where |
 |---|---|---|
-| `xl` | 64 | The title page's personal score cluster — and only there (founder hierarchy pass, 2026-08-27) |
 | `lg` | 56 | The scale's spare step; no shipped surface uses it today |
-| `md` | 44 | Collection rows, search results, the title page's aggregate score rows, the post-rank confirmation |
+| `detail` | 48 | The title page's `SCORES` row — all three units (2026-09-07) |
+| `md` | 44 | Collection rows, search results, the post-rank confirmation |
 | `sm` | 40 | Feed items, review rows, the Following drilldown, profile poster overlays |
 
-The table was `md` 44 / `sm` 36 and drifted twice from the code that ships. `sm` went to 40 on 2026-08-16: the badge sizes its number to fit `10.0` rather than the common `8.7`, and at 36 that arithmetic yields 13pt type — legible, but visibly smaller than the row's own footnote beside it. `xl` was added on 2026-08-27 for exactly one place, the personal cluster in the title hero, where the hierarchy pass made the reader's own number the anchor of the band; the "Your score" caption went with the same pass, because a filled Maroon circle with a number in it, above a button named Rank, does not need a caption to say whose score it is. Lists stay on `md`/`sm`.
+The table was `md` 44 / `sm` 36 and drifted twice from the code that ships. `sm` went to 40 on 2026-08-16: the badge sizes its number to fit `10.0` rather than the common `8.7`, and at 36 that arithmetic yields 13pt type — legible, but visibly smaller than the row's own footnote beside it. Lists stay on `md`/`sm`.
+
+`xl` (64) is **deleted**, not deprecated. It was added on 2026-08-27 for exactly one place — the personal score cluster in the title hero — and the founder's 2026-09-07 lock moves the reader's own number into the `SCORES` row with the other two, so nothing used it. Leaving it would have left a size in the system documenting a composition the app no longer has. `detail` replaces it at 48: three circles sit across a 358pt content width with their labels beneath them, and at `lg` the row runs out of column before the third label sets.
+
+**Two variants, and this is the one place the single-fill rule below does not hold.** `ScoreBadge` takes `filled` (the default, and what every badge outside the title page's `SCORES` row draws) and `outlined` (a Maroon ring, no fill, Maroon number). The `SCORES` row states three scores side by side and they are three different claims — the reader's own, the mean over accounts they chose to follow, and bingd.'s — so three identical filled circles would say those claims are interchangeable. **Exactly one circle on that page is filled Maroon and it is always the reader's own.** See [`screens.md` §6](./screens.md).
+
+> **There was a third, and sample size is why it is gone** (founder, physical QA, 2026-09-08). `quiet` drew a neutral ring and neutral ink for an aggregate with almost nothing behind it — bingd. below two ratings — on the reading that one person's opinion should not look statistically authoritative. On a device that reads as a score that failed to load or went stale rather than a thin one, because grey on that row already means *no score*.
+>
+> **The rule is now one sentence with no exceptions in it: a real score is Maroon, and no score is a filled grey disc.** Nothing else may be encoded in the colour of a circle — not sample size, not freshness, not confidence. How deep a sample is is stated in words directly under the number (`1 rating`, `128 ratings`), which is more precise than a colour and readable by somebody who cannot tell two greys apart. Whether there is a number at all is still the server's decision (`score.community_min_ratings`); below it the unit draws the grey disc and says so in words. The variant was deleted from the type rather than left unused, so confidence-by-colour cannot be reintroduced by passing a string.
 
 Filled, not outlined. Beli's badge is an outline circle whose stroke and number share a color that tracks the score, and that cannot be reproduced here: an outline in Sage measures 2.4:1 and in Stone 3.0:1, so two of the three buckets would ship a number below the body-text floor. Filling the circle inverts the problem — the fill carries the color, the ink carries the contrast, and all three pairs in §3 clear AA. It is a more assertive badge than Beli's, which suits a list that is read at arm's length.
 
 **Unranked is a real state with its own rendering**: a dashed `border.strong` ring, no number, and the label `Rank` in `caption`/`text.tertiary`. It is a button. Never `0.0`, never `#—`, never a dimmed number — a title with no score has not failed to get one, it just has not been compared yet (PRD §26.4 AC 2).
+
+**The title page's `SCORES` row states an absence as a filled `scoreEmpty` disc with nothing inside it** — no dash, no line, no icon, no zero, and no ring (2026-09-08). The empty unit has been a dashed ring, a cream `empty` disc and an em dash in a neutral ring in turn, and every one of those is *a mark inside a circle*, which is exactly how this page states a number; each therefore read as a quiet score rather than as no score. Filled and genuinely empty is the one treatment that cannot be misread, and the fill is what answers the founder's original constraint — "no blank cream disc that looks like broken content" — without spending a glyph on it.
+
+Each unit still says its own words beneath the disc (`Not ranked yet`, `No ratings yet`, `Not enough ratings`) rather than sharing one string, because those are three different facts and only the middle one is something the reader can act on; the disc carries the same distinction as its accessible label, which is the only place a screen reader can get it. The dashed ring stays correct wherever a slot is genuinely an invitation to fill it, and the cream `empty` disc remains what a standalone list row draws.
+
+**Supporting copy is a count, at most three words** (2026-09-08). The first pass wrote sentences here — `1 person you follow`, `None of your friends have ranked this` — and in a third of a 358pt content width those set on two and three lines, dragged the row taller and made the section read as noise. Both aggregates now count the same way, `1 rating` / `N ratings`; the label above each is what says *whose*. **A ranked personal score has no second line at all**: the bucket word, the rank, the watch date and finally the word `Ranked` have each been tried there and cut, the last because a filled Maroon circle with a number in it has already said it.
+
+**One derivation per unit, so the number and the words cannot disagree.** A physical build showed `7.0` above `Your score` above `Not ranked yet`, because the badge and the sub-label were chosen by two different expressions. Whether a unit has a score decides the badge, the copy and the spoken label together, and it is `score != null` rather than a truthiness check — `0.0` is a real score at the bottom of the *Not for me* band.
 
 Never a percentage, a ring gauge, a progress bar, or a 0–100 value. Never an average across users.
 

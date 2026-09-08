@@ -32,6 +32,21 @@ export const GROUP_PICKS_MAX = 20;
 export const GROUP_PICKS_MIN = 10;
 
 /**
+ * How many people a group has to have before there are picks to make, counting the
+ * reader.
+ *
+ * **Unchanged, and named on 2026-09-08 rather than introduced.** The rule was written as
+ * `selected.size === 0` on the sheet's button — true, and it stated the requirement in
+ * terms of the *other* people rather than of the group, which is why the disabled button
+ * read `Get picks for 1`: a control offering to do something for one person, that did
+ * not work. The founder's correction is to the copy, not to the rule, so this constant
+ * exists to let the sheet say the rule instead of encoding it twice.
+ *
+ * Two, because one person choosing what to watch is the rest of the app.
+ */
+export const GROUP_PICKS_MIN_MEMBERS = 2;
+
+/**
  * The quality floors, on the server's 0–1 `group_score`.
  *
  * Calibrated against the RPC's arithmetic rather than chosen round: a title saved by
