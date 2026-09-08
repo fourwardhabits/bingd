@@ -221,6 +221,12 @@ device**, and no test renderer can answer whether it draws.
       the other device. An account without one shows nothing rather than a placeholder.
 - [ ] **One Top Ranked wall and no duplicate list below it.** All / Movies / TV seasons
       filter it in place.
+- [ ] **Under All, the scores only ever go down** — left to right, top to bottom, on
+      **somebody else's profile as well as your own**. A 9.9 above a 10.0 is the defect
+      fixed on 2026-09-08 and it was only ever visible on an account whose ranked films
+      and ranked seasons were very different in number, so check it on the fullest
+      account you can reach rather than a fresh one. Movies and TV stay in their own
+      ranking's order, which is the same thing.
 - [ ] Recent activity renders and **reads like the Feed** — the same row, not a weakened
       copy of it.
 - [ ] **`ProfileIdentity` and `TopRanked` are shared between your own profile and
