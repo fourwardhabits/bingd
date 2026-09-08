@@ -224,7 +224,17 @@ export function collapse({
 const trimEnd = (value: string) => value.replace(/\s+$/, '');
 
 const styles = StyleSheet.create({
-  block: { paddingHorizontal: theme.layout.gutter },
+  /**
+   * The prose, full width, with the founder's 14–16 above it.
+   *
+   * The gap used to be supplied by the action row's own bottom edge, and when the actions
+   * moved up into the identity column the synopsis was left sitting directly against
+   * whichever of the two columns above it was taller — text glued to a poster on one
+   * title and to a button on the next. `space[4]` is the same interval as the gutter it
+   * is inset by, so the block reads as one inset field rather than as a paragraph that
+   * happened to land there.
+   */
+  block: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
   /** Off the flow and invisible: it exists to be measured, never to be seen. Stretched
    *  to the block's own width, because a line count measured at a different width is a
    *  line count for a different paragraph. */

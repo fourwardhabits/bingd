@@ -650,6 +650,134 @@ size with counts. The row is a horizontal scroller with `nowrap` now — the sam
 the tab row — so on every ordinary phone nothing changes and on a narrow one it scrolls rather
 than reflows.
 
+### As built — 2026-09-07, final: the score moves into Scores, and the actions move up
+
+The founder reviewed the composition above against a full visual specification and approved
+it **with revisions**. This is what shipped. Two of the revisions overrule the specification
+itself, and they are marked.
+
+**The hero is a fixed 16:9 band.** `width / layout.aspect.backdrop`, about 220pt at 390,
+whatever the artwork is. The compact navigation overlays it, gains its Paper ground on scroll,
+and keeps its existing physical height — there is no navigation spacer. Artwork resolves in a
+fixed order (`lib/hero.ts`): the title's own backdrop, the parent series' backdrop where that
+is semantically valid, then a poster blurred and held at 0.9 opacity so it reads as a *field*
+rather than as a picture somebody stretched, then a Parchment band. A portrait poster is never
+drawn raw inside the landscape frame. The poster slot inherits the same way: the season's own
+artwork, then the series', then the branded placeholder.
+
+**The poster carries artwork and nothing else.** No score, no `Your score` caption, no dashed
+ring, no rank badge. `posterColumn` has no `position: 'relative'` any more, so there is nothing
+for an overlay to be anchored against — which is a harder thing to reintroduce by accident than
+a deleted component. `PersonalScore` is deleted and `scoreBadge.xl` (64) with it; both existed
+only for the cluster this removes. The poster is `poster.detail`, 100 × 150 — a new size between
+`md` and `lg`, because at 88 the artwork read as a thumbnail left beside the title and at 132
+the column had too little width to set a serif title in.
+
+**The reader's own score is the first of three units in `SCORES`.** `Your score → Following →
+bingd.`, in that fixed order, which is a hierarchy of relevance to one reader and not a
+leaderboard: me, then the people I chose, then the room. On the poster the number had nothing to
+be measured against; here it is the first term of a comparison read straight across. It is stated
+**once** on the page.
+
+The units carry **no bucket word, no rank and no watch date**. All three were in the
+specification's `Your score` cell and all three were cut: `Loved` is jargon this screen has never
+spoken, and the placement and the date are the reader's *history* with the title rather than a
+qualification of an aggregate.
+
+**Each unit says its own empty state.** They shared `Not enough ratings`, which hid a real
+distinction — the app being short of a sample, nobody the reader follows having seen it, and the
+reader not having ranked it are three different facts and only the middle one is actionable. So:
+`Not ranked yet`, `None of your friends have ranked this`, `Not enough ratings`. Every empty
+circle carries an **em dash** in a plain neutral ring, never the cream `empty` disc, which is
+indistinguishable from a circle whose contents failed to load.
+
+**Three units stack; two did not have to.** A circle with its words *beside* it needs about 170pt,
+so three ran off a 358pt content width and the horizontal scroller that used to rescue the
+two-unit row turned bingd. into something a reader discovered by swiping. Each unit is now a
+circle with its words *beneath* it on one of three equal columns; the row overflows downward by
+wrapping its own sub-label, and the scroller is gone because there is nothing left for it to
+rescue.
+
+**Fill carries the hierarchy, and this overrides §8's one-Maroon-fill rule inside this row.**
+`ScoreBadge` takes a `variant`: `filled` (the reader's own, and still the default everywhere
+else in the app), `outlined` (somebody else's score with enough behind it), and `quiet` (neutral
+ring, neutral ink). Three identical filled Maroon circles say the three claims are
+interchangeable, which is the opposite of what the section exists to say. `quiet` applies to
+**bingd. below two ratings** — the founder's rule is "do not make one person's score look
+statistically authoritative" — and never to Following, where `1 person you follow` names a human
+the reader chose. It is a visual demotion only; whether there is a number at all is still the
+server's decision.
+
+**The actions live inside the identity column — REVISION.** The specification pinned the
+identity row to 150pt so the action group landed at the same y on every title; the founder
+rejected that as dead space made deliberate, and it is. The row is content-driven: title,
+subtitle, metadata, personal context, **actions**, all in the left column beside the poster, so
+the group rises on a short title and fills the space the poster leaves. Consistency of rhythm,
+not of coordinates. The synopsis still begins full width, below whichever column is taller.
+
+**The Rank/Ranked control is content-sized — REVISION of the shipped build.** It took `flex: 1`
+and therefore the whole width the two glyphs left, and a full-width primary at the top of a
+reading page reads as a form's submit button. It is `flexShrink: 1` with
+`layout.control.inlineButtonMaxWidth` (168) as the guard at 130% type; `Rank` measures about 104
+and `Ranked` about 132. The trailing space to its right is the signal that the group has ended.
+Height stays 44 so it shares a centre line with the two 44pt icon boxes. Treatment, behaviour and
+the word in both states are unchanged, and there is still no responsive switch to a glyph.
+
+**One metadata grammar, and a credit rule per kind.**
+
+| | subtitle | metadata line |
+|---|---|---|
+| film | `2013` | `R · 180 min · Martin Scorsese` |
+| season | `Season 1 · 2024` | `TV-MA · 9 episodes · Craig Mazin` |
+
+The subtitle joined with a comma and the line below with a middle dot, which made two adjacent
+lines of the same metadata look like two different kinds of claim; one separator now. The credit
+is **the film's `Director` or the season's `Creator`, with no fallback in either direction**. The
+line read `director ?? showrunner` for every kind, and on a season the `Director` credit is the
+person who directed *one episode of nine* — every season page was presenting them where a reader
+reads "whose show is this". The Executive Producer fallback went with it: on television that is
+routinely a financier or a star with a production deal. `TV-MA · 24 episodes` is better than a
+confident falsehood in the one place on the page nobody can check. Every line is built by
+filtering, so a missing segment never leaves a stray separator, and every line is clamped to one:
+the heading takes two before truncating and does **not** shrink its type to fit.
+
+**The personal context stays beside the title, and it is the overall rank.** `#2 in Movies ·
+Watched Aug 17, 2026`, in `caption`/tertiary under the metadata. The specification moved both
+halves under `Your score`; the founder kept them here, because a placement and a date are the
+reader's history with the title and not an aggregate's qualification. `heroRankFor` still answers
+with the best top-ten *genre* placement where there is no top-ten overall one, and this line now
+**discards that**: `#3 in Drama` beside a title reads as that title's standing when it is really
+the standing of a slice the reader never chose, and swapping to it exactly when the overall
+number is weaker is the page flattering itself. No overall placement means no segment. The genre
+reading survives for the post-ranking reveal, where the reader has just done the comparison that
+produced it.
+
+**The spacing contract.** `space[7]` (28) is new — the next step on the same 4pt grid — and it is
+the page's one *section* interval, used at genres → `SCORES`, scores → Where to watch, and Where
+to watch → the tab row. `space[6]` had been doing both jobs, so a section change was spaced
+exactly like a heading and its own content.
+
+| from → to | gap |
+|---|---|
+| hero → identity | 16 |
+| within the metadata stack | 4 |
+| metadata → personal context | 8 |
+| personal context → actions | 12 |
+| between action controls | 8 |
+| identity/poster region → synopsis | 16 |
+| synopsis → genres | 12 |
+| genres → `SCORES` | 28 |
+| `SCORES` → the row | 16 |
+| circle → its label | 10 |
+| scores → Where to watch | 28 |
+| Where to watch → the tab rule | 28 |
+
+**Unchanged, deliberately.** Where to watch keeps its restrained module and still draws nothing
+at all when the provider has no answer — there is no invented *In theaters* state, because the
+app has no theatrical-availability data. The tab set, the tab contents, the genre row's position
+and neutral chip styling, the ranking menu's copy and every one of its semantics, and For You's
+single scrolling control row are all as they were.
+
 ### The title-page crash — 2026-09-07
 
 The founder's report was two symptoms: a title page renders briefly and then the app's error

@@ -5,7 +5,38 @@ import { BUCKET_LABEL, formatScore, type Bucket } from '@/features/collection/sc
 import { theme } from '../tokens';
 import { Text } from './Text';
 
-export type ScoreBadgeSize = 'md' | 'sm' | 'lg' | 'xl';
+export type ScoreBadgeSize = 'md' | 'sm' | 'lg' | 'detail';
+
+/**
+ * How much authority the circle claims (title detail, founder lock, 2026-09-07).
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THERE IS MORE THAN ONE, AND WHAT IT OVERRIDES
+ *
+ * The written rule was one deep Maroon fill everywhere a derived 0–10 score is stated
+ * (`semantic.score`), and for a badge that appears *alone* — a feed row, a search row, a
+ * collection wall — it is still exactly right and still the default.
+ *
+ * The title page's Scores row is the case that rule was not written for. It states three
+ * scores side by side and they are three different claims: the reader's own, the mean
+ * over the accounts they chose to follow, and bingd.'s. Three identical filled Maroon
+ * circles say those three claims are interchangeable, which is the opposite of what the
+ * section exists to say. The founder's direction is that the hierarchy is carried by the
+ * treatment: **me filled, everyone else outlined.**
+ *
+ *   `filled`   the reader's own score. Parchment on Maroon, 7.4:1, unchanged, and still
+ *              what every badge outside this one row draws.
+ *   `outlined` somebody else's score, with enough behind it to state plainly. Maroon
+ *              ring, Maroon number, no fill.
+ *   `quiet`    somebody else's score with almost nothing behind it. Neutral ring,
+ *              neutral number. The number is still shown — withholding it would be a
+ *              different lie — but it stops looking like a verdict.
+ *
+ * `quiet` is the answer to "do not make one person's score look statistically
+ * authoritative". It is a *visual* demotion only: the threshold that decides whether
+ * there is a number at all remains the server's.
+ */
+export type ScoreBadgeVariant = 'filled' | 'outlined' | 'quiet';
 
 export type ScoreBadgeProps = {
   /** Omit for a title that is logged but not yet compared. */
@@ -17,6 +48,11 @@ export type ScoreBadgeProps = {
    */
   bucket?: Bucket | null;
   size?: ScoreBadgeSize;
+  /**
+   * Filled unless a caller says otherwise, so every badge outside the title page's
+   * Scores row is untouched by the hierarchy this prop exists to express.
+   */
+  variant?: ScoreBadgeVariant;
   /**
    * Makes the badge a button into the canonical log-and-rank sheet — **in both states**
    * since 2026-09-06.
@@ -54,7 +90,13 @@ export type ScoreBadgeProps = {
  * ground Maroon as a hairline stroke measures under 3:1; filling inverts it, and
  * Parchment on Maroon is 7.4:1.
  */
-export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgeProps) {
+export function ScoreBadge({
+  score,
+  bucket,
+  size = 'md',
+  variant = 'filled',
+  onPress,
+}: ScoreBadgeProps) {
   const { diameter, fontSize } = metrics(size);
 
   if (score == null) {
@@ -81,12 +123,15 @@ export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgePr
       // The score says what it is; the hint says what pressing it does. Without this a
       // screen reader announces a number that happens to be a button.
       accessibilityHint={onPress ? 'Opens your log, where you can rank it again' : undefined}
-      style={[styles.circle, styles.filled, { width: diameter, height: diameter }]}
+      style={[styles.circle, VARIANT_RING[variant], { width: diameter, height: diameter }]}
     >
       <Text
         variant="score"
         numberOfLines={1}
-        style={[styles.ink, { fontSize, lineHeight: Math.round(fontSize * 1.15) }]}
+        style={[
+          VARIANT_INK[variant],
+          { fontSize, lineHeight: Math.round(fontSize * 1.15) },
+        ]}
         // The circle already grew with the font scale, so the number must not
         // grow again on top of it or the ratio the sizing depends on is lost.
         allowFontScaling={false}
@@ -158,21 +203,35 @@ export function EmptyScoreBadge({
   size = 'md',
   label = 'No score yet',
   dashed = false,
+  dash = false,
 }: {
   size?: ScoreBadgeSize;
   label?: string;
   /**
-   * The reader's own unranked state, as a dashed ring with nothing in it.
+   * A dashed ring with nothing in it.
    *
-   * The title page's personal score used the `ScoreBadge` unranked ring, which carries
-   * the word "Rank" — right beside a button that says the same word (founder, physical
-   * Android, 2026-09-07). Solid grey is for other people's missing numbers; the dashed
-   * ring is the app's own "no score yet", and it needs no word when the invitation is
-   * already the control next to it.
+   * **No longer used by the title page**, and deliberately not deleted: it is still the
+   * right treatment for a slot a reader is expected to fill, wherever one appears. What
+   * the founder ruled out on 2026-09-07 is a *floating* dashed circle on the title page
+   * — a dashed ring beside a poster reads as a control somebody forgot to draw, and the
+   * page's honest empty states now say so in words instead. See `dash`.
    */
   dashed?: boolean;
+  /**
+   * An em dash inside a plain neutral ring.
+   *
+   * This is the title page's empty score, in both places it occurs: the reader has not
+   * ranked this, or nobody they follow has. The founder's constraint is exact — "no
+   * blank cream disc that looks like broken content" — and a genuinely empty circle is
+   * indistinguishable from a circle whose contents failed to load. A dash is a stated
+   * absence: somebody decided there is nothing here.
+   *
+   * Not `0.0`, which is a verdict, and not the word "Rank", which is the invitation the
+   * button beside it already carries.
+   */
+  dash?: boolean;
 }) {
-  const { diameter } = metrics(size);
+  const { diameter, fontSize } = metrics(size);
 
   return (
     <View
@@ -181,12 +240,28 @@ export function EmptyScoreBadge({
       accessibilityLabel={label}
       style={[
         styles.circle,
-        dashed ? styles.unranked : styles.empty,
+        dashed ? styles.unranked : dash ? styles.quiet : styles.empty,
         { width: diameter, height: diameter },
       ]}
-    />
+    >
+      {dash ? (
+        <Text
+          variant="score"
+          numberOfLines={1}
+          style={[styles.quietInk, { fontSize, lineHeight: Math.round(fontSize * 1.15) }]}
+          // The circle already grew with the font scale; see the note on the filled
+          // badge's number, which this mirrors so the two never disagree in a row.
+          allowFontScaling={false}
+        >
+          {EM_DASH}
+        </Text>
+      ) : null}
+    </View>
   );
 }
+
+/** The character, named, so it cannot be typed as a hyphen by a later edit. */
+const EM_DASH = '—';
 
 /**
  * How wide `10.0` is, as a multiple of the font size, in Inter SemiBold with
@@ -255,5 +330,46 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.border.strong,
   },
+  /**
+   * Somebody else's score, stated plainly: a Maroon ring with no fill.
+   *
+   * Two points rather than one, for the reason every rule in this app is drawn doubled —
+   * a single point rounds away to nothing on some Android densities, and a ring that
+   * disappears on one device is a circle that has become a bare number on it.
+   *
+   * The ring is `semantic.score` at full strength. A tinted ring measured under 3:1 and
+   * read as disabled; the *number inside* is what carries contrast here (Maroon on
+   * Paper, 7.6:1), so the ring can be honest about which colour it is.
+   */
+  outlined: { borderWidth: 2, borderColor: theme.semantic.score },
+  outlinedInk: { color: theme.semantic.score },
+  /**
+   * Almost nothing behind it: a neutral ring and a neutral number.
+   *
+   * No fill, which is what separates it from `empty` — the cream disc `empty` draws is
+   * exactly the "blank disc that looks like broken content" the founder ruled out for
+   * the title page. This is a ring around a stated value, or around a stated absence.
+   */
+  quiet: { borderWidth: 2, borderColor: theme.border.strong },
+  quietInk: { color: theme.text.tertiary },
   pressed: { opacity: 0.7 },
 });
+
+/**
+ * The ring and fill for each variant, and the ink that goes in it.
+ *
+ * Two lookups rather than one style each, because the pair must be chosen together: an
+ * outlined ring with Parchment ink is Parchment on Paper, which is invisible. Keeping
+ * them adjacent is what makes that mistake visible to the next reader of this file.
+ */
+const VARIANT_RING: Record<ScoreBadgeVariant, object> = {
+  filled: styles.filled,
+  outlined: styles.outlined,
+  quiet: styles.quiet,
+};
+
+const VARIANT_INK: Record<ScoreBadgeVariant, object> = {
+  filled: styles.ink,
+  outlined: styles.outlinedInk,
+  quiet: styles.quietInk,
+};

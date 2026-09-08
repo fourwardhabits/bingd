@@ -2,6 +2,7 @@ import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -329,7 +330,9 @@ describe('the three kinds of title', () => {
   it('renders a season, whose parent arrives as an array', async () => {
     // The heading is the *show*, and the season and year are the subtitle beneath it.
     const view = await openOn(completeSeason, 'The Last of Us');
-    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1, 2023$/);
+    // One separator for the whole block since 2026-09-07: the middle dot the metadata
+    // line beneath already used, so the two lines read as one grammar.
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 2023$/);
   });
 
   it('renders a series, which has no score block and no rank control', async () => {
@@ -483,7 +486,7 @@ describe('optional metadata that is absent in the catalogue', () => {
     expect(view.getByLabelText(/Where to watch\. Netflix\./)).toBeTruthy();
   });
 
-  it('renders a ranked title placed outside the top ten, where the genre path runs', async () => {
+  it('renders a ranked title placed outside the top ten, and shows no ordinal', async () => {
     // `heroRankFor` only reaches `genreRanksFor` for a placement past the tenth, so this
     // is the branch a single ranked fixture never exercises.
     tableRows.rankings = Array.from({ length: 40 }, (_, index) => ({
@@ -506,9 +509,19 @@ describe('optional metadata that is absent in the catalogue', () => {
 
     const view = await openOn(completeFilm, 'Inception');
 
-    // No ordinal is shown for a placement that is not a statement about the title, and
-    // with no watch date there is no context line at all rather than an empty one.
-    await waitFor(() => expect(view.getByTestId('personal-score')).toBeTruthy());
+    /**
+     * No ordinal is shown for a placement that is not a statement about the title, and
+     * with no watch date there is no context line at all rather than an empty one.
+     *
+     * **Since 2026-09-07 this holds even where a genre placement would qualify.** The
+     * identity line takes the overall rank or nothing: `#3 in Drama` beside a title reads
+     * as that title's standing when it is really the standing of a slice the reader never
+     * chose, and swapping to it precisely when the overall number is weaker is the page
+     * flattering itself. `heroRankFor` still computes the genre reading for the
+     * post-ranking reveal, which is a surface where the reader has just done the
+     * comparison that produced it.
+     */
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
     expect(view.queryByTestId('title-context')).toBeNull();
   });
 
@@ -569,7 +582,7 @@ describe('the identity line', () => {
     expect(view.getByTestId('title-meta')).not.toHaveTextContent(/episode/);
   });
 
-  it('falls back to a showrunner credit where television has no director', async () => {
+  it('names a television Creator, and only a Creator', async () => {
     tableRows.media_cache = [
       {
         media_item_id: 'season-1',
@@ -590,6 +603,183 @@ describe('the identity line', () => {
     );
   });
 
+  it('omits the credit rather than printing a season’s episode director', async () => {
+    /**
+     * **The defect this rule exists for** (founder grammar lock, 2026-09-07).
+     *
+     * The line read `director ?? showrunner` for every kind of title, and on a season the
+     * `Director` credit is the person who directed *one episode of nine*. Every season
+     * page in the app was presenting them in the slot a reader reads as "whose show is
+     * this" — a confident falsehood in the one place on the page nobody can check.
+     *
+     * `TV-MA · 9 episodes` is the founder's answer, and it is better.
+     */
+    tableRows.media_cache = [
+      {
+        media_item_id: 'season-1',
+        facet: 'credits',
+        payload: {
+          cast: [],
+          crew: [
+            { id: 1, name: 'Ali Abbasi', job: 'Director', department: 'Directing' },
+            { id: 2, name: 'Carolyn Strauss', job: 'Executive Producer', department: 'Production' },
+          ],
+        },
+      },
+    ];
+
+    const view = await openOn(completeSeason, 'The Last of Us');
+
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^TV-MA · 9 episodes$/),
+    );
+    // Neither stand-in. An executive producer is routinely a financier or a star with a
+    // production deal, and an episode director directed one episode.
+    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/Ali Abbasi/);
+    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/Carolyn Strauss/);
+    // And no dangling separator where the third segment would have been.
+    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/·\s*$/);
+  });
+
+  it('never borrows a television Creator for a film', async () => {
+    // The rule falls both ways. A film has no creator credit worth the name, so a payload
+    // carrying one must not fill the director's slot with it.
+    tableRows.media_cache = [
+      {
+        media_item_id: 'film-1',
+        facet: 'credits',
+        payload: {
+          cast: [],
+          crew: [{ id: 1, name: 'Somebody Else', job: 'Creator', department: 'Production' }],
+        },
+      },
+    ];
+
+    const view = await openOn(completeFilm, 'Inception');
+
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^PG-13 · 148 min$/),
+    );
+    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/Somebody Else/);
+  });
+
+  it('leaves no stray separator when the outer segments are the missing ones', async () => {
+    // Built by filtering rather than by joining and trimming, so a gap anywhere in the
+    // line closes up instead of leaving ` ·  · ` behind.
+    //
+    // The credits are stated rather than inherited from the default fixture: this file's
+    // `beforeEach` does not reset `media_cache`, so a test that leaves a payload behind
+    // is a test that decides what the next one sees.
+    tableRows.media_cache = [
+      {
+        media_item_id: 'film-1',
+        facet: 'credits',
+        payload: {
+          cast: [],
+          crew: [{ id: 1, name: 'Christopher Nolan', job: 'Director', department: 'Directing' }],
+        },
+      },
+    ];
+
+    const view = await openOn(
+      { ...completeFilm, runtime_minutes: null, certification: null },
+      'Inception',
+    );
+
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^Christopher Nolan$/),
+    );
+  });
+
+  it('keeps every metadata line to one line', async () => {
+    /**
+     * The founder's rule: prefer truncation over wrapping the metadata into two lines. A
+     * creative credit long enough to wrap turns a three-part line into a paragraph, and
+     * two of those under a serif title is the "stack of bands" this pass is removing.
+     */
+    // Stated for the reason the test above records: `media_cache` survives between tests
+    // in this file, and this one needs a season payload rather than whatever the last
+    // test left behind.
+    tableRows.media_cache = [
+      {
+        media_item_id: 'season-1',
+        facet: 'credits',
+        payload: {
+          cast: [],
+          crew: [{ id: 1, name: 'Craig Mazin', job: 'Creator', department: 'Production' }],
+        },
+      },
+    ];
+
+    const view = await openOn(completeSeason, 'The Last of Us');
+
+    await waitFor(() => expect(view.getByTestId('title-meta')).toBeTruthy());
+    expect(view.getByTestId('title-meta').props.numberOfLines).toBe(1);
+    expect(view.getByTestId('title-subtitle').props.numberOfLines).toBe(1);
+    // And the heading takes at most two before it truncates, rather than shrinking its
+    // type to fit — a display face at a different size on every title reads as a bug.
+    expect(view.getByTestId('title-name').props.numberOfLines).toBe(2);
+  });
+
+  it('shows the overall rank and never swaps to a genre rank', async () => {
+    /**
+     * **The founder's rule, and it is the one place this line could flatter the reader**
+     * (2026-09-07).
+     *
+     * `heroRankFor` answers with the top-ten overall placement where there is one and
+     * otherwise with the best top-ten *genre* placement. The identity line takes the first
+     * and discards the second: `#3 in Science Fiction` beside a title reads as that
+     * title's standing when it is really the standing of a slice the reader never chose,
+     * and switching to it precisely when the overall number is weaker is a page reporting
+     * the flattering fact rather than the true one.
+     *
+     * The fixture is built so the genre reading would win under the old rule: the film
+     * sits 13th overall, which is outside the top ten, inside a Science Fiction group of
+     * six — past `MIN_GENRE_SIZE` — where it is first.
+     */
+    tableRows.rankings = [
+      { user_id: 'user-1', media_item_id: 'film-1', position: 13, category: 'movies', bucket: 'loved' },
+      ...Array.from({ length: 12 }, (_, index) => ({
+        user_id: 'user-1',
+        media_item_id: `drama-${index}`,
+        position: index + 1,
+        category: 'movies',
+        bucket: 'loved',
+      })),
+      ...Array.from({ length: 5 }, (_, index) => ({
+        user_id: 'user-1',
+        media_item_id: `scifi-${index}`,
+        position: 14 + index,
+        category: 'movies',
+        bucket: 'loved',
+      })),
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-02-12',
+        note: null,
+        note_has_spoilers: null,
+        note_visibility: null,
+      },
+    ];
+
+    const view = await openOn(completeFilm, 'Inception');
+
+    // The watch date is there, so there *is* a context line to inspect — which is what
+    // makes the absence of an ordinal a statement rather than an empty element.
+    await waitFor(() =>
+      expect(view.getByTestId('title-context')).toHaveTextContent(/Watched/),
+    );
+    expect(view.getByTestId('title-context')).not.toHaveTextContent(/#\d+ in Science Fiction/);
+    expect(view.getByTestId('title-context')).not.toHaveTextContent(/#\d+ in Action/);
+    expect(view.getByTestId('title-context')).not.toHaveTextContent(/#13 in Movies/);
+    // And no dangling separator where the ordinal would have been.
+    expect(view.getByTestId('title-context')).not.toHaveTextContent(/^\s*·/);
+  });
+
   it('says where it sits and when it was watched, on one line', async () => {
     rankIt('season-1', 'tv_seasons');
 
@@ -604,25 +794,28 @@ describe('the identity line', () => {
 
 describe('the personal score', () => {
   /**
-   * The badge is deliberately hidden from assistive technology.
+   * The number inside a badge is drawn but not separately announced.
    *
-   * `PersonalScore` is one button carrying one sentence — "Your score: 10.0 out of 10" —
-   * and the circle inside it sets its own `accessible` label, so without this wrapper a
-   * screen reader on Android would find two nodes for one number. That is also what
-   * excludes it from an ordinary query, so a test about the *drawn* number has to ask for
-   * it. `YOU` sits outside the wrapper and needs no such thing.
+   * The circle sets its own `accessible` label — "10.0 out of 10" — so the `Text` inside
+   * it is excluded from the accessibility tree and therefore from an ordinary query. A
+   * test about the *drawn* number has to ask for it.
    */
   const drawn = { includeHiddenElements: true } as const;
 
-  it('says the number is the reader’s own, in words and on the badge', async () => {
+  it('says the number is the reader’s own, in the Scores row', async () => {
     rankIt('film-1', 'movies');
 
     const view = await openOn(completeFilm, 'Inception');
 
     /**
-     * **The words, not a badge on a badge.** A naked 10.0 beside artwork is what every
-     * other product's critics' aggregate looks like, and the first answer to that — a
-     * floating `YOU` pill on the circle — read as a sticker. Ownership is stated instead.
+     * **The words are the unit's label, not a badge on a badge** (founder lock,
+     * 2026-09-07).
+     *
+     * A naked 10.0 beside artwork is what every other product's critics' aggregate looks
+     * like. The first answer to that was a floating `YOU` pill on the circle, which read
+     * as a sticker; the second was a `Your score` caption under a badge pinned to the
+     * poster's corner. The answer that holds is putting the number where a label and two
+     * comparisons already exist.
      *
      * Waiting on the number rather than on the words, because the words are drawn in both
      * states: that is the point of them, and it is what makes the region hold still.
@@ -630,8 +823,13 @@ describe('the personal score', () => {
     await waitFor(() => expect(view.getByText('10.0', drawn)).toBeTruthy());
     expect(view.getByText('Your score')).toBeTruthy();
     expect(view.queryByText('YOU')).toBeNull();
-    // And the spoken label, which leads with whose score it is rather than with the number.
-    expect(view.getByLabelText(/^Your score: 10\.0 out of 10/)).toBeTruthy();
+
+    // And it is inside the Scores section, not beside the artwork.
+    const scores = view.getByTestId('scores-section');
+    expect(within(scores).getByText('10.0', drawn)).toBeTruthy();
+    expect(within(scores).getByText('Your score')).toBeTruthy();
+    expect(view.queryByTestId('personal-score')).toBeNull();
+    expect(view.queryByTestId('title-score-anchor')).toBeNull();
   });
 
   it('never calls it a star rating, or a rank', async () => {
@@ -646,8 +844,14 @@ describe('the personal score', () => {
   it('draws the honest empty state for a title nobody has ranked', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
-    // Not a greyed zero and not a faded number (PRD §26.4).
-    expect(view.getByLabelText('You have not ranked this yet')).toBeTruthy();
+    /**
+     * A dash in a plain ring, with the sentence beside it. Not a greyed zero and not a
+     * faded number (PRD §26.4), and — since the founder's 2026-09-07 lock — not a dashed
+     * ring floating beside the poster either. The invitation is the button; this is the
+     * statement of fact.
+     */
+    expect(view.getByLabelText('Your score: Not ranked yet')).toBeTruthy();
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
     expect(view.queryByText('0.0')).toBeNull();
   });
 });
@@ -849,47 +1053,139 @@ const flat = (style: unknown): Record<string, unknown> =>
     ? Object.assign({}, ...style.map(flat))
     : ((style ?? {}) as Record<string, unknown>);
 
+/**
+ * **The poster carries artwork and nothing else** (founder lock, 2026-09-07).
+ *
+ * The score has now been in four places: a detached column opposite the poster, stacked
+ * beneath the poster, overhanging the poster's lower-left corner, and — now — the first
+ * unit of the Scores row. Each of the first three fought the artwork it was pinned to,
+ * and none of them gave the number anything to be measured against.
+ *
+ * These are the assertions that stop it coming back.
+ */
 describe('the score and the poster', () => {
   const hidden = { includeHiddenElements: true } as const;
 
-  it('is anchored to the poster, overhanging its corner, rather than stacked beneath it', async () => {
-    /**
-     * **Structural, not pixel** (founder, physical Android, 2026-09-07). The score sat
-     * under the poster for one revision and produced a tall empty right-hand column. It
-     * belongs to the artwork: inside the poster's own column, absolutely positioned, and
-     * negative on both axes so the circle crosses the frame's lower-left corner onto Paper.
-     */
+  it('puts no score, caption, ring or badge on the poster', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
     await waitFor(() => expect(view.getByText('10.0', hidden)).toBeTruthy());
 
     const column = view.getByTestId('title-poster-column');
-    const anchor = within(column).getByTestId('title-score-anchor');
-    const style = flat(anchor.props.style);
 
-    expect(style.position).toBe('absolute');
-    expect(style.left as number).toBeLessThan(0);
-    expect(style.bottom as number).toBeLessThan(0);
-    // And bounded: the overhang stays inside the 16pt gap between the poster and the
-    // identity column, so the badge can neither cover a long title's last words nor take
-    // a press meant for the linked series name (review 75). No slop for the same reason.
-    expect(style.left as number).toBeGreaterThanOrEqual(-16);
-    expect(view.getByTestId('personal-score').props.hitSlop).toBeUndefined();
-    // Ownership in words, beneath the number, inside the same object.
-    expect(within(anchor).getByText('Your score')).toBeTruthy();
+    // The three shapes it took, all gone.
+    expect(view.queryByTestId('title-score-anchor')).toBeNull();
+    expect(view.queryByTestId('personal-score')).toBeNull();
+    expect(within(column).queryByText('Your score')).toBeNull();
+    expect(within(column).queryByText(/\d\.\d/, hidden)).toBeNull();
+    expect(within(column).queryByLabelText(/out of 10/)).toBeNull();
+    // And no ordinal badge either: the placement is a line of type in the identity
+    // column, never a stamp on the artwork.
+    expect(within(column).queryByText(/^#\d+/)).toBeNull();
     expect(view.queryByText('YOU')).toBeNull();
   });
 
-  it('draws an empty ring for an unranked title, with no word inside it', async () => {
-    // The word "Rank" inside the circle duplicated the button beside it. The honest
-    // statement of "no score yet" is the empty dashed ring; the invitation is the button.
+  it('leaves the poster column with nothing to anchor an overlay to', async () => {
+    /**
+     * The structural form of the same rule, asserted on the *mechanism* rather than on
+     * the absence of one testID.
+     *
+     * Every revision of the badge attached itself the same way: `position: 'relative'` on
+     * this column, so an absolutely positioned child could be measured against the
+     * poster's frame. Without the containing block there is nothing for an overlay to be
+     * placed against, which is a harder thing to reintroduce by accident than a name.
+     */
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByText('10.0', hidden)).toBeTruthy());
+
+    const column = flat(view.getByTestId('title-poster-column').props.style);
+    expect(column.position).toBeUndefined();
+  });
+
+  it('draws a stated absence for an unranked title, and only in the Scores row', async () => {
+    /**
+     * The word "Rank" inside the circle duplicated the button beside it, and a dashed
+     * ring floating beside the poster read as a control somebody forgot to draw. The
+     * honest statement of "no score yet" is a dash and a sentence, in the row where the
+     * other two scores are; the invitation is the button.
+     */
     const view = await openOn(completeFilm, 'Inception');
 
-    const score = view.getByTestId('personal-score');
-    expect(within(score).queryByText('Rank', hidden)).toBeNull();
-    expect(within(score).queryByText(/\d\.\d/, hidden)).toBeNull();
-    expect(view.getByLabelText('You have not ranked this yet')).toBeTruthy();
+    const scores = view.getByTestId('scores-section');
+    expect(within(scores).getByText('Not ranked yet')).toBeTruthy();
+    expect(within(scores).queryByText('Rank', hidden)).toBeNull();
+    expect(within(scores).queryByText(/\d\.\d/, hidden)).toBeNull();
+    expect(view.getByLabelText('Your score: Not ranked yet')).toBeTruthy();
     expect(view.getByTestId('title-action-rank')).toBeTruthy();
+  });
+});
+
+/**
+ * **The identity column, and the dead band that used to sit above the action row.**
+ *
+ * The actions were a full-width row *after* the whole identity region, so they waited for
+ * the bottom of a 150pt poster before they could be drawn — which on a short title left
+ * an obvious empty band beside the artwork with the page's primary control below it. The
+ * design draft's answer was a fixed 150pt identity row so the button always landed at the
+ * same y; the founder rejected that as the same dead space made deliberate.
+ */
+describe('where the action row lives', () => {
+  it('sits inside the identity column, above the synopsis', async () => {
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+
+    // Inside the same column as the title and its metadata, not a sibling of the whole
+    // identity row — which is what lets it rise on a short title.
+    const identity = view.getByTestId('title-identity-copy');
+    expect(within(identity).getByTestId('title-actions')).toBeTruthy();
+    expect(within(identity).getByTestId('title-name')).toBeTruthy();
+
+    // And not in the poster's column, which is the other way this could be misread.
+    const column = view.getByTestId('title-poster-column');
+    expect(within(column).queryByTestId('title-actions')).toBeNull();
+  });
+
+  it('reserves no fixed height for the identity row', async () => {
+    /**
+     * The founder's correction of the design draft, as a measurement. A minimum height on
+     * this row is what would put the action group at the same y on every title, and it is
+     * exactly the dead space this pass exists to remove: the row is content-driven, and
+     * whichever column is taller sets its height.
+     */
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+
+    const row = flat(view.getByTestId('title-identity').props.style);
+    expect(row.minHeight).toBeUndefined();
+    expect(row.height).toBeUndefined();
+    // Top-aligned, so the title and the poster begin on the same line rather than the
+    // column sliding down to meet the artwork.
+    expect(row.alignItems).toBe('flex-start');
+  });
+
+  it('keeps the rank control content-sized rather than full width', async () => {
+    /**
+     * **The correction the founder called unacceptable in the previous build.** It took
+     * `flex: 1` — the whole width the two glyphs left — and on the device a full-width
+     * primary at the top of a reading page reads as a form's submit button.
+     */
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+
+    const button = flat(view.getByTestId('title-action-ranked').props.style);
+    expect(button.flex).toBeUndefined();
+    expect(button.flexGrow).toBeUndefined();
+    expect(button.alignSelf).not.toBe('stretch');
+    // Capped inside the founder's 150–170 range, which is the guard at 130% type.
+    expect(button.maxWidth as number).toBeLessThanOrEqual(170);
+    expect(button.maxWidth as number).toBeGreaterThanOrEqual(150);
+    // Still 44pt tall, so it shares a centre line with the two icon boxes beside it.
+    expect(button.minHeight).toBe(theme.layout.minTapTarget);
+    // And it keeps its word in both states: no responsive switch to a glyph.
+    expect(view.getByText('Ranked')).toBeTruthy();
   });
 });
 

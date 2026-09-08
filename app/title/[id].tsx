@@ -44,7 +44,6 @@ import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
-import { PersonalScore } from '@/features/title/PersonalScore';
 import { Synopsis } from '@/features/title/Synopsis';
 import { TitleActions } from '@/features/title/TitleActions';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
@@ -117,6 +116,34 @@ type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
  * reveals the rest, and no metadata is dropped on the way.
  */
 const EPISODES_FIRST_PAGE = 50;
+
+/**
+ * The one joiner in the identity block: space, middle dot, space.
+ *
+ * Written down once because the founder's grammar lock is that all three lines below the
+ * title read as one statement — `Season 1 · 2024`, `TV-MA · 24 episodes`, `#2 in TV ·
+ * Watched Aug 17, 2026`. The subtitle used a comma until 2026-09-07, which made two
+ * adjacent lines of the same metadata look like two different kinds of claim.
+ *
+ * Every line that uses it is assembled by filtering first, so a missing segment can never
+ * leave a stray separator at either end.
+ */
+const SEP = ' · ';
+
+/**
+ * How many lines the identity heading takes before it truncates (founder lock,
+ * 2026-09-07).
+ *
+ * Two, and the type does **not** shrink to avoid reaching it. A serif display face set
+ * smaller to fit a long name gives a page whose heading is a different size on every
+ * title, which reads as a bug rather than as a fit; three lines of `title1` in a 242pt
+ * column push the metadata and the whole action row down past the poster.
+ *
+ * `The Wolf of Wall Street` sets on exactly two. Longer names lose their tail, which is
+ * the honest trade: the compact navigation bar carries the full name once the reader
+ * scrolls past the hero, so nothing is unreachable.
+ */
+const TITLE_LINES = 2;
 
 /**
  * The title page (screens.md §6), rebuilt after the founder's device test.
@@ -627,14 +654,20 @@ export default function TitleScreen() {
    */
   const primaryName = (isSeason ? (parent?.title ?? title.title) : title.title) || title.title;
   /**
-   * `Season 1, 2023`, or `2010`.
+   * `Season 1 · 2024`, or `2013`.
    *
-   * A comma joins a season to its year in every place anybody writes one down, and the
-   * em-dash form the log sheet uses — "Parks and Recreation — Season 2" — is for surfaces
-   * with one line to say the whole name in. Here there is a hierarchy to put it in.
+   * **One separator for the whole identity block** (founder grammar lock, 2026-09-07).
+   * It was a comma here and a middle dot on the line below, which made two adjacent lines
+   * of the same metadata look like two different kinds of statement. The middle dot is
+   * what the metadata line already used and it is now the block's only joiner, so
+   * `Season 1 · 2024` and `TV-MA · 24 episodes` read as one grammar.
+   *
+   * The em-dash form the log sheet uses — "Parks and Recreation — Season 2" — is for
+   * surfaces with one line to say the whole name in. Here there is a hierarchy to put it
+   * in.
    */
   const identitySubtitle = isSeason
-    ? [displayTitle ?? title.title, year].filter(Boolean).join(', ')
+    ? [displayTitle ?? title.title, year].filter(Boolean).map(String).join(SEP)
     : year
       ? String(year)
       : null;
@@ -653,40 +686,71 @@ export default function TitleScreen() {
    * applied here for the first time — the line used to print a runtime for a season,
    * which is a column TMDB does not fill, so the segment was simply missing.
    *
-   * Then the credit. A film's director; for television, the best equivalent the credits
-   * already fetched can offer — a creator or an executive producer, in that order — and
-   * nothing at all when the payload has none. **No new request is made to fill this
-   * line**: it reads the `credits` facet this screen was already asking for.
+   * Then the credit, **and which credit is decided by the kind of title, with no
+   * cross-fallback in either direction** (founder grammar lock, 2026-09-07).
+   *
+   *   film        the `Director`, or nothing.
+   *   television  an explicit `Creator`, or nothing.
+   *
+   * It used to read `director ?? showrunner` for every kind, and on a season that is the
+   * bug the founder named: the `Director` credit on a season payload is the person who
+   * directed *one episode*, and the line presented them in the slot a reader reads as
+   * "whose show is this". `To Kill a Monkey` and every other season page were printing an
+   * episode director as a showrunner. Falling the other way is no better — a film has no
+   * creator credit worth the name — so neither kind borrows the other's.
+   *
+   * Where the credit is missing the segment is simply absent: `TV-MA · 24 episodes` is
+   * the founder's rule and it is better than a confident falsehood in the one place on
+   * the page a reader has no way to check. `useCredits` narrows the television answer to
+   * `Creator` for the same reason.
    *
    * Built by filtering, so a missing part never leaves a stray separator, and the whole
    * line is absent rather than empty when all three are: an empty `Text` is a line box
    * with the footnote's height, which reads as a gap under the title.
    */
   const lengthLabel = lengthOf(title.kind, title.runtime_minutes, title.episode_count);
-  const metaLine = [
-    descriptive.certification,
-    lengthLabel,
-    credits.data?.director ?? credits.data?.showrunner ?? null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const credit =
+    title.kind === 'movie' ? (credits.data?.director ?? null) : (credits.data?.showrunner ?? null);
+  const metaLine = [descriptive.certification, lengthLabel, credit].filter(Boolean).join(SEP);
 
   /**
    * The reader's own context under the metadata: where it sits, and when they saw it.
    *
-   * The ordinal was a line of its own beside a detached score and is now a segment of
-   * this one, which is the founder's "incorporate it without cluttering the identity
-   * block": `#1 in TV` is four characters of information and does not deserve a row.
-   * `heroRankFor` still decides whether there is one at all — top ten only, or nothing.
+   * `#2 in Movies · Watched Aug 17, 2026`.
    *
-   * The watch date has never been on this page. It is the other half of "what have I
-   * done with this", it is already fetched, and a reader who cannot remember whether they
-   * have seen something is exactly who this page is for.
+   * ---------------------------------------------------------------------------
+   * IT STAYS HERE, AND IT IS THE OVERALL RANK (founder, 2026-09-07)
+   *
+   * The design draft proposed moving both halves into the Scores section, under `Your
+   * score`. The founder cut that and the reason is what each fact is *about*: a score is
+   * an aggregate, and a placement and a date are the reader's history with this title.
+   * They belong beside the title, not beneath a number. They also do not fit that cell —
+   * a score unit is a circle and two short lines.
+   *
+   * **Overall only.** `heroRankFor` answers with the top-ten overall placement where
+   * there is one and otherwise with the best top-ten *genre* placement, and this line now
+   * takes the first and discards the second. `#3 in Drama` beside a film's title reads as
+   * that film's standing when it is really the standing of a slice the reader never
+   * chose, and swapping to it precisely when the overall number is weaker is the page
+   * flattering itself. Where there is no top-ten overall placement the segment is absent
+   * and the line is the watch date alone.
+   *
+   * The genre reading is not deleted — `heroRankFor` still computes it and the
+   * post-ranking reveal still uses it, which is a surface where the reader has just
+   * finished the comparison that produced it.
+   *
+   * Built by filtering, so a title ranked outside the top ten and never dated produces no
+   * line at all rather than a dangling separator.
    */
   const watchedLine = data.logged?.watched_on
     ? `Watched ${formatShortDate(data.logged.watched_on)}`
     : null;
-  const contextLine = [heroRank?.label ?? null, watchedLine].filter(Boolean).join(' · ');
+  const contextLine = [
+    heroRank?.basis === 'overall' ? heroRank.label : null,
+    watchedLine,
+  ]
+    .filter(Boolean)
+    .join(SEP);
 
   // A tab whose content does not exist is not rendered. An always-empty tab is
   // worse than a missing one: it invites a tap that leads nowhere. Videos is here
@@ -1034,28 +1098,56 @@ export default function TitleScreen() {
         </View>
 
         {/**
-         * **Identity left, poster right, and every word of it on Paper** (founder, final
-         * direction, 2026-09-07).
+         * **Identity left, poster right, actions inside the left column, and every word
+         * of it on Paper** (founder, final direction, 2026-09-07).
+         *
+         * ---------------------------------------------------------------------------
+         * WHY THE WORDS ARE NOT ON THE ARTWORK
          *
          * The first pass of this redesign put the poster on the left and the words on the
-         * right, with the whole row pulled up into the artwork. The founder's correction is
-         * two changes and they are really one: **primary title text must not depend on
-         * being readable over a backdrop nobody chose.** A hero is unpredictable — a night
-         * scene, a white sky, a face — and a serif title set on it is legible on the
-         * artwork the designer happened to be looking at.
+         * right, with the whole row pulled up into the artwork. The founder's correction:
+         * **primary title text must not depend on being readable over a backdrop nobody
+         * chose.** A hero is unpredictable — a night scene, a white sky, a face — and a
+         * serif title set on it is legible on the artwork the designer happened to be
+         * looking at.
          *
          * So the row starts at the hero's lower edge and everything in the left column
          * sets on the page's own Paper. The poster keeps the overlap, because a poster is
-         * artwork and artwork may cross the fade; it is the one object on this page allowed
-         * to (`POSTER_LIFT`). The result is the composition the brief asks for: image-led
-         * at the top, then a calm editorial column with the artwork anchored opposite it.
+         * artwork and artwork may cross the fade; it is the one object on this page
+         * allowed to (`POSTER_LIFT`).
          *
-         * The score comes with the poster rather than with the words — it is a fact about
-         * *this* title, and the poster is the only thing on the page that can only be about
-         * this title.
+         * ---------------------------------------------------------------------------
+         * THE ACTIONS ARE IN THIS COLUMN, AND THE ROW HAS NO FIXED HEIGHT
+         *
+         * They were a full-width row *after* the whole identity region, which meant they
+         * waited for the bottom of a 150pt poster before they could be drawn. On a short
+         * title — a one-line name, a year, a length, no credit — that left an obvious
+         * empty band beside the poster and pushed the page's primary control down past
+         * it. The design draft's answer was to pin the row to 150pt so the button always
+         * landed at the same y; the founder rejected that as the same dead space made
+         * deliberate.
+         *
+         * The row is content-driven instead. The stack is title, subtitle, metadata,
+         * personal context, actions — all inside the column beside the poster — so the
+         * button rises on a short title and sits lower on a long one, and the space
+         * beside the poster is used rather than reserved. Identical action-row
+         * coordinates across the catalogue were never the goal; a consistent rhythm was.
+         *
+         * The synopsis still begins full width, below whichever of the two columns is
+         * taller.
+         *
+         * ---------------------------------------------------------------------------
+         * THE POSTER CARRIES ARTWORK AND NOTHING ELSE
+         *
+         * No score, no `Your score` caption, no dashed ring, no rank badge. The reader's
+         * own number is the first unit of the Scores section now (`ScoresSection`), where
+         * it has the two things it never had on the poster: a label saying whose it is,
+         * and something to be compared against. What sat here was a badge overhanging a
+         * corner with a caption under it, and every revision of it fought the artwork it
+         * was pinned to.
          */}
-        <View style={styles.identity}>
-          <View style={styles.identityCopy}>
+        <View style={styles.identity} testID="title-identity">
+          <View style={styles.identityCopy} testID="title-identity-copy">
             {/* For a season the heading is the show, and the show is also the way to
                 the series page — so the heading is the link rather than a small line
                 above it. A film's name leads nowhere and is not a control. */}
@@ -1066,17 +1158,24 @@ export default function TitleScreen() {
                 onPress={() => router.push(`/title/${parent.id}`)}
                 hitSlop={theme.space[1]}
               >
-                <Text testID="title-name" variant="title1">
+                <Text testID="title-name" variant="title1" numberOfLines={TITLE_LINES}>
                   {primaryName}
                 </Text>
               </Pressable>
             ) : (
-              <Text testID="title-name" variant="title1">
+              <Text testID="title-name" variant="title1" numberOfLines={TITLE_LINES}>
                 {primaryName}
               </Text>
             )}
             {identitySubtitle ? (
-              <Text testID="title-subtitle" variant="callout" tone="secondary">
+              <Text
+                testID="title-subtitle"
+                variant="callout"
+                tone="secondary"
+                // Every line of the identity block is one line. A season name long
+                // enough to wrap turns the subtitle into a paragraph under the heading.
+                numberOfLines={1}
+              >
                 {identitySubtitle}
               </Text>
             ) : null}
@@ -1085,116 +1184,112 @@ export default function TitleScreen() {
                 and an empty `Text` is not nothing on screen. It is a line box with the
                 footnote's height, which reads as a gap under the title. Review 17e. */}
             {metaLine ? (
-              <Text testID="title-meta" variant="footnote" tone="secondary">
+              <Text
+                testID="title-meta"
+                variant="footnote"
+                tone="secondary"
+                // One line, always. A creative credit long enough to wrap turns a
+                // three-part metadata line into a two-line paragraph, which is the
+                // founder's "prefer truncation over wrapping the metadata".
+                numberOfLines={1}
+              >
                 {metaLine}
               </Text>
             ) : null}
             {contextLine ? (
-              <Text testID="title-context" variant="caption" tone="tertiary">
+              <Text
+                testID="title-context"
+                variant="caption"
+                tone="tertiary"
+                numberOfLines={1}
+                style={styles.contextLine}
+              >
                 {contextLine}
               </Text>
             ) : null}
+
+            {/**
+             * **Rank/Ranked, Save, Recommend — inside this column, directly under the
+             * personal-context line** (founder, 2026-09-07).
+             *
+             * Not after the whole identity region, which is where it was: there it had to
+             * wait for the bottom of the poster, so on a short title an empty band opened
+             * up beside the artwork and the page's primary control sat below it. Here it
+             * rises with the copy above it and fills the column the poster leaves.
+             *
+             * The Rank/Ranked control keeps its **text and its behaviour**: unranked opens
+             * the log, ranked opens the ranking-options menu. Nothing here decides between
+             * ranking the same watch again and logging another watch, because that is the
+             * menu's job and the distinction is the whole point of it.
+             */}
+            <View style={styles.actionsRow}>
+              <TitleActions
+                rank={
+                  rankable
+                    ? {
+                        ranked: Boolean(data.ranked),
+                        accessibilityLabel: data.ranked
+                          ? 'Ranked. Change or remove this.'
+                          : `Rank ${displayTitle ?? title.title}`,
+                        accessibilityHint: data.ranked
+                          ? 'Opens rating and collection options'
+                          : 'Opens the rating sheet',
+                        onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                      }
+                    : null
+                }
+                save={{
+                  selected: isWatchlisted,
+                  // The sentences the labelled control used, unchanged: a screen reader's
+                  // name for this control is what says which way the toggle goes.
+                  accessibilityLabel: isWatchlisted
+                    ? `Remove ${title.title} from your watchlist`
+                    : `Add ${title.title} to your watchlist`,
+                  onPress: () => void toggleWatchlist(),
+                  disabled: watchlistBusy,
+                }}
+                recommend={
+                  rankable
+                    ? {
+                        accessibilityLabel: `Recommend ${title.title} to a friend`,
+                        onPress: () => {
+                          setActionError(null);
+                          setRecommendedTo(null);
+                          setRecommending(true);
+                        },
+                      }
+                    : null
+                }
+              />
+            </View>
           </View>
 
           <View style={styles.posterColumn} testID="title-poster-column">
             <View style={styles.posterFrame}>
               <Poster
-                uri={posterUri(title.poster_path, 'card')}
-                title={title.title}
-                // `md`. The poster shares the row with the whole identity now, and a 132pt
-                // frame left too little width to set a serif title in beside it.
-                size="md"
+                /**
+                 * The season's own artwork, then the series'.
+                 *
+                 * A season with no poster of its own is a real state in this catalogue,
+                 * and before this it fell straight through to the branded placeholder
+                 * while the series' perfectly good key art sat one row away — the same
+                 * inheritance `heroArtwork` already does for the backdrop. The placeholder
+                 * is still the answer when neither exists; it is never a stretched or
+                 * letterboxed stand-in.
+                 */
+                uri={
+                  posterUri(title.poster_path, 'card') ??
+                  posterUri(parent?.poster_path ?? null, 'card')
+                }
+                title={displayTitle ?? title.title}
+                // `detail` — 100×150. `md` was 88 wide, which read as a thumbnail left
+                // beside the title rather than as the counterweight to it; `lg` at 132
+                // left too little width to set a serif title in.
+                size="detail"
               />
             </View>
-            {/**
-             * **On the poster's lower-left corner, overhanging onto Paper** (founder,
-             * physical Android, 2026-09-07).
-             *
-             * It sat *under* the poster for one revision, which produced a tall empty
-             * column on the right of the page and a score that read as a separate block
-             * rather than as the poster's. Anchored to the corner it is attached to the
-             * artwork — the one thing on the page that can only be about this title —
-             * and the column below the poster is no taller than the poster. The overhang
-             * onto Paper is what keeps the number legible whatever the artwork is.
-             *
-             * A series has no score because it cannot be ranked (PRD §10), so it gets no
-             * anchor rather than an empty one.
-             */}
-            {rankable ? (
-              <View
-                style={styles.scoreAnchor}
-                pointerEvents="box-none"
-                testID="title-score-anchor"
-              >
-                <PersonalScore
-                  score={score}
-                  // Ranked, but the band sizes that derive the number have not landed. The
-                  // neutral empty circle says the number has not arrived; the dashed ring
-                  // is for a title with no ranking at all.
-                  pending={Boolean(data.ranked) && score == null}
-                  bucket={data.ranked?.bucket ?? null}
-                  // Exactly where the Ranked control leads: a ranked title opens its
-                  // options, an unranked one opens the log. The score has been the place to
-                  // press to change a rating since 2026-09-06 and still is.
-                  onPress={() => (data.ranked ? setManaging(true) : openLog())}
-                />
-              </View>
-            ) : null}
           </View>
         </View>
-
-        {/**
-         * **Rank/Ranked, Save, Recommend — one row, directly after the identity block.**
-         *
-         * It was hung from the right under the poster for one revision, and on the device
-         * that read as detached: a cluster floating in the corner with a blank column
-         * above it. It is a full-width row now — the labelled control takes the width the
-         * two glyphs leave, so it is unmistakably the primary act, and the synopsis begins
-         * a short way beneath. See `TitleActions`.
-         *
-         * The Rank/Ranked control keeps its **text and its behaviour**: unranked opens the
-         * log, ranked opens the ranking-options menu. Nothing here decides between ranking
-         * the same watch again and logging another watch, because that is the menu's job
-         * and the distinction is the whole point of it.
-         */}
-        <TitleActions
-          rank={
-            rankable
-              ? {
-                  ranked: Boolean(data.ranked),
-                  accessibilityLabel: data.ranked
-                    ? 'Ranked. Change or remove this.'
-                    : `Rank ${displayTitle ?? title.title}`,
-                  accessibilityHint: data.ranked
-                    ? 'Opens rating and collection options'
-                    : 'Opens the rating sheet',
-                  onPress: () => (data.ranked ? setManaging(true) : openLog()),
-                }
-              : null
-          }
-          save={{
-            selected: isWatchlisted,
-            // The sentences the labelled control used, unchanged: a screen reader's name
-            // for this control is what says which way the toggle goes.
-            accessibilityLabel: isWatchlisted
-              ? `Remove ${title.title} from your watchlist`
-              : `Add ${title.title} to your watchlist`,
-            onPress: () => void toggleWatchlist(),
-            disabled: watchlistBusy,
-          }}
-          recommend={
-            rankable
-              ? {
-                  accessibilityLabel: `Recommend ${title.title} to a friend`,
-                  onPress: () => {
-                    setActionError(null);
-                    setRecommendedTo(null);
-                    setRecommending(true);
-                  },
-                }
-              : null
-          }
-        />
 
         {/* The no-artwork case for the recommendation callout. Same object, laid out in
             the flow rather than over a hero that is not there. */}
@@ -1297,12 +1392,29 @@ export default function TitleScreen() {
          * A series has no aggregate of its own, because it cannot be ranked (PRD §10), so
          * it gets no row rather than a permanent "Not enough ratings".
          *
-         * **The reader's own score is not in here.** It is on the poster, with `YOU` on
-         * it. It led this row as well until 2026-08-18, which put the same number on the
-         * page twice and made the second copy the weaker one. Founder correction, kept.
+         * **The reader's own score leads this row** (founder, 2026-09-07). It was on the
+         * poster and is not any more; the poster carries artwork and nothing else. Three
+         * units, in one fixed order — `Your score`, `Following`, `bingd.` — which is a
+         * hierarchy of relevance to one reader rather than a leaderboard: me, then the
+         * people I chose, then the room. The number is stated once on this page, here.
          */}
         {!isSeries ? (
           <ScoresSection
+            you={
+              rankable
+                ? {
+                    score,
+                    // Ranked, but the band sizes that derive the number have not landed
+                    // yet. `Score loading` rather than `Not ranked yet`, which would
+                    // contradict the Ranked control a few points above it.
+                    pending: Boolean(data.ranked) && score == null,
+                    // Exactly where the Ranked control leads: a ranked title opens its
+                    // options, an unranked one opens the log. The score has been a place
+                    // to press to change a rating since 2026-09-06 and still is.
+                    onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                  }
+                : null
+            }
             bingd={{
               score: community.data?.score ?? null,
               ratingCount: community.data?.ratingCount ?? 0,
@@ -2120,40 +2232,43 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
   },
   /**
-   * The poster, with the score anchored to its corner, as one object on the right.
+   * The poster, as one object on the right.
    *
    * The lift lives here rather than on the row, so the artwork crosses the hero's fade
-   * and the words do not. `position: 'relative'` is what the score's absolute anchor is
-   * measured against; the frame's own width is what the column is.
+   * and the words do not. It carries nothing but the artwork now — the score that used to
+   * be anchored to its corner is the first unit of the Scores section.
    */
-  posterColumn: { position: 'relative', marginTop: -POSTER_LIFT },
+  posterColumn: { marginTop: -POSTER_LIFT },
   /**
-   * The score, over the poster's lower-left corner.
-   *
-   * Negative on both axes so the circle crosses the frame's edge: twelve points of it
-   * overhang onto Paper to the left, which keeps the number legible whatever the artwork
-   * behind the rest of it is, and the caption beneath it hangs below the frame by a few
-   * points. The action row's own top padding is what gives that overhang room.
-   *
-   * **The overhang is bounded by the row's gap, and this is the review finding it
-   * answers** (Codex, review 75). The identity column and the poster are `space[4]`
-   * apart; an overhang wider than that puts the badge over the last words of a long
-   * title and, because the poster column is the later sibling, lets the badge take a
-   * press meant for the linked series name. Twelve points is inside sixteen with four to
-   * spare, and `PersonalScore` carries no hit slop of its own for the same reason — the
-   * circle is already past the 44pt target without it.
-   *
-   * `box-none` on the wrapper so only the badge takes touches: the anchor is a
-   * positioning device and must not become a second, invisible target on the poster.
-   */
-  scoreAnchor: { position: 'absolute', left: -12, bottom: -12 },
-  /**
-   * Everything that names the title, on the left.
+   * Everything that names the title *and everything you can do to it*, on the left.
    *
    * `flex: 1` so it takes the width the poster leaves and a long name wraps inside it
-   * rather than pushing the row wider than the gutters allow.
+   * rather than pushing the row wider than the gutters allow. `minWidth: 0` because a
+   * flex child's default minimum is its content, and without it a long unbroken title
+   * pushes the poster off the right gutter instead of wrapping.
+   *
+   * The `gap` is the founder's 4–6 for the metadata stack. Two children take more than
+   * that and add their own margin on top of it: see `contextLine` and `actionsRow`.
    */
-  identityCopy: { flex: 1, gap: theme.space[1] },
+  identityCopy: { flex: 1, minWidth: 0, gap: theme.space[1] },
+  /**
+   * `space[1]` on top of the column's own `space[1]` gap, so the personal context sits 8
+   * below the metadata.
+   *
+   * The founder's contract asks for 6–8 here, and the reason it is more than the 4 above
+   * it is that this line is a different kind of fact: everything above it is about the
+   * title and this is about the reader.
+   */
+  contextLine: { marginTop: theme.space[1] },
+  /**
+   * `space[2]` on top of the column's `space[1]` gap: 12 from the line above.
+   *
+   * The founder's contract asks for 12–16 between the personal context and the actions,
+   * and this is the interval that stops the row reading as glued to the text. It is set
+   * here rather than inside `TitleActions` because the distance is one term in a spacing
+   * contract this screen holds, not a property of a button cluster.
+   */
+  actionsRow: { marginTop: theme.space[2] },
   /**
    * A Paper mat around the artwork, the way a print is framed.
    *
@@ -2228,7 +2343,9 @@ const styles = StyleSheet.create({
    * densities — the reason every rule in this app is drawn that way.
    */
   tabs: {
-    marginTop: theme.space[6],
+    // The page's section interval, the same one the Scores block and Where to watch
+    // open with, plus the rule.
+    marginTop: theme.space[7],
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
     paddingTop: theme.space[1],

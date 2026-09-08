@@ -456,7 +456,10 @@ describe('the section treatment', () => {
 
     expect(view.queryByTestId('where-to-watch-divider')).toBeNull();
     // The air that replaced it lives on the row, which is the block's own top padding.
-    expect(flat(view.getByTestId('where-to-watch')).paddingTop).toBe(theme.space[6]);
+    // `space[7]` since 2026-09-07: it is the title page's one section interval, and the
+    // Scores block above it and the tab row below it open with the same value, so every
+    // seam on the page measures the same.
+    expect(flat(view.getByTestId('where-to-watch')).paddingTop).toBe(theme.space[7]);
   });
 
   it('is a row and not a card, with no border of its own', async () => {

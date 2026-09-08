@@ -367,8 +367,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     // A section's worth of air, since the rule that used to carry it is gone. This is
     // now the only thing separating Where to watch from the scores above it, which is
-    // the whole of the founder's 2026-09-07 note about density.
-    paddingTop: theme.space[6],
+    // the whole of the founder's 2026-09-07 note about density. `space[7]` rather than
+    // `space[6]`: it is the page's one section interval, and the Scores block above it
+    // opens with the same value, so every seam on this page measures the same.
+    paddingTop: theme.space[7],
     minHeight: theme.layout.rowMinHeight,
   },
   copy: { flex: 1, gap: 2 },

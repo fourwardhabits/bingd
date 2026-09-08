@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -576,29 +576,59 @@ describe('a title this user has ranked', () => {
   it('shows the score, not the position', async () => {
     const view = await open();
 
-    // Top of a two-title Loved band, so the band's high. **Once.** It led the Scores
-    // section as well until the founder's correction of 2026-08-18; two copies of one
-    // number, and the second had neither the rank line nor the control that changes it.
+    // Top of a two-title Loved band, so the band's high. **Once**, and in the Scores
+    // section: it sat on the poster's corner until the founder's 2026-09-07 lock, and
+    // before that it was in both places at once.
     await waitFor(() =>
-      expect(view.getAllByLabelText('Your score: 10.0 out of 10, I liked it')).toHaveLength(1),
+      expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1),
     );
   });
 
-  it('puts its one copy in the hero and never in the Scores section', async () => {
+  it('puts its one copy in the Scores row and never on the poster', async () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
-    // The hero badge is the one copy, spoken as a score. The "Your score" caption
-    // under it went in the founder's hierarchy pass — a filled circle with a number,
-    // above a button named Rank, does not need a caption to say whose score it is —
-    // and the Scores section carried a second copy under those words until 2026-08-18.
-    expect(view.getAllByLabelText('Your score: 10.0 out of 10, I liked it')).toHaveLength(1);
-    // One copy of the number, and one place the words "Your score" appear — beneath the
-    // poster. The Scores section is what everybody *else* thought and never restates it.
+
+    /**
+     * **The number is stated exactly once on this page, and the poster carries none of
+     * it** (founder lock, 2026-09-07).
+     *
+     * It was a badge overhanging the poster's lower-left corner with a `Your score`
+     * caption under it. Every revision of that fought the artwork it was pinned to, and
+     * beside a poster the number had nothing to be measured against. In the Scores row it
+     * is the first term of a comparison the reader reads straight across.
+     */
+    expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1);
     expect(view.getAllByText('Your score')).toHaveLength(1);
-    // The section is what everybody *else* thought, and those are its only two rows.
+
+    // And the words and the number are in the same place: the unit, not the poster.
+    const poster = view.getByTestId('title-poster-column');
+    expect(within(poster).queryByText('Your score')).toBeNull();
+    expect(within(poster).queryByLabelText(/out of 10/)).toBeNull();
+    expect(view.queryByTestId('title-score-anchor')).toBeNull();
+
+    // Three units, in the founder's order: me, then the people I chose, then the room.
     expect(view.getByText('Following')).toBeTruthy();
     expect(view.getByText('bingd.')).toBeTruthy();
+  });
+
+  it('puts no bucket word, rank or watch date under the personal score', async () => {
+    /**
+     * All three were proposed for that cell and all three were cut. `I liked it` under a
+     * 10.0 is jargon this screen has never spoken; the placement and the date are the
+     * reader's *history* with the title rather than a qualification of an aggregate, and
+     * they stay on the identity line where they describe exactly that.
+     */
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    const scores = view.getByTestId('scores-section');
+    expect(within(scores).queryByText(/^(I liked it|It was fine|Not for me)$/)).toBeNull();
+    expect(within(scores).queryByText(/^#\d+ in /)).toBeNull();
+    expect(within(scores).queryByText(/Watched /)).toBeNull();
+
+    // Where they actually live.
+    expect(view.getByTestId('title-context')).toHaveTextContent(/#1 in Movies/);
   });
 
   it('says where it sits in their own list, as an ordinal', async () => {
@@ -1617,10 +1647,15 @@ describe('the following score', () => {
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
     expect(view.getByText('bingd.')).toBeTruthy();
     // Founder correction, 2026-08-18: the row is always drawn, with the grey circle
-    // and the same four words. A row that appears when the data does is a page that
-    // moves under somebody reading it.
+    // and the circle. A row that appears when the data does is a page that moves under
+    // somebody reading it.
+    //
+    // The *words* changed on 2026-09-07: Following says its own sentence now rather than
+    // borrowing bingd.'s four. "Not enough ratings" is a fact about the app's sample;
+    // this is a fact about who the reader follows, and it is the only one of the two they
+    // can do anything about.
     expect(view.getByText('Following')).toBeTruthy();
-    expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
   });
 
   it('never calls it a friend score, because following is not mutual', async () => {
@@ -1703,8 +1738,15 @@ describe('a season, on its own page', () => {
     // Still the way to the series page: the heading is the link rather than a line above
     // the link.
     expect(view.getByLabelText('Breaking Bad, the series this belongs to')).toBeTruthy();
-    // A comma joins a season to its year in every place anybody writes one down.
-    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1, 2023$/);
+    /**
+     * **One separator for the whole identity block** (founder grammar lock, 2026-09-07).
+     *
+     * It was a comma here and a middle dot on the metadata line directly beneath, which
+     * made two adjacent lines of the same metadata look like two different kinds of
+     * claim. The middle dot is the block's only joiner now, so `Season 1 · 2023` and
+     * `TV-MA · 9 episodes` read as one grammar.
+     */
+    expect(view.getByTestId('title-subtitle')).toHaveTextContent(/^Season 1 · 2023$/);
     // Not the flattened form, which would say the show twice on one screen.
     expect(view.queryByText(/Breaking Bad, S1/)).toBeNull();
   });
@@ -1737,13 +1779,18 @@ describe('a title opened from a recommendation', () => {
 });
 
 /**
- * The empty state, which is now one shape for both rows.
+ * The empty state, which is one shape for both readers and its own sentence per row.
  *
  * Two silences used to be told apart here: a reader who followed nobody got no row at
  * all, and a reader who followed eleven people none of whom had seen the film was told
- * exactly that. The founder collapsed both into the grey circle and four words on
- * 2026-08-18. The reader can act on neither case, and a row that materialises when the
- * data arrives moves the page under somebody reading it.
+ * exactly that. The founder collapsed both into one circle on 2026-08-18. The reader can
+ * act on neither case, and a row that materialises when the data arrives moves the page
+ * under somebody reading it. That much is unchanged.
+ *
+ * What changed on 2026-09-07 is the *words*. Following borrowed bingd.'s four, "Not
+ * enough ratings", and that hid a real distinction: the app being short of a sample and
+ * nobody the reader chose having seen this are different facts, and only the second one
+ * is something they can do anything about.
  */
 describe('the following score with nothing to say', () => {
   it('says so for a reader who follows eleven people', async () => {
@@ -1756,19 +1803,20 @@ describe('the following score with nothing to say', () => {
      * Anchored on the **community** score, not on the "Following" heading.
      *
      * The heading is drawn before either number arrives, so waiting on it proves only
-     * that the section exists. This assertion needs more than that: it says "Not enough
-     * ratings" appears *once*, which is only true after the community row has resolved to
-     * its 7.4 — before that both rows are empty and both say it, and `getByText` fails
-     * with "found multiple elements".
+     * that the section exists. Anchoring on the community score is what makes the
+     * assertions below statements about the settled page rather than about a frame of it.
      *
-     * It passed locally and failed on CI (run 32876993932), which is the signature of a
-     * wait that gates on the wrong thing rather than of a real defect. Same class as the
-     * one `PrivacyScreen.test.tsx` records.
+     * The original form of this wait passed locally and failed on CI (run 32876993932),
+     * which is the signature of a wait that gates on the wrong thing rather than of a
+     * real defect. Same class as the one `PrivacyScreen.test.tsx` records.
      */
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
-    // The old copy named the reader's following list back to them. It is gone.
+    // And it is Following's own sentence: bingd. has a 7.4 to report, so its empty words
+    // are nowhere on the page. The two rows no longer share a string.
+    expect(view.queryByText('Not enough ratings')).toBeNull();
+    // An older copy named the reader's following list back to them. Also gone.
     expect(view.queryByText('Nobody you follow has ranked this')).toBeNull();
   });
 
@@ -1783,21 +1831,24 @@ describe('the following score with nothing to say', () => {
     // row that materialises when the data arrives moves the page under them.
     //
     // Anchored on the community score for the reason the test above records: the
-    // "Following" heading is drawn before either number arrives, so a single match for
-    // "Not enough ratings" is only a fact once the other row has resolved.
+    // "Following" heading is drawn before either number arrives.
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
   });
 
-  it('draws the grey circle rather than a faded number', async () => {
+  it('draws a stated absence rather than a faded number', async () => {
     mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 0 }];
     mockRpcResults.community_score = [{ score: null, rating_count: 2, min_ratings: 10 }];
 
     const view = await open();
 
     await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
-    expect(view.getAllByText('Not enough ratings')).toHaveLength(2);
+    // Each row in its own words, and each circle carrying an em dash rather than being
+    // blank: "no blank cream disc that looks like broken content" is the founder's exact
+    // constraint, and an empty circle is indistinguishable from one that failed to load.
+    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('Not enough ratings')).toBeTruthy();
     // Never a zero, and never a real number greyed out to say "do not trust this".
     expect(view.queryByText('0.0')).toBeNull();
   });
@@ -2401,15 +2452,18 @@ describe('the score row and what surrounds it', () => {
     expect(order).not.toContain('scores-divider');
   });
 
-  it('holds for a ranked movie, with the personal score left in the hero', async () => {
+  it('holds for a ranked movie, with the personal score leading the row', async () => {
     rankThisFilm();
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
     const view = await open();
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
 
     expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
-    // The reader's own score is not duplicated into the row.
-    expect(view.getAllByLabelText('Your score: 10.0 out of 10, I liked it')).toHaveLength(1);
+    // Stated once, in the Scores row, where the reader's own number is the first term of
+    // a comparison rather than a figure beside artwork with nothing to measure it by.
+    expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1);
+    expect(at(view, 'Your score')).toBeLessThan(at(view, 'Following'));
+    expect(at(view, 'Following')).toBeLessThan(at(view, 'bingd.'));
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
@@ -2479,9 +2533,14 @@ describe('the score row and what surrounds it', () => {
     expect(view.queryByTestId('scores-divider')).toBeNull();
   });
 
-  it('keeps the insufficient-ratings state', async () => {
+  it('keeps the insufficient-ratings state, in each row’s own words', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getAllByText('Not enough ratings')).toHaveLength(2));
+    // Three rows with nothing to report and three different sentences, because they are
+    // three different facts: the reader has not ranked it, nobody they follow has, and
+    // the app is short of a sample. Only the middle one is something they can act on.
+    await waitFor(() => expect(view.getByText('Not enough ratings')).toBeTruthy());
+    expect(view.getByText('None of your friends have ranked this')).toBeTruthy();
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
 
     expect(view.queryByText(/more needed/)).toBeNull();
   });

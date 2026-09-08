@@ -55,14 +55,23 @@ export type TitleActionsProps = {
  * labelled button and an icon, because a control that is a word on one phone and a
  * symbol on another is two controls.
  *
- * **Three equal shares read as a toolbar, and a right-hung cluster read as detached.**
- * The first arrangement stretched three identical icon shares across the page — a band
- * of chrome, the dashboard feeling this whole pass is removing. The second hung a
- * content-sized cluster from the right under the poster, and on the device that floated
- * in a corner with a blank column above it. This is the third and it is the ordinary
- * one: a single row directly after the identity block, the labelled control taking the
- * width the two glyphs leave. One row, one strong control, two quiet ones — and the
- * synopsis begins a short way beneath.
+ * **It is content-sized, and that is the founder's fourth and final correction**
+ * (2026-09-07). The arrangement this replaces gave the labelled control `flex: 1` — the
+ * whole width the two glyphs left — on the reasoning that width makes it unmistakably
+ * the primary act. On the device it did the opposite: a full-width control at the top of
+ * a reading page is a form's submit button, and the row read as chrome laid across the
+ * page rather than as something belonging to the title above it. `Rank` and `Ranked` are
+ * about 104 and 132 points of label; that is what they now measure, with
+ * `inlineButtonMaxWidth` as the guard at 130% type.
+ *
+ * The trailing space to its right is not waste, it is the signal: it is what says the
+ * group has ended.
+ *
+ * **The row lives inside the identity column now**, beside the poster, directly under
+ * the personal-context line — not below the whole poster/identity region. The founder's
+ * note is that waiting for the bottom of a 150pt poster to place a 44pt button leaves an
+ * obvious dead band above it on every short title. The component takes no horizontal
+ * padding of its own for that reason: it is inside a block that is already inset.
  *
  * ---------------------------------------------------------------------------
  * WHY ONLY THE FIRST ONE IS LABELLED
@@ -99,7 +108,15 @@ export function TitleActions({ rank, save, recommend }: TitleActionsProps) {
             size={theme.layout.icon.sm}
             color={rank.ranked ? theme.semantic.action : theme.semantic.actionText}
           />
-          <Text variant="headline" tone={rank.ranked ? 'action' : 'inverse'}>
+          {/* One line, always. The button is content-sized with a ceiling, so the only
+              way the label could break is at a text size where it meets that ceiling —
+              and a two-line `Ranked` is a control that has changed shape rather than a
+              label that has grown. */}
+          <Text
+            variant="headline"
+            numberOfLines={1}
+            tone={rank.ranked ? 'action' : 'inverse'}
+          >
             {rank.ranked ? 'Ranked' : 'Rank'}
           </Text>
         </Pressable>
@@ -163,18 +180,21 @@ function IconControl({
 
 const styles = StyleSheet.create({
   /**
-   * One row across the content width, directly after the identity block.
+   * One left-aligned group inside the identity column.
    *
-   * The top padding is also the clearance for the score, which overhangs the poster's
-   * lower edge by a few points on its caption; the row is the first thing beneath it.
+   * No horizontal padding: the block above it is already inset by the gutter and this
+   * row sits in the same column as the title. No top padding either — the screen owns
+   * the distance from the personal-context line, because that gap is one interval in a
+   * spacing contract the screen holds and not a property of a button cluster.
+   *
+   * `align-items: center` rather than `stretch`, so the two 44pt icon boxes and the
+   * label-sized button share a centre line whatever the label does at large type.
    */
   cluster: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
     alignItems: 'center',
     gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[5],
   },
   rank: {
     flexDirection: 'row',
@@ -182,10 +202,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: theme.space[2],
     minHeight: theme.layout.minTapTarget,
-    // The width the two glyphs leave. It makes the labelled control unmistakably the
-    // primary act, and `Rank` and `Ranked` the same object at two lengths rather than a
-    // control that resizes the moment you use it.
-    flex: 1,
+    /**
+     * Sized by its label, capped, and never stretched.
+     *
+     * `flexShrink: 1` rather than `flex: 1`: it takes exactly the width `Rank` or
+     * `Ranked` needs and gives width back only if the row genuinely runs out — which,
+     * with two 44pt glyphs beside it and a 168pt ceiling, it cannot at any width this
+     * app runs at. That is the difference between a compact control and the full-width
+     * one the founder rejected.
+     */
+    flexShrink: 1,
+    maxWidth: theme.layout.control.inlineButtonMaxWidth,
     paddingHorizontal: theme.space[4],
     borderRadius: theme.radius.control,
   },
