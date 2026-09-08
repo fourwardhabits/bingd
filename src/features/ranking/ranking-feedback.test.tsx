@@ -134,9 +134,29 @@ const REVEAL = 'Film A scored 8.7 out of 10. #3 in Movies.';
  */
 let timingSpy: jest.SpyInstance;
 let reduceMotionSpy: jest.SpyInstance;
+let setValueSpy: jest.SpyInstance;
+/** Every `start()` the entrance actually called, by the value it was travelling to. */
+let started: unknown[];
 
 beforeEach(() => {
-  timingSpy = jest.spyOn(Animated, 'timing');
+  started = [];
+  /**
+   * Stubbed rather than merely observed. Review 78b's P2 is exact: asserting that a
+   * `timing` *config* was constructed would pass with the `.start()` deleted, and a
+   * reveal whose entrance is never started sits at opacity 0 — a blank score panel.
+   */
+  timingSpy = jest.spyOn(Animated, 'timing').mockImplementation((_value, config) => {
+    const composite = {
+      start: (callback?: (result: { finished: boolean }) => void) => {
+        started.push((config as { toValue: unknown }).toValue);
+        callback?.({ finished: true });
+      },
+      stop: () => {},
+      reset: () => {},
+    };
+    return composite as unknown as Animated.CompositeAnimation;
+  });
+  setValueSpy = jest.spyOn(Animated.Value.prototype, 'setValue');
   reduceMotionSpy = jest
     .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
     .mockResolvedValue(false);
@@ -304,6 +324,9 @@ describe('the placement landing', () => {
     expect(entrance).toHaveLength(1);
     expect(entrance[0]![1].duration).toBeLessThanOrEqual(400);
     expect(entrance[0]![1].useNativeDriver).toBe(true);
+    // And it was actually run. A configured animation that is never started is a panel
+    // that stays at opacity 0.
+    expect(started).toEqual([1]);
   });
 
   it('does not move at all when the reader asked for stillness', async () => {
@@ -328,6 +351,14 @@ describe('the placement landing', () => {
     await waitFor(() => expect(sheet.getByLabelText(REVEAL)).toBeTruthy());
 
     expect(timingSpy.mock.calls.filter(([, config]) => config.toValue === 1)).toHaveLength(0);
+    expect(started).toEqual([]);
+    /**
+     * **And the panel is visible.** Suppressing the animation without putting the value
+     * at rest is the same blank reveal by a different route, and zero timing calls alone
+     * cannot tell the two apart — review 78b's second P2.
+     */
+    expect(setValueSpy).toHaveBeenCalledWith(1);
+    // The haptic is not motion, and is not suppressed with it.
     expect(mockHaptics.notification).toHaveBeenCalledTimes(1);
   });
 

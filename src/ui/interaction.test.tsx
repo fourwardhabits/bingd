@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { AccessibilityInfo, Animated } from 'react-native';
 
 import { PeoplePicker } from '@/features/people/PeoplePicker';
@@ -331,6 +331,51 @@ describe('Reduce Motion', () => {
     isEnabled.mockRestore();
     subscribe.mockRestore();
     timing.mockRestore();
+  });
+
+  it('puts a held control back when the preference changes mid-press', async () => {
+    /**
+     * **The sequence review 78 named as a P1, exercised** (its follow-up P2 was that the
+     * fix had no test that ran it). Press in with motion allowed, switch Reduce Motion on
+     * while the thumb is still down, and the control must not be left sitting at 0.975 —
+     * which is exactly what an early return from both handlers produced.
+     *
+     * The listener is captured from the subscription rather than simulated, so this
+     * exercises the real path a system event takes into the hook.
+     */
+    let notify: ((reduced: boolean) => void) | undefined;
+    const isEnabled = jest
+      .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+      .mockResolvedValue(false);
+    const subscribe = jest
+      .spyOn(AccessibilityInfo, 'addEventListener')
+      .mockImplementation((_event, handler) => {
+        notify = handler as unknown as (reduced: boolean) => void;
+        return { remove: jest.fn() } as never;
+      });
+    const setValue = jest.spyOn(Animated.Value.prototype, 'setValue');
+
+    await render(<FilterChip icon="options-outline" label="Filters" onPress={jest.fn()} />);
+    const chip = screen.getByRole('button', { name: 'Filters' });
+
+    await fireEvent(chip, 'pressIn');
+    setValue.mockClear();
+
+    // The reader turns Reduce Motion on with the control still held.
+    await act(async () => {
+      notify?.(true);
+    });
+
+    expect(setValue).toHaveBeenCalledWith(1);
+
+    // And releasing afterwards still leaves it at rest rather than doing nothing.
+    setValue.mockClear();
+    await fireEvent(chip, 'pressOut');
+    expect(setValue).toHaveBeenCalledWith(1);
+
+    isEnabled.mockRestore();
+    subscribe.mockRestore();
+    setValue.mockRestore();
   });
 
   it('is consulted, subscribed to, and does not silence the haptic', async () => {

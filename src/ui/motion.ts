@@ -37,31 +37,68 @@ export function useReducedMotion() {
  * on mid-animation stops it.
  */
 export function useReducedMotionState() {
-  const [reduced, setReduced] = useState(false);
-  const [known, setKnown] = useState(false);
+  const [state, setState] = useState({ reduced: false, known: false });
 
   useEffect(() => {
     let live = true;
+    /**
+     * **Three ways an answer can arrive, and they are not equal** (independent review
+     * 78b, P1). The first version had two of them wrong.
+     *
+     * The *event* is always the freshest answer and always makes the preference known.
+     * The *initial read* is a snapshot taken before it, so it must not overwrite an event
+     * that has already spoken — the sequence review 78b named is an event reporting `true`
+     * followed by an older read resolving `false`, which turned Reduce Motion back off
+     * and let the entrance run.
+     */
+    let eventSeen = false;
+    let initialSettled = false;
+
+    const fromEvent = (reduced: boolean) => {
+      eventSeen = true;
+      if (live) setState({ reduced, known: true });
+    };
+
+    const fromInitialRead = (reduced: boolean) => {
+      if (eventSeen || initialSettled || !live) return;
+      initialSettled = true;
+      setState({ reduced, known: true });
+    };
 
     AccessibilityInfo.isReduceMotionEnabled()
-      .then((enabled) => {
-        if (!live) return;
-        setReduced(enabled);
-        setKnown(true);
-      })
-      .catch(() => {
-        // A platform that cannot answer is a platform with no preference to honour, and
-        // waiting for ever would mean an entrance that never plays. Treat it as answered.
-        if (live) setKnown(true);
-      });
+      .then(fromInitialRead)
+      // A platform that cannot answer has no preference to honour.
+      .catch(() => fromInitialRead(false));
 
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', fromEvent);
+
+    /**
+     * **And a bounded fallback, because "never answers" must not mean "never appears".**
+     *
+     * The whole point of `known` is that a one-shot entrance waits for it — so a promise
+     * that never settles would leave the ranking reveal at opacity 0 permanently, which
+     * is a blank score panel and by some distance the worst outcome this pass could
+     * produce. After this long, an unanswered platform is treated as having no preference.
+     *
+     * Short enough that a reader never sees the wait — the panel is at opacity 0 for it,
+     * and a real answer arrives in a frame or two on every platform that has one.
+     */
+    const fallback = setTimeout(() => fromInitialRead(false), UNANSWERED_FALLBACK_MS);
 
     return () => {
       live = false;
+      clearTimeout(fallback);
       subscription.remove();
     };
   }, []);
 
-  return { reduced, known };
+  return state;
 }
+
+/**
+ * How long a one-shot will wait to be told before assuming there is nothing to honour.
+ *
+ * 250ms: past any real platform's answer, and under the threshold at which a reader
+ * would perceive the ranking reveal as slow to arrive rather than as arriving.
+ */
+const UNANSWERED_FALLBACK_MS = 250;
