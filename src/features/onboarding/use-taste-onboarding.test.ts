@@ -1,7 +1,9 @@
 import { act, waitFor } from '@testing-library/react-native';
 
+import { queryKeys } from '@/lib/query';
 import { renderHookWithProviders } from '@/test-utils/render';
 
+import type { RankingOutcomeRead } from './pick-five';
 import {
   resetTasteIntent,
   useBeginTasteOnboarding,
@@ -97,10 +99,10 @@ const begin = async (userId: string) => {
 };
 
 /** Leaving, the way one of the summary's buttons does. */
-const complete = async ({ skipped }: { skipped: boolean }) => {
+const complete = async ({ outcome }: { outcome: RankingOutcomeRead }) => {
   const { result } = await renderHookWithProviders(() => useCompleteTasteOnboarding('user-1'));
   await act(async () => {
-    await result.current({ skipped });
+    await result.current({ outcome });
   });
 };
 
@@ -272,7 +274,7 @@ describe('useTasteOnboarding', () => {
     expect(result.current.isPending).toBe(true);
 
     // The person answers while the read is still out.
-    await complete({ skipped: true });
+    await complete({ outcome: 'skipped' });
     expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('skipped');
 
     // And now the counts come back, into a process that has moved on without them.
@@ -378,7 +380,7 @@ describe('useTasteOnboarding', () => {
     const { result: complete } = await renderHookWithProviders(() =>
       useCompleteTasteOnboarding('user-a'),
     );
-    await complete.current({ skipped: false });
+    await complete.current({ outcome: 'completed' });
 
     // A is finished, held in memory whatever the disk did.
     const { result: again } = await renderHookWithProviders(() => useTasteOnboarding('user-a'));
@@ -579,5 +581,101 @@ describe('onboarding_started', () => {
     await begin('user-1');
 
     expect(starts()).toHaveLength(0);
+  });
+});
+
+/**
+ * **`onboarding_completed` says what it knows and nothing else.**
+ *
+ * Both of its properties have already been wrong in the flattering direction once. The
+ * first version derived `skipped` from a query the last step can mount before, so an
+ * unanswered read became zero, zero was below five, and a completed flow reported a skip.
+ * The fix for that resolved an unrecorded outcome to `completed` instead — trading an
+ * under-count for a manufactured success, which is the worse of the two because a gap is
+ * visible and an invented completion is not.
+ *
+ * The rule these tests hold is the third option: the event fires either way, so the
+ * denominator never drifts, and a property nobody can establish is simply absent.
+ * `sanitize` turns the undefined into an omission on the wire (`analytics.test.ts`).
+ */
+type Completion = { name: string; props: Record<string, unknown> };
+
+describe('onboarding_completed', () => {
+  const completions = (): Completion[] =>
+    mockTrack.mock.calls
+      .map(([event]) => event as Completion)
+      .filter((event) => event.name === 'onboarding_completed');
+
+  /** The one event, asserted to be one — indexing is checked under this tsconfig. */
+  const only = (events: Completion[]): Completion => {
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    if (!event) throw new Error('no onboarding_completed was emitted');
+    return event;
+  };
+
+  /**
+   * Ending the flow, against a client the test can seed — because `titles_ranked` is read
+   * from the cache, and whether the cache has anything is exactly what is under test.
+   */
+  const end = async (outcome: RankingOutcomeRead, ranked?: number) => {
+    const { result, client } = await renderHookWithProviders(() =>
+      useCompleteTasteOnboarding('user-1'),
+    );
+    if (ranked !== undefined) {
+      client.setQueryData(queryKeys.tasteOnboarding('user-1'), { ranked, needed: true });
+    }
+    await act(async () => {
+      await result.current({ outcome });
+    });
+    return completions();
+  };
+
+  it('reports a recorded completion as a completion', async () => {
+    const event = only(await end('completed', 5));
+
+    expect(event.props).toEqual({ skipped: false, titles_ranked: 5 });
+  });
+
+  it('reports a recorded skip as a skip', async () => {
+    const event = only(await end('skipped', 2));
+
+    expect(event.props).toEqual({ skipped: true, titles_ranked: 2 });
+  });
+
+  /**
+   * The one that matters. An account with nothing recorded is not guessed at in either
+   * direction, and the event still fires.
+   */
+  it('leaves skipped unsaid when no outcome was recorded', async () => {
+    const event = only(await end('unknown', 5));
+
+    // Neither guess. The property is absent, and the count beside it is unaffected.
+    expect(event.props.skipped).toBeUndefined();
+    expect(event.props.titles_ranked).toBe(5);
+  });
+
+  /**
+   * `titles_ranked` had the identical defect and it is fixed the identical way. The count
+   * used to be read *after* this hook seeds the cache, at which point `?? 0` always found
+   * a number — so a relaunch onto the last step, where nothing has fetched the query,
+   * reported that a completed flow had ranked nothing.
+   */
+  it('leaves titles_ranked unsaid when the count was never read', async () => {
+    const event = only(await end('completed'));
+
+    expect(event.props.skipped).toBe(false);
+    expect(event.props.titles_ranked).toBeUndefined();
+  });
+
+  /**
+   * An unknown outcome is still an *ending*. Declining to claim what happened does not
+   * mean declining to act: the phase is `done`, so nobody who has already been through
+   * the flow is put back into it.
+   */
+  it('still ends the flow on an unknown outcome', async () => {
+    await end('unknown');
+
+    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('done');
   });
 });

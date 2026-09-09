@@ -202,14 +202,14 @@ describe('the terms acknowledgment at signup', () => {
  * **The screen is no longer a locked room.** Build 4, physical device: signed in with
  * the wrong email, landed here, and there was no way out — Settings is behind the
  * profile gate and an iOS reinstall keeps the Keychain session. The escape's behaviour
- * lives in `account-escape.test.tsx`; what this suite pins is that "Pick your name"
+ * lives in `account-escape.test.tsx`; what this suite pins is that "Set up your profile"
  * actually offers it.
  */
 describe('the way out of the wrong account', () => {
   it('offers Use a different account beneath the form', async () => {
     const view = await renderWithProviders(<CreateProfileScreen />);
 
-    await waitFor(() => expect(view.getByText('Pick your name')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Set up your profile')).toBeTruthy());
     expect(view.getByText('Use a different account')).toBeTruthy();
   });
 });

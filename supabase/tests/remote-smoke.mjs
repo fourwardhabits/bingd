@@ -40,8 +40,20 @@ const { environmentForRef } = require('../../config/production-lane.cjs');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/**
+ * Tolerates the file being absent, which `social-activation.mjs` already does and this
+ * did not. `.env` is untracked, so a **git worktree has none** — and a worktree is exactly
+ * where a release branch gets validated. The failure was a stack trace out of `readFileSync`
+ * before the first probe, on a run whose target had been supplied entirely through the
+ * environment and needed no file at all.
+ */
 function loadEnv() {
-  const text = readFileSync(join(root, '.env'), 'utf8');
+  let text;
+  try {
+    text = readFileSync(join(root, '.env'), 'utf8');
+  } catch {
+    return {};
+  }
   const out = {};
   for (const line of text.split(/\r?\n/)) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
@@ -976,6 +988,15 @@ expectRefused(
 expectRefused(
   'anon cannot execute top_rated_titles',
   await rpc('top_rated_titles', { p_medium: 'movies', p_limit: 1 }),
+);
+
+// 20260914000100, the organic branch of onboarding's People step. Definer, and the only
+// discovery function whose whole purpose is to put strangers in front of somebody — so an
+// anon grant would turn it into a directory of every public account, ranked by activity,
+// readable without an account. Probed with its real argument for the reason above.
+expectRefused(
+  'anon cannot execute people_starter_suggestions',
+  await rpc('people_starter_suggestions', { p_limit: 1 }),
 );
 
 const total = passed + failures.length + inconclusive.length;

@@ -55,7 +55,9 @@ error rather than a decision somebody makes at 2am before a demo.
 | `sign_in_completed` | a Supabase session exists | the person signing in | `method` |
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
-| `onboarding_completed` | the first-run taste flow ended, by either exit | the account | `skipped`, `titles_ranked` |
+| `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` — either may be **absent**, see below |
+| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09) | the account | `step`, `variant`, `outcome` |
+| `onboarding_motivations` | the six-way motivation question was answered, once, as soon as the account exists (2026-09-09) | the account | `count`, `picked` |
 
 ### Core loop
 
@@ -257,10 +259,44 @@ has no start, which is the gap the seed in `create-profile.tsx` exists to close.
 denominator for `onboarding_completed`** is this event, and `onboarding_started` without a
 matching completion is the abandonment the beta could not previously count.
 
+**`onboarding_step_completed`** (2026-09-09) exists because the flow is ten steps long and
+"it converts" stopped being a useful sentence about it. It follows the **step** rather than
+the tap, so a lost reply under-counts rather than double-counts, and its `variant` is the
+branch the People step drew **on entry** — a `could_not_load` retried into a real list still
+reports what the reader first met. It carries no ids, no handles and no count of who was
+suggested: step 9 is a private read of one person's social neighbourhood, and the analytics
+must not be able to reconstruct that graph.
+
+**`onboarding_motivations`** (2026-09-09) carries `picked` as a **delimited string** over
+the six fixed slugs and deliberately not as an array. `sanitize` accepts scalars only, so an
+array would be dropped silently and the event would arrive looking complete with its one
+interesting property missing. It is the closest this product comes to asking somebody why
+they downloaded it, and it is discarded after step 4 unless a column is ever justified.
+
 **`onboarding_completed`** covers both exits and `skipped` separates them. One event
 rather than two, so the denominator cannot drift: everybody who reaches the end of the
 flow is in it. It is emitted from `useCompleteTasteOnboarding`, which all three exits go
 through, rather than from the three buttons.
+
+**Both of its properties can be absent, and an absence means "not known"** (2026-09-09).
+Read `skipped` as three groups, not two: `false` is a recorded completion, `true` a
+recorded skip, and *missing* an account whose outcome nothing wrote down — one that was
+already mid-flow when this shipped, or a device whose preference write lost. `titles_ranked`
+is missing on the same terms, when the last step was reached before the taste count had
+been read at all.
+
+This is worth the awkwardness in a query because both properties have already been wrong
+in the flattering direction. `skipped` was first derived from the taste count at the moment
+the last button was pressed, and that count is a query the step can mount before: an
+unanswered read was zero, zero was below five, and **an account that ranked all five
+reported itself as a skip.** The repair recorded the outcome at the two exits that watch it
+happen — which is right — but resolved an unreadable one to `completed`, on the reasoning
+that finishing is the likelier explanation. That swaps an under-count for a *manufactured*
+success, and it is the worse trade: a gap in a chart is visible and can be excluded, while
+an invented completion is indistinguishable from a real one and can never be subtracted
+back out. So the flow still ends normally on an unknown outcome — that is a product
+decision the app is entitled to make on incomplete information — and the event simply does
+not say. `sanitize` drops the undefined, so nothing reaches PostHog.
 
 **`title_logged`** is a bucket, not a position. A bucket is a band (PRD §11); the exact
 ordering is `ranking_completed`. It is not the log sheet opening.

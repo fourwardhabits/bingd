@@ -1,0 +1,299 @@
+import { useCallback, useSyncExternalStore } from 'react';
+
+import { withGrace } from '@/lib/grace';
+import { readPref, writePref } from '@/lib/prefs';
+
+/**
+ * The five movies chosen on step 6, held across the ranking run that follows.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY SELECTION IS NOW A SEPARATE ACT FROM RANKING
+ *
+ * The old picker ranked each film **the moment it was chosen**, and the argument for that
+ * was a good one: the second film is placed against the first while it is still in mind.
+ * The founder's flow separates them, and the reasons are about the screen rather than the
+ * mechanic (`01-screen-map.md` §6):
+ *
+ * - Interleaving is what made the old screen need a paragraph explaining itself. A title,
+ *   one instruction and a grid need no explanation.
+ * - The reader never saw the shape of what they were committing to. "Pick five" is a task
+ *   somebody can picture the end of; "rank films until the app stops asking" is not.
+ *
+ * What is emphatically *not* changed is the ranking itself. The run that follows is the
+ * real `TasteBucketSheet` and the real `RankingSheet` driving the real
+ * `rank_start`/`rank_answer` session, one title at a time, in the order they were chosen.
+ * Nothing here re-implements a comparison.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE CHOICE IS WRITTEN DOWN
+ *
+ * Because the ranking run can be interrupted, and the five are no longer recoverable from
+ * anywhere else. Under the old flow, progress was entirely a fact about `rankings` — a
+ * closed app reopened on film three because film three was what the database said. That
+ * is still how *progress* is read (see `app/onboarding/taste.tsx`), but the **selection**
+ * is a decision the reader made that the database has no record of until each title is
+ * ranked. Losing it would mean somebody who closed the app after ranking two of five came
+ * back to an empty grid and had to choose five again, two of which they had already done.
+ *
+ * So the list is written on the way into the run, and read back on the way in again. Same
+ * terms as every other preference in the flow: memory first, disk dispatched, a failed
+ * write costing a re-selection and nothing worse.
+ */
+const PICK_PREF = 'onboarding.pickFive';
+
+export const PICK_TARGET = 5;
+
+/** Everything the run needs about one chosen movie, and nothing else. */
+export type PickedTitle = {
+  /** A `media_items` id. The same id `set_bucket` and the ranking session take. */
+  id: string;
+  title: string;
+  year: number | null;
+  posterUri: string | null;
+};
+
+const picks = new Map<string, readonly PickedTitle[]>();
+const listeners = new Set<() => void>();
+
+function publish() {
+  for (const listener of listeners) listener();
+}
+
+/** Exported for tests, which must not inherit a selection from the previous one. */
+export function resetPickFive() {
+  picks.clear();
+  pickSeq.clear();
+  pickWrites.clear();
+  publish();
+}
+
+/**
+ * The write chain for each account's selection, and the counter that says which write is
+ * still the current one.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A SELECTION NEEDS THIS MORE THAN THE STAGE DOES
+ *
+ * `setPicks` writes the **whole array** and it is called on every poster tap. Somebody
+ * choosing five films taps five times in a few seconds, and the taps that matter most —
+ * a deselect and a replacement — come in pairs a few hundred milliseconds apart. Each of
+ * those dispatched its own full-array write and nothing ordered them, so the platform was
+ * free to land the four-title write after the five-title one and leave a **subset** of the
+ * reader's actual choice on disk.
+ *
+ * As with the stage, the session is unaffected: memory is published immediately and the
+ * grid is right. It costs the reader on the launch after — they press "Rank these 5",
+ * close the app before the first placement, and come back to a partial grid to choose
+ * from again. That is the exact loss this file was written to prevent, arriving through
+ * the door it left open.
+ *
+ * A sequence number rather than the stage's ordering test, because a selection has no
+ * natural order: the fifth tap is not "greater than" the fourth, it is merely later, and
+ * later is the whole of what matters. Same two properties otherwise — ordered per account,
+ * and a superseded write is skipped rather than written late.
+ */
+const pickSeq = new Map<string, number>();
+const pickWrites = new Map<string, Promise<void>>();
+
+/**
+ * How long one write may hold the queue behind it. See the stage store's note, which
+ * carries the reasoning: a serialised chain with no deadline turns a single stalled
+ * Keychain call into *every later selection never being written*, which is worse than the
+ * reordering it was added to fix. Bounded, not cancelled, and the queue moves on.
+ */
+const PICK_WRITE_GRACE_MS = 4000;
+
+const pickKey = (userId: string) => `${userId}.${PICK_PREF}`;
+
+/** A stored row that is missing an id cannot be ranked, so it is not restored. */
+const usable = (row: unknown): row is PickedTitle =>
+  typeof row === 'object' &&
+  row !== null &&
+  typeof (row as PickedTitle).id === 'string' &&
+  typeof (row as PickedTitle).title === 'string';
+
+/**
+ * Reads the stored selection into memory once. An unreadable one is simply empty, which
+ * puts the reader back on the grid rather than into a run with nothing to run.
+ */
+export async function hydratePicks(userId: string): Promise<readonly PickedTitle[]> {
+  const remembered = picks.get(userId);
+  if (remembered) return remembered;
+
+  const stored = await readPref<unknown[]>(pickKey(userId)).catch(() => null);
+  const restored = Array.isArray(stored) ? stored.filter(usable).slice(0, PICK_TARGET) : [];
+  picks.set(userId, restored);
+  publish();
+  return restored;
+}
+
+/**
+ * Records the selection, in memory first and then on disk.
+ *
+ * The disk half is ordered and coalesced per account — see `pickSeq` above. Memory is
+ * still written and published synchronously, so the grid answers the tap at the speed it
+ * always did; what changed is only which of several racing writes is allowed to be last.
+ */
+export async function setPicks(
+  userId: string,
+  chosen: readonly PickedTitle[],
+): Promise<void> {
+  const capped = chosen.slice(0, PICK_TARGET);
+  picks.set(userId, capped);
+  publish();
+
+  const seq = (pickSeq.get(userId) ?? 0) + 1;
+  pickSeq.set(userId, seq);
+
+  const queued = (pickWrites.get(userId) ?? Promise.resolve()).then(async () => {
+    // A later tap has already been dispatched, and its write is queued behind this one.
+    // Writing this older array now is precisely the reordering being removed.
+    if (pickSeq.get(userId) !== seq) return;
+    await withGrace(
+      writePref<readonly PickedTitle[]>(pickKey(userId), capped),
+      PICK_WRITE_GRACE_MS,
+      null,
+    );
+  });
+
+  pickWrites.set(userId, queued);
+  await queued;
+}
+
+const EMPTY: readonly PickedTitle[] = [];
+
+/**
+ * The selection as a subscription.
+ *
+ * The empty value is a module constant, not a fresh array per read: `useSyncExternalStore`
+ * compares snapshots by identity, and returning a new `[]` every time is an infinite
+ * render loop rather than an empty list.
+ */
+export function usePicks(userId: string | null): readonly PickedTitle[] {
+  return useSyncExternalStore(
+    useCallback((onChange: () => void) => {
+      listeners.add(onChange);
+      return () => listeners.delete(onChange);
+    }, []),
+    () => (userId ? (picks.get(userId) ?? EMPTY) : EMPTY),
+    () => EMPTY,
+  );
+}
+
+/**
+ * Whether the reader finished the ranking half or left it.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS RECORDED RATHER THAN DERIVED AT THE END
+ *
+ * `onboarding_completed.skipped` used to be computed on the notification step, from the
+ * taste query's ranked count: `(state.data?.ranked ?? 0) < FIRST_FIVE`. CI caught what
+ * that costs, and it is a reporting defect rather than a test one.
+ *
+ * The count is a *query*, and step 10 can mount before it has answered — on a relaunch
+ * straight onto the notification step it always does. An unanswered query is `undefined`,
+ * `?? 0` turns that into zero, and zero is below five, so **an account that ranked all
+ * five reports itself as a skip**. The direction matters: the flow's most important
+ * success metric would have been systematically under-counted, and the failure is silent
+ * because the event still fires and still looks well formed.
+ *
+ * So the outcome is written where it is actually known — by the screen that watched it
+ * happen, at the two exits that are the only ways past the ranking half — and read back as
+ * a fact. Memory-first like every other preference here, so within one session the write
+ * and the read are the same process and there is no race at all.
+ *
+ * ---------------------------------------------------------------------------
+ * AND UNKNOWN STAYS UNKNOWN
+ *
+ * There is a third answer and it is a real one: a relaunch onto step 10 for an account
+ * whose outcome was never written, or whose preference cannot be read. It covers the
+ * accounts that were already mid-flow when this shipped, and any device where the disk
+ * write lost.
+ *
+ * The first version of this fix resolved that to `completed`, on the reasoning that
+ * somebody who finished is the likelier explanation. That reasoning is sound as a *prior*
+ * and wrong as a *record*. It replaces the previous silent bias with a quieter one in the
+ * opposite direction — the flow's central success metric would count completions nobody
+ * observed — and it is worse than the bug it replaces in one specific way: an
+ * under-count is visible as a gap, while a manufactured completion is indistinguishable
+ * from a real one and can never be subtracted back out afterwards.
+ *
+ * So this returns `unknown`, and `useCompleteTasteOnboarding` **omits** `skipped` rather
+ * than guessing it — `sanitize` drops an undefined property, and an absent property is
+ * already this file's convention for "not known" (see `PeopleStepVariant.could_not_load`,
+ * which is an unreadable list given its own name rather than folded into an empty one).
+ * A dashboard then sees three groups, one of which is honestly labelled.
+ *
+ * The *product* decision is separate and unchanged: an unknown outcome still ends the
+ * flow as `done`, because the cost of the other mistake is putting somebody who has
+ * already finished back through it. What is refused here is only the claim about what
+ * happened, not the behaviour.
+ */
+const OUTCOME_PREF = 'onboarding.rankingOutcome';
+
+/**
+ * How long the last button of the flow may wait to learn how the ranking half ended.
+ *
+ * Shorter than the write grace beside it, because this one is in front of a person: it is
+ * read between a press and a navigation, where the other two are behind one.
+ */
+const OUTCOME_READ_GRACE_MS = 2000;
+
+export type RankingOutcome = 'completed' | 'skipped';
+
+/** What a *read* can answer, which is the two above plus the honest third. */
+export type RankingOutcomeRead = RankingOutcome | 'unknown';
+
+const outcomeKey = (userId: string) => `${userId}.${OUTCOME_PREF}`;
+
+const outcomes = new Map<string, RankingOutcome>();
+
+/** Exported for tests, which must not inherit an outcome from the previous one. */
+export function resetRankingOutcome() {
+  outcomes.clear();
+}
+
+/** Records how the ranking half ended, in memory first and then on disk. */
+export async function setRankingOutcome(
+  userId: string,
+  outcome: RankingOutcome,
+): Promise<void> {
+  outcomes.set(userId, outcome);
+  await writePref<RankingOutcome>(outcomeKey(userId), outcome).catch(() => {});
+}
+
+/**
+ * How the ranking half ended, or `unknown` when nothing recorded it.
+ *
+ * Only the two written words are believed. Anything else — absent, unreadable, or a value
+ * from some future version this build does not know — is `unknown`, and the caller reports
+ * it as unknown rather than picking the likelier of the two. See the header.
+ */
+export async function rankingOutcome(userId: string): Promise<RankingOutcomeRead> {
+  const remembered = outcomes.get(userId);
+  if (remembered) return remembered;
+
+  /**
+   * **Bounded, and the fallback is the honest word rather than a convenient one.**
+   *
+   * This sits between the last button of the flow and the navigation that button
+   * promised, which is exactly the position the build-4 stranding occupied: three awaits
+   * on promises the platform is allowed to never settle, each holding a screen shut for
+   * good. `.catch` covers a read that *fails* and says nothing about one that hangs, and
+   * a hung Keychain here would leave the reader pressing a dead button at the end of a
+   * ten-step flow with the flow not yet marked finished.
+   *
+   * The grace costs nothing in the ordinary case, because the ordinary case never reaches
+   * the disk at all: the write and the read are the same process, so `outcomes` has
+   * already answered above. And a read that will not settle **is** an unknown outcome —
+   * which is a sentence this function can now say, so the deadline does not have to be
+   * paid for with a guess.
+   */
+  const stored = await withGrace(
+    readPref<RankingOutcome>(outcomeKey(userId)),
+    OUTCOME_READ_GRACE_MS,
+    null,
+  );
+  if (stored === 'skipped' || stored === 'completed') return stored;
+  return 'unknown';
+}

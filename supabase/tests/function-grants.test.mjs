@@ -295,6 +295,16 @@ const ALLOWED = {
   'people_mutuals(integer)': ['authenticated'],
   'people_taste_matches(integer)': ['authenticated'],
 
+  // Added 2026-09-09 with the onboarding flow (20260914000100). The third discovery
+  // list, and the one with the least social cover: it is shown to an account with no
+  // relationships at all, so its eligibility rule is the strictest of the three —
+  // `can_discover_profile` *and* `visibility = 'public'`, where Mutuals deliberately
+  // admits an eligible private account through relationship proximity. Definer and
+  // viewerless like its two neighbours, so it can only answer about auth.uid(), and it
+  // returns counts rather than a score: a percentage here would be taste_match computed
+  // over evidence taste_match itself refuses.
+  'people_starter_suggestions(integer)': ['authenticated'],
+
   // Added 2026-08-27 with the ranking/taste tranche (20260827000700–000900).
   //
   // `dismiss_for_you` is the first writer for `recommendation_feedback`, a table

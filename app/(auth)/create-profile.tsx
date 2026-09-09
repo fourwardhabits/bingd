@@ -337,7 +337,11 @@ export default function CreateProfileScreen() {
             reader needs before typing*; "you can change it later, once a month" is
             true, is not needed now, and is on the Settings screen that changes it. */}
         <View style={styles.intro}>
-          <Text variant="title1">Pick your name</Text>
+          {/* `Pick your name` described one of the four things this screen asks for. The
+              title changed with the founder's flow; nothing else on the screen did, and
+              the age gate, the birthday, the visibility default and the Terms line are all
+              exactly where they were. */}
+          <Text variant="title1">Set up your profile</Text>
           <Text variant="footnote" tone="secondary">
             Your username is how friends find you.
           </Text>

@@ -626,6 +626,14 @@ describe('the guard is wired in, not merely present', () => {
     // 20260827000100. The list behind people_mutuals' count, same argument as the
     // pair above: a pure read filtered through both oracles from the caller's side.
     'mutuals_with',
+    // 20260914000100. The onboarding People step's organic list, and the same argument
+    // again with one clause more: a `stable sql` select taking nothing but a limit, every
+    // candidate filtered through `can_discover_profile` from the caller's own side, and
+    // additionally required to be `visibility = 'public'` and `status = 'active'`. So a
+    // suspended subject is absent twice over. A suspended *caller* reading a list of
+    // people reaches nobody: `follow`, which is the act these rows lead to, calls the
+    // guard.
+    'people_starter_suggestions',
 
     // 20260828000300. The monthly leaderboard and the caller's own standing on it.
     //

@@ -5,7 +5,7 @@ import { renderWithProviders } from '@/test-utils/render';
 
 /**
  * **"Use a different account" — the door out of the account-trap.** Build 4, physical
- * device: sign in with the wrong email, land on "Pick your name", and there is no
+ * device: sign in with the wrong email, land on "Set up your profile", and there is no
  * sign-out anywhere — Settings is behind the profile gate, and on iOS the Keychain
  * session survives a reinstall. These pin the whole escape: the confirmation stands
  * between a mistap and a sign-out, the sign-out is the canonical helper (device-token
@@ -74,7 +74,7 @@ describe('Use a different account', () => {
 
     await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
     // Explicit, because routing leaves a signed-out person inside `(auth)` alone: from
-    // "Pick your name" nothing else would move them.
+    // "Set up your profile" nothing else would move them.
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(auth)/sign-in'));
   });
 

@@ -3,7 +3,14 @@ import type { Session } from '@supabase/supabase-js';
 import { useRouter, useSegments } from 'expo-router';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
+import {
+  STAGE_ROUTES,
+  hydrateStage,
+  useOnboardingStage,
+  type OnboardingStage,
+} from '@/features/onboarding/use-onboarding-stage';
+import { FIRST_FIVE, useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
+import { hydrateWelcomeSeen, useWelcomeSeen } from '@/features/onboarding/welcome';
 import { identify } from '@/lib/analytics';
 import { note, rememberRoute, tally } from '@/lib/flight-recorder';
 import { withGrace } from '@/lib/grace';
@@ -250,6 +257,32 @@ export type RoutingInput = {
   /** Undefined while the first-run check has not answered. */
   tasteNeeded: boolean | undefined;
   tastePending: boolean;
+  /**
+   * How far the first-run flow got on this device, or undefined if it never started.
+   *
+   * Asked *before* `tasteNeeded` below, and that ordering is load-bearing rather than
+   * arbitrary. See `use-onboarding-stage.ts`: five rankings no longer mean the flow is
+   * over, so the taste query answers "not needed" for somebody sitting on the People
+   * step, and a router that trusted it alone would open the Feed with the last two
+   * steps skipped.
+   */
+  stage: OnboardingStage | null | undefined;
+  /**
+   * How many movies this account has ranked, when the taste check has answered.
+   *
+   * Read only by the lost-stage fallback below. It is the evidence that distinguishes "a
+   * brand new account with no stage" from "an account whose stage preference was lost
+   * after it had already finished the ranking run".
+   */
+  tasteRanked: number | undefined;
+  /**
+   * Whether the opening has been shown on this device. Undefined while it is unread.
+   *
+   * Device-scoped rather than account-scoped, because it is the one screen that runs
+   * with no session and there is nothing to key it to. It is also the reason a signed
+   * out user is not sent straight to the form any more.
+   */
+  welcomeSeen: boolean | undefined;
 };
 
 /**
@@ -267,28 +300,130 @@ export function nextRoute({
   screen,
   tasteNeeded,
   tastePending,
+  stage,
+  tasteRanked,
+  welcomeSeen,
 }: RoutingInput): string | null {
   // Not knowing where the user belongs is not a reason to move them.
   if (status === 'loading' || status === 'error') return null;
 
   const inAuthGroup = group === '(auth)';
 
-  if (status === 'signed-out') return inAuthGroup ? null : '/(auth)/sign-in';
+  /**
+   * Signed out, and the opening now sits in front of the form.
+   *
+   * **The wait on `welcomeSeen` is bounded where it is read, not here.** An undefined
+   * value means the preference has not been answered yet, and moving on it would either
+   * show the opening to somebody who has already dismissed it or skip it on a first
+   * launch, depending on which way the guess went. Neither is worth guessing, and the
+   * read cannot hang for ever: `hydrateWelcomeSeen` resolves it to `true` on a failure
+   * or a stall, on the rule that losing one screen is a smaller cost than holding the
+   * whole app. So this is a hold measured in one Keychain read, not an open-ended one.
+   */
+  if (status === 'signed-out') {
+    if (inAuthGroup) return null;
+    if (welcomeSeen === undefined) return null;
+    return welcomeSeen ? '/(auth)/sign-in' : '/(auth)/welcome';
+  }
 
   if (status === 'onboarding') {
     return !inAuthGroup || screen !== 'create-profile' ? '/(auth)/create-profile' : null;
   }
 
   /**
-   * **Routing sends people into the first-run flow; it never takes them out of it.**
+   * **Routing sends people into the first-run flow; it never takes them out of one that
+   * is still running.**
    *
    * The screen owns its own exit — the two buttons on its summary, and "Not now".
    * Letting this decide as well is the blocker independent review found: bucketing the
    * first film makes the account stop looking new, and the router, seeing somebody on
    * the onboarding route who no longer needed it, replaced the screen with the feed at
    * one of five. The flow working correctly was being read as a reason to end it.
+   *
+   * That rule was written as `return null` for the whole group, which is stronger than
+   * the rule itself and left a second hole: **a flow that is over is not a flow this
+   * protects.** An account that finished — or one that was never in the flow at all,
+   * which is every established user — could open `/onboarding/motivations` and stay
+   * there, and `motivations` calls `begin()`, so an established account would have its
+   * phase written to `active` and could walk the first-run steps with a collection
+   * already behind it. Only `taste.tsx` ejected on its own, which is the duplication this
+   * replaces: one guard for the group, and the screens keep owning their exits.
+   *
+   * Every input below is an authority this function already trusts, in the order it
+   * already trusts them, so the in-flow cases answer exactly as they did before.
    */
-  if (group === 'onboarding') return null;
+  if (group === 'onboarding') {
+    // Not knowing where somebody is in the flow is not a reason to move them, here for
+    // the same reason as the identical line below.
+    if (stage === undefined) return null;
+
+    // Mid-flow. The screen owns its exits, and this is the case the rule above is about.
+    if (stage && stage !== 'done') return null;
+
+    /**
+     * **A finished flow, so this is a link into something that is over.**
+     *
+     * The exiting screen's choice of destination is not overruled by this: `finish` in
+     * `app/onboarding/notifications.tsx` resolves its destination *before* it writes
+     * `done`, so the write and the navigation are adjacent and synchronous and there is
+     * no commit in between for this to answer in.
+     */
+    if (stage === 'done') return '/(tabs)/feed';
+
+    // No stage at all, so the taste rule is the only remaining authority. Waiting on it
+    // costs one count query, and guessing it costs somebody their place in the flow.
+    if (tastePending) return null;
+
+    /**
+     * `tasteNeeded` is what separates the two accounts that reach here with no stage, and
+     * it separates them cleanly: an account resting mid-flow still holds the `active`
+     * phase, and `readState` answers **needed** for it even at five rankings, because
+     * leaving is an act and not a count. An established account has no phase and a
+     * collection, and answers not-needed. So this stays for the first and ejects the
+     * second, which is the whole of what the group guard is for.
+     */
+    return tasteNeeded ? null : '/(tabs)/feed';
+  }
+
+  /**
+   * **A flow that has started is answered by where it got to, and by nothing else.**
+   *
+   * Before the taste rule, deliberately. `readState` settles an `active` account with
+   * five rankings to `done` so a summary cannot repeat for ever, and that repair is
+   * still right for the ranking sub-flow — but the run is step 7 of ten now, so an
+   * account resting on People or on the notification question has five rankings and a
+   * taste query that says "not needed". Asking that question first would open the Feed
+   * with two steps silently skipped, which is the same class of defect as the router
+   * ejecting somebody after their first film.
+   *
+   * `done` falls through on purpose: the flow is over, and where the app opens is the
+   * exiting screen's decision rather than this function's.
+   */
+  /**
+   * **Not knowing where somebody is in the flow is not a reason to guess.**
+   *
+   * `undefined` is the stage preference not having been read yet. Guessing it absent sends
+   * an account resting on the People step back to step 3, and — because `readState` settles
+   * such an account to `done` on the way past — lets the launch after that skip the social
+   * half entirely. Independent review found exactly that sequence.
+   *
+   * The wait is bounded where it is read: `hydrateStage` resolves a dead or slow Keychain
+   * to `null` after four seconds, so this cannot become the build-4 hang in a new place.
+   */
+  if (stage === undefined) return null;
+
+  if (stage && stage !== 'done') return STAGE_ROUTES[stage];
+
+  /**
+   * **A finished flow is finished, and the taste rule is not consulted again.**
+   *
+   * This used to fall through to the rules below, which is a second defect review found:
+   * the two authorities are written by separate preference keys, so a completion whose
+   * *taste* write is lost leaves `stage: 'done'` beside a phase still marked `active` —
+   * and the taste rule would then send a fully onboarded account back to step 3 to do all
+   * ten again. The stage is the flow's authority, so `done` answers here.
+   */
+  if (stage === 'done') return inAuthGroup || group === undefined ? '/(tabs)/feed' : null;
 
   /**
    * Still pending is not a reason to move anyone: the flow's screen would be mounted
@@ -297,7 +432,27 @@ export function nextRoute({
    */
   if (tastePending) return null;
 
-  if (tasteNeeded) return '/onboarding/taste';
+  if (tasteNeeded) {
+    /**
+     * **The stage is gone but the ranking plainly happened, so the flow resumes after it.**
+     *
+     * The safety net for a lost or unreadable stage preference. Without it, this branch
+     * sends an account that has already placed five movies back to the motivation
+     * question — and the steps it would then have to walk again include the ranking run,
+     * which is the expensive one and the one already done.
+     *
+     * `FIRST_FIVE` rankings is not proof the reader reached People, but it is proof they
+     * finished step 7, and People is the step after it. Repeating one step somebody may
+     * have already seen is a far smaller cost than repeating six, and far smaller than the
+     * alternative failure this replaces, which was skipping the social half in silence.
+     */
+    if (stage === null && (tasteRanked ?? 0) >= FIRST_FIVE) return STAGE_ROUTES.people;
+
+    // An account that belongs in the flow and has no stage yet starts at the top of it.
+    // The stage is written by the first screen rather than here, so this stays a pure
+    // function of its inputs.
+    return STAGE_ROUTES.motivations;
+  }
 
   /**
    * `/` is the other route a ready user does not belong on. `(tabs)` is a group and
@@ -336,6 +491,29 @@ export function useAuthRouting() {
     auth.status === 'ready',
   );
 
+  const userId = auth.status === 'ready' ? auth.userId : null;
+  const stage = useOnboardingStage(userId);
+  const welcomeSeen = useWelcomeSeen();
+
+  /**
+   * The two device-local reads the router depends on, each performed once.
+   *
+   * Separate from the routing effect below on purpose. That effect runs on every segment
+   * change, and hydration is a Keychain read: doing it there would put one on every
+   * navigation for a value that cannot change without this process being told. Both
+   * helpers return early once they have an answer, so a second call is free, and both
+   * publish to the subscriptions above rather than returning into a variable nothing
+   * would re-render on.
+   */
+  useEffect(() => {
+    void hydrateWelcomeSeen();
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    void hydrateStage(userId);
+  }, [userId]);
+
   useEffect(() => {
     // Typed routes give `segments` a union of fixed-length tuples, so indexing past the
     // shortest one is a type error rather than a runtime one. The names are what this
@@ -348,6 +526,9 @@ export function useAuthRouting() {
       screen,
       tasteNeeded: taste.data?.needed,
       tastePending: taste.isPending,
+      stage,
+      tasteRanked: taste.data?.ranked,
+      welcomeSeen,
     });
 
     /**
@@ -362,5 +543,14 @@ export function useAuthRouting() {
       tally('route.replace');
       router.replace(destination as never);
     }
-  }, [auth, segments, router, taste.isPending, taste.data?.needed]);
+  }, [
+    auth,
+    segments,
+    router,
+    taste.isPending,
+    taste.data?.needed,
+    taste.data?.ranked,
+    stage,
+    welcomeSeen,
+  ]);
 }

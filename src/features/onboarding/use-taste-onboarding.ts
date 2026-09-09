@@ -7,6 +7,9 @@ import { readPref, writePref } from '@/lib/prefs';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
+// Type only, and one direction only: `pick-five` imports nothing from here.
+import type { RankingOutcomeRead } from './pick-five';
+
 /**
  * Whether this account should be shown the first-run taste flow, and how far it got.
  *
@@ -347,8 +350,22 @@ export function useCompleteTasteOnboarding(userId: string) {
   const queryClient = useQueryClient();
 
   return useCallback(
-    async ({ skipped }: { skipped: boolean }) => {
-      const phase: TastePhase = skipped ? 'skipped' : 'done';
+    async ({ outcome }: { outcome: RankingOutcomeRead }) => {
+      /**
+       * **The phase and the analytics claim are decided separately, from one input.**
+       *
+       * `unknown` ends the flow as `done`, which is the existing product rule elsewhere
+       * in this file — "does not put anyone through the flow when it cannot tell" — and
+       * it is the safe direction, because the cost of the other mistake is somebody who
+       * already finished being asked to start again.
+       *
+       * It does **not** follow that the event may say `skipped: false`. That would be the
+       * behavioural default leaking into the record as a fact nobody observed. The phase
+       * is a decision this app is entitled to make on incomplete information; the event
+       * is a report, and a report says so when it does not know.
+       */
+      const phase: TastePhase = outcome === 'skipped' ? 'skipped' : 'done';
+      const skipped = outcome === 'unknown' ? undefined : outcome === 'skipped';
 
       /**
        * `onboarding_completed`, from the one function all three exits go through.
@@ -365,8 +382,19 @@ export function useCompleteTasteOnboarding(userId: string) {
        *
        * `titles_ranked` is read from the cache rather than refetched. It is what the
        * progress bar was showing when they left, which is the number the event is about.
+       *
+       * **Read here, before the seeding write below, and undefined when the cache has
+       * nothing.** It used to be read afterwards, at which point the seed guarantees a
+       * row and `?? 0` guarantees a number — so an account that ranked five and relaunched
+       * onto the last step, where nothing has fetched this query, reported
+       * `titles_ranked: 0`. That is the same defect `skipped` had, in the same event, and
+       * it is silent for the same reason: a zero is a plausible count. An absent property
+       * is the honest answer, and `sanitize` produces it from `undefined`.
        */
       const ended = intent.get(userId);
+      const counted = queryClient.getQueryData<TasteOnboarding>(
+        queryKeys.tasteOnboarding(userId),
+      )?.ranked;
 
       // Synchronously, and before the write is awaited. `begin` checks this immediately
       // before its own write, which is what closes the race review found: begin reads an
@@ -414,12 +442,7 @@ export function useCompleteTasteOnboarding(userId: string) {
       if (ended !== 'done' && ended !== 'skipped') {
         track({
           name: 'onboarding_completed',
-          props: {
-            skipped,
-            titles_ranked:
-              queryClient.getQueryData<TasteOnboarding>(queryKeys.tasteOnboarding(userId))
-                ?.ranked ?? 0,
-          },
+          props: { skipped, titles_ranked: counted },
         });
       }
 

@@ -1,9 +1,11 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { peopleDiscovery, TAB_ROUTES } from '@/lib/routes';
+import { TAB_ROUTES } from '@/lib/routes';
 
+import { resetPickFive, resetRankingOutcome } from './pick-five';
+import { resetOnboardingStages } from './use-onboarding-stage';
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
@@ -81,7 +83,12 @@ jest.mock('@/lib/supabase', () => ({
         in: () => chain,
         filter: () => chain,
         limit: () => chain,
-        order: () => Promise.resolve({ data: rows(), error: null }),
+        // Chainable, not terminal: `useRankedCollection` reads
+        // `.order(...).limit(...)` and takes its rows from the awaited builder, so an
+        // `order` that resolved here would leave `limit` undefined on a promise.
+        order: () => chain,
+        // The keyset cursor `read-all.ts` applies between pages.
+        gt: () => chain,
         single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         then: (resolve: (value: unknown) => unknown) =>
@@ -159,60 +166,97 @@ beforeEach(() => {
   mockPushEnv.requestResult = 'granted';
   mockPushEnv.registered = 0;
   resetTasteIntent();
+  // The two stores the two-phase picker added. Both are module-level, like the taste
+  // intent map above, so a selection left behind by one test would resume in the next.
+  resetPickFive();
+  resetRankingOutcome();
+  resetOnboardingStages();
 });
 
 const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === fn);
 
+/**
+ * The picker, drawn and ready.
+ *
+ * The screen waits on two answers before it draws anything — the first-run check and the
+ * stored selection — so every test comes through here rather than asserting against a
+ * loading frame.
+ */
 const open = async () => {
   const view = await renderWithProviders(<TasteScreen />);
-  await waitFor(() => expect(view.getByText('Build your taste')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Get started')).toBeTruthy());
   return view;
 };
 
 const search = async (view: Awaited<ReturnType<typeof open>>, term: string) => {
-  await fireEvent.changeText(view.getByLabelText('Search for a film'), term);
+  await fireEvent.changeText(view.getByLabelText('Search for a movie'), term);
   await waitFor(() => expect(view.getByLabelText(/Inception, 2010/)).toBeTruthy());
 };
 
-/**
- * **What the flow says a score is, before the first one appears** (pre-GTM audit,
- * 2026-09-07). The reveal echoes it once, under the first scores; see
- * `RankingSheet.test.tsx`. This is the sentence it echoes.
- *
- * Placed ahead of the resume tests deliberately: "stops resuming onto the summary once it
- * has done so" leaves this module unable to draw the flow for anything rendered after it,
- * and a test of copy should not inherit that.
- */
-describe('what the flow says a score is', () => {
-  it('explains, before the first comparison, that scores come from placement and move', async () => {
-    const view = await open();
-
-    expect(view.getByText(/not from stars/)).toBeTruthy();
-    expect(
-      view.getByText(
-        /Each one gets a score from where it lands, and that score can move as you rank more/,
-      ),
-    ).toBeTruthy();
-  });
-
-  it('no longer offers the collection from the summary, which the bar already has', async () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-    const view = await renderWithProviders(<TasteScreen />);
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    expect(view.queryByRole('button', { name: 'See my collection' })).toBeNull();
-    expect(view.getByRole('button', { name: 'Find people' })).toBeTruthy();
-  });
+/** One row of `rankings`, as `useRankedCollection` reads them. */
+const rankedRow = (id: string, title: string, position: number) => ({
+  media_item_id: id,
+  bucket: 'loved',
+  position,
+  category: 'movies',
+  created_at: '2026-09-09T00:00:00Z',
+  media_items: {
+    title,
+    season_number: null,
+    release_date: '2010-01-01',
+    poster_path: null,
+    genres: [],
+    runtime_minutes: 100,
+    kind: 'movie',
+    original_language: 'en',
+    parent_id: null,
+    parent: null,
+  },
 });
 
-describe('the first five', () => {
-  it('starts at zero of five', async () => {
+/**
+ * The first `n` of the five chosen, placed.
+ *
+ * The run's cursor is **membership**, not a count: it asks which of *these* movies have
+ * been ranked. So a fixture has to say which ones, and cannot get away with a number.
+ */
+const placed = (n: number) => {
+  mockTableRows.rankings = Array.from({ length: n }, (_, index) =>
+    rankedRow(`pick-${index + 1}`, `Movie ${index + 1}`, index + 1),
+  );
+};
+
+/** Five already chosen, restored as a resumed selection rather than five searches. */
+const fiveChosen = () =>
+  mockPrefs.set(
+    'user-1.onboarding.pickFive',
+    Array.from({ length: 5 }, (_, n) => ({
+      // Deliberately not `film-1`: that is the search fixture's id, and a collision would
+      // make a sixth tap a *deselection* of one of the five rather than the ignored tap
+      // the test is about.
+      id: `pick-${n + 1}`,
+      title: `Movie ${n + 1}`,
+      year: 2010 + n,
+      posterUri: null,
+    })),
+  );
+
+describe('choosing five, before anything is ranked', () => {
+  it('asks for five movies, in the words the founder settled on', async () => {
     const view = await open();
-    expect(view.getByLabelText('0 of 5 films ranked')).toBeTruthy();
+
+    expect(view.getByText("Pick five movies you've seen.")).toBeTruthy();
+    // `film` was the app's own word and `movie` is the founder's. Having one directly
+    // above the other on a single screen is what settled it.
+    expect(view.queryByText(/five films/i)).toBeNull();
   });
 
-  it('offers films and never a series, because a series cannot be ranked', async () => {
+  it('starts at zero of five', async () => {
+    const view = await open();
+    expect(view.getByLabelText('0 of 5 movies chosen')).toBeTruthy();
+  });
+
+  it('offers movies and never a series, because a series cannot be ranked', async () => {
     const view = await open();
     await search(view, 'inception');
 
@@ -220,658 +264,371 @@ describe('the first five', () => {
   });
 
   /**
-   * The founder decision this screen exists to honour.
+   * **The whole point of the two-phase design**, asserted as an absence.
    *
-   * The first five may be films somebody saw fifteen years ago. `LogSheet` follows a
-   * bucket save with `log_watched` for today, because the sheet it belongs to displays
-   * a date — and that would put five historical films into this year's Goals. This
-   * screen goes straight to `set_bucket`, which writes no date, and `goals.ts` refuses
-   * to count a null one.
+   * The old screen opened the bucket sheet on every pick. Choosing is its own act now, so
+   * nothing is ranked and nothing is even asked until the run is started.
    */
-  it('records no watch date, so an old film does not land in this year’s goals', async () => {
+  it('ranks nothing while the reader is still choosing', async () => {
     const view = await open();
     await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies chosen')).toBeTruthy());
+    expect(view.queryByText('How was it?')).toBeNull();
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_start')).toHaveLength(0);
+  });
+
+  it('holds the run until the reader asks for it', async () => {
+    fiveChosen();
+    const view = await open();
+
+    // Five are chosen, so the primary is live. Nothing has started.
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+    expect(view.queryByText('How was it?')).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Rank these 5' }));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+  });
+
+  /**
+   * A selected poster carries a check and never a number.
+   *
+   * A badge reading 1 to 5 while somebody is choosing would state an order they have not
+   * chosen: selection order is not the ranking, and the ranking is what the next step
+   * exists to work out.
+   */
+  it('marks a chosen movie as selected rather than numbering it', async () => {
+    mockTableRows.provider_list_cache = [
+      {
+        list_key: 'trending.movie.day',
+        payload: { ids: ['film-1'] },
+        fetched_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    ];
+    mockTableRows.media_items = [
+      {
+        id: 'film-1',
+        title: 'Inception',
+        release_date: '2010-07-16',
+        poster_path: null,
+        popularity: 9,
+        kind: 'movie',
+      },
+    ];
+
+    const view = await open();
+    const tile = await waitFor(() => view.getByLabelText('Inception'));
+
+    expect(tile.props.accessibilityState.checked).toBe(false);
+    await fireEvent.press(tile);
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Inception').props.accessibilityState.checked).toBe(true),
+    );
+    expect(view.queryByText('#1')).toBeNull();
+  });
+
+  it('lets a chosen movie be unchosen', async () => {
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies chosen')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByLabelText('0 of 5 movies chosen')).toBeTruthy());
+  });
+
+  /**
+   * A sixth tap is not a replacement and not an error.
+   *
+   * The remaining cells have gone quiet and the primary is live, so there is nothing
+   * honest another tap could mean. Silently swapping one of the five out would change a
+   * decision the reader never revisited.
+   */
+  it('ignores a sixth choice rather than replacing one of the five', async () => {
+    fiveChosen();
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+
+    expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy();
+  });
+});
+
+
+describe('a selection that was lost while rankings survived', () => {
+  /**
+   * **The cursor is membership, not a count**, and this is the sequence that proved it had
+   * to be. Independent review found it in the first draft.
+   *
+   * If the selection write fails after some movies have been ranked, the picker comes back
+   * empty and the reader chooses five *different* movies. A cursor of `chosen[ranked]`
+   * would then point at index 2 of the new five and silently skip the first two of them —
+   * and with five previously ranked, any new selection satisfied the payoff immediately
+   * and none of it was ever ranked at all.
+   *
+   * Asking which of *these* movies have been placed cannot drift like that.
+   */
+  it('starts at the first of a new selection, even when other movies are already ranked', async () => {
+    // Two rankings exist, and they are not among the five about to be chosen: exactly the
+    // state a lost `pickFive` write leaves behind.
+    mockTableRows.rankings = [
+      rankedRow('lost-1', 'Something Else', 1),
+      rankedRow('lost-2', 'Another Thing', 2),
+    ];
+    fiveChosen();
+
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+    // Not already running: none of the chosen five has been placed.
+    expect(view.queryByText('How was it?')).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Rank these 5' }));
+
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    // The first of the five, not the third.
+    expect(view.getByText('Movie 1')).toBeTruthy();
+  });
+
+  it('does not treat unrelated rankings as progress through the five', async () => {
+    mockTableRows.rankings = Array.from({ length: 5 }, (_, index) =>
+      rankedRow(`lost-${index + 1}`, `Old ${index + 1}`, index + 1),
+    );
+    fiveChosen();
+
+    const view = await open();
+
+    // Five unrelated rankings must not satisfy the payoff for a selection none of them
+    // belong to.
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+    expect(view.queryByText('Your First Five')).toBeNull();
+  });
+});
+
+describe('the run, which is the real ranking engine', () => {
+  const startRun = async () => {
+    fiveChosen();
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Rank these 5' }));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    return view;
+  };
+
+  /**
+   * The founder decision this flow exists to honour.
+   *
+   * The first five may be movies somebody saw fifteen years ago. `LogSheet` follows a
+   * bucket save with `log_watched` for today, because the sheet it belongs to displays a
+   * date, and that would put five historical movies into this year's Goals. This flow goes
+   * straight to `set_bucket`, which writes no date, and `goals.ts` refuses to count a null
+   * one.
+   */
+  it('records no watch date, so an old movie does not land in this year of goals', async () => {
+    const view = await startRun();
     await fireEvent.press(view.getByLabelText('I liked it'));
 
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
   });
 
-  it('goes straight into the real comparison flow, with no second tap', async () => {
-    const view = await open();
-    await search(view, 'inception');
-
-    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+  it('drives the real comparison session rather than a copy of it', async () => {
+    const view = await startRun();
     await fireEvent.press(view.getByLabelText('I liked it'));
 
     // `rank_start` is the same session opener the Log tab drives. Nothing about the
-    // ranking algorithm is reimplemented here.
+    // ranking algorithm is reimplemented by onboarding.
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
     expect(callsTo('rank_start')[0][1]).toMatchObject({
-      p_media_item_id: 'film-1',
+      p_media_item_id: 'pick-1',
       p_bucket: 'loved',
     });
   });
 
-  it('resumes where the account already is, rather than from a local counter', async () => {
-    // Three placed in an earlier session. Nothing local records that; it is read back
-    // off `rankings`, so closing the app is not a way to lose progress or repeat it.
-    mockCounts.rankings = 3;
-    mockCounts.user_media = 3;
-
-    const view = await open();
-    await waitFor(() => expect(view.getByLabelText('3 of 5 films ranked')).toBeTruthy());
-  });
-
-  it('offers the way out once five are placed', async () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-
+  it('says how far along the run is, which the sheets cannot', async () => {
+    fiveChosen();
+    placed(2);
     const view = await renderWithProviders(<TasteScreen />);
 
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-    expect(view.getByRole('button', { name: 'Explore For You' })).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Find people' })).toBeTruthy();
+    /**
+     * `includeHiddenElements`, because the backdrop is behind an open sheet.
+     *
+     * The run opens the bucket question immediately, and RNTL treats everything behind a
+     * modal as hidden from accessibility — correctly, since that is exactly what it is to
+     * a screen reader. The backdrop is still the thing under test: it is what tells the
+     * reader they are on the third of five while the sheet asks about one movie.
+     */
+    await waitFor(() =>
+      expect(view.getByText('Ranking your 5', { includeHiddenElements: true })).toBeTruthy(),
+    );
+    expect(
+      view.getByLabelText('2 of 5 movies chosen', { includeHiddenElements: true }),
+    ).toBeTruthy();
   });
+});
 
-  it('does not claim to know what kind of viewer five films makes somebody', async () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-
+describe('resuming', () => {
+  /**
+   * The selection is the one thing in this flow the database has no record of until each
+   * title is ranked, so it is the one thing written down. Somebody who closed the app
+   * after ranking two of five must not be asked to choose five again.
+   */
+  it('comes back to the run rather than to an empty grid', async () => {
+    fiveChosen();
+    placed(3);
     const view = await renderWithProviders(<TasteScreen />);
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
 
-    // No taste archetype, no "you are a…". Five films orders a list; it does not
-    // characterise a person, and inventing that in the first minute would undermine
-    // every honest number the app shows afterwards.
-    expect(view.queryByText(/you are a/i)).toBeNull();
+    await waitFor(() =>
+      expect(view.getByText('Ranking your 5', { includeHiddenElements: true })).toBeTruthy(),
+    );
+    expect(view.queryByText('Get started')).toBeNull();
   });
 
   /**
-   * Independent review, 09c. Routing sends people here and never takes them away —
-   * which is what stopped the flow ejecting somebody after their first film, and which
-   * makes this screen the only thing between an established account and enrolment.
-   * Somebody opening the route from a deep link used to be sent to the feed by routing.
+   * **The cursor is the count.** There is no stored index, so a placement that failed
+   * leaves the number where it was and brings the same title back rather than skipping it.
    */
-  it('sends an established account away instead of enrolling it', async () => {
+  it('takes the next movie from the ranked count rather than a stored cursor', async () => {
+    fiveChosen();
+    placed(3);
+    const view = await renderWithProviders(<TasteScreen />);
+
+    await waitFor(() =>
+      expect(view.getByText('Movie 4', { includeHiddenElements: true })).toBeTruthy(),
+    );
+  });
+
+  it('reads progress from the data rather than from a local counter', async () => {
+    fiveChosen();
+    placed(5);
+    const view = await renderWithProviders(<TasteScreen />);
+
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+  });
+
+  it('sends an established account to the feed instead of enrolling it', async () => {
     mockPrefs.clear();
     mockCounts.rankings = 12;
-    mockCounts.user_media = 12;
-
+    mockCounts.user_media = 40;
     await renderWithProviders(<TasteScreen />);
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
-    // And it must not have marked them as in the flow on the way past.
-    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBeUndefined();
-  });
-
-  /**
-   * Independent review, 09c. `writePref` is SecureStore and can fail. When the decision
-   * lived only on disk, "Not now" wrote nothing, the query refetched, the account still
-   * looked new, and routing sent the user straight back to the screen they had just
-   * declined — a loop produced by a failed preference write.
-   */
-  it('honours Not now for the session even when the write fails', async () => {
-    mockWriteFails = true;
-
-    const view = await open();
-    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
-    // Nothing was persisted, so the flow may be offered again on a future launch. What
-    // must not happen is this session deciding they still need it — the process holds
-    // the decision even when the disk refused it.
-    mockReplace.mockReset();
-    await renderWithProviders(<TasteScreen />);
-
-    // Sent straight back out rather than enrolled again. (The component keeps rendering
-    // until navigation unmounts it, so the assertion is on the decision, not the tree.)
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
-    // The disk still says they are in the flow, because the write failed. Memory is what
-    // beat it — which is the whole point of holding the decision in the process.
-    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('active');
-  });
-
-  it('lets somebody leave who cannot think of five, and remembers that', async () => {
-    const view = await open();
-    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
-    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('skipped');
-  });
-});
-
-/**
- * "How was it?", as the founder saw it on a device — three circles piled on top of one
- * another with the labels floating over them.
- *
- * The cause was not in the chip. `BucketChip` is written with `flex: 1` so that three
- * of them take equal columns of a row; this sheet mapped them into a container that had
- * a gap and no direction, and `flex: 1` in a column of automatic height resolves each
- * chip to nothing. The row is now a component — `BucketChoices` — that both this sheet
- * and `LogSheet` render, so there is no parent left for either of them to get wrong.
- *
- * These read the layout, not a screenshot: what has to hold is the direction, the equal
- * columns and the words, none of which is a colour.
- */
-describe('the rating sheet', () => {
-  const flatten = (style: unknown) =>
-    (Array.isArray(style) ? Object.assign({}, ...style) : (style ?? {})) as Record<
-      string,
-      unknown
-    >;
-
-  const openSheet = async () => {
-    const view = await open();
-    await search(view, 'inception');
-    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
-    return view;
-  };
-
-  it('offers the three choices, in the words the product uses', async () => {
-    const view = await openSheet();
-
-    expect(view.getAllByRole('radio').map((chip) => chip.props.accessibilityLabel)).toEqual([
-      'I liked it',
-      'It was fine',
-      'I didn’t like it',
-    ]);
-  });
-
-  it('draws them as one horizontal row rather than a stack', async () => {
-    const view = await openSheet();
-
-    // The regression guard. A column here, or an absolutely positioned chip, is the
-    // broken build.
-    const row = view.getByTestId('bucket-choices');
-    expect(flatten(row.props.style).flexDirection).toBe('row');
-    for (const chip of view.getAllByRole('radio')) {
-      expect(flatten(chip.props.style).flex).toBe(1);
-      expect(flatten(chip.props.style).position).toBeUndefined();
-    }
-  });
-
-  it('shows the same control the Log tab shows, rather than its own copy', async () => {
-    const view = await openSheet();
-
-    // Same testID, same role, same three radios as `LogSheet.test.tsx` asserts. If one
-    // surface stops using `BucketChoices`, one of the two tests goes red.
-    expect(view.getByTestId('bucket-choices').props.accessibilityRole).toBe('radiogroup');
-    expect(view.getAllByRole('radio')).toHaveLength(3);
-  });
-
-  it('starts with nothing chosen, because nobody has chosen yet', async () => {
-    const view = await openSheet();
-
-    for (const chip of view.getAllByRole('radio')) {
-      expect(chip.props.accessibilityState.selected).toBe(false);
-    }
-  });
-
-  /**
-   * The sheet's own content block, found by walking up from the row rather than
-   * through a testID added for this test's benefit. Everything asserted about the
-   * sheet's shape lives on it: the gutter, the clearance under the drag handle, and
-   * the fact that it scrolls at all.
-   */
-  const contentBlock = (view: Awaited<ReturnType<typeof openSheet>>) => {
-    let node = view.getByTestId('bucket-choices').parent;
-    while (node && node.props.contentContainerStyle === undefined) node = node.parent;
-    if (!node) throw new Error('the choices are not inside a scrolling content block');
-    return node;
-  };
-
-  it('keeps the sheet content off the edge and clear of the drag handle', async () => {
-    const view = await openSheet();
-
-    // The heading sat flush against the left edge of the sheet, because the body
-    // carried no horizontal padding at all.
-    const body = flatten(contentBlock(view).props.contentContainerStyle);
-    expect(body.paddingHorizontal).toBe(16);
-    expect(body.paddingTop).toBeGreaterThan(0);
-  });
-
-  it('offers a way out that is not the scrim, and writes nothing on the way', async () => {
-    const view = await openSheet();
-
-    // `Sheet` hides its backdrop from the accessibility tree, so tapping outside is
-    // not a route a screen reader can take. Leaving must not cost a rating, and it
-    // must not leave a title behind either.
-    // A real 44pt target rather than a word with `hitSlop` around it: slop that
-    // reaches past its parent's bounds is not delivered on Android.
-    const close = view.getByRole('button', { name: 'Close' });
-    expect(flatten(close.props.style).minHeight).toBe(44);
-
-    await fireEvent.press(close);
-
-    await waitFor(() => expect(view.queryByText('How was it?')).toBeNull());
-    expect(callsTo('set_bucket')).toHaveLength(0);
-    expect(callsTo('rank_start')).toHaveLength(0);
-    expect(view.getByLabelText('0 of 5 films ranked')).toBeTruthy();
-  });
-
-  it('scrolls, so the largest text sizes cannot put a choice out of reach', async () => {
-    const view = await openSheet();
-
-    // `Sheet` caps itself at 90% of the window. The Log tab's sheet scrolls for exactly
-    // this reason; this one did not, and at the largest accessibility text sizes the
-    // third choice and the helper text went somewhere nobody could get to.
-    expect(contentBlock(view).type).toBe('RCTScrollView');
-  });
-
-  it('stores the middle bucket the middle words mean', async () => {
-    const view = await openSheet();
-    await fireEvent.press(view.getByLabelText('It was fine'));
-
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
-    expect(callsTo('set_bucket')[0][1]).toEqual({
-      p_media_item_id: 'film-1',
-      p_bucket: 'fine',
-      p_operation_id: expect.any(String),
-    });
-    // And the comparison flow still opens on the same bucket, unchanged by the layout.
-    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    expect(callsTo('rank_start')[0][1]).toMatchObject({
-      p_media_item_id: 'film-1',
-      p_bucket: 'fine',
-    });
-  });
-
-  it('stores not_for_me for the last of the three, not the camelCase id', async () => {
-    const view = await openSheet();
-    await fireEvent.press(view.getByLabelText('I didn’t like it'));
-
-    // The chip's id is `notForMe`; what is written — and what the comparison session
-    // is opened on — is `not_for_me`. This is the one place that mapping is visible
-    // from the surface, so it is asserted here.
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
-    expect(callsTo('set_bucket')[0][1]).toEqual({
-      p_media_item_id: 'film-1',
-      p_bucket: 'not_for_me',
-      p_operation_id: expect.any(String),
-    });
-    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    expect(callsTo('rank_start')[0][1]).toMatchObject({
-      p_media_item_id: 'film-1',
-      p_bucket: 'not_for_me',
-    });
-  });
-});
-
-/**
- * **Where the last screen of onboarding actually sends people.**
- *
- * The founder tapped "Explore For You" on a physical device and landed on the Feed.
- *
- * The root cause was not a typo. `leave()` did `complete()` and then
- * `router.replace('/(tabs)/feed')`, with the destination written into the helper rather
- * than passed to it — so one function served two buttons that mean two different things,
- * and the one whose label makes a promise was the one silently broken. A bare
- * `'/(tabs)/feed'` looks correct wherever it appears; nothing about it says which button
- * it belongs to.
- *
- * The second half of the trap is that **the tab labels and the route names disagree on
- * purpose**: the bar reads For you and the route is `recommendations`, because the file
- * was never renamed. So a screen navigating by the word on the bar guesses wrong.
- *
- * These assert the destination by route, which is what `TAB_ROUTES` exists to make
- * checkable — an index would pass today and break the next time the bar is reordered.
- */
-describe('where onboarding lets go', () => {
-  const finished = () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-    return renderWithProviders(<TasteScreen />);
-  };
-
-  it('sends Explore For You to the For You tab', async () => {
-    const view = await finished();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
-    // The bug, named. Not "some route other than feed" — the exact wrong answer.
-    expect(mockReplace).not.toHaveBeenCalledWith(TAB_ROUTES.feed);
-  });
-
-  it('names the route rather than the label, because those differ', async () => {
-    const view = await finished();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-
-    // The tab says "For you" and the file is `recommendations`. Asserted literally so
-    // that a future rename of one has to account for the other.
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/recommendations'));
-  });
-
-  it('sends Find people into For You, opened on People', async () => {
-    const view = await finished();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding')));
-  });
-
-  /**
-   * Declining is not exploring. Somebody who would not rank five films is put where the
-   * app has something to show them that is not about their own taste yet — which is the
-   * Feed, and is the one destination that did not change.
-   */
-  it('leaves Not now on the feed', async () => {
-    mockCounts.rankings = 0;
-    mockCounts.user_media = 0;
-    const view = await renderWithProviders(<TasteScreen />);
-    await waitFor(() => expect(view.getByText('Build your taste')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
   });
+});
 
-  it('completes the flow before it navigates, either way', async () => {
-    const view = await finished();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+describe('Your First Five', () => {
+  const arrive = async () => {
+    fiveChosen();
+    /**
+     * All five of *the chosen* placed, and deliberately returned out of order.
+     *
+     * The ids have to be the chosen ones: the payoff is reached by every chosen movie
+     * having been placed, which is membership rather than a count. The disordered response
+     * is what makes the assertion below about the screen's own sorting.
+     */
+    mockTableRows.rankings = [
+      rankedRow('pick-2', 'Second', 2),
+      rankedRow('pick-1', 'First', 1),
+      rankedRow('pick-3', 'Third', 3),
+      rankedRow('pick-4', 'Fourth', 4),
+      rankedRow('pick-5', 'Fifth', 5),
+    ];
+    const view = await renderWithProviders(<TasteScreen />);
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    return view;
+  };
 
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+  /** **Order is the payoff**, and it belongs to the placement rather than to the response. */
+  it('draws the rows in ranked order rather than in the order they arrived', async () => {
+    const view = await arrive();
 
-    // The destination changed; what it is a destination *from* did not. The phase is
-    // recorded in prefs — an account left `active` would be held on this screen again on
-    // the next launch, which is the half of `leave` that had to survive the fix.
-    await waitFor(() => expect([...mockPrefs.values()]).toContain('done'));
+    // Waited on rather than asserted immediately: the heading renders as soon as the five
+    // are known to be placed, and the rows follow when the ranked list resolves. CI found
+    // the difference on a slower machine; the local run had been hiding it.
+    await waitFor(() => expect(view.getByText('First')).toBeTruthy());
+    expect(view.getByText('Second')).toBeTruthy();
+
+    // The ordinal belongs to the placement, not to the response.
+    const rows = view.getAllByText(/^(First|Second|Third|Fourth|Fifth)$/).map((n) => n.props.children);
+    expect(rows).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth']);
+  });
+
+  it('says what the five bought without explaining the algorithm again', async () => {
+    const view = await arrive();
+
+    expect(view.getByText(/This is just the start/)).toBeTruthy();
+    // The score is explained once, under the first reveal. A second explanation here would
+    // turn a reward into a lesson.
+    expect(view.queryByText(/comes from where this lands/)).toBeNull();
+  });
+
+  /**
+   * One primary action. A fork at the payoff — Explore For You beside Find people — is
+   * what made the social half of onboarding optional in the first place.
+   */
+  it('offers one way on, and does not fork into the app', async () => {
+    const view = await arrive();
+
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Explore For You' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Find people' })).toBeNull();
+  });
+
+
+  /**
+   * The write side of the reporting fix: the outcome is recorded by the screen that
+   * watched it happen, at each of the two exits past the ranking half.
+   */
+  it('records that the ranking half was completed', async () => {
+    const view = await arrive();
+    await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mockPrefs.get('user-1.onboarding.rankingOutcome')).toBe('completed'),
+    );
+  });
+  it('continues into the People step rather than into the app', async () => {
+    const view = await arrive();
+    await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
   });
 });
 
-/**
- * **The destination survives the notification step.** The founder tapped "Explore For
- * You", answered the permission question, and had to land on For You — not the Feed,
- * and not back on the summary. The exit is captured before the step is shown and used
- * after it, whichever answer the step gets.
- */
-describe('the notification step on the way out', () => {
-  const finished = () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-    return renderWithProviders(<TasteScreen />);
-  };
-
-  it('keeps Explore For You pointed at For You through Turn on notifications', async () => {
-    mockPushEnv.permission = 'undetermined';
-    const view = await finished();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-    await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Turn on notifications' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
-    expect(mockReplace).not.toHaveBeenCalledWith(TAB_ROUTES.feed);
-  });
-
-  it('keeps Find people pointed at People through Not now', async () => {
-    mockPushEnv.permission = 'undetermined';
-    const view = await finished();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
-    await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
-
+describe('the way out', () => {
+  /**
+   * **The stranding this codebase has already paid for once.**
+   *
+   * Five is a hard requirement to reach the next control, so the picker is the only screen
+   * in the flow that could hold somebody indefinitely. The old screen carried this button
+   * with a comment that has not stopped being true: somebody who cannot think of five
+   * movies they have seen must not be held here forever.
+   */
+  it('lets somebody leave who cannot think of five', async () => {
+    const view = await open();
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding')));
-  });
-});
-
-/**
- * **The reopened app after the build-4 crash, as a suite.** Phase `active` on disk,
- * five films ranked, the OS permission already granted, the offer already recorded —
- * exactly the state the founder reopened into, where both summary buttons had died.
- * What these pin is that every exit ends in a navigation, whatever the phone's
- * storage or permission plumbing does on the way.
- */
-describe('recovery after a crash during the notification step', () => {
-  const reopened = () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-    mockPrefs.set('push.offered', true);
-    mockPushEnv.permission = 'granted';
-    return renderWithProviders(<TasteScreen />);
-  };
-
-  it('returns to the summary and lets the buttons finish the job', async () => {
-    const view = await reopened();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-
-    // The question is not put twice: permission exists and the offer is recorded, so
-    // the tap goes straight to the destination that was chosen.
-    expect(view.queryByText('Stay in the loop')).toBeNull();
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+    // Into the social step, not out of onboarding: declining the ranking is not declining
+    // the flow, and the People step still has something to offer.
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
   });
 
-  /**
-   * The dead-button pin. Before the fix, `leave` awaited a SecureStore read with no
-   * catch: one rejection and the press died silently — buttons on screen, nothing
-   * behind them, which is the founder's step 11 verbatim.
-   */
-  it('still leaves when the offer preference cannot be read', async () => {
-    mockReadFails.add('push.offered');
-    const view = await reopened();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
 
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+  it('records that the ranking half was left, so the completion says so', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+    await waitFor(() =>
+      expect(mockPrefs.get('user-1.onboarding.rankingOutcome')).toBe('skipped'),
+    );
   });
-
-  /**
-   * Review 47's first blocker: a rejected read was covered, a read that never settles
-   * was not — and SecureStore is allowed to simply not answer. The offer decision is
-   * now bounded, so the exit happens at the grace with the question skipped.
-   */
-  it('still leaves when the offer preference read never settles', async () => {
-    jest.useFakeTimers();
-    try {
-      mockReadHangs.add('push.offered');
-      const view = await reopened();
-      await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-      await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-      await act(async () => {});
-      expect(mockReplace).not.toHaveBeenCalled();
-
-      await act(async () => {
-        jest.advanceTimersByTime(3000);
-      });
-      expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  it('still leaves when the phase cannot be written', async () => {
-    mockWriteFails = true;
-    const view = await reopened();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-
-    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding')));
-  });
-
-  /** The escape route reaches this screen too — see `UseDifferentAccountButton`. */
-  it('offers a way out of the account itself, from the summary and the flow', async () => {
-    const view = await reopened();
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+  it('offers a way out of the account itself, which routing makes unreachable otherwise', async () => {
+    const view = await open();
     expect(view.getByText('Use a different account')).toBeTruthy();
-  });
-});
-
-/**
- * **The screen the founder photographed on TestFlight build 4, and why it was not the
- * contradiction it looked like.**
- *
- * Pressing "Explore For You" on the summary appeared to send the app *backwards* into
- * "Build your taste", showing `5 of 5` above the copy for the very first film — "Start
- * with one you love", "The first one needs no comparison." — before finally landing on
- * Collection rather than For You. Read as state, those three facts cannot all be true at
- * once, which is what made it look like corruption.
- *
- * They were three separate things, and only the first one was a bug about onboarding:
- *
- *   1. `done` was `state.data?.needed === true && ranked >= FIRST_FIVE`, and
- *      `useCompleteTasteOnboarding` sets `needed: false` **synchronously**, before its
- *      first await — deliberately, because routing has to see the decision immediately.
- *      So the press itself disqualified the summary, and the ranking step rendered in its
- *      place while the exit was still in flight.
- *   2. `ranked` is preserved at five across that write, so the progress bar under the
- *      wrong branch read `5 of 5` — correctly.
- *   3. The "first one" copy was never gated on the count at all. Its only condition is an
- *      empty search box, which is exactly what the end of the flow leaves behind.
- *
- * And it was held there: `finish` awaited a SecureStore write bounded at three seconds,
- * on top of the three the notification-offer decision may already have spent. Six seconds
- * of a screen visibly disagreeing with the button just pressed.
- *
- * These assert the *frames between the press and the navigation*, which every existing
- * test in this file skips — they wait for `mockReplace` and never look at what was on
- * screen in between.
- */
-describe('the frames between the press and the navigation', () => {
-  const atSummary = async () => {
-    mockCounts.rankings = 5;
-    mockCounts.user_media = 5;
-    const view = await renderWithProviders(<TasteScreen />);
-    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
-    return view;
-  };
-
-  it('never puts the summary back into the ranking step on the way out', async () => {
-    const view = await atSummary();
-
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
-
-    // The whole defect, stated as the thing that must never be on screen.
-    expect(view.queryByText('Build your taste')).toBeNull();
-    expect(view.queryByText('Start with one you love')).toBeNull();
-    expect(view.queryByLabelText('5 of 5 films ranked')).toBeNull();
-    expect(view.getByText('That is a start')).toBeTruthy();
-  });
-
-  it('holds the summary through the notification-offer decision, not the ranking step', async () => {
-    jest.useFakeTimers();
-    try {
-      mockReadHangs.add('push.offered');
-      const view = await atSummary();
-
-      await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
-      await act(async () => {});
-
-      // Mid-exit, with the offer decision still hanging: still the summary.
-      expect(view.getByText('That is a start')).toBeTruthy();
-      expect(view.queryByText('Build your taste')).toBeNull();
-
-      await act(async () => {
-        // The offer-decision grace in `app/onboarding/taste.tsx`.
-        jest.advanceTimersByTime(3000);
-      });
-      expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding'));
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  /**
-   * The disk write is no longer between the person and the door.
-   *
-   * `complete()` records the decision in memory and in the query cache before its first
-   * await, so there is nothing left to wait for — and waiting anyway is what spent up to
-   * three seconds per exit on a device whose Keychain was slow.
-   */
-  it('navigates without waiting for the completion write', async () => {
-    // The Keychain write that never comes back — review 47's shape, and the one this
-    // path used to sit behind for three seconds before giving up on it.
-    mockWriteHangs = true;
-
-    const view = await atSummary();
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
-    expect(view.getByText('That is a start')).toBeTruthy();
-  });
-
-  /**
-   * The copy follows the count, not the search box.
-   *
-   * Somebody three films in who clears the field was being told to start, and at the end
-   * of the flow the same sentence promised a comparison-free first pick under a full
-   * progress bar. Nothing in this suite asserted the pairing was impossible, which is how
-   * it reached a physical build.
-   */
-  it('does not offer first-film copy to somebody who has already ranked films', async () => {
-    mockCounts.rankings = 3;
-    mockCounts.user_media = 3;
-    const view = await renderWithProviders(<TasteScreen />);
-    await waitFor(() => expect(view.getByText('Build your taste')).toBeTruthy());
-
-    expect(view.getByLabelText('3 of 5 films ranked')).toBeTruthy();
-    expect(view.queryByText('Start with one you love')).toBeNull();
-    expect(view.queryByText(/first one needs no comparison/)).toBeNull();
-  });
-
-  /**
-   * A force-quit on the summary reopens on the summary, with buttons that work — the
-   * resume requirement, asserted as *pressable* rather than merely present. Build 4's
-   * trap was a summary whose buttons were on screen and did nothing.
-   */
-  it('recovers to a summary whose buttons still leave, after a restart', async () => {
-    const view = await atSummary();
-    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
-  });
-
-  /**
-   * **And the recovery ends, which is the founder's 2026-08-26 report.**
-   *
-   * Five films ranked, a full collection, and *every* launch landing on "That is a start".
-   * `active` is written on arrival and cleared only by one of this screen's own exits, so
-   * every other way out leaves it set — and on build 4 every other way out was the only
-   * one available. The account was pinned to a flow it had already finished, with the one
-   * door out being a button that had already failed it once.
-   *
-   * The resume above is kept, because a crashed exit deserves a second go at the buttons.
-   * What is new is that it terminates: arriving here with the work already done settles
-   * the phase, so a second restart opens the app. One repeat, never two, whether or not
-   * the press lands.
-   *
-   * This deliberately replaces the previous version of the test above, which asserted two
-   * consecutive restarts both reaching the summary. That was the trap, written down.
-   */
-  it('stops resuming onto the summary once it has done so', async () => {
-    const first = await atSummary();
-    first.unmount();
-    // A relaunch: the process forgets, the device does not.
-    resetTasteIntent();
-
-    const second = await renderWithProviders(<TasteScreen />);
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
-    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('done');
-
-    // Unmounted rather than left to automatic cleanup: this screen dispatches a
-    // fire-and-forget phase write, and one still in flight when the next test's
-    // `beforeEach` has already reset the store lands on top of it.
-    second.unmount();
   });
 });
