@@ -141,7 +141,7 @@ Semantics are in [`ranking.md`](./ranking.md).
 | `block(target_id)` | Block. Removes follows both ways, voids invitations, hides tags | no |
 | `unblock(target_id)` | Remove a block. Does **not** restore prior follows | no |
 | `report(subject_type, subject_id, reason, note?)` | File a report | no |
-| `follow_activity_people(event_ids uuid[], limit?)` | Who one or more `follow_added` Feed stories are about, per viewer. The **only** read path into `feed_follow_targets`, which has RLS on and no policy: two predicates, `can_view_profile` on the event's actor and `can_identify_profile` on every account named, with the caller excluded from their own story and no total returned (`20260912000100`) | no |
+| `follow_activity_people(event_ids uuid[])` | Who one or more `follow_added` Feed stories are about, per viewer. The **only** read path into `feed_follow_targets`, which has RLS on and no policy: two predicates, `can_view_profile` on the event's actor and `can_identify_profile` on every account named, with the caller excluded from their own story and no total returned. **Takes no limit and truncates nothing** since `20260912000400` — every member the viewer may identify is returned, so the count a Feed row draws is exact; the bound is the writer's, at `feed.follow_story_max_people` (clamped 1..200) | no |
 
 > **`follow` posts Feed activity when — and only when — the edge lands approved**
 > (`20260912000100`). It aggregates into one `follow_added` row per actor per

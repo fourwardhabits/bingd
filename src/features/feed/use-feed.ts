@@ -939,20 +939,18 @@ async function attachFollowPeople(items: FeedItem[]) {
     // a floor under a pathological caller rather than a real limit.
     p_event_ids: items.map((item) => item.id).slice(0, 50),
     /**
-     * `p_limit` is deliberately **not** passed, and that is not the same omission review
-     * objected to in the first version of this tranche.
+     * There is no `p_limit`, and since `20260912000400` there is no such argument to pass.
      *
-     * Then, the default was a number — the client took whatever page came back and derived
-     * an exact "and 24 others" from its length, which is a row lying about a set the sheet
-     * cannot show. Since `20260912000300` the default is null and null *means* the whole
-     * story: the server resolves it to `feed.follow_story_max_people`, the same row
-     * `_post_follow_activity` reads before it appends, so the largest membership that can
-     * exist and the largest this can return are one number.
+     * The first version of this tranche had one, defaulting to a number: the client took
+     * whatever page came back and derived an exact "and 24 others" from its length, which is
+     * a row lying about a set the sheet cannot show. Two attempts to make the limit agree
+     * with the story's own ceiling both failed — a literal disagreed the moment the ceiling
+     * was configured differently, and reading the configuration disagreed across *time*,
+     * because a story built at fifty and read at ten is forty members silently dropped.
      *
-     * Restating that number here would put a second copy of it in a place that cannot see
-     * the config row, which is precisely how the two halves came to disagree. What this
-     * depends on is the *semantics* of the default, and those are what the count below is
-     * allowed to be exact about.
+     * So the reader truncates nothing and the count below can be exact. The bound is the
+     * writer's: `_post_follow_activity` stops appending at `feed.follow_story_max_people`,
+     * which is why this stays a small read.
      */
   });
   if (error || !data) return;

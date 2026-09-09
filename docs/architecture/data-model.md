@@ -705,9 +705,9 @@ at read time — is not available: the Feed is paged by a keyset over
 `(causal_at, causal_step, id)` shared with the profile activity page, and a group-by cannot
 be paged by a keyset over its members.
 
-**The membership itself is bounded at `feed.follow_story_max_people` (50)**, and that number
-is what makes two separate things true at once — an independent review of the migration found
-both halves. `follow.max_per_hour` bounds one account's own follows at sixty, but
+**The membership itself is bounded at `feed.follow_story_max_people` (50 by default) as it is
+written**, and that number is what keeps this read small — an independent review of the
+migration found the need for it. `follow.max_per_hour` bounds one account's own follows at sixty, but
 `redeem_invite` posts the *inviter's* story from the invitee's session, so a link shared into
 a large group chat appends one member per redemption with no per-actor ceiling anywhere. A
 story naming five thousand people is not a story anybody reads; it is a sort on every feed
@@ -742,7 +742,7 @@ revoked from both client roles — `notifications`' shape since `20260819000300`
 same reason: the predicate that decides who may be named is `can_identify_profile`, which is
 server-only and which a policy expression cannot call.
 
-`follow_activity_people(event_ids, limit)` is the only read path. It applies
+`follow_activity_people(event_ids)` is the only read path, and since `20260912000400` it takes no limit. It applies
 `can_view_profile` to the event's actor — restated because `security definer` bypasses
 `feed_events_read` — and `can_identify_profile` to every account it names, which is the
 identity-not-content predicate `followers_of`, `following_of` and `people_mutuals` already

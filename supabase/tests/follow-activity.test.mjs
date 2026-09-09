@@ -786,6 +786,134 @@ describe('a story is bounded, so the reader never pages one', () => {
     }
   });
 
+  it('clamps a ceiling set above 200, because nothing else bounds a Feed read', async () => {
+    /**
+     * `20260912000400` made the reader report the story rather than re-decide it, which left
+     * `feed.follow_story_max_people` as the only thing standing between a Feed page and an
+     * arbitrarily large read — and it is a row in a table. Set it to 5,000 by mistake and
+     * invite redemptions build 5,000-member stories; nothing fails at that moment, and the
+     * cost lands on every reader afterwards, for ever.
+     *
+     * So the writer clamps at 200. The membership is built directly here rather than through
+     * two hundred `follow` calls: what is under test is `v_held >= v_cap` with a *clamped*
+     * cap, and two hundred round trips would test the harness instead.
+     */
+    await t.sql(`update app_config set value = '5000'::jsonb where key = 'feed.follow_story_max_people'`);
+    try {
+      const abi = await user('clamp_abi');
+      // Two hundred members and one more person, in two statements.
+      const { rows: made } = await t.sql(
+        `with ids as (select gen_random_uuid() as id from generate_series(1, 201)),
+              u as (insert into auth.users (id) select id from ids returning id),
+              p as (
+                insert into profiles (id, username, display_name, visibility)
+                select u.id, 'fa_clamp_' || row_number() over (order by u.id) || '_${seq}',
+                       'Clamp', 'public'::profile_visibility
+                  from u returning id
+              )
+         select id from p order by id`,
+      );
+      const members = made.slice(0, 200).map((r) => r.id);
+      const extra = made[200].id;
+
+      const { rows: ev } = await t.sql(
+        `insert into feed_events (actor_id, type, payload, causal_at, causal_step)
+         values ($1, 'follow_added', '{}'::jsonb, now(), 0) returning id`,
+        [abi],
+      );
+      await t.sql(
+        `insert into feed_follow_targets (event_id, followed_id)
+         select $1, unnest($2::uuid[])`,
+        [ev.rows === undefined ? ev[0].id : ev[0].id, members],
+      );
+      assert.equal((await stories(abi))[0].members, 200);
+
+      await follow(abi, extra);
+      assert.equal(
+        (await stories(abi))[0].members,
+        200,
+        'the two hundred and first is refused however large the configured ceiling says',
+      );
+      assert.equal(await edge(abi, extra), 'approved', 'and the follow itself still happened');
+    } finally {
+      await t.sql(
+        `update app_config set value = '50'::jsonb where key = 'feed.follow_story_max_people'`,
+      );
+    }
+  });
+
+  it('names at least one person when the ceiling is set to zero', async () => {
+    // The cap is consulted only on the append path, so a setting of 0 never stopped the
+    // *first* member being named. `greatest(..., 1)` makes that the stated rule rather than
+    // an accident of where the check sits.
+    await t.sql(`update app_config set value = '0'::jsonb where key = 'feed.follow_story_max_people'`);
+    try {
+      const abi = await user('zero_abi');
+      await follow(abi, await user('zero_first'));
+      await follow(abi, await user('zero_second'));
+      assert.equal((await stories(abi))[0].members, 1);
+    } finally {
+      await t.sql(
+        `update app_config set value = '50'::jsonb where key = 'feed.follow_story_max_people'`,
+      );
+    }
+  });
+
+  it('orders on something neither account can edit', async () => {
+    /**
+     * The first name in the sentence must not move because somebody renamed themselves.
+     *
+     * `created_at` defaults to transaction-scoped `now()`, so two members appended in one
+     * transaction share a timestamp exactly — which is what `redeem_invite` does. Until
+     * `20260912000500` the tie-break was `username`, editable from Settings, so a rename
+     * could reorder somebody else's Feed row. It is `followed_id` now: immutable, and the
+     * membership's own key.
+     */
+    const abi = await user('tie_abi');
+    const zed = await user('tie_zed');
+    const amy = await user('tie_amy');
+
+    await follow(abi, zed);
+    const story = (await stories(abi))[0];
+    // Appended in one statement, so both rows carry the same created_at, exactly as a
+    // redemption's two appends would.
+    await t.sql(
+      `insert into feed_follow_targets (event_id, followed_id) values ($1, $2), ($1, $3)
+       on conflict do nothing`,
+      [story.id, zed, amy],
+    );
+
+    const viewer = await user('tie_viewer');
+    const ids = async () => {
+      await t.actAs(viewer);
+      const { rows } = await t.sql(
+        `select user_id, username from follow_activity_people($1::uuid[])`,
+        [[story.id]],
+      );
+      return rows;
+    };
+
+    const before = await ids();
+    assert.equal(before.length, 2);
+
+    // Rename whichever one comes first to a handle that sorts last. Under the old tie-break
+    // that alone would move it to the end of the list.
+    await t.sql(`update profiles set username = 'fa_tie_zzz_${seq}' where id = $1`, [
+      before[0].user_id,
+    ]);
+
+    assert.deepEqual(
+      (await ids()).map((r) => r.user_id),
+      before.map((r) => r.user_id),
+      'the order is by followed_id, so a rename cannot move it',
+    );
+    assert.deepEqual(
+      before.map((r) => r.user_id),
+      [zed, amy].sort(),
+      'and that order is the two ids ascending',
+    );
+  });
+
   it('still bounds a story when the ceiling is not configured', async () => {
     // The documented fallback is 50. A `coalesce` over a query returning no rows is never
     // evaluated, which is the defect `config-defaults.test.mjs` exists for — and here it

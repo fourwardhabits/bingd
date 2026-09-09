@@ -6,8 +6,8 @@ import { createTestDb } from './harness.mjs';
 /**
  * The invitee's own welcome, 20260823000100.
  *
- * `redeem_invite` has always notified the *inviter* and has, since `20260819000500`,
- * created the invitee's follow for them. The invitee themselves was told nothing — so
+ * `redeem_invite` notified the *inviter* and has, since `20260819000500`, created the
+ * invitee's follow for them. The invitee themselves was told nothing — so
  * the one person in the exchange who had never seen the app before arrived to a follow
  * they did not watch happen and an empty inbox. A beta tester reported it as a Feed
  * that begins empty.
@@ -27,7 +27,11 @@ import { createTestDb } from './harness.mjs';
  *      suspended inviter all leave the inbox empty — the welcome is a consequence of a
  *      successful attribution and of nothing else.
  *   5. **Nothing else moved.** The follow, the inviter's own notification and the
- *      return shape are `20260819000500`'s and are asserted here unchanged.
+ *      return shape are `20260819000500`'s and are asserted here unchanged — with two
+ *      later exceptions this file does not own: since `20260912000200` the follow into a
+ *      *private* inviter is approved rather than a request, and the inviter's row is
+ *      `invite_joined` rather than `follow_request` and is skipped entirely for an
+ *      invitee who already followed them. `follow-activity.test.mjs` owns both.
  */
 
 let t;
