@@ -969,6 +969,15 @@ expectRefused(
   await rpc('_post_follow_activity', { p_actor: NIL, p_target: NIL }),
 );
 
+// 20260913000100. A definer aggregate over every public account's rankings, which is
+// exactly the shape a missing revoke would make free to read from a signed-out client.
+// Probed with real arguments, because PostgREST answers a signature mismatch with 404
+// and a 404 would pass this whether the grant existed or not.
+expectRefused(
+  'anon cannot execute top_rated_titles',
+  await rpc('top_rated_titles', { p_medium: 'movies', p_limit: 1 }),
+);
+
 const total = passed + failures.length + inconclusive.length;
 console.log(`\n${passed}/${total} passed, ${failures.length} failed, ${inconclusive.length} inconclusive\n`);
 

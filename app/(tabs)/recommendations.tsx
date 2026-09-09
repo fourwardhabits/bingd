@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -31,6 +31,12 @@ import {
   type ForYouItem,
   type Medium,
 } from '@/features/recommendations/use-for-you';
+import {
+  TOP_RATED_FILTER_PAGES,
+  TOP_RATED_PAGE,
+  useTopRated,
+  type TopRatedItem,
+} from '@/features/recommendations/use-top-rated';
 import {
   asCollectionItem as recommendationAsItem,
   unopenedCount,
@@ -107,9 +113,45 @@ export default function RecommendationsScreen() {
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
 
-  /** Which side of the wall the reader is on. The selector's value, directly (§A16). */
+  /** Which side of the *personalised* wall the reader is on. See `mode` below. */
   const [medium, setMedium] = useState<Medium>('movies');
-  /** The first chip. Not a tab: see the header. */
+  /**
+   * Which side of **Top Rated** the reader is on, or null when they are not on it.
+   *
+   * Two pieces of state rather than one four-valued `mode`, and the reason is the same
+   * one that used to hold People apart from `medium` (§A16, since removed): a glance at
+   * Top Rated must not move the personalised slate's query or throw away the page depth
+   * somebody scrolled. Holding the two separately means Movies → Top Rated Movies →
+   * Movies costs the personalised wall nothing at all, and the selector's value is
+   * derived from both so the control cannot disagree with either.
+   *
+   * Deliberately not persisted, for the reason this screen already gives about People:
+   * For You is a question asked fresh each visit, and reopening on Top Rated because
+   * somebody once looked there would be answering a question nobody asked twice.
+   */
+  const [topMedium, setTopMedium] = useState<Medium | null>(null);
+  /**
+   * How many pages a *filtered* Top Rated wall may pull in on its own, and why it is
+   * state rather than the constant it started as.
+   *
+   * The auto-advance below fetches further pages while a filter is hiding everything on
+   * the ones already loaded. It has to stop somewhere or a filter matching nothing walks
+   * the whole catalogue on its own; it stopped at `TOP_RATED_FILTER_PAGES` and said
+   * "Nothing matches those filters", which is a **false statement** whenever the wall
+   * still has pages left — the two hundred highest-rated titles containing no Westerns
+   * does not mean the catalogue has none, and an empty wall has nothing to scroll, so
+   * the reader could not reach them either. That is the one arbitrary cutoff the
+   * founder's brief rules out, arriving through the back door.
+   *
+   * So the bound is now a budget the reader can extend, and the empty state says which
+   * of the two things happened. Automatic work stays bounded — nothing fetches more than
+   * ten pages without somebody asking — and nothing is unreachable.
+   *
+   * Reset to the default whenever the question changes (a new mode, a new filter), so an
+   * extension granted for one narrow filter is not spent silently on the next broad one.
+   */
+  const [topRatedBudget, setTopRatedBudget] = useState(TOP_RATED_FILTER_PAGES);
+  /** The first chip. Not a tab: see the header. Never on while Top Rated is. */
   const [sentOnly, setSentOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [filters, setFilters] = useState<CollectionFilters>(emptyFilters());
@@ -147,14 +189,46 @@ export default function RecommendationsScreen() {
    * cost nothing: the slate itself was always cached per medium by React Query, and the
    * page count was the only thing being discarded.
    *
-   * **The selector's value is `medium` itself again** (§A16). It used to be derived, because
-   * People was a third option the `medium` state could not hold and a separate flag carried
-   * it; with People gone to the Feed there are exactly two categories, both of them media,
-   * and the derivation had nothing left to reconcile. So this is `setMedium` under a name
-   * that says what pressing the control means — kept as a named function rather than passing
-   * the setter, because PR B adds two more options and the branch belongs here.
+   * **The selector holds four things now** (founder, 2026-09-09): the two personalised
+   * walls and the two Top Rated ones. It is derived from the two pieces of state above
+   * rather than stored, so the control's value is computed from what the screen is
+   * actually showing instead of being a third thing free to disagree with either.
    */
-  const changeMedium = (next: Medium) => setMedium(next);
+  const changeMode = (next: ForYouMode) => {
+    if (next === 'movies' || next === 'tv') {
+      setTopMedium(null);
+      setMedium(next);
+      return;
+    }
+    /**
+     * Top Rated leaves `medium` alone, which is what keeps the personalised wall, its
+     * filters and its per-medium depth exactly where the reader left them.
+     *
+     * Sent to you goes off, because it is a narrowing of *what people sent this reader*
+     * and there is no such thing on a wall about everybody's ratings. Leaving it on
+     * would draw the sent list under a heading that says Top Rated.
+     */
+    setSentOnly(false);
+    /**
+     * And the Group Picks sheet closes with it. Today this cannot be reached — `Sheet`
+     * is a real `Modal` with `accessibilityViewIsModal`, so the selector underneath is
+     * not touchable while the sheet is up — but "absent on Top Rated" is meant to be a
+     * property of the screen rather than a consequence of one component's presentation,
+     * and the day that sheet becomes an inline panel is not the day to remember this.
+     */
+    setGroupPicking(false);
+    setTopRatedBudget(TOP_RATED_FILTER_PAGES);
+    setTopMedium(next === 'topMovies' ? 'movies' : 'tv');
+  };
+
+  /** What the selector shows. See `topMedium`. */
+  const mode: ForYouMode = topMedium
+    ? topMedium === 'movies'
+      ? 'topMovies'
+      : 'topTv'
+    : medium;
+  /** Whether the wall is the community's order rather than this reader's slate. */
+  const onTopRated = topMedium !== null;
 
   /**
    * Filters, and the page count that has to move with them.
@@ -167,6 +241,9 @@ export default function RecommendationsScreen() {
   const changeFilters = (next: CollectionFilters) => {
     setFilters(next);
     resetPages();
+    // A new filter is a new question, and the allowance the last one earned does not
+    // carry over to it. See `topRatedBudget`.
+    setTopRatedBudget(TOP_RATED_FILTER_PAGES);
   };
 
   /**
@@ -196,6 +273,19 @@ export default function RecommendationsScreen() {
     setPagesByMedium((current) => ({ ...current, [medium]: next }));
   const resetPages = () => setPagesByMedium({ movies: 1, tv: 1 });
   const slate = useForYou(profile.id, medium, filters, pages);
+  /**
+   * The community's wall, and it is a different query rather than a mode of the slate.
+   *
+   * `useTopRated`'s own header has the argument. What matters here is that the two
+   * never run at once: `onTopRated` gates this one, and the slate is left mounted and
+   * cached so returning to it is instantaneous rather than a refetch.
+   *
+   * `topMedium ?? 'movies'` is never read while disabled — the query does not run — and
+   * exists only because the key has to be a `Medium` rather than a nullable one. The
+   * alternative, a null in the key, would put an entry in the cache for a wall nobody
+   * ever asked for.
+   */
+  const topRated = useTopRated(profile.id, topMedium ?? 'movies', onTopRated);
   const logged = useLoggedCollection(profile.id);
   const sent = useSentToYou(profile.id);
   /**
@@ -208,8 +298,137 @@ export default function RecommendationsScreen() {
   const markOpened = useMarkRecommendationOpened(profile.id);
   const dismissTitle = useDismissTitle(profile.id);
 
-  const items = slate.data?.items ?? [];
+  /**
+   * Everything Top Rated has fetched so far, before any filter.
+   *
+   * Kept unfiltered because two things need the whole corpus: the filter sheet, whose
+   * options have to describe what could be chosen rather than what already survived a
+   * choice, and the auto-advance below, which counts pages rather than matches.
+   *
+   * ---------------------------------------------------------------------------
+   * DEDUPED ACROSS PAGES, BECAUSE A KEYSET IS NOT A SNAPSHOT
+   *
+   * The cursor names the row it continues from, which is what stops an *offset* handing
+   * page two a row page one already showed. It does not freeze the ordering: the wall is
+   * an aggregate over live ratings, so a title that sat above the cursor can fall below
+   * it between two requests and be returned again — and pull-to-refresh refetches every
+   * loaded page against cursors taken before the refresh, which is the same hazard with
+   * the timing removed.
+   *
+   * One repeated row would otherwise be two tiles of the same poster and two React keys
+   * with one value. First occurrence wins, so the server's order is still the order.
+   *
+   * The reverse — a title climbing *above* the cursor and never being returned — cannot
+   * be fixed here, and is not fixed anywhere short of materialising the ranking. It is
+   * recorded in `use-top-rated.ts` rather than papered over.
+   */
+  const topPool = (() => {
+    const seen = new Set<string>();
+    const out: TopRatedItem[] = [];
+    for (const page of topRated.data?.pages ?? []) {
+      for (const item of page.items) {
+        if (seen.has(item.mediaItemId)) continue;
+        seen.add(item.mediaItemId);
+        out.push(item);
+      }
+    }
+    return out;
+  })();
+  /**
+   * The wall, filtered on the client.
+   *
+   * `applyFilters` rather than a `p_genres` on the RPC, and that is a correctness
+   * decision rather than a convenience: a season's genres are its show's, Anime is a
+   * predicate over language and genres rather than a stored label, and a person filter
+   * needs a credits index. All three already live here, in the one resolver every
+   * genre-bearing read in the app goes through. Re-expressing them in SQL would be a
+   * second implementation of product semantics, and the first thing to drift.
+   *
+   * What that costs is handled by `advanceFiltered` below.
+   */
+  const topItems = applyFilters(topPool, filters);
+  const slateItems = slate.data?.items ?? [];
+  /**
+   * The wall, as the four fields a tile is drawn from.
+   *
+   * A `ForYouItem` carries a scoring `explanation` and a `TopRatedItem` carries a
+   * community mean, and neither of those is a property of a poster. Narrowing the union
+   * to what the grid actually reads is what stops the two shapes leaking into each
+   * other — the long press below still wants a whole `ForYouItem`, and it goes back to
+   * `slateItems` for one rather than casting this.
+   */
+  const items: readonly {
+    mediaItemId: string;
+    title: string;
+    year: number | null;
+    posterPath: string | null;
+  }[] = onTopRated ? topItems : slateItems;
+  /**
+   * Whichever query the wall is currently drawn from, for the three states every wall
+   * has: loading, failed, and try again.
+   *
+   * One name rather than a branch at each of the three, because those branches are where
+   * a screen with two data sources goes wrong — a `slate.isPending` left behind on a
+   * Top Rated wall is a skeleton that never resolves, and it would look like a hung
+   * request rather than a missed edit.
+   */
+  const wall = onTopRated ? topRated : slate;
   const sentRows = sent.data ?? [];
+
+  /**
+   * A filtered Top Rated wall asks for more pages until it has something to say.
+   *
+   * The failure this removes: a reader on Top Rated Movies chooses Horror, the twenty
+   * highest-rated films in the catalogue contain none, and the screen shows the empty
+   * state for a filter that matches plenty of titles thirty rows further down — with no
+   * way to reach them, because there is nothing on screen to scroll.
+   *
+   * So the wall advances itself while a filter is on and the visible count is short,
+   * bounded by `topRatedBudget` — which starts at `TOP_RATED_FILTER_PAGES` and which the
+   * empty state below lets the reader extend, so the bound is on *unattended* work
+   * rather than on what is reachable. It is deliberately **not** a while-loop: each
+   * fetch re-renders, this runs again against the wall that actually came back, and the
+   * page count is what stops it. `isFetchingNextPage` keeps two requests from being in
+   * flight for the same page.
+   */
+  const pagesLoaded = topRated.data?.pages.length ?? 0;
+  /**
+   * Named rather than read off `topRated` inside the effect, so the dependency array
+   * holds three values and one stable function instead of a query object React Query
+   * rebuilds on every render. The object form runs this after every commit; the guards
+   * would make almost all of those a no-op, which is exactly the kind of "almost" that
+   * turns into a fetch loop the first time one of them is edited.
+   */
+  const { hasNextPage: topHasMore, isFetchingNextPage: topFetching } = topRated;
+  const fetchMoreTopRated = topRated.fetchNextPage;
+  const filtered = isFiltered(filters);
+  const shownCount = topItems.length;
+  useEffect(() => {
+    if (!onTopRated || !filtered) return;
+    if (!topHasMore || topFetching) return;
+    if (pagesLoaded >= topRatedBudget) return;
+    if (shownCount >= TOP_RATED_PAGE) return;
+    void fetchMoreTopRated();
+  }, [
+    onTopRated,
+    filtered,
+    shownCount,
+    pagesLoaded,
+    topRatedBudget,
+    topHasMore,
+    topFetching,
+    fetchMoreTopRated,
+  ]);
+  /**
+   * Whether an empty filtered wall means "there are none" or only "there are none yet".
+   *
+   * `topHasMore` is the server having filled the last page it was asked for, so there is
+   * more wall behind this one and the search stopped on the budget rather than on the
+   * catalogue. That is the difference the two empty states below turn on, and stating it
+   * once here keeps the copy and the button from ever disagreeing about which case they
+   * are in.
+   */
+  const topSearchStoppedEarly = topHasMore === true;
 
   /**
    * Whether asking for another page could produce anything.
@@ -219,7 +438,7 @@ export default function RecommendationsScreen() {
    * which is a better signal than a count, because it accounts for the diversity
    * ceilings rejecting the tail as well as for the pool being empty.
    */
-  const exhausted = pages >= MAX_PAGES || items.length < pages * SLATE_SIZE;
+  const exhausted = pages >= MAX_PAGES || slateItems.length < pages * SLATE_SIZE;
 
   /**
    * One more page, when the reader reaches the end of this one.
@@ -230,6 +449,18 @@ export default function RecommendationsScreen() {
    * request loop" satisfied by there being no request.
    */
   const loadMore = () => {
+    /**
+     * Top Rated pages over the network, so its own guards are the query's rather than
+     * this screen's arithmetic: `hasNextPage` is the server having returned a full page,
+     * and `isFetchingNextPage` is what makes the several `onScroll` events a fast flick
+     * produces into one request. There is deliberately **no** `MAX_PAGES` here — the
+     * founder's brief rules out a terminal cutoff, and the wall ends where the
+     * catalogue's rated titles do.
+     */
+    if (onTopRated) {
+      if (topRated.hasNextPage && !topRated.isFetchingNextPage) void topRated.fetchNextPage();
+      return;
+    }
     if (exhausted) return;
     /**
      * `pages + 1`, and **not** the functional `current => current + 1`.
@@ -266,6 +497,16 @@ export default function RecommendationsScreen() {
    * wall they are four pages down inside is a wall whose change they cannot see.
    */
   const refreshSlate = () => {
+    /**
+     * On Top Rated the gesture means what it says on every other list in the app: go and
+     * ask again. There is no seed to advance and no arrangement to shuffle — the order
+     * is the community's and rearranging it would be the screen inventing one — so this
+     * refetches the wall from its first page.
+     */
+    if (onTopRated) {
+      void topRated.refetch();
+      return;
+    }
     refreshRecommendations();
     resetPages();
   };
@@ -447,9 +688,20 @@ export default function RecommendationsScreen() {
        * on a device the tab row drew differently here than on Collection, and the two
        * screens are meant to lead with the same control. It is also the only one of the two
        * that scales — a fourth tab is a wrapped row where a fourth sheet row is a fourth
-       * sheet row.
+       * sheet row, which is exactly the bet the two Top Rated entries below just called in.
+       *
+       * **Top Rated Movies and Top Rated TV are entries here rather than a chip** (founder,
+       * 2026-09-09). This control answers "what am I looking at", and the community's order
+       * is a different answer to that question, not a narrowing of the reader's own — every
+       * chip in the row below narrows a wall that is already showing, and this replaces it.
+       *
+       * `Top Rated TV` says seasons even though the personalised entry above it says shows,
+       * and the two are right for their own walls: a season is the only television unit
+       * anybody can rate, so it is the only one that can be rated highest. `MediumSelector`
+       * draws the four in one sheet, in this order, so the two personalised walls stay
+       * where a returning reader last found them.
        */}
-      <MediumSelector value={medium} onChange={changeMedium} options={FOR_YOU_CATEGORIES} />
+      <MediumSelector value={mode} onChange={changeMode} options={FOR_YOU_MODES} />
       {/* The selector above it is the screen's entire header, and this is the seam that
       marks where the header ends and the wall begins. */}
       <HeaderBoundary />
@@ -493,6 +745,26 @@ export default function RecommendationsScreen() {
             testID="for-you-controls-scroller"
           >
             <View style={styles.filterRow} testID="for-you-controls">
+              {/**
+               * **Sent to you and Group Picks are absent on Top Rated** (founder,
+               * 2026-09-09), and Filters is not.
+               *
+               * The rule that separates them is what each control is *about*. Sent to
+               * you narrows the wall to things people sent this reader, and Group Picks
+               * asks what a named group should watch: both are statements about
+               * particular people, and there is no honest way to apply either to a wall
+               * whose whole claim is that the order belongs to everybody. Offering them
+               * here would mean either a control that quietly leaves Top Rated the
+               * moment it is pressed, or one that does nothing.
+               *
+               * Filters are different in kind. Genre, Language and Decade narrow *which
+               * titles* are on screen and say nothing about whose opinion put them
+               * there, so `Horror, top rated` is a question this wall can answer
+               * without changing what it is. The rating filters stay off on both walls,
+               * for the reason they were always off here: nothing on either has been
+               * ranked by this reader.
+               */}
+              {onTopRated ? null : (
               <FilterChip
                 icon={sentOnly ? 'mail-open' : 'mail-outline'}
                 label={
@@ -511,6 +783,7 @@ export default function RecommendationsScreen() {
                 emphasis="social"
                 onPress={() => setSentOnly((on) => !on)}
               />
+              )}
               {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
                 entire wall, and every other control here narrows the wall that is
                 already showing — it belongs in the selector at the top with the other
@@ -520,18 +793,20 @@ export default function RecommendationsScreen() {
             segment and not a tab — a group is a momentary question, and this row is
             where the screen keeps its questions. The wall the chip sits on decides the
             medium the picks answer for. */}
-              <FilterChip
-                icon="people-outline"
-                label="Group Picks"
-                // The row's other social feature. It shares Sent to you's treatment
-                // exactly, so the two read as one family and Filters reads as the
-                // utility beside them.
-                emphasis="social"
-                onPress={() => {
-                  track({ name: 'group_picks_opened' });
-                  setGroupPicking(true);
-                }}
-              />
+              {onTopRated ? null : (
+                <FilterChip
+                  icon="people-outline"
+                  label="Group Picks"
+                  // The row's other social feature. It shares Sent to you's treatment
+                  // exactly, so the two read as one family and Filters reads as the
+                  // utility beside them.
+                  emphasis="social"
+                  onPress={() => {
+                    track({ name: 'group_picks_opened' });
+                    setGroupPicking(true);
+                  }}
+                />
+              )}
               {/* The collection's own sheet, which its header always intended this screen to
             reuse rather than growing a second one. Genre, Language, Decade and Anime
             come with it. Rating filters are off: nothing on either list has been ranked
@@ -580,26 +855,114 @@ export default function RecommendationsScreen() {
                 void toggleSaveById(row.mediaItemId, !savedIds.has(row.mediaItemId))
               }
             />
-          ) : slate.isError ? (
+          ) : wall.isError ? (
             <EmptyState
               kind="couldNotLoad"
-              title="Could not load recommendations"
+              title={onTopRated ? 'Could not load Top Rated' : 'Could not load recommendations'}
               body="Check your connection and try again."
-              action={{ label: 'Try again', onPress: () => void slate.refetch() }}
+              action={{ label: 'Try again', onPress: () => void wall.refetch() }}
             />
-          ) : slate.isPending ? (
+          ) : wall.isPending ? (
             <SkeletonRow count={6} />
           ) : items.length === 0 ? (
-            <Nothing
-              medium={medium}
-              ranked={logged.data?.rankedCount ?? 0}
-              filtered={isFiltered(filters)}
-              onRank={() => router.push('/log')}
-              onClearFilters={() => changeFilters(emptyFilters())}
-            />
+            onTopRated ? (
+              /**
+               * Three sentences, and the one it does not say is "there is nothing".
+               *
+               * A Top Rated wall is empty for exactly two reasons and they are not the
+               * reader's fault in the same way: a filter has hidden everything that was
+               * there, or not enough people have rated anything yet.
+               *
+               * **Neither sentence quotes the threshold**, deliberately. The number is
+               * `discovery.top_rated_min_ratings` and the server is the only thing that
+               * knows it — an empty page carries no row to read it off, so any figure
+               * here would be a client-side copy of a config value, right until the day
+               * it is moved. The second sentence says the true thing instead, which is
+               * that the wall fills up as people rank.
+               *
+               * `Nothing` is deliberately not reused: every branch of it is about this
+               * reader's own taste being thin, which is the wrong diagnosis here.
+               */
+              isFiltered(filters) ? (
+                /**
+                 * Two filtered-empty states, because there are two different facts.
+                 *
+                 * The wall searched as far as its budget allowed and there is more wall
+                 * behind it: then nothing has been proved about the catalogue, and the
+                 * honest sentence says how far it looked and offers to look further.
+                 * Saying "nothing matches" here was a claim the screen had not earned —
+                 * the two hundred highest-rated titles holding no Westerns is not the
+                 * catalogue holding none, and with an empty wall there was nothing to
+                 * scroll to reach them. That is a terminal cutoff by another name.
+                 *
+                 * Or the wall genuinely ended, in which case nothing does match and
+                 * clearing the filters is the only thing left to offer.
+                 */
+                topSearchStoppedEarly ? (
+                  <EmptyState
+                    kind="nothingYet"
+                    title="Nothing yet in the highest rated"
+                    body="No match so far in the top rated titles we have looked through. There are more below."
+                    action={{
+                      label: 'Keep looking',
+                      /**
+                       * Measured from where the wall actually is, not from where the
+                       * budget happens to sit.
+                       *
+                       * The budget is an absolute page count and it resets to ten when
+                       * the question changes, but the *pages* do not reset with it —
+                       * React Query keeps them, and the reader may have scrolled far
+                       * past ten before filtering, since manual paging has no budget at
+                       * all. A plain `current + TOP_RATED_FILTER_PAGES` then buys a
+                       * ceiling still below `pagesLoaded`, and the press does nothing
+                       * visible: on a wall thirty pages deep the first two presses are
+                       * silent no-ops. Independent review, 2026-09-09.
+                       *
+                       * Taking the larger of the two first guarantees the new ceiling is
+                       * a full allowance *beyond the current depth*, so every press
+                       * authorises real work for as long as the wall has more.
+                       */
+                      onPress: () =>
+                        setTopRatedBudget(
+                          (current) => Math.max(current, pagesLoaded) + TOP_RATED_FILTER_PAGES,
+                        ),
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    kind="nothingYet"
+                    title="Nothing matches those filters"
+                    body="No top rated title matches everything you have chosen."
+                    action={{
+                      label: 'Clear filters',
+                      onPress: () => changeFilters(emptyFilters()),
+                    }}
+                  />
+                )
+              ) : (
+                <EmptyState
+                  kind="nothingYet"
+                  title="Not enough ratings yet"
+                  body="Titles appear here once enough people have rated them. Rank what you watch and this fills up."
+                  action={{ label: 'Rank something', onPress: () => router.push('/log') }}
+                />
+              )
+            ) : (
+              <Nothing
+                medium={medium}
+                ranked={logged.data?.rankedCount ?? 0}
+                filtered={isFiltered(filters)}
+                onRank={() => router.push('/log')}
+                onClearFilters={() => changeFilters(emptyFilters())}
+              />
+            )
           ) : (
             <ScrollView
               contentContainerStyle={styles.content}
+              /* The only way a test can reach the scroll that pages the wall — the same
+                 reason `for-you-refresh` exists on the control below. A `ScrollView` has
+                 no accessible name and no role to query it by. */
+              testID="for-you-wall"
               /**
                * The wall grows as the reader nears its end (§18).
                *
@@ -662,7 +1025,10 @@ export default function RecommendationsScreen() {
                * the narrower truth, that bingd. is still learning, and no claim about
                * where the titles came from.
                */}
-              {slate.data?.popularityOnly ? (
+              {/* Neither line belongs on Top Rated: both are statements about how well
+                  bingd. knows *this reader's* taste, and this wall makes no claim about
+                  that at all. */}
+              {onTopRated ? null : slate.data?.popularityOnly ? (
                 <Text variant="footnote" tone="tertiary" style={styles.lowData}>
                   Popular right now while bingd. learns your taste.
                 </Text>
@@ -691,18 +1057,43 @@ export default function RecommendationsScreen() {
                   if (item)
                     void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
                 }}
-                // The founder's X (§12): the card goes on the tap — the optimistic
-                // set feeds `useForYou`'s select, so no refetch and no flash — and
-                // the write persists it. Only a proven refusal is worth an alert.
-                onDismissTile={(tile) => {
-                  void dismissTitle(tile.id).then((result) => {
-                    if (!result.ok) Alert.alert('Could not hide this', result.message);
-                  });
-                }}
-                onLongPressTile={(tile) => {
-                  const item = items.find((candidate) => candidate.mediaItemId === tile.id);
-                  if (item) explain(item);
-                }}
+                /**
+                 * The founder's X (§12): the card goes on the tap — the optimistic
+                 * set feeds `useForYou`'s select, so no refetch and no flash — and
+                 * the write persists it. Only a proven refusal is worth an alert.
+                 *
+                 * **Absent on Top Rated**, and not merely because it would do nothing.
+                 * A dismissal is a durable statement that this reader does not want a
+                 * title *recommended*, and it is read by the slate query alone — so an X
+                 * here would silently edit a different wall while appearing to edit this
+                 * one, and the tile it removed would come back on the next page. The
+                 * community's order is not a list anybody gets to edit.
+                 */
+                onDismissTile={
+                  onTopRated
+                    ? undefined
+                    : (tile) => {
+                        void dismissTitle(tile.id).then((result) => {
+                          if (!result.ok) Alert.alert('Could not hide this', result.message);
+                        });
+                      }
+                }
+                /**
+                 * Why a title is on the wall is a question only the slate can answer: it
+                 * explains a *score against this reader's taste*, and Top Rated has no
+                 * such score. The gesture is absent there rather than answering with
+                 * something else.
+                 */
+                onLongPressTile={
+                  onTopRated
+                    ? undefined
+                    : (tile) => {
+                        const item = slateItems.find(
+                          (candidate) => candidate.mediaItemId === tile.id,
+                        );
+                        if (item) explain(item);
+                      }
+                }
               />
 
               {/**
@@ -718,7 +1109,11 @@ export default function RecommendationsScreen() {
                * has already said something better, and two explanations of the same
                * absence is worse than either.
                */}
-              {exhausted && items.length > 0 ? (
+              {/* Not on Top Rated. The line asks the reader to rank more so their
+                  *recommendations* sharpen, which is a true and useful thing to say
+                  about a slate and a non-sequitur under a wall of everybody's ratings —
+                  that one ends where the rated catalogue ends, and needs no apology. */}
+              {!onTopRated && exhausted && items.length > 0 ? (
                 <Text variant="footnote" tone="tertiary" style={styles.exhausted}>
                   Rank a few more titles to sharpen your recommendations.
                 </Text>
@@ -733,7 +1128,15 @@ export default function RecommendationsScreen() {
               items={
                 sentOnly
                   ? sentRows.map(recommendationAsItem)
-                  : (slate.data?.candidatePool ?? [])
+                  : onTopRated
+                    ? // The *unfiltered* pool, so the sheet's options describe what could
+                      // be chosen rather than what already survived a choice — otherwise
+                      // picking Horror would leave Horror as the only genre on offer and
+                      // a second one could never be added. It grows as the wall pages, and
+                      // `advanceFiltered` is what makes sure it has grown enough to be
+                      // worth describing.
+                      topPool
+                    : (slate.data?.candidatePool ?? [])
               }
               value={filters}
               showBuckets={false}
@@ -771,22 +1174,35 @@ export default function RecommendationsScreen() {
 }
 
 /**
- * The two things this screen can be showing, keyed by **this screen's** medium rather than
- * the collection's.
+ * The four things this screen can be showing.
  *
- * `Medium` here is `'movies' | 'tv'` and Collection's is `'movies' | 'tv_seasons'`,
- * because the units genuinely differ: TMDB answers "similar" about a *show* and never
- * about one of its seasons, so this wall holds series. That is also why the label reads
- * "TV shows" and Collection's reads "TV" — one accurate word each, rather than one
- * shared table forcing both to say the same slightly-wrong thing.
+ * Two personalised walls and two community ones. `Medium` here is `'movies' | 'tv'` and
+ * Collection's is `'movies' | 'tv_seasons'`, because the units genuinely differ: TMDB
+ * answers "similar" about a *show* and never about one of its seasons, so the
+ * personalised wall holds series. That is also why the label reads "TV shows" and
+ * Collection's reads "TV" — one accurate word each, rather than one shared table forcing
+ * both to say the same slightly-wrong thing.
  *
- * **It was three** (§A16). People was the third and is a mode of the Feed tab now, which is
- * what takes `ForYouCategory` — a union of `Medium` and a value `medium` could not hold —
- * out of this file with it. The selector's value is `medium` itself again.
+ * **The two television entries hold different units, and only one of them says so.**
+ * Nothing in this product has ever rated a whole series — `rankable_category` maps
+ * `season -> tv_seasons` and refuses a series outright (PRD §10) — so the highest-rated
+ * television is a *season*, while the personalised wall beside it is *shows*. The labels
+ * are the founder's, given as a list of exactly four, and `Top Rated TV` is one of them:
+ * a reader meets the distinction in the rows themselves, which read `The Last of Us, S1`,
+ * rather than in a label long enough to wrap. Recorded here because the two words are one
+ * apart and mean different things.
+ *
+ * **It was three, then two, and is four** (§A16, then founder 2026-09-09). People was the
+ * third and is a mode of the Feed tab now; Top Rated is not a fifth thing in that
+ * lineage — it is titles, which is what this screen exclusively is.
  */
-const FOR_YOU_CATEGORIES: readonly MediumSelectorOption<Medium>[] = [
+export type ForYouMode = Medium | 'topMovies' | 'topTv';
+
+const FOR_YOU_MODES: readonly MediumSelectorOption<ForYouMode>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV shows' },
+  { id: 'topMovies', label: 'Top Rated Movies' },
+  { id: 'topTv', label: 'Top Rated TV' },
 ];
 
 /**

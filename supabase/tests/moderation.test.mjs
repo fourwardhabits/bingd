@@ -478,6 +478,12 @@ describe('the guard is wired in, not merely present', () => {
     // suspended *subject*, which is the direction that matters.
     'public_notes',
     'community_score',
+    // 20260913000100. The same read as community_score over the whole catalogue: a
+    // stable aggregate that writes nothing and takes no subject, so a suspended caller
+    // learns nothing it could not learn by asking community_score title by title — and
+    // a suspended *rater* is already outside the population, which is the direction
+    // that matters.
+    'top_rated_titles',
     // 20260816001100. A stable read whose entire population is the caller's own
     // approved followees, filtered by can_view_profile from the caller's side. A
     // suspended account calling it learns nothing new: can_view_profile already

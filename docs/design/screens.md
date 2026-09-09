@@ -675,6 +675,68 @@ is already on the 4pt scale, and buying back the sixteen points the arithmetic i
 mean taking the control off the grid the rest of this document is built on. **It never wraps
 to two lines under any circumstances.**
 
+### As built — 2026-09-09: Top Rated, in the selector
+
+Founder decision. The For You selector holds **four** entries: *Movies*, *TV shows*, *Top
+Rated Movies*, *Top Rated TV*. The first two are the reader's own slate. The last two are the
+community's order, straight out of `top_rated_titles` — the score a title page already prints,
+asked about the catalogue rather than about one row.
+
+**Why the selector rather than a chip.** This control answers *what am I looking at*, and
+every chip in the row below it narrows a wall that is already showing. The community's order is
+a different answer to the first question, not a narrowing of the second, so it belongs where
+Movies and TV are. It is also why the dropdown was kept over a tab row on 2026-09-07: a fourth
+tab is a wrapped row where a fourth sheet row is a fourth sheet row.
+
+**What leaves with the switch, and what does not.**
+
+| Control | On Top Rated | Why |
+|---|---|---|
+| *Sent to you* | **Absent** | It narrows the wall to what particular people sent this reader. There is no honest version of that over a wall whose claim is that the order belongs to everybody. It is also turned **off** when Top Rated is chosen, and stays off on the way back — restoring it would draw the sent list under a control the reader last pressed to leave it |
+| *Group Picks* | **Absent** | Same reason, one step further: it asks what a named group should watch |
+| *Filters* | **Present** | Genre, Language and Decade narrow *which titles*, and say nothing about whose opinion put them there. `Horror, top rated` is a question this wall can answer without changing what it is |
+| The X on a tile | **Absent** | A dismissal is a durable statement about *recommendations* and is read by the slate alone, so an X here would silently edit a different wall and the tile would return on the next page |
+| Long press to explain | **Absent** | It explains a score against this reader's taste. There is no such score here |
+| Pull to refresh | **Present, and it refetches** | There is no seed to advance and no arrangement to shuffle. Rearranging the community's order would be the screen inventing one |
+
+**It pages, and there is no Top 25.** The wall keeps going until the rated catalogue runs
+out — keyset paginated on the whole sort key, so page two continues from a named row rather
+than counting past a moving one. The founder's brief rules out a terminal cutoff and this has
+none; the personalised wall's `MAX_PAGES` does not apply.
+
+A keyset is not a snapshot, though, and the first draft of this section said otherwise. The
+sort key is an aggregate over live ratings, so a title can cross the cursor between two
+requests: falling below it and being returned twice, which the screen dedupes by id with the
+first occurrence winning; or climbing above it and not being returned to this scroll at all,
+which nothing short of a materialised ordering can fix and which a pull to refresh resolves.
+Both are properties of ranking live data rather than defects of the cursor.
+
+**Filtering works across the whole corpus, not just the loaded page.** Filters run on the
+client, because a season's genres are its show's, Anime is a predicate rather than a stored
+label, and a person filter needs a credits index — all three already live in `filters.ts` and a
+SQL copy would be the first thing to drift. So a filtered wall fetches further pages on its own
+until it has a screenful, and the filter sheet's options are built from the **unfiltered** pool,
+so a second genre can always be added to the first.
+
+That self-advance is bounded at ten pages so a narrow filter cannot walk the catalogue
+unattended — but the bound is on *unattended* work, not on what is reachable. When it stops
+with the wall still holding pages, the empty state says **Nothing yet in the highest rated**
+and offers *Keep looking*, which spends another allowance. It says **Nothing matches those
+filters** only when the wall has genuinely ended, because that is the only time it is true.
+The first version said it either way, which was both an unearned claim and the terminal cutoff
+arriving through the filter path: the reader could not scroll an empty wall to reach the rest.
+
+**No score on the tiles.** A poster's score badge means *what this reader gave it*, and the
+accessibility label says so. Putting a community mean in the same badge would make one
+component mean two things one tab apart. The order is the statement; the number is on the
+title page, where `ScoresSection` labels whose it is.
+
+**Two empty states, and neither quotes the threshold.** A filtered wall with nothing on it
+offers *Clear filters*; an unfiltered one says titles appear once enough people have rated
+them. The number is `discovery.top_rated_min_ratings` and only the server knows it — an empty
+page carries no row to read it off, so any figure in the copy would be a client-side copy of a
+config value right up until it moved.
+
 ### As built — 2026-09-08: For You's header and control row
 
 Three founder findings from physical QA, all on the same strip of screen.
