@@ -22,8 +22,10 @@ import { serialiseRedemption } from './serialise';
 
 export type RedeemOutcome =
   /**
-   * Attributed, and PRD §17's acceptance semantics have run: the one-way follow, or a
-   * request if the inviter is private. `followState` is what actually exists, which is
+   * Attributed, and PRD §17's acceptance semantics have run. Since `20260912000200` a
+   * **personal** token connects both parties, both edges approved, whatever either
+   * account's visibility says; a `referral` token still writes the one-way follow, or a
+   * request if its owner is private. `followState` is what actually exists, which is
    * not always what this call would have created — an invitee who already followed
    * their inviter keeps the state they had.
    *

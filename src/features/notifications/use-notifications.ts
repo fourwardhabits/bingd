@@ -767,9 +767,12 @@ const INVITE_ROWS = new Set<string>(['invite_welcome', 'invite_joined']);
  * they are statements, and the place to undo a follow is the profile the row already
  * opens, where `FollowControl` has always drawn that state and its confirmation.
  *
- * **`Follow` on a welcome, `Follow back` on a join.** The inviter never followed the
- * invitee, so there is nothing for the invitee to return; the inviter, receiving a join,
- * is being followed and can return it.
+ * **`Follow` on a welcome, `Follow back` on a join.** The wording is chosen for the
+ * relationship each row is about rather than for what usually exists: on a welcome the
+ * invitee has nothing to return, and on a join the inviter is being followed and can.
+ * Since `20260912000200` a redeemed personal invite creates both edges, so both rows
+ * ordinarily draw **Following** — these two labels are what is left when somebody has
+ * since unfollowed and comes back to the row.
  *
  * Everything else keeps the old rule exactly. `follow` and `friendship` offer Follow
  * back only where no edge goes the other way; `follow_request` is excluded because it

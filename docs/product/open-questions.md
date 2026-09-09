@@ -32,7 +32,7 @@ All six product decisions that blocked architecture as of v0.5 have been resolve
 | Former blocker | Resolution | Where |
 |---|---|---|
 | Default privacy and follow approval | Public by default; Private toggle; approval only when private | Decision log §3 |
-| Invitation acceptance semantics | One-way recipient→inviter follow, explicit tap, follow-back prompt | Decision log §5 |
+| Invitation acceptance semantics | Explicit tap; a **personal** invite connects both parties, both approved (2026-09-08). A referral token stays one-way | Decision log §5 |
 | Invitation token model | One reusable personal link plus short code | Decision log §5 |
 | Notification mechanism | Full system in v1; inbox live; push built but delivery flagged off | Decision log §6 |
 | Lists in public alpha | Ship in v1 with the three-list limit enforced | Decision log §8 |
