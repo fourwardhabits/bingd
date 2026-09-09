@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -75,6 +75,7 @@ import {
   Text,
   type IconToggleOption,
 } from '@/ui/components';
+import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -357,46 +358,38 @@ export default function FeedScreen() {
   );
 
   /**
-   * **Re-tapping the Feed tab while a non-Feed mode is showing** (founder, 2026-08-30).
+   * **Re-tapping the Feed tab** (founder, 2026-08-30, widened 2026-09-09).
    *
-   * The other half of the same complaint the hardware-Back handler above answers, and
-   * it is the half iOS has: Leaderboard is a mode of this route, so pressing the tab
-   * you are already on had nothing to pop and left the reader looking at the board they
-   * were trying to leave. Every other tab in this app is its own root, so "tap the tab
-   * to go back to the top of it" is a habit this one alone broke.
+   * The other half of the complaint the hardware-Back handler above answers, and it is
+   * the half iOS has: Leaderboard is a mode of this route, so pressing the tab you are
+   * already on had nothing to pop and left the reader looking at the board they were
+   * trying to leave.
    *
-   * **Only when this tab is already focused.** `tabPress` fires for the Feed tab
-   * whether the reader was on Feed or on Collection, and resetting the mode in the
-   * second case would be a different change — arriving from another tab would stop
-   * returning you to the board you left, which nothing asked for. `isFocused()` is the
-   * whole of "already-selected".
+   * This screen grew that listener first and now shares it — `useTabReset` is the same
+   * subscription on all five tabs, and the rules it enforces (already-focused only,
+   * nothing prevented) are stated there. What is left here is the only part that is
+   * this screen's own: what its root is.
    *
-   * **Nothing is prevented.** The default for a re-tap of a focused tab is
-   * pop-to-top/scroll-to-top, and this route has no nested stack for that to reach, so
-   * consuming the event would take a behaviour away in exchange for nothing. Every
-   * other tab is untouched by construction: this listener lives on this screen.
+   * `showingFeed`, not `showingBoard`: People is a mode a reader experiences as a second
+   * screen too, and re-tapping the tab must leave it the same way. `setMode` rather than
+   * `changeMode`, because leaving the board is not a `leaderboard_viewed` event and the
+   * remembered timeframe is somebody else's state.
    *
-   * `navigation` is the tab's own object and is stable, so the effect re-subscribes
-   * only when the mode it reads changes.
+   * **Already on the Feed, so the habit's other half applies**: back to the top of it.
+   * No refetch — the reader has pull-to-refresh for that, and spending a round trip to
+   * animate something nobody asked for is how a gesture becomes expensive.
    */
-  const navigation = useNavigation();
+  const scroller = useRef<ScrollView>(null);
 
-  useEffect(() => {
-    // Under the unit runner `useNavigation` is mocked to whatever the test supplies;
-    // a navigator that cannot report focus is one this screen has no business
-    // listening to, and the optional call is what keeps that from being a crash.
-    const unsubscribe = navigation.addListener?.(
-      'tabPress' as never,
-      (() => {
-        // `showingFeed`, not `showingBoard`: People is a mode a reader experiences as a
-        // second screen too, and re-tapping the tab must leave it the same way.
-        if (showingFeed) return;
-        if (navigation.isFocused && !navigation.isFocused()) return;
+  useTabReset(
+    useCallback(() => {
+      if (!showingFeed) {
         setMode('feed');
-      }) as never,
-    );
-    return () => unsubscribe?.();
-  }, [navigation, showingFeed]);
+        return;
+      }
+      scroller.current?.scrollTo({ y: 0, animated: true });
+    }, [showingFeed]),
+  );
 
   /** Only a genuine change. Re-tapping the chip you are on would measure fidgeting. */
   const changeMetric = (next: LeaderboardMetric) => {
@@ -600,6 +593,7 @@ export default function FeedScreen() {
           Reactions and comment counts come with it — they are read alongside the
           events and are the part most likely to have moved. */}
       <ScrollView
+        ref={scroller}
         // Named so the pagination suite can drive a scroll at it. The screen holds a
         // second, horizontal ScrollView inside the trending shelf, so "the ScrollView"
         // is ambiguous by type and a label is the only unambiguous handle.

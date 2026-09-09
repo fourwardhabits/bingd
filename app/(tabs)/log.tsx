@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
@@ -29,6 +29,7 @@ import {
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
+import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
@@ -112,6 +113,36 @@ export default function LogScreen() {
   const [watchlistBusy, setWatchlistBusy] = useState<string | null>(null);
   /** The same fact, written synchronously, which is what makes it a guard. See below. */
   const watchlistInFlight = useRef<string | null>(null);
+  /** The field, so a re-tap of this tab can put the cursor back in it. */
+  const field = useRef<TextInput>(null);
+
+  /**
+   * **Re-tapping the Search tab** (founder, physical iOS 1.0.1 build 8).
+   *
+   * Search has no nested route either — a query, a filter, a widened member list and an
+   * open season picker are all states of this one screen — so the habit that works
+   * everywhere else did nothing here. `useTabReset` is the shared subscription and holds
+   * the rules; what is this screen's own is that its root is an *empty field with the
+   * keyboard up*, which is the state the tab exists to put somebody in. It is the same
+   * state `autoFocus` gives on a first arrival, reached the same way.
+   *
+   * Unconditional rather than "reset if there is something to reset". Everything cleared
+   * here is a query somebody is done with, the field ends up focused either way, and a
+   * branch would only mean the second tap of two behaving differently from the first.
+   *
+   * The log and ranking sheets are deliberately untouched. Both are modals over this
+   * screen with a write in progress behind them, and the tab bar is not reachable while
+   * either is up — closing one from here would be inventing an exit nobody pressed.
+   */
+  useTabReset(
+    useCallback(() => {
+      setInput('');
+      setFilter('all');
+      setAllMembers(false);
+      setSeries(null);
+      field.current?.focus();
+    }, []),
+  );
 
   const queryClient = useQueryClient();
   /** Drains the post-ranking celebration queue when the log flow ends. */
@@ -404,6 +435,7 @@ export default function LogScreen() {
       <AppHeader />
       <View style={styles.searchRow}>
         <SearchField
+          ref={field}
           accessibilityLabel="Search"
           // Names both halves, because the second was invisible while it sat behind
           // a chip. "@handle" rather than "a member" so the sigil is discoverable.

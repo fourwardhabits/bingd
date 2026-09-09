@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   RefreshControl,
@@ -42,6 +42,7 @@ import { useProfileStats } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { TAB_ROUTES } from '@/lib/routes';
+import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   ActivityRow,
@@ -124,6 +125,42 @@ export default function ProfileScreen() {
       router.setParams({ awards: undefined });
     }
   }, [awardsParam, router]);
+
+  /**
+   * **Re-tapping the Profile tab** (founder, physical iOS 1.0.1 build 8).
+   *
+   * The nested states here are sheets — Followers, Following, a stat's title list,
+   * bingd. Awards — and a sheet is a place a reader experiences as a second screen, so
+   * pressing the tab you are already on should leave it. `useTabReset` is the shared
+   * subscription and states the rules.
+   *
+   * Every sheet on this page is a real `Modal` with `accessibilityViewIsModal`, so the
+   * tab bar is not touchable while one is up and this branch is not reachable today. It
+   * is here for the same reason the Top Rated selector closes Group Picks: "the tab
+   * returns you to the top of this section" is meant to be a property of the screen
+   * rather than a consequence of one component's presentation, and the day a sheet
+   * becomes an inline panel is not the day to remember it.
+   *
+   * The comment sheet is deliberately not in the list. It is opened from an activity row
+   * and can hold something half-typed; the others hold nothing.
+   *
+   * Already at the root, so: back to the top. No refetch — this page is four cached
+   * reads and a paged feed, and spending them to animate a tab press is how a habit
+   * becomes expensive.
+   */
+  const scroller = useRef<ScrollView>(null);
+
+  useTabReset(
+    useCallback(() => {
+      if (followList || titleList || awardsOpen) {
+        setFollowList(null);
+        setTitleList(null);
+        setAwardsOpen(false);
+        return;
+      }
+      scroller.current?.scrollTo({ y: 0, animated: true });
+    }, [followList, titleList, awardsOpen]),
+  );
 
   /**
    * Own activity, asked for directly — not the follow feed filtered down to oneself.
@@ -218,6 +255,7 @@ export default function ProfileScreen() {
         }}
       />
       <ScrollView
+        ref={scroller}
         contentContainerStyle={styles.content}
         /**
          * The next page, asked for when the reader is within a screenful of the end.

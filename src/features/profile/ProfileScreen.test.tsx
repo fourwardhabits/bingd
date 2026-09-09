@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Share } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -128,7 +128,29 @@ jest.mock('@/features/awards/ProfileAwards', () => {
   };
 });
 
+/** See the `useNavigation` stand-in below. */
+const mockTabPress: (() => void)[] = [];
+const mockNavigation = {
+  focused: true,
+  addListener: (event: string, handler: () => void) => {
+    if (event === 'tabPress') mockTabPress.push(handler);
+    return () => {};
+  },
+  isFocused: () => mockNavigation.focused,
+};
+
+const pressTab = () => {
+  const handler = mockTabPress.at(-1);
+  if (!handler) throw new Error('the screen subscribed to no tabPress');
+  handler();
+};
+
 jest.mock('expo-router', () => ({
+  // The tab bar, captured rather than mounted: the screen subscribes to its navigator's
+  // `tabPress`, and `pressTab` calls what it subscribed with, which is exactly what React
+  // Navigation does with it. `focused` is mutable because "already-selected" is the whole
+  // of the contract.
+  useNavigation: () => mockNavigation,
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},
@@ -853,5 +875,43 @@ describe('an award in Recent activity', () => {
     expect(view.getByText(/Spark/)).toBeTruthy();
     expect(view.getByLabelText(/Comment on Sai's activity/)).toBeTruthy();
     expect(renderedText(view.toJSON())).toContain('2026');
+  });
+});
+
+/**
+ * **Re-tapping the Profile tab** (founder, physical iOS 1.0.1 build 8).
+ *
+ * The nested states here are sheets, and a sheet is a place a reader experiences as a
+ * second screen — so pressing the tab you are already on should leave it. Today every
+ * one of them is a real `Modal` with `accessibilityViewIsModal`, so the tab bar is not
+ * touchable while one is up; the behaviour is asserted anyway, because "the tab returns
+ * you to the top of this section" is meant to be a property of the screen rather than a
+ * consequence of one component's presentation.
+ */
+describe('re-tapping the Profile tab', () => {
+  beforeEach(() => {
+    mockTabPress.length = 0;
+    mockNavigation.focused = true;
+  });
+
+  it('closes the awards sheet', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByText('See all'));
+    await waitFor(() => expect(view.getByLabelText('bingd. Awards')).toBeTruthy());
+
+    await act(async () => pressTab());
+
+    await waitFor(() => expect(view.queryByLabelText('bingd. Awards')).toBeNull());
+  });
+
+  it('leaves it open when the press arrives from another tab', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByText('See all'));
+    await waitFor(() => expect(view.getByLabelText('bingd. Awards')).toBeTruthy());
+
+    mockNavigation.focused = false;
+    await act(async () => pressTab());
+
+    expect(view.getByLabelText('bingd. Awards')).toBeTruthy();
   });
 });
