@@ -1137,12 +1137,14 @@ them — and the sheet behind it lists exactly those. A row promising four other
 that lists one would be the feature contradicting itself, and one of the missing three would
 be an account that had blocked the reader.
 
-**And the count is complete, because the story is bounded.** A story names at most fifty
-people (`feed.follow_story_max_people`), so the reader's one page is the whole thing and the
-sheet needs no "showing the first N" line. That bound is not a display cap bolted on: without
-it, a personal link shared into a large group chat appends a member per redemption for ever,
-the sentence would present a page as a total, and every feed page holding the story would sort
-the whole aggregate to draw one line.
+**And the count is complete, because nothing truncates it.** `follow_activity_people` takes
+no limit and returns every member of the story that this viewer may identify, so the sheet
+needs no "showing the first N" line. What keeps that cheap is a bound on the other side: a
+story's membership stops at `feed.follow_story_max_people` (50 by default) when it is
+*written*. Without that bound a personal link shared into a large group chat would append a
+member per redemption for ever, and every feed page holding the story would read the whole
+aggregate to draw one line. The bound belongs to the writer alone — a reader that applied one
+too could disagree with it, and did, twice.
 
 Tapping the emphasised name opens that person; tapping anything else opens the list, which is
 the one place in the Feed that carries follow controls. A story about one person has no list

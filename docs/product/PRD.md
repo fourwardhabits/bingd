@@ -413,7 +413,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 3. The user opens the share sheet or copies the link or code.
 4. An installed recipient opens an invitation screen. A recipient without the app reaches a lightweight web page with public-safe inviter context, store actions, and the short code.
 5. After sign-up, the recipient explicitly accepts, which creates a follow to the inviter — and, since 2026-09-08, a follow from the inviter back to them (§17, §A7).
-6. The inviter is notified that they joined.
+6. The inviter is notified that they joined — unless the recipient already followed them and no request of the inviter's was answered, in which case nothing new is filed (§26.13 clause 7).
 
 ### H. Monetization loop — Provisional, not active in v1
 
@@ -758,7 +758,7 @@ See §12 for the full specification.
 4. Open the share sheet, or copy the invite link or short code.
 5. The recipient opens the installed app or a no-install web page. After account creation they explicitly accept.
 6. Acceptance creates a follow to the inviter, or a follow request if the inviter is private, **and a follow from the inviter back to the recipient** (§A7, 2026-09-08).
-7. The inviter is notified that they joined. There is no Follow back to press: the relationship already exists.
+7. The inviter is notified that they joined, and there is no Follow back to press: the relationship already exists. The one acceptance that files them nothing is a recipient who already followed them, where the news was delivered at the time (§26.13 clause 7).
 
 ### Share a ranking or list
 
@@ -3571,9 +3571,9 @@ Rationale: a reusable personal link matches how people actually invite — paste
 v0.5 said "accepts or follows" in three places without ever defining the result. The defined behavior is:
 
 1. The recipient must have an account. Acceptance is an **explicit tap**, never automatic.
-2. Acceptance **creates a one-way follow from recipient to inviter**.
-3. If the inviter's account is **private**, acceptance creates a **follow request** instead, subject to normal approval.
-4. ~~The inviter is then **notified and prompted to follow back**. The inviter is never auto-followed.~~ **Reversed 2026-09-08 (§A7): a redeemed personal invite connects both parties.** The inviter is notified, and the follow *back* is created automatically in the same transaction — see the As-built block at the end of this section for the asymmetry that survives, which is that the invitee's own edge into a **private** inviter is still a request.
+2. ~~Acceptance **creates a one-way follow from recipient to inviter**.~~ **Reversed 2026-09-08 (§A7, `20260912000100`): a redeemed *personal* invite creates both edges.** A `referral` token still creates this one-way follow and nothing else.
+3. ~~If the inviter's account is **private**, acceptance creates a **follow request** instead, subject to normal approval.~~ **Superseded 2026-09-08 (founder, `20260912000200`): a personal invite connects a private inviter too**, because minting a personal link and handing it to a named person is that approval, given in advance. A `referral` token still yields a request into a private owner.
+4. ~~The inviter is then **notified and prompted to follow back**. The inviter is never auto-followed.~~ **Reversed 2026-09-08 (§A7): a redeemed personal invite connects both parties.** The follow *back* is created automatically in the same transaction, and the inviter is told at most once — see §26.13 clause 7 and the As-built block at the end of this section.
 5. The recipient's identity is **not revealed to the inviter before acceptance**.
 6. An active **block** in either direction voids the invitation entirely.
 7. Acceptance also records referral attribution, independent of the follow.
@@ -3834,11 +3834,18 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > `mutation-check.mjs` mutant 15 proves that assertion would notice if the key were removed.
 >
 > **And the same absence of a per-actor ceiling bounds the story itself.** A story's membership
-> stops at `feed.follow_story_max_people` (50), which is what makes the reader's single page
-> the *whole* story rather than a page it would present as a total — so "and 49 others" is the
-> truth about what that viewer may see. Everything above the bound is still a follow and still
-> in the graph; it is only not in the sentence, which is §A13 applied to the row instead of to
-> the list.
+> stops at `feed.follow_story_max_people` (50 by default) when it is written. Everything above
+> the bound is still a follow and still in the graph; it is only not in the sentence, which is
+> §A13 applied to the row instead of to the list.
+>
+> **The reader truncates nothing** (`20260912000400`). `follow_activity_people` takes no limit
+> and returns every member the viewer may identify, so "and 49 others" is the truth about what
+> they may see rather than a page presented as a total. Two earlier attempts put a bound in the
+> reader as well, and a second bound is a second thing to disagree with the first: a literal 50
+> disagreed the moment the configured ceiling moved, and reading the configuration disagreed
+> across *time*, because a story built at 50 and read at 10 is forty members silently dropped
+> from a story that was legitimately that long. Lowering the setting shortens future stories,
+> which is what a density lever should do, and hides nobody from one already told.
 
 ---
 

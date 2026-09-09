@@ -503,7 +503,7 @@ const ALLOWED = {
   // and a blocked or suspended member of a story the caller *can* see is absent from it.
   // The caller is excluded from their own row, and no total is returned, so the Feed
   // cannot promise people the reader is not allowed to open.
-  'follow_activity_people(uuid[],integer)': ['authenticated'],
+  'follow_activity_people(uuid[])': ['authenticated'],
 
   // Added 2026-08-17. The first writer and the first reader for a table that has
   // existed since 20260813000900 with nothing consulting it. Both are about the

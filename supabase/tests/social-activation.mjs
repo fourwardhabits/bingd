@@ -317,7 +317,6 @@ try {
 
   const named = await rpc(abi.token, 'follow_activity_people', {
     p_event_ids: [eventId],
-    p_limit: 50,
   });
   report(
     'the story names nobody to the person it is about',
@@ -327,7 +326,6 @@ try {
 
   const strangerRead = await rpc(stranger.token, 'follow_activity_people', {
     p_event_ids: [eventId],
-    p_limit: 50,
   });
   report(
     'and names them to an unrelated reader who is allowed to identify them',
@@ -354,7 +352,6 @@ try {
   );
   const afterBlock = await rpc(stranger.token, 'follow_activity_people', {
     p_event_ids: [eventId],
-    p_limit: 50,
   });
   report(
     'a block in either direction removes the member from the story',
@@ -448,13 +445,14 @@ try {
   console.log('');
 
   // -------------------------------------------------------------------------
-  console.log('— the corrective migration, on the wire (20260912000200) —');
+  console.log('— the corrective migrations, on the wire (20260912000200 .. 400) —');
 
   /**
-   * `follow_activity_people` was **dropped and recreated** with a narrower return type, and
-   * that is the change PostgREST is most able to get wrong: a stale schema cache serves the
-   * old signature, and a `select` naming a column the new one does not have would then
-   * succeed. So the assertion is the negative one — asking for `ordinal` must 400.
+   * `follow_activity_people` was **dropped and recreated twice** — first with a narrower
+   * return type, then with a narrower *signature* — and that is the change PostgREST is most
+   * able to get wrong: a stale schema cache keeps serving the old one, and everything below
+   * would then be about a function that no longer exists. Both assertions are negative,
+   * because a negative is what a stale cache fails.
    */
   const gone = await fetch(`${url}/rest/v1/rpc/follow_activity_people?select=ordinal`, {
     method: 'POST',
@@ -467,9 +465,19 @@ try {
     `${gone.status} ${(await gone.text()).slice(0, 160)}`,
   );
 
+  const limited = await rpc(stranger.token, 'follow_activity_people', {
+    p_event_ids: [eventId],
+    p_limit: 1,
+  });
+  report(
+    'and it no longer takes a limit at all, so nothing can ask it to truncate a story',
+    limited.status === 404,
+    `${limited.status} ${JSON.stringify(limited.body).slice(0, 160)}`,
+  );
+
   const whole = await rpc(stranger.token, 'follow_activity_people', { p_event_ids: [eventId] });
   report(
-    'and its default answers the whole story rather than a page',
+    'while the one-argument form answers the whole story',
     whole.status === 200 && whole.body?.length === 1,
     JSON.stringify(whole).slice(0, 200),
   );

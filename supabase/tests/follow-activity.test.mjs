@@ -712,6 +712,43 @@ describe('a story is bounded, so the reader never pages one', () => {
     }
   });
 
+  it('keeps naming every member of a story built before the ceiling was LOWERED', async () => {
+    /**
+     * The second half of the same defect, and the direction the first fix still had.
+     *
+     * `20260912000300` made the reader read `feed.follow_story_max_people` instead of a
+     * literal, on the argument that one number cannot disagree with itself. It can, across
+     * time: a story built at 50 and read at 10 is fifty rows the reader now returns ten of.
+     * Nothing deletes the other forty — they are in `feed_follow_targets`, in a story that
+     * was legitimately that long — and the row would say "and 9 others" about them.
+     *
+     * `20260912000400` takes the limit away entirely, so the reader reports the story rather
+     * than re-deciding how long it was allowed to be. Lowering the setting shortens *future*
+     * stories, which is what a density lever should do.
+     */
+    const abi = await user('low_abi');
+    const targets = [];
+    for (let i = 0; i < 6; i += 1) targets.push(await user(`low_t${i}`));
+    for (const target of targets) await follow(abi, target);
+
+    const rows = await stories(abi);
+    assert.equal(rows[0].members, 6, 'six members, at the ceiling in force when they joined');
+
+    await t.sql(`update app_config set value = '2'::jsonb where key = 'feed.follow_story_max_people'`);
+    try {
+      const viewer = await user('low_viewer');
+      assert.equal(
+        (await named(viewer, [rows[0].id])).length,
+        6,
+        'a story already told is not shortened by a setting changed afterwards',
+      );
+    } finally {
+      await t.sql(
+        `update app_config set value = '50'::jsonb where key = 'feed.follow_story_max_people'`,
+      );
+    }
+  });
+
   it('lets the reader return the whole story when the ceiling is RAISED', async () => {
     /**
      * The disagreement `20260912000300` closes, and the direction every earlier test missed.

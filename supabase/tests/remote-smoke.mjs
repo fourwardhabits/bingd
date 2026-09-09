@@ -958,7 +958,7 @@ expectRefused(
 // has no perspective to answer from.
 expectRefused(
   'anon cannot execute follow_activity_people',
-  await rpc('follow_activity_people', { p_event_ids: [NIL], p_limit: 1 }),
+  await rpc('follow_activity_people', { p_event_ids: [NIL] }),
 );
 
 // Internal, and probed with the other underscore-prefixed helpers: it takes an actor rather

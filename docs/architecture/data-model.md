@@ -711,12 +711,20 @@ both halves. `follow.max_per_hour` bounds one account's own follows at sixty, bu
 `redeem_invite` posts the *inviter's* story from the invitee's session, so a link shared into
 a large group chat appends one member per redemption with no per-actor ceiling anywhere. A
 story naming five thousand people is not a story anybody reads; it is a sort on every feed
-page that happens to include it. With the bound: the reader's single page **is** the whole
-story, so "and 49 others" is the truth about what that viewer may see rather than a page
-presented as a total; and the sort inside `follow_activity_people` is over at most fifty rows
-per event, which is why it needs no index beyond the membership's own primary key. A
-fifty-first follow inside the same window is simply not in the story — it is still a follow,
-still in the graph, and the next window opens a new story.
+page that happens to include it. So a follow past the ceiling inside the same window is
+simply not in the story — it is still a follow, still in the graph, and the next window opens
+a new story.
+
+**The bound is the writer's alone, and `follow_activity_people` truncates nothing**
+(`20260912000400`). It takes no limit: every member of a named event that the viewer may
+identify is returned, so "and 49 others" is the truth about what that viewer may see rather
+than a page presented as a total. Two earlier attempts put the bound in the reader as well
+and both could disagree with the writer — a literal 50 disagreed as soon as the configured
+ceiling moved, and reading the configuration disagreed across *time*, because a story built
+at 50 and read at 10 is forty members the reader would silently drop. A story is bounded by
+what was true when it was written; lowering the setting shortens future stories and hides
+nobody from one already told. The read stays small because the membership is small, which is
+why it needs no index beyond `feed_follow_targets`' own primary key.
 
 **`causal_at` is set once and never bumped**, so an append does not move the row in that
 keyset. Inside an hour it is near the top regardless, and a row that changed its sort

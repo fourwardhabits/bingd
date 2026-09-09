@@ -6,16 +6,21 @@ import { createTestDb } from './harness.mjs';
 /**
  * The inviter's half of an acceptance, 20260831000100.
  *
- * `redeem_invite` has always told the inviter something. Until this migration it told
- * them the wrong thing: a plain `follow` row — "Ada Lovelace started following you" —
- * with nothing in it saying this person came through their invitation. The sentence
- * that says so, "joined bingd. from your invite", belonged to `invite_activated`, which
- * fires at the invitee's *tenth ranking*. So the interesting fact arrived days late or
- * never, and the moment it actually happened was reported as something duller.
+ * When `redeem_invite` told the inviter something, until this migration it told them the
+ * wrong thing: a plain `follow` row — "Ada Lovelace started following you" — with nothing
+ * in it saying this person came through their invitation. The sentence that says so,
+ * "joined bingd. from your invite", belonged to `invite_activated`, which fires at the
+ * invitee's *tenth ranking*. So the interesting fact arrived days late or never, and the
+ * moment it actually happened was reported as something duller.
+ *
+ * (Since `20260912000200` there is one acceptance that tells the inviter nothing at all —
+ * a recipient who *already* followed them, where the news was delivered at the time and the
+ * only edge that moves is the inviter's own outgoing one. `follow-activity.test.mjs` owns
+ * that case; every acceptance this file is about files a row.)
  *
  * The properties that carry this row:
  *
- *   1. **It replaces the `follow` row rather than joining it.** One acceptance, one
+ *   1. **It replaces the `follow` row rather than joining it.** One acceptance, at most one
  *      notification. Two rows naming the same person for the same act is the redundancy
  *      PRD §15 exists to prevent, and it is the property most easily lost by a later
  *      edit that adds an insert instead of moving one.
