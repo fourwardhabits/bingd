@@ -284,11 +284,11 @@ Two things about this are load-bearing. It counts `source = 'in_app'` only, so i
 2. Reject if the caller is the inviter.
 3. Reject if a block exists in either direction.
 4. Reject with `BG409` if this token has already been accepted by this caller.
-5. Insert a `follows` row from caller to inviter — `approved` if the inviter is public, `pending` if private.
+5. Insert a `follows` row from caller to inviter. ~~`approved` if the inviter is public, `pending` if private.~~ **Since `20260912000200` a valid *personal* token creates BOTH edges, both `approved`**, whatever either account's visibility says, and upgrades a pending edge in either direction rather than leaving it. A `referral` token keeps the original rule and creates the caller's edge only.
 6. Set `accepted_at` on the caller's `invite_attributions` row. **If a row already exists naming a different inviter, leave it alone** — the follow in step 5 still happens.
-7. Emit a notification to the inviter, which carries the follow-back prompt.
+7. Emit a notification to the inviter. ~~which carries the follow-back prompt.~~ **At most one, and there is no follow-back prompt to carry since `20260912000200`, because the relationship already exists**: `invite_joined` when the caller's own edge was created or upgraded, `follow_approved` when instead it was the *inviter's* own pending request that this redemption answered, and nothing when neither moved — a caller who already followed the inviter announced that at the time.
 
-The inviter is never auto-followed. Step 5 creates exactly one row, in one direction.
+~~The inviter is never auto-followed. Step 5 creates exactly one row, in one direction.~~ **Reversed 2026-09-08 (§A7).** A personal invitation is bilateral social intent, so step 5 creates two rows. A `referral` token still creates one.
 
 Step 6 is where the original wording was wrong, and the failure was silent. `invite_attributions` is keyed by `invitee_id`, so a person has exactly one attribution — and a second invite link, opened later from a different friend, would have collided on that primary key. Rejecting the whole call at step 4 would have meant a real person tapping a real friend's real invite and getting an error with no useful explanation, because the reason lives in a row about somebody else entirely.
 

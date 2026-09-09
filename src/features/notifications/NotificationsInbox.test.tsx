@@ -244,7 +244,7 @@ describe('read is something the reader does', () => {
 /**
  * **The row a brand-new account opens Bingd to.**
  *
- * `redeem_invite` has always notified the inviter and, since `20260819000500`, created
+ * `redeem_invite` notified the inviter and, since `20260819000500`, created
  * the invitee's follow for them. The invitee was told nothing — so the person who had
  * never seen the app arrived to a follow they did not watch happen and an empty inbox.
  * `20260823000100` files the missing half; these assert how it reads.

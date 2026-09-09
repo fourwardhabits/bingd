@@ -870,18 +870,28 @@ describe('a story is bounded, so the reader never pages one', () => {
      * membership's own key.
      */
     const abi = await user('tie_abi');
+    const seed = await user('tie_seed');
     const zed = await user('tie_zed');
     const amy = await user('tie_amy');
 
-    await follow(abi, zed);
+    // The story exists first, opened by an ordinary follow of somebody else. Zed and Amy are
+    // then appended in ONE statement, so they are the pair that genuinely ties: both rows get
+    // the same transaction-scoped `now()`, exactly as a redemption's two appends do. Adding
+    // one of them through `follow` first would leave two different timestamps and the test
+    // would pass under the old ordering too.
+    await follow(abi, seed);
     const story = (await stories(abi))[0];
-    // Appended in one statement, so both rows carry the same created_at, exactly as a
-    // redemption's two appends would.
     await t.sql(
-      `insert into feed_follow_targets (event_id, followed_id) values ($1, $2), ($1, $3)
-       on conflict do nothing`,
+      `insert into feed_follow_targets (event_id, followed_id) values ($1, $2), ($1, $3)`,
       [story.id, zed, amy],
     );
+
+    const tied = await t.sql(
+      `select count(distinct created_at)::int as instants from feed_follow_targets
+        where event_id = $1 and followed_id = any ($2::uuid[])`,
+      [story.id, [zed, amy]],
+    );
+    assert.equal(tied.rows[0].instants, 1, 'the two of them share a created_at, or nothing ties');
 
     const viewer = await user('tie_viewer');
     const ids = async () => {
@@ -894,24 +904,25 @@ describe('a story is bounded, so the reader never pages one', () => {
     };
 
     const before = await ids();
-    assert.equal(before.length, 2);
+    assert.equal(before.length, 3, 'the seed plus the two that tie');
 
-    // Rename whichever one comes first to a handle that sorts last. Under the old tie-break
-    // that alone would move it to the end of the list.
+    // The tied pair, in the order the function returned them. Whichever came first is renamed
+    // to a handle that sorts last, which under the old `username` tie-break would have sent
+    // it to the end of the pair.
+    const tiedPair = before.filter((r) => r.user_id === zed || r.user_id === amy);
+    assert.equal(tiedPair.length, 2);
     await t.sql(`update profiles set username = 'fa_tie_zzz_${seq}' where id = $1`, [
-      before[0].user_id,
+      tiedPair[0].user_id,
     ]);
 
+    const after = await ids();
     assert.deepEqual(
-      (await ids()).map((r) => r.user_id),
+      after.map((r) => r.user_id),
       before.map((r) => r.user_id),
-      'the order is by followed_id, so a rename cannot move it',
+      'the tie is broken by followed_id, so a rename cannot move it',
     );
-    assert.deepEqual(
-      before.map((r) => r.user_id),
-      [zed, amy].sort(),
-      'and that order is the two ids ascending',
-    );
+    // And the pair really is ordered by id, whichever of the two random uuids sorts first.
+    assert.ok(tiedPair[0].user_id < tiedPair[1].user_id);
   });
 
   it('still bounds a story when the ceiling is not configured', async () => {
