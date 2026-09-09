@@ -21,7 +21,16 @@
  * actively trying to reorder them, rather than against one that happens to be fast.
  */
 import { advanceStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
-import { PICK_TARGET, resetPickFive, setPicks, type PickedTitle } from './pick-five';
+import {
+  PICK_TARGET,
+  rankingOutcome,
+  resetPickFive,
+  resetRankingOutcome,
+  setPicks,
+  setRankingOutcome,
+  type PickedTitle,
+  type RankingOutcomeRead,
+} from './pick-five';
 
 /** Every `writePref` that was actually issued, in the order the platform received it. */
 const mockIssued: { name: string; value: unknown }[] = [];
@@ -30,8 +39,11 @@ const mockLanded: { name: string; value: unknown }[] = [];
 /** The releases for the calls still open, so a test can complete them out of order. */
 const mockGates: (() => void)[] = [];
 
+/** A read that never settles, which is the failure the graces exist for. */
+let mockReadHangs = false;
+
 jest.mock('@/lib/prefs', () => ({
-  readPref: () => Promise.resolve(null),
+  readPref: () => (mockReadHangs ? new Promise(() => {}) : Promise.resolve(null)),
   writePref: (name: string, value: unknown) => {
     mockIssued.push({ name, value });
     return new Promise<void>((resolve) => {
@@ -69,8 +81,10 @@ beforeEach(() => {
   mockIssued.length = 0;
   mockLanded.length = 0;
   mockGates.length = 0;
+  mockReadHangs = true;
   resetOnboardingStages();
   resetPickFive();
+  resetRankingOutcome();
 });
 
 // ---------------------------------------------------------------------------
@@ -154,6 +168,37 @@ describe('the stage pointer', () => {
 
     expect(mockGates).toHaveLength(2);
   });
+
+  /**
+   * **A queue is a barrier, and this is the way out of it.**
+   *
+   * The first version of this serialisation had no deadline, which review caught: a write
+   * the platform never calls back holds every later stage behind it for the life of the
+   * process, so the device ends up with an *older* stage than the reader reached — a worse
+   * version of the race the queue was added to remove. The wait is bounded on the same
+   * terms as every other bounded wait in this codebase; the stalled write is not
+   * cancelled, and the queue moves on without it.
+   */
+  it('does not let one stalled write hold every later stage for ever', async () => {
+    jest.useFakeTimers();
+    try {
+      void advanceStage('user-1', 'answers');
+      await jest.advanceTimersByTimeAsync(0);
+      // Handed to the platform, and deliberately never released.
+      expect(mockIssued.map((write) => write.value)).toEqual(['answers']);
+
+      void advanceStage('user-1', 'people');
+      await jest.advanceTimersByTimeAsync(0);
+      // Still barred, which is correct: the grace has not expired yet.
+      expect(mockIssued.map((write) => write.value)).toEqual(['answers']);
+
+      await jest.advanceTimersByTimeAsync(5000);
+
+      expect(mockIssued.map((write) => write.value)).toEqual(['answers', 'people']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -229,5 +274,74 @@ describe('the five-film selection', () => {
     await settle();
 
     expect(mockGates).toHaveLength(2);
+  });
+
+  /** The same way out of the same barrier. See the stage store's version above. */
+  it('does not let one stalled write hold every later selection for ever', async () => {
+    jest.useFakeTimers();
+    try {
+      void setPicks('user-1', [film('a')]);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(mockIssued).toHaveLength(1);
+
+      void setPicks('user-1', [film('a'), film('b')]);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(mockIssued).toHaveLength(1);
+
+      await jest.advanceTimersByTimeAsync(5000);
+
+      expect(mockIssued).toHaveLength(2);
+      const latest = mockIssued[1]?.value as PickedTitle[];
+      expect(latest.map((picked) => picked.id)).toEqual(['a', 'b']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('the ranking outcome, read at the last button of the flow', () => {
+  /**
+   * **The stranding this codebase already shipped once, in a new place.**
+   *
+   * `rankingOutcome` sits between the notification step's button and the navigation it
+   * promised. Its `.catch` covers a read that fails and says nothing about one that never
+   * settles — which is exactly the build-4 shape: a Keychain call the platform does not
+   * call back, holding a screen shut at the end of a ten-step flow.
+   *
+   * The fallback is the honest word rather than a convenient one. A read that will not
+   * settle *is* an unknown outcome, and the event says so rather than guessing.
+   */
+  it('answers unknown rather than waiting for ever on a Keychain that never replies', async () => {
+    jest.useFakeTimers();
+    try {
+      let settled: RankingOutcomeRead | null = null;
+      void rankingOutcome('user-1').then((answer) => {
+        settled = answer;
+      });
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(settled).toBeNull();
+
+      await jest.advanceTimersByTimeAsync(3000);
+      expect(settled).toBe('unknown');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  /**
+   * The ordinary case never reaches the disk at all, so the grace costs nothing.
+   *
+   * `setRankingOutcome` is dispatched rather than awaited here for the same reason
+   * `taste.tsx` dispatches it: it writes memory synchronously and hands the disk half to
+   * the platform, and this mock's platform never answers. The point of the test is that
+   * the read below does not need it to.
+   */
+  it('answers from memory without a read when the same process recorded it', async () => {
+    void setRankingOutcome('user-1', 'completed');
+
+    await expect(rankingOutcome('user-1')).resolves.toBe('completed');
   });
 });

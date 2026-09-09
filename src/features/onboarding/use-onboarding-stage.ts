@@ -173,6 +173,24 @@ export function resetOnboardingStages() {
 const queuedStage = new Map<string, OnboardingStage>();
 const stageWrites = new Map<string, Promise<void>>();
 
+/**
+ * How long one write may hold the queue behind it.
+ *
+ * **A chain is a barrier, and a barrier needs a way out.** `.catch` handles a write that
+ * fails; it does nothing for one that never settles, which is the build-4 pathology this
+ * codebase already has a name for — a Keychain operation the platform simply does not call
+ * back. Serialising without a deadline would turn one stalled write into every later stage
+ * never being written at all, which is a worse version of the defect being fixed: instead
+ * of an older stage winning a race, no newer stage exists on the device at all.
+ *
+ * So the wait is bounded on the same terms as every other bounded wait here: the work is
+ * not cancelled, it finishes in the background if it ever does, and the queue moves on.
+ * The residue is honest and small — a write that outlives its grace can still land after
+ * the one that replaced it, which is the original race, now confined to a device already
+ * in trouble rather than sitting on the ordinary path.
+ */
+const STAGE_WRITE_GRACE_MS = 4000;
+
 function persistStage(userId: string, next: OnboardingStage): Promise<void> {
   queuedStage.set(userId, next);
 
@@ -181,7 +199,7 @@ function persistStage(userId: string, next: OnboardingStage): Promise<void> {
     // chain and will be written; this one would only be an older value reaching the disk
     // later, which is the reordering being removed.
     if (queuedStage.get(userId) !== next) return;
-    await writePref<OnboardingStage>(stageKey(userId), next).catch(() => {});
+    await withGrace(writePref<OnboardingStage>(stageKey(userId), next), STAGE_WRITE_GRACE_MS, null);
   });
 
   stageWrites.set(userId, queued);

@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
+import { withGrace } from '@/lib/grace';
 import { readPref, writePref } from '@/lib/prefs';
 
 /**
@@ -94,6 +95,14 @@ export function resetPickFive() {
 const pickSeq = new Map<string, number>();
 const pickWrites = new Map<string, Promise<void>>();
 
+/**
+ * How long one write may hold the queue behind it. See the stage store's note, which
+ * carries the reasoning: a serialised chain with no deadline turns a single stalled
+ * Keychain call into *every later selection never being written*, which is worse than the
+ * reordering it was added to fix. Bounded, not cancelled, and the queue moves on.
+ */
+const PICK_WRITE_GRACE_MS = 4000;
+
 const pickKey = (userId: string) => `${userId}.${PICK_PREF}`;
 
 /** A stored row that is missing an id cannot be ranked, so it is not restored. */
@@ -140,7 +149,11 @@ export async function setPicks(
     // A later tap has already been dispatched, and its write is queued behind this one.
     // Writing this older array now is precisely the reordering being removed.
     if (pickSeq.get(userId) !== seq) return;
-    await writePref<readonly PickedTitle[]>(pickKey(userId), capped).catch(() => {});
+    await withGrace(
+      writePref<readonly PickedTitle[]>(pickKey(userId), capped),
+      PICK_WRITE_GRACE_MS,
+      null,
+    );
   });
 
   pickWrites.set(userId, queued);
@@ -218,6 +231,14 @@ export function usePicks(userId: string | null): readonly PickedTitle[] {
  */
 const OUTCOME_PREF = 'onboarding.rankingOutcome';
 
+/**
+ * How long the last button of the flow may wait to learn how the ranking half ended.
+ *
+ * Shorter than the write grace beside it, because this one is in front of a person: it is
+ * read between a press and a navigation, where the other two are behind one.
+ */
+const OUTCOME_READ_GRACE_MS = 2000;
+
 export type RankingOutcome = 'completed' | 'skipped';
 
 /** What a *read* can answer, which is the two above plus the honest third. */
@@ -252,7 +273,27 @@ export async function rankingOutcome(userId: string): Promise<RankingOutcomeRead
   const remembered = outcomes.get(userId);
   if (remembered) return remembered;
 
-  const stored = await readPref<RankingOutcome>(outcomeKey(userId)).catch(() => null);
+  /**
+   * **Bounded, and the fallback is the honest word rather than a convenient one.**
+   *
+   * This sits between the last button of the flow and the navigation that button
+   * promised, which is exactly the position the build-4 stranding occupied: three awaits
+   * on promises the platform is allowed to never settle, each holding a screen shut for
+   * good. `.catch` covers a read that *fails* and says nothing about one that hangs, and
+   * a hung Keychain here would leave the reader pressing a dead button at the end of a
+   * ten-step flow with the flow not yet marked finished.
+   *
+   * The grace costs nothing in the ordinary case, because the ordinary case never reaches
+   * the disk at all: the write and the read are the same process, so `outcomes` has
+   * already answered above. And a read that will not settle **is** an unknown outcome —
+   * which is a sentence this function can now say, so the deadline does not have to be
+   * paid for with a guess.
+   */
+  const stored = await withGrace(
+    readPref<RankingOutcome>(outcomeKey(userId)),
+    OUTCOME_READ_GRACE_MS,
+    null,
+  );
   if (stored === 'skipped' || stored === 'completed') return stored;
   return 'unknown';
 }

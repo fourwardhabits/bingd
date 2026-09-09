@@ -57,9 +57,22 @@ describe('the app directory', () => {
    * moment anybody would find out before an expired token found it for them.
    *
    * `_layout` and `+`-prefixed files are excluded because they are not routes.
+   *
+   * Two details are the difference between this checking the invariant and merely looking
+   * as though it does, and review found both:
+   *
+   *   · the walk is **recursive**, and an `index` file names its directory. A flat
+   *     `onboarding/foo.tsx` is not the only way to add a route — `onboarding/foo/index.tsx`
+   *     is a route too, and a test that read one level would have passed while it sat
+   *     unguarded, which is precisely the failure being pinned;
+   *
+   *   · the layout is read with its **comments stripped**. Substring matching against the
+   *     whole file lets a route name mentioned in prose satisfy the assertion, and the
+   *     block above this guard names several.
    */
   it('declares every onboarding route inside the signed-in guard', () => {
-    const layout = readFileSync(join(APP, '_layout.tsx'), 'utf8');
+    const source = readFileSync(join(APP, '_layout.tsx'), 'utf8');
+    const layout = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
     const open = layout.indexOf('<Stack.Protected');
     const close = layout.indexOf('</Stack.Protected>');
@@ -67,10 +80,15 @@ describe('the app directory', () => {
     expect(close).toBeGreaterThan(open);
     const guarded = layout.slice(open, close);
 
-    const routes = readdirSync(join(APP, 'onboarding'))
-      .filter((name) => /\.[tj]sx?$/.test(name))
-      .filter((name) => !name.startsWith('_') && !name.startsWith('+'))
-      .map((name) => `onboarding/${name.replace(/\.[tj]sx?$/, '')}`);
+    const ONBOARDING = join(APP, 'onboarding');
+    const routes = walk(ONBOARDING)
+      .filter((path) => /\.[tj]sx?$/.test(path))
+      .map((path) => path.slice(ONBOARDING.length + 1).replace(/\\/g, '/'))
+      .filter((route) => !route.split('/').some((part) => /^[_+]/.test(part)))
+      .map((route) => route.replace(/\.[tj]sx?$/, ''))
+      // `foo/index` is the route `foo`, which is the name the layout declares.
+      .map((route) => route.replace(/\/index$/, ''))
+      .map((route) => `onboarding/${route}`);
 
     // A guard nobody can see the shape of is worth asserting is non-empty first.
     expect(routes.length).toBeGreaterThan(0);
