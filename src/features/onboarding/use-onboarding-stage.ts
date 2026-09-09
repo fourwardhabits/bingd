@@ -284,6 +284,44 @@ export async function hydrateStage(userId: string): Promise<OnboardingStage | nu
  * calls to one key. `persistStage` is what makes the durable copy follow the same rule —
  * see its note for the resume this was losing.
  */
+/**
+ * Moves the account **back** to a step, which is the one thing `advanceStage` refuses.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A DELIBERATE REWIND IS NOT THE RACE THE REFUSAL EXISTS FOR
+ *
+ * `advanceStage` will not go backwards because two of its callers can be in flight at
+ * once — a screen's own Continue and a resume that is still hydrating — and the later of
+ * the two is the answer whatever order they arrive in. That argument is about a *stale*
+ * value winning. It says nothing about a screen that has just established, from the disk,
+ * that the flow is not where the stage claims it is.
+ *
+ * There is exactly one such case and it is a hang, found by independent review of the
+ * founder's reordering. `answers` is a function of the motivation selection, and the two
+ * are separate preference keys written by the same Continue — so a selection that failed
+ * to persist, or cannot be read, leaves `stage: 'answers'` beside nothing to answer.
+ * The screen's documented recovery is to return to the question; routing then reads the
+ * stage, decides `answers` is authoritative, and sends them straight back. The screen
+ * hydrates the same empty selection and the loop does not end.
+ *
+ * So the correction is to the *stage*, not to the navigation: the flow really is at the
+ * question, and once both authorities say so the router sends them there by itself. The
+ * navigation that follows is then agreement rather than an argument.
+ *
+ * Refuses to go *forwards*, which is the mirror of the rule it relaxes: a rewind is a
+ * repair, and a repair that could advance anybody would be `advanceStage` without its
+ * guard.
+ */
+export async function rewindStage(userId: string, back: OnboardingStage): Promise<void> {
+  const current = stages.get(userId);
+  if (!current || STAGE_ORDER.indexOf(current) <= STAGE_ORDER.indexOf(back)) return;
+
+  stages.set(userId, back);
+  publish();
+  note('onboarding', 'stage.rewind', back);
+  await persistStage(userId, back);
+}
+
 export async function advanceStage(userId: string, next: OnboardingStage): Promise<void> {
   const current = stages.get(userId);
   // `null` and `undefined` both mean "nothing to go backwards from". Only a real stage

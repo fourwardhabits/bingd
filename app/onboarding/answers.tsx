@@ -9,7 +9,7 @@ import {
   useMotivations,
 } from '@/features/onboarding/motivation-selection';
 import { chosenMotivations } from '@/features/onboarding/motivations';
-import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import { rewindStage, useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
 import { track } from '@/lib/analytics';
 import { fontFamily, theme } from '@/ui/tokens';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
@@ -41,9 +41,16 @@ import { Button, Screen, SectionHeader, Text } from '@/ui/components';
  *
  * This screen is a function of the previous one's answer, so an empty selection is not an
  * empty state — it is a screen with nothing to be about. Rather than draw a heading over
- * nothing, it returns to step 3. That happens only when the stored selection cannot be
- * read at all, which is the same class of failure `motivation-selection.ts` accepts in
+ * nothing, it returns to the question. That happens only when the stored selection cannot
+ * be read at all, which is the same class of failure `motivation-selection.ts` accepts in
  * exchange for not putting a column on the account table.
+ *
+ * **And the stage is corrected before the navigation, which is what stops the recovery
+ * being a loop** (independent review of the founder's reordering). The selection and the
+ * stage are separate preference keys written by the same Continue, so one can persist
+ * without the other; a screen that only navigated would be sent straight back by routing,
+ * which still read `answers` as authoritative, and would hydrate the same empty selection
+ * for ever. The flow really is at the question, so that is what the stage is made to say.
  */
 export default function AnswersScreen() {
   const router = useRouter();
@@ -67,7 +74,12 @@ export default function AnswersScreen() {
   useEffect(() => {
     let active = true;
     void hydrateMotivations(userId).then((stored) => {
-      if (active && stored.size === 0) router.replace('/onboarding/motivations');
+      if (!active || stored.size > 0) return;
+      // The stage first, so routing agrees with the navigation rather than undoing it.
+      // Not awaited: the memory half of `rewindStage` is synchronous and is what the
+      // router reads, and the disk half is how it survives a relaunch.
+      void rewindStage(userId, 'motivations');
+      router.replace('/onboarding/motivations');
     });
     return () => {
       active = false;

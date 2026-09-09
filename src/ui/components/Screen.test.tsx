@@ -148,13 +148,24 @@ describe('while a keyboard is up in front of the screen', () => {
     expect(read()).toBe(16);
   });
 
-  it('leaves a tab screen at zero either way', async () => {
+  it('costs a tab screen no keyboard subscription at all', async () => {
+    /**
+     * The listener belongs to the screens that spend the inset. Four of the five tab
+     * roots pass no `includeBottomInset` and discard the answer, and they stay mounted
+     * for the life of the session — so subscribing there would re-render Collection every
+     * time somebody focused Search, for a number that is always zero.
+     */
     const { read } = await openWith();
-    expect(read()).toBe(0);
-
-    mockInsets.bottom = 291;
-    await keyboard(291);
 
     expect(read()).toBe(0);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('subscribes exactly once on a screen that does spend it', async () => {
+    await openWith({ includeBottomInset: true });
+
+    // One show and one hide. The pair is `useKeyboardHeight`, and the platform decides
+    // which of the two pairs it is.
+    expect(listeners.size).toBe(2);
   });
 });

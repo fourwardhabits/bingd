@@ -236,9 +236,29 @@ async function inheritedMetadata(
  *   recommendations sees the two hundred the server ranks highest — unopened first, then
  *   newest — and the rest are not reachable from this screen.
  * - Since `withoutRanked`, the page the client holds can be **shorter** than the page the
- *   server served. That only ever makes `unopenedIsAtLeast` answer false where it would
- *   have answered true, so the chip says `199` rather than `200+` — an understatement of
- *   a capped list, which is the direction this rule permits. It cannot overstate.
+ *   server served, and independent review asked for both consequences to be written down
+ *   rather than discovered.
+ *
+ *   The first is harmless: a shorter page only ever makes `unopenedIsAtLeast` answer
+ *   false where it would have answered true, so the chip says `199` rather than `200+` —
+ *   an understatement of a capped list, which is the direction this rule permits. It
+ *   cannot overstate.
+ *
+ *   The second is the empty state. **A reader holding more than two hundred delivered
+ *   recommendations, of which the two hundred the server ranks highest are all already
+ *   ranked, is told nothing has been sent their way while an unranked one sits at
+ *   position 201.** That is a false sentence, and it is worth being exact about what it
+ *   is and is not. It is not new unreachability: row 201 is not on this screen today
+ *   either, by the cap. It is the cap becoming *visible* in a case where it used to be
+ *   silent.
+ *
+ *   Closing it exactly means filtering **before** the limit, which is the RPC's job and
+ *   therefore a migration — `and not exists (select 1 from rankings ...)` in
+ *   `recommendations_to_me`. That is the right fix and it is deliberately not taken in a
+ *   release fix pass: the client answer is complete for every account that can exist at
+ *   this stage, it needs no deploy, and it is true on the backend the shipped build is
+ *   already running against. Carried with the pagination debt above rather than
+ *   approximated here.
  *
  * That last one is **deferred pagination debt, not a wrong number**. Paging it needs a
  * cursor the RPC does not take, which is a migration, and it is carried into Beta

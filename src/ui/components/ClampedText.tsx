@@ -95,6 +95,28 @@ export type ClampedTextProps = {
  * size — not an average of the alphabet.
  *
  * ---------------------------------------------------------------------------
+ * WHAT THE TRIM IS AND IS NOT, STATED RATHER THAN IMPLIED
+ *
+ * It is an estimate. A per-character figure is an average over one line, so a kept prefix
+ * of wide glyphs followed by a dropped tail of narrow ones can come out wider than the
+ * arithmetic predicts — independent review's case, a prefix of `W`s and a tail of `i`s.
+ * The word-boundary cut below usually gives back several characters' worth of slack,
+ * which is what makes it hold in practice, but it is slack rather than a proof.
+ *
+ * **What the clamp guarantees is the part that matters, and it is exact**: the marker can
+ * never orphan onto a line of its own, because `numberOfLines` has not given the block
+ * one. The residual failure is the marker being ellipsized with the prose on an unusually
+ * uneven line — the reader sees the paragraph truncate the way it did before this
+ * component existed, on one line of one paragraph, which is a lost invitation and not a
+ * broken layout.
+ *
+ * Closing it exactly means measuring the candidate string itself: a third pass, a
+ * shrink-and-remeasure loop, and its own termination argument. That is more machinery
+ * than the failure is worth, so it is deliberately not here and is written down instead.
+ * A margin was tried and removed: subtracting a character's width discarded short trailing
+ * words that genuinely fitted, which is a common cost paid for a rare, invisible gain.
+ *
+ * ---------------------------------------------------------------------------
  * WHAT HAPPENS BEFORE THE MEASUREMENT LANDS, AND IF IT NEVER DOES
  *
  * The visible text is the whole thing under `numberOfLines={clamp}`, which is what both
@@ -127,14 +149,25 @@ export function ClampedText({
 
   const collapsed = collapse({ lines, markerWidth, available, clamp });
   const draw = render ?? ((prose: string) => prose);
+  /** Whether both passes and the column width have answered. */
+  const measured = lines != null && markerWidth != null && available != null;
   /**
    * Whether this is still a control.
    *
-   * One-way text that is already open is not: it has nothing left to do, so it announces
-   * as nothing rather than as a dimmed button with no label. A toggle stays a control in
-   * both states, which is what `collapseLabel` means.
+   * Three cases, and the middle one is what independent review found: **text that fits
+   * its clamp is not a button.** A one-line review under `numberOfLines={2}` draws no
+   * marker, because there is nothing to promise — and it was still announcing itself as
+   * "Show the whole review, button, collapsed" over a review that was entirely visible,
+   * and doing nothing when pressed.
+   *
+   * Before the measurement lands it stays pressable, which is the honest unmeasured
+   * state: the block has always been the press target and a reader can still open it a
+   * frame early. And one-way text that is already open is not a control either — it has
+   * nothing left to do, so it announces as nothing rather than as a dimmed button with no
+   * label. A toggle stays a control in both directions, which is what `collapseLabel`
+   * means.
    */
-  const acts = !expanded || Boolean(collapseLabel);
+  const acts = expanded ? Boolean(collapseLabel) : collapsed != null || !measured;
 
   return (
     <Pressable

@@ -4,7 +4,7 @@ import { renderWithProviders } from '@/test-utils/render';
 
 import { MOTIVATIONS, chosenMotivations, motivationsProperty } from './motivations';
 import { resetMotivationSelection } from './motivation-selection';
-import { resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
+import { advanceStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the routes: everything under app/ is bundled by expo-router's
@@ -286,5 +286,36 @@ describe('step 4, the answers', () => {
   it('returns to the question when there is nothing to answer', async () => {
     await renderWithProviders(<AnswersScreen />);
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/onboarding/motivations'));
+  });
+
+  /**
+   * **And the stage goes back with them, which is what stops the recovery being a loop**
+   * (independent review of the founder's reordering).
+   *
+   * The selection and the stage are separate preference keys written by the same
+   * Continue, so one can persist without the other. With the stage left at `answers`,
+   * routing reads it as authoritative and replaces the question with this screen the
+   * instant it navigates away; the screen hydrates the same empty selection and the pair
+   * never settles. Correcting the stage makes both authorities say the same thing, and
+   * the navigation becomes agreement rather than an argument.
+   */
+  it('rewinds the stage with it, so routing does not send them straight back', async () => {
+    await advanceStage('user-1', 'answers');
+    expect(stageInMemory('user-1')).toBe('answers');
+
+    await renderWithProviders(<AnswersScreen />);
+
+    await waitFor(() => expect(stageInMemory('user-1')).toBe('motivations'));
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/motivations');
+  });
+
+  it('leaves a stage that is already behind it alone', async () => {
+    // A rewind is a repair, not a second way to advance: it only ever moves backwards.
+    await advanceStage('user-1', 'motivations');
+
+    await renderWithProviders(<AnswersScreen />);
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/onboarding/motivations'));
+    expect(stageInMemory('user-1')).toBe('motivations');
   });
 });
