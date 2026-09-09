@@ -189,6 +189,32 @@ describe('a clamped note', () => {
 
     expect(view.queryByTestId('note-more')).toBeNull();
     expect(view.getAllByText(/antidisestablishmentarianism/).length).toBeGreaterThan(0);
+
+    /**
+     * **And it is still openable**, which is the half that matters and the half a second
+     * review caught missing. The clamp is hiding a line of this note; a marker that
+     * cannot be drawn is a lost invitation, not a lost control. Losing the press target
+     * too would leave text visibly ellipsized with no way to read the rest of it, by
+     * touch or by screen reader.
+     */
+    const control = view.getByLabelText('Show the whole review');
+    await fireEvent.press(control);
+    expect(view.getAllByText(/etc/).length).toBeGreaterThan(0);
+  });
+
+  it('is not a control at all when the whole text is already visible', async () => {
+    const view = await renderWithProviders(
+      <SpoilerNote text="one two" masked={false} numberOfLines={2} />,
+    );
+
+    await measure(view, [
+      { text: 'one ', width: 60 },
+      { text: 'two', width: 60 },
+    ]);
+
+    // Announcing "Show the whole review, button" over a review that is entirely on
+    // screen is a control that does nothing when pressed.
+    expect(view.queryByLabelText('Show the whole review')).toBeNull();
   });
 
   it('renders nothing of a masked note, marker included', async () => {

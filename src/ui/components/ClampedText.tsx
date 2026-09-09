@@ -152,22 +152,34 @@ export function ClampedText({
   /** Whether both passes and the column width have answered. */
   const measured = lines != null && markerWidth != null && available != null;
   /**
+   * Whether there is text the clamp is hiding.
+   *
+   * **Deliberately not `collapsed != null`, and that conflation is a defect independent
+   * review caught in this component's own second draft.** `collapse` answers a narrower
+   * question — *is there prose to draw a marker after* — and it says no in two unrelated
+   * cases: the text fits, and the text is truncated but nothing survives the trim. Reading
+   * its `null` as "nothing is hidden" made the second case unopenable: a block visibly
+   * ellipsized by the clamp, with no marker and no way to press it, by touch or by screen
+   * reader. This is the plain fact, straight off the measurement.
+   */
+  const truncated = measured && (lines?.length ?? 0) > clamp;
+  /**
    * Whether this is still a control.
    *
-   * Three cases, and the middle one is what independent review found: **text that fits
-   * its clamp is not a button.** A one-line review under `numberOfLines={2}` draws no
-   * marker, because there is nothing to promise — and it was still announcing itself as
-   * "Show the whole review, button, collapsed" over a review that was entirely visible,
-   * and doing nothing when pressed.
+   * **Text that fits its clamp is not a button.** A one-line review under
+   * `numberOfLines={2}` draws no marker, because there is nothing to promise — and it was
+   * still announcing itself as "Show the whole review, button, collapsed" over a review
+   * that was entirely visible, and doing nothing when pressed.
    *
-   * Before the measurement lands it stays pressable, which is the honest unmeasured
-   * state: the block has always been the press target and a reader can still open it a
-   * frame early. And one-way text that is already open is not a control either — it has
-   * nothing left to do, so it announces as nothing rather than as a dimmed button with no
-   * label. A toggle stays a control in both directions, which is what `collapseLabel`
-   * means.
+   * Everything the clamp is hiding stays openable, marker or no marker. Before the
+   * measurement lands it stays pressable too, which is the honest unmeasured state: the
+   * block has always been the press target and a reader can open it a frame early.
+   *
+   * One-way text that is already open is not a control — it has nothing left to do, so it
+   * announces as nothing rather than as a dimmed button with no label. A toggle stays a
+   * control in both directions, which is what `collapseLabel` means.
    */
-  const acts = expanded ? Boolean(collapseLabel) : collapsed != null || !measured;
+  const acts = expanded ? Boolean(collapseLabel) : truncated || !measured;
 
   return (
     <Pressable
