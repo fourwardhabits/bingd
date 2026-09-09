@@ -55,9 +55,13 @@ import type { Medium } from './use-for-you';
  * ratings, so between two requests a title can move across the cursor:
  *
  *   * *downwards* — it was above the cursor, its score falls, and page two returns it a
- *     second time. The screen dedupes the flattened pages by `mediaItemId` (first
- *     occurrence wins, so the server's order survives), which is also what covers
- *     pull-to-refresh refetching every loaded page against pre-refresh cursors.
+ *     second time. The screen dedupes the flattened pages by `mediaItemId`, first
+ *     occurrence winning, so the server's order survives.
+ *
+ * Refetching a whole infinite query is **not** a third case: TanStack walks the pages in
+ * order and derives each cursor from the page it has just received, so a refresh never
+ * replays a stale cursor. It can still land mid-move — page two fetched a moment after
+ * page one — which is the same downward case above, and the same dedupe covers it.
  *   * *upwards* — it was below the cursor, its score rises, and it is never returned to
  *     this scroll at all. Nothing here can fix that: it would take a materialised
  *     ordering the whole wall paged against, which is a snapshot of the community's

@@ -422,3 +422,85 @@ describe('a filter that matches nothing on the pages loaded so far', () => {
     expect(view.getByText('Clear filters')).toBeTruthy();
   });
 });
+
+/**
+ * Keep looking, on a wall that was already scrolled deep.
+ *
+ * The budget is an absolute page count that resets when the question changes; the pages
+ * do not reset with it, and manual paging has no budget at all. So a reader can be
+ * further into the wall than the budget they were just handed — and a press that only
+ * added to the budget then bought a ceiling still below the current depth and did
+ * nothing at all. Independent review, 2026-09-09.
+ *
+ * This drives the wall past twenty pages by scrolling, which is the only way to get
+ * there: the auto-advance itself stops at ten. Only a handful of tiles are ever on
+ * screen, because the standing filter matches three titles.
+ */
+describe('keep looking on a deeply scrolled wall', () => {
+  it('advances on the first press however many pages are already cached', async () => {
+    // Forty chained pages of twenty, so no cursor ever ends the wall.
+    const pageOf = (n: number) =>
+      Array.from({ length: 20 }, (_, i) => row(`q${n}-${i}`, 9.9 - n / 100 - i / 10000));
+    const pages = Array.from({ length: 40 }, (_, n) => pageOf(n));
+    pages.forEach((page, n) =>
+      page.forEach((item, i) => {
+        // Page one carries the two facets: three Comedies, and one 1990s Drama.
+        const comedy = n === 0 && i > 0 && i < 4;
+        const nineties = n === 0 && i === 4;
+        mockCatalogue[item.media_item_id] = media(
+          item.media_item_id,
+          `F ${item.media_item_id}`,
+          comedy ? 'Comedy' : 'Drama',
+          'movie',
+          nineties ? 1994 : 2014,
+        );
+      }),
+    );
+    mockTopRatedPages = { first: pages[0]! };
+    pages.forEach((page, n) => {
+      if (n + 1 < pages.length) mockTopRatedPages[page[19]!.media_item_id] = pages[n + 1]!;
+    });
+
+    const view = await open();
+    await choose(view, 'Top Rated Movies');
+    await waitFor(() => expect(view.getByLabelText('F q0-0, 2014')).toBeTruthy());
+
+    // Comedy alone matches three, so the wall renders and can be scrolled — and the
+    // auto-advance spends its ten pages getting there.
+    await fireEvent.press(view.getByText('Filters'));
+    await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
+    await fireEvent.press(view.getByText('Comedy'));
+    await fireEvent.press(view.getByText('Apply'));
+    await waitFor(() => expect(view.getByLabelText('F q0-1, 2014')).toBeTruthy());
+
+    // Twelve manual pages on top of the auto-advance's ten: past twenty either way.
+    const scroll = async () => {
+      await fireEvent.scroll(view.getByTestId('for-you-wall'), {
+        nativeEvent: {
+          contentOffset: { y: 4000 },
+          contentSize: { height: 4200, width: 320 },
+          layoutMeasurement: { height: 600, width: 320 },
+        },
+      });
+    };
+    for (let i = 0; i < 12; i += 1) {
+      const before = mockRpc.mock.calls.length;
+      await scroll();
+      await waitFor(() => expect(mockRpc.mock.calls.length).toBeGreaterThan(before));
+    }
+
+    // Now a filter combination nothing loaded satisfies, which resets the budget to ten
+    // while the wall sits far deeper than that.
+    await fireEvent.press(view.getByText(/^Filters/));
+    await waitFor(() => expect(view.getByText('1990s')).toBeTruthy());
+    await fireEvent.press(view.getByText('1990s'));
+    await fireEvent.press(view.getByText('Apply'));
+    await waitFor(() => expect(view.getByText('Nothing yet in the highest rated')).toBeTruthy());
+
+    // The press must buy real work on the *first* press, not the third.
+    mockRpc.mockClear();
+    await fireEvent.press(view.getByText('Keep looking'));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    expect(mockRpc).toHaveBeenCalledWith('top_rated_titles', expect.objectContaining({}));
+  });
+});

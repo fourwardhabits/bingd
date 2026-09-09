@@ -905,8 +905,27 @@ export default function RecommendationsScreen() {
                     body="No match so far in the top rated titles we have looked through. There are more below."
                     action={{
                       label: 'Keep looking',
+                      /**
+                       * Measured from where the wall actually is, not from where the
+                       * budget happens to sit.
+                       *
+                       * The budget is an absolute page count and it resets to ten when
+                       * the question changes, but the *pages* do not reset with it —
+                       * React Query keeps them, and the reader may have scrolled far
+                       * past ten before filtering, since manual paging has no budget at
+                       * all. A plain `current + TOP_RATED_FILTER_PAGES` then buys a
+                       * ceiling still below `pagesLoaded`, and the press does nothing
+                       * visible: on a wall thirty pages deep the first two presses are
+                       * silent no-ops. Independent review, 2026-09-09.
+                       *
+                       * Taking the larger of the two first guarantees the new ceiling is
+                       * a full allowance *beyond the current depth*, so every press
+                       * authorises real work for as long as the wall has more.
+                       */
                       onPress: () =>
-                        setTopRatedBudget((current) => current + TOP_RATED_FILTER_PAGES),
+                        setTopRatedBudget(
+                          (current) => Math.max(current, pagesLoaded) + TOP_RATED_FILTER_PAGES,
+                        ),
                     }}
                   />
                 ) : (
