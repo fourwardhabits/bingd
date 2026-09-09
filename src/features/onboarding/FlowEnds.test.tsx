@@ -89,7 +89,8 @@ beforeEach(() => {
   resetWelcomeSeen();
   resetTasteIntent();
   resetRankingOutcome();
-  // Five placed, so the flow reaching its end is a completion rather than a skip.
+  // A flow in progress, with five placed. Note that the *outcome* is deliberately not
+  // seeded here: an unrecorded outcome is `unknown`, and each test that cares says so.
   mockPrefs.set('user-1.onboarding.taste.phase', 'active');
   mockCounts.rankings = 5;
   mockCounts.user_media = 5;
@@ -186,6 +187,9 @@ describe('ending the flow', () => {
    */
   it('reports one completion, at the end rather than at the payoff', async () => {
     mockCounts.follows = 1;
+    // Recorded by the ranking screen, which is the only thing that knows. Without it the
+    // outcome is `unknown` and the event says so — see the pin two tests below.
+    mockPrefs.set('user-1.onboarding.rankingOutcome', 'completed');
     await finish();
 
     await waitFor(() => expect(eventsNamed('onboarding_completed')).toHaveLength(1));
@@ -213,12 +217,12 @@ describe('ending the flow', () => {
    * **The regression pin for the reporting bug CI caught.**
    *
    * No rankings are visible to this screen at all — the counts are absent, exactly as they
-   * are on a relaunch before the taste query has answered. The old implementation read that
-   * as zero, called it a skip, and quietly under-counted every completed flow. The outcome
-   * is now a recorded fact, so it survives a screen that knows nothing about the count.
+   * are on a relaunch before the taste query has answered. The first implementation read
+   * that as zero, called it a skip, and quietly under-counted every completed flow.
    */
   it('does not call a completion a skip merely because no count is available', async () => {
     mockCounts.follows = 1;
+    mockPrefs.set('user-1.onboarding.rankingOutcome', 'completed');
     delete mockCounts.rankings;
     delete mockCounts.user_media;
 
@@ -226,6 +230,46 @@ describe('ending the flow', () => {
 
     await waitFor(() => expect(eventsNamed('onboarding_completed')).toHaveLength(1));
     expect(eventsNamed('onboarding_completed')[0].props).toMatchObject({ skipped: false });
+  });
+
+  /**
+   * **And the pin for the fix's own failure mode, which is the opposite one.**
+   *
+   * Nothing recorded an outcome: an account that was already mid-flow when this shipped,
+   * or a device whose disk write lost. The first version of the fix resolved that to
+   * `completed`, on the reasoning that finishing is likelier — which quietly manufactures
+   * the flow's central success out of an absence. A missing property is a gap somebody can
+   * see; an invented completion is indistinguishable from a real one forever after.
+   *
+   * So the event still fires — the denominator does not drift — and simply does not say.
+   * `sanitize` drops the undefined, so nothing reaches the wire (`analytics.test.ts`).
+   */
+  it('says nothing about skipped when no outcome was ever recorded', async () => {
+    mockCounts.follows = 1;
+    delete mockCounts.rankings;
+    delete mockCounts.user_media;
+
+    await finish();
+
+    await waitFor(() => expect(eventsNamed('onboarding_completed')).toHaveLength(1));
+    const props = eventsNamed('onboarding_completed')[0].props;
+    expect(props.skipped).toBeUndefined();
+    // Not the other guess either. Unknown is neither exit.
+    expect(props.skipped).not.toBe(true);
+  });
+
+  /**
+   * The behaviour under an unknown outcome is unchanged, and deliberately so: the flow
+   * still ends. Refusing to *claim* an outcome is not refusing to act on one — the cost of
+   * the other choice is somebody who already finished being put back through it.
+   */
+  it('still ends the flow when the outcome is unknown', async () => {
+    mockCounts.follows = 1;
+    delete mockCounts.rankings;
+
+    await finish();
+
+    await waitFor(() => expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('done'));
   });
   it('does not navigate twice when the button is pressed twice', async () => {
     mockCounts.follows = 1;

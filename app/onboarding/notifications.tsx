@@ -112,8 +112,13 @@ export default function NotificationsStepScreen() {
      * five, and an account that had ranked all five reported itself as a **skip**. CI
      * caught it; the direction is the bad one, because it under-counts the flow's central
      * success. `taste.tsx` now records the answer at the two exits that know it.
+     *
+     * The read has three answers, not two, and the third is passed through rather than
+     * collapsed here. An account with no recorded outcome — mid-flow before this shipped,
+     * or a lost disk write — is `unknown`, the flow still ends, and the event omits
+     * `skipped` instead of guessing the likelier of the two. See `rankingOutcome`.
      */
-    void complete({ skipped: (await rankingOutcome(profile.id)) === 'skipped' });
+    void complete({ outcome: await rankingOutcome(profile.id) });
 
     const destination = (await opensOnFeed()) ? TAB_ROUTES.feed : TAB_ROUTES.forYou;
     router.replace(destination);

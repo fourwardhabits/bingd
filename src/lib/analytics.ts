@@ -222,8 +222,24 @@ export type AnalyticsEvent =
    *
    * `skipped` is what distinguishes them, and it is one event rather than two so the
    * denominator cannot drift: everybody who reaches the end of the flow is in here.
+   *
+   * **Both properties are `| undefined` rather than optional, and the difference is the
+   * point.** The key must still be written at the call site — omitting it is a compile
+   * error, so a property cannot be lost in a hurry — but `undefined` is a permitted
+   * value, and `sanitize` drops it, so the event arrives without the property.
+   *
+   * That is how "not known" is said here. Neither of these is always knowable at the
+   * moment the flow ends: the notification step can mount before the taste query has
+   * answered, which on a relaunch straight onto it always happens, and an account that
+   * was mid-flow before the outcome was recorded at all has nothing to read back. The
+   * previous versions resolved both to a confident value — `skipped: false` and
+   * `titles_ranked: 0` — and a manufactured number is worse than a missing one, because
+   * a gap is visible in a chart and a fabricated zero is not.
    */
-  | { name: 'onboarding_completed'; props: { skipped: boolean; titles_ranked: number } }
+  | {
+      name: 'onboarding_completed';
+      props: { skipped: boolean | undefined; titles_ranked: number | undefined };
+    }
   /**
    * One step of the first-run flow was left, in either direction.
    *

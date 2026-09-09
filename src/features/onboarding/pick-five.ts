@@ -141,13 +141,39 @@ export function usePicks(userId: string | null): readonly PickedTitle[] {
  * a fact. Memory-first like every other preference here, so within one session the write
  * and the read are the same process and there is no race at all.
  *
- * **Unknown resolves to `completed`.** A relaunch onto step 10 with an unreadable
- * preference is far more likely to be somebody who finished than somebody who declined,
- * and reporting a completion as a skip is the error that was just removed.
+ * ---------------------------------------------------------------------------
+ * AND UNKNOWN STAYS UNKNOWN
+ *
+ * There is a third answer and it is a real one: a relaunch onto step 10 for an account
+ * whose outcome was never written, or whose preference cannot be read. It covers the
+ * accounts that were already mid-flow when this shipped, and any device where the disk
+ * write lost.
+ *
+ * The first version of this fix resolved that to `completed`, on the reasoning that
+ * somebody who finished is the likelier explanation. That reasoning is sound as a *prior*
+ * and wrong as a *record*. It replaces the previous silent bias with a quieter one in the
+ * opposite direction — the flow's central success metric would count completions nobody
+ * observed — and it is worse than the bug it replaces in one specific way: an
+ * under-count is visible as a gap, while a manufactured completion is indistinguishable
+ * from a real one and can never be subtracted back out afterwards.
+ *
+ * So this returns `unknown`, and `useCompleteTasteOnboarding` **omits** `skipped` rather
+ * than guessing it — `sanitize` drops an undefined property, and an absent property is
+ * already this file's convention for "not known" (see `PeopleStepVariant.could_not_load`,
+ * which is an unreadable list given its own name rather than folded into an empty one).
+ * A dashboard then sees three groups, one of which is honestly labelled.
+ *
+ * The *product* decision is separate and unchanged: an unknown outcome still ends the
+ * flow as `done`, because the cost of the other mistake is putting somebody who has
+ * already finished back through it. What is refused here is only the claim about what
+ * happened, not the behaviour.
  */
 const OUTCOME_PREF = 'onboarding.rankingOutcome';
 
 export type RankingOutcome = 'completed' | 'skipped';
+
+/** What a *read* can answer, which is the two above plus the honest third. */
+export type RankingOutcomeRead = RankingOutcome | 'unknown';
 
 const outcomeKey = (userId: string) => `${userId}.${OUTCOME_PREF}`;
 
@@ -167,11 +193,18 @@ export async function setRankingOutcome(
   await writePref<RankingOutcome>(outcomeKey(userId), outcome).catch(() => {});
 }
 
-/** How the ranking half ended. See the header for why an unknown answer is a completion. */
-export async function rankingOutcome(userId: string): Promise<RankingOutcome> {
+/**
+ * How the ranking half ended, or `unknown` when nothing recorded it.
+ *
+ * Only the two written words are believed. Anything else — absent, unreadable, or a value
+ * from some future version this build does not know — is `unknown`, and the caller reports
+ * it as unknown rather than picking the likelier of the two. See the header.
+ */
+export async function rankingOutcome(userId: string): Promise<RankingOutcomeRead> {
   const remembered = outcomes.get(userId);
   if (remembered) return remembered;
 
   const stored = await readPref<RankingOutcome>(outcomeKey(userId)).catch(() => null);
-  return stored === 'skipped' ? 'skipped' : 'completed';
+  if (stored === 'skipped' || stored === 'completed') return stored;
+  return 'unknown';
 }
