@@ -1137,6 +1137,13 @@ them — and the sheet behind it lists exactly those. A row promising four other
 that lists one would be the feature contradicting itself, and one of the missing three would
 be an account that had blocked the reader.
 
+**And the count is complete, because the story is bounded.** A story names at most fifty
+people (`feed.follow_story_max_people`), so the reader's one page is the whole thing and the
+sheet needs no "showing the first N" line. That bound is not a display cap bolted on: without
+it, a personal link shared into a large group chat appends a member per redemption for ever,
+the sentence would present a page as a total, and every feed page holding the story would sort
+the whole aggregate to draw one line.
+
 Tapping the emphasised name opens that person; tapping anything else opens the list, which is
 the one place in the Feed that carries follow controls. A story about one person has no list
 worth opening and does not offer one.

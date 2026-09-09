@@ -449,30 +449,39 @@ describe('acceptance semantics (PRD §17)', () => {
     assert.ok(back.approved_at);
   });
 
-  it('clause 3: a private inviter receives a request, not a follow', async () => {
-    // The private setting is honoured rather than bypassed, which is the whole reason
-    // §17 spells this clause out separately.
+  /**
+   * **Clause 3 is superseded for a personal token** (founder 2026-09-08, `20260912000200`).
+   *
+   * `20260912000100` left this edge a request, on the argument that the inviter is not the
+   * caller and approval by anybody other than the target is what `respond_follow_request`
+   * exists to enforce. The founder's reading, which supersedes it: the inviter *did* act —
+   * they minted a personal link and handed it to this person, which is the same decision
+   * an Approve is, taken earlier and about the same person.
+   *
+   * So the assertion that guarded the old rule guards the new one, in one diff, and the
+   * private setting is still honoured everywhere else: `people_taste_matches` never names
+   * a private account, `follow_activity_people` still resolves through
+   * `can_identify_profile`, and a `referral` token still produces a request — asserted in
+   * `follow-activity.test.mjs`, which is where the `kind` gate is tested.
+   */
+  it('clause 3: a personal invite connects a private inviter too', async () => {
     const inviter = await newUser('accept_private', 'private');
     const invitee = await newUser('accepter_private');
     const token = await mintLink(inviter);
 
     await t.actAs(invitee);
     const answer = await redeem(token);
-    assert.equal(answer.follow_state, 'pending');
-    // Not connected: one half of the pair is still a request. §A7's mutual-follow
-    // decision explicitly stops short of approving a follow *into* a private account,
-    // because that approval belongs to the private account and nobody else.
-    assert.equal(answer.connected, false);
+    assert.equal(answer.follow_state, 'approved');
+    assert.equal(answer.connected, true, 'the invitation promised a connection on both sides');
 
     const edge = await followRow(invitee, inviter);
-    assert.equal(edge.state, 'pending');
-    assert.equal(edge.approved_at, null);
+    assert.equal(edge.state, 'approved');
+    assert.ok(edge.approved_at);
 
     /**
-     * The reverse edge is `approved` even here, and that is not the private setting being
-     * bypassed. The invitee is the caller: the account whose content this grants access to
-     * is their own, and redeeming this person's personal link is them granting it. The
-     * inviter's privacy is what stays behind approval, and it does — `edge` above.
+     * The reverse edge was already `approved` before this change, for a reason that is
+     * unaffected by it: the invitee is the caller, and the account whose content it grants
+     * access to is their own.
      */
     const back = await followRow(inviter, invitee);
     assert.equal(back.state, 'approved');
@@ -506,9 +515,10 @@ describe('acceptance semantics (PRD §17)', () => {
     const privateInvitee = (
       await t.sql(`select id from profiles where username = 'accepter_private'`)
     ).rows[0].id;
-    // A request, because it is a task rather than news — and `follow_request` is
-    // exempt from the preference map for exactly that reason (20260819000300).
-    assert.deepEqual(await noticesTo(privateInviter, privateInvitee), ['follow_request']);
+    // And a private inviter gets the same row since `20260912000200`, because they get the
+    // same relationship: news rather than a task, so there is nothing left to Approve.
+    assert.deepEqual(await noticesTo(privateInviter, privateInvitee), ['invite_joined']);
+    assert.deepEqual(await noticesTo(privateInvitee, privateInviter), ['invite_welcome']);
   });
 
   it('never downgrades an existing approved follow, and files no second notice', async () => {

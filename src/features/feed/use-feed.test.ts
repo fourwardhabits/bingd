@@ -1063,7 +1063,6 @@ describe('follow stories', () => {
     display_name: username[0]?.toUpperCase() + username.slice(1),
     avatar_path: null,
     visibility: 'public',
-    ordinal: 1,
     ...over,
   });
 
@@ -1086,7 +1085,7 @@ describe('follow stories', () => {
     mockFeedRows = [followRow(), followRow({ id: 'follow-2' }), event()];
     mockFollowPeopleRows = [
       named('follow-1', 'ravi'),
-      named('follow-1', 'ben', { ordinal: 2 }),
+      named('follow-1', 'ben'),
       named('follow-2', 'cy'),
     ];
 

@@ -260,7 +260,11 @@ describe('what the welcome did not change', () => {
     assert.equal(rows[0].state, 'approved');
   });
 
-  it('still requests rather than follows a private inviter', async () => {
+  it('follows a private inviter too, and files the same one welcome', async () => {
+    // The state changed under this test in `20260912000200` — a personal invite now
+    // connects both parties whatever either visibility says. What it is here to assert did
+    // not: the welcome is filed either way, because it is about who invited them rather
+    // than about whether the follow landed.
     const inviter = await newUser('private_inviter', 'private');
     const invitee = await newUser('private_invitee');
     const token = await mintLink(inviter);
@@ -268,14 +272,12 @@ describe('what the welcome did not change', () => {
     await t.actAs(invitee);
     const result = await redeem(token);
 
-    assert.equal(result.follow_state, 'pending');
+    assert.equal(result.follow_state, 'approved');
     const { rows } = await t.sql(
       `select state from follows where follower_id = $1 and followee_id = $2`,
       [invitee, inviter],
     );
-    assert.equal(rows[0].state, 'pending');
-    // And the welcome is filed either way — it is about who invited them, not about
-    // whether the follow landed.
+    assert.equal(rows[0].state, 'approved');
     assert.equal((await welcomes(invitee)).length, 1);
   });
 

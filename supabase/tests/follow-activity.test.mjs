@@ -5,7 +5,7 @@ import { createTestDb } from './harness.mjs';
 
 /**
  * Follow activity, and the mutual connection a redeemed invite creates.
- * `20260912000100`, founder tranche 2026-09-08 §§A7-A14.
+ * `20260912000100` and its corrective `20260912000200`, founder tranche 2026-09-08 §§A7-A14.
  *
  * Three things are being asserted here and they fail in three different ways, which is
  * why they are one file:
@@ -73,10 +73,12 @@ const stories = async (actor) => {
 /** `follow_activity_people` as one viewer, grouped by event. */
 const named = async (viewer, eventIds) => {
   await t.actAs(viewer);
+  // No `order by` of its own beyond the event: the function's own `order by ft.created_at`
+  // is what the sentence's first name depends on, and re-sorting here would hide a
+  // regression in it. `ordinal` was dropped in review — the client never read it, and the
+  // window function that produced it made the reader sort every member of every event.
   const { rows } = await t.sql(
-    `select event_id, username, visibility, ordinal
-       from follow_activity_people($1::uuid[])
-      order by event_id, ordinal`,
+    `select event_id, username, visibility from follow_activity_people($1::uuid[])`,
     [eventIds],
   );
   return rows;
@@ -159,9 +161,16 @@ describe('a follow becomes activity', () => {
     const viewer = await user('bulk_viewer');
     const seen = await named(viewer, [rows[0].id]);
     assert.equal(seen.length, 5);
+
+    const handles = (
+      await t.sql(
+        `select id, username from profiles where id = any ($1::uuid[])`,
+        [targets],
+      )
+    ).rows;
     assert.deepEqual(
-      seen.map((r) => r.ordinal),
-      [1, 2, 3, 4, 5],
+      seen.map((r) => r.username),
+      targets.map((id) => handles.find((row) => row.id === id).username),
       'ordered by when each follow joined the story, so the named one is stable',
     );
   });
@@ -639,6 +648,429 @@ describe('a redeemed invite is one relationship', () => {
       token,
     ]);
     assert.ok(err, 'the taxonomy is a check constraint, not a convention');
+  });
+});
+
+describe('a story is bounded, so the reader never pages one', () => {
+  /**
+   * §1b, and it is two problems with one number. The reader presents its answer as the
+   * whole story, and an unbounded membership makes that a lie *and* makes the read sort
+   * thousands of rows to return fifty. `follow.max_per_hour` bounds one account's own
+   * follows at sixty, but `redeem_invite` posts the **inviter's** story from the invitee's
+   * session — so a link in a large group chat appends one member per redemption with no
+   * per-actor ceiling anywhere.
+   *
+   * The cap is lowered here rather than three hundred accounts being created: what is
+   * under test is that the ceiling is read and obeyed, and `config-defaults.test.mjs`'s
+   * lesson is that a configured number is only real if something reads it.
+   */
+  it('stops naming people once the story is full', async () => {
+    await t.sql(`update app_config set value = '3'::jsonb where key = 'feed.follow_story_max_people'`);
+    try {
+      const abi = await user('cap_abi');
+      const targets = [];
+      for (let i = 0; i < 5; i += 1) targets.push(await user(`cap_t${i}`));
+
+      for (const target of targets) await follow(abi, target);
+
+      const rows = await stories(abi);
+      assert.equal(rows.length, 1, 'a full story is still one story');
+      assert.equal(rows[0].members, 3);
+
+      // Every edge exists. The cap is what the Feed says, never who follows whom.
+      for (const target of targets) assert.equal(await edge(abi, target), 'approved');
+    } finally {
+      await t.sql(
+        `update app_config set value = '50'::jsonb where key = 'feed.follow_story_max_people'`,
+      );
+    }
+  });
+
+  it('still mentions somebody already in a full story exactly once', async () => {
+    // The re-follow path crosses the ceiling: the insert is a no-op by primary key, so a
+    // naive `count >= cap` check would return early and change nothing — but it would also
+    // return early for a *new* person, which is the case the guard is for. This asserts the
+    // membership test that separates them.
+    await t.sql(`update app_config set value = '2'::jsonb where key = 'feed.follow_story_max_people'`);
+    try {
+      const abi = await user('capre_abi');
+      const first = await user('capre_first');
+      const second = await user('capre_second');
+
+      await follow(abi, first);
+      await follow(abi, second);
+      await unfollow(abi, first);
+      await follow(abi, first);
+
+      const rows = await stories(abi);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].members, 2);
+    } finally {
+      await t.sql(
+        `update app_config set value = '50'::jsonb where key = 'feed.follow_story_max_people'`,
+      );
+    }
+  });
+
+  it('still bounds a story when the ceiling is not configured', async () => {
+    // The documented fallback is 50. A `coalesce` over a query returning no rows is never
+    // evaluated, which is the defect `config-defaults.test.mjs` exists for — and here it
+    // would remove the bound rather than change a number.
+    await t.sql(`delete from app_config where key = 'feed.follow_story_max_people'`);
+    try {
+      const abi = await user('nocap_abi');
+      const first = await user('nocap_first');
+      const second = await user('nocap_second');
+      await follow(abi, first);
+      await follow(abi, second);
+      assert.equal((await stories(abi))[0].members, 2);
+    } finally {
+      await t.sql(
+        `insert into app_config (key, value) values ('feed.follow_story_max_people', '50'::jsonb)
+           on conflict (key) do nothing`,
+      );
+    }
+  });
+});
+
+describe('a personal invite connects both parties whatever either has chosen', () => {
+  /**
+   * The founder decision `20260912000200` carries, asserted as the matrix it is rather
+   * than as the one case that used to be interesting.
+   *
+   * `20260912000100` left the invitee -> inviter edge a **request** when the inviter was
+   * private, on the argument that the inviter is not the caller. The founder's reading
+   * supersedes it: the inviter *did* act, when they minted a personal link and handed it to
+   * this person, and that is the same decision an Approve is. So all four combinations end
+   * the same way, and a test per combination is what stops the next reader from assuming
+   * one of them is special.
+   */
+  const combinations = [
+    ['public', 'public'],
+    ['private', 'public'],
+    ['public', 'private'],
+    ['private', 'private'],
+  ];
+  for (const [n, [inviterVis, inviteeVis]] of combinations.entries()) {
+    it(`connects a ${inviterVis} inviter and a ${inviteeVis} invitee, both ways`, async () => {
+      // `username_format` allows 24 characters, so the case is in the test's name rather
+      // than in the handle.
+      const suraj = await user(`mx${n}i`, inviterVis);
+      const abi = await user(`mx${n}j`, inviteeVis);
+      const token = await mintLink(suraj);
+
+      const answer = await redeem(abi, token);
+      assert.equal(answer.status, 'ok');
+      assert.equal(answer.follow_state, 'approved');
+      assert.equal(answer.connected, true);
+
+      assert.equal(await edge(abi, suraj), 'approved');
+      assert.equal(await edge(suraj, abi), 'approved');
+
+      // One relationship, one story, authored by the inviter -- the direction with an
+      // audience. Unchanged by the visibility of either account.
+      assert.deepEqual(await stories(abi), []);
+      assert.equal((await stories(suraj)).length, 1);
+
+      // And nobody is left holding a decision they have already made.
+      const asks = await t.sql(
+        `select 1 from notifications where type = 'follow_request'
+           and ((recipient_id = $1 and actor_id = $2) or (recipient_id = $2 and actor_id = $1))`,
+        [suraj, abi],
+      );
+      assert.equal(asks.rows.length, 0);
+    });
+  }
+
+  it('is still a request, and no reverse edge, for a referral token', async () => {
+    // The gate is the token's `kind`, so the founder decision above cannot leak into a
+    // future public campaign link. A private owner is the case that separates the two
+    // rules: personal connects, referral requests.
+    const suraj = await user('mxref_suraj', 'private');
+    const abi = await user('mxref_abi');
+    const token = await mintLink(suraj);
+    await t.sql(`update invite_tokens set kind = 'referral' where token = $1`, [token]);
+
+    const answer = await redeem(abi, token);
+    assert.equal(answer.status, 'ok');
+    assert.equal(answer.follow_state, 'pending');
+    assert.equal(answer.connected, false);
+
+    assert.equal(await edge(abi, suraj), 'pending');
+    assert.equal(await edge(suraj, abi), null);
+    assert.deepEqual(await stories(suraj), []);
+
+    // And the request row survives, because on this path there is still a decision.
+    const asks = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2`,
+      [suraj, abi],
+    );
+    assert.deepEqual(
+      asks.rows.map((r) => r.type),
+      ['follow_request'],
+    );
+  });
+});
+
+describe('a redemption answers a request the inviter had already made', () => {
+  /**
+   * The correction independent review found in the first version of `20260912000100`.
+   *
+   * A **private** invitee whose inviter had already asked to follow them came out of a
+   * redemption still holding a request: `on conflict do nothing` preserved the pending row,
+   * `connected` answered false, the invitee's inbox kept an Approve button for a decision
+   * they had just made by another door, and the Feed announced a relationship one edge of
+   * which was pending.
+   *
+   * The same argument that makes the fresh edge approved makes this one approved — the
+   * invitee is the caller — so the redemption upgrades it and clears the request.
+   */
+  it('upgrades a pending reverse edge instead of leaving it', async () => {
+    const suraj = await user('upg_suraj');
+    const abi = await user('upg_abi', 'private');
+    const token = await mintLink(suraj);
+
+    // The inviter asks first, through the ordinary writer.
+    assert.equal((await follow(suraj, abi)).state, 'pending');
+    assert.equal(await edge(suraj, abi), 'pending');
+
+    const answer = await redeem(abi, token);
+    assert.equal(answer.status, 'ok');
+    assert.equal(answer.connected, true, 'the invitation promised a connection');
+    assert.equal(await edge(suraj, abi), 'approved');
+
+    // And the story is about an approved edge, which is what §A9 requires of every one.
+    assert.equal((await stories(suraj)).length, 1);
+  });
+
+  it('clears the request it just answered', async () => {
+    const suraj = await user('req_suraj');
+    const abi = await user('req_abi', 'private');
+    const token = await mintLink(suraj);
+
+    await follow(suraj, abi);
+    const before = await t.sql(
+      `select 1 from notifications where recipient_id = $1 and actor_id = $2
+         and type = 'follow_request'`,
+      [abi, suraj],
+    );
+    assert.equal(before.rows.length, 1, 'the request was filed');
+
+    await redeem(abi, token);
+
+    const after = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2
+        order by created_at`,
+      [abi, suraj],
+    );
+    assert.deepEqual(
+      after.rows.map((r) => r.type),
+      ['invite_welcome'],
+      'an Approve button for a decision already made is a control that raises P0002',
+    );
+  });
+
+  it('never downgrades an approved edge, and keeps the instant it was granted', async () => {
+    const suraj = await user('keep_suraj');
+    const abi = await user('keep_abi');
+    const token = await mintLink(suraj);
+
+    await follow(suraj, abi);
+    const granted = (
+      await t.sql(`select approved_at from follows where follower_id = $1 and followee_id = $2`, [
+        suraj,
+        abi,
+      ])
+    ).rows[0].approved_at;
+
+    await redeem(abi, token);
+
+    const after = (
+      await t.sql(
+        `select state, approved_at from follows where follower_id = $1 and followee_id = $2`,
+        [suraj, abi],
+      )
+    ).rows[0];
+    assert.equal(after.state, 'approved');
+    assert.equal(
+      after.approved_at.getTime(),
+      granted.getTime(),
+      'approved_at records when access was actually granted, not when it was reconfirmed',
+    );
+  });
+
+  it('files no follow_approved beside the join row', async () => {
+    // PRD §15: one row per act. The person who would receive it is receiving
+    // `invite_joined` in the same transaction about the same pair, and that row already
+    // routes to the profile where the control now reads Following.
+    const suraj = await user('napp_suraj');
+    const abi = await user('napp_abi', 'private');
+    const token = await mintLink(suraj);
+
+    await follow(suraj, abi);
+    await redeem(abi, token);
+
+    const notices = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2 order by created_at`,
+      [suraj, abi],
+    );
+    assert.deepEqual(
+      notices.rows.map((r) => r.type),
+      ['invite_joined'],
+    );
+  });
+
+  it('upgrades the invitee`s own pending request into a private inviter', async () => {
+    // The other direction, and the one `20260912000200` opened: the invitee had already
+    // asked to follow a private account and then redeemed that account's link. The ask has
+    // been answered by the link, so the edge is approved and the inviter's inbox loses the
+    // Approve it was carrying -- replaced by the join row, which is news rather than a task.
+    const suraj = await user('fwd_suraj', 'private');
+    const abi = await user('fwd_abi');
+    const token = await mintLink(suraj);
+
+    assert.equal((await follow(abi, suraj)).state, 'pending');
+
+    const answer = await redeem(abi, token);
+    assert.equal(answer.follow_state, 'approved');
+    assert.equal(answer.connected, true);
+    assert.equal(await edge(abi, suraj), 'approved');
+
+    const notices = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2 order by created_at`,
+      [suraj, abi],
+    );
+    assert.deepEqual(
+      notices.rows.map((r) => r.type),
+      ['invite_joined'],
+      'the request it answered is cleared, and one row says what happened',
+    );
+  });
+
+  it('upgrades both directions when both were pending', async () => {
+    const suraj = await user('both_suraj', 'private');
+    const abi = await user('both_abi', 'private');
+    const token = await mintLink(suraj);
+
+    assert.equal((await follow(abi, suraj)).state, 'pending');
+    assert.equal((await follow(suraj, abi)).state, 'pending');
+
+    assert.equal((await redeem(abi, token)).connected, true);
+    assert.equal(await edge(abi, suraj), 'approved');
+    assert.equal(await edge(suraj, abi), 'approved');
+
+    const asks = await t.sql(
+      `select 1 from notifications where type = 'follow_request'
+         and ((recipient_id = $1 and actor_id = $2) or (recipient_id = $2 and actor_id = $1))`,
+      [suraj, abi],
+    );
+    assert.equal(asks.rows.length, 0, 'neither inbox keeps a decision already made');
+  });
+
+  it('tells the inviter their own request landed when there is no join to announce', async () => {
+    /**
+     * The one case `invite_joined`'s condition cannot reach, and it must not be silent.
+     *
+     * The invitee already followed the inviter, so nothing about *their* edge moved and a
+     * join row would be the second notice about a relationship the inviter was told about
+     * at the time. What did move is the **inviter's** own request into a private invitee,
+     * which this redemption approved -- so they get the row `respond_follow_request` would
+     * have sent them. Never both, and never neither.
+     */
+    const suraj = await user('appr_suraj');
+    const abi = await user('appr_abi', 'private');
+    const token = await mintLink(suraj);
+
+    await follow(abi, suraj); // approved, suraj is public
+    assert.equal((await follow(suraj, abi)).state, 'pending');
+
+    assert.equal((await redeem(abi, token)).connected, true);
+    assert.equal(await edge(suraj, abi), 'approved');
+
+    const notices = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2 order by created_at`,
+      [suraj, abi],
+    );
+    assert.deepEqual(
+      notices.rows.map((r) => r.type),
+      ['follow', 'follow_approved'],
+      'the follow they were told about at the time, then the answer to their own ask',
+    );
+  });
+
+  it('says nothing new when both edges were already approved', async () => {
+    const suraj = await user('quiet_suraj');
+    const abi = await user('quiet_abi');
+    const token = await mintLink(suraj);
+
+    await follow(abi, suraj);
+    await follow(suraj, abi);
+
+    assert.equal((await redeem(abi, token)).connected, true);
+
+    const notices = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2 order by created_at`,
+      [suraj, abi],
+    );
+    assert.deepEqual(
+      notices.rows.map((r) => r.type),
+      ['follow'],
+      'nothing moved, so nothing is announced a second time',
+    );
+  });
+
+  /**
+   * The half of an approval that is easy to miss (20260826000400): a recommendation sent to
+   * somebody who has not followed you back **waits**, and approving them delivers it. A
+   * redemption is two approvals, so it drains both queues -- and the two directions need
+   * two tests, because a pair that holds one cannot hold the other. Sending requires the
+   * sender to follow the recipient; holding requires the recipient not to follow back.
+   *
+   * The direction is what these are really for: `_release_recommendations(sender,
+   * recipient)` is easy to call backwards, and doing so is silent.
+   */
+  const heldState = async (sender) =>
+    (await t.sql(`select state from title_recommendations where sender_id = $1`, [sender])).rows.map(
+      (r) => r.state,
+    );
+
+  it('releases what the inviter was holding for their invitee', async () => {
+    const suraj = await user('relf_suraj');
+    const abi = await user('relf_abi');
+    const token = await mintLink(suraj);
+
+    // Suraj follows Abi, so he may send; Abi does not follow back, so it waits.
+    await follow(suraj, abi);
+    await t.actAs(suraj);
+    await t.sql(`select recommend_title($1, $2, $3)`, [
+      await uuid(),
+      abi,
+      await t.createMovie('Held', (seq += 1)),
+    ]);
+    assert.deepEqual(await heldState(suraj), ['pending']);
+
+    await redeem(abi, token);
+    assert.deepEqual(await heldState(suraj), ['delivered']);
+  });
+
+  it('releases what the invitee was holding for their inviter', async () => {
+    const suraj = await user('relb_suraj');
+    const abi = await user('relb_abi');
+    const token = await mintLink(suraj);
+
+    // The other way round: Abi already followed Suraj and sent him something, and Suraj
+    // had never followed back, so it waited. Redeeming his link creates that edge.
+    await follow(abi, suraj);
+    await t.actAs(abi);
+    await t.sql(`select recommend_title($1, $2, $3)`, [
+      await uuid(),
+      suraj,
+      await t.createMovie('Held Back', (seq += 1)),
+    ]);
+    assert.deepEqual(await heldState(abi), ['pending']);
+
+    await redeem(abi, token);
+    assert.deepEqual(await heldState(abi), ['delivered']);
   });
 });
 

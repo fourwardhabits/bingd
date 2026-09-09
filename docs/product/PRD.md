@@ -3724,10 +3724,17 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 
 > ### As built — 2026-09-08: a redeemed invitation is a connection, not a prompt
 >
-> **Clause 4 is reversed** (founder tranche 2026-09-08 §A7, `20260912000100`). "The inviter
-> is never auto-followed" was the rule from v0.5 through every block above; a redeemed
-> personal invite now creates **both** follow edges, in the same transaction as the
-> attribution.
+> **Clauses 3 and 4 are reversed** (founder tranche 2026-09-08 §A7, `20260912000100`, then
+> `20260912000200`). "The inviter is never auto-followed" was the rule from v0.5 through every
+> block above; a redeemed personal invite now creates **both** follow edges, both approved, in
+> the same transaction as the attribution.
+>
+> The two migrations are one change told in two parts, and they are two files for a reason
+> that is not editorial: `20260912000100` had already been executed against staging when the
+> review of it and the founder's decision arrived. A migration that has run somewhere is
+> history, and editing it would leave a file no database ever ran, a history row describing
+> statements that no longer exist, and a production apply taking a path staging never
+> rehearsed. So `20260912000200` carries every correction, and the rehearsal stays honest.
 >
 > The reasoning is not that the old rule was badly implemented. It is that the invitation
 > itself is bilateral social intent — one person deliberately shared their personal link,
@@ -3736,27 +3743,68 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > social in bingd. is worth more once a graph exists, and this is the one mechanism that
 > reliably seeds one.
 >
-> **The asymmetry that survives, and it is a privacy decision rather than a leftover.**
+> **No asymmetry survives, and clause 3 is superseded with it** (founder, `20260912000200`).
 >
 > | edge | state | why |
 > |---|---|---|
-> | inviter → invitee | **approved**, whatever the invitee's visibility says | The invitee is the caller. Granting the inviter access to the invitee's *own* account is the invitee's decision to make, and redeeming that specific person's link is them making it |
-> | invitee → inviter | **approved** for a public inviter, **pending** for a private one — unchanged | The inviter is not the caller and has done nothing in this transaction. Auto-approving here would hand a brand-new account read access to a private account's collection, notes, goals and activity without that account acting, which is exactly what `respond_follow_request` exists to require |
+> | inviter → invitee | **approved**, whatever the invitee's visibility says — and a request that was already **pending** is upgraded to approved | The invitee is the caller. Granting the inviter access to the invitee's *own* account is the invitee's decision to make, and redeeming that specific person's link is them making it |
+> | invitee → inviter | **approved**, whatever the inviter's visibility says — and a request that was already **pending** is upgraded to approved | The inviter *did* act: they minted a personal link and handed it to this person, which is the same decision an Approve is, taken earlier and about the same person |
 >
-> So a public inviter gets a mutual pair, and a private inviter keeps clause 3 and keeps the
-> `follow_request` row that carries Approve and Decline. Nothing about private semantics is
-> weakened in either direction. The founder's instruction was explicit that a fully-connected
-> relationship is preferred "provided this does not violate an existing privacy/security
-> invariant"; approval by anybody other than the target is that invariant.
+> `20260912000100` shipped the second row as "approved for a public inviter, **pending** for a
+> private one", on the argument that the inviter is not the caller and that approval by
+> anybody other than the target is what `respond_follow_request` exists to enforce. The
+> founder's reading supersedes it: minting a personal link is that approval, given in advance
+> and to a named person, and asking for it again when they walk through the door is the
+> product asking twice for a decision it has already been given. **All four combinations of
+> the two accounts' visibility now end approved / approved.**
 >
-> **The notifications are unchanged and there are still exactly two.** The invitee's
-> `invite_welcome`, the inviter's `invite_joined` — or `follow_request` when the inviter is
-> private. The reverse edge is written directly rather than through `follow`, precisely so it
-> files no third row: the person it would tell is the invitee, who is already reading "Suraj
-> invited you" about the same fact. The relationship-action table above still holds and now
-> resolves differently by itself, because it reads `follow_state_with` at draw time: the join
-> row draws **Following** rather than **Follow back**, and no CTA had to be removed to make
-> that happen.
+> **What that widens, stated rather than left to be discovered.** A personal token is
+> reusable and `invite_attributions` is keyed on the invitee, so one link can be redeemed by
+> many people. A link that leaks out of the conversation it was sent in used to produce a
+> *request* into a private inviter, which the inviter then decided; now whoever holds it
+> becomes an approved follower on redemption. The controls are the ones that already exist:
+> `revoke_invite_link` ends a link that has travelled too far, `unfollow` and `block` end a
+> relationship, and `invite_joined` names every person who uses it as they use it. This is a
+> deliberate trade of a leaked-link edge case against the activation of every invitation that
+> goes where it was sent.
+>
+> **Everything else about privacy is unmoved**: a block in either direction still refuses the
+> whole redemption, a suspended inviter still refuses it, the caller's own suspension still
+> refuses it at `assert_can_write`, `people_taste_matches` still never names a private
+> account, and `follow_activity_people` still resolves every named account through
+> `can_identify_profile`.
+>
+> **A pending edge is upgraded rather than left alone, in either direction** — a correction
+> independent review found in `20260912000100`. `on conflict do nothing` looked conservative
+> and was not: a private invitee whose inviter had already asked to follow them came out of a
+> redemption still holding a request — `connected` false, an Approve button in their inbox for
+> a decision they had just made by another door, and a Feed story announcing a relationship one
+> edge of which was pending. Redemption now does what `respond_follow_request` does on
+> approval: it flips the state, keeps the `approved_at` of an edge that was already approved,
+> clears the `follow_request` row it answered in **both** directions, and releases what either
+> side was holding for the other.
+>
+> **`referral` keeps clause 3 exactly.** `invite_tokens.kind` is the gate, so the invitee's own
+> edge into a private *referral* owner is still a request, there is still no reverse edge, and
+> there is still no story. A future public campaign link cannot inherit a rule written for a
+> link one friend hands another.
+>
+> **There are still exactly two notifications, one to each person.** The invitee's
+> `invite_welcome`; the inviter's `invite_joined` — for a private inviter too since
+> `20260912000200`, because a private inviter now gets the same relationship and there is
+> nothing left for a `follow_request` to Approve. Both edges are written directly rather than
+> through `follow`, precisely so they file no third row.
+>
+> The one row that is neither is the case `invite_joined` cannot cover: an invitee who
+> *already* followed their inviter announced that at the time, so there is no join to file —
+> and if the redemption approved the **inviter's** own pending request into a private invitee,
+> they get the `follow_approved` `respond_follow_request` would have sent them. Never both,
+> and never neither. No `follow_approved` goes to the invitee in any case: they are reading
+> "Suraj invited you" in the same transaction about the same pair.
+>
+> The relationship-action table above still holds and now resolves differently by itself,
+> because it reads `follow_state_with` at draw time: the join row draws **Following** rather
+> than **Follow back**, and no CTA had to be removed to make that happen.
 >
 > **A future referral token will not do this.** `invite_tokens.kind` is the gate —
 > `personal` is the only kind `create_invite_link` mints, and `referral` is declared with no
@@ -3782,6 +3830,13 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > and `_post_follow_activity` now takes an ordered pair lock and a per-actor advisory key
 > before it reads anything. `races/follow-activity.mjs` asserts it live and
 > `mutation-check.mjs` mutant 15 proves that assertion would notice if the key were removed.
+>
+> **And the same absence of a per-actor ceiling bounds the story itself.** A story's membership
+> stops at `feed.follow_story_max_people` (50), which is what makes the reader's single page
+> the *whole* story rather than a page it would present as a total — so "and 49 others" is the
+> truth about what that viewer may see. Everything above the bound is still a follow and still
+> in the graph; it is only not in the sentence, which is §A13 applied to the row instead of to
+> the list.
 
 ---
 

@@ -1,6 +1,6 @@
 /**
  * Social connection activation, against a **deployed** nonprod project.
- * `20260912000100`, founder tranche 2026-09-08 §§A4–A14.
+ * `20260912000100` and its corrective `20260912000200`, founder tranche 2026-09-08 §§A4–A14.
  *
  * ---------------------------------------------------------------------------
  * WHY THIS EXISTS BESIDE TWO SUITES THAT ALREADY COVER THE SAME FUNCTIONS
@@ -317,7 +317,7 @@ try {
 
   const named = await rpc(abi.token, 'follow_activity_people', {
     p_event_ids: [eventId],
-    p_limit: 25,
+    p_limit: 50,
   });
   report(
     'the story names nobody to the person it is about',
@@ -327,7 +327,7 @@ try {
 
   const strangerRead = await rpc(stranger.token, 'follow_activity_people', {
     p_event_ids: [eventId],
-    p_limit: 25,
+    p_limit: 50,
   });
   report(
     'and names them to an unrelated reader who is allowed to identify them',
@@ -354,7 +354,7 @@ try {
   );
   const afterBlock = await rpc(stranger.token, 'follow_activity_people', {
     p_event_ids: [eventId],
-    p_limit: 25,
+    p_limit: 50,
   });
   report(
     'a block in either direction removes the member from the story',
@@ -443,6 +443,88 @@ try {
     'and Match carries the shared count the People row prints',
     shaped.status === 200,
     `${shaped.status} ${(await shaped.text()).slice(0, 200)}`,
+  );
+
+  console.log('');
+
+  // -------------------------------------------------------------------------
+  console.log('— the corrective migration, on the wire (20260912000200) —');
+
+  /**
+   * `follow_activity_people` was **dropped and recreated** with a narrower return type, and
+   * that is the change PostgREST is most able to get wrong: a stale schema cache serves the
+   * old signature, and a `select` naming a column the new one does not have would then
+   * succeed. So the assertion is the negative one — asking for `ordinal` must 400.
+   */
+  const gone = await fetch(`${url}/rest/v1/rpc/follow_activity_people?select=ordinal`, {
+    method: 'POST',
+    headers: asUser(stranger.token),
+    body: JSON.stringify({ p_event_ids: [eventId] }),
+  });
+  report(
+    'the reader no longer has an ordinal column, so the recreate reached the cache',
+    gone.status === 400,
+    `${gone.status} ${(await gone.text()).slice(0, 160)}`,
+  );
+
+  const whole = await rpc(stranger.token, 'follow_activity_people', { p_event_ids: [eventId] });
+  report(
+    'and its default answers the whole story rather than a page',
+    whole.status === 200 && whole.body?.length === 1,
+    JSON.stringify(whole).slice(0, 200),
+  );
+
+  const cap = await service(
+    `/rest/v1/app_config?select=key,value&key=eq.feed.follow_story_max_people`,
+  );
+  report(
+    'the story ceiling is configured, so the count the row prints is the whole set',
+    (cap.body ?? [])[0]?.value === 50,
+    JSON.stringify(cap.body),
+  );
+
+  /**
+   * The founder's decision, in the combination that used to behave differently: a private
+   * inviter and a private invitee. Both edges must come out approved, and neither inbox may
+   * keep a `follow_request` for a decision the invitation already made.
+   */
+  const pi = await createAccount('privinviter');
+  const pj = await createAccount('privinvitee');
+  for (const who of [pi, pj]) {
+    const set = await rpc(who.token, 'set_profile_visibility', {
+      p_operation_id: uuid(),
+      p_visibility: 'private',
+    });
+    report(`${who.label} goes private`, set.status === 200 && set.body?.status === 'ok', JSON.stringify(set));
+  }
+
+  const privLink = await rpc(pi.token, 'create_invite_link', { p_operation_id: uuid() });
+  const privRedeem = await rpc(pj.token, 'redeem_invite', {
+    p_operation_id: uuid(),
+    p_token: privLink.body?.token,
+  });
+  report(
+    'a private invitee redeeming a private inviter`s personal link comes out connected',
+    privRedeem.status === 200 &&
+      privRedeem.body?.status === 'ok' &&
+      privRedeem.body?.follow_state === 'approved' &&
+      privRedeem.body?.connected === true,
+    JSON.stringify(privRedeem),
+  );
+
+  const privEdges = await rpc(pj.token, 'follow_state_with', { p_user_ids: [pi.id] });
+  report(
+    'both directed edges are approved, with nothing left pending',
+    privEdges.body?.[0]?.following === 'approved' && privEdges.body?.[0]?.followed_by === 'approved',
+    JSON.stringify(privEdges),
+  );
+
+  const privInbox = await rpc(pi.token, 'my_notifications', { p_limit: 20 });
+  const privKinds = (privInbox.body ?? []).map((row) => row.kind).sort();
+  report(
+    'and the private inviter is told once, by the join row rather than a request',
+    privKinds.length === 1 && privKinds[0] === 'invite_joined',
+    JSON.stringify(privKinds),
   );
 
   console.log('');

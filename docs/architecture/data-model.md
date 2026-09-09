@@ -676,7 +676,7 @@ So `_leave_watchlist` deleting the row when a title is watched leaves the activi
 
 **Nothing was added to the read path**, which is what makes the privacy argument short: `feed_events_read` is type-independent, so the event is visible to exactly the accounts that may see the actor's rankings — and `20260820000200` set `watchlist`'s own select policy to the same visibility. `reactions_read`, `add_comment` and `set_reaction` all key on the event id and never on `type`, so a new type inherits the social controls by construction.
 
-### `follow_added`, and who a story is allowed to name — `20260912000100`
+### `follow_added`, and who a story is allowed to name — `20260912000100`, `20260912000200`
 
 Following somebody is Feed activity (founder §A9), and it is the first event type in this
 schema whose subject is a **person** rather than a title. Three things follow from that, and
@@ -704,6 +704,19 @@ because there is at most one an hour per actor. The alternative — a row per fo
 at read time — is not available: the Feed is paged by a keyset over
 `(causal_at, causal_step, id)` shared with the profile activity page, and a group-by cannot
 be paged by a keyset over its members.
+
+**The membership itself is bounded at `feed.follow_story_max_people` (50)**, and that number
+is what makes two separate things true at once — an independent review of the migration found
+both halves. `follow.max_per_hour` bounds one account's own follows at sixty, but
+`redeem_invite` posts the *inviter's* story from the invitee's session, so a link shared into
+a large group chat appends one member per redemption with no per-actor ceiling anywhere. A
+story naming five thousand people is not a story anybody reads; it is a sort on every feed
+page that happens to include it. With the bound: the reader's single page **is** the whole
+story, so "and 49 others" is the truth about what that viewer may see rather than a page
+presented as a total; and the sort inside `follow_activity_people` is over at most fifty rows
+per event, which is why it needs no index beyond the membership's own primary key. A
+fifty-first follow inside the same window is simply not in the story — it is still a follow,
+still in the graph, and the next window opens a new story.
 
 **`causal_at` is set once and never bumped**, so an append does not move the row in that
 keyset. Inside an hour it is near the top regardless, and a row that changed its sort
@@ -752,8 +765,15 @@ rather than one that has not.
 writer) is the gate on the mutual auto-follow a redeemed invitation now creates. It is a
 property of the token rather than a branch inside `redeem_invite`, so a future public
 campaign link is a writer plus a product decision rather than an `if` somebody has to notice.
-PRD §17's As-built block for 2026-09-08 carries the privacy argument for the asymmetry
-between the two edges.
+
+Since `20260912000200` a valid **personal** token ends with **both** edges `approved`, in all
+four combinations of the two accounts' visibility, and a request that was already pending in
+either direction is upgraded rather than left — with the `follow_request` it answered cleared
+in both directions and anything either side was holding released, which is what an approval
+does everywhere else. A **referral** token keeps `20260912000100`'s semantics exactly: the
+invitee's own edge is a request into a private owner, and there is no reverse edge and no
+story. PRD §17's As-built block for 2026-09-08 carries the founder's argument for the change
+and states plainly what it widens.
 
 
 ### The award loop — `award_unlocks`, `award_tiers`, `award_genre_patterns` — `20260828000100`

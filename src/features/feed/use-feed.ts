@@ -227,6 +227,22 @@ type FollowPersonRow = {
 };
 
 /**
+ * How many people one follow story can ever name — `feed.follow_story_max_people`, and the
+ * server's own ceiling on `p_limit`.
+ *
+ * Asked for **explicitly** rather than left to the RPC's default, which is the correction
+ * an independent review of this tranche produced: the first version omitted the argument,
+ * took whatever page came back, and derived an exact "and 24 others" from its length. A
+ * page presented as a whole is a row that lies about a set the sheet then cannot show.
+ *
+ * It is safe to treat the answer as complete because `_post_follow_activity` stops storing
+ * members at this same number — the story's membership is bounded, not paged. If that
+ * bound ever moves, this constant and the config row move together or the sentence starts
+ * under-counting again.
+ */
+const FOLLOW_STORY_PEOPLE = 50;
+
+/**
  * PostgREST returns a to-one embed as an object and a to-many as an array, and
  * its generated types say array for both.
  *
@@ -938,6 +954,7 @@ async function attachFollowPeople(items: FeedItem[]) {
     // The server caps this at fifty; a page of the feed is twenty events, so the slice is
     // a floor under a pathological caller rather than a real limit.
     p_event_ids: items.map((item) => item.id).slice(0, 50),
+    p_limit: FOLLOW_STORY_PEOPLE,
   });
   if (error || !data) return;
 

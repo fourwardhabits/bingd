@@ -154,7 +154,17 @@ describe('the row an acceptance files for the inviter', () => {
     );
   });
 
-  it('gives a private inviter the request, and not a join beside it', async () => {
+  it('gives a private inviter the join row too, because there is nothing left to approve', async () => {
+    /**
+     * Property 4 is superseded for a personal token (`20260912000200`). It read: a private
+     * inviter keeps `follow_request`, because that row carries Approve and Decline and is
+     * the only place in the app they exist.
+     *
+     * The founder's decision removes the decision the row was carrying. Minting a personal
+     * link and handing it to somebody is the inviter acting; there is no Approve left to
+     * offer, so `follow_request` would be a control that raises P0002 when pressed. The
+     * inviter gets what a public inviter gets, and for the same reason: news, once.
+     */
     const inviter = await newUser('priv_join_inviter', 'private');
     const invitee = await newUser('priv_join_invitee');
     const token = await mintLink(inviter);
@@ -162,10 +172,7 @@ describe('the row an acceptance files for the inviter', () => {
     await t.actAs(invitee);
     await redeem(token);
 
-    // `follow_request` alone. It carries Approve and Decline and is the only place in
-    // the app they exist, so it is not replaceable — and a join row beside it would be
-    // two notifications for one act.
-    assert.deepEqual(await noticesTo(inviter, invitee), ['follow_request']);
+    assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
   });
 
   it('files nothing more when the same operation is replayed', async () => {
