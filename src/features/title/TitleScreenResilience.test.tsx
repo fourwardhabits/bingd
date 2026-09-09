@@ -522,7 +522,33 @@ describe('optional metadata that is absent in the catalogue', () => {
      * comparison that produced it.
      */
     await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+    /**
+     * **The slot is present and empty, rather than absent** (founder, 2026-09-08).
+     *
+     * It used to render nothing at all, and that was the layout jump: the line arrives
+     * with the watch date the moment a ranking succeeds, and everything below it — the
+     * actions row, the synopsis, the whole page — moved down by one caption line at the
+     * exact moment the reader was being told their ranking had worked.
+     *
+     * So the element is always mounted and holds its own height with a zero-width space.
+     * What this asserts is that it still says *nothing*: no placement, no date, and none
+     * of the placeholder copy the founder ruled out.
+     */
+    /**
+     * `includeHiddenElements`, because the empty slot is deliberately hidden.
+     *
+     * It carries `accessibilityElementsHidden` while it has nothing to say, and RNTL
+     * excludes hidden elements from queries by default — so the slot being unfindable
+     * *through the ordinary query* is the assertion that a screen reader is not handed a
+     * blank line, and finding it this way is the assertion that the space is nevertheless
+     * reserved.
+     */
     expect(view.queryByTestId('title-context')).toBeNull();
+    const context = view.getByTestId('title-context', { includeHiddenElements: true });
+    expect(context).toBeTruthy();
+    expect(context).not.toHaveTextContent(/#\d+/);
+    expect(context).not.toHaveTextContent(/Watched/);
+    expect(context).not.toHaveTextContent(/[A-Za-z0-9]/);
   });
 
   it('keeps the page when the viewer state fails but the catalogue does not', async () => {

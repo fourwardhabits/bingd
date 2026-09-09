@@ -139,6 +139,15 @@ const EPISODES_FIRST_PAGE = 50;
 const SEP = ' · ';
 
 /**
+ * What holds the personal-context line's height while there is nothing to say.
+ *
+ * Written as an escape rather than typed as itself: an invisible character in source is
+ * one careless "strip trailing whitespace" away from becoming an empty string, and the
+ * failure would be a layout jump nobody could see in the diff.
+ */
+const ZERO_WIDTH = '\u200B';
+
+/**
  * How many lines the identity heading takes before it truncates (founder lock,
  * 2026-09-07).
  *
@@ -1220,17 +1229,40 @@ export default function TitleScreen() {
                 {metaLine}
               </Text>
             ) : null}
-            {contextLine ? (
-              <Text
-                testID="title-context"
-                variant="caption"
-                tone="tertiary"
-                numberOfLines={1}
-                style={styles.contextLine}
-              >
-                {contextLine}
-              </Text>
-            ) : null}
+            {/**
+             * **The slot is always here, even before there is anything to put in it**
+             * (founder, physical QA, 2026-09-08).
+             *
+             * This line is the only part of the identity column that appears *because* of
+             * ranking: before, there is no placement and no watch date, so it rendered
+             * nothing; after, `Watched 8 Sep 2026` arrives and pushed the actions row, the
+             * synopsis and the whole page down by one caption line. The successful
+             * Rank → Ranked transition ended in a jump, which read as the page correcting
+             * itself rather than as the thing the reader just did having worked.
+             *
+             * Reserved rather than measured. A `minHeight` in points would be a lie the
+             * moment somebody raises their system text size — the line grows and the
+             * reservation does not — so the element that holds the space is the same
+             * `Text`, in the same variant, carrying a zero-width space when it has nothing
+             * to say. It scales because it is real text, and it shows nothing because the
+             * character has no glyph. **Not** a placeholder word: the founder ruled out
+             * `Not watched yet` and `—`, and they were right — an empty line is not a fact
+             * about the title and should not read as one.
+             *
+             * Hidden from accessibility while empty, so a screen reader is not handed a
+             * blank line to announce between the metadata and the actions.
+             */}
+            <Text
+              testID="title-context"
+              variant="caption"
+              tone="tertiary"
+              numberOfLines={1}
+              style={styles.contextLine}
+              accessibilityElementsHidden={!contextLine}
+              importantForAccessibility={contextLine ? 'auto' : 'no-hide-descendants'}
+            >
+              {contextLine || ZERO_WIDTH}
+            </Text>
 
             {/**
              * **Rank/Ranked, Save, Recommend — inside this column, directly under the

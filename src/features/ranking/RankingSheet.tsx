@@ -1635,15 +1635,29 @@ function Reveal({
        * mind. Done is still one tap, still writes nothing, and nothing here is required.
        * ---------------------------------------------------------------------------
        */}
+      {/**
+       * **Done on the left, Add details on the right** (founder, 2026-09-08).
+       *
+       * The emphasis is unchanged and so is the copy: Add details is still the filled
+       * maroon control and Done is still outlined. What moved is which side each sits on,
+       * and the reason is conventional rather than aesthetic — the forward action belongs
+       * in the trailing position, where a thumb reaching past a dismissal expects to find
+       * it. Leading it with the filled button asked the reader to step over the thing they
+       * were being encouraged to do in order to reach the way out.
+       *
+       * Both are `fit` inside equal-flex wrappers, so the pair keeps its symmetry and
+       * neither label decides the row's proportions. The accessibility order follows the
+       * visual order because it is the same JSX order — nothing here reorders at paint.
+       */}
       <View style={styles.revealExits}>
+        <View style={styles.revealExit}>
+          <Button label="Done" kind="secondary" fit onPress={onDone} />
+        </View>
         {onFinishLog ? (
           <View style={styles.revealExit}>
             <Button label="Add details" fit onPress={onFinishLog} />
           </View>
         ) : null}
-        <View style={styles.revealExit}>
-          <Button label="Done" kind="secondary" fit onPress={onDone} />
-        </View>
       </View>
     </View>
   );
