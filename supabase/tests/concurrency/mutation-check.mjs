@@ -66,6 +66,14 @@
  *      entry is stranded forever — the lost-crossing shape of mutant 12's family,
  *      pointed at a delete. The damage is *plausible in the schema*: every row is
  *      legal, and only the watchlist entry's continued existence is wrong.
+ *  15. `_post_follow_activity` with its per-actor advisory lock deleted, keeping the pair
+ *      lock and the `for update` (20260912000100). This is the version that shipped first
+ *      and that the race suite rejected on its first run, and it is the mutant that looks
+ *      most like the honest one: `for update` reads as a lock and locks nothing when the
+ *      select returns no rows. The pair lock does not close it either — two *different*
+ *      invitees redeeming one inviter's link hold two different pair keys — so both insert
+ *      a story about the same actor and the founder's §A13 frequency cap becomes one row
+ *      per caller.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1348,6 +1356,133 @@ end; $$;`);
 
   await t1.end();
   await t2.end();
+  await db.close();
+}
+
+
+// --- Mutant 15: `_post_follow_activity` with its per-actor advisory lock deleted, keeping
+//     the pair lock and the `for update` — which is exactly what the first version of
+//     `20260912000100` shipped, and exactly what `races/follow-activity.mjs` F1 caught on
+//     its first run.
+//
+//     The point of this mutant is that the honest-looking version is the wrong one.
+//     `select ... limit 1 for update` reads as a lock, and it locks nothing when it returns
+//     no rows: two transactions that both find no open story both find nothing to lock. The
+//     pair lock does not help either, because the two callers here are two *different*
+//     invitees redeeming one inviter's link, so they hold two different pair keys.
+//
+//     The damage stays plausible in the schema — two well-formed stories, one member each,
+//     both about the same actor — and what breaks is the founder's §A13 frequency cap: one
+//     row per actor per hour becomes one row per caller.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  await db.sql(`
+create or replace function _post_follow_activity(p_actor uuid, p_target uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_window interval; v_event uuid;
+begin
+  if p_actor is null or p_target is null or p_actor = p_target then return; end if;
+  -- THE MUTATION: the pair lock stays and \`follow_story:<actor>\` is gone, so two callers
+  -- holding two different pair keys are serialised by nothing at all.
+  perform _lock_pair(p_actor, p_target);
+  select make_interval(mins => coalesce(
+           (select (value)::integer from app_config where key = 'feed.follow_aggregation_minutes'), 60))
+    into v_window;
+  if exists (
+    select 1 from feed_events e join feed_follow_targets ft on ft.event_id = e.id
+     where e.type = 'follow_added' and e.actor_id = p_target
+       and ft.followed_id = p_actor and e.causal_at > now() - v_window
+  ) then return; end if;
+  select e.id into v_event from feed_events e
+   where e.type = 'follow_added' and e.actor_id = p_actor and e.causal_at > now() - v_window
+   order by e.causal_at desc limit 1 for update;
+  if v_event is null then
+    insert into feed_events (actor_id, type, payload, causal_at, causal_step)
+    values (p_actor, 'follow_added', '{}'::jsonb, now(), 0) returning id into v_event;
+  end if;
+  insert into feed_follow_targets (event_id, followed_id) values (v_event, p_target)
+  on conflict (event_id, followed_id) do nothing;
+end; $$;
+  `);
+
+  const inviter = await fx.createUser();
+  const abi = await fx.createUser();
+  const ravi = await fx.createUser();
+
+  const mint = await db.session('mint');
+  await mint.actAs(inviter);
+  const token = (
+    await mint.one(`select create_invite_link(gen_random_uuid()) as r`)
+  ).r.token;
+  await mint.end();
+
+  // The window, opened deterministically rather than by firing both and hoping.
+  //
+  // The first version of this mutant fired the two redemptions together and asserted two
+  // stories, and it reported MISSED on a busy machine — because when the two do *not*
+  // overlap, the mutant behaves correctly: the second caller finds the first's committed
+  // story and appends to it. The defect is only reachable inside the window, so the window
+  // has to be held open. That is the same lesson `races/*.mjs` records: a race asserted by
+  // racing is a race asserted sometimes.
+  //
+  // The barrier stops the first caller with its story inserted and uncommitted. The honest
+  // function makes the second wait on `follow_story:<inviter>`; the mutant holds no such
+  // key, so it walks straight past and inserts a second story of its own.
+  await db.armBarrier('feed_follow_targets', 'mutant-story');
+  const ctl = await db.controller();
+  await ctl.hold('mutant-story');
+
+  const t1 = await db.session('abi');
+  const t2 = await db.session('ravi');
+  await t1.actAs(abi);
+  await t2.actAs(ravi);
+
+  const [keyRow] = await db.rows(
+    `select hashtextextended('follow_story:' || $1::text, 0)::text as k`,
+    [inviter],
+  );
+
+  await t1.begin();
+  await t1.pauseAt('mutant-story');
+  const p1 = t1.start(`select redeem_invite(gen_random_uuid(), $1) as r`, [token]);
+  await t1.awaitBlocked();
+
+  await t2.begin();
+  const p2 = t2.start(`select redeem_invite(gen_random_uuid(), $1) as r`, [token]);
+
+  let waitedOnActor = true;
+  try {
+    await t2.awaitBlocked({ on: 'advisory', advisoryKey: keyRow.k, timeoutMs: 1500 });
+  } catch {
+    waitedOnActor = false;
+  }
+
+  await ctl.release('mutant-story');
+  const r1 = await p1;
+  await t1.commit();
+  const r2 = await p2;
+  await t2.commit();
+
+  const stories = await db.rows(
+    `select count(*)::int as n from feed_events where actor_id = $1 and type = 'follow_added'`,
+    [inviter],
+  );
+
+  results.push([
+    'follow-story actor lock removed -> the second appender no longer waits on the actor',
+    waitedOnActor === false,
+  ]);
+  results.push([
+    'follow-story actor lock removed -> one link accepted twice at once leaves two stories',
+    r1.rows[0].r.status === 'ok' && r2.rows[0].r.status === 'ok' && stories[0].n === 2,
+  ]);
+
+  await t1.end();
+  await t2.end();
+  await ctl.end();
   await db.close();
 }
 

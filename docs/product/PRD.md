@@ -412,8 +412,8 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 2. Bingd creates or reuses the user's personal invitation token and prepares a short branded message plus a canonical link.
 3. The user opens the share sheet or copies the link or code.
 4. An installed recipient opens an invitation screen. A recipient without the app reaches a lightweight web page with public-safe inviter context, store actions, and the short code.
-5. After sign-up, the recipient explicitly accepts, which creates a one-way follow to the inviter.
-6. The inviter is notified and prompted to follow back.
+5. After sign-up, the recipient explicitly accepts, which creates a follow to the inviter — and, since 2026-09-08, a follow from the inviter back to them (§17, §A7).
+6. The inviter is notified that they joined.
 
 ### H. Monetization loop — Provisional, not active in v1
 
@@ -757,8 +757,8 @@ See §12 for the full specification.
 3. Preview the message and the public-safe inviter context. Private data is never included.
 4. Open the share sheet, or copy the invite link or short code.
 5. The recipient opens the installed app or a no-install web page. After account creation they explicitly accept.
-6. Acceptance creates a one-way follow to the inviter, or a follow request if the inviter is private.
-7. The inviter is notified and prompted to follow back.
+6. Acceptance creates a follow to the inviter, or a follow request if the inviter is private, **and a follow from the inviter back to the recipient** (§A7, 2026-09-08).
+7. The inviter is notified that they joined. There is no Follow back to press: the relationship already exists.
 
 ### Share a ranking or list
 
@@ -3573,7 +3573,7 @@ v0.5 said "accepts or follows" in three places without ever defining the result.
 1. The recipient must have an account. Acceptance is an **explicit tap**, never automatic.
 2. Acceptance **creates a one-way follow from recipient to inviter**.
 3. If the inviter's account is **private**, acceptance creates a **follow request** instead, subject to normal approval.
-4. The inviter is then **notified and prompted to follow back**. The inviter is never auto-followed.
+4. ~~The inviter is then **notified and prompted to follow back**. The inviter is never auto-followed.~~ **Reversed 2026-09-08 (§A7): a redeemed personal invite connects both parties.** The inviter is notified, and the follow *back* is created automatically in the same transaction — see the As-built block at the end of this section for the asymmetry that survives, which is that the invitee's own edge into a **private** inviter is still a request.
 5. The recipient's identity is **not revealed to the inviter before acceptance**.
 6. An active **block** in either direction voids the invitation entirely.
 7. Acceptance also records referral attribution, independent of the follow.
@@ -3721,6 +3721,67 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > from the App Store and launches from there arrives unattributed — no welcome, no join
 > row, no follow — and the recovery is the landing page's *I already have Bingd*. Invite
 > analytics remain a **floor**.
+
+> ### As built — 2026-09-08: a redeemed invitation is a connection, not a prompt
+>
+> **Clause 4 is reversed** (founder tranche 2026-09-08 §A7, `20260912000100`). "The inviter
+> is never auto-followed" was the rule from v0.5 through every block above; a redeemed
+> personal invite now creates **both** follow edges, in the same transaction as the
+> attribution.
+>
+> The reasoning is not that the old rule was badly implemented. It is that the invitation
+> itself is bilateral social intent — one person deliberately shared their personal link,
+> and another deliberately used it to join — so making either of them go and find the other
+> afterwards was the product asking twice for a decision it had already been given. Everything
+> social in bingd. is worth more once a graph exists, and this is the one mechanism that
+> reliably seeds one.
+>
+> **The asymmetry that survives, and it is a privacy decision rather than a leftover.**
+>
+> | edge | state | why |
+> |---|---|---|
+> | inviter → invitee | **approved**, whatever the invitee's visibility says | The invitee is the caller. Granting the inviter access to the invitee's *own* account is the invitee's decision to make, and redeeming that specific person's link is them making it |
+> | invitee → inviter | **approved** for a public inviter, **pending** for a private one — unchanged | The inviter is not the caller and has done nothing in this transaction. Auto-approving here would hand a brand-new account read access to a private account's collection, notes, goals and activity without that account acting, which is exactly what `respond_follow_request` exists to require |
+>
+> So a public inviter gets a mutual pair, and a private inviter keeps clause 3 and keeps the
+> `follow_request` row that carries Approve and Decline. Nothing about private semantics is
+> weakened in either direction. The founder's instruction was explicit that a fully-connected
+> relationship is preferred "provided this does not violate an existing privacy/security
+> invariant"; approval by anybody other than the target is that invariant.
+>
+> **The notifications are unchanged and there are still exactly two.** The invitee's
+> `invite_welcome`, the inviter's `invite_joined` — or `follow_request` when the inviter is
+> private. The reverse edge is written directly rather than through `follow`, precisely so it
+> files no third row: the person it would tell is the invitee, who is already reading "Suraj
+> invited you" about the same fact. The relationship-action table above still holds and now
+> resolves differently by itself, because it reads `follow_state_with` at draw time: the join
+> row draws **Following** rather than **Follow back**, and no CTA had to be removed to make
+> that happen.
+>
+> **A future referral token will not do this.** `invite_tokens.kind` is the gate —
+> `personal` is the only kind `create_invite_link` mints, and `referral` is declared with no
+> writer, so introducing a public campaign link later is a writer plus a product decision
+> about its social semantics rather than an `if` somebody has to notice inside
+> `redeem_invite`.
+>
+> **`connected` is returned to the client**, true only when both edges came out approved, and
+> `invite_auto_follow_succeeded` follows that answer rather than the tap. The ratio between it
+> and `invite_redeemed` is the measurement of this change.
+>
+> **One Feed story, not two** (§A14). Two directed edges are one relationship, and the story
+> is authored by the **inviter** because that is the direction with an audience: the Feed reads
+> activity by actor, so the inviter's followers are shown the new account. The invitee's own
+> edge posts nothing — a second story would be duplication, and it would reach nobody anyway,
+> a brand-new account having no followers.
+>
+> **The concurrency this opened, and the defect it caught.** Two people accepting the same
+> link at the same moment are two transactions appending to one inviter's story — the actor is
+> not the caller, so nothing the callers already lock serialises them. The first version
+> guarded it with `select ... for update`, which locks the rows a query returned and cannot
+> lock a row that is not there yet; the real-PostgreSQL race suite failed it on the first run,
+> and `_post_follow_activity` now takes an ordered pair lock and a per-actor advisory key
+> before it reads anything. `races/follow-activity.mjs` asserts it live and
+> `mutation-check.mjs` mutant 15 proves that assertion would notice if the key were removed.
 
 ---
 

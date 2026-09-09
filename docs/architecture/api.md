@@ -141,6 +141,15 @@ Semantics are in [`ranking.md`](./ranking.md).
 | `block(target_id)` | Block. Removes follows both ways, voids invitations, hides tags | no |
 | `unblock(target_id)` | Remove a block. Does **not** restore prior follows | no |
 | `report(subject_type, subject_id, reason, note?)` | File a report | no |
+| `follow_activity_people(event_ids uuid[], limit?)` | Who one or more `follow_added` Feed stories are about, per viewer. The **only** read path into `feed_follow_targets`, which has RLS on and no policy: two predicates, `can_view_profile` on the event's actor and `can_identify_profile` on every account named, with the caller excluded from their own story and no total returned (`20260912000100`) | no |
+
+> **`follow` posts Feed activity when — and only when — the edge lands approved**
+> (`20260912000100`). It aggregates into one `follow_added` row per actor per
+> `feed.follow_aggregation_minutes`, beside the recommendation release that already sits in
+> that branch and for the same reason: a pending request has decided nothing, and announcing
+> one would publish a relationship its target has not agreed to. `respond_follow_request`
+> posts nothing either — an approval is the private account's own act, days later, and the
+> two people who care are already told. Neither the edge nor the notification changed.
 
 **`block` and `report` are not queueable**, per PRD §18. Both are safety actions where a stale queued state is dangerous — a user who blocks someone on a train should not discover an hour later that it never took effect. The client hides the target locally on tap and submits when connected, which is a UI affordance rather than an outbox entry.
 

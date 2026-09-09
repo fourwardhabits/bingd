@@ -486,6 +486,25 @@ const ALLOWED = {
   'title_review_count(uuid)': ['authenticated'],
   'set_review_helpful(uuid,uuid,boolean)': ['authenticated'],
 
+  // Added 2026-09-08 (20260912000100), social connection activation.
+  //
+  // `follow_activity_people` is the **only** read path into `feed_follow_targets`, which
+  // has row level security on and deliberately no policy — the shape `notifications` has
+  // had since 20260819000300, and for the same reason: the predicate that decides who may
+  // be named in a follow story is `can_identify_profile`, which is server-only and which a
+  // policy expression therefore cannot call.
+  //
+  // It takes event ids and no viewer, so 20260813001900's rule holds in its strongest
+  // form. Two gates, both restated inside the body because `security definer` bypasses
+  // RLS: `can_view_profile` on the event's actor, which is exactly what `feed_events_read`
+  // would have applied, and `can_identify_profile` on every account it names, which is
+  // what `followers_of` and `people_mutuals` name people with. So holding an event id buys
+  // nothing: a story belonging to a private account the caller cannot see returns no rows,
+  // and a blocked or suspended member of a story the caller *can* see is absent from it.
+  // The caller is excluded from their own row, and no total is returned, so the Feed
+  // cannot promise people the reader is not allowed to open.
+  'follow_activity_people(uuid[],integer)': ['authenticated'],
+
   // Added 2026-08-17. The first writer and the first reader for a table that has
   // existed since 20260813000900 with nothing consulting it. Both are about the
   // caller's own settings and neither takes a target.

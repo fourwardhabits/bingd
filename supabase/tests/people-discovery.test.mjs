@@ -459,6 +459,14 @@ describe('taste matches: people whose rankings agree with yours', () => {
       canonical.score,
       'the suggestion and the profile show the same number, because it is the same call',
     );
+    /**
+     * And the evidence beside it (20260912000100, founder §A6): a People row reads
+     * `87% match · 14 shared`, which is the line the Leaderboard already draws. Same
+     * `taste_match` call, same `common_count`, so the two surfaces cannot come to
+     * disagree about what "shared" counts.
+     */
+    assert.equal(rows[0].shared_count, canonical.common_count);
+    assert.equal(rows[0].shared_count, 6);
   });
 
   /**

@@ -276,53 +276,34 @@ describe('a wall that is not yet the reader’s', () => {
   });
 });
 
-describe('arriving to find people', () => {
-  it('opens on People when sent here for that, and consumes the parameter', async () => {
+/**
+ * **This screen no longer answers for People** (founder §A16, 2026-09-08).
+ *
+ * Two tests used to live here: For You opening on People when `show=people` arrived, and
+ * the same thing on an already-mounted tab. Both moved to `FeedMode.test.tsx` with the
+ * surface, because `peopleDiscovery` now points at the Feed route.
+ *
+ * What is left is the half that still belongs to this screen and is easy to get wrong in a
+ * move: a stale link, a queued navigation or a restored deep link can still deliver
+ * `show=people` here, and the answer has to be that nothing happens. A screen that read a
+ * parameter it can no longer act on would be a screen that swallowed it.
+ */
+describe('a stale request for People', () => {
+  it('opens on Movies and leaves the parameter alone', async () => {
     mockParams = { show: 'people' };
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing People'));
-    // Consumed on arrival, so a later choice of Movies is not undone by a value still
-    // sitting in the URL — the profile tab's `awards` rule, applied here.
-    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
-    // People is the discovery lists, not the wall.
-    expect(view.queryByLabelText(/^Inception/)).toBeNull();
+    expect(showing(view)).toBe('Showing Movies');
+    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
+    // Not consumed: this screen has no claim on it, and clearing a parameter it does not
+    // act on would swallow a navigation somebody else may still be resolving.
+    expect(mockSetParams).not.toHaveBeenCalled();
   });
 
-  it('opens on Movies, as it always has, when nobody asked for People', async () => {
+  it('opens on Movies when nobody asked for anything, as it always has', async () => {
     const view = await open();
 
     expect(showing(view)).toBe('Showing Movies');
     expect(mockSetParams).not.toHaveBeenCalled();
-  });
-
-  /**
-   * **The tab is already mounted when the Feed's Find people arrives** (Codex review of
-   * #122). A tab stays mounted, so an initial-state read alone would open nothing for a
-   * reader who had already looked at For You. The parameter has to be applied on change,
-   * consumed so it cannot re-fire, and must leave the selector free afterwards.
-   */
-  it('opens People on an already-mounted tab, consumes the parameter, and lets go', async () => {
-    const view = await open();
-    expect(showing(view)).toBe('Showing Movies');
-
-    // The Feed's action lands: the route's parameter changes under a mounted screen.
-    mockParams = { show: 'people' };
-    await view.rerender(<RecommendationsScreen />);
-
-    await waitFor(() => expect(showing(view)).toBe('Showing People'));
-    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
-    expect(mockParams).toEqual({});
-
-    // Not stuck: the selector still answers, and the consumed parameter does not put
-    // People back on the next render.
-    await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: /^Movies/ }));
-    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
-    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
-
-    await view.rerender(<RecommendationsScreen />);
-    expect(showing(view)).toBe('Showing Movies');
-    expect(mockSetParams).toHaveBeenCalledTimes(1);
   });
 });

@@ -54,9 +54,31 @@ export const ACTIVITY_TYPES = [
   'watchlist_added',
   'award_earned',
   'goal_completed',
+  // 20260912000100. One aggregated row per actor per window — see `FEED_ACTIVITY_TYPES`
+  // below, which is the only read that asks for it.
+  'follow_added',
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
+
+/**
+ * The types a **profile's** Recent activity asks for: everything except follow stories.
+ *
+ * The founder's §A9 scopes follow activity to the Feed, where it is social *discovery*
+ * content — a way for a network to propagate. On a profile it would be neither: somebody
+ * reading Abisola's page came to see what she has watched, and "followed Ravi and 4
+ * others" between two rankings is an audit entry, which is the exact thing §A9 says not to
+ * build.
+ *
+ * Two lists rather than a `filter` at the call site, because this is the read's `IN`
+ * clause: a type absent from the array is not fetched, rather than fetched and dropped.
+ */
+export const PROFILE_ACTIVITY_TYPES = ACTIVITY_TYPES.filter(
+  (type) => type !== 'follow_added',
+) as readonly ActivityType[];
+
+/** The types the Feed asks for: all of them. */
+export const FEED_ACTIVITY_TYPES = ACTIVITY_TYPES as readonly ActivityType[];
 
 /**
  * Which activities are claims about having *seen* the title.
@@ -95,6 +117,10 @@ const VERB: Record<ActivityType, string> = {
   // "Abisola hit their 2026 Movies goal" — the possessive rides with the verb so the
   // emphasised slot holds the goal itself rather than the word "their".
   goal_completed: 'hit their',
+  // "Abi followed Ravi", "Abi followed Ravi and 4 others" (§A9). The emphasised slot holds
+  // the first person the *reader* is allowed to see, and the overflow rides in the tail —
+  // see `followTail`, which is where the count comes from.
+  follow_added: 'followed',
 };
 
 /**
@@ -133,6 +159,28 @@ export const tailFor = (type: ActivityType, name?: string | null): string | null
   if (type === 'award_earned' && /\baward\b/i.test(name ?? '')) return null;
   return TAIL[type] ?? null;
 };
+
+/**
+ * `and 4 others`, `and 1 other`, or nothing at all — the tail of a follow story.
+ *
+ * `count` is how many people the **reader** may see, not how many the actor followed, and
+ * that is the load-bearing part rather than an implementation detail. `follow_activity_people`
+ * returns only accounts this viewer is allowed to identify (`20260912000100`), so a story
+ * about five follows shows "and 1 other" to somebody who may see two of them. The
+ * alternative — a true total from the row — would promise four people the sheet then
+ * refuses to list, and one of the four would be an account that had blocked the reader.
+ *
+ * Not in `TAIL` because every other entry there is a constant and this one is arithmetic;
+ * a lookup table with one computed member is a table nobody trusts.
+ *
+ * Singular and plural spelled out rather than `other(s)`, which is the convention the rest
+ * of this app follows (`8 episodes` / `1 episode`, `2 mutuals` / `1 mutual`).
+ */
+export function followTail(count: number): string | null {
+  const others = count - 1;
+  if (others <= 0) return null;
+  return `and ${others} ${others === 1 ? 'other' : 'others'}`;
+}
 
 // ---------------------------------------------------------------------------
 // The subheading

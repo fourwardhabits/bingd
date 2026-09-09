@@ -8,18 +8,19 @@ import { renderWithProviders } from '@/test-utils/render';
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
 /**
- * **One selector, three categories** — the founder's final call on For You.
+ * **One selector, two categories** — For You is titles only (founder §A16, 2026-09-08).
  *
- * People shipped as a `SegmentedControl` above the category dropdown, which left the
- * screen asking its one question twice: a Titles/People strip, and under it a
- * Movies/TV shows control that only meant anything on one side of the strip. Two
- * selectors stacked in a header is a reader working out which one owns which, so People
- * is now a third option in the control that was already there.
+ * The history in one paragraph, because the shape of this file is the shape of that
+ * argument. People shipped as a `SegmentedControl` above the category dropdown, which left
+ * the screen asking its one question twice; it became a third option *inside* the dropdown;
+ * and on 2026-09-08 it left this screen altogether for the Feed tab, beside Feed and
+ * Leaderboard. The reason is not layout: a recommendations screen is not where a new
+ * account builds a social graph, and People behind a dropdown here was never going to be
+ * where activation happened.
  *
- * What is asserted here is the shape of that control and the two things the change could
- * plausibly have broken: that People still draws the discovery lists and none of the
- * title-only chrome, and that a visit to People does not throw away the filter or the
- * Sent to you state the reader had set on the title side.
+ * So what this file asserts is the two-option control, that **no** trace of People is left
+ * on this screen, and that the title-only chrome the People branch used to be hidden from
+ * is now unconditional.
  *
  * `useForYou` is stood in for, as `SentToYou.test.tsx` does — the engine is not what
  * this file is about, and `for-you-stability.test.tsx` is the file that exercises the
@@ -180,7 +181,7 @@ describe('the one selector', () => {
     expect(view.queryAllByRole('radio')).toHaveLength(0);
   });
 
-  it('offers Movies, TV shows and People, and nothing else', async () => {
+  it('offers Movies and TV shows, and nothing else', async () => {
     const view = await open();
     await fireEvent.press(view.getByLabelText(/^Showing /));
 
@@ -188,7 +189,9 @@ describe('the one selector', () => {
     // and the glyph is a `Text` node that lands in the accessible name behind the label.
     expect(view.getByRole('button', { name: /^Movies/ })).toBeTruthy();
     expect(view.getByRole('button', { name: /^TV shows/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^People/ })).toBeTruthy();
+    // §A16. People is a mode of the Feed tab now, and the option that used to open it here
+    // is gone rather than hidden — a dropdown row nobody can reach is a dropdown row.
+    expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
     // The For You override. Collection lists the rankable unit, which is the season;
     // this wall holds series, and calling them seasons here would name something that is
     // not on screen.
@@ -202,47 +205,53 @@ describe('the one selector', () => {
   });
 });
 
-describe('People', () => {
-  it('draws the discovery modes', async () => {
+/**
+ * **People is gone from this screen** (§A16), and its absence is asserted three ways
+ * because there were three places it could have been left behind: the dropdown option, the
+ * suggestion lists it drew, and the reads that fed them.
+ *
+ * The last one is the point. A screen that no longer shows People but still calls
+ * `people_mutuals` on every open would be spending a request per launch on a surface that
+ * is not there — the kind of thing that survives a move because nothing on screen says it
+ * is happening.
+ */
+describe('People, which is no longer here', () => {
+  it('offers no way to reach it and draws none of it', async () => {
     mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
     mockRpcResults.people_taste_matches = [
       person({ user_id: 'bo-id', username: 'bo', display_name: 'Bo', match_score: 91 }),
     ];
 
     const view = await open();
-    await choose(view, 'People');
+    await waitFor(() =>
+      expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
+    );
 
-    // The two discovery modes as chips — Mutuals showing, Matches one press away.
-    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
-    expect(view.getByText('Matches')).toBeTruthy();
-    expect(showing(view)).toBe('Showing People');
+    expect(showing(view)).toBe('Showing Movies');
+    expect(view.queryByText('Mutuals')).toBeNull();
+    expect(view.queryByText('Match')).toBeNull();
+    expect(view.queryByText('Ben + 2 more')).toBeNull();
   });
 
-  /**
-   * A chip that narrows a wall of films, over a list of people, would be a control with
-   * nothing to act on. All four sit inside the title branch, so this is really an
-   * assertion that the branch is drawn from the selector and not from something that can
-   * drift away from it.
-   */
-  it('draws none of the title-only controls', async () => {
-    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
-    mockRpcResults.recommendations_to_me = [recommendation()];
-
+  it('asks the server for no suggestions at all', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText(/^Sent to you/)).toBeTruthy());
-    await choose(view, 'People');
+    await waitFor(() =>
+      expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
+    );
 
-    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
-    expect(view.queryByText(/^Sent to you/)).toBeNull();
-    expect(view.queryByText(/^Filters/)).toBeNull();
-    expect(view.queryByText('Refresh')).toBeNull();
-    expect(view.queryByText('Clear all')).toBeNull();
-    // The wall itself, which is the largest thing that would otherwise be left under a
-    // heading that says Mutuals.
-    expect(view.queryByLabelText(/^Save Inception to watchlist$/)).toBeNull();
+    const asked = mockRpc.mock.calls.map(([name]) => name);
+    expect(asked).not.toContain('people_mutuals');
+    expect(asked).not.toContain('people_taste_matches');
   });
 });
 
+/**
+ * **The title-only controls are unconditional now.**
+ *
+ * They used to live inside the branch that People was the other half of, and the value of
+ * asserting them here is that the branch is gone: a chip that appeared only when the
+ * selector was not on People is a chip that can now only fail to appear for a real reason.
+ */
 describe('the title categories', () => {
   it('still draws the wall and the filter row on Movies', async () => {
     const view = await open();
@@ -266,13 +275,17 @@ describe('the title categories', () => {
 });
 
 /**
- * **A look at People is not a reset.**
+ * **Switching category is not a reset.**
  *
  * The reader's filters and their Sent to you chip are state of the screen rather than of
- * the wall, so a category that has neither must leave both alone — a filter that has to
- * be set again after every glance at a suggestion list is one nobody sets twice.
+ * one wall, so moving between Movies and TV shows must leave both alone — a filter that has
+ * to be set again after every switch is one nobody sets twice.
+ *
+ * This used to be asserted across a visit to People, which was the category that drew
+ * neither control. People has left the screen (§A16) and the property it was guarding has
+ * not, so the same two tests now cross the seam that is still here.
  */
-describe('coming back from People', () => {
+describe('crossing between the two categories', () => {
   it('keeps an applied filter', async () => {
     const view = await open();
 
@@ -282,11 +295,10 @@ describe('coming back from People', () => {
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
 
-    await choose(view, 'People');
-    await waitFor(() => expect(view.queryByText('Filters · 1')).toBeNull());
-    await choose(view, 'Movies');
+    await choose(view, 'TV shows');
+    await waitFor(() => expect(showing(view)).toBe('Showing TV shows'));
 
-    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+    expect(view.getByText('Filters · 1')).toBeTruthy();
   });
 
   it('keeps Sent to you turned on', async () => {
@@ -296,12 +308,11 @@ describe('coming back from People', () => {
     await fireEvent.press(view.getByText(/^Sent to you/));
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
 
-    await choose(view, 'People');
-    await waitFor(() => expect(view.queryByText('Heat (1995)')).toBeNull());
-    await choose(view, 'Movies');
+    await choose(view, 'TV shows');
+    await waitFor(() => expect(showing(view)).toBe('Showing TV shows'));
 
     // Still the list rather than the wall, which is what the chip being on means.
-    await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
+    expect(view.getByText('Heat (1995)')).toBeTruthy();
   });
 });
 
@@ -320,13 +331,6 @@ describe('the Group Picks chip', () => {
     await waitFor(() => expect(view.getByText("Who's watching?")).toBeTruthy());
   });
 
-  it('is absent on People', async () => {
-    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
-    const view = await open();
-    await choose(view, 'People');
-    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
-    expect(view.queryByText('Group Picks')).toBeNull();
-  });
 });
 
 /**

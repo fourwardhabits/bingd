@@ -1,7 +1,7 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { BackHandler } from 'react-native';
 
-import { PEOPLE_DISCOVERY } from '@/lib/routes';
+import { peopleDiscovery } from '@/lib/routes';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -78,7 +78,13 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: (...a: unknown[]) => mockPush(...a) }),
+  useRouter: () => ({
+    push: (...a: unknown[]) => mockPush(...a),
+    setParams: () => {},
+  }),
+  // The Feed reads `show=people` so a contextual CTA can open it on People (§A15). No
+  // parameter here: every test in this file is about the activity list.
+  useLocalSearchParams: () => ({}),
   useFocusEffect: (callback: () => void) => callback(),
   useNavigation: () => ({ addListener: () => () => {}, isFocused: () => true }),
 }));
@@ -308,20 +314,24 @@ describe('the true end', () => {
   });
 
   /**
-   * **The quiet feed leads somewhere** (pre-GTM audit, 2026-09-07). The copy said
-   * "follow someone" and nothing on the screen led to anybody; the one action goes to
-   * For You opened on People — the same destination onboarding's summary offers, by
-   * the same parameter, and no Everyone feed.
+   * **The quiet feed leads somewhere** (pre-GTM audit, 2026-09-07; retargeted §A15,
+   * 2026-09-08). The copy said "follow someone" and nothing on the screen led to anybody.
+   * The one action now goes to **this same tab, opened on People** — it used to go to For
+   * You, which is where People lived until the founder's pre-distribution pass moved it.
+   * Still no Everyone feed and still one action.
+   *
+   * `sparse_feed` rides with it so `people_suggestions_viewed` can tell this mechanism
+   * apart from a reader who found the toggle, which is the question §A15 exists to answer.
    */
-  it('offers Find people, into For You opened on People', async () => {
+  it('offers Find your people, into this tab opened on People', async () => {
     mockFeedQueue = [{ rows: [] }];
     const view = await open();
     await waitFor(() => expect(view.getByText(/quiet right now/i)).toBeTruthy());
 
     mockPush.mockClear();
-    await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Find your people' }));
 
-    expect(mockPush).toHaveBeenCalledWith(PEOPLE_DISCOVERY);
+    expect(mockPush).toHaveBeenCalledWith(peopleDiscovery('sparse_feed'));
   });
 
   it('offers no such action once there is activity to show', async () => {
@@ -329,7 +339,7 @@ describe('the true end', () => {
     const view = await open();
     await seeRow(view, 0);
 
-    expect(view.queryByRole('button', { name: 'Find people' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Find your people' })).toBeNull();
   });
 });
 

@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -21,7 +21,6 @@ import {
   useRecommendationRequests,
   useSweepIntent,
 } from '@/features/recommendations/use-recommendation-requests';
-import { PeopleDiscovery } from '@/features/people/PeopleDiscovery';
 import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
@@ -84,60 +83,31 @@ import {
  *
  * For You is a wall of artwork; Sent to you is a list. See `SentToYouList` for why they
  * differ.
+ *
+ * ---------------------------------------------------------------------------
+ * **PEOPLE IS NO LONGER HERE** (founder §A16, 2026-09-08)
+ *
+ * It was the third option in the category selector, on the argument that For You answers
+ * "what next" and the honest answer is sometimes a person. That argument was about
+ * *discovery*; the founder's pre-distribution pass is about *activation*, which is a
+ * different problem with a different answer. Somebody who has just joined does not open a
+ * recommendations screen looking for their friends, and People behind a dropdown here was
+ * never going to be where a social graph gets built.
+ *
+ * So People is a mode of the Feed tab — the tab that is already about other people — beside
+ * Feed and Leaderboard, and this screen is titles and watch discovery only. `peopleDiscovery`
+ * is the route that says so; both surfaces that used to send somebody here for People now
+ * send them there instead, and neither of them had to know that this screen changed.
+ *
+ * What did **not** move: Sent to you, Group Picks, the filters and the recommendation
+ * requests. Those are all about titles, which is what this screen now exclusively is.
  */
 export default function RecommendationsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
 
-  /**
-   * Whether the People suggestions are showing instead of the title wall.
-   *
-   * **A boolean, with the selector's third option derived from it** (2026-09-07).
-   * People is an option in the dropdown again — it is an answer to "what am I looking
-   * at", which is the question that control asks — but it is deliberately not a value
-   * `medium` can hold. Keeping it as its own flag is what stops a glance at People from
-   * moving the slate query to Movies and throwing away a TV wall somebody scrolled; see
-   * `category` below, which is the one place the two are combined.
-   *
-   * State rather than a route, unchanged: a route would put People in the back stack and
-   * make the tab bar's "back to the top of For You" gesture land somewhere the reader
-   * did not leave. Every filter and scroll position on the title side survives a look at
-   * People and back, which is what a control living *inside* a screen implies.
-   *
-   * Deliberately not persisted. Collection remembers its side because a TV-heavy reader
-   * opens the same list every day; For You is a question asked fresh each visit, and an
-   * app that reopened on People because somebody once looked there would be answering a
-   * question nobody asked twice.
-   *
-   * **Except on arrival by `PEOPLE_DISCOVERY`** (2026-09-07). The end of onboarding and
-   * an empty Feed both send people here *to find people*, and this parameter is how
-   * they say so. Read at mount and consumed on change, the way the profile tab reads
-   * its `awards` parameter: a tab stays mounted, so an initial-state read alone would
-   * open nothing for somebody who had already visited For You, and the parameter is
-   * cleared in the same breath so that choosing Movies afterwards is not undone by a
-   * value still sitting in the URL.
-   */
-  const { show } = useLocalSearchParams<{ show?: string }>();
-  const [peopleOpen, setPeopleOpen] = useState(show === 'people');
-  useEffect(() => {
-    if (show === 'people') {
-      // Synchronising FROM an external system — the URL — which is the case the
-      // rule's own doc carves out; the param is consumed in the same breath, so this
-      // fires once per arrival, not per render.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPeopleOpen(true);
-      router.setParams({ show: undefined });
-    }
-  }, [show, router]);
-  /**
-   * The title side the reader is on, and it is untouched by a visit to People.
-   *
-   * People is not a medium, so there is no honest value for this while it is showing —
-   * and deriving one would silently move the slate query to Movies the moment somebody
-   * glanced at People from TV shows, throwing away a wall they had scrolled. Holding it
-   * separately means the visit costs the slate nothing at all.
-   */
+  /** Which side of the wall the reader is on. The selector's value, directly (§A16). */
   const [medium, setMedium] = useState<Medium>('movies');
   /** The first chip. Not a tab: see the header. */
   const [sentOnly, setSentOnly] = useState(false);
@@ -177,25 +147,14 @@ export default function RecommendationsScreen() {
    * cost nothing: the slate itself was always cached per medium by React Query, and the
    * page count was the only thing being discarded.
    *
-   * Choosing a media tab also leaves People, because tapping Movies while looking at a
-   * list of people plainly means "show me the films".
+   * **The selector's value is `medium` itself again** (§A16). It used to be derived, because
+   * People was a third option the `medium` state could not hold and a separate flag carried
+   * it; with People gone to the Feed there are exactly two categories, both of them media,
+   * and the derivation had nothing left to reconcile. So this is `setMedium` under a name
+   * that says what pressing the control means — kept as a named function rather than passing
+   * the setter, because PR B adds two more options and the branch belongs here.
    */
-  const changeCategory = (next: ForYouCategory) => {
-    setPeopleOpen(next === 'people');
-    // People is not a medium, so it leaves `medium` alone — which is what keeps the
-    // wall, its filters and its per-medium depth exactly where the reader left them.
-    if (next !== 'people') setMedium(next);
-  };
-
-  /**
-   * What the selector shows, derived rather than stored.
-   *
-   * Two pieces of state (is People showing, which media side) and one control over
-   * both, so the control's value is computed from them instead of being a third thing
-   * that could disagree with either. This is the seam that lets People be an option in
-   * the dropdown without being a `medium` the slate query could ever be asked for.
-   */
-  const category: ForYouCategory = peopleOpen ? 'people' : medium;
+  const changeMedium = (next: Medium) => setMedium(next);
 
   /**
    * Filters, and the page count that has to move with them.
@@ -471,48 +430,30 @@ export default function RecommendationsScreen() {
       <AppHeader />
 
       {/**
-       * **Movies, TV shows, People** — one selector, and the founder's answer to Bingd
-       * having no way to find anybody (tranche 2026-08-26 §10, revised).
+       * **Movies and TV shows** — one selector, in the place Collection leads with the
+       * same one.
        *
-       * For You is the screen that answers "what next", and the honest answer is
-       * sometimes a film and sometimes a person. People was first built as a segmented
-       * control *above* this one, which gave the screen two selectors stacked in its
-       * header: a reader had to work out that the top one chose a kind of thing and the
-       * bottom one chose a category of the thing the top one had chosen. It is one
-       * question — what am I looking at — so it is one control, and People is a third
-       * option in the control that was already asking it.
-       *
-       * The same control Collection leads with, in the same place, doing the same job.
        * "TV shows" rather than "TV seasons" because this wall holds series: TMDB answers
        * "similar" about a show and never about one of its seasons. Collection keeps its
        * own two options and its own label — see `MediumSelector`.
-       */}
-      {/**
-       * **Restored, with People back in it** (founder, physical Android, 2026-09-07).
        *
-       * These were visible tabs for a day, and People was demoted to a chip beside Sent
-       * to you. On a device the tab row drew differently here than on Collection — the
-       * two screens are supposed to lead with the same control — and People as a chip
-       * sat in a row of *filters*, where a thing that replaces the entire wall does not
-       * belong. Both problems are the same problem: the screen has one question at the
-       * top, and splitting it across two control languages is what made it look split.
+       * **People was a third option here and has left** (founder §A16, 2026-09-08). It is
+       * a mode of the Feed tab now, for the reason this file's header gives: a
+       * recommendations screen is not where a new account builds a social graph. What that
+       * leaves behind is a two-option dropdown, which is what this control was before
+       * 2026-08-26 and is again.
        *
-       * The dropdown is also the only one of the two that scales. Movies and TV shows
-       * are not necessarily the last categories this screen will offer, and a fourth
-       * tab is a wrapped row where a fourth sheet row is a fourth sheet row.
+       * A dropdown and not a tab row, which is the 2026-09-07 decision and is unaffected:
+       * on a device the tab row drew differently here than on Collection, and the two
+       * screens are meant to lead with the same control. It is also the only one of the two
+       * that scales — a fourth tab is a wrapped row where a fourth sheet row is a fourth
+       * sheet row.
        */}
-      <MediumSelector value={category} onChange={changeCategory} options={FOR_YOU_CATEGORIES} />
-      {/* Outside the branch, because the selector above it is now the screen's entire
-      header and the seam it marks is the same one whichever category is showing. */}
+      <MediumSelector value={medium} onChange={changeMedium} options={FOR_YOU_CATEGORIES} />
+      {/* The selector above it is the screen's entire header, and this is the seam that
+      marks where the header ends and the wall begins. */}
       <HeaderBoundary />
 
-      {peopleOpen ? (
-        // No filter row: none of the genre chips narrows a list of people, and drawing
-        // them here would offer controls that do nothing. The way back is the selector
-        // above, which reads "People" with its chevron — the same control that got here.
-        <PeopleDiscovery viewerId={profile.id} />
-      ) : (
-        <>
           {/* Above the filters, and only when something is waiting.
 
           It sits here rather than in the filter row because it is not a filter: the
@@ -825,21 +766,13 @@ export default function RecommendationsScreen() {
               sweepIntent={sweepIntent}
             />
           ) : null}
-        </>
-      )}
     </Screen>
   );
 }
 
 /**
- * The three things this screen can be showing.
- *
- * The two title categories come from the shared table rather than being restated here,
- * so "Movies" cannot come to mean one thing on Collection and another here; People is
- * the addition, and the only one this screen owns.
- */
-/**
- * The two primary tabs, keyed by **this screen's** medium rather than the collection's.
+ * The two things this screen can be showing, keyed by **this screen's** medium rather than
+ * the collection's.
  *
  * `Medium` here is `'movies' | 'tv'` and Collection's is `'movies' | 'tv_seasons'`,
  * because the units genuinely differ: TMDB answers "similar" about a *show* and never
@@ -847,16 +780,13 @@ export default function RecommendationsScreen() {
  * "TV shows" and Collection's reads "TV" — one accurate word each, rather than one
  * shared table forcing both to say the same slightly-wrong thing.
  *
- * The mapping table this replaced existed only to translate between the two, and the
- * translation existed only because the control was shared. The control is a tab row now
- * and takes this screen's own ids directly.
+ * **It was three** (§A16). People was the third and is a mode of the Feed tab now, which is
+ * what takes `ForYouCategory` — a union of `Medium` and a value `medium` could not hold —
+ * out of this file with it. The selector's value is `medium` itself again.
  */
-type ForYouCategory = Medium | 'people';
-
-const FOR_YOU_CATEGORIES: readonly MediumSelectorOption<ForYouCategory>[] = [
+const FOR_YOU_CATEGORIES: readonly MediumSelectorOption<Medium>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV shows' },
-  { id: 'people', label: 'People' },
 ];
 
 /**

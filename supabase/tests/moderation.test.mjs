@@ -659,6 +659,18 @@ describe('the guard is wired in, not merely present', () => {
     // reaches nobody: every act a pick leads to (log, rank, save, recommend) calls
     // the guard itself.
     'group_picks',
+
+    // 20260912000100. Who a follow story is about, resolved per viewer.
+    //
+    // A pure read, and the suspension question resolves in both directions inside the
+    // function rather than needing the guard. A suspended *member* is excluded by
+    // `p.status = 'active'` and by `can_identify_profile`, so a suspended account is
+    // absent from every story. A suspended *caller* reads a list of handles they could
+    // already reach one at a time — `can_view_profile` on the actor and
+    // `can_identify_profile` on each name are the same two predicates `followers_of`
+    // applies — and every act a name leads to (open the profile, follow, request) calls
+    // the guard itself.
+    'follow_activity_people',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

@@ -9,7 +9,12 @@ import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { compactName, type MediaKind } from '@/lib/titles';
 
-import { ACTIVITY_TYPES, isWatchActivity, type ActivityType } from './activity';
+import {
+  FEED_ACTIVITY_TYPES,
+  isWatchActivity,
+  PROFILE_ACTIVITY_TYPES,
+  type ActivityType,
+} from './activity';
 
 export type FeedNote = {
   text: string;
@@ -108,6 +113,29 @@ export type FeedItem = {
    * lead and route its tap. Null on every other type.
    */
   goal: { year: number; category: 'movies' | 'tv_seasons'; target: number } | null;
+  /**
+   * The people a `follow_added` row is about — and only there (`20260912000100`).
+   *
+   * **As far as *this* viewer is allowed to know**, which is the whole reason it is a list
+   * rather than a name and a count on the row. `follow_activity_people` applies
+   * `can_identify_profile` per caller, so a story about five follows arrives here holding
+   * however many of them the reader may identify; the sentence and the sheet are both
+   * built from this array, so neither can promise somebody the other refuses to show.
+   *
+   * Empty on every other type, and an empty array on a follow row means the row is
+   * dropped — see `attachFollowPeople`.
+   */
+  followed: FollowedPerson[];
+};
+
+/** One person named by a follow story. Identity only: this is a discovery list. */
+export type FollowedPerson = {
+  id: string;
+  username: string;
+  name: string;
+  avatarUri: string | null;
+  /** True when the account is private, so the control offers Request rather than Follow. */
+  isPrivate: boolean;
 };
 
 type Embedded<T> = T | T[] | null;
@@ -186,6 +214,16 @@ type CompanionRow = {
   tagger_id: string;
   media_item_id: string;
   profiles: Embedded<{ display_name: string | null; username: string }>;
+};
+
+/** One row of `follow_activity_people` (`20260912000100`). */
+type FollowPersonRow = {
+  event_id: string;
+  user_id: string;
+  username: string;
+  display_name: string | null;
+  avatar_path: string | null;
+  visibility: string;
 };
 
 /**
@@ -271,6 +309,10 @@ export function useFeed(userId: string) {
         [userId, ...(follows ?? []).map((row) => row.followee_id)],
         FEED_PAGE_SIZE,
         pageParam,
+        // Follow stories are Feed-only (`PROFILE_ACTIVITY_TYPES` says why), and the
+        // reader's own are dropped here rather than filtered out of the query — see
+        // `activityPage`.
+        { types: FEED_ACTIVITY_TYPES, hideOwnFollows: userId },
       );
     },
   });
@@ -362,6 +404,8 @@ export function useActorActivity(actorId: string | null, limit = FEED_PAGE_SIZE)
     // Null at the true end, which is what makes `hasNextPage` false and stops the
     // bottom of a profile asking for a page that does not exist.
     getNextPageParam: (last: FeedPage) => last.cursor,
+    // `PROFILE_ACTIVITY_TYPES` by default, which is every type except follow stories: see
+    // that constant for why a profile is not the place for one.
     queryFn: async ({ pageParam }): Promise<FeedPage> =>
       activityPage([actorId as string], limit, pageParam),
   });
@@ -474,18 +518,44 @@ async function activityPage(
   actorIds: string[],
   limit: number,
   cursor: FeedCursor | null,
+  {
+    types = PROFILE_ACTIVITY_TYPES,
+    hideOwnFollows,
+  }: { types?: readonly ActivityType[]; hideOwnFollows?: string } = {},
 ): Promise<FeedPage> {
   if (!actorIds.length) return { items: [], cursor: null };
 
   const items: FeedItem[] = [];
   let next = cursor;
   for (let read = 0; read < 4; read += 1) {
-    const rows = await activityRows(actorIds, limit, next);
-    // A short page is the end of the feed, and it is the only end signal there is:
-    // asking for one row more than needed, to find out, would cost a round trip on
-    // every page to save one at the very last.
+    const rows = await activityRows(actorIds, limit, next, types);
+    /**
+     * A short page is the end of the feed, and it is the only end signal there is:
+     * asking for one row more than needed, to find out, would cost a round trip on
+     * every page to save one at the very last.
+     *
+     * **From the raw rows, before anything is dropped.** Both filters below shorten the
+     * list, and a cursor taken after them would rewind past every dropped row and serve
+     * the tail of this page again — the same rule `cursorFor`'s own header states.
+     */
     next = rows.length === limit ? cursorFor(rows[rows.length - 1] as FeedRow) : null;
-    items.push(...(await hydrate(rows)));
+    /**
+     * **The reader's own follow stories, out** (§A10, last line).
+     *
+     * The Feed's actor set is the reader plus the people they follow, which is what puts
+     * their own rankings in their own feed — and that is right for a ranking and wrong for
+     * a follow: "You followed Ravi and 4 others" is the app telling somebody what they
+     * just did. Dropped here rather than in the query because PostgREST is already
+     * spending its one top-level `or` on the keyset, and a second `or` would be `AND`ed
+     * with it into a predicate neither clause means.
+     *
+     * Costs at most one wasted row an hour per reader, which is what the aggregation
+     * window bounds it to.
+     */
+    const kept = hideOwnFollows
+      ? rows.filter((row) => !(row.type === 'follow_added' && row.actor_id === hideOwnFollows))
+      : rows;
+    items.push(...(await hydrate(kept)));
     if (items.length || !next) break;
   }
   return { items, cursor: next };
@@ -496,12 +566,13 @@ async function activityRows(
   actorIds: string[],
   limit: number,
   cursor: FeedCursor | null,
+  types: readonly ActivityType[],
 ): Promise<FeedRow[]> {
   const rows = supabase.from('feed_events').select(ACTIVITY_SELECT);
 
   const { data, error } = await (cursor ? rows.or(keyset(cursor)) : rows)
     .in('actor_id', actorIds)
-    .in('type', [...ACTIVITY_TYPES])
+    .in('type', [...types])
     /**
      * **Three keys, and the last two are what make one action read in order**
      * (20260901000100, corrected 20260902000100).
@@ -573,7 +644,9 @@ async function oneActivity(eventId: string): Promise<FeedItem | null> {
     .from('feed_events')
     .select(ACTIVITY_SELECT)
     .eq('id', eventId)
-    .in('type', [...ACTIVITY_TYPES])
+    // The profile set, which is the right one here: this exists for the comment-thread
+    // page, and a follow story carries no comments to open one from.
+    .in('type', [...PROFILE_ACTIVITY_TYPES])
     .limit(1);
   if (error) throw error;
 
@@ -703,6 +776,8 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       category: row.payload?.category ?? null,
       note: null,
       companions: [],
+      // Filled by `attachFollowPeople` below, per viewer, and only on a follow row.
+      followed: [],
       award: award(row),
       goal:
         row.type === 'goal_completed' && row.payload?.year && row.payload?.category
@@ -730,8 +805,28 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
    * Filtering the input is the whole fix, and it also narrows the two queries.
    */
   const watched = items.filter((item) => isWatchActivity(item.type));
-  await Promise.all([attachNotes(watched), attachCompanions(watched)]);
-  return items;
+  const follows = items.filter((item) => item.type === 'follow_added');
+  await Promise.all([
+    attachNotes(watched),
+    attachCompanions(watched),
+    attachFollowPeople(follows),
+  ]);
+
+  /**
+   * **A follow story with nobody the reader may see is not a row.**
+   *
+   * The one place in this function where an item is dropped for a reason other than an
+   * unresolvable actor, and it is the same kind of reason: a row whose sentence would read
+   * "Abi followed" is not an activity item. It happens legitimately — a story about one
+   * person who has since blocked the reader, or a story whose only member is the reader
+   * themselves, which `follow_activity_people` excludes because a Follow control pointed at
+   * yourself cannot exist.
+   *
+   * Dropping rather than substituting a count is the §A12 rule enforced at the last
+   * moment it can be: nothing about a member the viewer may not identify reaches the
+   * screen, not even the fact that there was one.
+   */
+  return items.filter((item) => item.type !== 'follow_added' || item.followed.length > 0);
 }
 
 /**
@@ -813,5 +908,58 @@ async function attachCompanions(items: FeedItem[]) {
   for (const item of items) {
     if (!item.mediaItemId) continue;
     item.companions = byPair.get(`${item.actorId}:${item.mediaItemId}`) ?? [];
+  }
+}
+
+/**
+ * The people the follow stories on this page are about, in one round trip.
+ *
+ * `follow_activity_people` is the only read path into `feed_follow_targets`, which has row
+ * security on and no policy (`20260912000100`): the predicate that decides who may be
+ * named — `can_identify_profile` — is server-only, and a policy expression cannot call it.
+ * So this is a definer RPC taking event ids and no viewer, and everything about *who* is
+ * decided there rather than here. Nothing in this file filters people, and there is no
+ * client path that could start.
+ *
+ * One call for the whole page rather than one per row, which matters more here than it
+ * looks: the RPC resolves `can_identify_profile` per person, so a row-at-a-time version
+ * would be a request per follow story and the aggregation window exists precisely so a
+ * social session produces several of them.
+ *
+ * Swallowed on failure, exactly as the notes and the companions are — with one difference
+ * that is the point rather than an accident: a story whose people did not load ends up
+ * with an empty array, and `hydrate` drops it. So a failed enrichment costs the reader a
+ * row they cannot act on, never a row that says "Abi followed" and nothing else.
+ */
+async function attachFollowPeople(items: FeedItem[]) {
+  if (!items.length) return;
+
+  const { data, error } = await supabase.rpc('follow_activity_people', {
+    // The server caps this at fifty; a page of the feed is twenty events, so the slice is
+    // a floor under a pathological caller rather than a real limit.
+    p_event_ids: items.map((item) => item.id).slice(0, 50),
+  });
+  if (error || !data) return;
+
+  const byEvent = new Map<string, FollowedPerson[]>();
+  for (const row of data as FollowPersonRow[]) {
+    const name = row.display_name || row.username;
+    if (!name) continue;
+    byEvent.set(row.event_id, [
+      ...(byEvent.get(row.event_id) ?? []),
+      {
+        id: row.user_id,
+        username: row.username,
+        name,
+        avatarUri: avatarUri(row.avatar_path),
+        isPrivate: row.visibility === 'private',
+      },
+    ]);
+  }
+
+  for (const item of items) {
+    // The server orders by when each follow joined the story, so the name in the
+    // sentence's emphasised slot is stable across refetches.
+    item.followed = byEvent.get(item.id) ?? [];
   }
 }

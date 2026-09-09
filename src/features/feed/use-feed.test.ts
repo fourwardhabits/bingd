@@ -7,6 +7,9 @@ import { feedItems, FEED_PAGE_SIZE, useActorActivity, useFeed } from './use-feed
 let mockFeedRows: unknown[] = [];
 let mockNoteRows: unknown[] = [];
 let mockNoteError: unknown = null;
+/** `follow_activity_people`'s answer: who a follow story is about, for *this* viewer. */
+let mockFollowPeopleRows: unknown[] = [];
+let mockFollowPeopleError: unknown = null;
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 /**
  * Every `.order()` the feed asks for, per table.
@@ -49,6 +52,15 @@ jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: Record<string, unknown>) => {
       rpcCalls.push({ name, args });
+      // Branched by name since `follow_activity_people` arrived (20260912000100). It was one
+      // answer for every RPC, which was true while `public_notes` was the only one — a
+      // second reader taking that answer would have been handed a page of notes.
+      if (name === 'follow_activity_people') {
+        return Promise.resolve({
+          data: mockFollowPeopleError ? null : mockFollowPeopleRows,
+          error: mockFollowPeopleError,
+        });
+      }
       return Promise.resolve({ data: mockNoteError ? null : mockNoteRows, error: mockNoteError });
     },
     from: (table: string) => {
@@ -177,6 +189,8 @@ beforeEach(() => {
   mockFeedRows = [];
   mockNoteRows = [];
   mockNoteError = null;
+  mockFollowPeopleRows = [];
+  mockFollowPeopleError = null;
   rpcCalls.length = 0;
   mockFeedReads.length = 0;
   mockFeedQueue = [];
@@ -1018,5 +1032,167 @@ describe('pages joined into a list', () => {
 
   it('is empty for a feed that has not loaded', async () => {
     expect(feedItems(undefined)).toEqual([]);
+  });
+});
+
+/**
+ * Follow stories in the feed (`20260912000100`, founder §§A9–A14).
+ *
+ * The read, the hydration and the two drops — which is everything about follow activity
+ * this file can prove. Who a story may name is `follow_activity_people`'s decision and is
+ * asserted against real policies in `supabase/tests/follow-activity.test.mjs`; what is
+ * asserted here is that the client asks the right question and believes the answer.
+ */
+describe('follow stories', () => {
+  const followRow = (over: Record<string, unknown> = {}) =>
+    event({
+      id: 'follow-1',
+      type: 'follow_added',
+      actor_id: 'friend',
+      media_item_id: null,
+      media_items: null,
+      payload: {},
+      profiles: { username: 'abi', display_name: 'Abi', avatar_path: null },
+      ...over,
+    });
+
+  const named = (eventId: string, username: string, over: Record<string, unknown> = {}) => ({
+    event_id: eventId,
+    user_id: `${username}-id`,
+    username,
+    display_name: username[0]?.toUpperCase() + username.slice(1),
+    avatar_path: null,
+    visibility: 'public',
+    ordinal: 1,
+    ...over,
+  });
+
+  it('asks the feed for follow stories and the profile does not', async () => {
+    mockFeedRows = [event()];
+    await load();
+    expect(mockFeedReads[0]?.in.type).toContain('follow_added');
+
+    mockFeedReads.length = 0;
+    const view = await renderHookWithProviders(() => useActorActivity('friend'));
+    await waitFor(() => expect(view.result.current.isPending).toBe(false));
+
+    // `PROFILE_ACTIVITY_TYPES`: a profile's Recent activity is what somebody watched, and a
+    // follow story between two rankings would be the audit log §A9 refuses to build.
+    expect(mockFeedReads[0]?.in.type).not.toContain('follow_added');
+    expect(mockFeedReads[0]?.in.type).toContain('title_ranked');
+  });
+
+  it('resolves who a story is about, in one call for the page', async () => {
+    mockFeedRows = [followRow(), followRow({ id: 'follow-2' }), event()];
+    mockFollowPeopleRows = [
+      named('follow-1', 'ravi'),
+      named('follow-1', 'ben', { ordinal: 2 }),
+      named('follow-2', 'cy'),
+    ];
+
+    const items = await load();
+    const first = items.find((item) => item.id === 'follow-1');
+
+    expect(first?.followed.map((person) => person.username)).toEqual(['ravi', 'ben']);
+    expect(items.find((item) => item.id === 'follow-2')?.followed).toHaveLength(1);
+    // An ordinary ranking row carries none, and is not asked about.
+    expect(items.find((item) => item.id === 'event-1')?.followed).toEqual([]);
+
+    const calls = rpcCalls.filter((call) => call.name === 'follow_activity_people');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args.p_event_ids).toEqual(['follow-1', 'follow-2']);
+  });
+
+  it('does not ask at all when the page holds no follow story', async () => {
+    mockFeedRows = [event()];
+    await load();
+
+    expect(rpcCalls.filter((call) => call.name === 'follow_activity_people')).toHaveLength(0);
+  });
+
+  it('marks a private member so the row can offer Request rather than Follow', async () => {
+    mockFeedRows = [followRow()];
+    mockFollowPeopleRows = [named('follow-1', 'ravi', { visibility: 'private' })];
+
+    const items = await load();
+
+    expect(items[0]?.followed[0]?.isPrivate).toBe(true);
+  });
+
+  /**
+   * **A story with nobody the reader may see is not a row** (§A12).
+   *
+   * It happens legitimately: a story about one person who has since blocked the reader, or
+   * one whose only member is the reader themselves — `follow_activity_people` excludes the
+   * caller, because a Follow control pointed at yourself cannot exist. Dropping is the
+   * honest outcome; a row reading "Abi followed" is a sentence with a hole in it.
+   */
+  it('drops a story the reader may see nobody in', async () => {
+    mockFeedRows = [followRow(), event()];
+    mockFollowPeopleRows = [];
+
+    const items = await load();
+
+    expect(items.map((item) => item.id)).toEqual(['event-1']);
+  });
+
+  it('drops it when the resolution failed, rather than drawing half a sentence', async () => {
+    mockFeedRows = [followRow(), event()];
+    mockFollowPeopleError = { message: 'nope' };
+
+    const items = await load();
+
+    // The ranking survives: a failed enrichment costs the row it belonged to and no more,
+    // which is the rule the notes and the companions already follow.
+    expect(items.map((item) => item.id)).toEqual(['event-1']);
+  });
+
+  /**
+   * **The reader's own follow stories, out of their own feed** (§A10, last line).
+   *
+   * The feed's actor set is the reader plus the people they follow, which is what puts
+   * their own rankings in their own feed — right for a ranking and wrong for a follow:
+   * "You followed Ravi and 4 others" is the app telling somebody what they just did.
+   *
+   * Their own *rankings* must survive it, which is the other half of the assertion and the
+   * one a too-broad filter would break.
+   */
+  it('drops the reader’s own follow story and keeps their own ranking', async () => {
+    mockFeedRows = [
+      followRow({ id: 'mine', actor_id: 'user-1' }),
+      followRow({ id: 'theirs' }),
+      event({ id: 'my-ranking', actor_id: 'user-1' }),
+    ];
+    mockFollowPeopleRows = [named('theirs', 'ravi'), named('mine', 'ravi')];
+
+    const items = await load();
+
+    expect(items.map((item) => item.id)).toEqual(['theirs', 'my-ranking']);
+    // And it is dropped before the read, so the RPC is never asked about it.
+    const calls = rpcCalls.filter((call) => call.name === 'follow_activity_people');
+    expect(calls[0]?.args.p_event_ids).toEqual(['theirs']);
+  });
+
+  /**
+   * The cursor comes from the **raw** rows, before either drop. A cursor taken after them
+   * would rewind past every dropped row and serve the tail of this page a second time —
+   * which is exactly the duplicate the keyset exists to make impossible.
+   */
+  it('pages from the last row the server sent, not the last row it kept', async () => {
+    const page = Array.from({ length: FEED_PAGE_SIZE }, (_, i) =>
+      i === FEED_PAGE_SIZE - 1
+        ? followRow({ id: 'last', actor_id: 'user-1', created_at: '2026-08-01T00:00:00Z' })
+        : event({ id: `event-${i}`, created_at: '2026-08-15T00:00:00Z' }),
+    );
+    mockFeedQueue = [{ rows: page }, { rows: [] }];
+
+    const { feed, view } = await open();
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+    await waitFor(() => expect(view.result.current.isFetchingNextPage).toBe(false));
+
+    // The dropped row's own timestamp, which is the boundary the server was given.
+    expect(mockFeedReads[1]?.or).toContain('2026-08-01T00:00:00Z');
   });
 });

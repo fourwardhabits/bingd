@@ -2,7 +2,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { PEOPLE_DISCOVERY, TAB_ROUTES } from '@/lib/routes';
+import { peopleDiscovery, TAB_ROUTES } from '@/lib/routes';
 
 import { resetTasteIntent } from './use-taste-onboarding';
 
@@ -557,7 +557,7 @@ describe('where onboarding lets go', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding')));
   });
 
   /**
@@ -626,7 +626,7 @@ describe('the notification step on the way out', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding')));
   });
 });
 
@@ -705,7 +705,7 @@ describe('recovery after a crash during the notification step', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Find people' }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding')));
   });
 
   /** The escape route reaches this screen too — see `UseDifferentAccountButton`. */
@@ -785,7 +785,7 @@ describe('the frames between the press and the navigation', () => {
         // The offer-decision grace in `app/onboarding/taste.tsx`.
         jest.advanceTimersByTime(3000);
       });
-      expect(mockReplace).toHaveBeenCalledWith(PEOPLE_DISCOVERY);
+      expect(mockReplace).toHaveBeenCalledWith(peopleDiscovery('onboarding'));
     } finally {
       jest.useRealTimers();
     }

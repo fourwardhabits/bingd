@@ -33,7 +33,17 @@ export type PersonSuggestion = {
    */
   context:
     | { kind: 'mutuals'; count: number; names: string[] }
-    | { kind: 'match'; score: number };
+    /**
+     * `shared` is `taste_match`'s own `common_count`, added to the RPC by
+     * `20260912000100` so a People row reads `87% Match · 14 shared` — the same line the
+     * Leaderboard draws, from the same call, so the two cannot disagree about what
+     * "shared" counts.
+     *
+     * Nullable for one reason and it is not a missing feature: a cache written by a
+     * bundle that predates the column has no number, and a row that printed `· null
+     * shared` because of it is the defect that only appears on somebody else's phone.
+     */
+    | { kind: 'match'; score: number; shared: number | null };
 };
 
 type Row = {
@@ -115,9 +125,15 @@ export function usePeopleTasteMatches(viewerId: string, enabled = true) {
       const { data, error } = await supabase.rpc('people_taste_matches', { p_limit: 10 });
       if (error) throw error;
 
-      return ((data ?? []) as (Row & { match_score: number })[]).map((row) => ({
+      return (
+        (data ?? []) as (Row & { match_score: number; shared_count?: number | null })[]
+      ).map((row) => ({
         ...identity(row),
-        context: { kind: 'match' as const, score: row.match_score },
+        context: {
+          kind: 'match' as const,
+          score: row.match_score,
+          shared: row.shared_count ?? null,
+        },
       }));
     },
   });
@@ -179,4 +195,29 @@ export function mutualsLine(context: { count: number; names: string[] }): string
   if (!first) return `${context.count} ${context.count === 1 ? 'mutual' : 'mutuals'}`;
   if (context.count === 1) return `Mutual: ${first}`;
   return `${first} + ${context.count - 1} more`;
+}
+
+/**
+ * `87% Match · 14 shared`, or `87% Match` on its own.
+ *
+ * **The same two-part line the Leaderboard and the profile draw**, in the same order and
+ * from the same `taste_match` numbers (`LeaderboardView.secondLine`) — the founder's §A6,
+ * and the reason it is worth a shared shape rather than a template repeated three times is
+ * that "shared" is a count with a definition, and three surfaces printing it are three
+ * chances to print a different one.
+ *
+ * **There is no `Match TBD` here, and that is not an omission.** That phrase means "not
+ * enough overlap to score yet", and it cannot occur on this list: `people_taste_matches`
+ * returns a candidate only once `taste_match` produced a score, so a row without a
+ * percentage is not a row. The low-data semantics are preserved by the row being absent
+ * rather than by a placeholder — which is the stronger version of the same rule, because a
+ * screen full of `Match TBD` would be the feature looking broken.
+ *
+ * The count is dropped rather than printed as zero when it is missing, so a cache written
+ * before `20260912000100` degrades to the line it always drew instead of to `· null
+ * shared`.
+ */
+export function matchLine(context: { score: number; shared: number | null }): string {
+  const percent = `${context.score}% Match`;
+  return context.shared === null ? percent : `${percent} · ${context.shared} shared`;
 }
