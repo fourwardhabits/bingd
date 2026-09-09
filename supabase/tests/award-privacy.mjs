@@ -52,9 +52,22 @@ const { environmentForRef } = require('../../config/production-lane.cjs');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/**
+ * Tolerates a file being absent, as `social-activation.mjs` already does. `.env` and
+ * `.env.local` are both untracked, so a **git worktree has neither** — and a worktree is
+ * exactly where a release branch gets validated. The failure was a stack trace out of
+ * `readFileSync` before the first check, on a run whose target had been supplied entirely
+ * through the environment and needed no file at all.
+ */
 function loadEnv(file) {
   const out = {};
-  for (const line of readFileSync(join(root, file), 'utf8').split(/\r?\n/)) {
+  let text;
+  try {
+    text = readFileSync(join(root, file), 'utf8');
+  } catch {
+    return out;
+  }
+  for (const line of text.split(/\r?\n/)) {
     const match = /^([A-Za-z0-9_]+)=(.*)$/.exec(line.trim());
     if (match) out[match[1]] = match[2];
   }
