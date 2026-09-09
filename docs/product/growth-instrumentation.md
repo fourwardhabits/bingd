@@ -106,8 +106,9 @@ it is a bound that keeps a publicly-posted link from filling the table, not an e
 ceiling.
 
 **`redeem_invite(operation_id, token)`** writes the attribution and `profiles.invited_by`,
-creates PRD §17's one-way follow — a *request* when the inviter is private — and files the
-inviter's notification. The primary key on `invitee_id` is the rule that matters: **a
+creates PRD §17's follow — since `20260912000200` **both** edges, both approved, for a
+personal token, and the one-way follow with a request into a private owner for a referral
+one — and files the inviter's notification, at most one. The primary key on `invitee_id` is the rule that matters: **a
 person is invited once, and no replay, no second token and no second device can move it.**
 Refusals are *returned* rather than raised, so a wrong token spends a slot against the
 ceiling — this is the one writer in the schema where a refused attempt is what an attack

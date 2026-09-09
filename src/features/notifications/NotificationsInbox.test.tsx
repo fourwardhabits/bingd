@@ -244,7 +244,7 @@ describe('read is something the reader does', () => {
 /**
  * **The row a brand-new account opens Bingd to.**
  *
- * `redeem_invite` has always notified the inviter and, since `20260819000500`, created
+ * `redeem_invite` notified the inviter and, since `20260819000500`, created
  * the invitee's follow for them. The invitee was told nothing — so the person who had
  * never seen the app arrived to a follow they did not watch happen and an empty inbox.
  * `20260823000100` files the missing half; these assert how it reads.
@@ -295,9 +295,10 @@ describe('the welcome an invitation writes back', () => {
   });
 
   /**
-   * "Follow back" is wrong here — the inviter never followed them, so there is nothing
-   * to return. In practice this control is rare, because the redemption already made
-   * the follow; it appears if the reader later unfollows and comes back to the row.
+   * "Follow back" is wrong on a welcome — it is the invitee's own edge that the row is
+   * about, and there is nothing to return. In practice this control is rare, because the
+   * redemption already made the follow; it appears if the reader later unfollows and
+   * comes back to the row.
    */
   it('offers Follow rather than Follow back when there is no edge', async () => {
     mockNotifications.length = 0;
@@ -444,8 +445,11 @@ describe('the row an acceptance files for the inviter', () => {
   });
 
   /**
-   * **"Follow back" and not "Follow"**: the invitee has just followed the inviter, so
-   * there genuinely is something to return. The mirror of the welcome's rule.
+   * **"Follow back" and not "Follow"**: the invitee has followed the inviter, so there
+   * genuinely is something to return. The mirror of the welcome's rule. Since
+   * `20260912000200` the redemption returns it in the same transaction, so this label is
+   * what remains after the inviter unfollows — the state is read at draw time, which is
+   * why no CTA had to be removed when the semantics changed.
    */
   it('offers Follow back when the inviter does not follow them yet', async () => {
     mockNotifications.length = 0;

@@ -2,19 +2,24 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { PeopleDiscovery } from './PeopleDiscovery';
-import { mutualsLine } from './use-people';
+import { PeopleView } from './PeopleView';
+import { matchLine, mutualsLine } from './use-people';
 
 /**
- * People discovery, the second half of For You (founder tranche 2026-08-26 §§10–15;
- * modes and named mutuals from the external-beta polish, 2026-08-27).
+ * People — the third mode of the Feed tab (founder tranche 2026-08-26 §§10–15; modes and
+ * named mutuals from the external-beta polish, 2026-08-27; **moved out of For You and
+ * restyled as a sibling of the Leaderboard on 2026-09-08**, §§A2–A6).
  *
  * The screen is thin on purpose — both suggestion lists are decided entirely by
  * `people_mutuals` and `people_taste_matches`, and the privacy rules live there, in
- * `20260826000500`/`20260827000100`, where a DB test can exercise them against real
- * policies. What is asserted here is what only the client can get wrong: which mode
- * shows, what a row says, that the mutual line opens the inspection sheet, and that
- * the Follow control is the app's one follow mutation rather than a second copy of it.
+ * `20260826000500`/`20260827000100`/`20260912000100`, where a DB test can exercise them
+ * against real policies. In particular **`follow-activity.test.mjs` is where "Match never
+ * returns a private account" is asserted**, because that is a server rule and a client
+ * assertion about it would pass against a server that had stopped enforcing it.
+ *
+ * What is asserted here is what only the client can get wrong: which mode shows, what a row
+ * says, that the mutual line opens the inspection sheet, and that the Follow control is the
+ * app's one follow mutation rather than a second copy of it.
  */
 
 const mockPush = jest.fn();
@@ -52,10 +57,10 @@ beforeEach(() => {
   mockRpcErrors = {};
 });
 
-const open = () => renderWithProviders(<PeopleDiscovery viewerId="viewer" />);
+const open = () => renderWithProviders(<PeopleView viewerId="viewer" />);
 
 describe('the two modes', () => {
-  it('opens on Mutuals and keeps Matches one chip away', async () => {
+  it('opens on Mutuals and keeps Match one chip away', async () => {
     mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
     mockRpcResults.people_taste_matches = [
       person({ user_id: 'bo-id', username: 'bo', display_name: 'Bo', match_score: 91 }),
@@ -67,13 +72,13 @@ describe('the two modes', () => {
     // One mode at a time: the match percentage is behind its chip, not stacked below.
     expect(view.queryByText('91% Match')).toBeNull();
 
-    await fireEvent.press(view.getByText('Matches'));
+    await fireEvent.press(view.getByText('Match'));
 
     await waitFor(() => expect(view.getByText('91% Match')).toBeTruthy());
     expect(view.queryByText('Ben + 2 more')).toBeNull();
   });
 
-  it('says why Mutuals is empty without hiding the Matches that loaded', async () => {
+  it('says why Mutuals is empty without hiding the Match list that loaded', async () => {
     mockRpcResults.people_mutuals = [];
     mockRpcResults.people_taste_matches = [person({ match_score: 74 })];
 
@@ -81,7 +86,7 @@ describe('the two modes', () => {
 
     await waitFor(() => expect(view.getByText('No mutuals yet')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Matches'));
+    await fireEvent.press(view.getByText('Match'));
 
     await waitFor(() => expect(view.getByText('74% Match')).toBeTruthy());
   });
@@ -113,7 +118,7 @@ describe('the two modes', () => {
 
     await waitFor(() => expect(view.getByText('Could not load suggestions')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Matches'));
+    await fireEvent.press(view.getByText('Match'));
 
     await waitFor(() => expect(view.getByText('74% Match')).toBeTruthy());
     expect(view.queryByText('Could not load suggestions')).toBeNull();
@@ -142,7 +147,7 @@ describe('the two modes', () => {
     await waitFor(() => expect(view.getByText('Could not load suggestions')).toBeTruthy());
     expect(view.queryByText('No suggestions yet')).toBeNull();
 
-    await fireEvent.press(view.getByText('Matches'));
+    await fireEvent.press(view.getByText('Match'));
 
     await waitFor(() => expect(view.getByText('No matches yet')).toBeTruthy());
   });
@@ -273,11 +278,61 @@ describe('inspecting the mutuals', () => {
     mockRpcResults.people_mutuals = [person({ user_id: 'z', username: 'z', mutual_count: 1, mutual_names: ['Ben'] })];
 
     const view = await open();
-    await waitFor(() => expect(view.getByText('Matches')).toBeTruthy());
-    await fireEvent.press(view.getByText('Matches'));
+    await waitFor(() => expect(view.getByText('Match')).toBeTruthy());
+    await fireEvent.press(view.getByText('Match'));
     await waitFor(() => expect(view.getByText('74% Match')).toBeTruthy());
 
     expect(view.queryByLabelText('See mutuals with Anna')).toBeNull();
+  });
+});
+
+describe('a private suggestion', () => {
+  /**
+   * Mutuals may name a private account the viewer is allowed to discover (§A4,
+   * `20260828000400`), and the lock beside the handle is what stops the tap being a
+   * surprise — the same marker the Leaderboard and the follower lists draw. The screen
+   * reader gets the word, which is what this asserts: a glyph has no accessible name.
+   */
+  it('says Private to a screen reader and offers the relationship control', async () => {
+    mockRpcResults.people_mutuals = [
+      person({ mutual_count: 1, mutual_names: ['Ben'], visibility: 'private' }),
+    ];
+
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Anna, @anna, Private, Mutual: Ben')).toBeTruthy(),
+    );
+    expect(view.getByText('Follow')).toBeTruthy();
+  });
+});
+
+describe('a Match row', () => {
+  /**
+   * `87% Match · 14 shared` — the Leaderboard's own line, from `taste_match`'s own
+   * `common_count` (§A6, `20260912000100`). The percentage alone is what this drew before
+   * the RPC returned the count.
+   */
+  it('carries its evidence beside the percentage', async () => {
+    mockRpcResults.people_taste_matches = [person({ match_score: 87, shared_count: 14 })];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Match')).toBeTruthy());
+    await fireEvent.press(view.getByText('Match'));
+
+    await waitFor(() => expect(view.getByText('87% Match · 14 shared')).toBeTruthy());
+  });
+
+  it('degrades to the percentage alone for a cache written without the count', async () => {
+    // A bundle that read this RPC before the column existed. `· null shared` is the defect
+    // this guards, and it is the kind that only appears on somebody else's phone.
+    mockRpcResults.people_taste_matches = [person({ match_score: 74 })];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Match')).toBeTruthy());
+    await fireEvent.press(view.getByText('Match'));
+
+    await waitFor(() => expect(view.getByText('74% Match')).toBeTruthy());
   });
 });
 
@@ -302,5 +357,36 @@ describe('mutualsLine', () => {
   it('falls back to the bare count when a stale cache has no names', () => {
     expect(mutualsLine({ count: 1, names: [] })).toBe('1 mutual');
     expect(mutualsLine({ count: 2, names: [] })).toBe('2 mutuals');
+  });
+});
+
+/**
+ * The other line, also without a render.
+ *
+ * `Match TBD` is deliberately absent and cannot occur here: `people_taste_matches` returns
+ * a candidate only once `taste_match` scored it, so a row without a percentage is not a row.
+ * The low-data semantics are preserved by absence, which is the stronger version of the
+ * rule — see `matchLine`'s own header.
+ */
+describe('matchLine', () => {
+  it('prints the percentage and its evidence, in the Leaderboard’s order', () => {
+    expect(matchLine({ score: 87, shared: 14 })).toBe('87% Match · 14 shared');
+  });
+
+  it('prints a single shared title without pluralising the word', () => {
+    // `shared` is a modifier here rather than a noun — `1 shared`, like the Leaderboard's
+    // and the profile's. Asserted so nobody "fixes" it into `1 shareds` or `1 shared title`.
+    expect(matchLine({ score: 40, shared: 1 })).toBe('40% Match · 1 shared');
+  });
+
+  it('drops the count rather than printing zero when a cache has none', () => {
+    expect(matchLine({ score: 91, shared: null })).toBe('91% Match');
+  });
+
+  it('keeps a zero the server actually sent', () => {
+    // Not reachable through `people_taste_matches` — a scored candidate shares at least
+    // `taste.min_common` titles — but `0` and `null` must not collapse, or a future caller
+    // with a genuine zero would silently print no count at all.
+    expect(matchLine({ score: 12, shared: 0 })).toBe('12% Match · 0 shared');
   });
 });

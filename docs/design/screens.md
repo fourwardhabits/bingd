@@ -85,7 +85,7 @@ The user lands on an empty Collection with one clear next action, never on an em
 **As built — 2026-09-07, the pre-GTM convergence.** Two things the shipped flow says that the specification above did not, both from the product audit of what a stranger meets in the first minute.
 
 - **What a score is, before the first one appears.** The intro of Build your taste reads *"Rank five films you have seen. bingd. learns from how they compare to each other, not from stars. Each one gets a score from where it lands, and that score can move as you rank more."* A first liked film reveals `10.0` and `#1 in Movies`, and the second ranking moves it; without that sentence the reveal read as a star rating the app had assigned and then changed its mind about. The reveal repeats it once, quietly — see §4.
-- **The summary offers Explore For You and Find people.** *See my collection* is gone from the second slot: the Collection is one tap away on the bar for the rest of this person's life, and the moment five films are placed is the one moment the app can say "now find the people whose rankings you will see". Find people lands on For You opened on People (`PEOPLE_DISCOVERY` in `lib/routes.ts`, the tab with `show=people`), which is the existing discovery surface and not a screen of its own. The empty Feed offers the same action to the same place (§7).
+- **The summary offers Explore For You and Find people.** *See my collection* is gone from the second slot: the Collection is one tap away on the bar for the rest of this person's life, and the moment five films are placed is the one moment the app can say "now find the people whose rankings you will see". Find people lands on **the Feed tab opened on People** (`peopleDiscovery('onboarding')` in `lib/routes.ts`, the tab with `show=people`), which is the existing discovery surface and not a screen of its own. The empty Feed offers the same action to the same place (§7). *It pointed at For You until 2026-09-08, when §A16 moved People onto the Feed beside Feed and Leaderboard; the constant existing is what made that a one-line change at both call sites.*
 
 ---
 
@@ -1023,7 +1023,7 @@ Where an actor genuinely cannot be resolved, the item is **omitted**. A feed wit
 
 Empty feed for a user following nobody: an invitation to find friends, not a spinner and not a blank page.
 
-**As built — 2026-09-07.** The quiet feed — *"Your feed is quiet right now. Rank a title, or follow someone, and activity will appear here."* — carries one action, **Find people**, into For You opened on People (`PEOPLE_DISCOVERY`). The copy had said "follow someone" for weeks while nothing on the screen led to anybody: People lives behind For You's category selector, which a stranger on an empty Feed had no reason to open. It is the same destination onboarding's summary offers, by the same parameter. It is not an Everyone feed, not a contacts import, and not a banner — the branch is gone the moment there is activity to show.
+**As built — 2026-09-07, retargeted 2026-09-08.** The quiet feed — *"Your feed is quiet right now. Rank a title, or follow someone, and activity will appear here."* — carries one action, **Find your people**, into **this same tab opened on People** (`peopleDiscovery('sparse_feed')`). The copy had said "follow someone" for weeks while nothing on the screen led to anybody. It went to For You, where People lived until §A16 moved it onto the Feed; it is still the same destination onboarding's summary offers, by the same parameter, and `source` is what lets `people_suggestions_viewed` tell the two mechanisms apart. It is not an Everyone feed, not a contacts import, and not a banner — the branch is gone the moment there is activity to show.
 
 ### The row as it stands — 2026-08-20
 
@@ -1045,6 +1045,122 @@ The anatomy above is the 2026-08-15 decision and is kept for its reasoning. Thre
 - **One leading object.** The poster is the anchor and the actor's face is a small ringed chip in its bottom-right corner, contained inside the artwork rather than overhanging it. Two separate leading visuals is Bingd's problem and not Beli's — Beli has one photograph per item where Bingd has a poster *and* a face — and setting them side by side made the row read as busy.
 - **One left text edge.** The sentence, the metadata, the note, the reaction cluster and the action icons all start at the poster's right edge. The metadata used to start 32pt left of the sentence it describes, because the avatar was standing in front of that sentence; nothing is offset by hand now.
 - **Actions are icons**, labelled for screen readers and named after the title they act on. Comments shipped since — the icon appears only where a surface has wired the sheet up, and it carries a count and never a preview, since a preview is the mask that gets forgotten.
+
+---
+
+### People, the third mode of this tab — 2026-09-08
+
+Founder tranche §§A2–A6, A15, A16. People was a category of For You — behind the Movies /
+TV shows dropdown — and it is now a peer of Feed and Leaderboard, reached by the compact
+control in the content header row.
+
+**Why it moved, which is not a layout argument.** For You answers *what next*, and the
+honest answer is sometimes a person; that was the case for putting People there and it was a
+good one. What the pre-distribution pass established is that the *activation* problem is a
+different problem: the risk is that somebody joins and never connects with anybody they
+actually know, and a surface behind a dropdown on a recommendations screen was never going
+to be where that gets fixed. This is the tab that is already about other people. For You is
+titles and watch discovery only now.
+
+Still three modes of one route rather than a sixth tab — five is the width of the bar — so
+Android's hardware Back and a re-tap of the Feed tab both leave People the way they leave the
+board, and both handlers now read *"is the Feed showing"* rather than *"is the board
+showing"*.
+
+```
+PEOPLE YOU MAY KNOW                    [Feed] [Trophy] [People]
+ Mutuals   Match
+─────────────────────────────────────────────────
+ (A)  Anna  @anna                            [Follow]
+      Mutual: Ben
+─────────────────────────────────────────────────
+ (B)  Bo  @bo  🔒                          [Requested]
+      87% Match · 14 shared
+```
+
+**It is drawn as a sibling of the Leaderboard**, and that is legibility rather than taste:
+the two share one control, so they have to share one page shape or the control reads as
+switching between two different apps. Same margins, same header rhythm, same row density,
+same avatar size, same name-over-handle hierarchy, same dividers, same lock glyph for a
+private account. The heading sits exactly where `THIS MONTH ▼` sits.
+
+**No chevron on the heading**, and no rank numbers on the rows. `PEOPLE YOU MAY KNOW` is a
+`SectionHeader` rather than a `MediumSelector` because there is no header-level choice to
+make yet and a chevron that opens nothing is a control that lies; if a second header-level
+list ever exists it becomes a selector and the row does not move. And a leaderboard is a
+competition where a suggestion list is not — numbering suggestions 1, 2, 3 would say the
+first one is the best person, which is not a claim this data supports.
+
+**Two lists that answer different questions, and the difference is a privacy decision.**
+
+| | what it is | may name a private account? |
+|---|---|---|
+| **Mutuals** | people followed by people you follow, most shared connections first | **yes**, where the viewer may discover them (§A4, `20260828000400`) |
+| **Match** | people whose rankings agree with yours, scored by `taste_match` itself | **never** (§A5, `20260912000100`) |
+
+A private account may be searched for deliberately and may surface through social proximity
+— a friend of a friend is socially grounded, the row carries the lock, and the control offers
+Request. What it must never be is *algorithmically recommended to an unrelated stranger*
+because a correlation came out high. Both rules are enforced in the server functions rather
+than in the client, so a client that filtered would be the same rule written twice in a place
+where the second copy can be wrong and nobody would see it.
+
+**Match carries its evidence** — `87% Match · 14 shared`, the Leaderboard's own line from the
+same `taste_match` call, so the two surfaces cannot come to disagree about what "shared"
+counts. There is no `Match TBD` here and its absence is not an omission: a candidate without
+a score is not returned at all, so the low-data rule is preserved by the row being absent
+rather than by a placeholder.
+
+*From contacts* is the obvious third list and is deliberately not built. It needs an
+address-book permission, which is a decision about what bingd. uploads about people who never
+signed up.
+
+### Follow activity in the Feed — 2026-09-08
+
+Founder §§A9–A14. Following somebody is now Feed content, and it is **social discovery
+content rather than an audit log**, which decides everything about how the row is drawn.
+
+```
+ (A)  Abi followed Ravi and 4 others
+      12m ago
+```
+
+A lighter row than an activity row — avatar, one sentence, one time label — with no poster,
+no score, no note, **no reactions and no comments**. That lightness is the frequency rule
+expressed as composition: a follow story cannot dominate a screenful of rankings because it
+is a third of the height of one. Aggregation does the rest: one story per actor per hour,
+appended to, so a session spent following ten suggestions is one row and not ten.
+
+**The count is the reader's, not the actor's.** The people a story names are resolved per
+viewer, so a story about five follows reads "and 1 other" to somebody allowed to see two of
+them — and the sheet behind it lists exactly those. A row promising four others over a sheet
+that lists one would be the feature contradicting itself, and one of the missing three would
+be an account that had blocked the reader.
+
+**And the count is complete, because nothing truncates it.** `follow_activity_people` takes
+no limit and returns every member of the story that this viewer may identify, so the sheet
+needs no "showing the first N" line. What keeps that cheap is a bound on the other side: a
+story's membership stops at `feed.follow_story_max_people` (50 by default) when it is
+*written*. Without that bound a personal link shared into a large group chat would append a
+member per redemption for ever, and every feed page holding the story would read the whole
+aggregate to draw one line. The bound belongs to the writer alone — a reader that applied one
+too could disagree with it, and did, twice.
+
+Tapping the emphasised name opens that person; tapping anything else opens the list, which is
+the one place in the Feed that carries follow controls. A story about one person has no list
+worth opening and does not offer one.
+
+**A reader never sees their own follow activity in their own feed** — the Feed's actor set is
+the reader plus the people they follow, which is right for a ranking and wrong for a follow.
+**A reciprocal follow inside the window is suppressed**: viewers who were told the
+relationship exists are not told again because it became mutual. And **a redeemed invitation
+is one story, authored by the inviter**, because that is the direction with an audience: two
+directed edges are one relationship, and the inviter's followers are who the new account
+should reach.
+
+Follow stories are Feed-only. A profile's Recent activity is what somebody watched, and
+"followed Ravi and 4 others" between two rankings there is the audit entry this section
+refuses to build.
 
 ---
 

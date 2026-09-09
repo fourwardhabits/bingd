@@ -115,6 +115,48 @@ already seen. `for_you_slate_shown` (the For You section below) is the one event
 answers it, gated on the same guard the impression writer uses so it cannot become the
 stream of writes this paragraph was refusing.
 
+### Social connection activation — added 2026-09-08
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `people_suggestions_viewed` | the reader **entered** the People mode of the Feed tab | the reader | `source`, `mode` |
+| `people_suggestions_mode_changed` | a **different** People list was chosen | the reader | `mode` |
+| `follow_activity_opened` | an aggregated follow story was opened into its list of people | the reader | — |
+| `invite_auto_follow_succeeded` | `redeem_invite` answered `connected: true` — a personal invite left both accounts mutually connected | the **invitee** | none |
+
+The founder's §A17, and the question behind all four is the one this release exists to
+answer: **does somebody who joins connect with people they actually know?**
+
+`people_suggestions_viewed` is shaped like `leaderboard_viewed` and for the same reason —
+it fires on the **transition into** the mode, not on render. What it adds is `source`
+(`people` | `onboarding` | `sparse_feed` | `invite`), which is the part worth measuring:
+the permanent mode behind the Feed's toggle and a contextual prompt at the end of
+onboarding are two different mechanisms, and only one of them can be improved by moving a
+control. `invite` is declared and has no emitter — a redeemed invitation ends in a mutual
+connection rather than in a prompt to go and find people, so there is nothing honest to
+attribute to it today.
+
+`mode` is `mutuals` | `match`, the server's own two lists.
+`people_suggestions_mode_changed` fires only on a genuine change, exactly as
+`leaderboard_metric_selected` does.
+
+**There is deliberately no `people_suggestion_followed`.** §A17 names one, and it already
+exists: `follow_created` carries `surface` and `state`, so a follow started from People is
+`{ surface: 'people', state: 'approved' }` and a request is the same event with
+`state: 'pending'`. A second name would make "how many follows happened" a sum over two
+events, which is how a funnel comes to disagree with itself. `surface` gained `people` in
+the same change, kept distinct from `for_you` — People used to live there, and one number
+spanning the move would hide whether the move worked.
+
+`invite_auto_follow_succeeded` follows the **row**, like `invite_redeemed`: the server
+answers `connected` only when both follow edges came out approved, so a private inviter —
+whose side stays a request until they answer it — emits nothing here. It sits beside
+`invite_redeemed` rather than replacing it, and the ratio between the two is the whole
+measurement of §A7. **`invite_auto_follow_failed` is deferred and has no emitter**: the
+reverse edge is written inside `redeem_invite`'s own transaction with the attribution row
+it depends on, so it cannot half-succeed, and calling a private inviter's pending request a
+failure would mislabel a privacy decision that was kept on purpose.
+
 ### Help & Support — added 2026-09-03
 
 | Event | Fires exactly when | Owner | Properties |

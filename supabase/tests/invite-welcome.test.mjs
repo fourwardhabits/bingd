@@ -6,8 +6,8 @@ import { createTestDb } from './harness.mjs';
 /**
  * The invitee's own welcome, 20260823000100.
  *
- * `redeem_invite` has always notified the *inviter* and has, since `20260819000500`,
- * created the invitee's follow for them. The invitee themselves was told nothing — so
+ * `redeem_invite` notified the *inviter* and has, since `20260819000500`, created the
+ * invitee's follow for them. The invitee themselves was told nothing — so
  * the one person in the exchange who had never seen the app before arrived to a follow
  * they did not watch happen and an empty inbox. A beta tester reported it as a Feed
  * that begins empty.
@@ -27,7 +27,11 @@ import { createTestDb } from './harness.mjs';
  *      suspended inviter all leave the inbox empty — the welcome is a consequence of a
  *      successful attribution and of nothing else.
  *   5. **Nothing else moved.** The follow, the inviter's own notification and the
- *      return shape are `20260819000500`'s and are asserted here unchanged.
+ *      return shape are `20260819000500`'s and are asserted here unchanged — with two
+ *      later exceptions this file does not own: since `20260912000200` the follow into a
+ *      *private* inviter is approved rather than a request, and the inviter's row is
+ *      `invite_joined` rather than `follow_request` and is skipped entirely for an
+ *      invitee who already followed them. `follow-activity.test.mjs` owns both.
  */
 
 let t;
@@ -260,7 +264,11 @@ describe('what the welcome did not change', () => {
     assert.equal(rows[0].state, 'approved');
   });
 
-  it('still requests rather than follows a private inviter', async () => {
+  it('follows a private inviter too, and files the same one welcome', async () => {
+    // The state changed under this test in `20260912000200` — a personal invite now
+    // connects both parties whatever either visibility says. What it is here to assert did
+    // not: the welcome is filed either way, because it is about who invited them rather
+    // than about whether the follow landed.
     const inviter = await newUser('private_inviter', 'private');
     const invitee = await newUser('private_invitee');
     const token = await mintLink(inviter);
@@ -268,14 +276,12 @@ describe('what the welcome did not change', () => {
     await t.actAs(invitee);
     const result = await redeem(token);
 
-    assert.equal(result.follow_state, 'pending');
+    assert.equal(result.follow_state, 'approved');
     const { rows } = await t.sql(
       `select state from follows where follower_id = $1 and followee_id = $2`,
       [invitee, inviter],
     );
-    assert.equal(rows[0].state, 'pending');
-    // And the welcome is filed either way — it is about who invited them, not about
-    // whether the follow landed.
+    assert.equal(rows[0].state, 'approved');
     assert.equal((await welcomes(invitee)).length, 1);
   });
 

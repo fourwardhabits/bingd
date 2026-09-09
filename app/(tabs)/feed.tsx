@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,6 +31,8 @@ import {
   type FeedItem,
 } from '@/features/feed/use-feed';
 import { activityLead } from '@/features/feed/ActivityLead';
+import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
+import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
@@ -39,6 +41,7 @@ import {
   type ReactionKind,
 } from '@/features/feed/use-reactions';
 import { LeaderboardView } from '@/features/leaderboard/LeaderboardView';
+import { DEFAULT_PEOPLE_MODE, PeopleView } from '@/features/people/PeopleView';
 import {
   DEFAULT_METRIC,
   DEFAULT_TIMEFRAME,
@@ -56,7 +59,7 @@ import { track } from '@/lib/analytics';
 import { readPref, writePref } from '@/lib/prefs';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
-import { PEOPLE_DISCOVERY } from '@/lib/routes';
+import { peopleDiscovery } from '@/lib/routes';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import {
   ActivityRow,
@@ -75,12 +78,21 @@ import {
 import { theme } from '@/ui/tokens';
 
 /**
- * Feed or Leaderboard — the two states of this tab's content area.
+ * Feed, Leaderboard or People — the three states of this tab's content area.
  *
  * Feed first, because it is the default and because the leftmost cell being the
  * default is the rule the Collection toggle follows too.
+ *
+ * **People arrived on 2026-09-08** (founder §§A2, A16). It was a category of For You,
+ * behind the Movies / TV shows dropdown, and it moved here because this is the tab that is
+ * already about other people — and because the activation problem it exists to solve is
+ * not the "what should I watch" problem For You answers. For You is titles only now.
+ *
+ * Still three modes of one route rather than a sixth tab: five is the width of the bar.
+ * That is what the hardware-Back and tab-press handlers below are for, and both were
+ * written for two modes and now read "not the Feed" rather than "the board".
  */
-type FeedMode = 'feed' | 'leaderboard';
+type FeedMode = 'feed' | 'leaderboard' | 'people';
 
 /**
  * Which leaderboard timeframe this reader last chose, per account.
@@ -111,6 +123,13 @@ const FEED_MODES = [
   // homepage". Reusing the glyph would say the two toggles answer the same question.
   { value: 'feed', icon: 'newspaper-outline', label: 'Feed' },
   { value: 'leaderboard', icon: 'trophy-outline', label: 'Leaderboard' },
+  /**
+   * `people-outline`, which is the glyph this app already spends on a set of people —
+   * Group Picks' chip and the old For You mutuals chip both use it. `person-add-outline`
+   * was the other candidate and is wrong: it names the *act* of following, and this cell
+   * names a place, in a control whose other two cells are also places.
+   */
+  { value: 'people', icon: 'people-outline', label: 'People' },
 ] as const satisfies readonly IconToggleOption<FeedMode>[];
 
 /** PRD §14. Fan-out on read: followed users' activity is queried at read time
@@ -177,6 +196,17 @@ export default function FeedScreen() {
   /** Whether the reader has chosen since their preference was read. Same guard Collection uses. */
   const chosenTimeframe = useRef(false);
   const showingBoard = mode === 'leaderboard';
+  const showingPeople = mode === 'people';
+  /**
+   * Whether the activity list is what the content area holds.
+   *
+   * Named rather than written as `!showingBoard` at each site, which is what those sites
+   * used to say: with two modes the two readings were the same sentence, and with three
+   * they are not. Every "the feed is not showing" test below — pull to refresh, the
+   * infinite-scroll handler, the empty state — means *this*, and getting one of them wrong
+   * would have shown a feed spinner over a list of people.
+   */
+  const showingFeed = mode === 'feed';
   // Not fetched until the board is actually opened. The Feed is the default and most
   // readers will never toggle, so an eager read would be a request per app open for a
   // surface nobody asked for.
@@ -233,26 +263,74 @@ export default function FeedScreen() {
   };
 
   /**
-   * Entering a mode, with the one analytics event this surface needs.
+   * Entering a mode, with the analytics events these surfaces need.
    *
-   * Emitted on the *transition into* Leaderboard rather than on render, so leaving and
-   * coming back is a second view — which it is, being a second decision to look — while
-   * a re-render caused by anything else on this busy screen is not.
+   * Emitted on the *transition into* a mode rather than on render, so leaving and coming
+   * back is a second view — which it is, being a second decision to look — while a
+   * re-render caused by anything else on this busy screen is not.
+   *
+   * `source` on the People event is what separates the two mechanisms §A15 is about: this
+   * path is somebody finding the control, and `arriveAtPeople` below is somebody being
+   * sent. Whether the permanent mode is enough on its own is the question, and one event
+   * that could not tell them apart would not answer it.
    */
   const changeMode = (next: FeedMode) => {
     if (next === mode) return;
     setMode(next);
     if (next === 'leaderboard') track({ name: 'leaderboard_viewed', props: { metric } });
+    if (next === 'people') {
+      track({
+        name: 'people_suggestions_viewed',
+        props: { source: 'people', mode: DEFAULT_PEOPLE_MODE },
+      });
+    }
   };
 
   /**
-   * **Android's hardware Back, while the board is showing** (founder physical bug).
+   * **Arriving on People from somewhere else** (§A15).
+   *
+   * The end of onboarding and an empty Feed both send people here *to find people*, and
+   * `show=people` is how they say so. Read on change and consumed in the same breath, the
+   * way For You used to read the same parameter and the profile tab reads its `awards` one:
+   * a tab stays mounted, so an initial-state read alone would open nothing for somebody who
+   * had already visited the Feed, and the parameter is cleared immediately so that choosing
+   * Feed afterwards is not undone by a value still sitting in the URL.
+   *
+   * `from` rides with it purely so the event can name the mechanism. An unrecognised value
+   * falls back to the permanent mode's own source rather than being sent through — the
+   * property is a closed set of four words and a URL is a place a stranger can type.
+   */
+  const { show, from } = useLocalSearchParams<{ show?: string; from?: string }>();
+  useEffect(() => {
+    if (show !== 'people') return;
+    // Synchronising FROM an external system — the URL — which is the case the rule's own
+    // doc carves out; the param is consumed in the same breath, so this fires once per
+    // arrival rather than per render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMode('people');
+    track({
+      name: 'people_suggestions_viewed',
+      props: {
+        source: from === 'onboarding' || from === 'sparse_feed' ? from : 'people',
+        mode: DEFAULT_PEOPLE_MODE,
+      },
+    });
+    router.setParams({ show: undefined, from: undefined });
+  }, [show, from, router]);
+
+  /**
+   * **Android's hardware Back, while a non-Feed mode is showing** (founder physical bug).
    *
    * Leaderboard is a *mode* of this route, not a route of its own, so the navigator had
    * nothing to pop and Back exited the app from what the reader experienced as a
    * second screen. The founder's instruction was explicit: do not invent a route to
    * solve this. So the mode consumes the event itself and hands the reader back to the
    * Feed, which is where they came from.
+   *
+   * **`showingFeed` rather than `showingBoard` since People arrived.** People is the same
+   * shape of thing — a mode that a reader experiences as a second screen — and a handler
+   * that named the board would have let Back close the app from it. The test is now "is
+   * the Feed showing", which is the sentence this handler always meant.
    *
    * `useFocusEffect`, not `useEffect`: this tab stays mounted while the reader is on
    * another one, and a listener that outlived focus would swallow Back on Collection.
@@ -270,16 +348,16 @@ export default function FeedScreen() {
   useFocusEffect(
     useCallback(() => {
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-        if (!showingBoard) return false;
+        if (showingFeed) return false;
         setMode('feed');
         return true;
       });
       return () => subscription.remove();
-    }, [showingBoard]),
+    }, [showingFeed]),
   );
 
   /**
-   * **Re-tapping the Feed tab while the board is showing** (founder, 2026-08-30).
+   * **Re-tapping the Feed tab while a non-Feed mode is showing** (founder, 2026-08-30).
    *
    * The other half of the same complaint the hardware-Back handler above answers, and
    * it is the half iOS has: Leaderboard is a mode of this route, so pressing the tab
@@ -310,13 +388,15 @@ export default function FeedScreen() {
     const unsubscribe = navigation.addListener?.(
       'tabPress' as never,
       (() => {
-        if (!showingBoard) return;
+        // `showingFeed`, not `showingBoard`: People is a mode a reader experiences as a
+        // second screen too, and re-tapping the tab must leave it the same way.
+        if (showingFeed) return;
         if (navigation.isFocused && !navigation.isFocused()) return;
         setMode('feed');
       }) as never,
     );
     return () => unsubscribe?.();
-  }, [navigation, showingBoard]);
+  }, [navigation, showingFeed]);
 
   /** Only a genuine change. Re-tapping the chip you are on would measure fidgeting. */
   const changeMetric = (next: LeaderboardMetric) => {
@@ -332,6 +412,15 @@ export default function FeedScreen() {
   // The event whose comments are open. A third independent idea, for the same reason
   // the first two are separate: a row can be in any, all or none of these states.
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /**
+   * The aggregated follow story whose list of people is open, or none (§A12).
+   *
+   * An event id rather than the event, so the sheet redraws against whatever the feed
+   * currently holds: the story is mutable server-side — a follow made in the same hour
+   * appends to it — and a snapshot taken at press time would list a set the row behind it
+   * had already outgrown.
+   */
+  const [followStoryFor, setFollowStoryFor] = useState<string | null>(null);
   /**
    * The event being recommended, if any.
    *
@@ -459,10 +548,13 @@ export default function FeedScreen() {
    * position the reader is already sitting at, or a dead connection becomes a request
    * loop; the footer offers the retry instead, and that is the only way back.
    *
-   * The board has no pages, so the handler is not attached in that mode at all.
+   * Neither the board nor People has pages, so the handler does nothing in either mode.
+   * `showingFeed` rather than `!showingBoard` since People arrived: a list of ten
+   * suggestions is shorter than the threshold, so the old test would have asked for the
+   * next page of *activity* on every scroll of a surface that has none.
    */
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (showingBoard) return;
+    if (!showingFeed) return;
     if (!feed.hasNextPage || feed.isFetchingNextPage || feed.isError) return;
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     const fromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
@@ -470,6 +562,14 @@ export default function FeedScreen() {
   };
 
   const openComments = commentsFor ? (events.find((e) => e.id === commentsFor) ?? null) : null;
+  /**
+   * Resolved from the current list rather than held, for the reason `followStoryFor` records:
+   * the story grows, and the sheet must list what the row now says. Null once the row has
+   * left the page — a refresh that drops it closes the sheet, which is the honest outcome.
+   */
+  const openFollowStory = followStoryFor
+    ? (events.find((e) => e.id === followStoryFor) ?? null)
+    : null;
 
   return (
     <Screen>
@@ -512,14 +612,44 @@ export default function FeedScreen() {
         scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
-            refreshing={showingBoard ? leaderboard.isRefetching : feed.isRefetching}
+            refreshing={
+              showingBoard
+                ? leaderboard.isRefetching
+                : showingPeople
+                  ? // Its two queries live inside `PeopleView`, so this gesture reaches
+                    // them by key below and there is no `isRefetching` up here to read.
+                    // False rather than a spinner tied to nothing: a control that spins
+                    // for ever is worse than one that does not spin at all.
+                    false
+                  : feed.isRefetching
+            }
             onRefresh={() => {
-              // The board is the whole screen when it is showing, so the gesture means
+              // Whichever mode is showing IS the whole screen, so the gesture means
               // "re-read this" and nothing else. Refetching the feed underneath it would
               // spend two requests to update something nobody is looking at.
               if (showingBoard) {
                 void leaderboard.refetch();
                 void standing.refetch();
+                return;
+              }
+              if (showingPeople) {
+                /**
+                 * By key, because the two suggestion queries belong to `PeopleView` and
+                 * this control belongs to the screen — the same arrangement the trending
+                 * shelf already has below, and for the same reason: handing a `refetch`
+                 * back up through props would make the child's cache the parent's
+                 * business.
+                 *
+                 * Both lists, not just the visible one. The chips switch instantly from
+                 * cache, so a refresh that only re-read Mutuals would leave Match one tap
+                 * away and stale, which is the thing a deliberate refresh is for.
+                 */
+                void queryClient.refetchQueries({
+                  queryKey: ['people-mutuals', profile.id],
+                });
+                void queryClient.refetchQueries({
+                  queryKey: ['people-taste-matches', profile.id],
+                });
                 return;
               }
               // Back to one page before the refetch, so the gesture costs one request
@@ -564,20 +694,28 @@ export default function FeedScreen() {
         {/**
          * **The content header row** (founder follow-up §1).
          *
-         *     TRENDING NOW                    [Feed] [Trophy]
-         *     THIS MONTH ▼                    [Feed] [Trophy]
+         *     TRENDING NOW                    [Feed] [Trophy] [People]
+         *     THIS MONTH ▼                    [Feed] [Trophy] [People]
+         *     PEOPLE YOU MAY KNOW             [Feed] [Trophy] [People]
          *
-         * One row, drawn in both modes, so the toggle keeps its position while the thing
+         * One row, drawn in every mode, so the toggle keeps its position while the thing
          * across from it changes. That is what makes it read as a control over *this
          * content* rather than as chrome: it sits at the head of the list it switches.
          *
          * The left side is the heading of whatever is immediately below — the shelf's
-         * name in Feed mode, the timeframe selector in Leaderboard mode. In Feed mode it
-         * is drawn only when the shelf will actually render: `TrendingShelf` returns null
-         * when it has nothing, and a heading over an absent shelf would be a label for
-         * nothing. `useTrending` is called here purely to know that, and costs no
-         * request — it is the same query key the shelf itself uses, so React Query
-         * answers both from one fetch.
+         * name in Feed mode, the timeframe selector in Leaderboard mode, and since
+         * 2026-09-08 (§A3) `PEOPLE YOU MAY KNOW` in People mode, in the same slot with the
+         * same treatment. In Feed mode it is drawn only when the shelf will actually
+         * render: `TrendingShelf` returns null when it has nothing, and a heading over an
+         * absent shelf would be a label for nothing. `useTrending` is called here purely
+         * to know that, and costs no request — it is the same query key the shelf itself
+         * uses, so React Query answers both from one fetch.
+         *
+         * **People's heading is a `SectionHeader` and not a `MediumSelector`**, which is
+         * the founder's "do not add a fake chevron": there is no header-level choice on
+         * People yet, and a chevron that opens nothing is a control that lies. The two
+         * components draw the same words the same way — `sectionHeader`, uppercase, Maroon
+         * — so the row does not move if a second list ever makes it a selector.
          */}
         <View style={styles.contentHeader}>
           {/* The gutter is applied here, on the board's side only. `SectionHeader` pads
@@ -594,6 +732,10 @@ export default function FeedScreen() {
                 onChange={changeTimeframe}
                 options={LEADERBOARD_TIMEFRAMES}
               />
+            ) : showingPeople ? (
+              // `SectionHeader` pads itself, which is why People does not take
+              // `contentHeaderInset` above — the same reason Trending does not.
+              <SectionHeader title="People you may know" />
             ) : trendingHasItems ? (
               <SectionHeader title="Trending now" />
             ) : null}
@@ -624,6 +766,15 @@ export default function FeedScreen() {
             loading={leaderboard.isPending}
             onPressPerson={(username) => router.push(`/u/${username}`)}
           />
+        ) : showingPeople ? (
+          /**
+           * People replaces the whole content area, Trending included — the same rule the
+           * board follows and for the same reason (founder's word for it is a mode). It
+           * owns its own two queries and its own sub-chips; everything the feed owns below
+           * stays mounted and untouched, so coming back returns to exactly the feed that
+           * was there.
+           */
+          <PeopleView viewerId={profile.id} />
         ) : (
           <>
             {/* One shelf, above the activity. It renders nothing at all when there is
@@ -707,11 +858,53 @@ export default function FeedScreen() {
                   compact
                   title="Your feed is quiet right now."
                   body="Rank a title, or follow someone, and activity will appear here."
-                  action={{ label: 'Find people', onPress: () => router.push(PEOPLE_DISCOVERY) }}
+                  action={{
+                    label: 'Find your people',
+                    // Same tab, People mode — which since 2026-09-08 means this pushes the
+                    // route it is already on with a parameter, rather than sending somebody
+                    // to For You. `sparse_feed` is how `people_suggestions_viewed` tells
+                    // this mechanism apart from the toggle two lines above it.
+                    onPress: () => router.push(peopleDiscovery('sparse_feed')),
+                  }}
                 />
               </View>
             ) : (
-              events.map((event) => (
+              events.map((event) =>
+                /**
+                 * **A follow story is a different row** (§§A9, A12), and it is a different
+                 * row rather than an `ActivityRow` with six props left off.
+                 *
+                 * What `ActivityRow` is for is an activity *about a title*: it leads with a
+                 * poster, carries a score badge, a note with spoiler masking, watch
+                 * companions, a watchlist bookmark, a Recommend control, a reaction pill and
+                 * a comment count. A follow story has none of those and can never have any
+                 * of them — so the version of this that passes `title={firstPersonName}` and
+                 * `posterUri={undefined}` is one where the next person to add a prop to
+                 * `ActivityRow` has to remember that one caller means something else by
+                 * every field.
+                 *
+                 * **No reactions and no comments, deliberately.** §A9's instruction is that
+                 * follow activity is *social discovery content* and not an audit log, and a
+                 * follow you can react to and comment under is neither: it is a post about
+                 * somebody's relationship, on which the two people best placed to feel
+                 * strange about a thread are the ones named in it.
+                 */
+                event.type === 'follow_added' ? (
+                  <FollowStoryRow
+                    key={event.id}
+                    event={event}
+                    onPressActor={
+                      event.actorUsername
+                        ? () => router.push(`/u/${event.actorUsername}`)
+                        : undefined
+                    }
+                    onPressPerson={(username) => router.push(`/u/${username}`)}
+                    onOpenList={() => {
+                      track({ name: 'follow_activity_opened' });
+                      setFollowStoryFor(event.id);
+                    }}
+                  />
+                ) : (
                 <ActivityRow
                   key={event.id}
                   actorName={event.actorName}
@@ -818,7 +1011,8 @@ export default function FeedScreen() {
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
                 />
-              ))
+                ),
+              )
             )}
 
             {/**
@@ -890,6 +1084,18 @@ export default function FeedScreen() {
           router.push(`/u/${username}`);
         }}
       />
+
+      {/* Mounted only while open, like every other sheet on this screen. Its one query is
+          `follow_state_with` over people the page has already hydrated, so there is nothing
+          to keep warm behind a sheet most visits never open. */}
+      {openFollowStory ? (
+        <FollowStorySheet
+          event={openFollowStory}
+          viewerId={profile.id}
+          onPressPerson={(username) => router.push(`/u/${username}`)}
+          onClose={() => setFollowStoryFor(null)}
+        />
+      ) : null}
 
       {/* The media item and the title come from the event, so spoiler masking is
           against the exact thing the activity is about — a season, never its parent

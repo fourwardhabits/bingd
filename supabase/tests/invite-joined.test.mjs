@@ -6,16 +6,21 @@ import { createTestDb } from './harness.mjs';
 /**
  * The inviter's half of an acceptance, 20260831000100.
  *
- * `redeem_invite` has always told the inviter something. Until this migration it told
- * them the wrong thing: a plain `follow` row — "Ada Lovelace started following you" —
- * with nothing in it saying this person came through their invitation. The sentence
- * that says so, "joined bingd. from your invite", belonged to `invite_activated`, which
- * fires at the invitee's *tenth ranking*. So the interesting fact arrived days late or
- * never, and the moment it actually happened was reported as something duller.
+ * When `redeem_invite` told the inviter something, until this migration it told them the
+ * wrong thing: a plain `follow` row — "Ada Lovelace started following you" — with nothing
+ * in it saying this person came through their invitation. The sentence that says so,
+ * "joined bingd. from your invite", belonged to `invite_activated`, which fires at the
+ * invitee's *tenth ranking*. So the interesting fact arrived days late or never, and the
+ * moment it actually happened was reported as something duller.
+ *
+ * (Since `20260912000200` there is one acceptance that tells the inviter nothing at all —
+ * a recipient who *already* followed them, where the news was delivered at the time and the
+ * only edge that moves is the inviter's own outgoing one. `follow-activity.test.mjs` owns
+ * that case; every acceptance this file is about files a row.)
  *
  * The properties that carry this row:
  *
- *   1. **It replaces the `follow` row rather than joining it.** One acceptance, one
+ *   1. **It replaces the `follow` row rather than joining it.** One acceptance, at most one
  *      notification. Two rows naming the same person for the same act is the redundancy
  *      PRD §15 exists to prevent, and it is the property most easily lost by a later
  *      edit that adds an insert instead of moving one.
@@ -25,10 +30,13 @@ import { createTestDb } from './harness.mjs';
  *   3. **Acceptance and activation stay two events.** A later activation files
  *      `invite_activated` and does *not* file a second `invite_joined`. This is the
  *      distinction the old copy collapsed, and it is asserted directly.
- *   4. **A private inviter keeps `follow_request`.** Deliberate, and not an oversight:
- *      that row carries Approve and Decline and is the only place in the app they
- *      exist. Replacing it would strand the request; adding `invite_joined` beside it
- *      would be the redundant pair property 1 refuses.
+ *   4. **A private inviter gets `invite_joined` too, since `20260912000200`.** This
+ *      property read the other way until then — a private inviter kept `follow_request`,
+ *      because that row carries Approve and Decline and is the only place in the app they
+ *      exist. The founder's decision removes the decision the row was carrying: a personal
+ *      invite now connects both parties whatever either visibility says, so an Approve
+ *      would be a control that raises P0002 when pressed. The redundancy property 1
+ *      refuses is unchanged; there is simply nothing left to be redundant *with*.
  *   5. **It answers to the `invites` category and is push-eligible**, the latter because
  *      the `follow` row it replaced already was, and taking a push away silently would
  *      be a regression dressed as a copy change.
@@ -154,7 +162,17 @@ describe('the row an acceptance files for the inviter', () => {
     );
   });
 
-  it('gives a private inviter the request, and not a join beside it', async () => {
+  it('gives a private inviter the join row too, because there is nothing left to approve', async () => {
+    /**
+     * Property 4 is superseded for a personal token (`20260912000200`). It read: a private
+     * inviter keeps `follow_request`, because that row carries Approve and Decline and is
+     * the only place in the app they exist.
+     *
+     * The founder's decision removes the decision the row was carrying. Minting a personal
+     * link and handing it to somebody is the inviter acting; there is no Approve left to
+     * offer, so `follow_request` would be a control that raises P0002 when pressed. The
+     * inviter gets what a public inviter gets, and for the same reason: news, once.
+     */
     const inviter = await newUser('priv_join_inviter', 'private');
     const invitee = await newUser('priv_join_invitee');
     const token = await mintLink(inviter);
@@ -162,10 +180,7 @@ describe('the row an acceptance files for the inviter', () => {
     await t.actAs(invitee);
     await redeem(token);
 
-    // `follow_request` alone. It carries Approve and Decline and is the only place in
-    // the app they exist, so it is not replaceable — and a join row beside it would be
-    // two notifications for one act.
-    assert.deepEqual(await noticesTo(inviter, invitee), ['follow_request']);
+    assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
   });
 
   it('files nothing more when the same operation is replayed', async () => {

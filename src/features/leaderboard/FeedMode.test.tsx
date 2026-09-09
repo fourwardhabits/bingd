@@ -58,6 +58,16 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 const mockPush = jest.fn();
+const mockSetParams = jest.fn();
+
+/**
+ * The route's parameters, mutable so a test can deliver an arrival on People (§A15).
+ *
+ * A plain object rather than a getter, and reassigned rather than mutated, because the
+ * screen's effect keys on the values it read — a mutated object would be the same
+ * reference and the effect would not re-run.
+ */
+let mockParams: Record<string, string | undefined> = {};
 
 /**
  * **The tab bar, captured rather than mounted.**
@@ -88,7 +98,10 @@ const pressFeedTab = () => {
 };
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, setParams: (...a: unknown[]) => mockSetParams(...a) }),
+  // The Feed reads `show=people` so onboarding and an empty feed can open it on People
+  // (§A15). Mutable, so a test can deliver that arrival.
+  useLocalSearchParams: () => mockParams,
   // The trending shelf refetches on focus. Called immediately here, which is what a
   // focused screen does.
   useFocusEffect: (callback: () => void) => callback(),
@@ -169,6 +182,8 @@ beforeEach(() => {
   backHandlers.length = 0;
   tabPressHandlers.length = 0;
   mockNavigation.focused = true;
+  mockParams = {};
+  mockSetParams.mockClear();
   jest
     .spyOn(BackHandler, 'addEventListener')
     .mockImplementation(((_event: string, handler: () => boolean) => {
@@ -984,5 +999,186 @@ describe('the content header gutter', () => {
 
     await toBoard(view);
     expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **People, the third mode** (founder tranche 2026-09-08, §§A2, A3, A15).
+ *
+ * People was a category of For You and is now a peer of Feed and Leaderboard, reached by
+ * the same control. What this file owns is the *mode*: that the control has three cells and
+ * still fits, that People replaces the content area exactly as the board does, that the two
+ * handlers written for two modes work for three, and that a contextual CTA can open it.
+ *
+ * The suggestion lists themselves are `PeopleView.test.tsx`, and the privacy rules behind
+ * them are in `supabase/tests/`. Nothing here reaches for either.
+ */
+const toPeople = async (view: View) => {
+  await fireEvent.press(view.getByLabelText('People'));
+  await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
+};
+
+describe('the People mode', () => {
+  it('is a third cell in the same control, not a fourth tab', async () => {
+    const view = await open();
+
+    // One control, three cells, and the group keeps the name it had.
+    const group = view.getByLabelText('Feed mode');
+    expect(group.props.accessibilityRole).toBe('radiogroup');
+    expect(view.getByLabelText('Feed')).toBeTruthy();
+    expect(view.getByLabelText('Leaderboard')).toBeTruthy();
+    expect(view.getByLabelText('People')).toBeTruthy();
+  });
+
+  /**
+   * §A3: the heading sits where the timeframe selector sits, in the content header row, and
+   * it is **not a dropdown** — there is no header-level choice to make yet, and a chevron
+   * that opens nothing is a control that lies. A `MediumSelector` announces itself as
+   * "Showing X"; a `SectionHeader` does not, which is what this asserts without depending
+   * on a glyph.
+   */
+  it('draws its heading in the content header row, with no chevron', async () => {
+    const view = await open();
+    await toPeople(view);
+
+    expect(view.queryByLabelText('Showing People you may know')).toBeNull();
+    expect(view.getByLabelText('People you may know')).toBeTruthy();
+  });
+
+  it('replaces the content area, Trending and Activity included', async () => {
+    const view = await open();
+    await toPeople(view);
+
+    expect(view.queryByLabelText('Activity')).toBeNull();
+    expect(view.queryByLabelText('Showing This month')).toBeNull();
+  });
+
+  it('leaves the feed exactly where it was on the way back', async () => {
+    const view = await open();
+    await toPeople(view);
+
+    await fireEvent.press(view.getByLabelText('Feed'));
+
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    expect(view.queryByLabelText('People you may know')).toBeNull();
+  });
+
+  it('leaves the bell reachable, like every other mode', async () => {
+    const view = await open();
+    await toPeople(view);
+    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+  });
+});
+
+/**
+ * The two handlers that were written when there were two modes.
+ *
+ * Both said "is the board showing"; both now say "is the Feed showing". A People mode that
+ * Android's Back closed the app from, or that re-tapping the tab could not leave, would be
+ * the founder's original physical bug reintroduced by a feature that had nothing to do
+ * with it.
+ */
+describe('leaving People the two ways a mode can be left', () => {
+  it('returns to the Feed on hardware Back, and consumes the press', async () => {
+    const view = await open();
+    await toPeople(view);
+
+    expect(pressBack()).toBe(true);
+
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+  });
+
+  it('returns to the Feed root on a re-tap of the tab', async () => {
+    const view = await open();
+    await toPeople(view);
+
+    pressFeedTab();
+
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+  });
+});
+
+/**
+ * **Arriving on People from somewhere else** (§A15).
+ *
+ * The end of onboarding and an empty Feed both send somebody here to find people, and
+ * `show=people` is how they say so. The second test is the one that matters: a tab stays
+ * mounted, so an initial-state read alone opens nothing for a reader who has already been
+ * to the Feed — which is every reader who has just looked at an empty one.
+ */
+describe('arriving to find people', () => {
+  it('opens on People when sent here for that, and consumes the parameter', async () => {
+    mockParams = { show: 'people', from: 'onboarding' };
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined, from: undefined });
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'people_suggestions_viewed',
+      props: { source: 'onboarding', mode: 'mutuals' },
+    });
+  });
+
+  it('opens People on an already-mounted tab, and lets go afterwards', async () => {
+    const view = await open();
+    expect(view.getByLabelText('Activity')).toBeTruthy();
+
+    mockParams = { show: 'people', from: 'sparse_feed' };
+    await view.rerender(<FeedScreen />);
+
+    await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'people_suggestions_viewed',
+      props: { source: 'sparse_feed', mode: 'mutuals' },
+    });
+
+    // Not stuck: the consumed parameter does not put People back on the next render.
+    mockParams = {};
+    await fireEvent.press(view.getByLabelText('Feed'));
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await view.rerender(<FeedScreen />);
+    expect(view.getByLabelText('Activity')).toBeTruthy();
+  });
+
+  it('opens on Feed when nobody asked for People', async () => {
+    const view = await open();
+
+    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(mockSetParams).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A value a stranger typed into a URL is not a `source`. The property is a closed set of
+   * four words, so an unrecognised one falls back to the permanent mode's own source rather
+   * than being sent through to the vendor.
+   */
+  it('does not pass an unrecognised source through to analytics', async () => {
+    mockParams = { show: 'people', from: 'wherever' };
+    await open();
+
+    await waitFor(() =>
+      expect(mockTrack).toHaveBeenCalledWith({
+        name: 'people_suggestions_viewed',
+        props: { source: 'people', mode: 'mutuals' },
+      }),
+    );
+  });
+
+  it('records the view on the toggle too, named as the permanent mode', async () => {
+    const view = await open();
+    mockTrack.mockClear();
+    await toPeople(view);
+
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'people_suggestions_viewed',
+      props: { source: 'people', mode: 'mutuals' },
+    });
+
+    // And not again on the way back, which is the rule `leaderboard_viewed` follows.
+    mockTrack.mockClear();
+    await fireEvent.press(view.getByLabelText('Feed'));
+    expect(mockTrack).not.toHaveBeenCalled();
   });
 });

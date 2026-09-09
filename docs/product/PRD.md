@@ -412,8 +412,8 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 2. Bingd creates or reuses the user's personal invitation token and prepares a short branded message plus a canonical link.
 3. The user opens the share sheet or copies the link or code.
 4. An installed recipient opens an invitation screen. A recipient without the app reaches a lightweight web page with public-safe inviter context, store actions, and the short code.
-5. After sign-up, the recipient explicitly accepts, which creates a one-way follow to the inviter.
-6. The inviter is notified and prompted to follow back.
+5. After sign-up, the recipient explicitly accepts, which creates a follow to the inviter — and, since 2026-09-08, a follow from the inviter back to them (§17, §A7).
+6. The inviter is notified that they joined — unless the recipient already followed them and no request of the inviter's was answered, in which case nothing new is filed (§26.13 clause 7).
 
 ### H. Monetization loop — Provisional, not active in v1
 
@@ -757,8 +757,8 @@ See §12 for the full specification.
 3. Preview the message and the public-safe inviter context. Private data is never included.
 4. Open the share sheet, or copy the invite link or short code.
 5. The recipient opens the installed app or a no-install web page. After account creation they explicitly accept.
-6. Acceptance creates a one-way follow to the inviter, or a follow request if the inviter is private.
-7. The inviter is notified and prompted to follow back.
+6. Acceptance creates a follow to the inviter, or a follow request if the inviter is private, **and a follow from the inviter back to the recipient** (§A7, 2026-09-08).
+7. The inviter is notified that they joined, and there is no Follow back to press: the relationship already exists. The one acceptance that files them nothing is a recipient who already followed them, where the news was delivered at the time (§26.13 clause 7).
 
 ### Share a ranking or list
 
@@ -3571,9 +3571,9 @@ Rationale: a reusable personal link matches how people actually invite — paste
 v0.5 said "accepts or follows" in three places without ever defining the result. The defined behavior is:
 
 1. The recipient must have an account. Acceptance is an **explicit tap**, never automatic.
-2. Acceptance **creates a one-way follow from recipient to inviter**.
-3. If the inviter's account is **private**, acceptance creates a **follow request** instead, subject to normal approval.
-4. The inviter is then **notified and prompted to follow back**. The inviter is never auto-followed.
+2. ~~Acceptance **creates a one-way follow from recipient to inviter**.~~ **Reversed 2026-09-08 (§A7, `20260912000100`): a redeemed *personal* invite creates both edges.** A `referral` token still creates this one-way follow and nothing else.
+3. ~~If the inviter's account is **private**, acceptance creates a **follow request** instead, subject to normal approval.~~ **Superseded 2026-09-08 (founder, `20260912000200`): a personal invite connects a private inviter too**, because minting a personal link and handing it to a named person is that approval, given in advance. A `referral` token still yields a request into a private owner.
+4. ~~The inviter is then **notified and prompted to follow back**. The inviter is never auto-followed.~~ **Reversed 2026-09-08 (§A7): a redeemed personal invite connects both parties.** The follow *back* is created automatically in the same transaction, and the inviter is told at most once — see §26.13 clause 7 and the As-built block at the end of this section.
 5. The recipient's identity is **not revealed to the inviter before acceptance**.
 6. An active **block** in either direction voids the invitation entirely.
 7. Acceptance also records referral attribution, independent of the follow.
@@ -3630,7 +3630,7 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > - **`invite_redeemed` and `invite_activated` analytics**, both emitted from a server outcome. `acquisition_source: 'invite'` has its first honest writer.
 > - **The web router at `bingd.app`** — `/i/*`, `/u/*`, `/title/*`, `/lists/*`, plus the two `.well-known` files. Static, no server, no third-party SDK. Platform routing offers iPhone or Android their own destination and offers a desktop browser both, never guessing.
 >
-> **Acceptance semantics above are implemented in full.** Redemption writes the attribution, creates the one-way follow of clause 2, files a **request** instead when the inviter is private (clause 3), and notifies the inviter (clause 4) — who is never auto-followed. Clauses 1, 5, 6 and 7 were already met: the tap is explicit, the recipient is unnamed until it commits, a block voids the invitation, and the attribution is written independently of the follow.
+> **Acceptance semantics above are implemented in full.** Redemption writes the attribution, creates the follow of clause 2 and notifies the inviter (clause 4). ~~files a **request** instead when the inviter is private (clause 3) … who is never auto-followed.~~ **Clauses 2, 3 and 4 were superseded on 2026-09-08**, and what is implemented is the superseding rule: a **personal** invitation creates both edges, both `approved`, whatever either account's visibility says, and the inviter is told at most once. A **referral** token still does what clauses 2 and 3 describe. See the As-built block at the end of this section. Clauses 1, 5, 6 and 7 were already met: the tap is explicit, the recipient is unnamed until it commits, a block voids the invitation, and the attribution is written independently of the follow.
 >
 > The screen also carries clause "an option to switch": it names the account that will be attributed *before* the tap and offers to sign out. The switch first makes **the invitation on screen** the pending one, then signs out — so the invitation survives the switch, and it is the invitation the person was actually looking at. Merely *opening* a second link still does not move anything, because a link tapped is not a decision.
 >
@@ -3721,6 +3721,131 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > from the App Store and launches from there arrives unattributed — no welcome, no join
 > row, no follow — and the recovery is the landing page's *I already have Bingd*. Invite
 > analytics remain a **floor**.
+
+> ### As built — 2026-09-08: a redeemed invitation is a connection, not a prompt
+>
+> **Clauses 3 and 4 are reversed** (founder tranche 2026-09-08 §A7, `20260912000100`, then
+> `20260912000200`). "The inviter is never auto-followed" was the rule from v0.5 through every
+> block above; a redeemed personal invite now creates **both** follow edges, both approved, in
+> the same transaction as the attribution.
+>
+> The two migrations are one change told in two parts, and they are two files for a reason
+> that is not editorial: `20260912000100` had already been executed against staging when the
+> review of it and the founder's decision arrived. A migration that has run somewhere is
+> history, and editing it would leave a file no database ever ran, a history row describing
+> statements that no longer exist, and a production apply taking a path staging never
+> rehearsed. So `20260912000200` carries every correction, and the rehearsal stays honest.
+>
+> The reasoning is not that the old rule was badly implemented. It is that the invitation
+> itself is bilateral social intent — one person deliberately shared their personal link,
+> and another deliberately used it to join — so making either of them go and find the other
+> afterwards was the product asking twice for a decision it had already been given. Everything
+> social in bingd. is worth more once a graph exists, and this is the one mechanism that
+> reliably seeds one.
+>
+> **No asymmetry survives, and clause 3 is superseded with it** (founder, `20260912000200`).
+>
+> | edge | state | why |
+> |---|---|---|
+> | inviter → invitee | **approved**, whatever the invitee's visibility says — and a request that was already **pending** is upgraded to approved | The invitee is the caller. Granting the inviter access to the invitee's *own* account is the invitee's decision to make, and redeeming that specific person's link is them making it |
+> | invitee → inviter | **approved**, whatever the inviter's visibility says — and a request that was already **pending** is upgraded to approved | The inviter *did* act: they minted a personal link and handed it to this person, which is the same decision an Approve is, taken earlier and about the same person |
+>
+> `20260912000100` shipped the second row as "approved for a public inviter, **pending** for a
+> private one", on the argument that the inviter is not the caller and that approval by
+> anybody other than the target is what `respond_follow_request` exists to enforce. The
+> founder's reading supersedes it: minting a personal link is that approval, given in advance
+> and to a named person, and asking for it again when they walk through the door is the
+> product asking twice for a decision it has already been given. **All four combinations of
+> the two accounts' visibility now end approved / approved.**
+>
+> **What that widens, stated rather than left to be discovered.** A personal token is
+> reusable and `invite_attributions` is keyed on the invitee, so one link can be redeemed by
+> many people. A link that leaks out of the conversation it was sent in used to produce a
+> *request* into a private inviter, which the inviter then decided; now whoever holds it
+> becomes an approved follower on redemption. The controls are the ones that already exist:
+> `revoke_invite_link` ends a link that has travelled too far, `unfollow` and `block` end a
+> relationship, and `invite_joined` names every person who uses it as they use it. This is a
+> deliberate trade of a leaked-link edge case against the activation of every invitation that
+> goes where it was sent.
+>
+> **Everything else about privacy is unmoved**: a block in either direction still refuses the
+> whole redemption, a suspended inviter still refuses it, the caller's own suspension still
+> refuses it at `assert_can_write`, `people_taste_matches` still never names a private
+> account, and `follow_activity_people` still resolves every named account through
+> `can_identify_profile`.
+>
+> **A pending edge is upgraded rather than left alone, in either direction** — a correction
+> independent review found in `20260912000100`. `on conflict do nothing` looked conservative
+> and was not: a private invitee whose inviter had already asked to follow them came out of a
+> redemption still holding a request — `connected` false, an Approve button in their inbox for
+> a decision they had just made by another door, and a Feed story announcing a relationship one
+> edge of which was pending. Redemption now does what `respond_follow_request` does on
+> approval: it flips the state, keeps the `approved_at` of an edge that was already approved,
+> clears the `follow_request` row it answered in **both** directions, and releases what either
+> side was holding for the other.
+>
+> **`referral` keeps clause 3 exactly.** `invite_tokens.kind` is the gate, so the invitee's own
+> edge into a private *referral* owner is still a request, there is still no reverse edge, and
+> there is still no story. A future public campaign link cannot inherit a rule written for a
+> link one friend hands another.
+>
+> **At most two notifications, and never two to the same person.** The invitee always gets
+> `invite_welcome`. The inviter gets `invite_joined` — for a private inviter too since
+> `20260912000200`, because a private inviter now gets the same relationship and there is
+> nothing left for a `follow_request` to Approve. Both edges are written directly rather than
+> through `follow`, precisely so they file no third row.
+>
+> Two cases `invite_joined` cannot cover, because an invitee who *already* followed their
+> inviter announced that at the time and there is no join left to file. If the acceptance
+> approved the **inviter's** own pending request into a private invitee, they get the
+> `follow_approved` that `respond_follow_request` would have sent them. If it did not, they
+> get **nothing** — the follow they were told about at the time still stands, and the only
+> edge that moved is the inviter's own outgoing one, which no writer in this schema announces
+> to the person who made it. No `follow_approved` ever goes to the invitee: they are reading
+> "Suraj invited you" in the same transaction about the same pair.
+>
+> The relationship-action table above still holds and now resolves differently by itself,
+> because it reads `follow_state_with` at draw time: the join row draws **Following** rather
+> than **Follow back**, and no CTA had to be removed to make that happen.
+>
+> **A future referral token will not do this.** `invite_tokens.kind` is the gate —
+> `personal` is the only kind `create_invite_link` mints, and `referral` is declared with no
+> writer, so introducing a public campaign link later is a writer plus a product decision
+> about its social semantics rather than an `if` somebody has to notice inside
+> `redeem_invite`.
+>
+> **`connected` is returned to the client**, true only when both edges came out approved, and
+> `invite_auto_follow_succeeded` follows that answer rather than the tap. The ratio between it
+> and `invite_redeemed` is the measurement of this change.
+>
+> **One Feed story, not two** (§A14). Two directed edges are one relationship, and the story
+> is authored by the **inviter** because that is the direction with an audience: the Feed reads
+> activity by actor, so the inviter's followers are shown the new account. The invitee's own
+> edge posts nothing — a second story would be duplication, and it would reach nobody anyway,
+> a brand-new account having no followers.
+>
+> **The concurrency this opened, and the defect it caught.** Two people accepting the same
+> link at the same moment are two transactions appending to one inviter's story — the actor is
+> not the caller, so nothing the callers already lock serialises them. The first version
+> guarded it with `select ... for update`, which locks the rows a query returned and cannot
+> lock a row that is not there yet; the real-PostgreSQL race suite failed it on the first run,
+> and `_post_follow_activity` now takes an ordered pair lock and a per-actor advisory key
+> before it reads anything. `races/follow-activity.mjs` asserts it live and
+> `mutation-check.mjs` mutant 15 proves that assertion would notice if the key were removed.
+>
+> **And the same absence of a per-actor ceiling bounds the story itself.** A story's membership
+> stops at `feed.follow_story_max_people` (50 by default) when it is written. Everything above
+> the bound is still a follow and still in the graph; it is only not in the sentence, which is
+> §A13 applied to the row instead of to the list.
+>
+> **The reader truncates nothing** (`20260912000400`). `follow_activity_people` takes no limit
+> and returns every member the viewer may identify, so "and 49 others" is the truth about what
+> they may see rather than a page presented as a total. Two earlier attempts put a bound in the
+> reader as well, and a second bound is a second thing to disagree with the first: a literal 50
+> disagreed the moment the configured ceiling moved, and reading the configuration disagreed
+> across *time*, because a story built at 50 and read at 10 is forty members silently dropped
+> from a story that was legitimately that long. Lowering the setting shortens future stories,
+> which is what a density lever should do, and hides nobody from one already told.
 
 ---
 
@@ -4453,7 +4578,7 @@ Typecheck and lint on every change. Unit tests for ranking insertion, bucket-ban
 
 **Capabilities:** backend enforcement cannot be bypassed by a modified client; the three-list limit holds; **losing a capability makes data read-only and never deletes it**; Early Access grants expire; no purchase, price, restore, or plan UI exists anywhere in the v1 build; no user is displayed as Pro.
 
-**Invitations:** acceptance requires an explicit tap; acceptance creates a one-way recipient→inviter follow; a private inviter yields a follow request; the inviter is prompted, never auto-followed; recipient identity is hidden before acceptance; a block voids the invitation; revoked, expired, malformed, cross-environment, and rate-limited tokens all show safe states; a token never grants access to private data.
+**Invitations:** acceptance requires an explicit tap; acceptance of a **personal** token creates **both** follow edges, approved, in all four combinations of the two accounts' visibility (`20260912000200`), upgrading a pending edge in either direction and never downgrading an approved one; a **referral** token creates the one-way recipient→inviter follow only, and a request when its owner is private; recipient identity is hidden before acceptance; a block in either direction voids the invitation; revoked, expired, malformed, cross-environment, and rate-limited tokens all show safe states; a token never grants access to private data.
 
 **Sharing:** previews match output; private artifacts cannot produce public pages; private fields never appear in payloads; links resolve correctly installed and uninstalled; deleted and newly private objects return safe unavailable states; `share_sheet_opened` is never recorded as a completed post.
 
@@ -4641,9 +4766,9 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 2. A user has one reusable personal invite link plus a short code, and can revoke and regenerate both.
 3. The invite link opens the app when installed, and a web landing page when not, showing public-safe inviter context, store actions, and the short code.
 4. A recipient must create an account and then explicitly tap Accept.
-5. Acceptance creates a one-way follow from recipient to inviter.
-6. If the inviter is private, acceptance creates a follow request instead.
-7. The inviter is notified and prompted to follow back, and is never auto-followed.
+5. Acceptance of a **personal** token creates both follow edges, approved, whatever either account's visibility says — and upgrades a pending edge in either direction rather than leaving it, clearing the `follow_request` it answered. (`20260912000200`; clauses 5–7 as they read before that migration described the one-way rule it reversed.)
+6. A **referral** token creates the recipient→inviter follow only — a request when its owner is private — and no reverse edge and no Feed story, so a public campaign link never connects two strangers.
+7. The inviter is told at most once per acceptance: `invite_joined` when their invitee's edge was created or upgraded, `follow_approved` when instead it was the inviter's own pending request that the acceptance answered, and nothing when neither moved. Never two rows for one acceptance.
 8. The recipient's identity is not visible to the inviter before acceptance.
 9. A block in either direction voids the invitation.
 10. Revoked, malformed, cross-environment, and rate-limited tokens all render safe states without leaking private data.

@@ -676,6 +676,114 @@ So `_leave_watchlist` deleting the row when a title is watched leaves the activi
 
 **Nothing was added to the read path**, which is what makes the privacy argument short: `feed_events_read` is type-independent, so the event is visible to exactly the accounts that may see the actor's rankings — and `20260820000200` set `watchlist`'s own select policy to the same visibility. `reactions_read`, `add_comment` and `set_reaction` all key on the event id and never on `type`, so a new type inherits the social controls by construction.
 
+### `follow_added`, and who a story is allowed to name — `20260912000100`, `20260912000200`
+
+Following somebody is Feed activity (founder §A9), and it is the first event type in this
+schema whose subject is a **person** rather than a title. Three things follow from that, and
+each is a decision rather than a shape.
+
+**One mutable row per actor per window, not one row per follow.**
+
+```sql
+create table feed_follow_targets (
+  event_id    uuid not null references feed_events(id) on delete cascade,
+  followed_id uuid not null references profiles(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  primary key (event_id, followed_id)
+);
+
+create index feed_events_follow_window
+  on feed_events (actor_id, causal_at desc) where type = 'follow_added';
+create index feed_follow_targets_followed on feed_follow_targets (followed_id);
+```
+
+A session spent following ten suggestions is one row, appended to, for
+`feed.follow_aggregation_minutes` (60). That *is* the frequency cap §A13 asks for, rather
+than a relevance model layered over N rows: a follow story cannot crowd out watch activity
+because there is at most one an hour per actor. The alternative — a row per follow, grouped
+at read time — is not available: the Feed is paged by a keyset over
+`(causal_at, causal_step, id)` shared with the profile activity page, and a group-by cannot
+be paged by a keyset over its members.
+
+**The membership itself is bounded at `feed.follow_story_max_people` (50 by default) as it is
+written**, and that number is what keeps this read small — an independent review of the
+migration found the need for it. `follow.max_per_hour` bounds one account's own follows at sixty, but
+`redeem_invite` posts the *inviter's* story from the invitee's session, so a link shared into
+a large group chat appends one member per redemption with no per-actor ceiling anywhere. A
+story naming five thousand people is not a story anybody reads; it is a sort on every feed
+page that happens to include it. So a follow past the ceiling inside the same window is
+simply not in the story — it is still a follow, still in the graph, and the next window opens
+a new story.
+
+**The bound is the writer's alone, and `follow_activity_people` truncates nothing**
+(`20260912000400`). It takes no limit: every member of a named event that the viewer may
+identify is returned, so "and 49 others" is the truth about what that viewer may see rather
+than a page presented as a total. Two earlier attempts put the bound in the reader as well
+and both could disagree with the writer — a literal 50 disagreed as soon as the configured
+ceiling moved, and reading the configuration disagreed across *time*, because a story built
+at 50 and read at 10 is forty members the reader would silently drop. A story is bounded by
+what was true when it was written; lowering the setting shortens future stories and hides
+nobody from one already told. The read stays small because the membership is small, which is
+why it needs no index beyond `feed_follow_targets`' own primary key.
+
+**`causal_at` is set once and never bumped**, so an append does not move the row in that
+keyset. Inside an hour it is near the top regardless, and a row that changed its sort
+position while somebody was paging past it is the duplicate-and-skip the keyset exists to
+make impossible.
+
+**The membership is a table with no policy, and the payload holds nothing.** The obvious
+shape is an array of ids in `feed_events.payload`, and it is wrong from the other side of
+the wire: `payload` is selected straight through `feed_events_read`, so every reader of the
+event would hold the uuid of every account the actor followed — including accounts that have
+blocked them, suspended accounts, and private accounts with no relationship to them. A uuid
+is not a name, but it is a *handle*: it is the argument nearly every read in this schema
+takes. So `feed_follow_targets` has row security on, **no policy at all**, and its `select`
+revoked from both client roles — `notifications`' shape since `20260819000300`, and for the
+same reason: the predicate that decides who may be named is `can_identify_profile`, which is
+server-only and which a policy expression cannot call.
+
+`follow_activity_people(event_ids)` is the only read path, and since `20260912000400` it takes no limit. It applies
+`can_view_profile` to the event's actor — restated because `security definer` bypasses
+`feed_events_read` — and `can_identify_profile` to every account it names, which is the
+identity-not-content predicate `followers_of`, `following_of` and `people_mutuals` already
+use. The caller is excluded from their own row, because this list is a list of people to
+discover and a Follow control pointed at yourself cannot exist. **No total is returned**: the
+count a reader sees is the number of people *they* may open, so a row cannot promise "and 4
+others" over a sheet that lists one.
+
+**Two locks, and the one that matters is not the obvious one.** `_post_follow_activity`
+takes the ordered pair key and then `follow_story:<actor>` before it reads anything. The
+first version used `select ... limit 1 for update` alone and the real-PostgreSQL race suite
+rejected it immediately: **`for update` locks the rows a query returned, and cannot lock a
+row that is not there yet.** Two transactions that both find no open story both find nothing
+to lock. That is reachable in production rather than in theory — `redeem_invite` posts the
+*inviter's* story from the *invitee's* session, so two people accepting one personal link at
+the same moment hold two different pair keys and nothing else. Pair then actor, one of each,
+which is what makes the pair deadlock-free.
+
+**What is deliberately not announced.** A follow *request* posts nothing — announcing it
+would publish a relationship its target has not agreed to, and disclose that somebody asked.
+An *approval* posts nothing either: it is the private account's own act, days later, about a
+request the requester has half forgotten, and the two people who care are already notified.
+And a reciprocal follow inside the same window is suppressed — presentation only, never
+follow state, and the pair lock is what makes that check see a story that has committed
+rather than one that has not.
+
+`invite_tokens.kind` (`personal` | `referral`, defaulted, `referral` declared with no
+writer) is the gate on the mutual auto-follow a redeemed invitation now creates. It is a
+property of the token rather than a branch inside `redeem_invite`, so a future public
+campaign link is a writer plus a product decision rather than an `if` somebody has to notice.
+
+Since `20260912000200` a valid **personal** token ends with **both** edges `approved`, in all
+four combinations of the two accounts' visibility, and a request that was already pending in
+either direction is upgraded rather than left — with the `follow_request` it answered cleared
+in both directions and anything either side was holding released, which is what an approval
+does everywhere else. A **referral** token keeps `20260912000100`'s semantics exactly: the
+invitee's own edge is a request into a private owner, and there is no reverse edge and no
+story. PRD §17's As-built block for 2026-09-08 carries the founder's argument for the change
+and states plainly what it widens.
+
+
 ### The award loop — `award_unlocks`, `award_tiers`, `award_genre_patterns` — `20260828000100`
 
 Three tables arrived with the award social loop, and one feed event type with them.

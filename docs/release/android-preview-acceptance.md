@@ -157,7 +157,7 @@ Do not put real credentials or another person's data into a screenshot.
       correct today: no Play opt-in URL is configured.
 - [ ] **Redeem it** on the disposable second account: sign out, tap the link, sign up
       through it.
-- [ ] The inviter is notified.
+- [ ] The inviter is notified that they joined. (A disposable second account has never followed you, so this is the ordinary path; the only acceptance that files nothing is one where the recipient already followed you — PRD §26.13 clause 7.)
 - [ ] Rank ten titles on the second account and confirm the inviter gets
       **invite activated**.
 - [ ] **Revoke** the link from Settings › Privacy. The revoked URL no longer redeems, and a

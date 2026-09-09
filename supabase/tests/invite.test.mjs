@@ -415,34 +415,76 @@ describe('acceptance semantics (PRD §17)', () => {
     return rows.map((r) => r.type);
   };
 
-  it('clause 2: acceptance follows a public inviter, one way', async () => {
+  /**
+   * **Clause 2 was one-way and is now mutual** (founder §A7, 20260912000100).
+   *
+   * The original assertion here was `followRow(inviter, invitee) === null`, on §17
+   * clause 4's reading that the inviter is *prompted* to follow back and never
+   * auto-followed. The founder has reversed that: handing somebody your personal link
+   * and their using it to join is bilateral social intent, and making either person go
+   * and find the other afterwards was the activation gap this tranche exists to close.
+   *
+   * The test that guarded the old rule is kept as the test that guards the new one,
+   * rather than deleted and replaced somewhere else, so the reversal is legible in one
+   * diff.
+   */
+  it('clause 2: acceptance connects a public inviter both ways', async () => {
     const inviter = await newUser('accept_public');
     const invitee = await newUser('accepter_public');
     const token = await mintLink(inviter);
 
     await t.actAs(invitee);
-    assert.equal((await redeem(token)).follow_state, 'approved');
+    const answer = await redeem(token);
+    assert.equal(answer.follow_state, 'approved');
+    assert.equal(answer.connected, true, 'a public pair comes out mutually connected');
 
-    const edge = await followRow(invitee, inviter);
-    assert.equal(edge.state, 'approved');
-    assert.ok(edge.approved_at);
-    // One way. Clause 4: the inviter is prompted to follow back, never auto-followed.
-    assert.equal(await followRow(inviter, invitee), null);
+    const outward = await followRow(invitee, inviter);
+    assert.equal(outward.state, 'approved');
+    assert.ok(outward.approved_at);
+
+    // The reverse edge, which is what §A7 added. `approved` because the invitee is the
+    // caller: it is their own account's access they are granting.
+    const back = await followRow(inviter, invitee);
+    assert.equal(back.state, 'approved');
+    assert.ok(back.approved_at);
   });
 
-  it('clause 3: a private inviter receives a request, not a follow', async () => {
-    // The private setting is honoured rather than bypassed, which is the whole reason
-    // §17 spells this clause out separately.
+  /**
+   * **Clause 3 is superseded for a personal token** (founder 2026-09-08, `20260912000200`).
+   *
+   * `20260912000100` left this edge a request, on the argument that the inviter is not the
+   * caller and approval by anybody other than the target is what `respond_follow_request`
+   * exists to enforce. The founder's reading, which supersedes it: the inviter *did* act —
+   * they minted a personal link and handed it to this person, which is the same decision
+   * an Approve is, taken earlier and about the same person.
+   *
+   * So the assertion that guarded the old rule guards the new one, in one diff, and the
+   * private setting is still honoured everywhere else: `people_taste_matches` never names
+   * a private account, `follow_activity_people` still resolves through
+   * `can_identify_profile`, and a `referral` token still produces a request — asserted in
+   * `follow-activity.test.mjs`, which is where the `kind` gate is tested.
+   */
+  it('clause 3: a personal invite connects a private inviter too', async () => {
     const inviter = await newUser('accept_private', 'private');
     const invitee = await newUser('accepter_private');
     const token = await mintLink(inviter);
 
     await t.actAs(invitee);
-    assert.equal((await redeem(token)).follow_state, 'pending');
+    const answer = await redeem(token);
+    assert.equal(answer.follow_state, 'approved');
+    assert.equal(answer.connected, true, 'the invitation promised a connection on both sides');
 
     const edge = await followRow(invitee, inviter);
-    assert.equal(edge.state, 'pending');
-    assert.equal(edge.approved_at, null);
+    assert.equal(edge.state, 'approved');
+    assert.ok(edge.approved_at);
+
+    /**
+     * The reverse edge was already `approved` before this change, for a reason that is
+     * unaffected by it: the invitee is the caller, and the account whose content it grants
+     * access to is their own.
+     */
+    const back = await followRow(inviter, invitee);
+    assert.equal(back.state, 'approved');
   });
 
   it('clause 4: the inviter is told, and told the right thing', async () => {
@@ -457,15 +499,26 @@ describe('acceptance semantics (PRD §17)', () => {
     // one acceptance never produces two notifications about the same act.
     assert.deepEqual(await noticesTo(publicInviter, publicInvitee), ['invite_joined']);
 
+    /**
+     * And the invitee is told **once**, by the welcome (§A8, 20260912000100).
+     *
+     * Two follow edges now exist, and the reverse one is written directly rather than
+     * through `follow`, precisely so it files no `follow` notification: the person it
+     * would tell is already reading "Suraj invited you" about the same fact. Two rows for
+     * one relationship is the redundancy PRD §15 exists to prevent.
+     */
+    assert.deepEqual(await noticesTo(publicInvitee, publicInviter), ['invite_welcome']);
+
     const privateInviter = (
       await t.sql(`select id from profiles where username = 'accept_private'`)
     ).rows[0].id;
     const privateInvitee = (
       await t.sql(`select id from profiles where username = 'accepter_private'`)
     ).rows[0].id;
-    // A request, because it is a task rather than news — and `follow_request` is
-    // exempt from the preference map for exactly that reason (20260819000300).
-    assert.deepEqual(await noticesTo(privateInviter, privateInvitee), ['follow_request']);
+    // And a private inviter gets the same row since `20260912000200`, because they get the
+    // same relationship: news rather than a task, so there is nothing left to Approve.
+    assert.deepEqual(await noticesTo(privateInviter, privateInvitee), ['invite_joined']);
+    assert.deepEqual(await noticesTo(privateInvitee, privateInviter), ['invite_welcome']);
   });
 
   it('never downgrades an existing approved follow, and files no second notice', async () => {

@@ -35,7 +35,8 @@
     "build:web": "node web/build.mjs",
     "test:adapter": "node supabase/tests/adapter-smoke.mjs",
     "test:acceptance": "node supabase/tests/two-user-acceptance.mjs",
-    "test:award-privacy": "node supabase/tests/award-privacy.mjs"
+    "test:award-privacy": "node supabase/tests/award-privacy.mjs",
+    "test:social": "node supabase/tests/social-activation.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/dm-serif-display": "^0.4.2",

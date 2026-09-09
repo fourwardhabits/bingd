@@ -248,9 +248,9 @@ to action. `invite_link_opens` would give per-channel clicks, `invite_attributio
 signups, and `activated_at` the activations.
 
 **Decision, 2026-09-05: do not do this.** Redeeming an invite is not a neutral act. It
-writes a one-way follow to the inviter and files an `invite_joined` notification. Running
-every channel through invite links would therefore manufacture a follow edge for every
-single acquired user, and those edges land in exactly the numbers section 5.2 exists to
+writes a follow to the inviter — since 2026-09-08 a follow in *both* directions — and files
+an `invite_joined` notification. Running every channel through invite links would therefore
+manufacture follow edges for every single acquired user, and those edges land in exactly the numbers section 5.2 exists to
 read honestly:
 
 - follower counts

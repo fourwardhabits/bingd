@@ -78,7 +78,13 @@ export type Surface =
    */
   | 'notifications'
   /** The Group Picks results list, for saves made from a group's pick. */
-  | 'group_picks';
+  | 'group_picks'
+  /**
+   * The People mode of the Feed tab (2026-09-08). Distinct from `for_you`, which is where
+   * People discovery used to live: the two would otherwise be one number spanning a move,
+   * and whether the move worked is the question.
+   */
+  | 'people';
 
 export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
 
@@ -342,6 +348,60 @@ export type AnalyticsEvent =
    */
   | { name: 'leaderboard_metric_selected'; props: { metric: LeaderboardMetricName } }
 
+  // --- Social activation (2026-09-08, founder §A17) --------------------------
+  /**
+   * The People mode of the Feed tab was opened.
+   *
+   * The activation question this release exists to answer is whether somebody who joins
+   * connects with people they actually know, and the first half of that is whether they
+   * ever reach the surface where they could. `source` is how they arrived, which is the
+   * part worth measuring: a permanent mode nobody finds and a contextual CTA at the end of
+   * onboarding are two different mechanisms and only one of them can be improved by moving
+   * a control.
+   *
+   * Emitted on entering the mode rather than per render, the rule `leaderboard_viewed`
+   * already follows on the same control: leaving and coming back is a second decision to
+   * look, and a re-render on the busiest screen in the app is not.
+   */
+  | { name: 'people_suggestions_viewed'; props: { source: PeopleEntry; mode: PeopleSuggestionMode } }
+  /**
+   * Mutuals or Match was chosen.
+   *
+   * Which of the two answers people actually want, which is what decides whether the pair
+   * stays a pair. Only a *change*, exactly as `leaderboard_metric_selected` is, or the
+   * count measures fidgeting.
+   */
+  | { name: 'people_suggestions_mode_changed'; props: { mode: PeopleSuggestionMode } }
+  /**
+   * An aggregated follow story was opened into its list of people.
+   *
+   * The one thing worth knowing about follow activity that the follow itself does not
+   * already say: whether a "followed Ravi and 4 others" row is a thing readers act on or a
+   * line they scroll past. No count and no ids — see `ALLOWED_PROPERTY_KEYS`.
+   *
+   * **`people_suggestion_followed` and `people_suggestion_request_sent` are deliberately
+   * not separate events.** §A17 names them, and they already exist: `follow_created`
+   * carries `surface` and `state`, so a follow started from People is
+   * `{ surface: 'people', state: 'approved' }` and a request is the same event with
+   * `state: 'pending'`. Two more names for one row would make "how many follows happened"
+   * a sum over three events, which is how a funnel comes to disagree with itself.
+   */
+  | { name: 'follow_activity_opened'; props?: undefined }
+  /**
+   * A redeemed personal invite left the two accounts mutually connected.
+   *
+   * Follows the *row* and not the tap, the rule `invite_redeemed` states: `redeem_invite`
+   * answers `connected` only when both edges came out approved, so this is the server's
+   * fact rather than the client's inference. A private inviter answers `connected: false`
+   * and emits nothing here — their side is a request until they answer it, and
+   * `invite_redeemed` plus `follow_created` already describe that state.
+   *
+   * Emitted beside `invite_redeemed` rather than instead of it: one counts invitations
+   * claimed, this counts the ones that produced a connection, and the ratio is the whole
+   * point of §A7.
+   */
+  | { name: 'invite_auto_follow_succeeded'; props?: undefined }
+
   // --- Help & Support -------------------------------------------------------
   /**
    * A Help & Support row was tapped, and a mail draft to support@bingd.app was asked for.
@@ -484,6 +544,24 @@ export type AnalyticsEvent =
  */
 export type SupportTopicName = 'feedback' | 'problem';
 
+/** Which People list. The server's own two, so the event and the chip are one vocabulary. */
+export type PeopleSuggestionMode = 'mutuals' | 'match';
+
+/**
+ * How somebody reached People (§A17).
+ *
+ * `people` is the permanent mode's own control — the Feed tab's toggle. The other three
+ * are contextual routes into it, and they are the ones whose value is unknown: the whole
+ * question is whether an activation prompt at the end of onboarding does more than a
+ * control a reader has to find.
+ *
+ * `invite` is declared and has no emitter yet, for the reason `DEFERRED_EVENTS` exists:
+ * the invitation flow ends in a mutual connection rather than in a prompt to go and find
+ * people (§A7), so there is nothing honest to attribute to it today. Naming it here is
+ * what makes adding that route a decision rather than a new string.
+ */
+export type PeopleEntry = 'people' | 'onboarding' | 'sparse_feed' | 'invite';
+
 /** The emittable names, for tests and for the spec to be checked against. */
 export const ANALYTICS_EVENTS = [
   'sign_in_completed',
@@ -517,6 +595,11 @@ export const ANALYTICS_EVENTS = [
   'review_helpful_added',
   'review_helpful_removed',
   'reviews_sort_changed',
+  // 2026-09-08, social connection activation (§A17).
+  'people_suggestions_viewed',
+  'people_suggestions_mode_changed',
+  'follow_activity_opened',
+  'invite_auto_follow_succeeded',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -543,6 +626,23 @@ export const DEFERRED_EVENTS = {
    * client-side moment that IS the crossing, or a server-side analytics path.
    */
   award_earned: 'crossed server-side (20260828000100); no honest client emission point',
+  /**
+   * §A17 names it, and there is no state it could describe. The reverse follow edge is
+   * written inside `redeem_invite`'s own transaction with the attribution row it depends
+   * on, so it cannot half-succeed: either the redemption committed and the edge exists, or
+   * the redemption did not and the client is looking at a refusal it already reports.
+   *
+   * The one case that is *not* a mutual connection is a private inviter, whose side stays a
+   * request until they answer it — and calling that a failure would mislabel the privacy
+   * decision §A7 deliberately preserved. `invite_redeemed` plus `follow_created`'s `state`
+   * already say exactly what happened there.
+   *
+   * Deferred rather than deleted, so that if a future non-transactional path ever creates
+   * this edge separately, the name is already here and the taxonomy does not have to be
+   * reopened in a hurry.
+   */
+  invite_auto_follow_failed:
+    'the reverse edge commits with the attribution in one transaction and cannot partially fail; a private inviter is pending, not failed',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -582,6 +682,10 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'result_count',
   'source_mix',
   'filter_count',
+  // People activation (2026-09-08). `mode` is already above — a closed set of words, here
+  // `mutuals` or `match`. `source` is how somebody reached People, and is likewise a closed
+  // set of four words (`PeopleEntry`): never a person, a handle or a referrer.
+  'source',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

@@ -106,7 +106,54 @@ describe('IconToggle', () => {
     expect(wide(cell.width, first!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
     expect(wide(cell.width, last!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
   });
+  /**
+   * **Three cells, and the one dimension the arrangement gives up** (§A2, 2026-09-08).
+   *
+   * The Feed's control gained People. The slop rule is unchanged and that is the point:
+   * horizontal slop goes on the group's outer edges only, because the cells are flush and
+   * React Native hit-tests siblings last-first, so a left slop on any cell but the first
+   * takes its neighbour's own drawn right edge.
+   *
+   * The consequence is that the **middle cell is 36 × 44 rather than 44 × 44**, and there is
+   * no distribution that fixes it: the only eight points a middle cell could gain are ones
+   * it takes from a neighbour, and a cell that looks pressable and is not is a worse defect
+   * than one that is eight points narrow. Pinned here so it stays a decision — and so that
+   * anyone who does find a better arrangement has a failing test telling them the outer
+   * cells and the vertical target must not regress with it.
+   */
+  it('keeps the outer-edge slop rule at three, and says what that costs the middle', async () => {
+    const view = await renderWithProviders(
+      <IconToggle
+        options={[
+          { value: 'feed', icon: 'newspaper-outline', label: 'Feed' },
+          { value: 'leaderboard', icon: 'trophy-outline', label: 'Leaderboard' },
+          { value: 'people', icon: 'people-outline', label: 'People' },
+        ]}
+        value="feed"
+        onChange={() => {}}
+        label="Feed mode"
+      />,
+    );
+
+    const [first, middle, last] = view.getAllByRole('radio');
+    const cell = StyleSheet.flatten(first!.props.style);
+
+    expect(first!.props.hitSlop).toEqual({ ...SLOP, left: theme.space[2], right: 0 });
+    expect(middle!.props.hitSlop).toEqual({ ...SLOP, left: 0, right: 0 });
+    expect(last!.props.hitSlop).toEqual({ ...SLOP, left: 0, right: theme.space[2] });
+
+    // Every cell reaches the target vertically, which is the axis a thumb misses on.
+    for (const option of [first, middle, last]) {
+      expect(tall(cell.height, option!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    }
+    // The two outer cells reach it horizontally as well.
+    expect(wide(cell.width, first!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    expect(wide(cell.width, last!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    // The middle one does not, and takes nothing from either neighbour to try.
+    expect(wide(cell.width, middle!.props.hitSlop)).toBe(cell.width);
+  });
 });
+
 
 describe('SectionHeader', () => {
   it('lets the trailing action fill the 44pt row it sits in', async () => {

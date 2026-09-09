@@ -141,6 +141,15 @@ Semantics are in [`ranking.md`](./ranking.md).
 | `block(target_id)` | Block. Removes follows both ways, voids invitations, hides tags | no |
 | `unblock(target_id)` | Remove a block. Does **not** restore prior follows | no |
 | `report(subject_type, subject_id, reason, note?)` | File a report | no |
+| `follow_activity_people(event_ids uuid[])` | Who one or more `follow_added` Feed stories are about, per viewer. The **only** read path into `feed_follow_targets`, which has RLS on and no policy: two predicates, `can_view_profile` on the event's actor and `can_identify_profile` on every account named, with the caller excluded from their own story and no total returned. **Takes no limit and truncates nothing** since `20260912000400` — every member the viewer may identify is returned, so the count a Feed row draws is exact; the bound is the writer's, at `feed.follow_story_max_people` (clamped 1..200) | no |
+
+> **`follow` posts Feed activity when — and only when — the edge lands approved**
+> (`20260912000100`). It aggregates into one `follow_added` row per actor per
+> `feed.follow_aggregation_minutes`, beside the recommendation release that already sits in
+> that branch and for the same reason: a pending request has decided nothing, and announcing
+> one would publish a relationship its target has not agreed to. `respond_follow_request`
+> posts nothing either — an approval is the private account's own act, days later, and the
+> two people who care are already told. Neither the edge nor the notification changed.
 
 **`block` and `report` are not queueable**, per PRD §18. Both are safety actions where a stale queued state is dangerous — a user who blocks someone on a train should not discover an hour later that it never took effect. The client hides the target locally on tap and submits when connected, which is a UI affordance rather than an outbox entry.
 
@@ -275,11 +284,11 @@ Two things about this are load-bearing. It counts `source = 'in_app'` only, so i
 2. Reject if the caller is the inviter.
 3. Reject if a block exists in either direction.
 4. Reject with `BG409` if this token has already been accepted by this caller.
-5. Insert a `follows` row from caller to inviter — `approved` if the inviter is public, `pending` if private.
+5. Insert a `follows` row from caller to inviter. ~~`approved` if the inviter is public, `pending` if private.~~ **Since `20260912000200` a valid *personal* token creates BOTH edges, both `approved`**, whatever either account's visibility says, and upgrades a pending edge in either direction rather than leaving it. A `referral` token keeps the original rule and creates the caller's edge only.
 6. Set `accepted_at` on the caller's `invite_attributions` row. **If a row already exists naming a different inviter, leave it alone** — the follow in step 5 still happens.
-7. Emit a notification to the inviter, which carries the follow-back prompt.
+7. Emit a notification to the inviter. ~~which carries the follow-back prompt.~~ **At most one, and there is no follow-back prompt to carry since `20260912000200`, because the relationship already exists**: `invite_joined` when the caller's own edge was created or upgraded, `follow_approved` when instead it was the *inviter's* own pending request that this redemption answered, and nothing when neither moved — a caller who already followed the inviter announced that at the time.
 
-The inviter is never auto-followed. Step 5 creates exactly one row, in one direction.
+~~The inviter is never auto-followed. Step 5 creates exactly one row, in one direction.~~ **Reversed 2026-09-08 (§A7).** A personal invitation is bilateral social intent, so step 5 creates two rows. A `referral` token still creates one.
 
 Step 6 is where the original wording was wrong, and the failure was silent. `invite_attributions` is keyed by `invitee_id`, so a person has exactly one attribution — and a second invite link, opened later from a different friend, would have collided on that primary key. Rejecting the whole call at step 4 would have meant a real person tapping a real friend's real invite and getting an error with no useful explanation, because the reason lives in a row about somebody else entirely.
 

@@ -32,23 +32,30 @@ export const TAB_ROUTES = {
 export type TabRoute = (typeof TAB_ROUTES)[keyof typeof TAB_ROUTES];
 
 /**
- * For You, opened on People (2026-09-07).
+ * The Feed, opened on People (2026-09-07; **moved to the Feed tab 2026-09-08**).
  *
- * The social cold start has one answer in this app and it is a *state* of the For You
- * tab rather than a screen: `PeopleDiscovery` draws behind the same selector that
- * offers Movies and TV shows, and nothing else in the app leads to it. Two surfaces now
- * need to send somebody there directly — the end of onboarding, and an empty Feed — and
- * a parameter on the existing tab is what lets them do that without a second People
- * screen, a sixth tab or a duplicated component.
+ * The social cold start has one answer in this app and it is a *state* of a tab rather than
+ * a screen: `PeopleView` draws behind the Feed's own Feed / Leaderboard / People control,
+ * and nothing else in the app leads to it. Two surfaces need to send somebody there
+ * directly — the end of onboarding, and an empty Feed — and a parameter on the existing tab
+ * is what lets them do that without a second People screen, a sixth tab or a duplicated
+ * component.
  *
- * One object rather than two call sites each spelling `show: 'people'`, for the reason
+ * **It used to point at For You**, where People was a category of the Movies / TV shows
+ * dropdown. The founder's §§A2 and A16 moved People onto the Feed and left For You as
+ * titles only, and this constant existing is what made that a one-line change at both call
+ * sites instead of two screens each having an opinion about where People lives.
+ *
+ * `from` rides along so `people_suggestions_viewed` can say which mechanism worked. It is a
+ * `PeopleEntry`, checked against that union by the compiler at each call site rather than
+ * here — this file has no business importing the analytics vocabulary.
+ *
+ * One factory rather than call sites each spelling `show: 'people'`, for the reason
  * `TAB_ROUTES` exists: a bare string looks right wherever it appears, and the screen
- * reading it has to agree with both writers.
+ * reading it has to agree with every writer.
  */
-export const PEOPLE_DISCOVERY = {
-  pathname: TAB_ROUTES.forYou,
-  params: { show: 'people' },
-} as const;
+export const peopleDiscovery = (from: 'onboarding' | 'sparse_feed') =>
+  ({ pathname: TAB_ROUTES.feed, params: { show: 'people', from } }) as const;
 
 /** Somewhere a screen can send a person: a tab, or the one tab state that has a name. */
-export type Destination = TabRoute | typeof PEOPLE_DISCOVERY;
+export type Destination = TabRoute | ReturnType<typeof peopleDiscovery>;

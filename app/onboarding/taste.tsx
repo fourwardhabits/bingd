@@ -22,7 +22,7 @@ import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
 import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 import { withGrace } from '@/lib/grace';
 import { posterUri } from '@/lib/images';
-import { PEOPLE_DISCOVERY, TAB_ROUTES, type Destination } from '@/lib/routes';
+import { peopleDiscovery, TAB_ROUTES, type Destination } from '@/lib/routes';
 import { theme } from '@/ui/tokens';
 import {
   Button,
@@ -318,9 +318,9 @@ export default function TasteOnboardingScreen() {
           // `recommendations` — the label on the bar and the name of the file have
           // never matched, which is most of how this went wrong in the first place.
           onExplore={() => void leave({ skipped: false, to: TAB_ROUTES.forYou })}
-          // The same tab, opened on People. See `PEOPLE_DISCOVERY` for why this is a
+          // The Feed tab, opened on People. See `peopleDiscovery` for why this is a
           // parameter on For You rather than a screen of its own.
-          onFindPeople={() => void leave({ skipped: false, to: PEOPLE_DISCOVERY })}
+          onFindPeople={() => void leave({ skipped: false, to: peopleDiscovery('onboarding') })}
         />
       ) : (
         <>

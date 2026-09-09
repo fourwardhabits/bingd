@@ -85,27 +85,33 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the twenty-four canonical names and nothing else', () => {
+  it('is the twenty-eight canonical names and nothing else', () => {
     // Pinned deliberately. Adding a twenty-second is a product decision that has to be
     // made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
     // You slate and the streak names arrived 2026-09-06 (#112, #108) and were emitted
     // for a day without being pinned here or written into the spec; the two funnel
     // denominators — onboarding_started and ranking_started — arrived 2026-09-07 with
-    // the pre-GTM convergence.
+    // the pre-GTM convergence. The four social-activation names arrived 2026-09-08
+    // (§A17): three about People and the Feed's follow stories, and one that follows the
+    // row a redeemed invite writes.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
+        'follow_activity_opened',
         'follow_created',
         'for_you_slate_shown',
         'group_picks_generated',
         'group_picks_opened',
         'group_picks_result_opened',
         'invite_activated',
+        'invite_auto_follow_succeeded',
         'invite_link_created',
         'invite_redeemed',
         'member_search_result_opened',
         'onboarding_completed',
         'onboarding_started',
+        'people_suggestions_mode_changed',
+        'people_suggestions_viewed',
         'ranking_completed',
         'ranking_started',
         'recommendation_opened',
@@ -149,7 +155,13 @@ describe('the event vocabulary', () => {
     // `invite_activated` and `invite_redeemed` left this list on 2026-08-19, which is the
     // mechanism working rather than the list eroding: 20260819000500 gave both a writer,
     // so both moved into the union in the same change that made them true.
-    expect(Object.keys(DEFERRED_EVENTS).sort()).toEqual(['award_earned']);
+    // `invite_auto_follow_failed` joined on 2026-09-08: §A17 names it, and there is no
+    // state it could describe — the reverse follow edge commits with the attribution row in
+    // one transaction, and a private inviter is pending rather than failed.
+    expect(Object.keys(DEFERRED_EVENTS).sort()).toEqual([
+      'award_earned',
+      'invite_auto_follow_failed',
+    ]);
     for (const name of Object.keys(DEFERRED_EVENTS)) {
       expect(ANALYTICS_EVENTS as readonly string[]).not.toContain(name);
     }
