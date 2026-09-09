@@ -18,6 +18,15 @@ const decide = (input: Partial<RoutingInput>) =>
     screen: undefined,
     tasteNeeded: false,
     tastePending: false,
+    /**
+     * An established account, on a device that has already been introduced to the app.
+     *
+     * Both defaults are the *settled* answer rather than the unknown one, so that a case
+     * about the taste rule is not silently also a case about the opening. The tests that
+     * are about those two set them explicitly.
+     */
+    stage: undefined,
+    welcomeSeen: true,
     ...input,
   });
 
@@ -58,9 +67,92 @@ describe('nextRoute', () => {
     });
   });
 
+
+  describe('the opening, which runs before there is an account', () => {
+    it('sends a device that has never seen it to the opening rather than the form', () => {
+      expect(decide({ status: 'signed-out', welcomeSeen: false })).toBe('/(auth)/welcome');
+    });
+
+    it('sends a device that has seen it straight to sign in', () => {
+      expect(decide({ status: 'signed-out', welcomeSeen: true })).toBe('/(auth)/sign-in');
+    });
+
+    /**
+     * The hold, and why it is safe to have one here at all.
+     *
+     * Guessing either way is wrong: `true` skips the opening on a genuine first launch,
+     * `false` shows it again to somebody who dismissed it. The wait is bounded in
+     * `hydrateWelcomeSeen`, which resolves an unreadable or unresponsive preference to
+     * `true` — so this state cannot outlive one Keychain read, and the app is never held
+     * on it indefinitely. That is the build-4 lesson applied rather than repeated.
+     */
+    it('moves nobody while the preference has not been answered', () => {
+      expect(decide({ status: 'signed-out', welcomeSeen: undefined })).toBeNull();
+    });
+
+    it('leaves somebody alone once they are inside the auth group', () => {
+      expect(
+        decide({ status: 'signed-out', group: '(auth)', screen: 'welcome', welcomeSeen: false }),
+      ).toBeNull();
+    });
+  });
+
+  describe('resuming a flow that is longer than the ranking run', () => {
+    /**
+     * **The defect the stage rule exists to prevent, stated as a test.**
+     *
+     * Five rankings used to mean the flow was over, and `readState` still settles an
+     * `active` account with five of them to `done` so a summary cannot repeat for ever.
+     * The run is step 7 of ten now: an account that closed the app on the People step has
+     * five rankings and a taste query that answers "not needed". Asking taste first would
+     * open the Feed with People and the notification question silently skipped.
+     */
+    it('returns somebody to the step they left, even though taste says they are done', () => {
+      expect(decide({ stage: 'people', tasteNeeded: false })).toBe('/onboarding/people');
+    });
+
+    it('returns them to the notification step for the same reason', () => {
+      expect(decide({ stage: 'notifications', tasteNeeded: false })).toBe(
+        '/onboarding/notifications',
+      );
+    });
+
+    /**
+     * A finished flow falls through to the ordinary rules rather than being routed by
+     * this one. Where the app opens after onboarding is the exiting screen's decision —
+     * the Feed when a connection was made, For You when none was — and a stage rule that
+     * answered here would overrule it every time.
+     */
+    it('stops answering once the flow is done', () => {
+      expect(decide({ stage: 'done', tasteNeeded: false })).toBe('/(tabs)/feed');
+    });
+
+    /**
+     * The stage outranks a taste check that has not come back, which is what stops the
+     * resume flashing the wrong screen: without this, a cold start on the People step
+     * would sit on `/` until two count queries answered a question that cannot change
+     * where this person belongs.
+     */
+    it('does not wait for the taste check when the stage already answers', () => {
+      expect(decide({ stage: 'people', tastePending: true, tasteNeeded: undefined })).toBe(
+        '/onboarding/people',
+      );
+    });
+
+    it('still refuses to pull anybody out of the flow group', () => {
+      expect(decide({ group: 'onboarding', screen: 'people', stage: 'done' })).toBeNull();
+    });
+  });
   describe('the first-run flow', () => {
-    it('sends a brand-new account to build its taste', () => {
-      expect(decide({ tasteNeeded: true })).toBe('/onboarding/taste');
+    /**
+     * The flow now begins at the motivation question rather than at the picker.
+     *
+     * The account exists by this point — auth is step 2 — so there is somewhere to put
+     * an answer, and the two value screens come before the reader is asked to spend any
+     * effort on a five-film selection.
+     */
+    it('sends a brand-new account to the top of the flow', () => {
+      expect(decide({ tasteNeeded: true })).toBe('/onboarding/motivations');
     });
 
     it('sends an established account to the feed instead', () => {

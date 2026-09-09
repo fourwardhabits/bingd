@@ -55,7 +55,9 @@ error rather than a decision somebody makes at 2am before a demo.
 | `sign_in_completed` | a Supabase session exists | the person signing in | `method` |
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
-| `onboarding_completed` | the first-run taste flow ended, by either exit | the account | `skipped`, `titles_ranked` |
+| `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` |
+| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09) | the account | `step`, `variant`, `outcome` |
+| `onboarding_motivations` | the six-way motivation question was answered, once, as soon as the account exists (2026-09-09) | the account | `count`, `picked` |
 
 ### Core loop
 
@@ -256,6 +258,20 @@ an account created on this device but routed to the Feed by a timed-out first-ru
 has no start, which is the gap the seed in `create-profile.tsx` exists to close. **The
 denominator for `onboarding_completed`** is this event, and `onboarding_started` without a
 matching completion is the abandonment the beta could not previously count.
+
+**`onboarding_step_completed`** (2026-09-09) exists because the flow is ten steps long and
+"it converts" stopped being a useful sentence about it. It follows the **step** rather than
+the tap, so a lost reply under-counts rather than double-counts, and its `variant` is the
+branch the People step drew **on entry** — a `could_not_load` retried into a real list still
+reports what the reader first met. It carries no ids, no handles and no count of who was
+suggested: step 9 is a private read of one person's social neighbourhood, and the analytics
+must not be able to reconstruct that graph.
+
+**`onboarding_motivations`** (2026-09-09) carries `picked` as a **delimited string** over
+the six fixed slugs and deliberately not as an array. `sanitize` accepts scalars only, so an
+array would be dropped silently and the event would arrive looking complete with its one
+interesting property missing. It is the closest this product comes to asking somebody why
+they downloaded it, and it is discarded after step 4 unless a column is ever justified.
 
 **`onboarding_completed`** covers both exits and `skipped` separates them. One event
 rather than two, so the denominator cannot drift: everybody who reaches the end of the

@@ -3,7 +3,14 @@ import type { Session } from '@supabase/supabase-js';
 import { useRouter, useSegments } from 'expo-router';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import {
+  STAGE_ROUTES,
+  hydrateStage,
+  useOnboardingStage,
+  type OnboardingStage,
+} from '@/features/onboarding/use-onboarding-stage';
 import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
+import { hydrateWelcomeSeen, useWelcomeSeen } from '@/features/onboarding/welcome';
 import { identify } from '@/lib/analytics';
 import { note, rememberRoute, tally } from '@/lib/flight-recorder';
 import { withGrace } from '@/lib/grace';
@@ -250,6 +257,24 @@ export type RoutingInput = {
   /** Undefined while the first-run check has not answered. */
   tasteNeeded: boolean | undefined;
   tastePending: boolean;
+  /**
+   * How far the first-run flow got on this device, or undefined if it never started.
+   *
+   * Asked *before* `tasteNeeded` below, and that ordering is load-bearing rather than
+   * arbitrary. See `use-onboarding-stage.ts`: five rankings no longer mean the flow is
+   * over, so the taste query answers "not needed" for somebody sitting on the People
+   * step, and a router that trusted it alone would open the Feed with the last two
+   * steps skipped.
+   */
+  stage: OnboardingStage | undefined;
+  /**
+   * Whether the opening has been shown on this device. Undefined while it is unread.
+   *
+   * Device-scoped rather than account-scoped, because it is the one screen that runs
+   * with no session and there is nothing to key it to. It is also the reason a signed
+   * out user is not sent straight to the form any more.
+   */
+  welcomeSeen: boolean | undefined;
 };
 
 /**
@@ -267,13 +292,30 @@ export function nextRoute({
   screen,
   tasteNeeded,
   tastePending,
+  stage,
+  welcomeSeen,
 }: RoutingInput): string | null {
   // Not knowing where the user belongs is not a reason to move them.
   if (status === 'loading' || status === 'error') return null;
 
   const inAuthGroup = group === '(auth)';
 
-  if (status === 'signed-out') return inAuthGroup ? null : '/(auth)/sign-in';
+  /**
+   * Signed out, and the opening now sits in front of the form.
+   *
+   * **The wait on `welcomeSeen` is bounded where it is read, not here.** An undefined
+   * value means the preference has not been answered yet, and moving on it would either
+   * show the opening to somebody who has already dismissed it or skip it on a first
+   * launch, depending on which way the guess went. Neither is worth guessing, and the
+   * read cannot hang for ever: `hydrateWelcomeSeen` resolves it to `true` on a failure
+   * or a stall, on the rule that losing one screen is a smaller cost than holding the
+   * whole app. So this is a hold measured in one Keychain read, not an open-ended one.
+   */
+  if (status === 'signed-out') {
+    if (inAuthGroup) return null;
+    if (welcomeSeen === undefined) return null;
+    return welcomeSeen ? '/(auth)/sign-in' : '/(auth)/welcome';
+  }
 
   if (status === 'onboarding') {
     return !inAuthGroup || screen !== 'create-profile' ? '/(auth)/create-profile' : null;
@@ -291,13 +333,32 @@ export function nextRoute({
   if (group === 'onboarding') return null;
 
   /**
+   * **A flow that has started is answered by where it got to, and by nothing else.**
+   *
+   * Before the taste rule, deliberately. `readState` settles an `active` account with
+   * five rankings to `done` so a summary cannot repeat for ever, and that repair is
+   * still right for the ranking sub-flow — but the run is step 7 of ten now, so an
+   * account resting on People or on the notification question has five rankings and a
+   * taste query that says "not needed". Asking that question first would open the Feed
+   * with two steps silently skipped, which is the same class of defect as the router
+   * ejecting somebody after their first film.
+   *
+   * `done` falls through on purpose: the flow is over, and where the app opens is the
+   * exiting screen's decision rather than this function's.
+   */
+  if (stage && stage !== 'done') return STAGE_ROUTES[stage];
+
+  /**
    * Still pending is not a reason to move anyone: the flow's screen would be mounted
    * and then replaced, and the feed would flash behind it. Waiting costs one count
    * query on a cold start and nothing afterwards (`staleTime: Infinity`).
    */
   if (tastePending) return null;
 
-  if (tasteNeeded) return '/onboarding/taste';
+  // An account that belongs in the flow and has no stage yet starts at the top of it.
+  // The stage is written by the first screen rather than here, so this stays a pure
+  // function of its inputs.
+  if (tasteNeeded) return STAGE_ROUTES.motivations;
 
   /**
    * `/` is the other route a ready user does not belong on. `(tabs)` is a group and
@@ -336,6 +397,29 @@ export function useAuthRouting() {
     auth.status === 'ready',
   );
 
+  const userId = auth.status === 'ready' ? auth.userId : null;
+  const stage = useOnboardingStage(userId);
+  const welcomeSeen = useWelcomeSeen();
+
+  /**
+   * The two device-local reads the router depends on, each performed once.
+   *
+   * Separate from the routing effect below on purpose. That effect runs on every segment
+   * change, and hydration is a Keychain read: doing it there would put one on every
+   * navigation for a value that cannot change without this process being told. Both
+   * helpers return early once they have an answer, so a second call is free, and both
+   * publish to the subscriptions above rather than returning into a variable nothing
+   * would re-render on.
+   */
+  useEffect(() => {
+    void hydrateWelcomeSeen();
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    void hydrateStage(userId);
+  }, [userId]);
+
   useEffect(() => {
     // Typed routes give `segments` a union of fixed-length tuples, so indexing past the
     // shortest one is a type error rather than a runtime one. The names are what this
@@ -348,6 +432,8 @@ export function useAuthRouting() {
       screen,
       tasteNeeded: taste.data?.needed,
       tastePending: taste.isPending,
+      stage,
+      welcomeSeen,
     });
 
     /**
@@ -362,5 +448,5 @@ export function useAuthRouting() {
       tally('route.replace');
       router.replace(destination as never);
     }
-  }, [auth, segments, router, taste.isPending, taste.data?.needed]);
+  }, [auth, segments, router, taste.isPending, taste.data?.needed, stage, welcomeSeen]);
 }

@@ -86,6 +86,39 @@ export type Surface =
    */
   | 'people';
 
+
+/**
+ * The steps of the first-run flow that report their own completion.
+ *
+ * Named for what the reader did rather than for the route, on the same rule `Surface`
+ * follows: a file gets renamed in a redesign and the historical data then refers to a
+ * screen nobody can find. `sign_in` is absent because auth already has its own events,
+ * and the opening is absent because it runs before an account exists to attach it to.
+ */
+export type OnboardingStep =
+  | 'motivations'
+  | 'answers'
+  | 'profile'
+  | 'pick'
+  | 'payoff'
+  | 'people'
+  | 'notifications';
+
+/**
+ * Which branch the People step drew, decided by what the account actually has.
+ *
+ * A closed set of five words and never a person. `connected` is an account that arrived
+ * on somebody's invitation, `connected_alone` the same with nobody left to suggest;
+ * `starter_shared` and `starter_active` are the two orderings of the organic list; and
+ * `could_not_load` is the read having failed, which is deliberately its own answer
+ * rather than being folded into an empty list.
+ */
+export type PeopleStepVariant =
+  | 'connected'
+  | 'connected_alone'
+  | 'starter_shared'
+  | 'starter_active'
+  | 'could_not_load';
 export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
 
 /**
@@ -191,6 +224,49 @@ export type AnalyticsEvent =
    * denominator cannot drift: everybody who reaches the end of the flow is in here.
    */
   | { name: 'onboarding_completed'; props: { skipped: boolean; titles_ranked: number } }
+  /**
+   * One step of the first-run flow was left, in either direction.
+   *
+   * **Ten steps means ten places to lose somebody**, and "it converts" stopped being a
+   * useful sentence about onboarding the moment it grew past one screen. This is the
+   * only event that can say *which* step, and the flow's whole measurement rests on it
+   * (`04-analytics-and-measurement.md` §2).
+   *
+   * It follows the **step**, not the tap: emitted once as the step is left, so a lost
+   * reply under-counts rather than double-counts, which is the direction `analytics.md`
+   * §6 requires everywhere.
+   *
+   * `variant` is the People step's branch and is absent on every other step. It reports
+   * the branch rendered **on entry**, so a `could_not_load` that was retried into a real
+   * list still says what the reader first met: the question this answers is what the
+   * screen showed, not what it eventually became.
+   *
+   * No ids, no handles, and no count of who was suggested. Step 9 is a private read of
+   * one person's social neighbourhood, and analytics must not be able to reconstruct
+   * that graph from outside it.
+   */
+  | {
+      name: 'onboarding_step_completed';
+      props: {
+        step: OnboardingStep;
+        variant?: PeopleStepVariant;
+        outcome: 'continued' | 'skipped';
+      };
+    }
+  /**
+   * What somebody said they wanted, once, as soon as there is an account to attach it to.
+   *
+   * **The closest this product gets to asking why somebody downloaded it**, and worth
+   * more than every other onboarding event combined. Nothing else in the flow says
+   * anything about intent; the rest say only whether a screen was survived.
+   *
+   * `picked` is a delimited string over the six fixed slugs rather than an array, and
+   * that is a correctness requirement rather than a style: `sanitize` accepts scalars
+   * only, so an array would be dropped *silently* and the event would arrive looking
+   * complete with its one interesting property missing. `motivationsProperty` builds it
+   * in canonical order, so two accounts that chose the same three group together.
+   */
+  | { name: 'onboarding_motivations'; props: { count: number; picked: string } }
 
   // --- Core loop ----------------------------------------------------------
   /**
@@ -568,6 +644,8 @@ export const ANALYTICS_EVENTS = [
   'signup_completed',
   'onboarding_started',
   'onboarding_completed',
+  'onboarding_step_completed',
+  'onboarding_motivations',
   'title_logged',
   'ranking_started',
   'ranking_completed',
@@ -682,6 +760,18 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'result_count',
   'source_mix',
   'filter_count',
+  // First-run flow (2026-09-09). `step` and `outcome` are closed sets of words, and
+  // `variant` is the People step's branch: five words, never a person.
+  'step',
+  'variant',
+  'outcome',
+  // How many of the six motivations were chosen, and which. `picked` is a delimited
+  // string over those six fixed slugs and deliberately NOT an array: `sanitize` drops
+  // arrays, so the array version of this property would vanish without a sound and the
+  // event would look complete with its only interesting field missing. Same shape as
+  // `source_mix` above, for the same reason.
+  'count',
+  'picked',
   // People activation (2026-09-08). `mode` is already above — a closed set of words, here
   // `mutuals` or `match`. `source` is how somebody reached People, and is likewise a closed
   // set of four words (`PeopleEntry`): never a person, a handle or a referrer.

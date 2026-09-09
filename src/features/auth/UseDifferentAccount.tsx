@@ -29,7 +29,7 @@ const SIGN_OUT_GRACE_MS = 8000;
  * The escape route out of onboarding, for the account that is the wrong one.
  *
  * **The trap this exists to open** was found on the founder's own device: sign in with
- * an email OTP, land on "Pick your name", and there is no way back. Settings — the only
+ * an email OTP, land on "Set up your profile", and there is no way back. Settings — the only
  * surface with Sign out — is behind the profile gate, and on iOS uninstalling does not
  * reliably clear the Keychain session, so reinstalling reopens the same screen for the
  * same account. Being signed in to an account you cannot leave is a dead end the auth
@@ -45,7 +45,7 @@ const SIGN_OUT_GRACE_MS = 8000;
  * the device-token release, the pending Apple-name clear, and the settle-don't-throw
  * contract (review 45) all come along — and then routes to the auth entry explicitly.
  * Explicitly, because routing leaves a signed-out person *inside* the `(auth)` group
- * alone: from "Pick your name" nothing else would move them. Local sign-out only; no
+ * alone: from "Set up your profile" nothing else would move them. Local sign-out only; no
  * other device's session and nothing about the account itself is touched.
  */
 export function UseDifferentAccountButton() {
