@@ -1832,9 +1832,16 @@ describe('the reveal reads title, then placement, then where it landed', () => {
     expect(at('Sicario')).toBeLessThan(at('Collateral'));
   });
 
-  it('ends in exactly two controls, Add details then Done', async () => {
-    // `onFinishLog` is what puts Add details on screen — every screen that mounts the
-    // sheet passes it, and the reveal falls back to Done alone if one ever does not.
+  it('ends in exactly two controls, Done then Add details', async () => {
+    /**
+     * `onFinishLog` is what puts Add details on screen — every screen that mounts the
+     * sheet passes it, and the reveal falls back to Done alone if one ever does not.
+     *
+     * **The order is the assertion** (founder, 2026-09-08). Add details is the encouraged
+     * next step and belongs in the trailing position, where a thumb reaching past the way
+     * out expects the way on. Presence alone passed while the pair was the wrong way
+     * round, which is how this shipped reversed.
+     */
     mockRanked.mockReturnValue({ data: movies });
     answering(placement);
     const sheet = await openSheet({ onFinishLog: jest.fn() });
@@ -1843,6 +1850,11 @@ describe('the reveal reads title, then placement, then where it landed', () => {
     expect(sheet.getByRole('button', { name: 'Add details' })).toBeTruthy();
     expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy();
     expect(sheet.queryByRole('button', { name: 'Rank another' })).toBeNull();
+
+    // Rendered order is accessibility order: nothing here reorders at paint.
+    const order = textIn(sheet.toJSON());
+    const at = (needle: string) => order.findIndex((t) => t.includes(needle));
+    expect(at('Done')).toBeLessThan(at('Add details'));
   });
 
   it('leaves the title alone when there is no placement worth naming', async () => {

@@ -254,6 +254,14 @@ const styles = StyleSheet.create({
      * one the founder rejected.
      */
     flexShrink: 1,
+    /**
+     * A floor as well as a ceiling, so `Rank` and `Ranked` are the same width.
+     *
+     * Without it the control grew by two characters at the moment a ranking succeeded and
+     * pushed the bookmark and recommend glyphs sideways — a twitch at exactly the wrong
+     * moment. The floor is the wider label's own default-type width; see the token.
+     */
+    minWidth: theme.layout.control.inlineButtonMinWidth,
     maxWidth: theme.layout.control.inlineButtonMaxWidth,
     paddingHorizontal: theme.space[4],
     borderRadius: theme.radius.control,
