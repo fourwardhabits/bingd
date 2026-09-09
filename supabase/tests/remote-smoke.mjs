@@ -189,6 +189,29 @@ console.log(`\nProbing ${url} as an unauthenticated client\n`);
   const ref = supabaseProjectRef(url);
   const expected = ref === null ? null : environmentForRef(ref);
 
+  /**
+   * Production is refused unless it is asked for by name, and refused by **stopping**.
+   *
+   * Reporting a failed assertion and carrying on was tolerable while the URL could only
+   * come from `.env`; now that the ambient environment can set it, a shell or a CI job
+   * that happens to hold production's Expo variables would redirect the whole run there.
+   * Nothing below writes with more than an anon key and the negative probes are supposed
+   * to be refused — but "supposed to be refused" is exactly what this file exists to
+   * check, and the first probe to stop being refused would then be performing the write
+   * it was written to detect. So it exits instead, on the same `--target production`
+   * gesture `two-user-acceptance.mjs` already requires.
+   */
+  const wanted = process.argv.includes('--target')
+    ? process.argv[process.argv.indexOf('--target') + 1]
+    : 'nonprod';
+  if (expected === 'prod' && wanted !== 'production') {
+    console.error(
+      `\nRefusing to run: ${url} is the production project.\n` +
+        'Pass --target production to say so deliberately.\n',
+    );
+    process.exit(1);
+  }
+
   if (expected === null) {
     report(
       'the project this is pointed at is one this repository knows',

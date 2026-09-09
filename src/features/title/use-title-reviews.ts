@@ -157,6 +157,24 @@ export function useSetReviewHelpful(mediaItemId: string | null) {
   const client = useQueryClient();
 
   return useMutation({
+    /**
+     * One at a time, per title.
+     *
+     * Independent review found this: every tap started an independent request, so a quick
+     * Helpful-then-undo could reach the database in the order it was sent and complete in
+     * the other. The removal runs first and deletes nothing; the insert lands after it;
+     * the row is left marked when the reader's last intent was to clear it — and because
+     * the client then reconciles against the server, it faithfully displays the wrong
+     * answer.
+     *
+     * A scope makes TanStack run mutations sharing it in series, so the second request is
+     * not sent until the first has settled and **the last tap is the last write**. Keyed
+     * on the title rather than the review because that is the granularity a reader can
+     * actually tap at speed, and serialising two different reviews on one page costs
+     * nothing at this rate.
+     */
+    scope: { id: `review-helpful-${mediaItemId ?? 'none'}` },
+
     mutationFn: async ({ reviewId, helpful }: { reviewId: string; helpful: boolean }) => {
       const { data, error } = await supabase.rpc('set_review_helpful', {
         p_operation_id: Crypto.randomUUID(),

@@ -517,3 +517,64 @@ describe('backward compatibility with build 1.0.0 (7)', () => {
     assert.equal(rows.length, 3);
   });
 });
+
+/**
+ * What an unrecognised sort actually orders by — 20260911000200.
+ *
+ * Independent review found that `20260911000100` read `p_sort` in six separate places and
+ * claimed a fallback it did not implement. Asserting "three rows came back" was what let
+ * that through: the rows were there, in an order nobody chose.
+ */
+describe('a sort nobody recognises', () => {
+  before(async () => {
+    await setNoteTime(author, '2026-09-01T10:00:00Z');
+    await setNoteTime(second, '2026-09-02T10:00:00Z');
+    await setNoteTime(third, '2026-09-03T10:00:00Z');
+  });
+
+  it('orders an unknown value exactly as top_desc, not merely returning rows', async () => {
+    const secondId = await reviewIdOf(second);
+    await vote(reader, secondId, true);
+    await vote(voterB, secondId, true);
+    await t.actAs(null);
+
+    const expected = await list(reader, 'top_desc');
+    await t.actAs(null);
+    const actual = await list(reader, 'sideways');
+    await t.actAs(null);
+
+    assert.deepEqual(actual.map((r) => r.user_id), expected.map((r) => r.user_id));
+    assert.equal(actual[0].user_id, second);
+  });
+
+  it('treats null as top_desc rather than as the Following filter', async () => {
+    /**
+     * The defect this migration exists for. `null <> 'following'` is `null`, so the whole
+     * disjunction fell to the `exists` branch and a caller who named no sort silently got
+     * Following: everybody they do not follow vanished, with no error and nothing to see
+     * it by. `third` is followed by nobody, which is what makes them the witness.
+     */
+    const rows = await t.asUser(reader, async () => {
+      const { rows: r } = await t.sql(`select * from title_reviews_v2($1, null, 25)`, [film]);
+      return r;
+    });
+    await t.actAs(null);
+
+    assert.equal(rows.length, 3, 'a null sort filtered the list to Following');
+    assert.equal(rows.some((r) => r.user_id === third), true, 'the unfollowed author vanished');
+  });
+
+  it('treats an empty string the same way', async () => {
+    const rows = await list(reader, '');
+    await t.actAs(null);
+    assert.equal(rows.length, 3);
+    assert.equal(rows.some((r) => r.user_id === third), true);
+  });
+
+  it('still applies Following when Following is what was asked for', async () => {
+    // The guard against over-correcting: the filter must survive the fallback.
+    const rows = await list(reader, 'following');
+    await t.actAs(null);
+    assert.equal(rows.some((r) => r.user_id === third), false);
+  });
+});
