@@ -138,3 +138,36 @@ test('the Bingd aggregate shows from the first rating', async () => {
     await t.close();
   }
 });
+
+/**
+ * The discovery floor, which is the *other* question and therefore the other row.
+ *
+ * `score.community_min_ratings` above decides whether a title page may print a number at
+ * all, and the answer before launch is "from the first rating", because withholding is
+ * worse than a thin number the reader can see the sample size of. Top Rated asks
+ * something different: whether a title is worth putting in front of somebody on the
+ * strength of that number. One person's 10.0 is a true score and a false recommendation.
+ *
+ * Asserted separately, and the pairing is the point: a future pass that moves one of them
+ * has to notice it is not moving the other.
+ */
+test('Top Rated starts at five ratings, and is not the display threshold', async () => {
+  const t = await createTestDb();
+  try {
+    const { rows } = await t.sql(
+      `select key, (value)::integer as n
+         from app_config
+        where key in ('discovery.top_rated_min_ratings', 'score.community_min_ratings')
+        order by key`,
+    );
+    assert.deepEqual(
+      rows.map((row) => [row.key, row.n]),
+      [
+        ['discovery.top_rated_min_ratings', 5],
+        ['score.community_min_ratings', 1],
+      ],
+    );
+  } finally {
+    await t.close();
+  }
+});

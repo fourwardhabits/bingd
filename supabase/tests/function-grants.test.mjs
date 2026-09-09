@@ -119,6 +119,14 @@ const ALLOWED = {
   'public_notes(uuid[],uuid[],integer)': ['authenticated'],
   'community_score(uuid)': ['authenticated'],
 
+  // Added 2026-09-09 with Top Rated (20260913000100). The same definer read as
+  // `community_score` asked about the catalogue rather than about one title, over the
+  // same population, so it discloses nothing that function does not — a caller could
+  // already ask it title by title. It takes a medium and a cursor and never a viewer,
+  // which is 20260813001900's rule. Not anon: For You is behind sign-in, and a grant
+  // should follow a surface rather than precede it.
+  'top_rated_titles(text,integer,numeric,integer,uuid)': ['authenticated'],
+
   // Added 2026-08-16 with the Following score (20260816001100). A definer read taking
   // a title rather than a viewer: the population is `auth.uid()`'s own approved
   // followees, so it cannot be pointed at somebody else's perspective, which is

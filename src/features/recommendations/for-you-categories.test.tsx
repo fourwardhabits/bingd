@@ -181,7 +181,7 @@ describe('the one selector', () => {
     expect(view.queryAllByRole('radio')).toHaveLength(0);
   });
 
-  it('offers Movies and TV shows, and nothing else', async () => {
+  it('offers the two personalised walls and the two community ones, and nothing else', async () => {
     const view = await open();
     await fireEvent.press(view.getByLabelText(/^Showing /));
 
@@ -189,12 +189,17 @@ describe('the one selector', () => {
     // and the glyph is a `Text` node that lands in the accessible name behind the label.
     expect(view.getByRole('button', { name: /^Movies/ })).toBeTruthy();
     expect(view.getByRole('button', { name: /^TV shows/ })).toBeTruthy();
+    // Added 2026-09-09. The community's order is a different answer to "what am I
+    // looking at", which is the question this control asks, so it lives here rather
+    // than as a chip in the row below — see the screen's own note.
+    expect(view.getByRole('button', { name: /^Top Rated Movies/ })).toBeTruthy();
+    expect(view.getByRole('button', { name: /^Top Rated TV/ })).toBeTruthy();
     // §A16. People is a mode of the Feed tab now, and the option that used to open it here
     // is gone rather than hidden — a dropdown row nobody can reach is a dropdown row.
     expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
     // The For You override. Collection lists the rankable unit, which is the season;
-    // this wall holds series, and calling them seasons here would name something that is
-    // not on screen.
+    // the *personalised* wall holds series, and calling them seasons here would name
+    // something that is not on screen.
     expect(view.queryByRole('button', { name: /^TV seasons/ })).toBeNull();
   });
 

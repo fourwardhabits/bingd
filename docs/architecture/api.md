@@ -648,6 +648,20 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 | `unranked_queue` | The highest-bucket-first queue from [`ranking.md`](./ranking.md) §10 |
 | `inbox` | Notifications joined to actor and subject |
 
+### Top Rated — added 2026-09-09 (`20260913000100`)
+
+`top_rated_titles(p_medium text, p_limit integer default 20, p_after_score numeric default null, p_after_count integer default null, p_after_id uuid default null)` — one page of the catalogue in community-score order. Returns `media_item_id, score, rating_count, min_ratings`. `p_medium` is `movies` or `tv`; anything else raises `22023`. Signed-in callers only.
+
+**It is `community_score` asked about the catalogue rather than about one title**, and that is the contract: same population (public, active, not blocked in either direction), same `score_for` arithmetic over the same band bounds. `supabase/tests/top-rated.test.mjs` asserts the two agree title by title, because two community scores is the failure this function could introduce.
+
+Eligibility is `app_config discovery.top_rated_min_ratings` (seeded 5), which is deliberately **not** `score.community_min_ratings` (1). The second decides whether a title page may print a number at all; the first decides whether a title is worth recommending on the strength of it. One row per question.
+
+Ordering is `score desc, rating_count desc, media_item_id asc` — a total order whose last term cannot change. Pagination is keyset: the cursor is all three values from the last row of the previous page, or none of them for the first. Supplying some but not all raises `22023` rather than silently returning an empty page, because a row comparison containing NULL is NULL rather than false.
+
+The function returns ids and aggregates and no title text: `media_items` is world-readable, so the client reads the catalogue itself in a second query rather than having a definer function project columns anybody could select. `p_limit` clamps to 1…50.
+
+**TV means seasons here and series on the personalised wall**, and both are right: `rankable_category` refuses a series, so a series has no rating to be ordered by, while TMDB answers "similar" about a show and never about one of its seasons.
+
 ### Title search
 
 `search_titles(p_query text, p_limit integer default 20)` — added 2026-08-14. Returns `id, kind, title, release_date, poster_path, provenance`, films and series only, at most 50 rows. Signed-in callers only, per PRD §26.2 AC 1. A season is reached from its series page (AC 2); it would also be useless in a result list, since a season is titled "Season 4" and a page of bare ordinals says nothing about which show each belongs to. PRD §8's scope line says "movie, series, and season search", which contradicts §26.2 — see [open questions](../product/open-questions.md).
