@@ -471,6 +471,21 @@ const ALLOWED = {
   // set: a grant follows a surface, and there is no signed-out title page.
   'title_reviews(uuid,text,integer)': ['authenticated'],
 
+  // Added 2026-09-08 (20260911000100). Helpful, and the reads that carry it.
+  //
+  // `title_reviews_v2` is the same query as `title_reviews` above with the Helpful count
+  // and the caller's own vote, and it applies the identical `can_view_profile` predicate
+  // — the old one stays granted beside it because a public App Store build still calls
+  // it. `title_review_count` is that same population counted, for the tab label, so the
+  // digit and the list cannot disagree. `set_review_helpful` is the only writer of
+  // `review_helpful_votes`, which is deny-all: it calls `assert_can_write()`, refuses a
+  // caller's own review, and answers every unreachable target — missing, private,
+  // blocked, unapproved — with one indistinguishable error, so it cannot be used to
+  // detect a private note. Not anon, following the rule the whole title page follows.
+  'title_reviews_v2(uuid,text,integer)': ['authenticated'],
+  'title_review_count(uuid)': ['authenticated'],
+  'set_review_helpful(uuid,uuid,boolean)': ['authenticated'],
+
   // Added 2026-08-17. The first writer and the first reader for a table that has
   // existed since 20260813000900 with nothing consulting it. Both are about the
   // caller's own settings and neither takes a target.

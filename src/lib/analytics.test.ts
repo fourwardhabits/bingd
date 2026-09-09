@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the twenty-one canonical names and nothing else', () => {
+  it('is the twenty-four canonical names and nothing else', () => {
     // Pinned deliberately. Adding a twenty-second is a product decision that has to be
     // made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -113,6 +113,9 @@ describe('the event vocabulary', () => {
         'sign_in_completed',
         'signup_completed',
         'settings_support_email_opened',
+        'review_helpful_added',
+        'review_helpful_removed',
+        'reviews_sort_changed',
         'streak_state_viewed',
         'title_logged',
         'watchlist_added',

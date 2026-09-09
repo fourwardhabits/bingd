@@ -539,6 +539,13 @@ describe('the guard is wired in, not merely present', () => {
     // can_view_profile from the caller's own side. A suspended *author* is already
     // absent from it, which is the direction that matters.
     'title_reviews',
+    // 20260911000100. The second version of the same read and the count behind the tab
+    // label, filtered through the same `can_view_profile` from the caller's own side --
+    // so a suspended *author* is absent from both, which is the direction that matters.
+    // Their writer is `set_review_helpful`, which calls the guard: a suspended account
+    // may still read what people wrote and may not tell anyone it helped.
+    'title_reviews_v2',
+    'title_review_count',
     // 20260826000600. The two comment reads, and they are the same shape as
     // `title_reviews` above: stable, definer, taking no viewer, and applying
     // can_view_profile from the caller's own side to the event's actor and to each

@@ -1228,10 +1228,14 @@ describe('reviews', () => {
     updated_at: '2026-08-16T10:00:00.000Z',
     score: '8.4',
     reaction_count: 3,
+    // 20260911000100. The count is everybody's; `viewer_helpful` is only ever this
+    // reader's own, which is what the row has to carry for the control to draw a state.
+    helpful_count: 0,
+    viewer_helpful: false,
   };
 
   it('shows a Bingd reader’s note, under their name and beside their score', async () => {
-    mockRpcResults.title_reviews = [review];
+    mockRpcResults.title_reviews_v2 = [review];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
@@ -1243,7 +1247,7 @@ describe('reviews', () => {
   });
 
   it('names nothing of TMDB’s, because none of it is here any more', async () => {
-    mockRpcResults.title_reviews = [review];
+    mockRpcResults.title_reviews_v2 = [review];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
@@ -1262,7 +1266,7 @@ describe('reviews', () => {
    * report a reader filed about that title would have been silently swallowed.
    */
   it('reports a review by its own id, not by the title or the author', async () => {
-    mockRpcResults.title_reviews = [review];
+    mockRpcResults.title_reviews_v2 = [review];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
@@ -1288,7 +1292,7 @@ describe('reviews', () => {
    * from the row.
    */
   it('offers no Report on the viewer’s own review', async () => {
-    mockRpcResults.title_reviews = [
+    mockRpcResults.title_reviews_v2 = [
       { ...review, id: 'um-mine', user_id: 'user-1', username: 'sai', display_name: 'Sai' },
     ];
     const view = await open();
@@ -1299,7 +1303,7 @@ describe('reviews', () => {
   });
 
   it('says a review has gone rather than failing, when its author deleted it', async () => {
-    mockRpcResults.title_reviews = [review];
+    mockRpcResults.title_reviews_v2 = [review];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
@@ -1319,7 +1323,7 @@ describe('reviews', () => {
   });
 
   it('opens the reviewer’s profile', async () => {
-    mockRpcResults.title_reviews = [review];
+    mockRpcResults.title_reviews_v2 = [review];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
@@ -1329,7 +1333,7 @@ describe('reviews', () => {
   });
 
   it('masks a spoiler from somebody who has not watched this exact title', async () => {
-    mockRpcResults.title_reviews = [{ ...review, has_spoilers: true }];
+    mockRpcResults.title_reviews_v2 = [{ ...review, has_spoilers: true }];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
@@ -1340,7 +1344,7 @@ describe('reviews', () => {
   it('shows it once they have watched it, rather than making them reveal it', async () => {
     // The founder's correction: somebody who has seen the film should not have to tap
     // through every spoiler on the page.
-    mockRpcResults.title_reviews = [{ ...review, has_spoilers: true }];
+    mockRpcResults.title_reviews_v2 = [{ ...review, has_spoilers: true }];
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1' }];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
@@ -1351,28 +1355,28 @@ describe('reviews', () => {
   });
 
   it('offers the sort only when there is something to sort', async () => {
-    mockRpcResults.title_reviews = [review];
+    mockRpcResults.title_reviews_v2 = [review];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    expect(view.queryByRole('tab', { name: 'Top' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'Top, most helpful first' })).toBeNull();
   });
 
   it('sorts by Top first, which is what a first-time reader wants', async () => {
-    mockRpcResults.title_reviews = [
+    mockRpcResults.title_reviews_v2 = [
       review,
       { ...review, user_id: 'user-3', username: 'bo', display_name: 'Bo' },
     ];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByRole('tab', { name: 'Top' })).toBeTruthy());
-    expect(view.getByRole('tab', { name: 'Top' }).props.accessibilityState.selected).toBe(true);
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Top, most helpful first' })).toBeTruthy());
+    expect(view.getByRole('tab', { name: 'Top, most helpful first' }).props.accessibilityState.selected).toBe(true);
   });
 
   it('invites the first one rather than showing an empty box', async () => {
-    mockRpcResults.title_reviews = [];
+    mockRpcResults.title_reviews_v2 = [];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
@@ -1381,7 +1385,7 @@ describe('reviews', () => {
   });
 
   it('asks an unranked reader to rank first, because a review carries a score', async () => {
-    mockRpcResults.title_reviews = [];
+    mockRpcResults.title_reviews_v2 = [];
     const view = await open();
     await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
@@ -1391,7 +1395,7 @@ describe('reviews', () => {
   it('offers a ranked reader the one composer there has ever been', async () => {
     // The log sheet, where the spoiler flag and the visibility are chosen beside the
     // text. A second composer here would be a second content model wearing a button.
-    mockRpcResults.title_reviews = [];
+    mockRpcResults.title_reviews_v2 = [];
     tableRows.rankings = [
       {
         user_id: 'user-1',
