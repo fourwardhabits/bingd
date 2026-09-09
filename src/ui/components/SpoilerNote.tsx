@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { segmentMentions } from '@/features/feed/mentions';
 
 import { theme } from '../tokens';
+import { ClampedText } from './ClampedText';
 import { Text } from './Text';
 
 export type SpoilerNoteProps = {
@@ -68,7 +69,6 @@ export function SpoilerNote({
   onPressMention,
 }: SpoilerNoteProps) {
   const [revealed, setRevealed] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
   if (masked && !revealed) {
     return (
@@ -97,8 +97,6 @@ export function SpoilerNote({
     );
   }
 
-  const clamp = expanded ? undefined : numberOfLines;
-
   /**
    * Nested `Text`, not `Pressable`, and the choice is load-bearing.
    *
@@ -114,9 +112,9 @@ export function SpoilerNote({
    * anywhere else still expands. Wrapping each name in its own touchable view is how
    * both of those break.
    */
-  const body =
+  const body = (prose: string) =>
     mentions?.length && onPressMention
-      ? segmentMentions(text, mentions).map((span, index) =>
+      ? segmentMentions(prose, mentions).map((span, index) =>
           span.kind === 'text' ? (
             span.text
           ) : (
@@ -138,7 +136,7 @@ export function SpoilerNote({
             </Text>
           ),
         )
-      : text;
+      : prose;
 
   return (
     <View style={styles.note}>
@@ -157,16 +155,35 @@ export function SpoilerNote({
           </Text>
         </View>
       ) : null}
-      <Pressable
-        accessibilityRole={clamp ? 'button' : undefined}
-        accessibilityLabel={clamp ? `Show the whole ${noun}` : undefined}
-        onPress={() => setExpanded(true)}
-        disabled={!clamp}
-      >
-        <Text variant="body" numberOfLines={clamp}>
-          {body}
-        </Text>
-      </Pressable>
+      {/**
+       * **The clamp, with `… more` on the last visible line** (founder, physical iOS
+       * 1.0.1 build 8).
+       *
+       * This block truncated and expanded on a tap, and said neither: a reader who did
+       * not already know there was more text had no way to find out. The affordance is
+       * the title page's own, and it is the same component rather than a copy of it —
+       * measured, trimmed at a word boundary, and drawn *inside* the clamp so it can
+       * never orphan onto a line of its own. See `ClampedText`.
+       *
+       * `render` rather than a plain string, because a note can name people: the spans
+       * are rebuilt over whatever prose survives the trim, and the measuring pass is
+       * given the same spans so a semibold @handle is measured at the width it sets.
+       *
+       * No `collapseLabel`, which keeps this one-way. A feed row that could re-collapse
+       * under a thumb is a row that changes height while somebody is reading the one
+       * below it — the behaviour this block already had, stated deliberately.
+       */}
+      {numberOfLines ? (
+        <ClampedText
+          text={text}
+          clamp={numberOfLines}
+          render={body}
+          testIDPrefix="note"
+          expandLabel={`Show the whole ${noun}`}
+        />
+      ) : (
+        <Text variant="body">{body(text)}</Text>
+      )}
     </View>
   );
 }

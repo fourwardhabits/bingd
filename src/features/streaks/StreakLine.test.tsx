@@ -122,13 +122,35 @@ describe('what the row says', () => {
     }
   });
 
-  it('says nothing whatever about a run that is over', async () => {
-    // No "you lost your streak", no loss animation — and no "🔥 0 week streak", which
-    // is the app telling somebody they are failing at something.
+  /**
+   * **A run that is over still draws the row** (founder, physical iOS 1.0.1 build 8).
+   *
+   * `93648ad` hid the whole row at zero weeks, and what that produced on a device was a
+   * profile with no streak on it at all — indistinguishable from an account that has
+   * never ranked anything. The words here are the ones this row carried before that
+   * commit: the count, and an invitation rather than a loss.
+   *
+   * There is still no "you lost your streak", no loss animation and no best-run
+   * consolation. `best` is deliberately unread.
+   */
+  it('offers a lapsed run a way back, rather than disappearing', async () => {
     mockStreak = settled(streak({ weeks: 0, best: 6 }));
     const view = await open();
 
-    expect(view.queryByText(/week streak/)).toBeNull();
+    await waitFor(() => expect(view.getByText(/🔥 0 weeks/)).toBeTruthy());
+    expect(view.getByText(/Rank something this week to start a new one./)).toBeTruthy();
+    // The count is said as it is written, not as "A 0 week streak".
+    expect(view.getByLabelText(/^0 weeks. Rank something/)).toBeTruthy();
+    // No loss language, and the best run is not consolation for it.
+    expect(view.queryByText(/lost/i)).toBeNull();
+    expect(view.queryByText(/6/)).toBeNull();
+  });
+
+  it('draws the lapsed row only for an account with a history', async () => {
+    mockStreak = settled(streak({ weeks: 0, best: 0, hasHistory: false }));
+    const view = await open();
+
+    expect(view.queryByText(/0 weeks/)).toBeNull();
     expect(view.queryByText(/start a new one/)).toBeNull();
   });
 

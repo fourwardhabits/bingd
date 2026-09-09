@@ -701,6 +701,42 @@ describe('the shape of the page', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
+  /**
+   * **The weekly streak is on the owner's own profile, and this is where that is
+   * asserted** (founder, physical iOS 1.0.1 build 8).
+   *
+   * The streak has its own tests, and they all passed while the founder could not find
+   * the row on a device: `StreakLine` decides what to say, and this screen decides
+   * whether anything gets to say it. Nothing had ever asserted the second half, so the
+   * row could be dropped from the profile shell — by moving `GoalsSection`, by losing
+   * `streakUserId`, by wrapping either in a condition — and every streak test would
+   * still be green.
+   *
+   * The rankings carry `created_at` inside the current week, which is the whole of what
+   * `weeklyStreak` needs to answer with a live run. The clock is pinned so the fixture
+   * is not a different week on the day this runs.
+   */
+  it('draws the weekly streak under Your 2026', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 8, 2, 12));
+    try {
+      const thisWeek = new Date(2026, 8, 1, 9).toISOString();
+      mockTables.rankings = [1, 2].map((n) => ({
+        ...rankedRow(`film-${n}`, n),
+        created_at: thisWeek,
+      }));
+
+      const view = await open();
+
+      await waitFor(() => expect(view.getByText(/🔥 1 week streak/)).toBeTruthy());
+      const found = positions(view, ['YOUR 2026', '🔥', 'BINGD. AWARDS']);
+      for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
+      const order = found.map((piece) => piece.at);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('puts the Watchlist immediately after Top ranked', async () => {
     /**
      * **The founder's ordering decision, asserted as an ordering.** Top ranked says what

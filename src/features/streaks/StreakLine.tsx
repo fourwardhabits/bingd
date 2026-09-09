@@ -30,15 +30,20 @@ export type StreakLineProps = {
  * ---------------------------------------------------------------------------
  *
  * **It says nothing at all until there is something to say.** A reader who has never
- * ranked anything gets no section: "🔥 0 weeks" on a new account is the app telling
- * somebody they are failing at something they have not started. It also stays away when
- * the read fails — the same rule the awards shelf and the watchlist shelf on this page
- * already follow, and for the same reason: a failed secondary read must not take more of
- * the profile than the feature does when it works.
+ * ranked anything gets no section: a streak offered to somebody who has not started is
+ * the app telling them they are failing at something. It also stays away when the read
+ * fails — the same rule the awards shelf and the watchlist shelf on this page already
+ * follow, and for the same reason: a failed secondary read must not take more of the
+ * profile than the feature does when it works.
  *
- * **An open week is not a lost one.** With a live streak and no ranking yet this week,
- * the second line says how long there is to keep it — days, not a countdown, and once,
- * not four times. `streak.ts` is where the grace itself lives.
+ * **A run that has lapsed is still something to say, and that is the founder's
+ * correction of 2026-09-09.** Having ranked before and having a live run are two
+ * different facts, and for a while this row answered both with an empty space — see the
+ * note on the visibility rule below.
+ *
+ * **An open week is not a lost one.** A live streak with nothing ranked yet this week
+ * says only the count: no countdown, no nudge, nothing to be behind on. `streak.ts` is
+ * where the grace itself lives.
  */
 export function StreakLine({ userId }: StreakLineProps) {
   const streak = useStreak(userId);
@@ -68,14 +73,52 @@ export function StreakLine({ userId }: StreakLineProps) {
     });
   }, [data, daysLeft]);
 
-  // Nothing to say, and four different reasons for it — still loading, failed, an
-  // account that has not ranked anything yet, or a run that is currently zero weeks
-  // long. All four are the same answer here, and the last one matters: "🔥 0 week
-  // streak" is the app telling somebody they are failing at something.
-  if (!data?.hasHistory || data.weeks === 0) return null;
+  /**
+   * Nothing to say, and three reasons for it: still loading, the read failed, or this
+   * account has never ranked anything.
+   *
+   * **A run of zero weeks is not one of them, and putting it here is the regression this
+   * removes** (founder, physical iOS 1.0.1 build 8). `93648ad` added `|| data.weeks === 0`
+   * on the argument that "🔥 0 week streak" is the app telling somebody they are failing
+   * at something. That is true of the *sentence*, and it was answered by deleting the
+   * row — so an account whose run had lapsed lost the feature from its profile with
+   * nothing in its place, and there was no way to tell a streak that had ended from one
+   * that had never existed.
+   *
+   * The visibility rule is `hasHistory` again, which is what it was when the row shipped,
+   * and the lapsed case says the words it said then. Nothing else changes: the count
+   * phrasing and the `· This week ✓` state are the founder's own from 2026-09-07 and are
+   * untouched for every run of one week or more.
+   */
+  if (!data?.hasHistory) return null;
 
-  const run = data.weeks === 1 ? 'A one week streak' : `A ${data.weeks} week streak`;
-  const state = data.rankedThisWeek ? 'This week ✓' : null;
+  /** A history, and no current run. The one case this row used to draw and stopped. */
+  const lapsed = data.weeks === 0;
+  /**
+   * The count, spoken.
+   *
+   * The lapsed case says what the row says — `0 weeks` — rather than "A 0 week streak",
+   * which is what the arithmetic produced before and is a sentence about a streak that
+   * is not there.
+   */
+  const run = lapsed
+    ? '0 weeks'
+    : data.weeks === 1
+      ? 'A one week streak'
+      : `A ${data.weeks} week streak`;
+  /**
+   * What follows the count, and a lapsed run is the only week-not-yet-earned that speaks.
+   *
+   * A live streak with nothing ranked in this week still says nothing: an open week is
+   * not a lost one, and the nudge the founder removed at `93648ad` stays removed. A run
+   * of zero is a different fact — there is no streak to protect, so the line is an
+   * invitation rather than a task, and it is the one this row carried before.
+   */
+  const state = data.rankedThisWeek
+    ? 'This week ✓'
+    : lapsed
+      ? 'Rank something this week to start a new one.'
+      : null;
 
   return (
     <View style={styles.row}>
@@ -100,7 +143,7 @@ export function StreakLine({ userId }: StreakLineProps) {
         // would be "fire, four week streak".
         accessibilityLabel={state ? `${run}. ${state}` : run}
       >
-        {`🔥 ${data.weeks} week streak`}
+        {lapsed ? '🔥 0 weeks' : `🔥 ${data.weeks} week streak`}
         {state ? (
           <Text variant="callout" tone="secondary">
             {` · ${state}`}

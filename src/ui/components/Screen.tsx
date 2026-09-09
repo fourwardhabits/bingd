@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
 import { theme } from '../tokens';
+import { useStableBottomInset } from './use-stable-bottom-inset';
 
 const DEFAULT_EDGES: readonly Edge[] = ['top', 'left', 'right'];
 
@@ -35,12 +36,22 @@ export function Screen({
   includeBottomInset = false,
   edges = DEFAULT_EDGES,
 }: ScreenProps) {
-  const insets = useSafeAreaInsets();
+  /**
+   * **Stable across a keyboard, which is the founder's "the page behind the review sheet
+   * jumps" fix** (physical iOS 1.0.1 build 8).
+   *
+   * The live inset moves when a keyboard opens — iOS drops the home indicator from it,
+   * Android under edge-to-edge puts the IME in it — so this padding changed while a
+   * sheet in front of the page was being typed into, the page's scroll view was resized
+   * underneath a reader who was not touching it, and the content slid. See
+   * `use-stable-bottom-inset.ts` for the whole trace; this is its only caller.
+   */
+  const bottomInset = useStableBottomInset();
 
   // Zero, not a token, when there is something below: whatever is below owns
   // that space. Scroll views set their own generous `contentContainerStyle`
   // bottom padding, which is the right place for it, because it scrolls.
-  const bottomPadding = includeBottomInset ? Math.max(insets.bottom, theme.space[4]) : 0;
+  const bottomPadding = includeBottomInset ? Math.max(bottomInset, theme.space[4]) : 0;
 
   return (
     <SafeAreaView style={styles.safe} edges={edges}>
