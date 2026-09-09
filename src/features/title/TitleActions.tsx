@@ -255,13 +255,23 @@ const styles = StyleSheet.create({
      */
     flexShrink: 1,
     /**
-     * A floor as well as a ceiling, so `Rank` and `Ranked` are the same width.
+     * **No `minWidth` here, and the reason is worth keeping.**
      *
-     * Without it the control grew by two characters at the moment a ranking succeeded and
-     * pushed the bookmark and recommend glyphs sideways — a twitch at exactly the wrong
-     * moment. The floor is the wider label's own default-type width; see the token.
+     * `Rank` and `Ranked` are two characters apart, so the content-sized control grows
+     * when a ranking lands and carries the bookmark and recommend glyphs a step right.
+     * The obvious fix — a floor at the wider label's width, 132 — was written and then
+     * removed, because it overflows: this row lives in the identity column beside the
+     * poster, not across the screen, and that column is about 164pt on a 320pt phone and
+     * 219pt on a 375. A 132 floor plus two 44pt glyphs plus their gaps needs 236pt, so
+     * the floor would push the icons under the poster or off the edge on every phone
+     * narrower than about 393pt.
+     *
+     * `flexShrink: 1` is load-bearing precisely because of that: `Ranked` already gives
+     * width back on a narrow column, which is what keeps the row inside it. A floor takes
+     * that away. Removing the sideways twitch needs the icons anchored to the column's
+     * trailing edge, or a label pair of equal length — both changes to an approved layout
+     * rather than a defect fix, so neither is taken here.
      */
-    minWidth: theme.layout.control.inlineButtonMinWidth,
     maxWidth: theme.layout.control.inlineButtonMaxWidth,
     paddingHorizontal: theme.space[4],
     borderRadius: theme.radius.control,

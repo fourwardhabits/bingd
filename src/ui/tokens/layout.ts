@@ -69,26 +69,6 @@ export const layout = {
      * type, where it is the difference between a compact control and a full-width one.
      */
     inlineButtonMaxWidth: 168,
-    /**
-     * The floor under that same control, so its two states are one width
-     * (founder, physical QA, 2026-09-08).
-     *
-     * `Rank` and `Ranked` are two characters apart, and a content-sized button therefore
-     * grew by about that much the instant a ranking succeeded — carrying the bookmark and
-     * recommend glyphs beside it a step to the right. Small, and the founder saw it: the
-     * row twitched at the same moment the page was telling them the thing had worked.
-     *
-     * 132 is not a new measurement. It is the one the ceiling above is already derived
-     * from — *"`Ranked` sets to about 132 at the default text size"* — so the floor is the
-     * wider label's own width, and at default type both states now measure the same.
-     *
-     * **What this does not claim.** At larger text sizes both labels outgrow 132 and the
-     * two-character difference returns, bounded by `inlineButtonMaxWidth`. Holding them
-     * equal at every type size would mean measuring the longer label at runtime and
-     * reserving it, which is a great deal of machinery for a few points of drift at 130%
-     * type. This fixes the case the founder is actually looking at.
-     */
-    inlineButtonMinWidth: 132,
   },
   /**
    * What lifts a 32pt chip to the 44pt target without drawing it any larger
