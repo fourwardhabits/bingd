@@ -118,3 +118,60 @@ export function usePicks(userId: string | null): readonly PickedTitle[] {
     () => EMPTY,
   );
 }
+
+/**
+ * Whether the reader finished the ranking half or left it.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS RECORDED RATHER THAN DERIVED AT THE END
+ *
+ * `onboarding_completed.skipped` used to be computed on the notification step, from the
+ * taste query's ranked count: `(state.data?.ranked ?? 0) < FIRST_FIVE`. CI caught what
+ * that costs, and it is a reporting defect rather than a test one.
+ *
+ * The count is a *query*, and step 10 can mount before it has answered — on a relaunch
+ * straight onto the notification step it always does. An unanswered query is `undefined`,
+ * `?? 0` turns that into zero, and zero is below five, so **an account that ranked all
+ * five reports itself as a skip**. The direction matters: the flow's most important
+ * success metric would have been systematically under-counted, and the failure is silent
+ * because the event still fires and still looks well formed.
+ *
+ * So the outcome is written where it is actually known — by the screen that watched it
+ * happen, at the two exits that are the only ways past the ranking half — and read back as
+ * a fact. Memory-first like every other preference here, so within one session the write
+ * and the read are the same process and there is no race at all.
+ *
+ * **Unknown resolves to `completed`.** A relaunch onto step 10 with an unreadable
+ * preference is far more likely to be somebody who finished than somebody who declined,
+ * and reporting a completion as a skip is the error that was just removed.
+ */
+const OUTCOME_PREF = 'onboarding.rankingOutcome';
+
+export type RankingOutcome = 'completed' | 'skipped';
+
+const outcomeKey = (userId: string) => `${userId}.${OUTCOME_PREF}`;
+
+const outcomes = new Map<string, RankingOutcome>();
+
+/** Exported for tests, which must not inherit an outcome from the previous one. */
+export function resetRankingOutcome() {
+  outcomes.clear();
+}
+
+/** Records how the ranking half ended, in memory first and then on disk. */
+export async function setRankingOutcome(
+  userId: string,
+  outcome: RankingOutcome,
+): Promise<void> {
+  outcomes.set(userId, outcome);
+  await writePref<RankingOutcome>(outcomeKey(userId), outcome).catch(() => {});
+}
+
+/** How the ranking half ended. See the header for why an unknown answer is a completion. */
+export async function rankingOutcome(userId: string): Promise<RankingOutcome> {
+  const remembered = outcomes.get(userId);
+  if (remembered) return remembered;
+
+  const stored = await readPref<RankingOutcome>(outcomeKey(userId)).catch(() => null);
+  return stored === 'skipped' ? 'skipped' : 'completed';
+}

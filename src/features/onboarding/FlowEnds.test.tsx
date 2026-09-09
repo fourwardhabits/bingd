@@ -4,6 +4,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import { TAB_ROUTES } from '@/lib/routes';
 
 import { hydrateStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
+import { resetRankingOutcome } from './pick-five';
 import { resetWelcomeSeen } from './welcome';
 import { resetTasteIntent } from './use-taste-onboarding';
 
@@ -87,6 +88,7 @@ beforeEach(() => {
   resetOnboardingStages();
   resetWelcomeSeen();
   resetTasteIntent();
+  resetRankingOutcome();
   // Five placed, so the flow reaching its end is a completion rather than a skip.
   mockPrefs.set('user-1.onboarding.taste.phase', 'active');
   mockCounts.rankings = 5;
@@ -191,19 +193,40 @@ describe('ending the flow', () => {
   });
 
   /**
-   * `skipped` is read from the data rather than tracked through six screens: an account
-   * that reaches this step with fewer than five rankings did not complete the ranking half,
-   * and the count is the only honest witness to that.
+   * `skipped` is **read**, not re-derived from a query at the moment of the press.
+   *
+   * The earlier version computed it from the taste count, which this screen can mount
+   * before. An unanswered query read as zero, and an account that had ranked all five
+   * reported itself as a skip — the wrong direction on the flow's central metric. The
+   * ranking screen now records the answer at the two exits that know it.
    */
-  it('reports a skip when the ranking half was never finished', async () => {
-    mockCounts.rankings = 0;
-    mockCounts.user_media = 0;
+  it('reports a skip when the ranking half was left rather than finished', async () => {
+    mockPrefs.set('user-1.onboarding.rankingOutcome', 'skipped');
     await finish();
 
     await waitFor(() => expect(eventsNamed('onboarding_completed')).toHaveLength(1));
     expect(eventsNamed('onboarding_completed')[0].props).toMatchObject({ skipped: true });
   });
 
+
+  /**
+   * **The regression pin for the reporting bug CI caught.**
+   *
+   * No rankings are visible to this screen at all — the counts are absent, exactly as they
+   * are on a relaunch before the taste query has answered. The old implementation read that
+   * as zero, called it a skip, and quietly under-counted every completed flow. The outcome
+   * is now a recorded fact, so it survives a screen that knows nothing about the count.
+   */
+  it('does not call a completion a skip merely because no count is available', async () => {
+    mockCounts.follows = 1;
+    delete mockCounts.rankings;
+    delete mockCounts.user_media;
+
+    await finish();
+
+    await waitFor(() => expect(eventsNamed('onboarding_completed')).toHaveLength(1));
+    expect(eventsNamed('onboarding_completed')[0].props).toMatchObject({ skipped: false });
+  });
   it('does not navigate twice when the button is pressed twice', async () => {
     mockCounts.follows = 1;
     const view = await renderWithProviders(<NotificationsScreen />);

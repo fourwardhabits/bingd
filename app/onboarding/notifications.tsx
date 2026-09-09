@@ -4,11 +4,8 @@ import { useRef } from 'react';
 import { useCurrentProfile } from '@/features/auth';
 import { NotificationStep } from '@/features/onboarding/NotificationStep';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
-import {
-  FIRST_FIVE,
-  useCompleteTasteOnboarding,
-  useTasteOnboarding,
-} from '@/features/onboarding/use-taste-onboarding';
+import { rankingOutcome } from '@/features/onboarding/pick-five';
+import { useCompleteTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { track } from '@/lib/analytics';
 import { withGrace } from '@/lib/grace';
 import { TAB_ROUTES } from '@/lib/routes';
@@ -60,7 +57,7 @@ export default function NotificationsStepScreen() {
   const profile = useCurrentProfile();
   const advance = useAdvanceStage(profile.id);
   const complete = useCompleteTasteOnboarding(profile.id);
-  const state = useTasteOnboarding(profile.id);
+
 
   // A second press must not race a second navigation. A ref, because nothing renders from
   // it: the button stays live because the checks are quick.
@@ -104,7 +101,19 @@ export default function NotificationsStepScreen() {
     // decision that ends the flow is state the router depends on. `advance` and `complete`
     // both write memory synchronously and dispatch their disk writes.
     advance('done');
-    void complete({ skipped: (state.data?.ranked ?? 0) < FIRST_FIVE });
+
+    /**
+     * **The outcome is read, not re-derived**, and that is a correctness fix rather than a
+     * tidy-up.
+     *
+     * This used to be `(state.data?.ranked ?? 0) < FIRST_FIVE`. The taste count is a query,
+     * and this screen can mount before it answers — on a relaunch straight onto the
+     * notification step it always does. An unanswered query became zero, zero is below
+     * five, and an account that had ranked all five reported itself as a **skip**. CI
+     * caught it; the direction is the bad one, because it under-counts the flow's central
+     * success. `taste.tsx` now records the answer at the two exits that know it.
+     */
+    void complete({ skipped: (await rankingOutcome(profile.id)) === 'skipped' });
 
     const destination = (await opensOnFeed()) ? TAB_ROUTES.feed : TAB_ROUTES.forYou;
     router.replace(destination);

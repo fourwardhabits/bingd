@@ -4,7 +4,7 @@ import { renderWithProviders } from '@/test-utils/render';
 
 import { TAB_ROUTES } from '@/lib/routes';
 
-import { resetPickFive } from './pick-five';
+import { resetPickFive, resetRankingOutcome } from './pick-five';
 import { resetOnboardingStages } from './use-onboarding-stage';
 import { resetTasteIntent } from './use-taste-onboarding';
 
@@ -169,6 +169,7 @@ beforeEach(() => {
   // The two stores the two-phase picker added. Both are module-level, like the taste
   // intent map above, so a selection left behind by one test would resume in the next.
   resetPickFive();
+  resetRankingOutcome();
   resetOnboardingStages();
 });
 
@@ -578,6 +579,19 @@ describe('Your First Five', () => {
     expect(view.queryByRole('button', { name: 'Find people' })).toBeNull();
   });
 
+
+  /**
+   * The write side of the reporting fix: the outcome is recorded by the screen that
+   * watched it happen, at each of the two exits past the ranking half.
+   */
+  it('records that the ranking half was completed', async () => {
+    const view = await arrive();
+    await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(mockPrefs.get('user-1.onboarding.rankingOutcome')).toBe('completed'),
+    );
+  });
   it('continues into the People step rather than into the app', async () => {
     const view = await arrive();
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
@@ -604,6 +618,15 @@ describe('the way out', () => {
     expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
   });
 
+
+  it('records that the ranking half was left, so the completion says so', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    await waitFor(() =>
+      expect(mockPrefs.get('user-1.onboarding.rankingOutcome')).toBe('skipped'),
+    );
+  });
   it('offers a way out of the account itself, which routing makes unreachable otherwise', async () => {
     const view = await open();
     expect(view.getByText('Use a different account')).toBeTruthy();

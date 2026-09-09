@@ -12,6 +12,7 @@ import {
   PICK_TARGET,
   hydratePicks,
   setPicks,
+  setRankingOutcome,
   usePicks,
   type PickedTitle,
 } from '@/features/onboarding/pick-five';
@@ -233,6 +234,9 @@ export default function TasteOnboardingScreen() {
 
   const leavePayoff = () => {
     track({ name: 'onboarding_step_completed', props: { step: 'payoff', outcome: 'continued' } });
+    // Recorded where it is known. The notification step reports it at the end and must not
+    // have to re-derive it from a query that may not have answered. See `rankingOutcome`.
+    void setRankingOutcome(profile.id, 'completed');
     advance('people');
     router.replace('/onboarding/people');
   };
@@ -412,6 +416,7 @@ export default function TasteOnboardingScreen() {
                   name: 'onboarding_step_completed',
                   props: { step: 'pick', outcome: 'skipped' },
                 });
+                void setRankingOutcome(profile.id, 'skipped');
                 advance('people');
                 router.replace('/onboarding/people');
               }}
