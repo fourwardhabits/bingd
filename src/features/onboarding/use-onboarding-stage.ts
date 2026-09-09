@@ -134,7 +134,58 @@ function publish() {
 /** Exported for tests, which must not inherit a stage from the previous one. */
 export function resetOnboardingStages() {
   stages.clear();
+  queuedStage.clear();
+  stageWrites.clear();
   publish();
+}
+
+/**
+ * The last stage handed to the disk for an account, and the chain its writes queue on.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE MEMORY GUARD WAS NOT ENOUGH
+ *
+ * `advanceStage` refuses to go backwards, and that refusal is checked against the map
+ * above — which is correct, and which independent review pointed out says nothing at all
+ * about what reaches storage. The disk write was dispatched and never awaited by its
+ * caller, so two advances could be in flight at once, and **SecureStore does not promise
+ * that two writes to one key land in the order they were issued.**
+ *
+ * The failure is quiet and it is a resume failure, which is the expensive kind here. A
+ * slow `answers` write completing after a fast `taste` write leaves `answers` on disk. The
+ * session itself is perfect — memory is the authority while the process lives — so nobody
+ * sees anything wrong until the next launch, which reopens on a step already finished.
+ *
+ * Two properties, and the pair is what makes it safe:
+ *
+ *   **Ordered.** Every write for one account queues behind the previous one, so the
+ *   platform is never asked to interleave two writes to the same key.
+ *
+ *   **Coalesced.** A write that has been superseded while it waited does not run. The
+ *   later value is already queued behind it and is the answer; writing the older one
+ *   first would be correct but pointless, and skipping it keeps a six-step flow to as
+ *   few Keychain round trips as it actually needs.
+ *
+ * Per account rather than one global chain: two accounts on one device write different
+ * keys, and making B's Continue wait on A's stalled Keychain would be a new way to lose
+ * the thing this is protecting.
+ */
+const queuedStage = new Map<string, OnboardingStage>();
+const stageWrites = new Map<string, Promise<void>>();
+
+function persistStage(userId: string, next: OnboardingStage): Promise<void> {
+  queuedStage.set(userId, next);
+
+  const queued = (stageWrites.get(userId) ?? Promise.resolve()).then(async () => {
+    // Superseded while this sat in the queue. The newer value is behind it in the same
+    // chain and will be written; this one would only be an older value reaching the disk
+    // later, which is the reordering being removed.
+    if (queuedStage.get(userId) !== next) return;
+    await writePref<OnboardingStage>(stageKey(userId), next).catch(() => {});
+  });
+
+  stageWrites.set(userId, queued);
+  return queued;
 }
 
 /**
@@ -203,6 +254,11 @@ export async function hydrateStage(userId: string): Promise<OnboardingStage | nu
  * so the later of the two is the answer whatever order they arrive in. Without this, a
  * hydrate that resolves after a Continue would put the reader back on the step they just
  * left.
+ *
+ * **And the disk agrees with memory, which it used to only usually do.** The refusal
+ * above is a fact about the map; the write goes to a platform that does not order two
+ * calls to one key. `persistStage` is what makes the durable copy follow the same rule —
+ * see its note for the resume this was losing.
  */
 export async function advanceStage(userId: string, next: OnboardingStage): Promise<void> {
   const current = stages.get(userId);
@@ -213,7 +269,7 @@ export async function advanceStage(userId: string, next: OnboardingStage): Promi
   stages.set(userId, next);
   publish();
   note('onboarding', 'stage.advance', next);
-  await writePref<OnboardingStage>(stageKey(userId), next).catch(() => {});
+  await persistStage(userId, next);
 }
 
 /**

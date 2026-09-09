@@ -145,8 +145,27 @@ describe('nextRoute', () => {
       );
     });
 
-    it('still refuses to pull anybody out of the flow group', () => {
-      expect(decide({ group: 'onboarding', screen: 'people', stage: 'done' })).toBeNull();
+    it('still refuses to pull anybody out of a flow that is still running', () => {
+      expect(decide({ group: 'onboarding', screen: 'people', stage: 'people' })).toBeNull();
+    });
+
+    /**
+     * **And this is the half of that rule that was too strong.**
+     *
+     * It used to be `return null` for the whole group, which protected a running flow and
+     * a finished one alike. A finished flow is not a thing that needs protecting: it left
+     * `/onboarding/motivations` reachable by anybody who could type it, and that screen
+     * calls `begin()`, so an established account arriving there had its phase written to
+     * `active` and could walk the first-run steps with a collection already behind it.
+     *
+     * The exiting screen still owns where the app opens. `finish` resolves its destination
+     * before it writes `done`, so the write and the navigation are adjacent and this
+     * branch has no commit to answer in — see `app/onboarding/notifications.tsx`.
+     */
+    it('does take somebody out of a flow that is over', () => {
+      expect(decide({ group: 'onboarding', screen: 'people', stage: 'done' })).toBe(
+        '/(tabs)/feed',
+      );
     });
   });
 
@@ -236,11 +255,57 @@ describe('nextRoute', () => {
      * out. The screen owns its exit.
      */
     it('leaves somebody in the flow once their first film makes them look established', () => {
-      expect(decide({ group: 'onboarding', screen: 'taste', tasteNeeded: false })).toBeNull();
+      expect(
+        decide({ group: 'onboarding', screen: 'taste', stage: 'taste', tasteNeeded: false }),
+      ).toBeNull();
     });
 
     it('leaves them in it at five of five, so the summary is reachable', () => {
-      expect(decide({ group: 'onboarding', screen: 'taste', tasteNeeded: false })).toBeNull();
+      expect(
+        decide({ group: 'onboarding', screen: 'taste', stage: 'taste', tasteNeeded: false }),
+      ).toBeNull();
+    });
+
+    /**
+     * **Both cases above now carry a stage, and that is the change worth being explicit
+     * about rather than quietly making.**
+     *
+     * They were written before the stage existed, when `tasteNeeded: false` inside the
+     * group was the only description available of "mid-run, and the run itself is why you
+     * look established". It is no longer a description of only that: with no stage at all
+     * it is also, and much more commonly, an established account that opened an onboarding
+     * link. The two were indistinguishable, so one of them had to lose.
+     *
+     * Sending the established account away is the right loser, because the state the old
+     * rule protected is not reachable in a live session any more. Reaching an onboarding
+     * route at all requires either a stage — which `advanceStage` writes to memory
+     * synchronously, so it survives any failed disk write for the life of the process — or
+     * `tasteNeeded`, which is what carries somebody with no stage in. A reader on the
+     * picker walked through Motivations and Answers to get there and holds `taste`; the
+     * bucketing that flips `tasteNeeded` underneath them cannot take that away.
+     */
+    it('sends an established account away from a link into the flow it never started', () => {
+      expect(
+        decide({ group: 'onboarding', screen: 'motivations', stage: null, tasteNeeded: false }),
+      ).toBe('/(tabs)/feed');
+    });
+
+    it('and does not wait for anything to say so when the stage already has', () => {
+      expect(
+        decide({ group: 'onboarding', screen: 'answers', stage: 'done', tastePending: true }),
+      ).toBe('/(tabs)/feed');
+    });
+
+    /**
+     * The other side of it, which is the one that must not regress: an account that is
+     * genuinely part-way through and has lost its stage is still carried by the phase.
+     * `readState` answers **needed** for an `active` account even at five rankings,
+     * because leaving is an act and not a count — so this stays.
+     */
+    it('keeps an incomplete account whose stage was lost', () => {
+      expect(
+        decide({ group: 'onboarding', screen: 'people', stage: null, tasteNeeded: true }),
+      ).toBeNull();
     });
 
     it('does not bounce them out while the check is still pending either', () => {

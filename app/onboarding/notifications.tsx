@@ -97,10 +97,29 @@ export default function NotificationsStepScreen() {
       props: { step: 'notifications', outcome: 'continued' },
     });
 
-    // Recorded before anything that can fail, and before the destination is read: the
-    // decision that ends the flow is state the router depends on. `advance` and `complete`
-    // both write memory synchronously and dispatch their disk writes.
-    advance('done');
+    /**
+     * **Everything that has to be awaited is awaited first, and then the flow ends in one
+     * synchronous breath.**
+     *
+     * This used to write `done` before reading either of them, on the build-4 rule that
+     * the decision ending the flow is recorded before anything that can fail. The rule is
+     * right and the ordering it produced here was not, for two reasons that are really
+     * one — a window between `done` and the navigation it belongs to.
+     *
+     * The app closing inside that window persisted `done` with nobody moved, and the next
+     * launch routes every finished account to the Feed: somebody with no approved follow
+     * therefore reopened onto the empty Feed, which is the single thing the destination
+     * below exists to avoid. And now that the router ejects a finished flow out of the
+     * onboarding group, the same window is one the router could answer in, replacing this
+     * screen with the Feed a moment before it replaced itself with For You.
+     *
+     * Both close by moving the two reads in front. Neither can hang — `opensOnFeed` is
+     * bounded by `withGrace` and `rankingOutcome` is a preference read behind its own
+     * catch — so the flow-ending write is still reached, and it is now adjacent to the
+     * navigation it authorises. Dying before it costs a second press of one button, which
+     * is the cheapest failure available here.
+     */
+    const destination = (await opensOnFeed()) ? TAB_ROUTES.feed : TAB_ROUTES.forYou;
 
     /**
      * **The outcome is read, not re-derived**, and that is a correctness fix rather than a
@@ -118,9 +137,13 @@ export default function NotificationsStepScreen() {
      * or a lost disk write — is `unknown`, the flow still ends, and the event omits
      * `skipped` instead of guessing the likelier of the two. See `rankingOutcome`.
      */
-    void complete({ outcome: await rankingOutcome(profile.id) });
+    const outcome = await rankingOutcome(profile.id);
 
-    const destination = (await opensOnFeed()) ? TAB_ROUTES.feed : TAB_ROUTES.forYou;
+    // The end of the flow, in one breath: memory is written synchronously by both of
+    // these, and the navigation is on the next line, so nothing — not a relaunch, not the
+    // router's own effect — gets to run between the decision and the destination.
+    advance('done');
+    void complete({ outcome });
     router.replace(destination);
   };
 

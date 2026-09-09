@@ -285,6 +285,32 @@ function Navigation() {
                 there is nowhere behind it to return to. Leaving is an explicit choice
                 made on the screen itself. */}
               <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
+              {/* ---------------------------------------------------------------
+                  **The other five-sixths of the first-run flow, and they belong in
+                  here beside `taste` rather than outside it.**
+
+                  They were added as files and never declared, which does not stop
+                  expo-router serving them — it builds its tree from the directory —
+                  but it does leave them outside this guard. Every one of them opens
+                  with `useCurrentProfile()`, which throws outside a `ready` session,
+                  so the exact hole the long note above says `Stack.Protected` closes
+                  was open again for five of the six onboarding screens.
+
+                  The reachable case is not a crafted link. It is the involuntary exit
+                  named above — an expired refresh token, `delete_account` — landing on
+                  somebody who is *sitting* on Motivations or People, which is where a
+                  new account spends minutes at a time reading and choosing. The
+                  context flips, the screen re-renders and raises in the same commit,
+                  and `useAuthRouting`'s effect has not run yet. On `taste` that person
+                  loses a screen; on these five they lost the tree to an error boundary.
+
+                  Declared individually rather than as a group because there is no
+                  `onboarding/_layout.tsx` and adding one to carry a guard this file
+                  already owns would put the same decision in two places. */}
+              <Stack.Screen name="onboarding/motivations" options={{ headerShown: false }} />
+              <Stack.Screen name="onboarding/answers" options={{ headerShown: false }} />
+              <Stack.Screen name="onboarding/people" options={{ headerShown: false }} />
+              <Stack.Screen name="onboarding/notifications" options={{ headerShown: false }} />
               {/* A modal, like Settings, and for the same reason: it is a thing that
                   happens *over* whatever the reader was doing rather than a place they
                   navigated to. Dismissed by Done, by the back gesture, and by Android's

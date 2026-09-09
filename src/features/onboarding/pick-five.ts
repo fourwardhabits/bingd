@@ -61,8 +61,38 @@ function publish() {
 /** Exported for tests, which must not inherit a selection from the previous one. */
 export function resetPickFive() {
   picks.clear();
+  pickSeq.clear();
+  pickWrites.clear();
   publish();
 }
+
+/**
+ * The write chain for each account's selection, and the counter that says which write is
+ * still the current one.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A SELECTION NEEDS THIS MORE THAN THE STAGE DOES
+ *
+ * `setPicks` writes the **whole array** and it is called on every poster tap. Somebody
+ * choosing five films taps five times in a few seconds, and the taps that matter most —
+ * a deselect and a replacement — come in pairs a few hundred milliseconds apart. Each of
+ * those dispatched its own full-array write and nothing ordered them, so the platform was
+ * free to land the four-title write after the five-title one and leave a **subset** of the
+ * reader's actual choice on disk.
+ *
+ * As with the stage, the session is unaffected: memory is published immediately and the
+ * grid is right. It costs the reader on the launch after — they press "Rank these 5",
+ * close the app before the first placement, and come back to a partial grid to choose
+ * from again. That is the exact loss this file was written to prevent, arriving through
+ * the door it left open.
+ *
+ * A sequence number rather than the stage's ordering test, because a selection has no
+ * natural order: the fifth tap is not "greater than" the fourth, it is merely later, and
+ * later is the whole of what matters. Same two properties otherwise — ordered per account,
+ * and a superseded write is skipped rather than written late.
+ */
+const pickSeq = new Map<string, number>();
+const pickWrites = new Map<string, Promise<void>>();
 
 const pickKey = (userId: string) => `${userId}.${PICK_PREF}`;
 
@@ -88,7 +118,13 @@ export async function hydratePicks(userId: string): Promise<readonly PickedTitle
   return restored;
 }
 
-/** Records the selection, in memory first and then on disk. */
+/**
+ * Records the selection, in memory first and then on disk.
+ *
+ * The disk half is ordered and coalesced per account — see `pickSeq` above. Memory is
+ * still written and published synchronously, so the grid answers the tap at the speed it
+ * always did; what changed is only which of several racing writes is allowed to be last.
+ */
 export async function setPicks(
   userId: string,
   chosen: readonly PickedTitle[],
@@ -96,7 +132,19 @@ export async function setPicks(
   const capped = chosen.slice(0, PICK_TARGET);
   picks.set(userId, capped);
   publish();
-  await writePref<readonly PickedTitle[]>(pickKey(userId), capped).catch(() => {});
+
+  const seq = (pickSeq.get(userId) ?? 0) + 1;
+  pickSeq.set(userId, seq);
+
+  const queued = (pickWrites.get(userId) ?? Promise.resolve()).then(async () => {
+    // A later tap has already been dispatched, and its write is queued behind this one.
+    // Writing this older array now is precisely the reordering being removed.
+    if (pickSeq.get(userId) !== seq) return;
+    await writePref<readonly PickedTitle[]>(pickKey(userId), capped).catch(() => {});
+  });
+
+  pickWrites.set(userId, queued);
+  await queued;
 }
 
 const EMPTY: readonly PickedTitle[] = [];

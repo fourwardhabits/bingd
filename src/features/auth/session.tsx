@@ -331,15 +331,59 @@ export function nextRoute({
   }
 
   /**
-   * **Routing sends people into the first-run flow; it never takes them out of it.**
+   * **Routing sends people into the first-run flow; it never takes them out of one that
+   * is still running.**
    *
    * The screen owns its own exit — the two buttons on its summary, and "Not now".
    * Letting this decide as well is the blocker independent review found: bucketing the
    * first film makes the account stop looking new, and the router, seeing somebody on
    * the onboarding route who no longer needed it, replaced the screen with the feed at
    * one of five. The flow working correctly was being read as a reason to end it.
+   *
+   * That rule was written as `return null` for the whole group, which is stronger than
+   * the rule itself and left a second hole: **a flow that is over is not a flow this
+   * protects.** An account that finished — or one that was never in the flow at all,
+   * which is every established user — could open `/onboarding/motivations` and stay
+   * there, and `motivations` calls `begin()`, so an established account would have its
+   * phase written to `active` and could walk the first-run steps with a collection
+   * already behind it. Only `taste.tsx` ejected on its own, which is the duplication this
+   * replaces: one guard for the group, and the screens keep owning their exits.
+   *
+   * Every input below is an authority this function already trusts, in the order it
+   * already trusts them, so the in-flow cases answer exactly as they did before.
    */
-  if (group === 'onboarding') return null;
+  if (group === 'onboarding') {
+    // Not knowing where somebody is in the flow is not a reason to move them, here for
+    // the same reason as the identical line below.
+    if (stage === undefined) return null;
+
+    // Mid-flow. The screen owns its exits, and this is the case the rule above is about.
+    if (stage && stage !== 'done') return null;
+
+    /**
+     * **A finished flow, so this is a link into something that is over.**
+     *
+     * The exiting screen's choice of destination is not overruled by this: `finish` in
+     * `app/onboarding/notifications.tsx` resolves its destination *before* it writes
+     * `done`, so the write and the navigation are adjacent and synchronous and there is
+     * no commit in between for this to answer in.
+     */
+    if (stage === 'done') return '/(tabs)/feed';
+
+    // No stage at all, so the taste rule is the only remaining authority. Waiting on it
+    // costs one count query, and guessing it costs somebody their place in the flow.
+    if (tastePending) return null;
+
+    /**
+     * `tasteNeeded` is what separates the two accounts that reach here with no stage, and
+     * it separates them cleanly: an account resting mid-flow still holds the `active`
+     * phase, and `readState` answers **needed** for it even at five rankings, because
+     * leaving is an act and not a count. An established account has no phase and a
+     * collection, and answers not-needed. So this stays for the first and ejects the
+     * second, which is the whole of what the group guard is for.
+     */
+    return tasteNeeded ? null : '/(tabs)/feed';
+  }
 
   /**
    * **A flow that has started is answered by where it got to, and by nothing else.**
