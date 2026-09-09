@@ -658,6 +658,8 @@ Eligibility is `app_config discovery.top_rated_min_ratings` (seeded 5), which is
 
 Ordering is `score desc, rating_count desc, media_item_id asc` — a total order whose last term cannot change. Pagination is keyset: the cursor is all three values from the last row of the previous page, or none of them for the first. Supplying some but not all raises `22023` rather than silently returning an empty page, because a row comparison containing NULL is NULL rather than false.
 
+The keyset continues from a named row rather than counting past a moving one, which is what an offset into a live aggregate gets wrong. It is **not** a snapshot: a title whose score changes between two requests can cross the cursor, so it may be returned twice (the client dedupes by id, first occurrence winning) or, climbing, not returned to that scroll at all. Fixing the second would mean materialising the ordering, which would make the wall a snapshot of the community's order rather than the community's order.
+
 The function returns ids and aggregates and no title text: `media_items` is world-readable, so the client reads the catalogue itself in a second query rather than having a definer function project columns anybody could select. `p_limit` clamps to 1…50.
 
 **TV means seasons here and series on the personalised wall**, and both are right: `rankable_category` refuses a series, so a series has no rating to be ordered by, while TMDB answers "similar" about a show and never about one of its seasons.

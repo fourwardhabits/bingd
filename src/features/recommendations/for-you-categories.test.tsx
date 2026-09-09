@@ -197,6 +197,29 @@ describe('the one selector', () => {
     // §A16. People is a mode of the Feed tab now, and the option that used to open it here
     // is gone rather than hidden — a dropdown row nobody can reach is a dropdown row.
     expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
+
+    /**
+     * Exactly four, in exactly this order.
+     *
+     * The four `getByRole`s above assert presence, which a fifth option — a Lowest Rated
+     * the founder ruled out, say — passes just as happily, and which a swap of the two
+     * Top Rated entries passes too. The founder gave this control as an ordered list of
+     * four, so the list is what gets asserted. Independent review, 2026-09-09.
+     *
+     * Scoped to the sheet by its scrim rather than queried off the whole screen: the
+     * selector is a `Modal`, and RNTL renders a modal's siblings rather than hiding them
+     * the way a real screen reader would, so an unscoped `getAllByRole('button')` picks
+     * up the chip row and the tiles underneath as well.
+     *
+     * The option rows carry their label as a `Text` child rather than an
+     * `accessibilityLabel`, which is why this reads the rendered text.
+     */
+    const sheet = within(view.getByLabelText('Close'));
+    const options = sheet
+      .getAllByRole('button')
+      .map((node) => within(node).getAllByText(/\S/)[0]?.props.children)
+      .map((label) => String(label ?? ''));
+    expect(options).toEqual(['Movies', 'TV shows', 'Top Rated Movies', 'Top Rated TV']);
     // The For You override. Collection lists the rankable unit, which is the season;
     // the *personalised* wall holds series, and calling them seasons here would name
     // something that is not on screen.

@@ -45,9 +45,27 @@ import type { Medium } from './use-for-you';
  *
  * `(score, rating_count, id)`, straight out of the last row of the previous page and
  * handed back unmodified. An offset into an aggregate that moves whenever anybody ranks
- * anything shows page two a row page one already had; the keyset cannot, because it
- * names the row it is continuing from. Same reasoning as `use-feed.ts`, one surface
- * over.
+ * anything shows page two a row page one already had *because every row after an
+ * insertion shifts by one*; the keyset does not, because it names the row it is
+ * continuing from rather than counting past it. Same reasoning as `use-feed.ts`, one
+ * surface over.
+ *
+ * **What a keyset does not buy, stated plainly, because the first draft of this comment
+ * overclaimed it.** It is not a snapshot. The sort key here is an aggregate over live
+ * ratings, so between two requests a title can move across the cursor:
+ *
+ *   * *downwards* — it was above the cursor, its score falls, and page two returns it a
+ *     second time. The screen dedupes the flattened pages by `mediaItemId` (first
+ *     occurrence wins, so the server's order survives), which is also what covers
+ *     pull-to-refresh refetching every loaded page against pre-refresh cursors.
+ *   * *upwards* — it was below the cursor, its score rises, and it is never returned to
+ *     this scroll at all. Nothing here can fix that: it would take a materialised
+ *     ordering the whole wall paged against, which is a snapshot of the community's
+ *     order rather than the community's order. A reader who pulls to refresh sees it.
+ *
+ * Both are properties of ranking live data, not defects of the cursor; the wall would
+ * have them under any pagination scheme that is not a snapshot. Recorded so the next
+ * reader of this file does not have to rediscover it from a duplicate poster.
  *
  * The cursor is taken from the **raw RPC row**, not from the mapped item: the values the
  * server compares against have to be the values the server produced, and a numeric that
@@ -69,8 +87,15 @@ export const TOP_RATED_PAGE = 20;
  *
  * The cost is that a narrow filter over a wide corpus can hide everything on page one,
  * so the screen asks for more pages until it has something to show. This bounds that:
- * ten pages is two hundred of the highest-rated titles in the catalogue, and a filter
- * that matches nothing in those is a filter with nothing to match.
+ * ten pages is two hundred of the highest-rated titles in the catalogue.
+ *
+ * **It bounds unattended fetching, not what the reader can reach.** This was written as
+ * a terminal bound, on the reasoning that a filter matching nothing in the top two
+ * hundred is a filter with nothing to match — which is not true, and made the screen say
+ * "Nothing matches those filters" about a catalogue it had not finished looking at, with
+ * an empty wall offering nothing to scroll. The screen now spends this much at a time
+ * and offers the reader the next allowance, so no title is unreachable and nothing runs
+ * away on its own.
  */
 export const TOP_RATED_FILTER_PAGES = 10;
 

@@ -35,6 +35,7 @@ import {
   TOP_RATED_FILTER_PAGES,
   TOP_RATED_PAGE,
   useTopRated,
+  type TopRatedItem,
 } from '@/features/recommendations/use-top-rated';
 import {
   asCollectionItem as recommendationAsItem,
@@ -129,6 +130,27 @@ export default function RecommendationsScreen() {
    * somebody once looked there would be answering a question nobody asked twice.
    */
   const [topMedium, setTopMedium] = useState<Medium | null>(null);
+  /**
+   * How many pages a *filtered* Top Rated wall may pull in on its own, and why it is
+   * state rather than the constant it started as.
+   *
+   * The auto-advance below fetches further pages while a filter is hiding everything on
+   * the ones already loaded. It has to stop somewhere or a filter matching nothing walks
+   * the whole catalogue on its own; it stopped at `TOP_RATED_FILTER_PAGES` and said
+   * "Nothing matches those filters", which is a **false statement** whenever the wall
+   * still has pages left — the two hundred highest-rated titles containing no Westerns
+   * does not mean the catalogue has none, and an empty wall has nothing to scroll, so
+   * the reader could not reach them either. That is the one arbitrary cutoff the
+   * founder's brief rules out, arriving through the back door.
+   *
+   * So the bound is now a budget the reader can extend, and the empty state says which
+   * of the two things happened. Automatic work stays bounded — nothing fetches more than
+   * ten pages without somebody asking — and nothing is unreachable.
+   *
+   * Reset to the default whenever the question changes (a new mode, a new filter), so an
+   * extension granted for one narrow filter is not spent silently on the next broad one.
+   */
+  const [topRatedBudget, setTopRatedBudget] = useState(TOP_RATED_FILTER_PAGES);
   /** The first chip. Not a tab: see the header. Never on while Top Rated is. */
   const [sentOnly, setSentOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -187,6 +209,15 @@ export default function RecommendationsScreen() {
      * would draw the sent list under a heading that says Top Rated.
      */
     setSentOnly(false);
+    /**
+     * And the Group Picks sheet closes with it. Today this cannot be reached — `Sheet`
+     * is a real `Modal` with `accessibilityViewIsModal`, so the selector underneath is
+     * not touchable while the sheet is up — but "absent on Top Rated" is meant to be a
+     * property of the screen rather than a consequence of one component's presentation,
+     * and the day that sheet becomes an inline panel is not the day to remember this.
+     */
+    setGroupPicking(false);
+    setTopRatedBudget(TOP_RATED_FILTER_PAGES);
     setTopMedium(next === 'topMovies' ? 'movies' : 'tv');
   };
 
@@ -210,6 +241,9 @@ export default function RecommendationsScreen() {
   const changeFilters = (next: CollectionFilters) => {
     setFilters(next);
     resetPages();
+    // A new filter is a new question, and the allowance the last one earned does not
+    // carry over to it. See `topRatedBudget`.
+    setTopRatedBudget(TOP_RATED_FILTER_PAGES);
   };
 
   /**
@@ -270,8 +304,36 @@ export default function RecommendationsScreen() {
    * Kept unfiltered because two things need the whole corpus: the filter sheet, whose
    * options have to describe what could be chosen rather than what already survived a
    * choice, and the auto-advance below, which counts pages rather than matches.
+   *
+   * ---------------------------------------------------------------------------
+   * DEDUPED ACROSS PAGES, BECAUSE A KEYSET IS NOT A SNAPSHOT
+   *
+   * The cursor names the row it continues from, which is what stops an *offset* handing
+   * page two a row page one already showed. It does not freeze the ordering: the wall is
+   * an aggregate over live ratings, so a title that sat above the cursor can fall below
+   * it between two requests and be returned again — and pull-to-refresh refetches every
+   * loaded page against cursors taken before the refresh, which is the same hazard with
+   * the timing removed.
+   *
+   * One repeated row would otherwise be two tiles of the same poster and two React keys
+   * with one value. First occurrence wins, so the server's order is still the order.
+   *
+   * The reverse — a title climbing *above* the cursor and never being returned — cannot
+   * be fixed here, and is not fixed anywhere short of materialising the ranking. It is
+   * recorded in `use-top-rated.ts` rather than papered over.
    */
-  const topPool = (topRated.data?.pages ?? []).flatMap((page) => page.items);
+  const topPool = (() => {
+    const seen = new Set<string>();
+    const out: TopRatedItem[] = [];
+    for (const page of topRated.data?.pages ?? []) {
+      for (const item of page.items) {
+        if (seen.has(item.mediaItemId)) continue;
+        seen.add(item.mediaItemId);
+        out.push(item);
+      }
+    }
+    return out;
+  })();
   /**
    * The wall, filtered on the client.
    *
@@ -322,7 +384,9 @@ export default function RecommendationsScreen() {
    * way to reach them, because there is nothing on screen to scroll.
    *
    * So the wall advances itself while a filter is on and the visible count is short,
-   * bounded by `TOP_RATED_FILTER_PAGES`. It is deliberately **not** a while-loop: each
+   * bounded by `topRatedBudget` — which starts at `TOP_RATED_FILTER_PAGES` and which the
+   * empty state below lets the reader extend, so the bound is on *unattended* work
+   * rather than on what is reachable. It is deliberately **not** a while-loop: each
    * fetch re-renders, this runs again against the wall that actually came back, and the
    * page count is what stops it. `isFetchingNextPage` keeps two requests from being in
    * flight for the same page.
@@ -342,7 +406,7 @@ export default function RecommendationsScreen() {
   useEffect(() => {
     if (!onTopRated || !filtered) return;
     if (!topHasMore || topFetching) return;
-    if (pagesLoaded >= TOP_RATED_FILTER_PAGES) return;
+    if (pagesLoaded >= topRatedBudget) return;
     if (shownCount >= TOP_RATED_PAGE) return;
     void fetchMoreTopRated();
   }, [
@@ -350,10 +414,21 @@ export default function RecommendationsScreen() {
     filtered,
     shownCount,
     pagesLoaded,
+    topRatedBudget,
     topHasMore,
     topFetching,
     fetchMoreTopRated,
   ]);
+  /**
+   * Whether an empty filtered wall means "there are none" or only "there are none yet".
+   *
+   * `topHasMore` is the server having filled the last page it was asked for, so there is
+   * more wall behind this one and the search stopped on the budget rather than on the
+   * catalogue. That is the difference the two empty states below turn on, and stating it
+   * once here keeps the copy and the button from ever disagreeing about which case they
+   * are in.
+   */
+  const topSearchStoppedEarly = topHasMore === true;
 
   /**
    * Whether asking for another page could produce anything.
@@ -809,15 +884,42 @@ export default function RecommendationsScreen() {
                * reader's own taste being thin, which is the wrong diagnosis here.
                */
               isFiltered(filters) ? (
-                <EmptyState
-                  kind="nothingYet"
-                  title="Nothing matches those filters"
-                  body="No top rated title matches everything you have chosen."
-                  action={{
-                    label: 'Clear filters',
-                    onPress: () => changeFilters(emptyFilters()),
-                  }}
-                />
+                /**
+                 * Two filtered-empty states, because there are two different facts.
+                 *
+                 * The wall searched as far as its budget allowed and there is more wall
+                 * behind it: then nothing has been proved about the catalogue, and the
+                 * honest sentence says how far it looked and offers to look further.
+                 * Saying "nothing matches" here was a claim the screen had not earned —
+                 * the two hundred highest-rated titles holding no Westerns is not the
+                 * catalogue holding none, and with an empty wall there was nothing to
+                 * scroll to reach them. That is a terminal cutoff by another name.
+                 *
+                 * Or the wall genuinely ended, in which case nothing does match and
+                 * clearing the filters is the only thing left to offer.
+                 */
+                topSearchStoppedEarly ? (
+                  <EmptyState
+                    kind="nothingYet"
+                    title="Nothing yet in the highest rated"
+                    body="No match so far in the top rated titles we have looked through. There are more below."
+                    action={{
+                      label: 'Keep looking',
+                      onPress: () =>
+                        setTopRatedBudget((current) => current + TOP_RATED_FILTER_PAGES),
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    kind="nothingYet"
+                    title="Nothing matches those filters"
+                    body="No top rated title matches everything you have chosen."
+                    action={{
+                      label: 'Clear filters',
+                      onPress: () => changeFilters(emptyFilters()),
+                    }}
+                  />
+                )
               ) : (
                 <EmptyState
                   kind="nothingYet"

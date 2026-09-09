@@ -155,6 +155,23 @@ describe('top_rated_titles', () => {
     const row = (await topRated('movies')).find((r) => r.media_item_id === film);
     assert.equal(row.rating_count, 5, 'the private account is not in the population');
     assert.equal(Number(row.score), 10, 'and so cannot drag the mean down');
+
+    /**
+     * And the other half of the population clause, which had no test: `status = 'active'`.
+     * Visibility and status are separate columns and a filter can lose one of them
+     * without the other noticing, so a suspended *public* account is the case that
+     * distinguishes them. It is also the direction that matters for moderation — a
+     * suspended account's ratings must stop counting towards what everybody is shown.
+     */
+    const suspended = await t.createUser({ username: 'suspendedrater' });
+    await t.actAs(suspended);
+    await rankBelow(film, 'not_for_me');
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [suspended]);
+
+    await t.actAs(publicRaters[0]);
+    const afterSuspension = (await topRated('movies')).find((r) => r.media_item_id === film);
+    assert.equal(afterSuspension.rating_count, 5, 'a suspended account is not in the population');
+    assert.equal(Number(afterSuspension.score), 10, 'and so cannot drag the mean down either');
   });
 
   it('excludes a blocked account from both directions, like the single-title read', async () => {
@@ -253,35 +270,72 @@ describe('top_rated_titles', () => {
     assert.equal(new Set(walked).size, walked.length, 'no row is returned twice');
   });
 
-  it('breaks a score and count tie on the immutable id, in both directions', async () => {
-    const raters = [];
-    for (let i = 0; i < 5; i += 1) raters.push(await t.createUser({ username: `tie${i}` }));
+  it('breaks a genuine score and count tie on the immutable id', async () => {
+    /**
+     * The tie has to be *built*, and the first version of this test did not build one.
+     *
+     * It gave one film to `fine` and the other to `not_for_me` in the same five
+     * collections, which scores them 6.9 and 3.4 — never equal — and then guarded its
+     * only ordering assertion behind `if (scores are equal)`. The assertion therefore
+     * never ran, and an implementation with the tie-break reversed, or with no
+     * tie-break at all, passed it. Independent review, 2026-09-09.
+     *
+     * A real tie needs equal scores *and* equal counts from disjoint raters: each film
+     * alone in its rater's `loved` band, so `score_for` returns the band high of 10.0
+     * for a band of one, and five raters each. Nothing but the id can separate them.
+     */
+    const left = [];
+    const right = [];
+    for (let i = 0; i < 5; i += 1) left.push(await t.createUser({ username: `tieleft${i}` }));
+    for (let i = 0; i < 5; i += 1) right.push(await t.createUser({ username: `tieright${i}` }));
 
-    // Two films everybody ranks identically: the same bucket, alone in it, so both take
-    // the band high and both have the same count. Only the id can separate them.
     const one = await movie('Tie One');
     const two = await movie('Tie Two');
-    for (const who of raters) {
+    for (const who of left) {
       await t.actAs(who);
-      // Each in its own band so neither displaces the other's position.
-      await rankBelow(one, 'fine');
-      await rankBelow(two, 'not_for_me');
+      await rankBelow(one, 'loved');
+    }
+    for (const who of right) {
+      await t.actAs(who);
+      await rankBelow(two, 'loved');
     }
 
-    await t.actAs(raters[0]);
+    await t.actAs(left[0]);
     const rows = await topRated('movies', 50);
     const tied = rows.filter((row) => row.media_item_id === one || row.media_item_id === two);
     assert.equal(tied.length, 2);
 
-    // Whatever their scores turn out to be, the order is total and the ascending id is
-    // the last word: the walk above already proved paging agrees with it.
-    const scores = tied.map((row) => `${row.score}/${row.rating_count}`);
-    if (scores[0] === scores[1]) {
-      assert.ok(
-        tied[0].media_item_id < tied[1].media_item_id,
-        'a genuine tie is broken by the ascending id',
-      );
-    }
+    // The tie is asserted rather than assumed: if a future change stops these two
+    // scoring identically, this fails here instead of silently skipping the real check.
+    assert.equal(Number(tied[0].score), Number(tied[1].score), 'the scores must actually tie');
+    assert.equal(tied[0].rating_count, tied[1].rating_count, 'and so must the counts');
+    assert.equal(Number(tied[0].score), 10, 'a band of one scores its high');
+
+    // Unconditional, and in the direction the migration commits to: ascending id.
+    assert.ok(
+      tied[0].media_item_id < tied[1].media_item_id,
+      'a genuine tie is broken by the ascending id',
+    );
+
+    /**
+     * And the tie-break is stable across a page boundary, which is where a sort that
+     * disagreed with its own cursor would actually hurt.
+     *
+     * Asserted against the *full* ordering rather than against `tied[1]` directly: other
+     * fixtures in this file also score 10.0 from five raters, so the row after the first
+     * of these two is not necessarily the second of them. What must hold is that
+     * continuing from a row inside a tied run returns exactly the row the uncursored
+     * ordering puts next — which is the claim a cursor makes.
+     */
+    const whole = await topRated('movies', 50);
+    const at = whole.findIndex((r) => r.media_item_id === tied[0].media_item_id);
+    assert.ok(at >= 0 && at + 1 < whole.length, 'the tie is not the last row of the wall');
+    const walked = await topRated('movies', 1, whole[at]);
+    assert.equal(
+      walked[0].media_item_id,
+      whole[at + 1].media_item_id,
+      'continuing from inside a tied run returns the row the full ordering puts next',
+    );
   });
 
   it('refuses a medium it does not answer for, and half a cursor', async () => {

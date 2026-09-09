@@ -700,16 +700,31 @@ tab is a wrapped row where a fourth sheet row is a fourth sheet row.
 | Pull to refresh | **Present, and it refetches** | There is no seed to advance and no arrangement to shuffle. Rearranging the community's order would be the screen inventing one |
 
 **It pages, and there is no Top 25.** The wall keeps going until the rated catalogue runs
-out — keyset paginated on the whole sort key, so a title ranked mid-scroll cannot make page
-two repeat a poster from page one. The founder's brief rules out a terminal cutoff and this has
+out — keyset paginated on the whole sort key, so page two continues from a named row rather
+than counting past a moving one. The founder's brief rules out a terminal cutoff and this has
 none; the personalised wall's `MAX_PAGES` does not apply.
+
+A keyset is not a snapshot, though, and the first draft of this section said otherwise. The
+sort key is an aggregate over live ratings, so a title can cross the cursor between two
+requests: falling below it and being returned twice, which the screen dedupes by id with the
+first occurrence winning; or climbing above it and not being returned to this scroll at all,
+which nothing short of a materialised ordering can fix and which a pull to refresh resolves.
+Both are properties of ranking live data rather than defects of the cursor.
 
 **Filtering works across the whole corpus, not just the loaded page.** Filters run on the
 client, because a season's genres are its show's, Anime is a predicate rather than a stored
 label, and a person filter needs a credits index — all three already live in `filters.ts` and a
 SQL copy would be the first thing to drift. So a filtered wall fetches further pages on its own
-until it has a screenful or reaches ten pages, and the filter sheet's options are built from
-the **unfiltered** pool, so a second genre can always be added to the first.
+until it has a screenful, and the filter sheet's options are built from the **unfiltered** pool,
+so a second genre can always be added to the first.
+
+That self-advance is bounded at ten pages so a narrow filter cannot walk the catalogue
+unattended — but the bound is on *unattended* work, not on what is reachable. When it stops
+with the wall still holding pages, the empty state says **Nothing yet in the highest rated**
+and offers *Keep looking*, which spends another allowance. It says **Nothing matches those
+filters** only when the wall has genuinely ended, because that is the only time it is true.
+The first version said it either way, which was both an unearned claim and the terminal cutoff
+arriving through the filter path: the reader could not scroll an empty wall to reach the rest.
 
 **No score on the tiles.** A poster's score badge means *what this reader gave it*, and the
 accessibility label says so. Putting a community mean in the same badge would make one
