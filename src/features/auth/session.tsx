@@ -9,7 +9,7 @@ import {
   useOnboardingStage,
   type OnboardingStage,
 } from '@/features/onboarding/use-onboarding-stage';
-import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
+import { FIRST_FIVE, useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { hydrateWelcomeSeen, useWelcomeSeen } from '@/features/onboarding/welcome';
 import { identify } from '@/lib/analytics';
 import { note, rememberRoute, tally } from '@/lib/flight-recorder';
@@ -266,7 +266,15 @@ export type RoutingInput = {
    * step, and a router that trusted it alone would open the Feed with the last two
    * steps skipped.
    */
-  stage: OnboardingStage | undefined;
+  stage: OnboardingStage | null | undefined;
+  /**
+   * How many movies this account has ranked, when the taste check has answered.
+   *
+   * Read only by the lost-stage fallback below. It is the evidence that distinguishes "a
+   * brand new account with no stage" from "an account whose stage preference was lost
+   * after it had already finished the ranking run".
+   */
+  tasteRanked: number | undefined;
   /**
    * Whether the opening has been shown on this device. Undefined while it is unread.
    *
@@ -293,6 +301,7 @@ export function nextRoute({
   tasteNeeded,
   tastePending,
   stage,
+  tasteRanked,
   welcomeSeen,
 }: RoutingInput): string | null {
   // Not knowing where the user belongs is not a reason to move them.
@@ -346,7 +355,31 @@ export function nextRoute({
    * `done` falls through on purpose: the flow is over, and where the app opens is the
    * exiting screen's decision rather than this function's.
    */
+  /**
+   * **Not knowing where somebody is in the flow is not a reason to guess.**
+   *
+   * `undefined` is the stage preference not having been read yet. Guessing it absent sends
+   * an account resting on the People step back to step 3, and — because `readState` settles
+   * such an account to `done` on the way past — lets the launch after that skip the social
+   * half entirely. Independent review found exactly that sequence.
+   *
+   * The wait is bounded where it is read: `hydrateStage` resolves a dead or slow Keychain
+   * to `null` after four seconds, so this cannot become the build-4 hang in a new place.
+   */
+  if (stage === undefined) return null;
+
   if (stage && stage !== 'done') return STAGE_ROUTES[stage];
+
+  /**
+   * **A finished flow is finished, and the taste rule is not consulted again.**
+   *
+   * This used to fall through to the rules below, which is a second defect review found:
+   * the two authorities are written by separate preference keys, so a completion whose
+   * *taste* write is lost leaves `stage: 'done'` beside a phase still marked `active` —
+   * and the taste rule would then send a fully onboarded account back to step 3 to do all
+   * ten again. The stage is the flow's authority, so `done` answers here.
+   */
+  if (stage === 'done') return inAuthGroup || group === undefined ? '/(tabs)/feed' : null;
 
   /**
    * Still pending is not a reason to move anyone: the flow's screen would be mounted
@@ -355,10 +388,27 @@ export function nextRoute({
    */
   if (tastePending) return null;
 
-  // An account that belongs in the flow and has no stage yet starts at the top of it.
-  // The stage is written by the first screen rather than here, so this stays a pure
-  // function of its inputs.
-  if (tasteNeeded) return STAGE_ROUTES.motivations;
+  if (tasteNeeded) {
+    /**
+     * **The stage is gone but the ranking plainly happened, so the flow resumes after it.**
+     *
+     * The safety net for a lost or unreadable stage preference. Without it, this branch
+     * sends an account that has already placed five movies back to the motivation
+     * question — and the steps it would then have to walk again include the ranking run,
+     * which is the expensive one and the one already done.
+     *
+     * `FIRST_FIVE` rankings is not proof the reader reached People, but it is proof they
+     * finished step 7, and People is the step after it. Repeating one step somebody may
+     * have already seen is a far smaller cost than repeating six, and far smaller than the
+     * alternative failure this replaces, which was skipping the social half in silence.
+     */
+    if (stage === null && (tasteRanked ?? 0) >= FIRST_FIVE) return STAGE_ROUTES.people;
+
+    // An account that belongs in the flow and has no stage yet starts at the top of it.
+    // The stage is written by the first screen rather than here, so this stays a pure
+    // function of its inputs.
+    return STAGE_ROUTES.motivations;
+  }
 
   /**
    * `/` is the other route a ready user does not belong on. `(tabs)` is a group and
@@ -433,6 +483,7 @@ export function useAuthRouting() {
       tasteNeeded: taste.data?.needed,
       tastePending: taste.isPending,
       stage,
+      tasteRanked: taste.data?.ranked,
       welcomeSeen,
     });
 
@@ -448,5 +499,14 @@ export function useAuthRouting() {
       tally('route.replace');
       router.replace(destination as never);
     }
-  }, [auth, segments, router, taste.isPending, taste.data?.needed, stage, welcomeSeen]);
+  }, [
+    auth,
+    segments,
+    router,
+    taste.isPending,
+    taste.data?.needed,
+    taste.data?.ranked,
+    stage,
+    welcomeSeen,
+  ]);
 }

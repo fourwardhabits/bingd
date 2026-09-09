@@ -192,6 +192,39 @@ const search = async (view: Awaited<ReturnType<typeof open>>, term: string) => {
   await waitFor(() => expect(view.getByLabelText(/Inception, 2010/)).toBeTruthy());
 };
 
+/** One row of `rankings`, as `useRankedCollection` reads them. */
+const rankedRow = (id: string, title: string, position: number) => ({
+  media_item_id: id,
+  bucket: 'loved',
+  position,
+  category: 'movies',
+  created_at: '2026-09-09T00:00:00Z',
+  media_items: {
+    title,
+    season_number: null,
+    release_date: '2010-01-01',
+    poster_path: null,
+    genres: [],
+    runtime_minutes: 100,
+    kind: 'movie',
+    original_language: 'en',
+    parent_id: null,
+    parent: null,
+  },
+});
+
+/**
+ * The first `n` of the five chosen, placed.
+ *
+ * The run's cursor is **membership**, not a count: it asks which of *these* movies have
+ * been ranked. So a fixture has to say which ones, and cannot get away with a number.
+ */
+const placed = (n: number) => {
+  mockTableRows.rankings = Array.from({ length: n }, (_, index) =>
+    rankedRow(`pick-${index + 1}`, `Movie ${index + 1}`, index + 1),
+  );
+};
+
 /** Five already chosen, restored as a resumed selection rather than five searches. */
 const fiveChosen = () =>
   mockPrefs.set(
@@ -326,6 +359,56 @@ describe('choosing five, before anything is ranked', () => {
   });
 });
 
+
+describe('a selection that was lost while rankings survived', () => {
+  /**
+   * **The cursor is membership, not a count**, and this is the sequence that proved it had
+   * to be. Independent review found it in the first draft.
+   *
+   * If the selection write fails after some movies have been ranked, the picker comes back
+   * empty and the reader chooses five *different* movies. A cursor of `chosen[ranked]`
+   * would then point at index 2 of the new five and silently skip the first two of them —
+   * and with five previously ranked, any new selection satisfied the payoff immediately
+   * and none of it was ever ranked at all.
+   *
+   * Asking which of *these* movies have been placed cannot drift like that.
+   */
+  it('starts at the first of a new selection, even when other movies are already ranked', async () => {
+    // Two rankings exist, and they are not among the five about to be chosen: exactly the
+    // state a lost `pickFive` write leaves behind.
+    mockTableRows.rankings = [
+      rankedRow('lost-1', 'Something Else', 1),
+      rankedRow('lost-2', 'Another Thing', 2),
+    ];
+    fiveChosen();
+
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+    // Not already running: none of the chosen five has been placed.
+    expect(view.queryByText('How was it?')).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Rank these 5' }));
+
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    // The first of the five, not the third.
+    expect(view.getByText('Movie 1')).toBeTruthy();
+  });
+
+  it('does not treat unrelated rankings as progress through the five', async () => {
+    mockTableRows.rankings = Array.from({ length: 5 }, (_, index) =>
+      rankedRow(`lost-${index + 1}`, `Old ${index + 1}`, index + 1),
+    );
+    fiveChosen();
+
+    const view = await open();
+
+    // Five unrelated rankings must not satisfy the payoff for a selection none of them
+    // belong to.
+    await waitFor(() => expect(view.getByLabelText('5 of 5 movies chosen')).toBeTruthy());
+    expect(view.queryByText('Your First Five')).toBeNull();
+  });
+});
+
 describe('the run, which is the real ranking engine', () => {
   const startRun = async () => {
     fiveChosen();
@@ -368,7 +451,7 @@ describe('the run, which is the real ranking engine', () => {
 
   it('says how far along the run is, which the sheets cannot', async () => {
     fiveChosen();
-    mockCounts.rankings = 2;
+    placed(2);
     const view = await renderWithProviders(<TasteScreen />);
 
     /**
@@ -396,7 +479,7 @@ describe('resuming', () => {
    */
   it('comes back to the run rather than to an empty grid', async () => {
     fiveChosen();
-    mockCounts.rankings = 3;
+    placed(3);
     const view = await renderWithProviders(<TasteScreen />);
 
     await waitFor(() =>
@@ -411,7 +494,7 @@ describe('resuming', () => {
    */
   it('takes the next movie from the ranked count rather than a stored cursor', async () => {
     fiveChosen();
-    mockCounts.rankings = 3;
+    placed(3);
     const view = await renderWithProviders(<TasteScreen />);
 
     await waitFor(() =>
@@ -421,7 +504,7 @@ describe('resuming', () => {
 
   it('reads progress from the data rather than from a local counter', async () => {
     fiveChosen();
-    mockCounts.rankings = 5;
+    placed(5);
     const view = await renderWithProviders(<TasteScreen />);
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
@@ -438,32 +521,22 @@ describe('resuming', () => {
 });
 
 describe('Your First Five', () => {
-  const ranked = (id: string, title: string, position: number) => ({
-    media_item_id: id,
-    bucket: 'loved',
-    position,
-    category: 'movies',
-    created_at: '2026-09-09T00:00:00Z',
-    media_items: {
-      title,
-      season_number: null,
-      release_date: '2010-01-01',
-      poster_path: null,
-      genres: [],
-      runtime_minutes: 100,
-      kind: 'movie',
-      original_language: 'en',
-      parent_id: null,
-      parent: null,
-    },
-  });
-
   const arrive = async () => {
     fiveChosen();
-    mockCounts.rankings = 5;
-    // Deliberately returned out of order, so the assertion below is about the screen's
-    // own sorting rather than about the response.
-    mockTableRows.rankings = [ranked('film-2', 'Second', 2), ranked('film-1', 'First', 1)];
+    /**
+     * All five of *the chosen* placed, and deliberately returned out of order.
+     *
+     * The ids have to be the chosen ones: the payoff is reached by every chosen movie
+     * having been placed, which is membership rather than a count. The disordered response
+     * is what makes the assertion below about the screen's own sorting.
+     */
+    mockTableRows.rankings = [
+      rankedRow('pick-2', 'Second', 2),
+      rankedRow('pick-1', 'First', 1),
+      rankedRow('pick-3', 'Third', 3),
+      rankedRow('pick-4', 'Fourth', 4),
+      rankedRow('pick-5', 'Fifth', 5),
+    ];
     const view = await renderWithProviders(<TasteScreen />);
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
     return view;
@@ -473,10 +546,15 @@ describe('Your First Five', () => {
   it('draws the rows in ranked order rather than in the order they arrived', async () => {
     const view = await arrive();
 
-    expect(view.getByText('First')).toBeTruthy();
+    // Waited on rather than asserted immediately: the heading renders as soon as the five
+    // are known to be placed, and the rows follow when the ranked list resolves. CI found
+    // the difference on a slower machine; the local run had been hiding it.
+    await waitFor(() => expect(view.getByText('First')).toBeTruthy());
     expect(view.getByText('Second')).toBeTruthy();
-    expect(view.getByText('1')).toBeTruthy();
-    expect(view.getByText('2')).toBeTruthy();
+
+    // The ordinal belongs to the placement, not to the response.
+    const rows = view.getAllByText(/^(First|Second|Third|Fourth|Fifth)$/).map((n) => n.props.children);
+    expect(rows).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth']);
   });
 
   it('says what the five bought without explaining the algorithm again', async () => {

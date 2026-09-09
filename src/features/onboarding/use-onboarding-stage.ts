@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 import { note } from '@/lib/flight-recorder';
+import { withGrace } from '@/lib/grace';
 import { readPref, writePref } from '@/lib/prefs';
 
 /**
@@ -92,13 +93,36 @@ const stageKey = (userId: string) => `${userId}.${STAGE_PREF}`;
  *
  * The same module-level map, for the same reason, as `intent` in
  * `use-taste-onboarding.ts`: `writePref` is SecureStore and can fail, and a stage that
- * lived only on disk would let a failed write send somebody back to the step they had
- * just finished. A decision recorded here is authoritative for the life of the process
- * and the write is how it outlives the process.
+ * lived only on disk would let a failed write send somebody back to the step they had just
+ * finished. A decision recorded here is authoritative for the life of the process, and the
+ * write is how it outlives the process. Keyed by account, so two accounts on one device
+ * cannot read each other's.
  *
- * Keyed by account, so two accounts on one device cannot read each other's.
+ * ---------------------------------------------------------------------------
+ * AND IT HOLDS THREE STATES RATHER THAN TWO.
+ *
+ * | value | meaning |
+ * |---|---|
+ * | absent from the map | **not read yet, or could not be read** |
+ * | `null` | read, and this account has no stage |
+ * | a stage | read, and this is where the flow got to |
+ *
+ * **The third state is the fix for a real stranding**, found by independent review and
+ * worth stating in full because collapsing it back is easy and silent.
+ *
+ * This map used to hold stages only, and a read that rejected or never settled left the
+ * entry missing — which routing could not tell apart from "this account has no stage". It
+ * then fell through to the taste rule, and for an account resting on the People step that
+ * rule answers `needed: true` with five rankings already placed. The result was step 3
+ * again on that launch; and because `readState`'s repair branch settles such an account to
+ * `done`, the launch after that fell through to the app with People and the notification
+ * question **silently skipped**. One unreadable preference, and somebody never sees the
+ * social half of onboarding.
+ *
+ * So the unknown state is now representable, `nextRoute` holds on it rather than guessing,
+ * and the read below is bounded so the hold cannot outlive one Keychain call.
  */
-const stages = new Map<string, OnboardingStage>();
+const stages = new Map<string, OnboardingStage | null>();
 
 /** Subscribers to `stages`, so a screen advancing the stage re-renders the router. */
 const listeners = new Set<() => void>();
@@ -122,33 +146,49 @@ export function resetOnboardingStages() {
  * `readState` was restructured to stop paying. The disk read happens once per account
  * per process, in `hydrateStage`, and everything after it is synchronous.
  */
-export function stageInMemory(userId: string): OnboardingStage | undefined {
+export function stageInMemory(userId: string): OnboardingStage | null | undefined {
   return stages.get(userId);
 }
 
 /**
+ * How long the stage read may hold routing before it is answered for.
+ *
+ * Four seconds, matching `FIRST_RUN_GRACE_MS` and `WELCOME_GRACE_MS`, and for the reason
+ * both of those give: this is one Keychain lookup, so anything past it is not slow, it is
+ * stuck. `nextRoute` waits on the unknown state, so this bound is what stops that wait
+ * becoming the build-4 hang in a new place.
+ */
+const STAGE_GRACE_MS = 4000;
+
+/**
  * Reads the stored stage into memory once, and answers from memory forever after.
  *
- * Returns the stage so a caller can act on it directly. A rejection resolves to
- * `undefined` rather than throwing: an unreadable preference is not a reason to hold the
- * app, and an account whose stage cannot be read falls through to the taste rule, which
- * is where it would have been before this file existed.
+ * **A failure resolves to `null` — "this account has no stage" — and not to unknown.**
+ * That is a deliberate, lossy choice and it is the safe direction: unknown is a state
+ * routing *waits* on, so resolving a dead read to unknown would hold the app for ever,
+ * which is the failure this codebase has already shipped once. `null` lets routing fall
+ * through to the taste rule, and the `people` fallback in `nextRoute` is what keeps that
+ * fall-through from skipping the social half.
  */
-export async function hydrateStage(userId: string): Promise<OnboardingStage | undefined> {
+export async function hydrateStage(userId: string): Promise<OnboardingStage | null> {
   const remembered = stages.get(userId);
-  if (remembered) return remembered;
+  if (remembered !== undefined) return remembered;
 
-  const stored = await readPref<OnboardingStage>(stageKey(userId)).catch(() => null);
+  const stored = await withGrace(
+    readPref<OnboardingStage>(stageKey(userId)),
+    STAGE_GRACE_MS,
+    null,
+  ).catch(() => null);
+
   note('onboarding', 'stage.read', stored ?? 'absent');
-  if (!stored) return undefined;
 
   // A value written by a build that knew a stage this one does not is not a reason to
   // strand somebody on a route that no longer exists.
-  if (!STAGE_ORDER.includes(stored)) return undefined;
+  const settled = stored && STAGE_ORDER.includes(stored) ? stored : null;
 
-  stages.set(userId, stored);
+  stages.set(userId, settled);
   publish();
-  return stored;
+  return settled;
 }
 
 /**
@@ -166,6 +206,8 @@ export async function hydrateStage(userId: string): Promise<OnboardingStage | un
  */
 export async function advanceStage(userId: string, next: OnboardingStage): Promise<void> {
   const current = stages.get(userId);
+  // `null` and `undefined` both mean "nothing to go backwards from". Only a real stage
+  // can refuse.
   if (current && STAGE_ORDER.indexOf(current) >= STAGE_ORDER.indexOf(next)) return;
 
   stages.set(userId, next);
@@ -182,14 +224,18 @@ export async function advanceStage(userId: string, next: OnboardingStage): Promi
  * of them need the provider in its test. The snapshot is a plain map read, so it is
  * already stable between publishes.
  */
-export function useOnboardingStage(userId: string | null): OnboardingStage | undefined {
+export function useOnboardingStage(
+  userId: string | null,
+): OnboardingStage | null | undefined {
   return useSyncExternalStore(
     useCallback((onChange: () => void) => {
       listeners.add(onChange);
       return () => listeners.delete(onChange);
     }, []),
-    () => (userId ? stages.get(userId) : undefined),
-    () => undefined,
+    // `null` for a signed-out reader rather than `undefined`: there is no account, so
+    // there is nothing still to find out, and routing must not wait on it.
+    () => (userId ? stages.get(userId) : null),
+    () => null,
   );
 }
 

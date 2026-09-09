@@ -25,7 +25,13 @@ const decide = (input: Partial<RoutingInput>) =>
      * about the taste rule is not silently also a case about the opening. The tests that
      * are about those two set them explicitly.
      */
-    stage: undefined,
+    /**
+     * `null` is *read, and there is no stage* — an account that has never been in the
+     * flow. `undefined` would be "not read yet", which routing deliberately waits on, and
+     * defaulting to it would make every unrelated case a test of the hold.
+     */
+    stage: null,
+    tasteRanked: 0,
     welcomeSeen: true,
     ...input,
   });
@@ -141,6 +147,67 @@ describe('nextRoute', () => {
 
     it('still refuses to pull anybody out of the flow group', () => {
       expect(decide({ group: 'onboarding', screen: 'people', stage: 'done' })).toBeNull();
+    });
+  });
+
+  /**
+   * The three defects independent review found in the first draft of this flow. Each is a
+   * sequence rather than a state, and each ends with somebody looped or silently skipped
+   * past a step, so each is pinned here as arithmetic.
+   */
+  describe('a stage that could not be read', () => {
+    /**
+     * **Not knowing is not a reason to guess**, and guessing cost two different failures.
+     *
+     * Treating an unread stage as absent sent an account resting on People back to step 3;
+     * and because `readState` settles such an account to `done` on the way past, the next
+     * launch fell through to the app with People and the notification question skipped.
+     * The wait is bounded in `hydrateStage`, which resolves a dead Keychain to `null`.
+     */
+    it('moves nobody while the stage preference has not been answered', () => {
+      expect(decide({ stage: undefined, tasteNeeded: true })).toBeNull();
+    });
+
+    /**
+     * The safety net for a stage that was lost rather than merely slow. Five rankings is
+     * proof the ranking run finished, and People is the step after it — so the flow
+     * resumes there rather than at the motivation question, which would make somebody
+     * repeat the expensive step they had already done.
+     */
+    it('resumes after the ranking run when the stage is gone but the rankings are not', () => {
+      expect(decide({ stage: null, tasteNeeded: true, tasteRanked: 5 })).toBe(
+        '/onboarding/people',
+      );
+    });
+
+    it('still starts a genuinely new account at the top', () => {
+      expect(decide({ stage: null, tasteNeeded: true, tasteRanked: 0 })).toBe(
+        '/onboarding/motivations',
+      );
+    });
+
+    it('does not treat a part-finished run as a finished one', () => {
+      expect(decide({ stage: null, tasteNeeded: true, tasteRanked: 3 })).toBe(
+        '/onboarding/motivations',
+      );
+    });
+  });
+
+  describe('a completion whose two writes did not both land', () => {
+    /**
+     * **The stage is the flow's authority, so `done` answers on its own.**
+     *
+     * The two authorities are separate preference keys, so the transition is not atomic. A
+     * completion whose *taste* write is lost leaves `stage: 'done'` beside a phase still
+     * marked `active` — and this rule used to fall through to the taste rule, which would
+     * send a fully onboarded account back to step 3 to walk all ten again.
+     */
+    it('opens the app for a finished flow even when the taste phase disagrees', () => {
+      expect(decide({ stage: 'done', tasteNeeded: true })).toBe('/(tabs)/feed');
+    });
+
+    it('leaves a finished account alone once it is inside the app', () => {
+      expect(decide({ stage: 'done', group: '(tabs)', screen: 'feed', tasteNeeded: true })).toBeNull();
     });
   });
   describe('the first-run flow', () => {

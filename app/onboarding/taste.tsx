@@ -101,7 +101,7 @@ export default function TasteOnboardingScreen() {
 
   const state = useTasteOnboarding(profile.id);
   const begin = useBeginTasteOnboarding(profile.id);
-  const ranked = state.data?.ranked ?? 0;
+
 
   const chosen = usePicks(profile.id);
   /** False until the stored selection has been read, so the grid is not drawn empty first. */
@@ -151,6 +151,13 @@ export default function TasteOnboardingScreen() {
 
   const { results, idle, isPending, isError, retry, providerSearching } = useTitleSearch(input);
   const trending = useTrending();
+  /**
+   * The account's ranked movies, which the run reads for its cursor and the payoff reads
+   * for its order. One query serving both, and it is the same one the reveal already
+   * warms: `apply` invalidates this key on every placement, so it follows the run without
+   * anything here asking it to.
+   */
+  const rankedMovies = useRankedCollection(profile.id, 'movies');
 
   // Movies only, on every source this screen reads.
   const films = results.filter((result) => result.kind === 'movie');
@@ -163,23 +170,46 @@ export default function TasteOnboardingScreen() {
    * interleaving the two-phase design exists to remove — and it would do it without
    * warning, over a grid the reader was still looking at.
    *
-   * `ranked > 0` stands in for the press on a resume: somebody with placements already
+   * `placed > 0` stands in for the press on a resume: somebody with placements already
    * made has plainly begun, and asking them to press it again would be the flow having
    * forgotten what it watched them do.
    */
+  /**
+   * **Which of the chosen five are actually placed**, read from the rankings themselves.
+   *
+   * This used to be the global ranked *count*, and independent review found what that
+   * costs. The count is a fact about the account, not about this selection, and the two
+   * come apart the moment the selection is lost: if the `pickFive` write fails after two
+   * movies are ranked, the picker comes back empty, the reader chooses five *different*
+   * movies, and a cursor of `chosen[2]` then silently skips the first two of the new five.
+   * With all five previously ranked it was worse — any new selection satisfied the payoff
+   * immediately and none of it was ever ranked.
+   *
+   * Membership cannot drift like that. It asks the only question that matters — *has this
+   * particular movie been placed* — so a lost selection costs a re-selection and nothing
+   * else, which is what `pick-five.ts` promises. It costs no extra request either: the
+   * payoff already reads this list, and the ranking sheet invalidates its key on every
+   * placement.
+   */
+  const placedIds = new Set((rankedMovies.data ?? []).map((entry) => entry.mediaItemId));
+  const placed = chosen.filter((pick) => placedIds.has(pick.id)).length;
+
   const full = chosen.length >= PICK_TARGET;
-  const payoff = full && ranked >= FIRST_FIVE;
-  const running = full && !payoff && (runStarted || ranked > 0);
+  const payoff = full && placed >= PICK_TARGET;
+  // `placed > 0` stands in for the press on a resume, and it is now specifically *these*
+  // movies having been placed rather than any movie at all.
+  const running = full && !payoff && (runStarted || placed > 0);
   const picking = !running && !payoff;
 
   /**
-   * Which of the five is being ranked, read from the count rather than from a cursor.
+   * Which of the five is being ranked: the first one that has not been placed.
    *
-   * The run walks them in the order they were chosen and `ranked` is how many have landed,
-   * so it is also the index of the next one. A placement that failed leaves the count where
-   * it was and the same title comes up again, which is correct and needs no code of its own.
+   * The run walks them in the order they were chosen. A placement that failed leaves the
+   * movie unplaced and it simply comes up again, which is correct and needs no code of its
+   * own — and unlike an index, this cannot point at the wrong movie when the selection and
+   * the ranking history disagree.
    */
-  const current = running ? (chosen[ranked] ?? null) : null;
+  const current = running ? (chosen.find((pick) => !placedIds.has(pick.id)) ?? null) : null;
 
   const toggle = (title: PickedTitle) => {
     if (chosen.some((pick) => pick.id === title.id)) {
@@ -210,7 +240,10 @@ export default function TasteOnboardingScreen() {
   // Nothing until both answers are in. Drawing the picker first and then deciding shows the
   // grid for a beat to somebody who is about to be sent to the feed, which is the wrong
   // first thing to say to an account that has been in use for months.
-  if (!state.data || !picksReady) {
+  // The ranked list is waited on with the other two: without it `placedIds` is empty on
+  // the first frame, and a resumed run would draw the picker for a beat before correcting
+  // itself. For a genuinely new account it resolves empty and costs nothing.
+  if (!state.data || !picksReady || rankedMovies.isPending) {
     return (
       <Screen>
         <Stack.Screen options={{ headerShown: false }} />
@@ -233,7 +266,7 @@ export default function TasteOnboardingScreen() {
       {payoff ? (
         <FirstFive onContinue={leavePayoff} />
       ) : running ? (
-        <RunBackdrop placed={ranked} />
+        <RunBackdrop placed={placed} />
       ) : (
         <>
           <View style={styles.intro}>
