@@ -25,10 +25,13 @@ import { createTestDb } from './harness.mjs';
  *   3. **Acceptance and activation stay two events.** A later activation files
  *      `invite_activated` and does *not* file a second `invite_joined`. This is the
  *      distinction the old copy collapsed, and it is asserted directly.
- *   4. **A private inviter keeps `follow_request`.** Deliberate, and not an oversight:
- *      that row carries Approve and Decline and is the only place in the app they
- *      exist. Replacing it would strand the request; adding `invite_joined` beside it
- *      would be the redundant pair property 1 refuses.
+ *   4. **A private inviter gets `invite_joined` too, since `20260912000200`.** This
+ *      property read the other way until then — a private inviter kept `follow_request`,
+ *      because that row carries Approve and Decline and is the only place in the app they
+ *      exist. The founder's decision removes the decision the row was carrying: a personal
+ *      invite now connects both parties whatever either visibility says, so an Approve
+ *      would be a control that raises P0002 when pressed. The redundancy property 1
+ *      refuses is unchanged; there is simply nothing left to be redundant *with*.
  *   5. **It answers to the `invites` category and is push-eligible**, the latter because
  *      the `follow` row it replaced already was, and taking a push away silently would
  *      be a regression dressed as a copy change.

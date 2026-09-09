@@ -227,22 +227,6 @@ type FollowPersonRow = {
 };
 
 /**
- * How many people one follow story can ever name — `feed.follow_story_max_people`, and the
- * server's own ceiling on `p_limit`.
- *
- * Asked for **explicitly** rather than left to the RPC's default, which is the correction
- * an independent review of this tranche produced: the first version omitted the argument,
- * took whatever page came back, and derived an exact "and 24 others" from its length. A
- * page presented as a whole is a row that lies about a set the sheet then cannot show.
- *
- * It is safe to treat the answer as complete because `_post_follow_activity` stops storing
- * members at this same number — the story's membership is bounded, not paged. If that
- * bound ever moves, this constant and the config row move together or the sentence starts
- * under-counting again.
- */
-const FOLLOW_STORY_PEOPLE = 50;
-
-/**
  * PostgREST returns a to-one embed as an object and a to-many as an array, and
  * its generated types say array for both.
  *
@@ -954,7 +938,22 @@ async function attachFollowPeople(items: FeedItem[]) {
     // The server caps this at fifty; a page of the feed is twenty events, so the slice is
     // a floor under a pathological caller rather than a real limit.
     p_event_ids: items.map((item) => item.id).slice(0, 50),
-    p_limit: FOLLOW_STORY_PEOPLE,
+    /**
+     * `p_limit` is deliberately **not** passed, and that is not the same omission review
+     * objected to in the first version of this tranche.
+     *
+     * Then, the default was a number — the client took whatever page came back and derived
+     * an exact "and 24 others" from its length, which is a row lying about a set the sheet
+     * cannot show. Since `20260912000300` the default is null and null *means* the whole
+     * story: the server resolves it to `feed.follow_story_max_people`, the same row
+     * `_post_follow_activity` reads before it appends, so the largest membership that can
+     * exist and the largest this can return are one number.
+     *
+     * Restating that number here would put a second copy of it in a place that cannot see
+     * the config row, which is precisely how the two halves came to disagree. What this
+     * depends on is the *semantics* of the default, and those are what the count below is
+     * allowed to be exact about.
+     */
   });
   if (error || !data) return;
 

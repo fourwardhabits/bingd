@@ -712,6 +712,43 @@ describe('a story is bounded, so the reader never pages one', () => {
     }
   });
 
+  it('lets the reader return the whole story when the ceiling is RAISED', async () => {
+    /**
+     * The disagreement `20260912000300` closes, and the direction every earlier test missed.
+     *
+     * The writer read `feed.follow_story_max_people`; the reader clamped to a literal 50. The
+     * two agreed only while the row happened to say 50, so **lowering** it was safe and every
+     * test lowered it. Raise it and a story stores more members than any client can retrieve:
+     * the sheet lists 50, the row says "and 49 others", and the rest are named in
+     * `feed_follow_targets` where nobody can reach them.
+     *
+     * One `app_config` row causes it, no code change is involved, and nothing fails loudly.
+     * So this raises the ceiling past the old literal and asserts the reader keeps up.
+     */
+    await t.sql(`update app_config set value = '60'::jsonb where key = 'feed.follow_story_max_people'`);
+    try {
+      const abi = await user('rai_abi');
+      const targets = [];
+      for (let i = 0; i < 55; i += 1) targets.push(await user(`rai_t${i}`));
+      for (const target of targets) await follow(abi, target);
+
+      const rows = await stories(abi);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].members, 55, 'the writer stores every one of them');
+
+      const viewer = await user('rai_viewer');
+      assert.equal(
+        (await named(viewer, [rows[0].id])).length,
+        55,
+        'and the reader returns every one of them, rather than the first fifty',
+      );
+    } finally {
+      await t.sql(
+        `update app_config set value = '50'::jsonb where key = 'feed.follow_story_max_people'`,
+      );
+    }
+  });
+
   it('still bounds a story when the ceiling is not configured', async () => {
     // The documented fallback is 50. A `coalesce` over a query returning no rows is never
     // evaluated, which is the defect `config-defaults.test.mjs` exists for — and here it
@@ -995,6 +1032,39 @@ describe('a redemption answers a request the inviter had already made', () => {
       notices.rows.map((r) => r.type),
       ['follow', 'follow_approved'],
       'the follow they were told about at the time, then the answer to their own ask',
+    );
+  });
+
+  it('says nothing when the invitee already followed and no request of the inviter`s moved', async () => {
+    /**
+     * The third notification outcome, and the one review found untested: the invitee already
+     * follows the inviter, and the inviter has no edge of their own at all. `invite_joined`
+     * cannot fire — that follow was announced at the time — and `follow_approved` cannot,
+     * because no request of theirs was answered.
+     *
+     * Silence is correct rather than an omission. The only edge this call created is the
+     * inviter's own *outgoing* one, and nowhere in this schema is somebody notified about a
+     * follow they performed. Asserted so that a later reader who finds the silence surprising
+     * has to change a test to add a row, rather than adding one and finding nothing objects.
+     */
+    const suraj = await user('sil_suraj');
+    const abi = await user('sil_abi');
+    const token = await mintLink(suraj);
+
+    await follow(abi, suraj);
+    assert.equal(await edge(suraj, abi), null, 'the inviter has no edge of their own yet');
+
+    assert.equal((await redeem(abi, token)).connected, true);
+    assert.equal(await edge(suraj, abi), 'approved', 'and the redemption creates it');
+
+    const notices = await t.sql(
+      `select type from notifications where recipient_id = $1 and actor_id = $2 order by created_at`,
+      [suraj, abi],
+    );
+    assert.deepEqual(
+      notices.rows.map((r) => r.type),
+      ['follow'],
+      'the follow they were told about at the time, and nothing added on top of it',
     );
   });
 
