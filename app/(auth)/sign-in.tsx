@@ -92,12 +92,29 @@ export default function SignInScreen() {
 
   return (
     <Screen airy includeBottomInset>
+      {/**
+       * **This screen is the product introduction now** (founder, physical iOS 1.0.1
+       * build 8).
+       *
+       * There was a screen in front of it — an opening with a headline, a drawn
+       * comparison and two buttons that both led here. The founder's verdict after
+       * carrying it around was that it was weaker than the form it introduced: the
+       * poster frames were empty by construction (the catalogue is a cache and this
+       * screen has no session to read it with), the copy explained a mechanism, and this
+       * page already looked and sounded better. So there is one screen before the
+       * account again, and it is this one.
+       *
+       * The copy says what the app is for rather than how it works. Movies **and TV
+       * shows**, because half the product is television and the old line said "films and
+       * seasons", which names a data model. No comparison, no ranking mechanic, no
+       * "matches yours": those are step 4's to explain, to somebody who has said yes.
+       */}
       <View style={styles.intro}>
         <BrandLockup size="lg" />
-        <Text variant="display">Keep what you watch.</Text>
+        <Text variant="display">Rank and share what you watch.</Text>
         <Text variant="body" tone="secondary">
-          Rank films and seasons against each other, and find out whose taste actually
-          matches yours.
+          Rank movies and TV shows, see what your friends are watching, and find your next
+          binge.
         </Text>
       </View>
 

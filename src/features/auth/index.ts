@@ -3,6 +3,7 @@ export {
   useAuth,
   useAuthRouting,
   useCurrentProfile,
+  useCurrentUserId,
   type AuthState,
   type Profile,
 } from './session';

@@ -10,7 +10,6 @@ import {
   type OnboardingStage,
 } from '@/features/onboarding/use-onboarding-stage';
 import { FIRST_FIVE, useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
-import { hydrateWelcomeSeen, useWelcomeSeen } from '@/features/onboarding/welcome';
 import { identify } from '@/lib/analytics';
 import { note, rememberRoute, tally } from '@/lib/flight-recorder';
 import { withGrace } from '@/lib/grace';
@@ -66,6 +65,28 @@ export function useCurrentProfile(): Profile {
     throw new Error('useCurrentProfile was called outside a signed-in, onboarded session.');
   }
   return auth.profile;
+}
+
+/**
+ * The account id, for the two first-run screens that run before there is a profile.
+ *
+ * `onboarding` **is** a signed-in session — the `auth.users` row exists and every write
+ * it makes is attributed — it is only one without a `profiles` row yet. Motivations and
+ * *How bingd. helps* now come before the profile form (founder, 2026-09-09), and neither
+ * writes anything server-side: both key device preferences by account, which is exactly
+ * what this returns.
+ *
+ * A separate hook rather than a loosened `useCurrentProfile`, because the strictness of
+ * that one is what lets every screen behind the gate skip its null checks. This throws
+ * just as hard, one state earlier.
+ */
+export function useCurrentUserId(): string {
+  const auth = useAuth();
+
+  if (auth.status !== 'ready' && auth.status !== 'onboarding') {
+    throw new Error('useCurrentUserId was called outside a signed-in session.');
+  }
+  return auth.userId;
 }
 
 /**
@@ -275,14 +296,6 @@ export type RoutingInput = {
    * after it had already finished the ranking run".
    */
   tasteRanked: number | undefined;
-  /**
-   * Whether the opening has been shown on this device. Undefined while it is unread.
-   *
-   * Device-scoped rather than account-scoped, because it is the one screen that runs
-   * with no session and there is nothing to key it to. It is also the reason a signed
-   * out user is not sent straight to the form any more.
-   */
-  welcomeSeen: boolean | undefined;
 };
 
 /**
@@ -302,7 +315,6 @@ export function nextRoute({
   tastePending,
   stage,
   tasteRanked,
-  welcomeSeen,
 }: RoutingInput): string | null {
   // Not knowing where the user belongs is not a reason to move them.
   if (status === 'loading' || status === 'error') return null;
@@ -310,24 +322,58 @@ export function nextRoute({
   const inAuthGroup = group === '(auth)';
 
   /**
-   * Signed out, and the opening now sits in front of the form.
+   * Signed out, and sign in is the first screen of the product again.
    *
-   * **The wait on `welcomeSeen` is bounded where it is read, not here.** An undefined
-   * value means the preference has not been answered yet, and moving on it would either
-   * show the opening to somebody who has already dismissed it or skip it on a first
-   * launch, depending on which way the guess went. Neither is worth guessing, and the
-   * read cannot hang for ever: `hydrateWelcomeSeen` resolves it to `true` on a failure
-   * or a stall, on the rule that losing one screen is a smaller cost than holding the
-   * whole app. So this is a hold measured in one Keychain read, not an open-ended one.
+   * There was an opening in front of it, gated on a device preference this function had
+   * to wait for. The founder removed the screen after carrying it on a device (see
+   * `app/(auth)/sign-in.tsx`), and the wait went with it: a signed-out reader belongs on
+   * the form, immediately, with nothing to read from storage first.
    */
   if (status === 'signed-out') {
-    if (inAuthGroup) return null;
-    if (welcomeSeen === undefined) return null;
-    return welcomeSeen ? '/(auth)/sign-in' : '/(auth)/welcome';
+    return inAuthGroup ? null : '/(auth)/sign-in';
   }
 
+  /**
+   * **Signed in, with no profile yet — and this is no longer one destination**
+   * (founder, 2026-09-09).
+   *
+   * The flow used to put the profile form immediately after sign in, and the two value
+   * screens after *that*. The founder's order puts them in front of it: motivations, then
+   * how bingd. helps, then the profile. The reason is what each screen costs the reader.
+   * Saying why you are here and being told what the app does about it cost nothing and
+   * are what earn the form; a username, a birthday, a visibility choice and a Terms
+   * acceptance are the expensive part, and they come once somebody has a reason to spend
+   * it.
+   *
+   * **The invariant the founder named is preserved exactly.** Ranking writes need an
+   * account row, and the age gate and the Terms acceptance belong to `create_profile` —
+   * so the profile still comes *before* the ranking run, and nothing past this branch is
+   * reachable without one. What moved is two screens that write nothing but a device
+   * preference keyed by the account id, which an `onboarding` session already has. No
+   * auth change, no persistence change, no new state: the same `onboarding.stage` the
+   * rest of the flow already walks, consulted one status earlier.
+   *
+   * `stage === undefined` is the Keychain read not having answered. Waiting is the same
+   * choice the `ready` branch below makes and for the same reason — guessing would send
+   * somebody back a step — and it is bounded by `hydrateStage`'s own four seconds.
+   */
   if (status === 'onboarding') {
-    return !inAuthGroup || screen !== 'create-profile' ? '/(auth)/create-profile' : null;
+    if (stage === undefined) return null;
+
+    const onboardingScreen = (name: string) =>
+      group === 'onboarding' && screen === name ? null : `/onboarding/${name}`;
+
+    // No stage at all is a brand new account at the top of the flow.
+    if (stage === null || stage === 'motivations') return onboardingScreen('motivations');
+    if (stage === 'answers') return onboardingScreen('answers');
+
+    /**
+     * Past the two value screens, so the account is what is missing. Every later stage
+     * answers here — including `done`, which on a session with no profile means a device
+     * that finished the flow for an account that no longer has one (a deletion, a
+     * restore). The form is the only place that can put that right.
+     */
+    return inAuthGroup && screen === 'create-profile' ? null : '/(auth)/create-profile';
   }
 
   /**
@@ -491,24 +537,29 @@ export function useAuthRouting() {
     auth.status === 'ready',
   );
 
-  const userId = auth.status === 'ready' ? auth.userId : null;
+  /**
+   * **Both signed-in states, not only `ready`.**
+   *
+   * The stage is now consulted before there is a profile — motivations and *How bingd.
+   * helps* run in an `onboarding` session (see `nextRoute`) — and an `onboarding` session
+   * has a user id. Reading it only for `ready` would leave the stage permanently
+   * `undefined` through the first two steps, which is a state `nextRoute` deliberately
+   * *waits* on: the app would never route anywhere.
+   */
+  const userId =
+    auth.status === 'ready' || auth.status === 'onboarding' ? auth.userId : null;
   const stage = useOnboardingStage(userId);
-  const welcomeSeen = useWelcomeSeen();
 
   /**
-   * The two device-local reads the router depends on, each performed once.
+   * The device-local read the router depends on, performed once per account.
    *
    * Separate from the routing effect below on purpose. That effect runs on every segment
    * change, and hydration is a Keychain read: doing it there would put one on every
-   * navigation for a value that cannot change without this process being told. Both
-   * helpers return early once they have an answer, so a second call is free, and both
-   * publish to the subscriptions above rather than returning into a variable nothing
-   * would re-render on.
+   * navigation for a value that cannot change without this process being told. The helper
+   * returns early once it has an answer, so a second call is free, and it publishes to
+   * the subscription above rather than returning into a variable nothing would re-render
+   * on.
    */
-  useEffect(() => {
-    void hydrateWelcomeSeen();
-  }, []);
-
   useEffect(() => {
     if (!userId) return;
     void hydrateStage(userId);
@@ -528,7 +579,6 @@ export function useAuthRouting() {
       tastePending: taste.isPending,
       stage,
       tasteRanked: taste.data?.ranked,
-      welcomeSeen,
     });
 
     /**
@@ -551,6 +601,5 @@ export function useAuthRouting() {
     taste.data?.needed,
     taste.data?.ranked,
     stage,
-    welcomeSeen,
   ]);
 }

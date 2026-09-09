@@ -5,13 +5,11 @@ import { TAB_ROUTES } from '@/lib/routes';
 
 import { hydrateStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
 import { resetRankingOutcome } from './pick-five';
-import { resetWelcomeSeen } from './welcome';
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the routes: everything under app/ is bundled by expo-router's
 // require.context. See app-directory.test.ts.
 import NotificationsScreen from '../../../app/onboarding/notifications';
-import WelcomeScreen from '../../../app/(auth)/welcome';
 
 const mockReplace = jest.fn();
 const mockTrack = jest.fn();
@@ -58,6 +56,10 @@ jest.mock('expo-router', () => ({
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
+  // The two screens before the profile form read the account id instead, which is
+  // what an `onboarding` session can answer. See `useCurrentUserId`.
+  useCurrentUserId: () => 'user-1',
+  useAuth: () => ({ status: 'onboarding', userId: 'user-1', email: null }),
   UseDifferentAccountButton: () => null,
 }));
 
@@ -86,7 +88,6 @@ beforeEach(() => {
   for (const key of Object.keys(mockCounts)) delete mockCounts[key];
   mockCountHangs = false;
   resetOnboardingStages();
-  resetWelcomeSeen();
   resetTasteIntent();
   resetRankingOutcome();
   // A flow in progress, with five placed. Note that the *outcome* is deliberately not
@@ -292,49 +293,4 @@ describe('ending the flow', () => {
     resetOnboardingStages();
     await expect(hydrateStage('user-1')).resolves.toBe('done');
   });
-});
-
-describe('the opening', () => {
-  const open = async () => {
-    const view = await renderWithProviders(<WelcomeScreen />);
-    await waitFor(() => expect(view.getByText('Your favorites, in order.')).toBeTruthy());
-    return view;
-  };
-
-  it('makes the argument the headline cannot make on its own', async () => {
-    const view = await open();
-
-    expect(view.getByText(/without trying to squeeze everything into stars/)).toBeTruthy();
-    // The visual is the app's own comparison, and the question above it is the real one.
-    expect(view.getByText('Which did you like more?')).toBeTruthy();
-  });
-
-  /**
-   * The claim on this screen is the order. A number here would start an explanation the
-   * screen has no room to finish.
-   */
-  it('shows no score', async () => {
-    const view = await open();
-    expect(view.queryByText(/\d\.\d/)).toBeNull();
-  });
-
-  it('names the social half low on the screen', async () => {
-    const view = await open();
-    expect(
-      view.getByText('See what friends are loving, compare taste, and find your next watch.'),
-    ).toBeTruthy();
-  });
-
-  it.each(['Get started', 'I already have an account'])(
-    'sends %s to sign in, and closes the opening for good',
-    async (label) => {
-      const view = await open();
-      await fireEvent.press(view.getByRole('button', { name: label }));
-
-      expect(mockReplace).toHaveBeenCalledWith('/(auth)/sign-in');
-      await waitFor(() =>
-        expect(mockPrefs.get('onboarding.welcome.seen')).toBe(true),
-      );
-    },
-  );
 });

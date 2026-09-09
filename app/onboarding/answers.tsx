@@ -2,7 +2,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { useAuth, useCurrentUserId } from '@/features/auth';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import {
   hydrateMotivations,
@@ -15,7 +15,7 @@ import { fontFamily, theme } from '@/ui/tokens';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 
 /**
- * Step 4: here is how that works.
+ * Step 2 of the flow: here is how that works.
  *
  * ---------------------------------------------------------------------------
  * ONE CARD PER PICK, AND THE SAME SIZE EACH
@@ -47,9 +47,14 @@ import { Button, Screen, SectionHeader, Text } from '@/ui/components';
  */
 export default function AnswersScreen() {
   const router = useRouter();
-  const profile = useCurrentProfile();
-  const advance = useAdvanceStage(profile.id);
-  const picked = useMotivations(profile.id);
+  /**
+   * The account id, not the profile: this screen runs before the form. See the note on
+   * the same line in `motivations.tsx` for why the move costs nothing.
+   */
+  const userId = useCurrentUserId();
+  const auth = useAuth();
+  const advance = useAdvanceStage(userId);
+  const picked = useMotivations(userId);
   const cards = chosenMotivations(picked);
 
   /**
@@ -61,21 +66,35 @@ export default function AnswersScreen() {
    */
   useEffect(() => {
     let active = true;
-    void hydrateMotivations(profile.id).then((stored) => {
+    void hydrateMotivations(userId).then((stored) => {
       if (active && stored.size === 0) router.replace('/onboarding/motivations');
     });
     return () => {
       active = false;
     };
-  }, [profile.id, router]);
+  }, [userId, router]);
 
+  /**
+   * **Where Continue goes, and why it asks the auth state rather than assuming.**
+   *
+   * The stage advances to `taste` either way: that is where the flow is *up to*, and it
+   * is the answer this device has to remember. What differs is the next screen, and the
+   * profile is what decides it — a reader who came through sign in with no `profiles` row
+   * has the form next (founder's order, 2026-09-09), and one who somehow arrives here with
+   * an account already has the picker.
+   *
+   * Resolved here rather than left to `useAuthRouting`, which would also get it right, so
+   * that the write and the navigation are adjacent and synchronous. The same reason
+   * `finish` in `notifications.tsx` resolves its destination before writing `done`: no
+   * commit in between for the router to answer in, and no frame of the wrong screen.
+   */
   const onContinue = () => {
     track({
       name: 'onboarding_step_completed',
       props: { step: 'answers', outcome: 'continued' },
     });
     advance('taste');
-    router.replace('/onboarding/taste');
+    router.replace(auth.status === 'ready' ? '/onboarding/taste' : '/(auth)/create-profile');
   };
 
   return (

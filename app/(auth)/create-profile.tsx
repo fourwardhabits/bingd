@@ -13,6 +13,7 @@ import {
   usernameAvailability,
   useAuth,
 } from '@/features/auth';
+import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import { type TasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { track } from '@/lib/analytics';
 import { openLegal } from '@/lib/legal';
@@ -322,6 +323,21 @@ export default function CreateProfileScreen() {
 
   return (
     <Screen includeBottomInset>
+      {/**
+       * **The flow's own chrome, because this screen is inside the flow now** (founder's
+       * reordering, 2026-09-09).
+       *
+       * `FLOW_STEPS` has counted `profile` as the third of eight since the flow was
+       * written; what changed is that the form now actually sits there, between *How
+       * bingd. helps* and the picker. Without the header the progress line would appear
+       * on the two screens before it, vanish for this one, and come back — which reads as
+       * having left the flow and returned to it.
+       *
+       * Nothing else about the screen moves. The age gate, the birthday, the visibility
+       * default and the Terms line are exactly where they were, and they are still what
+       * every ranking write downstream depends on.
+       */}
+      <OnboardingHeader step="profile" />
       {/* What this replaced was `KeyboardAvoidingView` with `behavior: undefined` on
           Android — which is not a behaviour, it is a deferral to
           `windowSoftInputMode=adjustResize`. Under edge-to-edge the window does not
