@@ -127,16 +127,22 @@ export function ClampedText({
 
   const collapsed = collapse({ lines, markerWidth, available, clamp });
   const draw = render ?? ((prose: string) => prose);
+  /**
+   * Whether this is still a control.
+   *
+   * One-way text that is already open is not: it has nothing left to do, so it announces
+   * as nothing rather than as a dimmed button with no label. A toggle stays a control in
+   * both states, which is what `collapseLabel` means.
+   */
+  const acts = !expanded || Boolean(collapseLabel);
 
   return (
     <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ expanded }}
-      accessibilityLabel={expanded ? collapseLabel : expandLabel}
+      accessibilityRole={acts ? 'button' : undefined}
+      accessibilityState={acts ? { expanded } : undefined}
+      accessibilityLabel={acts ? (expanded ? collapseLabel : expandLabel) : undefined}
       onPress={() => setExpanded((open) => (collapseLabel ? !open : true))}
-      // Nothing left to open once it is open and cannot close: the target would
-      // otherwise announce itself as a button that does nothing.
-      disabled={expanded && !collapseLabel}
+      disabled={!acts}
       style={style}
     >
       {/**
@@ -280,8 +286,23 @@ export function collapse({
    * head it is kept.
    */
   const kept = boundary > 0 ? cut.slice(0, boundary) : head ? '' : cut;
+  const prose = trimEnd(head + kept);
 
-  return { prose: trimEnd(head + kept) };
+  /**
+   * **Nothing survived the trim, so there is nothing for a marker to follow.**
+   *
+   * Reachable when the budget buys no characters at all: a clamp of one whose first word
+   * is wider than the column minus the marker, or a marker wider than the column itself.
+   * Drawing it anyway would leave a block whose entire content is ` … more`, which says
+   * less than the text it replaced.
+   *
+   * `null` is the same answer the unmeasured first frame gets: the whole string under
+   * `numberOfLines`, with React Native's own ellipsis. Never wrong, only less inviting,
+   * and the block is still the press target.
+   */
+  if (!prose) return null;
+
+  return { prose };
 }
 
 /** Trailing space before ` … more` would double the gap the marker already carries. */

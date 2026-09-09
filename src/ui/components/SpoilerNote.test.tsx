@@ -170,6 +170,27 @@ describe('a clamped note', () => {
     expect(view.queryByLabelText(/Show the whole/)).toBeNull();
   });
 
+  it('draws no marker when the trim leaves nothing in front of it', async () => {
+    const view = await renderWithProviders(
+      <SpoilerNote text="antidisestablishmentarianism etc" masked={false} numberOfLines={1} />,
+    );
+
+    // One line, and its only word is wider than the column minus the marker. A block
+    // whose entire content is the affordance says less than the text it replaced, so the
+    // plain clamp stands instead.
+    await measure(
+      view,
+      [
+        { text: 'antidisestablishmentarianism', width: 300 },
+        { text: 'etc', width: 40 },
+      ],
+      { markerWidth: 295 },
+    );
+
+    expect(view.queryByTestId('note-more')).toBeNull();
+    expect(view.getAllByText(/antidisestablishmentarianism/).length).toBeGreaterThan(0);
+  });
+
   it('renders nothing of a masked note, marker included', async () => {
     const view = await renderWithProviders(
       <SpoilerNote text="He dies at the end." masked numberOfLines={2} hasSpoilers />,
