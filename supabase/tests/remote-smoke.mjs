@@ -50,7 +50,16 @@ function loadEnv() {
   return out;
 }
 
-const env = loadEnv();
+/**
+ * `.env`, then the ambient environment — the precedence its two sibling suites use.
+ *
+ * This read `.env` alone, which on a machine whose `.env` names production made the
+ * suite impossible to point at staging without editing the file that decides where the
+ * app itself connects. Since this probe holds nothing but an anon key and asserts what an
+ * unauthenticated caller can reach, the target is a parameter rather than a secret; the
+ * run prints the project it is talking to below.
+ */
+const env = { ...loadEnv(), ...process.env };
 const url = env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -866,6 +875,28 @@ expectRefused(
     `${res.status} ${body.slice(0, 200)}`,
   );
 }
+
+// 20260911000100. Helpful is `authenticated` only, all three of it. The list function
+// and the tab's count both read somebody's writing through `can_view_profile`, and the
+// writer changes a row; none of that is a signed-out surface, and the old `title_reviews`
+// set that rule for this page. `_helpful_target` is internal and is probed with the rest
+// of the underscore-prefixed helpers above.
+expectRefused(
+  'anon cannot execute title_reviews_v2',
+  await rpc('title_reviews_v2', { p_media_item_id: NIL, p_sort: 'top_desc', p_limit: 1 }),
+);
+expectRefused(
+  'anon cannot execute title_review_count',
+  await rpc('title_review_count', { p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute set_review_helpful',
+  await rpc('set_review_helpful', { p_operation_id: NIL, p_review_id: NIL, p_helpful: true }),
+);
+expectRefused(
+  'anon cannot execute _helpful_target',
+  await rpc('_helpful_target', { p_review_id: NIL }),
+);
 
 // The one thing the local suite structurally cannot check: citext is shimmed as a
 // domain in PGlite, so no local function carries an extension dependency and the
