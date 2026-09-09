@@ -61,7 +61,17 @@ function loadEnv(file) {
   return out;
 }
 
-const env = { ...loadEnv('.env'), ...loadEnv('.env.local') };
+/**
+ * Files first, then the ambient environment — the precedence `two-user-acceptance.mjs`
+ * already uses, and for its reason.
+ *
+ * Without the last term this suite can only ever run against whatever `.env.local`
+ * happens to name. On a machine where that file points at production, the target guard
+ * below correctly refuses and the suite becomes unrunnable rather than merely
+ * misdirected — which is how staging went unverified. The guard is untouched: it still
+ * decides, from the parsed host, which project this is allowed to write to.
+ */
+const env = { ...loadEnv('.env'), ...loadEnv('.env.local'), ...process.env };
 const url = env.EXPO_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL;
 const anonKey = env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;

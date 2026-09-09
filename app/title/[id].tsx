@@ -52,12 +52,20 @@ import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
 import { TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
-import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-reviews';
+import {
+  DEFAULT_REVIEW_SORT,
+  useSetReviewHelpful,
+  useTitleReviewCount,
+  useTitleReviews,
+  type ReviewSort,
+  type TitleReview,
+} from '@/features/title/use-title-reviews';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
 import { track } from '@/lib/analytics';
+import { hapticSelection } from '@/ui/haptics';
 import { posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
@@ -236,7 +244,7 @@ export default function TitleScreen() {
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
-  const [reviewSort, setReviewSort] = useState<ReviewSort>('top');
+  const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
   const [recommending, setRecommending] = useState(false);
   /** The Ranked control's menu: change the rating, drop it, or remove the title. */
   const [managing, setManaging] = useState(false);
@@ -353,6 +361,17 @@ export default function TitleScreen() {
    * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
    */
   const reviews = useTitleReviews(data?.title?.kind === 'series' ? null : titleId, reviewSort);
+  /**
+   * The number on the tab, read separately from the list.
+   *
+   * A series has no reviews of its own -- it cannot be ranked, so nobody has a score to
+   * review it with -- and passing null keeps the read from being issued at all rather
+   * than issuing one that is guaranteed to answer zero.
+   */
+  const reviewCount = useTitleReviewCount(
+    data?.title?.kind === 'series' ? null : titleId,
+  );
+  const setHelpful = useSetReviewHelpful(titleId);
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
@@ -806,7 +825,22 @@ export default function TitleScreen() {
      * A series is the exception and is excluded below: a series cannot be ranked, so
      * nobody can have a score to review it with.
      */
-    ...(isSeries ? [] : [{ id: 'reviews' as const, label: 'Reviews' }]),
+    /**
+     * The count sits in the label, which is the smallest honest fix for the founder's
+     * actual complaint: the tab did not say whether opening it was worth anything.
+     *
+     * Only once there is something to open. A `Reviews 0` is a label that has learned to
+     * say no, and it is also the state most titles are in -- the tab still appears,
+     * because it is the invitation to write the first one.
+     */
+    ...(isSeries
+      ? []
+      : [
+          {
+            id: 'reviews' as const,
+            label: reviewCount.data ? `Reviews ${reviewCount.data}` : 'Reviews',
+          },
+        ]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
   ];
@@ -1557,7 +1591,27 @@ export default function TitleScreen() {
             reviews={reviews.data ?? []}
             loading={reviews.isPending}
             sort={reviewSort}
-            onChangeSort={setReviewSort}
+            onChangeSort={(next) => {
+              setReviewSort(next);
+              track({ name: 'reviews_sort_changed', props: { sort: next } });
+            }}
+            onToggleHelpful={(review: TitleReview) => {
+              /**
+               * One write at a time, and a second tap while it is in flight does nothing.
+               *
+               * Not throttling for its own sake: a queued mutation runs its `onMutate`
+               * immediately, so a second tap would take a snapshot of the first tap's
+               * optimistic state and a double failure would roll back to a mark the
+               * server never accepted. Refusing to start the second write keeps exactly
+               * one optimistic change alive, which is the condition the rollback in
+               * `useSetReviewHelpful` is correct under.
+               */
+              if (setHelpful.isPending) return;
+              // The premium interaction vocabulary, at its quietest weight: this is a
+              // selection, not an achievement.
+              hapticSelection();
+              setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
+            }}
             // Against this viewer's watched set and this exact media item: having seen
             // Season 1 does not unmask Season 2.
             maskedFor={(review) =>

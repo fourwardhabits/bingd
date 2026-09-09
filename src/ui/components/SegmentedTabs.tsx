@@ -3,7 +3,20 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { theme } from '../tokens';
 import { Text } from './Text';
 
-export type SegmentOption<T extends string> = { id: T; label: string };
+export type SegmentOption<T extends string> = {
+  id: T;
+  label: string;
+  /**
+   * What a screen reader hears instead of the label.
+   *
+   * Optional, and only supplied where the label carries a glyph that does not read as a
+   * sentence — the review sort row's `Top ↓`, whose direction is visual and whose spoken
+   * form is `Top, most helpful first`. That is rule 5 of the sort contract in `ui/sort.ts`:
+   * the arrow is a two-state indicator, and a person who cannot see it is owed the words.
+   * Every other caller passes nothing and is unchanged.
+   */
+  accessibilityLabel?: string;
+};
 
 /**
  * How loudly a tab row reads, and the two classes bingd. has.
@@ -93,6 +106,7 @@ export function SegmentedTabs<T extends string>({
             <Pressable
               key={option.id}
               accessibilityRole="tab"
+              accessibilityLabel={option.accessibilityLabel}
               accessibilityState={{ selected }}
               onPress={() => onChange(option.id)}
               style={styles.tab}

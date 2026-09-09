@@ -396,6 +396,30 @@ export type AnalyticsEvent =
    * carrying what the title was.
    */
   | { name: 'group_picks_result_opened'; props: { position: number } }
+  /**
+   * Somebody said a review helped them, or took it back (20260911000100).
+   *
+   * The pair rather than one event with a boolean, because the two are different
+   * questions: how often does written criticism land, and how often does a reader change
+   * their mind about it. **No review id, no author id, no text** — the value of this
+   * metric is the rate, and a review is a paragraph a person wrote about a film they
+   * watched, which is exactly the kind of thing `sanitize` exists to keep out of an
+   * analytics payload.
+   */
+  | { name: 'review_helpful_added'; props?: undefined }
+  | { name: 'review_helpful_removed'; props?: undefined }
+  /**
+   * The reader changed how the Reviews tab is ordered.
+   *
+   * Carries the resolved sort — the same five values the RPC takes — because the
+   * question it answers is whether anybody uses anything but the default, and a boolean
+   * "changed the sort" cannot answer it. `following` appears without a direction because
+   * it is a filter and has none.
+   */
+  | {
+      name: 'reviews_sort_changed';
+      props: { sort: 'top_desc' | 'top_asc' | 'following' | 'recent_desc' | 'recent_asc' };
+    }
 
   // --- Recommendations ------------------------------------------------------
   /**
@@ -490,6 +514,9 @@ export const ANALYTICS_EVENTS = [
    */
   'for_you_slate_shown',
   'streak_state_viewed',
+  'review_helpful_added',
+  'review_helpful_removed',
+  'reviews_sort_changed',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
