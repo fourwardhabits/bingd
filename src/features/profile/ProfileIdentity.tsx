@@ -65,8 +65,11 @@ export type ProfileIdentityProps = {
   /**
    * What this viewer can do here.
    *
-   * Self gets Share Profile and Bingd Awards; anybody else gets the follow control. The
-   * *identity* above is identical either way, which is the whole point of the component.
+   * One row on both screens — `ProfileActions` — and it is the same row: Share Profile,
+   * then the act that depends on who is looking. Invite friends on your own profile, the
+   * relationship on somebody else's. The *identity* above is identical either way, which
+   * is the whole point of the component, and since the parity pass the shape of the
+   * controls is too.
    */
   controls?: ReactNode;
   /**
@@ -116,7 +119,7 @@ export type ProfileIdentityProps = {
  *
  *     Followers   Following   Movies   TV
  *
- *     [ Share Profile ]  [ Bingd Awards ]
+ *     [ Share Profile ]  [ Invite friends / Follow ]
  *
  * **The bio left the identity column.** It sat under the handle, in the width the photo
  * leaves — about two thirds of the screen — so a bio of any length wrapped early and

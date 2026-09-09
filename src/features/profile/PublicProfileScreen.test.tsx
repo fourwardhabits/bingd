@@ -1,5 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert, Share, StyleSheet } from 'react-native';
+import { Alert, Share, StyleSheet, type ViewStyle } from 'react-native';
 
 import { theme } from '@/ui/tokens';
 
@@ -163,9 +163,16 @@ jest.mock('expo-router', () => ({
   },
 }));
 
-jest.mock('@/features/auth', () => ({
-  useCurrentProfile: () => ({ id: 'viewer', username: 'sai', display_name: 'Sai' }),
-}));
+/**
+ * Who is asking, and it is a variable because one test needs it to be Anna.
+ *
+ * `/u/<your own handle>` resolves to this screen rather than the Collection tab, so the
+ * reader looking at their own profile through the visitor's route is a real case — and
+ * it is the one case where the action row has no trailing act to offer.
+ */
+const stranger = { id: 'viewer', username: 'sai', display_name: 'Sai' };
+let mockViewer = stranger;
+jest.mock('@/features/auth', () => ({ useCurrentProfile: () => mockViewer }));
 
 const anna = {
   id: 'anna-id',
@@ -195,6 +202,7 @@ const ranking = (id: string, title: string, position: number, over: Record<strin
 
 beforeEach(() => {
   mockPush.mockReset();
+  mockViewer = stranger;
   mockRpcResults = {};
   alertSpy.mockClear();
   mockRpcErrors = {};
@@ -1257,24 +1265,61 @@ describe('sharing and awards on somebody else’s profile', () => {
  * anything drift.
  *
  * The pair is `ProfileActions` now and is asserted in its own suite; what belongs here
- * is the *arrangement* this screen puts around it, which is the half that has to match
- * the owner's profile position for position:
+ * is the *arrangement* this screen puts around it, which has to match the owner's
+ * profile position for position:
  *
- *     [           Share Profile          ]
- *     [        Follow / Following        ]
+ *     [ Share Profile ] [ Follow / Following / Requested ]
  *
- * The trailing half of the top row holds Invite friends on your own profile, and nothing
- * here — inviting people "from" somebody else's page would be a sentence with the wrong
- * subject — so Share takes the full width rather than half of it and a gap. The row
- * underneath holds the one control that depends on who is looking.
+ * **The last of the four survived the first fix.** Share and the relationship were two
+ * stacked full-width rows here, against one row of two halves on the owner's page — so
+ * a visitor's action area was still a different *shape* one tap apart, which is the
+ * founder's report in its own words. Self and other are a permission difference, not a
+ * geometry difference: the trailing half holds Invite friends on your own profile and
+ * the relationship on somebody else's, and each screen has exactly one action row.
  */
 describe('the shape of somebody else’s profile', () => {
-  it('puts Share in the header row and the relationship underneath', async () => {
+  /**
+   * The row, read off the tree rather than off a prop.
+   *
+   * `ProfileActions` is a row of two `flex: 1` halves; a button reaches its half
+   * directly, and `FollowControl` puts one stretch wrapper in between. Both answers
+   * are the half, which is the thing that has to be shared.
+   */
+  type Node = { parent: unknown; children: unknown[]; props: Record<string, unknown> } | null;
+  const halfOf = (button: Node): Node => {
+    let node = button;
+    while (node) {
+      if ((StyleSheet.flatten(node.props.style) as ViewStyle | undefined)?.flex === 1) return node;
+      node = node.parent as Node;
+    }
+    return null;
+  };
+
+  it('puts Share and the relationship in one row, each taking half of it', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+
+    const share = halfOf(view.getByRole('button', { name: 'Share Profile' }));
+    const follow = halfOf(view.getByRole('button', { name: 'Follow' }));
+
+    // Two halves, and the *same* row: Follow was on a second full-width row underneath,
+    // which is the stacked shape this fix removes.
+    expect(share).not.toBeNull();
+    expect(follow).not.toBeNull();
+    expect(follow?.parent).toBe(share?.parent);
+    const row = share?.parent as Node;
+    expect((StyleSheet.flatten(row?.props.style) as ViewStyle | undefined)?.flexDirection).toBe(
+      'row',
+    );
+  });
+
+  it('orders Share first and the relationship second, as the owner’s profile does', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
 
-    // Rendered order is the arrangement. Follow was above the row, which put a
-    // different thing in the top position on each of the two screens.
+    // Rendered order is the arrangement, and it is the same order as the owner's page:
+    // Share Profile leads, and the act that depends on who is looking takes the
+    // trailing half.
     const controls = view
       .getAllByText(/^(Share Profile|Follow)$/)
       .map((node) => node.props.children);
@@ -1288,8 +1333,54 @@ describe('the shape of somebody else’s profile', () => {
     const follow = view.getByRole('button', { name: 'Follow' });
     const style = StyleSheet.flatten(follow.props.style);
     expect(style.backgroundColor).toBe(theme.semantic.action);
-    // Full width, which is the shape of the slot it sits in.
+    // It fills the slot it is handed, which is now half a row rather than the screen.
     expect(StyleSheet.flatten(follow.parent?.props?.style).alignSelf).toBe('stretch');
+  });
+
+  it('holds the relationship to the row’s one-line contract, as Share is held', async () => {
+    /**
+     * `Requested` is the long label, and half a gutter row is 140pt at the narrowest
+     * width this app supports. A wrapped label is what grew one button taller than its
+     * neighbour on the founder's iPhone — the defect `ProfileActions` was extracted to
+     * stop, and the relationship is subject to it now that it sits in the row.
+     *
+     * **This asserts the contract, not a measurement**, which is the same thing
+     * `ProfileActions.test.tsx` asserts and for the same reason: jest has no viewport
+     * and no Dynamic Type, so there is no width here for a label to fail to fit. What a
+     * test can hold is that the three props which make `fit` work are all present on
+     * this button — the founder's screenshot came from a button that had none of them —
+     * and that the pair still declares one height. The measured case is a device pass.
+     */
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: 'pending', followed_by: null, blocked: false },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Requested')).toBeTruthy());
+
+    const label = view.getByText('Requested');
+    expect(label.props.numberOfLines).toBe(1);
+    expect(label.props.adjustsFontSizeToFit).toBe(true);
+    expect(label.props.minimumFontScale).toBe(0.85);
+
+    // The two are still the same height, which is what the wrap used to break.
+    const requested = StyleSheet.flatten(view.getByRole('button', { name: 'Requested' }).props.style);
+    const share = StyleSheet.flatten(view.getByRole('button', { name: 'Share Profile' }).props.style);
+    expect(requested.minHeight).toBe(share.minHeight);
+  });
+
+  it('leaves the trailing half empty on your own profile rather than half a row and a gap', async () => {
+    // `/u/<your own handle>` resolves here, and there is no relationship to offer: you
+    // cannot follow yourself. The slot has to be *absent* rather than filled with a
+    // control that renders nothing, or Share sits at half width beside a gap.
+    mockViewer = { id: 'anna-id', username: 'anna', display_name: 'Anna' };
+    const view = await open();
+    await waitFor(() => expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy());
+
+    expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
+    // One half in the row, which is `ProfileActions` rendering nothing for the slot
+    // rather than an empty box in it.
+    const share = halfOf(view.getByRole('button', { name: 'Share Profile' }));
+    expect((share?.parent as Node)?.children).toHaveLength(1);
   });
 
   /**
@@ -1341,8 +1432,8 @@ describe('the shape of somebody else’s profile', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Following' }));
 
     // Withdrawing an approved follow means the next one is a *request* somebody else
-    // has to answer, so it is worth a sentence — and an accidental tap on a button that
-    // now sits full-width under the thumb must not sever anything.
+    // has to answer, so it is worth a sentence — and an accidental tap in the profile's
+    // action row must not sever anything.
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Unfollow Anna?', expect.any(String), expect.any(Array)));
     expect(mockRpcCalls.map((call) => call.name)).not.toContain('unfollow');
   });

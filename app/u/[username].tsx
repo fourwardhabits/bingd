@@ -453,18 +453,21 @@ export default function PublicProfileScreen() {
             }
             controls={
               /**
-               * **The same stack as the owner's profile, position for position.**
+               * **The same row as the owner's profile, position for position.**
                *
-               *     [           Share Profile          ]
-               *     [        Follow / Following        ]
+               *     [ Share Profile ] [ Follow / Following / Requested ]
                *
                * The founder's rule for this pass: looking at somebody else should feel
-               * like looking at your own profile, so the row sits where the row sits and
-               * what differs is exactly the thing that genuinely depends on who is
-               * looking. On the owner's own profile the trailing half of the top row is
-               * Invite friends; here it is empty, because inviting people "from"
-               * somebody else's page would be a sentence with the wrong subject — so
-               * Share takes the full width rather than half of it and a gap.
+               * like looking at your own profile. It was two stacked full-width rows
+               * here — Share, then the relationship underneath — against one row of two
+               * halves on the owner's page, so the two screens were a different *shape*
+               * one tap apart. Self and other differ by **permission**, not by geometry,
+               * and the trailing half is exactly where that permission difference
+               * belongs: Invite friends on your own page, the relationship on somebody
+               * else's. Inviting people "from" another person's profile would be a
+               * sentence with the wrong subject; following yourself is not a thing you
+               * can do — so on `/u/<your own handle>` the slot is empty again and Share
+               * takes the whole row rather than half of it and a gap.
                *
                * **`bingd. Awards` used to be the other half of this row on both
                * screens.** It is a section on the page now, above Top ranked, with its
@@ -474,22 +477,36 @@ export default function PublicProfileScreen() {
                * was two `Button`s written out here, and they had drifted: the same
                * object wore two treatments one tap apart. Fixed in the component rather
                * than here, because a rule two call sites keep by agreement is a rule
-               * that will be broken again.
+               * that will be broken again — which is why the relationship moves *into*
+               * the shared row rather than this screen growing a second one.
                *
-               * Follow is full-width Maroon on its own row underneath, which is the
-               * louder of the two positions and where a relationship control belongs.
+               * Follow keeps the fill and Share keeps the outline, which is the row's
+               * own rule: one filled control, spent on the act the page is for.
                */
-              <View style={styles.controls}>
-                <ProfileActions onShare={() => void shareProfile()} />
-                <FollowControl
-                  userId={subjectId}
-                  name={profile.data.name}
-                  viewerId={viewer.id}
-                  relationship={relationships.data?.get(subjectId)}
-                  isSelf={isSelf}
-                  surface="profile"
-                />
-              </View>
+              <ProfileActions
+                onShare={() => void shareProfile()}
+                /**
+                 * Decided here rather than left to `FollowControl`'s own `isSelf`.
+                 *
+                 * The control returns null for the reader themselves, but null is not
+                 * *absent*: the row is handed a node either way, so it would draw an
+                 * empty half beside a half-width Share — the dangling gap the slot is
+                 * conditional to avoid. The prop is passed through as well, so the
+                 * control still refuses on its own if this guard is ever loosened.
+                 */
+                trailing={
+                  isSelf ? undefined : (
+                    <FollowControl
+                      userId={subjectId}
+                      name={profile.data.name}
+                      viewerId={viewer.id}
+                      relationship={relationships.data?.get(subjectId)}
+                      isSelf={isSelf}
+                      surface="profile"
+                    />
+                  )
+                }
+              />
             }
           />
 
@@ -757,10 +774,6 @@ const styles = StyleSheet.create({
   // Taste Match had a style here — centred under the photo, two tight lines — and needs
   // none now that it is one line inside the identity column, which `ProfileIdentity`
   // already spaces.
-  // The pair, then the relationship action under it — the owner's profile keeps the
-  // same rhythm between its pair and Invite friends. `ProfileIdentity` owns the space
-  // above and the gutter beside.
-  controls: { gap: theme.space[2] },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
   note: { paddingBottom: theme.space[2] },
   noteBody: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[1] },
