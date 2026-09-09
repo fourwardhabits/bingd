@@ -15,8 +15,16 @@ export type FollowControlProps = {
   /** Where this control is being shown, for `follow_created` alone. */
   surface: Surface;
   /**
-   * `full` — the default — is the profile's own action area: one control across the
-   * width of the screen, in the slot that holds Invite friends on the reader's own page.
+   * `full` — the default — is the profile's own action area: the control fills the slot
+   * it is handed, which is the slot that holds Invite friends on the reader's own page.
+   *
+   * **That slot is half a gutter row now, not the width of the screen.** The
+   * relationship used to sit on a second full-width row underneath Share Profile, which
+   * made somebody else's profile a different *shape* from your own; the founder's parity
+   * rule is that self and other differ by permission, not by geometry. So it moved into
+   * `ProfileActions`' trailing half, beside Share, where Invite friends sits on the
+   * owner's page. `alignSelf: 'stretch'` is what lets one style serve both — it fills
+   * whatever it is given, and the locked private shell still gives it the screen.
    *
    * `compact` is the same control at the end of a row. People discovery needs one per
    * suggestion, and a full-width button under each of ten names would be a screen of
@@ -34,7 +42,7 @@ export type FollowControlProps = {
 };
 
 /**
- * The relationship, as one full-width control.
+ * The relationship, as one control that fills its slot.
  *
  * ---------------------------------------------------------------------------
  * WHY THE SAME BUTTON DOES THREE THINGS
@@ -101,6 +109,7 @@ export function FollowControl({
           label="Unblock"
           kind="secondary"
           size={compact ? 'sm' : 'md'}
+          fit={!compact}
           disabled={busy}
           disabledReason="Saving your last change."
           onPress={() =>
@@ -155,6 +164,20 @@ export function FollowControl({
          */
         kind={following || requested ? 'outline' : 'primary'}
         size={compact ? 'sm' : 'md'}
+        /**
+         * The half-row rule, which this control is now subject to.
+         *
+         * Half of a gutter row is 140pt at the 320pt widths this app supports, and a
+         * label at `md`'s default padding wants about 40 of those for padding alone.
+         * `Requested` is the long one, and at a raised Dynamic Type size it is the one
+         * that would wrap and grow this button taller than the Share Profile beside it —
+         * which is the exact defect `ProfileActions` was extracted to stop. `fit` caps
+         * the line and shrinks rather than clipping; see `Button`'s note for the
+         * arithmetic.
+         *
+         * Not in a list: `compact` hugs its own label, so there is nothing to fit it to.
+         */
+        fit={!compact}
         accessibilityHint={
           following
             ? `Unfollow ${name}`
@@ -193,8 +216,10 @@ export function FollowControl({
 }
 
 const styles = StyleSheet.create({
-  // Full width, which is the shape of the slot it sits in: on the owner's profile that
-  // slot holds Invite friends, and the two screens are meant to be the same screen.
+  // The shape of the slot it sits in, whatever that slot is: half of `ProfileActions`'
+  // row on a readable profile — the half that holds Invite friends on the owner's own
+  // page, because the two screens are meant to be the same screen — and the full width
+  // of the locked private shell, which has no row to sit in.
   control: { alignSelf: 'stretch' },
   // As wide as its own label and no wider, so a row of people is a row of names with a
   // control at the end rather than a column of buttons. `Button`'s `sm` is 36pt and

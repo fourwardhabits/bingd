@@ -10,10 +10,19 @@ export type ProfileActionsProps = {
    * The act that sits beside Share, and the one thing in this row that depends on who
    * is looking.
    *
-   * `Invite friends` on the owner's own profile; nothing at all on somebody else's,
-   * where inviting people "from" another person's page would be a sentence with the
-   * wrong subject. Absent, Share takes the whole row rather than half of it and a
-   * dangling gap.
+   * `Invite friends` on the owner's own profile; the relationship — Follow, Following,
+   * Requested, Unblock — on somebody else's. Those are the same act pointed at the two
+   * populations a profile has, and neither one is available on the other's page:
+   * inviting people "from" another person's profile would be a sentence with the wrong
+   * subject, and nobody follows themselves.
+   *
+   * Which leaves one case with no trailing act at all — `/u/<your own handle>`, which
+   * resolves to the visitor screen showing your own profile. Absent, Share takes the
+   * whole row rather than half of it and a dangling gap.
+   *
+   * **A node, not a variant.** A caller that renders `null` here still occupies the
+   * slot, so the *decision* to leave it empty has to be made by the caller passing
+   * nothing. That is the trade for a slot the row has no opinion about.
    */
   trailing?: ReactNode;
 };
@@ -47,9 +56,24 @@ export type ProfileActionsProps = {
  * it is spent on the growth act rather than on the one people already know how to find.
  * Share is `secondary`, which is a real button and not a de-emphasised one.
  *
- * On somebody else's profile the trailing slot is empty and Follow keeps the full-width
- * row underneath, which is the louder of the two positions and where the relationship
- * control belongs.
+ * ---------------------------------------------------------------------------
+ * AND WHY THE RELATIONSHIP IS IN THE TRAILING HALF
+ *
+ * `[ Share Profile ] [ Follow / Following / Requested ]` is what somebody else's
+ * profile draws — the same row, the same two halves, the same fill on the trailing act.
+ *
+ * It was Share full width with Follow full width underneath, which is where the
+ * founder's device pass landed: *viewing another user's profile does not feel like
+ * viewing your own*. The two screens shared this row already; what they did not share
+ * was the number of rows, so a visitor's action area was two stacked bars against one
+ * split bar on their own page. **Self and other are a permission difference, not a
+ * geometry difference** — the trailing half is precisely where the permission lives,
+ * and both screens now have exactly one action row.
+ *
+ * The fill lands on the trailing act on both, and for the same reason: Invite friends
+ * is how somebody new arrives, Follow is how this reader arrives at *this person*.
+ * `Following` and `Requested` give up the fill and keep the Maroon as an outline, which
+ * is the state change reading as a state change — `FollowControl` has that argument.
  * ---------------------------------------------------------------------------
  *
  * **`fit` is load-bearing rather than defensive.** A two-word label in half of a gutter
