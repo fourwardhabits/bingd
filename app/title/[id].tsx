@@ -1596,6 +1596,17 @@ export default function TitleScreen() {
               track({ name: 'reviews_sort_changed', props: { sort: next } });
             }}
             onToggleHelpful={(review: TitleReview) => {
+              /**
+               * One write at a time, and a second tap while it is in flight does nothing.
+               *
+               * Not throttling for its own sake: a queued mutation runs its `onMutate`
+               * immediately, so a second tap would take a snapshot of the first tap's
+               * optimistic state and a double failure would roll back to a mark the
+               * server never accepted. Refusing to start the second write keeps exactly
+               * one optimistic change alive, which is the condition the rollback in
+               * `useSetReviewHelpful` is correct under.
+               */
+              if (setHelpful.isPending) return;
               // The premium interaction vocabulary, at its quietest weight: this is a
               // selection, not an achievement.
               hapticSelection();

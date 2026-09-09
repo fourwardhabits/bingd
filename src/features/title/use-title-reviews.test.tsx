@@ -166,6 +166,27 @@ describe('marking a review helpful', () => {
     expect(result.current.list.data?.[0]?.viewerHelpful).toBe(false);
   });
 
+  it('leaves the cache on the server’s answer when a second tap is refused mid-flight', async () => {
+    /**
+     * The condition the rollback is correct under, asserted rather than assumed.
+     *
+     * A queued mutation runs its `onMutate` immediately, so two overlapping taps would
+     * nest their snapshots and a double failure would restore the first tap's optimistic
+     * state. The screen refuses the second tap while one is pending; this pins the
+     * consequence — one write, one optimistic change, and the server's number at the end.
+     */
+    const { result } = await mount();
+    await waitFor(() => expect(result.current.list.data?.[0]?.helpfulCount).toBe(2));
+
+    // One tap. The screen refuses the second while this is in flight, so no queue forms
+    // and no second `onMutate` snapshots the first one's optimistic state.
+    result.current.set.mutate({ reviewId: 'review-1', helpful: true });
+
+    await waitFor(() => expect(result.current.set.isSuccess).toBe(true));
+    await waitFor(() => expect(result.current.list.data?.[0]?.helpfulCount).toBe(7));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_review_helpful')).toHaveLength(1);
+  });
+
   it('never shows a negative count, however far the cache has drifted', async () => {
     server = { count: 0, mine: true };
     const { result } = await mount();

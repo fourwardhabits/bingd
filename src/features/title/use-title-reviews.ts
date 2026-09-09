@@ -175,6 +175,22 @@ export function useSetReviewHelpful(mediaItemId: string | null) {
      */
     scope: { id: `review-helpful-${mediaItemId ?? 'none'}` },
 
+    /**
+     * The scope orders the writes; `isPending` is what stops them queueing.
+     *
+     * Serialising alone was not enough, and the second review round found why: TanStack
+     * pauses a queued mutation's `mutationFn`, but it runs every queued mutation's
+     * `onMutate` **immediately**. Two fast taps therefore take two snapshots, the second
+     * of which is a snapshot of the first one's optimistic state — and if both requests
+     * then fail, the second rollback restores that optimistic state and the cache keeps a
+     * mark the server never accepted. A refetch repairs it; offline, nothing does.
+     *
+     * So the caller refuses to start a second write for a review while one is in flight
+     * (see `app/title/[id].tsx`). One optimistic change exists at a time, which is the
+     * condition under which snapshot-and-restore is exactly right. The scope is kept
+     * anyway: it still orders writes across two different reviews on one page.
+     */
+
     mutationFn: async ({ reviewId, helpful }: { reviewId: string; helpful: boolean }) => {
       const { data, error } = await supabase.rpc('set_review_helpful', {
         p_operation_id: Crypto.randomUUID(),
