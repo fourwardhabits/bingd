@@ -935,6 +935,40 @@ expectRefused(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Follow activity (20260912000100)
+//
+// `feed_follow_targets` is the second table in this schema with row security on and no
+// policy at all — `notifications`' shape — because who a follow story names is decided by
+// `can_identify_profile`, which is server-only and which a policy expression cannot call.
+// The grant is revoked as well, so this probe fails on privilege rather than on emptiness:
+// an empty staging database returns 200 with `[]` for a table anon *may* read, and that
+// would look identical to a lock nobody applied.
+{
+  const res = await get('feed_follow_targets?select=event_id&limit=1');
+  report(
+    'anon cannot read feed_follow_targets',
+    res.status === 401 || res.status === 403 || res.status === 404 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// The only read path into that table, and authenticated-only like every other viewer-relative
+// read on this schema: it answers from `auth.uid()`'s own perspective, so a signed-out caller
+// has no perspective to answer from.
+expectRefused(
+  'anon cannot execute follow_activity_people',
+  await rpc('follow_activity_people', { p_event_ids: [NIL], p_limit: 1 }),
+);
+
+// Internal, and probed with the other underscore-prefixed helpers: it takes an actor rather
+// than reading `auth.uid()`, so a client grant would be a way to post activity as somebody
+// else.
+expectRefused(
+  'anon cannot execute _post_follow_activity',
+  await rpc('_post_follow_activity', { p_actor: NIL, p_target: NIL }),
+);
+
 const total = passed + failures.length + inconclusive.length;
 console.log(`\n${passed}/${total} passed, ${failures.length} failed, ${inconclusive.length} inconclusive\n`);
 
