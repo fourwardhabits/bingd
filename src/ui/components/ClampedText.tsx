@@ -3,6 +3,7 @@ import {
   Pressable,
   StyleSheet,
   View,
+  useWindowDimensions,
   type NativeSyntheticEvent,
   type StyleProp,
   type TextLayoutEventData,
@@ -125,8 +126,16 @@ export type ClampedTextProps = {
  * press target either way, so a reader can still open it. The marker appears when the
  * measurement answers, one frame later.
  *
- * Text that already fits shows no marker at all and never will, which is the other half
- * of the contract.
+ * Text that already fits shows no marker at all, which is the other half of the contract.
+ *
+ * ---------------------------------------------------------------------------
+ * AND THE MEASUREMENT IS ABOUT *THIS* TEXT, NOT THE FIRST ONE
+ *
+ * The passes unmount once they have answered, so the answer has to be keyed to what it
+ * was an answer about — the string, and the type scale it set at. A row reused for an
+ * edited note, or a reader raising Dynamic Type with the app open, otherwise keeps a
+ * measurement of something that is no longer on screen. See the key below for what that
+ * costs now that the *control* depends on it.
  */
 export function ClampedText({
   text,
@@ -140,12 +149,48 @@ export function ClampedText({
   style,
 }: ClampedTextProps) {
   const [expanded, setExpanded] = useState(false);
-  /** One entry per line of the *whole* text, from the measuring pass. */
-  const [lines, setLines] = useState<{ text: string; width: number }[] | null>(null);
-  /** How wide ` … more` sets, from its own pass. */
-  const [markerWidth, setMarkerWidth] = useState<number | null>(null);
+  /**
+   * **What each measurement was of, stored beside it.**
+   *
+   * A measurement is only about the string and the type scale it was taken at, and both
+   * can change under a mounted block: a feed row is reused when a note is edited, and
+   * Dynamic Type moves while the app is open. The passes unmount once they have answered
+   * — a pass that stayed would re-measure on every layout — so without a key the first
+   * answer is the only answer this block ever has.
+   *
+   * That used to cost a missing marker, which is cosmetic. It stopped being cosmetic when
+   * whether the block is a *control* began depending on the measurement: a short note
+   * measured as fitting, then edited to a long one, would be truncated by the clamp with
+   * no marker, no button role and no way to open it. Independent review found exactly
+   * that, and it is the defect the previous fix was for, reintroduced through the back
+   * door.
+   *
+   * So the key is checked at read time rather than repaired in an effect. A stale entry
+   * simply is not a measurement of this text, the pass remounts, and one frame later the
+   * answer is about what is actually on screen.
+   *
+   * The marker is keyed on the scale alone: it is a constant string, so a new `text` does
+   * not change how wide ` … more` sets and re-measuring it would be a pass spent proving
+   * that.
+   */
+  const { fontScale } = useWindowDimensions();
+  const linesKey = `${fontScale} ${text}`;
+  const markerKey = String(fontScale);
+
+  const [measuredLines, setMeasuredLines] = useState<{
+    key: string;
+    value: { text: string; width: number }[];
+  } | null>(null);
+  const [measuredMarker, setMeasuredMarker] = useState<{ key: string; value: number } | null>(
+    null,
+  );
   /** The block's own width, which is what the last visible line has to fit inside. */
   const [available, setAvailable] = useState<number | null>(null);
+
+  /** One entry per line of the *whole* text, or null while it is not this text's. */
+  const lines = measuredLines?.key === linesKey ? measuredLines.value : null;
+  /** How wide ` … more` sets at this type scale. */
+  const markerWidth = measuredMarker?.key === markerKey ? measuredMarker.value : null;
 
   const collapsed = collapse({ lines, markerWidth, available, clamp });
   const draw = render ?? ((prose: string) => prose);
@@ -207,7 +252,8 @@ export function ClampedText({
       >
         {/* The two measuring passes. Off the flow, invisible, and hidden from assistive
             technology so the text is not announced three times. They unmount as soon as
-            they have answered — a pass that stayed would re-measure on every layout. */}
+            they have answered — a pass that stayed would re-measure on every layout — and
+            they come back the moment the answer stops being about what is on screen. */}
         {lines == null || markerWidth == null ? (
           <View
             style={styles.measure}
@@ -221,12 +267,13 @@ export function ClampedText({
                 variant={variant}
                 tone={tone}
                 onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) =>
-                  setLines(
-                    event.nativeEvent.lines.map((line) => ({
+                  setMeasuredLines({
+                    key: linesKey,
+                    value: event.nativeEvent.lines.map((line) => ({
                       text: line.text,
                       width: line.width,
                     })),
-                  )
+                  })
                 }
               >
                 {draw(text)}
@@ -238,7 +285,10 @@ export function ClampedText({
                 variant={variant}
                 tone={tone}
                 onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) =>
-                  setMarkerWidth(event.nativeEvent.lines[0]?.width ?? 0)
+                  setMeasuredMarker({
+                    key: markerKey,
+                    value: event.nativeEvent.lines[0]?.width ?? 0,
+                  })
                 }
               >
                 {MARKER}

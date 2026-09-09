@@ -1,4 +1,6 @@
 import { fireEvent } from '@testing-library/react-native';
+import { useState } from 'react';
+import { Text } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -44,6 +46,26 @@ const measure = async (
     nativeEvent: { layout: { x: 0, y: 0, width: available, height: 60 } },
   });
 };
+
+/**
+ * One mounted block whose text changes, which is what a reused feed row is. Driven by a
+ * press rather than by `rerender`, so the assertion is about the component keeping its
+ * own state across an ordinary update.
+ */
+function EditableNote() {
+  const [long, setLong] = useState(false);
+
+  return (
+    <>
+      <Text onPress={() => setLong(true)}>edit</Text>
+      <SpoilerNote
+        text={long ? 'one two three four five' : 'one two'}
+        masked={false}
+        numberOfLines={2}
+      />
+    </>
+  );
+}
 
 describe('a clamped note', () => {
   it('draws the whole text and no marker before anything is measured', async () => {
@@ -215,6 +237,47 @@ describe('a clamped note', () => {
     // Announcing "Show the whole review, button" over a review that is entirely on
     // screen is a control that does nothing when pressed.
     expect(view.queryByLabelText('Show the whole review')).toBeNull();
+  });
+
+  /**
+   * **A row reused for a different note measures the note it is showing.**
+   *
+   * The measuring passes unmount once they have answered, so an answer that is not keyed
+   * to what it was about is the only answer the block ever has. A feed row is reused when
+   * a note is edited, and a short note measured as fitting would then be a long note that
+   * the clamp truncates with no marker, no button role and no way to open it — which is
+   * the defect the whole `truncated` distinction exists to prevent, arriving from
+   * underneath.
+   */
+  it('re-measures when the text it is showing changes', async () => {
+    const view = await renderWithProviders(<EditableNote />);
+
+    await measure(view, [
+      { text: 'one ', width: 60 },
+      { text: 'two', width: 60 },
+    ]);
+    // Measured as fitting: no marker, and not a control.
+    expect(view.queryByLabelText('Show the whole review')).toBeNull();
+
+    // The same mounted block, showing a different note. A feed row is reused this way.
+    await fireEvent.press(view.getByText('edit'));
+
+    // The lines pass is back, because the stored answer is not about this text. The
+    // marker pass is not, and must not be: it is a constant string and the type scale
+    // has not moved, so re-measuring it would be a pass spent proving that.
+    await fireEvent(view.getByTestId('note-measure', hidden), 'textLayout', {
+      nativeEvent: {
+        lines: [
+          { text: 'one ', width: 60 },
+          { text: 'two ', width: 60 },
+          { text: 'three four five', width: 200 },
+        ],
+      },
+    });
+
+    expect(view.getByTestId('note-more')).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Show the whole review'));
+    expect(view.getAllByText(/five/).length).toBeGreaterThan(0);
   });
 
   it('renders nothing of a masked note, marker included', async () => {
