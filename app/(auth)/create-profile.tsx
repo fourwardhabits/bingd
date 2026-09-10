@@ -421,17 +421,27 @@ export default function CreateProfileScreen() {
                 wider. The whole handling story belongs in the Privacy Policy, which is
                 linked at the foot of this screen.
 
-                The rest is unchanged in meaning. The 13+ comparison is
-                `create_profile`'s and is the only current reader. "May use age" is a
-                hedge on purpose: nothing personalises anything from it yet, and claiming
-                otherwise would be the opposite error. What is deliberately *not* here is
-                "we don't save it", which would be false.
+                **"May use age to improve recommendations" is gone, on founder review
+                after build 11.** It was a hedge written on the reasoning that nothing
+                personalises from age *yet* — but a hedge about a thing the product does
+                not do is still a sentence a reader takes as a reason their birthday was
+                asked for, and it was the only clause on this screen describing a use that
+                does not exist. `date_of_birth` lives in `profile_private` and its one
+                reader anywhere is the 13+ comparison in `create_profile`
+                (`date_of_birth <= current_date - interval '13 years'`); no recommendation,
+                slate, taste or match path reads it. So the screen now names the only use
+                there is.
+
+                What is deliberately *not* here: "we don't save it", which would be false,
+                and any broad promise such as "we never sell your data" — the kind of
+                sentence this screen cannot keep on its own account. The handling story
+                belongs in the Privacy Policy, linked at the foot of this screen.
 
                 **Copy only.** Storage, the age threshold, the analytics denylist and the
                 RLS on `profile_private` are untouched by this change. */}
             <Text variant="caption" tone="tertiary">
-              Your birthday is private and isn’t shown on your profile. We use it to
-              confirm you’re 13 or older, and may use age to improve recommendations.
+              Your birthday isn’t shown on your profile. We use it to confirm age
+              eligibility.
             </Text>
             <View style={styles.birthRow}>
               <View style={styles.birthDay}>
