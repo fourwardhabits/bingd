@@ -9,6 +9,9 @@ import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
 import { BucketChoices, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
+/** A dismissing sheet answers nothing. */
+const noop = () => {};
+
 export type TasteSubject = {
   id: string;
   title: string;
@@ -38,11 +41,25 @@ export function TasteBucketSheet({
   subject,
   onClose,
   onChosen,
+  visible = true,
+  onDismissed,
 }: {
   subject: TasteSubject | null;
   onClose: () => void;
   /** Fired once the bucket is saved, to hand the title to the comparison sheet. */
   onChosen: (bucket: BucketId) => void;
+  /**
+   * Whether the sheet is presented, as distinct from whether it is mounted.
+   *
+   * Defaults to `true`, so a caller that renders this only while it wants it — which is
+   * every caller but one — behaves exactly as before. The onboarding run sets it `false`
+   * for the moment between a bucket being chosen and the comparison sheet appearing, and
+   * keeps the component mounted so iOS can finish dismissing this presentation before
+   * the next one is asked for. See `Sheet`'s `onDismissed`.
+   */
+  visible?: boolean;
+  /** iOS has finished dismissing this sheet. The next presentation is safe now. */
+  onDismissed?: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -52,7 +69,21 @@ export function TasteBucketSheet({
   if (!subject) return null;
 
   const choose = async (bucket: BucketId) => {
-    if (saving) return;
+    /**
+     * `!visible` is the second half of this guard and it closed a window the freeze fix
+     * opened (independent review).
+     *
+     * `saving` alone was enough while the caller unmounted this sheet the instant a
+     * bucket was chosen: the component was gone before a second tap could land. It stays
+     * mounted through `handoff` now, so iOS can finish dismissing it — and React Native
+     * keeps children rendered for the whole of that animation. The chips are therefore on
+     * screen, `saving` is already back to false, and a second tap would write a *second*
+     * `set_bucket` in a different bucket and a second `title_logged`, while `rank_start`
+     * was already opening a session in the first bucket's band.
+     *
+     * A dismissing sheet is not a sheet anybody is answering, so it answers nothing.
+     */
+    if (saving || !visible) return;
     setSaving(true);
     setProblem(null);
 
@@ -104,7 +135,21 @@ export function TasteBucketSheet({
   };
 
   return (
-    <Sheet visible onClose={onClose} label="How was it?">
+    <Sheet
+      visible={visible}
+      /**
+       * Inert while dismissing, for the same reason `choose` is (independent review).
+       *
+       * iOS keeps a dismissing modal's children mounted, so the Close control and the
+       * backdrop behind it are still live through the whole slide-out. A tap on either
+       * would take the run back to the picker, which unmounts this `<Modal>` **mid
+       * dismissal** — the precise operation the handoff exists to avoid — and drops a
+       * ranking that was already on its way.
+       */
+      onClose={visible ? onClose : noop}
+      onDismissed={onDismissed}
+      label="How was it?"
+    >
       {/* Scrolls, for the same reason `LogSheet` does. `Sheet` caps itself at 90% of
           the window, and at the largest accessibility text sizes a question, a poster
           block, three wrapped labels and a note are taller than that — which without
