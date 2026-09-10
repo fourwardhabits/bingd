@@ -54,10 +54,20 @@
       "whole shape of this beta, and an allowlist means the founder is asked to add",
       "an address every time somebody forwards a link — which is the moment the",
       "invitation stops working. Set this once the build is approved for external",
-      "testing; the App Store URL replaces it at public release."
+      "testing; the App Store URL replaces it at public release.",
+      "",
+      "storeUrl SET 2026-09-10. bingd. 1.0 has been on the public App Store since",
+      "2026-09-08 (iTunes lookup: trackName 'bingd.', bundleId app.bingd), and this",
+      "field was still null — which is why bingd.app offered no install button at all",
+      "and read as a dead end. destinationFor() prefers storeUrl over betaUrl, so the",
+      "site now sends everybody to the listing. App Review updates that same listing",
+      "when a new version is approved, so the URL does not move again.",
+      "",
+      "betaUrl is kept rather than removed: it is the destination again if the listing",
+      "is ever pulled, and it costs nothing while storeUrl wins."
     ],
     "betaUrl": "https://testflight.apple.com/join/kkgaYsqx",
-    "storeUrl": null
+    "storeUrl": "https://apps.apple.com/app/id6803954532"
   },
 
   "android": {

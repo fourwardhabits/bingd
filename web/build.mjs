@@ -309,19 +309,37 @@ const headers = `# Cloudflare Pages headers.
 
 # Everything on the site, in four parts.
 #
-${
-  isPublic
-    ? `# INDEXING IS ON. mode is "public", so no X-Robots-Tag is sent and the pages carry
-# no robots meta either. This is the launch state and it is not quietly reversible:
-# a /u/<handle> route that Google has indexed has published a list of Bingd's members,
-# and no privacy setting in the app can take that back afterwards. The router pages
-# name no account — the handle is read from the URL by the browser and never rendered
-# server-side — which is what makes indexing them safe at all.`
-    : `# The closed beta is noindex by founder decision (decision log §3). Set as a header
-# rather than a meta tag so it also covers the JSON files and anything served that is
-# not HTML. It lifts when distribution.config.json's mode becomes "public", which the
-# build refuses until both store URLs exist.`
-}
+# INDEXING IS PER ROUTE, NOT PER RELEASE MODE (2026-09-10).
+#
+# It used to be one X-Robots-Tag on /* keyed on the release mode, so the front page
+# could only become findable on the day Android went public — and / is now the install
+# page: the address on the App Store listing, in the privacy policy, in the Terms, and
+# in TestFlight's developer-website field. A launch page nobody can find is the wrong
+# half of that trade.
+#
+# So the noindex sits on the four routes that have an account in them, and is no longer
+# conditional at all. /u/<handle> indexed by Google publishes a list of Bingd's members
+# and no privacy setting in the app takes that back afterwards — a risk belonging to
+# *those routes*, which does not lift because the apps shipped. Each of them also
+# carries the robots meta tag, and that belt is what makes this safe to change without
+# guessing at Cloudflare's merge semantics for a repeated header: no header is set
+# twice below.
+#
+# The four documents keep their meta and lose the header, which changes nothing about
+# them. The .well-known files lose it too — they are fetched by OS verifiers rather
+# than crawled, and are public by construction.
+/u/*
+  X-Robots-Tag: noindex, nofollow
+
+/i/*
+  X-Robots-Tag: noindex, nofollow
+
+/title/*
+  X-Robots-Tag: noindex, nofollow
+
+/lists/*
+  X-Robots-Tag: noindex, nofollow
+
 #
 # bingd.app is the domain an invitation teaches people to trust, which makes it the
 # one worth framing inside somebody else's page. Nothing here is clickable into an
@@ -343,7 +361,7 @@ ${
 # destination read out of the URL, and no third-party origin on any page beyond the
 # font host the app already uses.
 /*
-${isPublic ? '' : '  X-Robots-Tag: noindex, nofollow\n'}  X-Content-Type-Options: nosniff
+  X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Content-Security-Policy: frame-ancestors 'none'; base-uri 'none'; form-action 'none'
   X-Frame-Options: DENY
@@ -651,14 +669,22 @@ const styles = `
 `;
 
 /**
- * The robots meta tag, or nothing.
+ * The robots meta tag, for the pages that get one.
  *
- * Belt to `_headers`' braces while the beta is closed — the header covers the JSON
- * files too, and the meta tag survives a host that drops custom headers. Both come
- * from the same `isPublic`, so they cannot disagree, which is the failure a second
- * hardcoded copy of this decision would eventually produce.
+ * **No longer keyed on `isPublic`, and this is the safety half of that change.** The
+ * pages this is applied to — the four router routes and the four documents — carry an
+ * account or a legal text and have no reason to be indexed at any release mode; a
+ * `/u/<handle>` in Google publishes a list of Bingd's members that nothing in the app
+ * can withdraw. Making it unconditional means the front page becoming findable cannot
+ * drag these along with it.
+ *
+ * Belt to `_headers`' braces: the header is set per route there, and this survives a
+ * host that drops custom headers. They no longer come from one flag, so
+ * `router.test.mjs` asserts they agree route by route instead.
+ *
+ * The front page deliberately does not use it — see where index.html is built.
  */
-const ROBOTS = isPublic ? '' : '\n    <meta name="robots" content="noindex, nofollow" />';
+const ROBOTS = '\n    <meta name="robots" content="noindex, nofollow" />';
 
 /**
  * The site origin, for the absolute URLs Open Graph requires.
@@ -721,10 +747,24 @@ const social = ({ share, path }) => `
 /**
  * One page.
  *
- * `noindex` while the test is closed, by founder decision (decision log §3) — a
- * `/u/<handle>` route that Google indexed would publish a list of Bingd's members,
- * which is a thing no privacy setting in the app would then be able to take back. It
- * lifts with the release mode and not before.
+ * `noindex` on every route here, and this is the reason it is not keyed on the release
+ * mode any more: a `/u/<handle>` route that Google indexed would publish a list of
+ * Bingd's members, and no privacy setting in the app could take that back afterwards.
+ * That risk does not lift when the apps go public — it is about *these* routes, which
+ * name accounts, and not about whether the product has launched. The front page is a
+ * different question and is answered where it is built.
+ *
+ * ---------------------------------------------------------------------------
+ * `#no-destination` IS ONE SENTENCE
+ *
+ * It was a lead-in plus `heading`, and with the invite-gate language gone the two said
+ * the same thing twice — "The bingd. beta is not open for this device yet. bingd. is not
+ * on this platform yet." — with the lead-in still implying a gate that no longer exists.
+ *
+ * This explanation lives here rather than in the template because the first version of
+ * it was written as an HTML comment *inside* the returned string: it shipped to every
+ * router page, was the only comment in the generated site, and republished the exact
+ * sentence it was describing the removal of. An independent review caught that.
  */
 const page = ({ dir, title, share, kind, heading, tagline, body }) => `<!doctype html>
 <html lang="en">
@@ -765,9 +805,7 @@ ${body}
             <a class="button secondary" id="open-app" hidden href="#"></a>
           </div>
 
-          <p id="no-destination" hidden>
-            ${isPublic ? 'bingd. is not available for this device yet.' : 'The bingd. beta is not open for this device yet.'} ${heading}
-          </p>
+          <p id="no-destination" hidden>${heading}</p>
         </div>
       </div>
 
@@ -811,28 +849,27 @@ ${SHOWCASE}
  * thing they installed from: "TestFlight or Play" is meaningless to somebody who tapped
  * an App Store button.
  */
-const INVITE_RETURN = isPublic
-  ? `          <p>
+/**
+ * The branch went on 2026-09-10 with the rest of the stale distribution language. It
+ * named "TestFlight or Play" in beta mode, and iOS visitors are sent to the App Store
+ * now — so the beta half named a destination its own button no longer offers. "the
+ * store" is true of every path a person can currently install by, on both platforms and
+ * in both modes, which is what the sentence is actually about: the store, whichever one,
+ * does not carry the invitation across.
+ */
+const INVITE_RETURN = `          <p>
             <strong>After installing bingd., come back to this page</strong> and tap
             &ldquo;I already have bingd.&rdquo; to finish connecting with your friend.
             Opening the app straight from the store works too, but the invitation will
             not follow you there.
-          </p>`
-  : `          <p>
-            <strong>Come back to this page once bingd. is installed</strong> and tap
-            &ldquo;I already have bingd.&rdquo;. Opening the app straight from TestFlight
-            or Play works too, but the invitation will not follow you there.
           </p>`;
 
 const INVITE_BODY = `        <span id="invite-intro">
           <p class="subject">You have been invited to bingd.</p>
           <p>
             bingd. is where you rank what you have watched and see what your friends
-            really think.${
-              isPublic
-                ? ' Get it below, and this invitation connects you when you arrive.'
-                : ' It is in closed testing, and this invitation is how you get in.'
-            }
+            really think. Get it below, and this invitation connects you when you
+            arrive.
           </p>
 ${INVITE_RETURN}
         </span>
@@ -876,14 +913,25 @@ const TITLE_BODY = `${CONTEXT_BLOCK}
           Open it in bingd. to see where your friends placed it, and where you would.
         </p>`;
 
-const GENERIC_BODY = isPublic
-  ? `        <p>
-          bingd. is where you rank what you have watched and see what your friends really
-          think. Get it below.
-        </p>`
-  : `        <p>
-          bingd. is in closed testing. Invitations are going out to a small first group,
-          and this page will become the app&rsquo;s public face when it opens up.
+/**
+ * No longer branches on `mode`, and that is the point.
+ *
+ * It used to say "bingd. is in closed testing. Invitations are going out to a small
+ * first group" whenever `mode` was `beta`. **That stopped being true**: iOS has been on
+ * the public App Store since 2026-09-08, and the TestFlight link was public before that
+ * by deliberate choice. So the sentence described a gate that did not exist, on the page
+ * a person lands on when a link cannot open the app — and it was the *only* body copy
+ * they got, with no install button under it.
+ *
+ * The invite-only claim is gone rather than reworded. What remains is true in both
+ * modes, which is why the branch went with it: the per-platform reality is carried by
+ * the install buttons, which read `distribution.config.json` and say exactly what is
+ * available where. One sentence cannot describe "public on iOS, closed test on Android"
+ * and should not try.
+ */
+const GENERIC_BODY = `        <p>
+          bingd. is where you rank what you&rsquo;ve watched and see what your friends
+          really think. Get it below.
         </p>`;
 
 /**
@@ -913,15 +961,18 @@ const SHOWCASE = `      <div class="showcase" aria-hidden="false">
 /**
  * The second half of an "unavailable" sentence, and each route's `heading`.
  *
- * In beta it says the test is closed, which is why a stranger who found a profile link
- * cannot get in. After launch that sentence is simply false — anybody can get in — and
- * the only remaining reason a device has no destination is a platform Bingd has not
- * shipped to. Two different facts, so two different sentences rather than one edited
- * to be vague enough for both.
+ * It used to read "bingd. is in closed testing" in beta mode, on the reasoning that a
+ * closed test is why a stranger who found a profile link cannot get in. **That is no
+ * longer the reason.** iOS is on the public App Store and Android's closed test has a
+ * public opt-in URL, so nobody is turned away for lack of an invitation — the only
+ * remaining reason a device has no destination is a platform Bingd has not shipped to,
+ * which was previously the launch-mode sentence and is now simply the true one.
+ *
+ * It is reached rarely and deliberately: `paintInstall` shows it only when
+ * `destinationFor` returns null for the visitor's platform, which today means neither a
+ * store URL nor a beta URL is configured for it.
  */
-const UNAVAILABLE = isPublic
-  ? 'bingd. is not on this platform yet.'
-  : 'bingd. is in closed testing.';
+const UNAVAILABLE = 'bingd. is not on this platform yet.';
 
 /**
  * The two addresses, and which one is which.
@@ -1005,7 +1056,7 @@ const DOCUMENT_DATE = '20 August 2026';
 const TERMS_DATE = '4 September 2026';
 
 const PRIVACY_BODY = `      <p class="lede">
-        ${isPublic ? 'Bingd' : 'Bingd is a closed beta. This'} describes what it actually
+        Bingd describes what it actually
         stores, why, and who else sees it &mdash; written against the database schema
         rather than from a template.
       </p>
@@ -1140,7 +1191,7 @@ const PRIVACY_BODY = `      <p class="lede">
       <p>
         If this changes in a way that affects what is collected or who sees it, the date at
         the top of this page changes. ${
-          isPublic ? 'This page is the record' : 'During the closed beta this page is the record'
+          'This page is the record'
         }; there is no mailing list and no in-app announcement to promise you.
       </p>
 
@@ -1738,7 +1789,11 @@ const DOCUMENTS = [
     dir: 'privacy',
     title: 'Privacy — Bingd',
     heading: 'Privacy',
-    stamp: `Last updated ${DOCUMENT_DATE}.${isPublic ? '' : ' Bingd is in closed testing.'}`,
+    // The "Bingd is in closed testing" half of this stamp went on 2026-09-10 with the
+    // rest of that claim: a privacy policy that describes the product as invite-only
+    // when it is on the App Store is a legal document with a false sentence in it, and
+    // this is the one document a store reviewer definitely opens.
+    stamp: `Last updated ${DOCUMENT_DATE}.`,
     body: PRIVACY_BODY,
   },
   {
@@ -1784,9 +1839,12 @@ const ROUTES = [
     share: 'You have been invited to bingd.',
     title: 'You have been invited to bingd.',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
-    heading: isPublic
-      ? 'Bingd is not on this platform yet.'
-      : 'Ask whoever invited you to let you know when it is.',
+    // The invited visitor's heading is the same complete sentence as every other
+    // route's. It used to be "Ask whoever invited you to let you know when it is." in
+    // beta, whose "it" had its antecedent in the lead-in half of #no-destination — and
+    // that half is gone, so the sentence was left pointing at nothing. It also asked
+    // somebody to wait for an invitation that is no longer how anyone gets in.
+    heading: UNAVAILABLE,
     body: INVITE_BODY,
   },
   {
@@ -1845,19 +1903,27 @@ for (const route of ROUTES) {
  * have flipped every generated page and left the address people actually type saying
  * the product was not out yet.
  *
- * Same content, same shape, same styles as the router pages it sits beside. What it
- * does not have is theirs: no install buttons and no `page.mjs`, because this page is
- * not the end of a link somebody was sent and has no token, handle or title to resolve.
+ * ---------------------------------------------------------------------------
+ * IT NOW HAS INSTALL BUTTONS, AND THE REASON IT DID NOT IS THE DEFECT
+ *
+ * This comment used to end: *"What it does not have is theirs: no install buttons and no
+ * `page.mjs`, because this page is not the end of a link somebody was sent and has no
+ * token, handle or title to resolve."* The premise is wrong. Nobody arrives at `/` only
+ * by accident — it is the address on both store listings, in the privacy policy, in the
+ * Terms, and it is what TestFlight shows as the developer website. The founder followed
+ * exactly that route on 2026-09-10 and got a page that said Bingd was invite-only and
+ * offered nothing to tap.
+ *
+ * Having no token to resolve is a reason to skip the *context* block, not the install
+ * row. So the row is here, wired by the same `page.mjs` the router pages use through
+ * `page: 'generic'`, which is `paintInstall` and nothing else: no context fetch, no
+ * Supabase read, no handle in the URL. `destinationFor` then says what is actually
+ * available per platform — the App Store on iOS, the Play opt-in on Android — instead of
+ * one sentence trying to describe both.
  */
-const ROOT_BODY = isPublic
-  ? `        <p>
-          bingd. is where you rank what you&rsquo;ve watched and see what your friends
-          really think &mdash; a ranked list of everything, built one comparison at a
-          time.
-        </p>`
-  : `        <p>
-          bingd. is in closed testing. Invitations are going out to a small first group,
-          and this page will become the app&rsquo;s public face when it opens up.
+const ROOT_BODY = `        <p>
+          Build your favourites through quick comparisons, see what friends are watching,
+          and find your next binge.
         </p>`;
 
 await writeFile(
@@ -1868,7 +1934,12 @@ await writeFile(
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>bingd.</title>
-    <meta name="description" content="Rank what you have watched, and see what your friends really think." />${ROBOTS}
+    <!-- No robots meta, and no X-Robots-Tag on / either. This page is the install page
+         and the address published on the App Store listing, in the privacy policy, in
+         the Terms and in TestFlight's developer-website field; a launch page that asks
+         not to be found is the wrong half of the trade the old mode-keyed rule made.
+         The routes that name an account keep both, unconditionally. -->
+    <meta name="description" content="Rank movies and TV with friends. Build your favourites through quick comparisons, see what friends are watching, and find your next binge." />
 ${social({ share: 'bingd.', path: '/' })}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1883,12 +1954,27 @@ ${social({ share: 'bingd.', path: '/' })}
 
   <body>
     <main>
-      <h1>bingd.</h1>
-      <p class="tagline">Rank what you&rsquo;ve watched. See what your friends really think.</p>
+      <div class="pitch">
+        <h1>bingd.</h1>
+        <p class="tagline">Rank movies &amp; TV with friends.</p>
 
-      <div class="card">
+        <div class="card">
 ${ROOT_BODY}
+
+          <div class="actions">
+            <a class="button" id="primary-install" hidden href="#"></a>
+
+            <span id="desktop-choices" hidden>
+              <a class="button" id="install-ios" hidden href="#"></a>
+              <a class="button" id="install-android" hidden href="#"></a>
+            </span>
+          </div>
+
+          <p id="no-destination" hidden>${UNAVAILABLE}</p>
+        </div>
       </div>
+
+${SHOWCASE}
 
       <footer>
         <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> &middot;
@@ -1896,6 +1982,12 @@ ${ROOT_BODY}
         <a href="/support">Support</a>
       </footer>
     </main>
+
+    <script type="application/json" id="bingd-config">${jsonBlock({
+      page: 'generic',
+      distribution: shippedDistribution,
+    })}</script>
+    <script type="module" src="/page.mjs"></script>
   </body>
 </html>
 `,

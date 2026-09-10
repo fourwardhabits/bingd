@@ -76,8 +76,16 @@ const link = (id, href, label) => {
   return true;
 };
 
-// The button's wording is `installLabel` in router.mjs — a decision, so it lives with
-// the tests. What stays here is the desktop pair, which is platform-keyed already.
+/**
+ * The desktop pair's fallback wording, used only if `installLabel` has nothing to say.
+ *
+ * It used to be what the desktop pair actually rendered, and that made the two halves of
+ * the site disagree: a phone was told "Join the bingd. Android beta" while a laptop
+ * showing both options was told "Get bingd. for Android" — the same closed test, one
+ * description honest about it and one not. Since 2026-09-10 the pair asks `installLabel`
+ * first, so both surfaces describe the same destination the same way, and iOS reads "Get
+ * bingd. on the App Store" now that the listing is public.
+ */
 const PLATFORM_LABEL = { ios: 'Get bingd. for iPhone', android: 'Get bingd. for Android' };
 
 /**
@@ -193,7 +201,11 @@ function paintInstall(cfg, platform) {
 
   const both = allDestinations(dist);
   for (const destination of both) {
-    link(`install-${destination.platform}`, destination.url, PLATFORM_LABEL[destination.platform]);
+    link(
+      `install-${destination.platform}`,
+      destination.url,
+      installLabel(destination) ?? PLATFORM_LABEL[destination.platform],
+    );
   }
   if (both.length > 0) show('desktop-choices');
   else show('no-destination');
