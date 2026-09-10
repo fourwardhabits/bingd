@@ -67,11 +67,35 @@ export function usePullRefresh(work: () => Promise<unknown>[] | Promise<unknown>
 
   const onRefresh = useCallback(() => {
     const token = (run.current += 1);
-    setRefreshing(true);
-    const started = work();
-    void Promise.allSettled(Array.isArray(started) ? started : [started]).then(() => {
+    const stop = () => {
       if (run.current === token) setRefreshing(false);
-    });
+    };
+
+    setRefreshing(true);
+
+    let started: Promise<unknown>[] | Promise<unknown>;
+    try {
+      started = work();
+    } catch {
+      /**
+       * **A caller that throws before it returns a promise** (independent review, P2).
+       *
+       * `setRefreshing(true)` is already done by this point, and without this there is
+       * nothing left to clear it: no promise was created, so nothing settles. The flag
+       * stays true for the life of the screen, which on iOS is the page held down with a
+       * band of background above it — the exact symptom this hook exists to remove,
+       * reintroduced through the one path that skips its own cleanup.
+       *
+       * Swallowed rather than rethrown, because this runs inside the reader's gesture: a
+       * throw here would surface as an unhandled error over a page they were only
+       * refreshing, and the caller's own `catch` — if it has one — has already had its
+       * chance. The visible outcome is a pull that ends immediately, which is the truth.
+       */
+      stop();
+      return;
+    }
+
+    void Promise.allSettled(Array.isArray(started) ? started : [started]).then(stop);
   }, [work]);
 
   return { refreshing, onRefresh };

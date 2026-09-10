@@ -186,14 +186,44 @@ export default function TasteOnboardingScreen() {
    */
   const rankedMovies = useRankedCollection(profile.id, 'movies');
 
-  const rankedIds = new Set((rankedMovies.data ?? []).map((entry) => entry.mediaItemId));
+  /**
+   * Which movies are placed: the ones the query has come back with, **union the ones this
+   * screen watched the server place**.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE SECOND HALF IS NOT BOOKKEEPING (independent review, P1)
+   *
+   * A placement invalidates `queryKeys.rankings`; it does not synchronously put the new
+   * row in the cache. So between `onPlaced` and the refetch landing there is a window —
+   * one round trip — in which the picker is back on screen and the count behind it is one
+   * short. A quick reader can pick a sixth movie in it and rank it, and the flow's central
+   * promise, *exactly five*, is broken by a race rather than by a decision. `Math.min`
+   * would then hide the overrun, which is worse than the overrun.
+   *
+   * The set is the fix and it is the smallest one available: a placement is a fact this
+   * component was told directly, so remembering it costs nothing and cannot disagree with
+   * the query — the two are unioned, so a row appearing in both is one movie, and an id
+   * added twice is one entry. It converges the moment the refetch lands and is discarded
+   * with the screen.
+   *
+   * It is deliberately *not* a counter. A counter would have to be reconciled against the
+   * query when it arrives; a set of ids is idempotent, so there is nothing to reconcile.
+   *
+   * The same union is what the picker filters on, so the sixth movie cannot be offered
+   * either — the count and the supply are answered by one fact rather than two.
+   */
+  const [confirmed, setConfirmed] = useState<readonly string[]>([]);
+  const rankedIds = new Set([
+    ...(rankedMovies.data ?? []).map((entry) => entry.mediaItemId),
+    ...confirmed,
+  ]);
   /**
    * How many of the five are done.
    *
-   * The ranked movies themselves, not a counter and not a membership test against a
-   * stored selection. An account only reaches this screen with an empty collection —
-   * `readState` admits `ranked === 0 && logged === 0` — so every ranked movie on it is
-   * one this run placed, and there is no second list that could disagree.
+   * The ranked movies themselves, not a stored selection. An account only reaches this
+   * screen with an empty collection — `readState` admits `ranked === 0 && logged === 0` —
+   * so every ranked movie on it is one this run placed, and there is no second list that
+   * could disagree.
    */
   const placed = Math.min(rankedIds.size, PICK_TARGET);
   const payoff = placed >= PICK_TARGET;
@@ -307,10 +337,27 @@ export default function TasteOnboardingScreen() {
             />
           </View>
 
-          {idle && (starters.isPending || trending.isPending) ? (
-            // Outside the grid's own ScrollView: its content container is a wrapping row,
-            // and a skeleton laid out inside one is a row of stripes rather than a
-            // placeholder for a grid.
+          {idle && starters.isPending ? (
+            /**
+             * **The starter list alone decides whether this is still loading**
+             * (independent review, P1).
+             *
+             * It was `starters.isPending || trending.isPending`, which made a healthy
+             * community list wait on the shelf that exists only to stand in for it. A slow
+             * Trending request would hold skeletons over a grid that was ready — the first
+             * screen of the product, with movies in hand and nothing drawn. Bounded by
+             * `REQUEST_DEADLINE_MS` rather than unbounded, and still wrong.
+             *
+             * The fallback is a fallback: when it is late, the grid draws without it and
+             * fills in when it arrives. The one visible cost is on a backend with neither
+             * source — the actionable "search for a movie" line for a moment before the
+             * shelf lands — and that line is a place somebody can act, which skeletons over
+             * a stalled request are not.
+             *
+             * Outside the grid's own ScrollView: its content container is a wrapping row,
+             * and a skeleton laid out inside one is a row of stripes rather than a
+             * placeholder for a grid.
+             */
             <SkeletonRow count={6} />
           ) : idle ? (
             /**
@@ -455,7 +502,12 @@ export default function TasteOnboardingScreen() {
          * `starter_movies` server-side, so the grid has to ask again to stop offering it.
          */
         onPlaced={() => {
+          if (step.kind !== 'ranking') return;
+          const id = step.subject.id;
           note('onboarding', 'placed', String(placed + 1));
+          // Before the step changes, so the picker cannot draw one frame with the old
+          // count. See `confirmed` for the sixth-ranking race this closes.
+          setConfirmed((was) => (was.includes(id) ? was : [...was, id]));
           setStep({ kind: 'picking' });
           void queryClient.invalidateQueries({
             queryKey: ['onboarding-starter-movies', profile.id],

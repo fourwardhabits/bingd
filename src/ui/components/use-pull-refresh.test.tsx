@@ -111,6 +111,28 @@ describe('usePullRefresh', () => {
   });
 
   /**
+   * **A caller that throws before it returns a promise** (independent review, P2).
+   *
+   * The flag is already true by then and no promise exists to clear it, so without the
+   * `try` it stays true for the life of the screen — the page held down, which is the
+   * symptom this hook removes, reintroduced through the one path that skips its own
+   * cleanup.
+   */
+  it('stops when the work function throws instead of returning promises', async () => {
+    const view = await render(
+      <Harness
+        work={() => {
+          throw new Error('a refetch that could not even start');
+        }}
+      />,
+    );
+
+    await fireEvent.press(view.getByLabelText('pull'));
+
+    await waitFor(() => expect(view.getByText('still')).toBeTruthy());
+  });
+
+  /**
    * A second pull is not cleared by the first one's completion.
    *
    * Two presses on two different controls, both wired to the same `onRefresh`: RNTL 14

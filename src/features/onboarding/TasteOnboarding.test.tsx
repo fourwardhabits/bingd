@@ -103,6 +103,27 @@ jest.mock('@/lib/prefs', () => ({
   },
 }));
 
+/**
+ * Tables whose read is parked rather than answered, keyed to the callbacks waiting on it.
+ *
+ * Two cases below are about what the screen does *while* a read is in flight, and every
+ * read here otherwise answers in the same microtask as the call — which is why neither
+ * had a test.
+ */
+const mockHeld = new Map<string, (() => void)[]>();
+const holdReadsOf = (table: string) => mockHeld.set(table, []);
+const releaseReadsOf = (table: string) => {
+  const waiting = mockHeld.get(table) ?? [];
+  mockHeld.delete(table);
+  for (const answer of waiting) answer();
+};
+/** Answers now, or when the table is released. */
+const held = <T,>(table: string, answer: () => T): Promise<T> => {
+  const waiting = mockHeld.get(table);
+  if (!waiting) return Promise.resolve(answer());
+  return new Promise<T>((resolve) => waiting.push(() => resolve(answer())));
+};
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (...args: unknown[]) => mockRpc(...args),
@@ -121,10 +142,15 @@ jest.mock('@/lib/supabase', () => ({
         order: () => chain,
         // The keyset cursor `read-all.ts` applies between pages.
         gt: () => chain,
-        single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-        maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: rows(), error: null, count: mockCounts[table] ?? rows().length }),
+        single: () => held(table, () => ({ data: rows()[0] ?? null, error: null })),
+        maybeSingle: () => held(table, () => ({ data: rows()[0] ?? null, error: null })),
+        then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => void) => {
+          void held(table, () => ({
+            data: rows(),
+            error: null,
+            count: mockCounts[table] ?? rows().length,
+          })).then(resolve, reject);
+        },
       });
       return chain;
     },
@@ -221,6 +247,7 @@ beforeEach(() => {
   for (const key of Object.keys(mockTableRows)) delete mockTableRows[key];
   for (const key of Object.keys(mockCounts)) delete mockCounts[key];
   mockStarterIds = [];
+  mockHeld.clear();
   /**
    * The server, as far as this screen is concerned.
    *
@@ -330,6 +357,27 @@ describe('the picker', () => {
     await waitFor(() => expect(view.getByLabelText('Starter 1')).toBeTruthy());
     expect(callsTo('starter_movies')).toHaveLength(1);
     expect(view.getByLabelText('Starter 3')).toBeTruthy();
+  });
+
+  /**
+   * **A ready starter list is not held behind the shelf that stands in for it**
+   * (independent review, P1).
+   *
+   * The loading branch was `starters.isPending || trending.isPending`, so a slow Trending
+   * request drew skeletons over a grid that was ready — the first screen of the product,
+   * with movies in hand and nothing on it.
+   */
+  it('draws the grid as soon as the starter list answers, without waiting for the shelf', async () => {
+    starterGrid(['starter-a', 'starter-b']);
+    // The fallback's read, parked. `starters` answers; `trending` does not.
+    holdReadsOf('provider_list_cache');
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Starter 1')).toBeTruthy());
+    expect(view.getByLabelText('Starter 2')).toBeTruthy();
+
+    releaseReadsOf('provider_list_cache');
   });
 
   /**
@@ -502,6 +550,40 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText('I liked it'));
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+  });
+
+  /**
+   * **Exactly five, even while the refetch that proves the fifth is still in flight**
+   * (independent review, P1).
+   *
+   * A placement invalidates the ranked collection; it does not synchronously put the row
+   * in the cache. So there is a window — one round trip — in which the picker is back and
+   * the count behind it is one short, and a quick reader could pick a sixth movie in it.
+   * The screen remembers the placement it was told about directly, so the window is closed
+   * on both halves at once: the count is right, and the payoff is what is on screen rather
+   * than another picker.
+   *
+   * The read is parked here to hold that window open for as long as the test needs.
+   */
+  it('reaches the payoff on the fifth even before the collection refetch lands', async () => {
+    alreadyRanked(4);
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+
+    // Every read of the ranked collection from here on is parked, so the cache can never
+    // learn about the fifth placement on its own.
+    holdReadsOf('rankings');
+
+    await fireEvent.press(view.getByLabelText('I liked it'));
+
+    // Five placed, and the flow says so from what it watched happen rather than from a
+    // query that has not answered. No sixth picker, so no sixth ranking.
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    expect(view.queryByLabelText('Search for a movie')).toBeNull();
+
+    releaseReadsOf('rankings');
   });
 
   /** Five rankings, and exactly five: one `rank_start` per movie and no repeats. */
