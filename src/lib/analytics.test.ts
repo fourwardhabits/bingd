@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the twenty-nine canonical names and nothing else', () => {
+  it('is the thirty canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -123,6 +123,7 @@ describe('the event vocabulary', () => {
         'recommendation_opened',
         'recommendation_sent',
         'sign_in_completed',
+        'sign_in_redirect_rejected',
         'signup_completed',
         'settings_support_email_opened',
         'review_helpful_added',
@@ -250,6 +251,23 @@ describe('ranking_completed', () => {
     });
 
     expect(propertiesOf()).toMatchObject({ skips: 2 });
+  });
+
+  /**
+   * The reason this is asserted here rather than only in the OAuth suite.
+   *
+   * `methods.oauth.test.ts` mocks `@/lib/analytics` wholesale, so it can prove the event
+   * is *emitted* with the right shape and cannot prove it *survives*. `track` filters
+   * every key against `ALLOWED_PROPERTY_KEYS`, and `problem` was missing from that list —
+   * so the one property that says which of three failures happened was dropped on the
+   * way to the wire, and all three refusals would have arrived in PostHog identical and
+   * indistinguishable. An independent review caught it; nothing in the suite did.
+   */
+  it('carries the OAuth refusal reason through the allowlist', () => {
+    mockCapture.mockClear();
+    track({ name: 'sign_in_redirect_rejected', props: { problem: 'not_the_app' } });
+
+    expect(propertiesOf()).toMatchObject({ problem: 'not_the_app' });
   });
 
   it('carries a start with the same mode vocabulary as the completion', () => {

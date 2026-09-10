@@ -292,4 +292,21 @@ What this section was missing is that a paragraph is not a check. The client was
 
 None of that is in a pull request's diff of the running project, and none of it travels with a deploy: **auth email configuration is console state**. The guard is that a new project now fails a check instead of failing a person.
 
-**The OAuth redirects must be registered**, which they are, as `bingd://**`, `bingd-dev://**`, `bingd-preview://**` and `https://bingd.app/**` alongside the three exact callbacks. Google returns to `Linking.createURL('auth/callback')`, which resolves per variant, and an unregistered value is refused by Supabase before the provider is ever contacted — so the symptom names the redirect and not the provider.
+**The OAuth redirects must be registered**, which they are, as `bingd://**`, `bingd-dev://**`, `bingd-preview://**` and `https://bingd.app/**` alongside the three exact callbacks.
+
+**The sentence that used to end this paragraph was false, and it cost a release.** It read: *"an unregistered value is refused by Supabase before the provider is ever contacted — so the symptom names the redirect and not the provider."* GoTrue does no such thing. It **substitutes `site_url`** for a `redirect_to` it cannot use and contacts the provider anyway. Probed against production on 2026-09-10:
+
+```
+redirect_to=bingd://auth/callback    -> bingd://auth/callback#...   honoured
+redirect_to=https://evil.example.com -> https://bingd.app#...       substituted
+redirect_to omitted                  -> https://bingd.app#...       substituted
+```
+
+`site_url` is `https://bingd.app`. So a wrong or missing redirect is not a failed sign-in — it is a **successful** Google authentication that ends on the marketing site with no session, no error, and nothing in any log. The founder hit exactly that from TestFlight on build 10, and this paragraph is why nobody looked at the redirect: it promised a failure that would announce itself.
+
+`https://bingd.app/auth/callback` is allow-listed too and is no better. The AASA claims only `/u/*`, `/lists/*`, `/title/*` and `/i/*`, so an https callback cannot re-enter the app, and Cloudflare Pages serves `index.html` at 200 for the unmatched path — the same dead end through a different door.
+
+Two guards replace the promise:
+
+- `resolveOAuthRedirect` in `src/features/auth/methods.ts` builds the callback from `Constants.expoConfig.scheme` — the value `app.config.ts` declares — rather than trusting `Linking.createURL`, and `signInWithGoogle` **refuses before contacting Google** if it cannot. `methods.oauth.test.ts` pins it, and the old behaviour fails five of those tests.
+- [`scripts/check-oauth-redirects.mjs`](../../scripts/check-oauth-redirects.mjs) reads the deployed project back and refuses if any variant callback is unregistered. Like the email templates above, **URL configuration is console state**: it is in no pull request's diff and travels with no deploy.

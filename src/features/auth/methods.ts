@@ -1,4 +1,5 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
+import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
@@ -254,11 +255,155 @@ export async function signInWithApple(): Promise<SignInOutcome> {
 // ---------------------------------------------------------------------------
 
 /**
- * The redirect target. It must be registered in Supabase under Authentication >
- * URL Configuration, or the provider refuses the request — and it differs per
- * variant because the scheme does.
+ * The redirect target, and the guard around it.
+ *
+ * ===========================================================================
+ * WHAT WENT WRONG, WHICH IS NOT WHAT THIS FILE USED TO SAY
+ *
+ * `docs/architecture/auth.md` claimed that "an unregistered value is refused by Supabase
+ * before the provider is ever contacted — so the symptom names the redirect and not the
+ * provider". **That is false, and it is the whole defect.** Probed against the production
+ * project on 2026-09-10:
+ *
+ *   redirect_to=bingd://auth/callback   -> Location: bingd://auth/callback#...   honoured
+ *   redirect_to=https://evil.example.com-> Location: https://bingd.app#...       fell back
+ *   redirect_to omitted                 -> Location: https://bingd.app#...       fell back
+ *
+ * GoTrue does not refuse an unusable redirect. It substitutes `site_url` — which is
+ * `https://bingd.app` — and contacts Google anyway. So the user authenticates
+ * *successfully* and is then handed to the marketing site inside the auth sheet, with no
+ * error raised anywhere and no session created. The founder hit exactly this from
+ * TestFlight on build 10.
+ *
+ * `https://bingd.app/auth/callback` is *also* in the allow-list, and is no better: the
+ * AASA claims only `/u/*`, `/lists/*`, `/title/*` and `/i/*`, so an https callback cannot
+ * re-enter the app, and Cloudflare Pages serves `index.html` at 200 for the unmatched
+ * path. Same dead end, by a different door.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE TESTS COULD NOT SEE IT
+ *
+ * `methods.oauth.test.ts` mocked the thing under suspicion:
+ *
+ *     jest.mock('expo-linking', () => ({ createURL: (path) => `bingd://${path}` }));
+ *
+ * so `expect(...redirectTo).toBe('bingd://auth/callback')` asserted the mock's own return
+ * value. `Linking.createURL` reads a native scheme registry that jest does not have, and
+ * whatever it answers on a device, that assertion passes. The suite agreed with the
+ * harness instead of with production — the same lesson `supabase/tests/harness.mjs`
+ * records about RLS.
+ *
+ * ---------------------------------------------------------------------------
+ * SO THE SOURCE OF TRUTH IS THE CONFIG, NOT THE HELPER
+ *
+ * The binary registered exactly one scheme and `app.config.ts` is where it is declared
+ * (`variants[].scheme`: `bingd`, `bingd-dev`, `bingd-preview`). `Constants.expoConfig`
+ * is that same resolved config read back at runtime, so the callback is **built** from it
+ * rather than asked for. No magic string is duplicated here: change the scheme in
+ * `app.config.ts` and this follows.
+ *
+ * `Linking.createURL` is still consulted, for one reason only — it is the value the
+ * previous build actually sent, so a disagreement is the defect reporting itself. A
+ * divergence is recorded and the *canonical* value is used regardless, because the
+ * canonical value is the one the scheme registry and the Supabase allow-list agree on.
+ *
+ * Expo Go is the one environment with no custom scheme of its own; `exp://**` is
+ * allow-listed for it and is accepted only when it is what `createURL` produced.
  */
-export const oauthRedirectUrl = () => Linking.createURL('auth/callback');
+const OAUTH_CALLBACK_PATH = 'auth/callback';
+
+/** The scheme this binary registered, from the resolved Expo config. */
+const registeredScheme = (): string | null => {
+  const declared = Constants.expoConfig?.scheme;
+  if (typeof declared === 'string' && declared.length > 0) return declared;
+  if (Array.isArray(declared)) {
+    return declared.find((s): s is string => typeof s === 'string' && s.length > 0) ?? null;
+  }
+  return null;
+};
+
+/**
+ * Scheme, host and path — never a query string and never a fragment.
+ *
+ * Everything secret in an OAuth callback lives in exactly those two places: the
+ * authorization `code` is a query parameter and an implicit-flow token is a fragment. So
+ * cutting at the first `?` or `#` is not a best-effort redaction, it is the whole
+ * boundary, and what remains cannot carry a credential. Length is capped as well, so a
+ * malformed value cannot turn a breadcrumb into a payload.
+ */
+export const sanitizeRedirect = (raw: unknown): string => {
+  if (typeof raw !== 'string' || raw.length === 0) return '(empty)';
+  const path = raw.split('#')[0]?.split('?')[0] ?? '';
+  if (path.length === 0) return '(empty)';
+  return path.length > 120 ? `${path.slice(0, 120)}…` : path;
+};
+
+export type OAuthRedirect =
+  | { ok: true; url: string; sanitized: string }
+  | { ok: false; problem: 'no_scheme' | 'not_the_app'; sanitized: string };
+
+/**
+ * Resolves the callback, or refuses. It never returns a value it has not checked.
+ */
+export function resolveOAuthRedirect(): OAuthRedirect {
+  const scheme = registeredScheme();
+  const produced = (() => {
+    try {
+      return Linking.createURL(OAUTH_CALLBACK_PATH);
+    } catch {
+      return '';
+    }
+  })();
+  const sanitized = sanitizeRedirect(produced);
+
+  /**
+   * Expo Go is decided by the *environment*, not by the absence of a scheme.
+   *
+   * This first read "if there is no scheme, accept an `exp://` URL", which is wrong and
+   * an independent review caught it: `app.config.ts` always declares a scheme and Expo
+   * Go serves that same resolved config, so `registeredScheme()` never returns null
+   * there. The branch was unreachable, Expo Go would have been sent
+   * `bingd://auth/callback` — a scheme it has not registered — and the sheet would never
+   * have come back. That is the very defect this function exists to prevent, reintroduced
+   * one environment over.
+   *
+   * `executionEnvironment` is the honest discriminator: `storeClient` is Expo Go,
+   * `standalone` and `bare` are builds that registered their own scheme. In Expo Go
+   * `createURL` is authoritative — the wildcard `exp:` callback is allow-listed in
+   * Supabase for exactly this — and everywhere else it is only evidence.
+   */
+  const inExpoGo =
+    Constants.executionEnvironment === 'storeClient' || Constants.appOwnership === 'expo';
+
+  if (inExpoGo) {
+    if (sanitized.startsWith('exp://') && sanitized.endsWith(`/--/${OAUTH_CALLBACK_PATH}`)) {
+      return { ok: true, url: produced, sanitized };
+    }
+    return { ok: false, problem: 'not_the_app', sanitized };
+  }
+
+  if (!scheme) return { ok: false, problem: 'no_scheme', sanitized };
+
+  const canonical = `${scheme}://${OAUTH_CALLBACK_PATH}`;
+
+  // The assertion is on the value about to be sent, not on the one that was produced.
+  // It cannot fail as long as `scheme` is a scheme, and it is here so that a future
+  // change to how the callback is built cannot quietly ship an https redirect again.
+  if (sanitizeRedirect(canonical) !== canonical || canonical.includes('://.')) {
+    return { ok: false, problem: 'not_the_app', sanitized: sanitizeRedirect(canonical) };
+  }
+
+  return { ok: true, url: canonical, sanitized: canonical };
+}
+
+/**
+ * Kept as the public name the rest of the app and its tests already use. It answers the
+ * checked value, and `signInWithGoogle` is the caller that handles a refusal.
+ */
+export const oauthRedirectUrl = () => {
+  const resolved = resolveOAuthRedirect();
+  return resolved.ok ? resolved.url : null;
+};
 
 /**
  * How the iOS web sign-in session is opened, and why it is opened that way.
@@ -327,10 +472,37 @@ export const oauthRedirectUrl = () => Linking.createURL('auth/callback');
 const authSessionOptions = Platform.OS === 'ios' ? { preferEphemeralSession: true } : undefined;
 
 export async function signInWithGoogle(): Promise<SignInOutcome> {
-  const redirectTo = oauthRedirectUrl();
+  const resolved = resolveOAuthRedirect();
 
-  // TEMPORARY: remove once the redirect URL is confirmed registered in Supabase.
-  console.log('[oauth] redirectTo =', redirectTo);
+  /**
+   * The refusal happens **before** the provider is contacted, and that ordering is the
+   * point. Sending an unusable redirect does not fail — it succeeds all the way through
+   * Google and then strands the person on `https://bingd.app` with no session and no
+   * error. Stopping here costs one sign-in attempt; not stopping costs the account.
+   *
+   * Nothing recorded below can carry a credential: `sanitized` is scheme, host and path
+   * with the query string and fragment already cut off, which is where an authorization
+   * code or a token would be. No email, no identity, no URL parameters.
+   */
+  if (!resolved.ok) {
+    track({ name: 'sign_in_redirect_rejected', props: { problem: resolved.problem } });
+    note('auth', 'oauth redirect rejected', `${resolved.problem} ${resolved.sanitized}`);
+    reportHandled(new Error(`OAuth redirect rejected: ${resolved.problem}`), {
+      redirect: resolved.sanitized,
+    });
+    return {
+      ok: false,
+      cancelled: false,
+      message:
+        'Google sign-in cannot start on this build. Use email or Apple to get in, and please report this.',
+    };
+  }
+
+  const redirectTo = resolved.url;
+
+  // A breadcrumb for the flight recorder on the way *in*, so a session that never comes
+  // back still says which callback it left on. Sanitized for the same reason as above.
+  note('auth', 'oauth redirect', resolved.sanitized);
 
   // skipBrowserRedirect because there is no browser to redirect: the URL is opened
   // in an in-app session so the result comes back to us rather than to the OS.
@@ -349,6 +521,30 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
     authSessionOptions,
   );
   if (result.type !== 'success') return cancelled;
+
+  /**
+   * The return leg is checked too, and for the same reason the outbound one is.
+   *
+   * `ASWebAuthenticationSession` reports `success` when it intercepts the scheme it was
+   * given, so in principle this can only be the app's own callback. In principle is what
+   * the outbound assumption was as well. If the URL that came back is not the callback
+   * that was sent, the safe thing is to say the sign-in did not complete rather than to
+   * parse a `code` out of a page we did not expect to be on.
+   */
+  const landed = sanitizeRedirect(result.url);
+  if (landed !== resolved.sanitized) {
+    track({ name: 'sign_in_redirect_rejected', props: { problem: 'wrong_landing' } });
+    note('auth', 'oauth landed elsewhere', landed);
+    reportHandled(new Error('OAuth callback landed on an unexpected URL'), {
+      expected: resolved.sanitized,
+      landed,
+    });
+    return {
+      ok: false,
+      cancelled: false,
+      message: 'Google sent us somewhere unexpected. Please try again.',
+    };
+  }
 
   // PKCE: the callback carries a short-lived code, not a token. The exchange is
   // what produces the session, and it is bound to a verifier held only by this
