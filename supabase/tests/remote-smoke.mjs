@@ -999,6 +999,17 @@ expectRefused(
   await rpc('people_starter_suggestions', { p_limit: 1 }),
 );
 
+// 20260915000100, the first-run picker's supply. Definer over every public account's
+// rankings, like Top Rated, and additionally the one discovery read that is called before
+// the reader has done anything at all — so a missing revoke would expose it to more
+// unauthenticated requests than any other. Probed with its real argument, because
+// PostgREST answers a signature mismatch with 404 and a 404 would pass this whether the
+// grant existed or not.
+expectRefused(
+  'anon cannot execute starter_movies',
+  await rpc('starter_movies', { p_limit: 1 }),
+);
+
 const total = passed + failures.length + inconclusive.length;
 console.log(`\n${passed}/${total} passed, ${failures.length} failed, ${inconclusive.length} inconclusive\n`);
 

@@ -57,7 +57,6 @@ error rather than a decision somebody makes at 2am before a demo.
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
 | `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` — either may be **absent**, see below |
 | `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09) | the account | `step`, `variant`, `outcome` |
-| `onboarding_motivations` | the six-way motivation question was answered, once, as soon as the account exists (2026-09-09) | the account | `count`, `picked` |
 
 ### Core loop
 
@@ -266,12 +265,6 @@ branch the People step drew **on entry** — a `could_not_load` retried into a r
 reports what the reader first met. It carries no ids, no handles and no count of who was
 suggested: step 9 is a private read of one person's social neighbourhood, and the analytics
 must not be able to reconstruct that graph.
-
-**`onboarding_motivations`** (2026-09-09) carries `picked` as a **delimited string** over
-the six fixed slugs and deliberately not as an array. `sanitize` accepts scalars only, so an
-array would be dropped silently and the event would arrive looking complete with its one
-interesting property missing. It is the closest this product comes to asking somebody why
-they downloaded it, and it is discarded after step 4 unless a column is ever justified.
 
 **`onboarding_completed`** covers both exits and `skipped` separates them. One event
 rather than two, so the denominator cannot drift: everybody who reaches the end of the

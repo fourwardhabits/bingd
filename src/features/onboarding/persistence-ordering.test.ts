@@ -1,10 +1,15 @@
 /**
  * **What reaches the disk, and in what order.**
  *
- * Both of the stores this flow keeps on the device — the stage pointer and the five-film
- * selection — publish to memory synchronously and hand their write to the platform
+ * The stage pointer publishes to memory synchronously and hands its write to the platform
  * without waiting for it. That is deliberate and it is why the flow feels immediate: no
  * button press watches the Keychain happen.
+ *
+ * **The five-film selection store this file also covered is gone** (2026-09-09). Choosing
+ * and ranking are one loop now, so at most one movie is ever chosen and not yet ranked and
+ * there is no selection to lose — `pick-five.ts` records the deletion in full. Its
+ * ordering cases went with it; the two properties they asserted are asserted here, on the
+ * store that still writes.
  *
  * It also meant, until independent review said so, that **two writes to one key could be
  * in flight at once and nothing decided which of them landed last.** SecureStore makes no
@@ -12,8 +17,7 @@
  *
  * The defect is invisible for the whole of the session that causes it, because memory is
  * the authority while the process lives. It is paid on the next launch, by a reader who
- * resumes at a step they already finished or comes back to a partial grid — which is the
- * one loss the selection store exists to prevent.
+ * resumes at a step they already finished.
  *
  * These tests are therefore about the **witness**, not the value: `writePref` here does
  * not resolve on its own. The test holds each call open and releases them in whatever
@@ -22,13 +26,9 @@
  */
 import { advanceStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
 import {
-  PICK_TARGET,
   rankingOutcome,
-  resetPickFive,
   resetRankingOutcome,
-  setPicks,
   setRankingOutcome,
-  type PickedTitle,
   type RankingOutcomeRead,
 } from './pick-five';
 
@@ -83,7 +83,6 @@ beforeEach(() => {
   mockGates.length = 0;
   mockReadHangs = true;
   resetOnboardingStages();
-  resetPickFive();
   resetRankingOutcome();
 });
 
@@ -96,9 +95,9 @@ describe('the stage pointer', () => {
    * choose an order.
    */
   it('never has two writes to the same key open at once', async () => {
-    void advanceStage('user-1', 'motivations');
-    void advanceStage('user-1', 'answers');
     void advanceStage('user-1', 'taste');
+    void advanceStage('user-1', 'people');
+    void advanceStage('user-1', 'notifications');
     await settle();
 
     expect(mockGates).toHaveLength(1);
@@ -107,26 +106,26 @@ describe('the stage pointer', () => {
   /**
    * **The adversarial ordering, run.**
    *
-   * `answers` is dispatched and held open. `taste` is dispatched while it is still in
+   * `taste` is dispatched and held open. `people` is dispatched while it is still in
    * flight and is released first — which is precisely the completion order that used to
-   * leave `answers` on the disk of somebody who had reached the picker.
+   * leave `taste` on the disk of somebody who had reached the People step.
    */
   it('lands the newest stage last, even when an older write is released first', async () => {
-    void advanceStage('user-1', 'answers');
-    await settle();
     void advanceStage('user-1', 'taste');
     await settle();
+    void advanceStage('user-1', 'people');
+    await settle();
 
-    // Only `answers` was ever handed to the platform; `taste` is queued behind it.
-    expect(mockIssued.map((write) => write.value)).toEqual(['answers']);
+    // Only `taste` was ever handed to the platform; `people` is queued behind it.
+    expect(mockIssued.map((write) => write.value)).toEqual(['taste']);
 
     await release();
     await release();
 
-    expect(mockLanded.map((write) => write.value)).toEqual(['answers', 'taste']);
+    expect(mockLanded.map((write) => write.value)).toEqual(['taste', 'people']);
     // The last thing written is the stage the reader actually reached, which is the whole
-    // claim: a relaunch resumes at `taste`, never at `answers`.
-    expect(mockLanded[mockLanded.length - 1]?.value).toBe('taste');
+    // claim: a relaunch resumes at `people`, never at `taste`.
+    expect(mockLanded[mockLanded.length - 1]?.value).toBe('people');
   });
 
   /**
@@ -135,7 +134,7 @@ describe('the stage pointer', () => {
    * written and immediately overwritten.
    */
   it('skips a stage that was superseded before its write began', async () => {
-    void advanceStage('user-1', 'answers');
+    void advanceStage('user-1', 'taste');
     void advanceStage('user-1', 'people');
     await settle();
 
@@ -148,7 +147,7 @@ describe('the stage pointer', () => {
     await settle();
     await release();
 
-    void advanceStage('user-1', 'answers');
+    void advanceStage('user-1', 'taste');
     await settle();
 
     expect(stageInMemory('user-1')).toBe('people');
@@ -161,9 +160,9 @@ describe('the stage pointer', () => {
    * this is protecting.
    */
   it('does not make one account wait on another account’s stalled write', async () => {
-    void advanceStage('user-1', 'answers');
+    void advanceStage('user-1', 'taste');
     await settle();
-    void advanceStage('user-2', 'answers');
+    void advanceStage('user-2', 'taste');
     await settle();
 
     expect(mockGates).toHaveLength(2);
@@ -182,117 +181,19 @@ describe('the stage pointer', () => {
   it('does not let one stalled write hold every later stage for ever', async () => {
     jest.useFakeTimers();
     try {
-      void advanceStage('user-1', 'answers');
+      void advanceStage('user-1', 'taste');
       await jest.advanceTimersByTimeAsync(0);
       // Handed to the platform, and deliberately never released.
-      expect(mockIssued.map((write) => write.value)).toEqual(['answers']);
+      expect(mockIssued.map((write) => write.value)).toEqual(['taste']);
 
       void advanceStage('user-1', 'people');
       await jest.advanceTimersByTimeAsync(0);
       // Still barred, which is correct: the grace has not expired yet.
-      expect(mockIssued.map((write) => write.value)).toEqual(['answers']);
+      expect(mockIssued.map((write) => write.value)).toEqual(['taste']);
 
       await jest.advanceTimersByTimeAsync(5000);
 
-      expect(mockIssued.map((write) => write.value)).toEqual(['answers', 'people']);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-
-const film = (id: string): PickedTitle => ({ id, title: `Film ${id}`, year: 2020, posterUri: null });
-
-describe('the five-film selection', () => {
-  it('never has two writes to the same key open at once', async () => {
-    void setPicks('user-1', [film('a')]);
-    void setPicks('user-1', [film('a'), film('b')]);
-    void setPicks('user-1', [film('a'), film('b'), film('c')]);
-    await settle();
-
-    expect(mockGates).toHaveLength(1);
-  });
-
-  /**
-   * **The tap pair that actually loses data**, and the one this is really about: a
-   * deselect and its replacement, a few hundred milliseconds apart. Each used to dispatch
-   * a full-array write of its own, and the four-title array landing after the five-title
-   * one left a subset of the reader's choice on the device.
-   */
-  it('lands the final selection last, even when an earlier write is released first', async () => {
-    const four = [film('a'), film('b'), film('c'), film('d')];
-    const five = [...four, film('e')];
-
-    void setPicks('user-1', four);
-    await settle();
-    void setPicks('user-1', five);
-    await settle();
-
-    expect(mockIssued).toHaveLength(1);
-
-    await release();
-    await release();
-
-    const last = mockLanded[mockLanded.length - 1]?.value as PickedTitle[];
-    expect(last.map((picked) => picked.id)).toEqual(['a', 'b', 'c', 'd', 'e']);
-  });
-
-  /**
-   * Select, select, deselect, replace — the whole interaction, with every write held open
-   * and released in the worst order available. What survives is what the grid shows.
-   */
-  it('survives a select / select / deselect / replace run in the wrong order', async () => {
-    void setPicks('user-1', [film('a')]);
-    await settle();
-    void setPicks('user-1', [film('a'), film('b')]);
-    void setPicks('user-1', [film('a')]);
-    void setPicks('user-1', [film('a'), film('c')]);
-    await settle();
-
-    while (mockGates.length > 0) await release();
-
-    const last = mockLanded[mockLanded.length - 1]?.value as PickedTitle[];
-    expect(last.map((picked) => picked.id)).toEqual(['a', 'c']);
-  });
-
-  /** The cap is still applied, and it is applied to what gets written as well. */
-  it('still writes at most the five the run can take', async () => {
-    void setPicks('user-1', ['a', 'b', 'c', 'd', 'e', 'f'].map(film));
-    await settle();
-    await release();
-
-    const written = mockLanded[0]?.value as PickedTitle[];
-    expect(written).toHaveLength(PICK_TARGET);
-  });
-
-  it('does not make one account wait on another account’s stalled write', async () => {
-    void setPicks('user-1', [film('a')]);
-    await settle();
-    void setPicks('user-2', [film('b')]);
-    await settle();
-
-    expect(mockGates).toHaveLength(2);
-  });
-
-  /** The same way out of the same barrier. See the stage store's version above. */
-  it('does not let one stalled write hold every later selection for ever', async () => {
-    jest.useFakeTimers();
-    try {
-      void setPicks('user-1', [film('a')]);
-      await jest.advanceTimersByTimeAsync(0);
-      expect(mockIssued).toHaveLength(1);
-
-      void setPicks('user-1', [film('a'), film('b')]);
-      await jest.advanceTimersByTimeAsync(0);
-      expect(mockIssued).toHaveLength(1);
-
-      await jest.advanceTimersByTimeAsync(5000);
-
-      expect(mockIssued).toHaveLength(2);
-      const latest = mockIssued[1]?.value as PickedTitle[];
-      expect(latest.map((picked) => picked.id)).toEqual(['a', 'b']);
+      expect(mockIssued.map((write) => write.value)).toEqual(['taste', 'people']);
     } finally {
       jest.useRealTimers();
     }

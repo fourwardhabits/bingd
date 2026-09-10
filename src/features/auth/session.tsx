@@ -68,17 +68,19 @@ export function useCurrentProfile(): Profile {
 }
 
 /**
- * The account id, for the two first-run screens that run before there is a profile.
+ * The account id, for anything that runs before there is a profile.
  *
- * `onboarding` **is** a signed-in session — the `auth.users` row exists and every write
- * it makes is attributed — it is only one without a `profiles` row yet. Motivations and
- * *How bingd. helps* now come before the profile form (founder, 2026-09-09), and neither
- * writes anything server-side: both key device preferences by account, which is exactly
- * what this returns.
+ * `onboarding` **is** a signed-in session — the `auth.users` row exists and every write it
+ * makes is attributed — it is only one without a `profiles` row yet. A surface in that
+ * status can still key device preferences by account, and this is what it keys them to.
  *
- * A separate hook rather than a loosened `useCurrentProfile`, because the strictness of
- * that one is what lets every screen behind the gate skip its null checks. This throws
- * just as hard, one state earlier.
+ * **No screen uses it as of 2026-09-09**, and it is kept rather than deleted because the
+ * distinction it draws is the architecture's (see `AuthState`) rather than any one
+ * screen's: the two value screens that briefly ran before the form are gone, and the flow
+ * is once again "sign in, then the form, then everything else". The next surface that
+ * needs to say something to an account without a profile should use this rather than
+ * loosening `useCurrentProfile`, whose strictness is what lets every screen behind the
+ * gate skip its null checks. This throws just as hard, one state earlier.
  */
 export function useCurrentUserId(): string {
   const auth = useAuth();
@@ -334,45 +336,34 @@ export function nextRoute({
   }
 
   /**
-   * **Signed in, with no profile yet — and this is no longer one destination**
-   * (founder, 2026-09-09).
+   * **Signed in, with no profile yet: the form, and nothing before it**
+   * (founder, physical iOS 1.0.1 build 9, 2026-09-09).
    *
-   * The flow used to put the profile form immediately after sign in, and the two value
-   * screens after *that*. The founder's order puts them in front of it: motivations, then
-   * how bingd. helps, then the profile. The reason is what each screen costs the reader.
-   * Saying why you are here and being told what the app does about it cost nothing and
-   * are what earn the form; a username, a birthday, a visibility choice and a Terms
-   * acceptance are the expensive part, and they come once somebody has a reason to spend
-   * it.
+   * This branch briefly held a small flow of its own. The founder's 2026-09-09 reordering
+   * put two value screens — *what do you want out of bingd.?* and *here is how that
+   * works* — in front of the profile form, on the reasoning that they cost the reader
+   * nothing and were what earned the expensive screen. Carrying build 9 settled it the
+   * other way: the flow explained too much before the product did anything, and both
+   * screens are gone.
    *
-   * **The invariant the founder named is preserved exactly.** Ranking writes need an
-   * account row, and the age gate and the Terms acceptance belong to `create_profile` —
-   * so the profile still comes *before* the ranking run, and nothing past this branch is
-   * reachable without one. What moved is two screens that write nothing but a device
-   * preference keyed by the account id, which an `onboarding` session already has. No
-   * auth change, no persistence change, no new state: the same `onboarding.stage` the
-   * rest of the flow already walks, consulted one status earlier.
+   * So there is one destination again, and it is the one the auth state already implies.
+   * An `onboarding` session is a session with no `profiles` row, the form is the only
+   * thing that can create one, and no stage this function knows is reachable without it.
    *
-   * `stage === undefined` is the Keychain read not having answered. Waiting is the same
-   * choice the `ready` branch below makes and for the same reason — guessing would send
-   * somebody back a step — and it is bounded by `hydrateStage`'s own four seconds.
+   * **The invariant the founder named is preserved exactly, and is now the only rule
+   * here.** Ranking writes need an account row, and the age gate and the Terms acceptance
+   * belong to `create_profile` — so the profile comes *before* the ranking run and
+   * nothing past this branch is reachable without one.
+   *
+   * The stage is not consulted at all any more. It has nothing to say about a session with
+   * no profile: every value it can hold means the same thing here, including `done`, which
+   * on such a session means a device that finished the flow for an account that no longer
+   * has one (a deletion, a restore). The form is the only place that can put that right.
+   * Not consulting it also removes a wait — this branch used to hold routing on
+   * `stage === undefined` while a Keychain read settled, on the first screen after sign
+   * in, for a value it then used only to choose between two deleted screens.
    */
   if (status === 'onboarding') {
-    if (stage === undefined) return null;
-
-    const onboardingScreen = (name: string) =>
-      group === 'onboarding' && screen === name ? null : `/onboarding/${name}`;
-
-    // No stage at all is a brand new account at the top of the flow.
-    if (stage === null || stage === 'motivations') return onboardingScreen('motivations');
-    if (stage === 'answers') return onboardingScreen('answers');
-
-    /**
-     * Past the two value screens, so the account is what is missing. Every later stage
-     * answers here — including `done`, which on a session with no profile means a device
-     * that finished the flow for an account that no longer has one (a deletion, a
-     * restore). The form is the only place that can put that right.
-     */
     return inAuthGroup && screen === 'create-profile' ? null : '/(auth)/create-profile';
   }
 
@@ -389,11 +380,11 @@ export function nextRoute({
    * That rule was written as `return null` for the whole group, which is stronger than
    * the rule itself and left a second hole: **a flow that is over is not a flow this
    * protects.** An account that finished — or one that was never in the flow at all,
-   * which is every established user — could open `/onboarding/motivations` and stay
-   * there, and `motivations` calls `begin()`, so an established account would have its
-   * phase written to `active` and could walk the first-run steps with a collection
-   * already behind it. Only `taste.tsx` ejected on its own, which is the duplication this
-   * replaces: one guard for the group, and the screens keep owning their exits.
+   * which is every established user — could open `/onboarding/taste` and stay there, and
+   * that screen calls `begin()`, so an established account would have its phase written
+   * to `active` and could walk the first-run steps with a collection already behind it.
+   * Only `taste.tsx` ejected on its own, which is the duplication this replaces: one
+   * guard for the group, and the screens keep owning their exits.
    *
    * Every input below is an authority this function already trusts, in the order it
    * already trusts them, so the in-flow cases answer exactly as they did before.
@@ -483,21 +474,22 @@ export function nextRoute({
      * **The stage is gone but the ranking plainly happened, so the flow resumes after it.**
      *
      * The safety net for a lost or unreadable stage preference. Without it, this branch
-     * sends an account that has already placed five movies back to the motivation
-     * question — and the steps it would then have to walk again include the ranking run,
-     * which is the expensive one and the one already done.
+     * sends an account that has already placed five movies back to the picker — and the
+     * steps it would then have to walk again include the ranking run, which is the
+     * expensive one and the one already done.
      *
      * `FIRST_FIVE` rankings is not proof the reader reached People, but it is proof they
-     * finished step 7, and People is the step after it. Repeating one step somebody may
-     * have already seen is a far smaller cost than repeating six, and far smaller than the
-     * alternative failure this replaces, which was skipping the social half in silence.
+     * finished the ranking run, and People is the step after it. Repeating one step
+     * somebody may have already seen is a far smaller cost than repeating the run, and far
+     * smaller than the alternative failure this replaces, which was skipping the social
+     * half in silence.
      */
     if (stage === null && (tasteRanked ?? 0) >= FIRST_FIVE) return STAGE_ROUTES.people;
 
     // An account that belongs in the flow and has no stage yet starts at the top of it.
     // The stage is written by the first screen rather than here, so this stays a pure
     // function of its inputs.
-    return STAGE_ROUTES.motivations;
+    return STAGE_ROUTES.taste;
   }
 
   /**
@@ -538,16 +530,14 @@ export function useAuthRouting() {
   );
 
   /**
-   * **Both signed-in states, not only `ready`.**
+   * **`ready` only, which is what it was before 2026-09-09 and is again.**
    *
-   * The stage is now consulted before there is a profile — motivations and *How bingd.
-   * helps* run in an `onboarding` session (see `nextRoute`) — and an `onboarding` session
-   * has a user id. Reading it only for `ready` would leave the stage permanently
-   * `undefined` through the first two steps, which is a state `nextRoute` deliberately
-   * *waits* on: the app would never route anywhere.
+   * The stage was briefly consulted before there was a profile, because the two value
+   * screens ran in an `onboarding` session. Both are gone and `nextRoute` no longer reads
+   * the stage in that status at all, so hydrating for it would be a Keychain read on the
+   * first screen after sign in whose answer nothing could use.
    */
-  const userId =
-    auth.status === 'ready' || auth.status === 'onboarding' ? auth.userId : null;
+  const userId = auth.status === 'ready' ? auth.userId : null;
   const stage = useOnboardingStage(userId);
 
   /**

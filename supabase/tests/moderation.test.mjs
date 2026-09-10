@@ -484,6 +484,14 @@ describe('the guard is wired in, not merely present', () => {
     // a suspended *rater* is already outside the population, which is the direction
     // that matters.
     'top_rated_titles',
+    // 20260915000100. The first-run picker's supply: the same aggregate again, with a
+    // different eligibility rule and the caller's own rankings removed. It writes
+    // nothing, and it takes no subject — the only viewer it reads is `auth.uid()`'s own
+    // rankings, so a suspended caller learns one fact about themselves they already
+    // know. The population excludes suspended raters by `p.status = 'active'`, which is
+    // the direction that matters, and every act a pick leads to (`set_bucket`,
+    // `rank_start`) calls the guard itself.
+    'starter_movies',
     // 20260816001100. A stable read whose entire population is the caller's own
     // approved followees, filtered by can_view_profile from the caller's side. A
     // suspended account calling it learns nothing new: can_view_profile already

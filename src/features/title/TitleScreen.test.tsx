@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -9,6 +9,26 @@ import { renderWithProviders } from '@/test-utils/render';
 import TitleScreen from '../../../app/title/[id]';
 
 const mockPush = jest.fn();
+/**
+ * Tables whose read is parked rather than answered, keyed to the callbacks waiting on it.
+ *
+ * See `the page behind an open sheet` at the foot of this file: the defect it pins is only
+ * visible while a query is fetching, and this mock otherwise answers within the same
+ * microtask as the call.
+ */
+const mockHeld = new Map<string, (() => void)[]>();
+/** Answers now, or when the table is released. */
+const held = <T,>(table: string, answer: () => T): Promise<T> => {
+  const waiting = mockHeld.get(table);
+  if (!waiting) return Promise.resolve(answer());
+  return new Promise<T>((resolve) => waiting.push(() => resolve(answer())));
+};
+const holdReadsOf = (table: string) => mockHeld.set(table, []);
+const releaseReadsOf = (table: string) => {
+  const waiting = mockHeld.get(table) ?? [];
+  mockHeld.delete(table);
+  for (const answer of waiting) answer();
+};
 const tableRows: Record<string, unknown[]> = {};
 let mockRpcResults: Record<string, unknown> = {};
 // Recorded rather than discarded: the collection writers this screen now calls are
@@ -62,13 +82,21 @@ jest.mock('@/lib/supabase', () => ({
         order: () => chain,
         limit: () => chain,
         gt: () => chain,
-        single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-        maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        single: () => held(table, () => ({ data: rows()[0] ?? null, error: null })),
+        maybeSingle: () => held(table, () => ({ data: rows()[0] ?? null, error: null })),
         // `count` as well as `data`: `useCredits` first asks whether the cache has
         // any rows at all, with a head-only count query, and a mock that answered
         // only `data` made every cast list read as empty.
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: rows(), error: null, count: rows().length }),
+        // Held open when the test asks, so a refetch can be *observed* while it is still
+        // in flight. Every read in this file otherwise resolves in the same microtask as
+        // the call, which is exactly why a page that only misbehaves during a fetch had
+        // no test until now.
+        then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => void) => {
+          void held(table, () => ({ data: rows(), error: null, count: rows().length })).then(
+            resolve,
+            reject,
+          );
+        },
       };
       return chain;
     },
@@ -243,6 +271,7 @@ beforeEach(() => {
   // list. Nothing outside the Episodes describes below should be reaching for one.
   mockFetchSeasonEpisodes.mockResolvedValue([]);
 
+  mockHeld.clear();
   mockRpcResults = {};
   mockRpcErrors = {};
   for (const key of Object.keys(mockReads)) delete mockReads[key];
@@ -2886,5 +2915,84 @@ describe('adjusting a ranking versus watching it again', () => {
     );
     // A band change is its own call; it never routes through the rewatch one.
     expect(againCalls()).toHaveLength(0);
+  });
+});
+
+/**
+ * **The page does not move because something else refetched** (founder, physical iOS
+ * 1.0.1 build 9, 2026-09-09).
+ *
+ * The founder's report is a title page that slid down and back up, exposing a blank band
+ * above the hero, while a review was being typed into the sheet in front of it. It was
+ * reported once against build 8, answered by holding the bottom safe-area inset steady
+ * (`use-stable-bottom-inset.ts`), and came back unchanged — because the inset was never
+ * the channel.
+ *
+ * The channel is `RefreshControl.refreshing`, and the chain has five links:
+ *
+ *   1. the log sheet autosaves the note *while it is being typed*;
+ *   2. a successful save invalidates `queryKeys.title(mediaItemId)`;
+ *   3. this page's `personal` query is keyed under that prefix, so it refetches;
+ *   4. `isRefetching` goes true, and it was wired straight to `refreshing`;
+ *   5. iOS reads that as `beginRefreshing()` — a *programmatic pull* — which grows the
+ *      scroll view's top content inset and animates the content down to meet it.
+ *
+ * The test drives link 2 directly, which is the only link that needs a person in the real
+ * world, and asserts link 5 cannot follow. `usePullRefresh` is the fix and
+ * `use-pull-refresh.test.tsx` holds its own contract; this is the binding, on the page the
+ * founder was actually looking at.
+ */
+describe('the page behind an open sheet', () => {
+  /**
+   * The control, read off the scroll view that owns it.
+   *
+   * `refreshControl` is a *prop* holding an element rather than a child, so it is never a
+   * node in the host tree and cannot be queried for. The scroll view carrying it is the
+   * page's own; nothing else on this route has one.
+   */
+  const refreshControl = (view: Awaited<ReturnType<typeof open>>) =>
+    view
+      .root!.queryAll(() => true)
+      .map((node) => node as never as { props?: Record<string, any> })
+      .find((node) => node.props?.refreshControl)?.props?.refreshControl;
+
+  it('does not begin refreshing because a query it observes was invalidated', async () => {
+    const view = await open();
+
+    const before = refreshControl(view);
+    // The page draws a RefreshControl at all: the gesture the Seasons empty state promises.
+    expect(before).toBeTruthy();
+    expect(before.props.refreshing).toBe(false);
+
+    // The refetch is parked, so the assertion below runs *while* the query is fetching.
+    // Without this the read answers in the same microtask as the invalidation and there is
+    // no in-flight moment for the old binding to be wrong in.
+    holdReadsOf('user_media');
+
+    // Exactly what a note autosave does. Nothing here pulls.
+    await act(async () => {
+      void view.client.invalidateQueries({ queryKey: ['title', 'film-1'] });
+    });
+
+    /**
+     * A whole turn, not just a microtask.
+     *
+     * React Query notifies its observers through `notifyManager`, which batches into a
+     * scheduled callback — so the fetch has begun before this line and the *render* that
+     * reads it has not. Without the turn, the assertion below reads the frame from before
+     * the refetch and passes whatever the binding is: a test that cannot fail, which is
+     * what this one was until the line was added.
+     */
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // On iOS this being true is not a spinner: it is the page held sixty points down,
+    // with the band of background above the hero the founder photographed.
+    expect(refreshControl(view).props.refreshing).toBe(false);
+
+    await act(async () => {
+      releaseReadsOf('user_media');
+    });
   });
 });

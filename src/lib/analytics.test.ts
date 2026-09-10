@@ -85,20 +85,21 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirty canonical names and nothing else', () => {
-    // Pinned deliberately. Adding a twenty-second is a product decision that has to be
-    // made in `docs/product/analytics.md` as well as here, and this failing is the
+  it('is the twenty-nine canonical names and nothing else', () => {
+    // Pinned deliberately. Adding one — or removing one — is a product decision that has
+    // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
     // You slate and the streak names arrived 2026-09-06 (#112, #108) and were emitted
     // for a day without being pinned here or written into the spec; the two funnel
     // denominators — onboarding_started and ranking_started — arrived 2026-09-07 with
     // the pre-GTM convergence. The four social-activation names arrived 2026-09-08
     // (§A17): three about People and the Feed's follow stories, and one that follows the
-    // row a redeemed invite writes. The two onboarding names arrived 2026-09-09 with the
-    // ten-step first-run flow: a flow that long has ten places to lose somebody, and
-    // `onboarding_step_completed` is the only event that can say which one. Its companion
-    // carries the six motivation slugs, which is the closest this product comes to asking
-    // why anybody downloaded it.
+    // row a redeemed invite writes. `onboarding_step_completed` arrived 2026-09-09 with
+    // the multi-screen first-run flow, and is the only event that can say which screen
+    // lost somebody. Its companion `onboarding_motivations` went on 2026-09-09 with the
+    // two value screens it reported on: the flow no longer asks why anybody downloaded
+    // the app, so nothing emits it and a name nothing emits is a name the spec must not
+    // carry.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
         'follow_activity_opened',
@@ -113,7 +114,6 @@ describe('the event vocabulary', () => {
         'invite_redeemed',
         'member_search_result_opened',
         'onboarding_completed',
-        'onboarding_motivations',
         'onboarding_started',
         'onboarding_step_completed',
         'people_suggestions_mode_changed',

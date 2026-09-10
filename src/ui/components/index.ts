@@ -55,6 +55,7 @@ export { ReactionControl, type ReactionControlProps } from './ReactionControl';
 // Not only `Sheet`'s any more: the Comments *page* is not a sheet and needs the same
 // measurement, for the same Android edge-to-edge reason. See the hook's own header.
 export { useKeyboardHeight } from './use-keyboard-height';
+export { usePullRefresh } from './use-pull-refresh';
 export { Screen } from './Screen';
 export { ScreenError, type ScreenErrorProps } from './ScreenError';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';

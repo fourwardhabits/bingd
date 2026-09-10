@@ -127,6 +127,14 @@ const ALLOWED = {
   // should follow a surface rather than precede it.
   'top_rated_titles(text,integer,numeric,integer,uuid)': ['authenticated'],
 
+  // Added 2026-09-09 with the first-run picker's supply (20260915000100). The same
+  // definer aggregate as Top Rated, over the same population, differing only in its
+  // eligibility rule and in excluding what the caller has already ranked — so it
+  // discloses nothing `community_score` and `top_rated_titles` do not. It takes a limit
+  // and never a viewer, which is 20260813001900's rule; the only viewer it reads is
+  // `auth.uid()`'s own, which is why the body refuses an anonymous caller outright.
+  'starter_movies(integer)': ['authenticated'],
+
   // Added 2026-08-16 with the Following score (20260816001100). A definer read taking
   // a title rather than a viewer: the population is `auth.uid()`'s own approved
   // followees, so it cannot be pointed at somebody else's perspective, which is

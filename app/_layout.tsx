@@ -212,21 +212,6 @@ function Navigation() {
   const resolved = auth.status !== 'loading' && auth.status !== 'error';
   const signedIn = auth.status === 'ready';
   /**
-   * **A signed-in session, with or without a profile yet.**
-   *
-   * The founder's reordering of 2026-09-09 put the first two onboarding screens in front
-   * of the profile form, so those two run in the `onboarding` status. They cannot sit
-   * behind `signedIn` — the guard would remove the only routes the router has for that
-   * status, and nothing would ever draw — and they must not sit outside a guard either,
-   * which is the hole the note below says `Stack.Protected` closes. So they get the guard
-   * that matches what they actually need: an account.
-   *
-   * That is not a weaker gate for anything else. Every screen under `signedIn` still
-   * requires the profile, and both screens here open with `useCurrentUserId`, which
-   * throws just as hard one status earlier.
-   */
-  const hasAccount = auth.status === 'ready' || auth.status === 'onboarding';
-  /**
    * An invitation opened before there was an account to attribute it to.
    *
    * Here rather than in the signup screen because there are three ways to reach a ready
@@ -351,28 +336,6 @@ function Navigation() {
                   title: ROOT_SCREEN_TITLES.settings,
                 }}
               />
-            </Stack.Protected>
-
-            {/* ---------------------------------------------------------------
-                **The two screens that run before the profile exists.**
-
-                They sat in the block above until the founder's reordering of
-                2026-09-09, and they cannot stay there: `signedIn` is
-                `status === 'ready'`, which an account without a `profiles` row is
-                not, so the guard would remove the only two routes the router has
-                for that status and the navigator would have nowhere to send
-                anybody.
-
-                A guard of their own rather than no guard at all. Everything the
-                long note above says about an undeclared route still applies —
-                both open with `useCurrentUserId`, which throws on a signed-out
-                session, and the involuntary exits (an expired refresh token,
-                `delete_account`) are as reachable here as anywhere. `hasAccount`
-                is exactly the condition those two screens need and nothing
-                weaker: an `auth.users` row to key their preferences to. */}
-            <Stack.Protected guard={hasAccount}>
-              <Stack.Screen name="onboarding/motivations" options={{ headerShown: false }} />
-              <Stack.Screen name="onboarding/answers" options={{ headerShown: false }} />
             </Stack.Protected>
           </Stack>
         </RouteErrorBoundary>
