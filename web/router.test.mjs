@@ -767,7 +767,7 @@ describe('the built site', () => {
     assert.equal(config.distribution.app.scheme, 'bingd');
     // The empty state must still exist for the 'other' platform and for any future
     // un-configured window — it is painted by page.mjs, not removed by configuration.
-    assert.match(invite, /not open for this device yet/);
+    assert.match(invite, /is not on this platform yet/);
   });
 
   it('drops the $comment prose rather than shipping it to every visitor', () => {
@@ -778,10 +778,20 @@ describe('the built site', () => {
 
   it('tells the invited visitor what the store round trip costs them', () => {
     // The deferred-install limitation, said to the person it affects rather than only
-    // in a document. Without it somebody installs from TestFlight, launches from the
+    // in a document. Without it somebody installs from the store, launches from the
     // home screen, and silently loses the invitation.
-    const invite = read('i.html');
-    assert.match(invite, /Come back to this page/);
+    //
+    // Case-insensitive since 2026-09-10: the two mode-specific sentences became one, and
+    // "come back to this page" now sits mid-sentence after "After installing bingd.,".
+    // What this test is about is that the round trip is explained at all, not where the
+    // capital letter falls.
+    //
+    // Read with whitespace collapsed, because the assertion is about the sentence a
+    // person reads and the file is free to wrap it wherever the column runs out. It was
+    // matching raw source, so re-flowing one paragraph broke a test about copy that had
+    // not changed — HTML collapses this whitespace before anybody sees it.
+    const invite = read('i.html').replace(/\s+/g, ' ');
+    assert.match(invite, /come back to this page/i);
     assert.match(invite, /the invitation will not follow you there/);
   });
 
@@ -1719,9 +1729,84 @@ describe('the release mode', () => {
     );
   });
 
-  it('keeps the closed test honestly described while it is a closed test', () => {
-    assert.match(read('index.html'), /closed testing/, 'the front page must say so');
-    assert.match(read('i.html'), /closed testing/, 'the invitation page must say so');
+  /**
+   * The inversion of what this used to assert, and the reason is that the old assertion
+   * was pinning a false claim.
+   *
+   * It read: *the front page must say so* — matching `/closed testing/` on `index.html`
+   * and `i.html`. That was true when it was written and stopped being true on
+   * 2026-09-08, when bingd. 1.0 went live on the public App Store; the TestFlight link
+   * had been deliberately public before that. So the site told every visitor the product
+   * was invite-only while anybody could install it, and the test held the sentence in
+   * place.
+   *
+   * `mode` is still `beta` and should be — Android really is a closed test — which is
+   * exactly why availability is no longer expressed as one global sentence. It is
+   * expressed per platform by the install buttons.
+   */
+  it('claims no invite gate anywhere, because there is not one', () => {
+    /**
+     * `closed beta` is in this list because the first version of it was not, and an
+     * independent review found what that missed: the privacy policy's *stamp* had the
+     * claim removed while its opening sentence still read "Bingd is a closed beta. This
+     * describes what it actually stores…", and a `/closed testing/i` grep walked past it.
+     * A regex that only catches the wording you happened to think of is a regex that
+     * certifies the ones you did not.
+     */
+    const gate = /closed testing|closed beta|invite[- ]only|Invitations are going out/i;
+    const pages = [
+      ['index.html'],
+      ['i.html'],
+      ['u.html'],
+      ['title.html'],
+      ['lists.html'],
+      ['privacy', 'index.html'],
+      ['terms', 'index.html'],
+      ['support', 'index.html'],
+      ['account-deletion', 'index.html'],
+    ];
+    for (const parts of pages) {
+      assert.doesNotMatch(
+        read(...parts),
+        gate,
+        `${parts.join('/')} still describes bingd. as invite-only`,
+      );
+    }
+  });
+
+  /**
+   * The front page has to be able to answer "how do I get it", which is what it could
+   * not do at all until 2026-09-10: it was a headline, one paragraph claiming a closed
+   * test, and a footer. The founder followed TestFlight's developer-website link onto it
+   * and correctly reported a dead end.
+   */
+  it('gives the front page an install row and the product shots', () => {
+    const front = read('index.html');
+    assert.match(front, /id="primary-install"/, 'no single-platform install button');
+    assert.match(front, /id="install-ios"/, 'no desktop iOS choice');
+    assert.match(front, /id="install-android"/, 'no desktop Android choice');
+    assert.match(front, /src="\/page\.mjs"/, 'nothing wires the buttons up');
+    assert.match(front, /id="bingd-config"/, 'the buttons have no distribution to read');
+    // Two shots, both with real alt text.
+    assert.match(front, /shot-collection\.jpg/);
+    assert.match(front, /shot-ranking\.jpg/);
+    for (const alt of front.matchAll(/<img[^>]*alt="([^"]*)"/g)) {
+      assert.ok(alt[1].length > 20, `a product shot has thin alt text: "${alt[1]}"`);
+    }
+  });
+
+  /**
+   * The front page reads no account data, so it is handed no key.
+   *
+   * `page: 'generic'` runs `paintInstall` and nothing else — no Supabase request — and
+   * the config block is built without `supabaseUrl`/`supabaseAnonKey` accordingly. This
+   * pins that: a page that needs no credential should not carry one, and the router
+   * pages that genuinely resolve context are where those belong.
+   */
+  it('gives the front page no Supabase credentials it does not use', () => {
+    const front = read('index.html');
+    assert.doesNotMatch(front, /supabaseAnonKey/);
+    assert.doesNotMatch(front, /supabase\.co/);
   });
 
   /**
@@ -1731,9 +1816,21 @@ describe('the release mode', () => {
    * host that drops custom headers. Both come from one `isPublic`, and this asserts
    * they landed together rather than one of them being edited alone.
    */
-  it('asks not to be indexed, in the header and in the pages', () => {
-    assert.match(read('_headers'), /X-Robots-Tag: noindex, nofollow/);
-    for (const file of ['index.html', 'i.html', 'u.html']) {
+  /**
+   * Indexing is per route now, not per release mode (2026-09-10).
+   *
+   * `index.html` used to be in the noindex list, which meant the front page could only
+   * become findable on the day Android went public — and it is the install page, the
+   * address on the App Store listing, in the privacy policy, in the Terms and in
+   * TestFlight's developer-website field.
+   *
+   * The routes that carry an account go the other way and are noindex *unconditionally*:
+   * a `/u/<handle>` in Google publishes a list of members and no privacy setting in the
+   * app withdraws it, which is a fact about those routes rather than about whether the
+   * apps have shipped.
+   */
+  it('keeps the account routes out of the index and lets the front page in', () => {
+    for (const file of ['i.html', 'u.html', 'title.html', 'lists.html']) {
       assert.match(
         read(file),
         /<meta name="robots" content="noindex, nofollow" \/>/,
@@ -1741,6 +1838,10 @@ describe('the release mode', () => {
       );
     }
     assert.match(read('terms', 'index.html'), /<meta name="robots"/);
+
+    // The front page carries neither half of the noindex.
+    assert.doesNotMatch(read('index.html'), /<meta name="robots"/);
+    assert.doesNotMatch(read('_headers'), /^\/\*\n(?:.*\n)*?\s*X-Robots-Tag/m);
   });
 
   /**
@@ -1750,14 +1851,43 @@ describe('the release mode', () => {
    * "download it from the App Store" over a button whose destination is null renders a
    * dead control and reads as a broken product rather than an unlaunched one.
    */
-  it('promises no store while no store URL exists', () => {
-    assert.equal(distribution.ios?.storeUrl ?? null, null);
-    assert.equal(distribution.android?.storeUrl ?? null, null);
-    for (const file of ['index.html', 'i.html', 'u.html', 'title.html', 'lists.html']) {
-      assert.doesNotMatch(
-        read(file),
-        /apps\.apple\.com|play\.google\.com\/store/,
-        `${file} names a store that has no URL configured`,
+  /**
+   * The intent is unchanged and the fact under it moved.
+   *
+   * This asserted both store URLs were null and that no page named a store. iOS's
+   * listing went live on 2026-09-08 and `ios.storeUrl` was set on 2026-09-10, so the
+   * flat assertion would now forbid the site from naming a store it really has — which
+   * is the same defect in the opposite direction.
+   *
+   * So it is written as the rule rather than as the state: **a store may be named
+   * exactly when its URL is configured.** Android's is still null, so Play must not be
+   * named; iOS's is set, so the App Store may be.
+   */
+  it('names a store only where a store URL exists', () => {
+    const pages = ['index.html', 'i.html', 'u.html', 'title.html', 'lists.html'];
+    const iosLive = Boolean(distribution.ios?.storeUrl);
+    const androidLive = Boolean(distribution.android?.storeUrl);
+
+    for (const file of pages) {
+      const html = read(file);
+      if (!iosLive) {
+        assert.doesNotMatch(html, /apps\.apple\.com/, `${file} names an App Store with no URL`);
+      }
+      if (!androidLive) {
+        assert.doesNotMatch(
+          html,
+          /play\.google\.com\/store/,
+          `${file} names a Play listing with no URL`,
+        );
+      }
+    }
+
+    // And the destination the pages actually carry is the one that was configured.
+    if (iosLive) {
+      assert.match(
+        read('index.html'),
+        new RegExp(distribution.ios.storeUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        'the front page does not carry the configured App Store URL',
       );
     }
   });
@@ -1856,8 +1986,21 @@ describe('the public build, in a sandbox', () => {
     assert.doesNotMatch(terms, /FourwardStudios[^.<]{0,20}\b(?:LLC|Inc|Ltd|Corp)\b/i);
 
     // And the launch state around it is the one the flag promises.
+    //
+    // **The account routes stay noindex through launch, and that is the change of
+    // 2026-09-10.** This used to assert a public build sent no `X-Robots-Tag: noindex`
+    // at all — so flipping the mode would have made `/u/<handle>` indexable, publishing
+    // a list of members that no privacy setting in the app could withdraw. Indexing is
+    // per route now: the front page is in, those four are out, and neither depends on
+    // the release mode any more.
     const headers = readFileSync(join(sandboxDist, '_headers'), 'utf8');
-    assert.doesNotMatch(headers, /X-Robots-Tag: noindex/);
+    for (const path of ['/u/*', '/i/*', '/title/*', '/lists/*']) {
+      assert.match(
+        headers,
+        new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n\\s+X-Robots-Tag: noindex`),
+        `a launch build would index ${path}`,
+      );
+    }
     const front = readFileSync(join(sandboxDist, 'index.html'), 'utf8');
     assert.doesNotMatch(front, /closed testing/);
     assert.doesNotMatch(front, /<meta name="robots"/);
@@ -1934,11 +2077,18 @@ describe('_headers', () => {
     }
   });
 
-  it('keeps noindex on everything, including the files that are not HTML', () => {
+  it('keeps noindex on the routes that name an account, and off the front page', () => {
     // A /u/<handle> route that Google indexed would publish a list of Bingd's members,
-    // which no privacy setting in the app could then take back. A header rather than a
-    // meta tag, so it also covers the two .well-known files.
-    assert.equal(rule('/*')['X-Robots-Tag'], 'noindex, nofollow');
+    // which no privacy setting in the app could then take back — so these four are
+    // noindex unconditionally, at every release mode.
+    for (const path of ['/u/*', '/i/*', '/title/*', '/lists/*']) {
+      assert.equal(rule(path)['X-Robots-Tag'], 'noindex, nofollow', `${path} is indexable`);
+    }
+
+    // The blanket /* rule went on 2026-09-10 because it also caught `/`, which is the
+    // install page and the address published on the store listing. Nothing may put it
+    // back: a header here would silently re-hide the front page.
+    assert.equal(rule('/*')['X-Robots-Tag'], undefined);
     assert.equal(rule('/*')['X-Content-Type-Options'], 'nosniff');
   });
 });

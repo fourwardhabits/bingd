@@ -36,6 +36,27 @@ jest.mock('expo-linking', () => ({
   createURL: (path: string) => `bingd://${path}`,
 }));
 
+/**
+ * The scheme, because `signInWithGoogle` builds its callback from the resolved Expo
+ * config rather than from `createURL` (2026-09-10). Without this the guard correctly
+ * refuses to start the flow, and the one Google assertion in this file — that an OAuth
+ * request is still an OAuth request — would fail for a reason that has nothing to do
+ * with email sign-in. `extra` is here because `src/lib/env.ts` parses it at import.
+ */
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: {
+      scheme: 'bingd',
+      extra: {
+        variant: 'production',
+        supabaseUrl: 'https://project.supabase.co',
+        supabaseAnonKey: 'anon-key-for-tests',
+      },
+    },
+  },
+}));
+
 const mockTrack = jest.fn();
 jest.mock('@/lib/analytics', () => ({
   track: (...args: unknown[]) => mockTrack(...args),

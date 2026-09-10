@@ -53,6 +53,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
 | `sign_in_completed` | a Supabase session exists | the person signing in | `method` |
+| `sign_in_redirect_rejected` | Google sign-in was refused **before** the provider was contacted, or the callback came back on a URL the app did not send (2026-09-10) | the person signing in | `problem` |
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
 | `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` — either may be **absent**, see below |
@@ -236,6 +237,17 @@ push exists. §10b carries the measurement plan it belongs to. Deliberately no
 
 This section is the point of the document. Every line here is a number somebody could
 otherwise report in good faith and be wrong about.
+
+**`sign_in_redirect_rejected`** counts a failure that is otherwise invisible, which is the
+only reason it exists. GoTrue answers a `redirect_to` it cannot use by substituting
+`site_url` rather than by erroring, so before 2026-09-10 a bad callback meant the person
+authenticated with Google **successfully** and was then left on `https://bingd.app` with no
+session and nothing raised anywhere. Nobody reports "it worked and then nothing happened",
+so the count has to come from the client. `problem` is three words — `no_scheme`,
+`not_the_app`, `wrong_landing` — and deliberately never the URL: an authorization code
+lives in a query string and a token in a fragment, so a property that could hold the URL
+could hold a credential. The sanitized scheme/host/path goes to the flight recorder and to
+Sentry instead. **A non-zero count here is a release blocker**, not a trend line.
 
 **`sign_in_completed`** is not an account. `profiles.id` references `auth.users(id)` and
 the profile is created afterwards, so there is a real, persistent state in between

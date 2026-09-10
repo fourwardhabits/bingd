@@ -204,6 +204,26 @@ export type AnalyticsEvent =
    */
   | { name: 'sign_in_completed'; props: { method: SignInMethod } }
   /**
+   * Google sign-in was refused **before** the provider was contacted, or came back on a
+   * URL that was not the callback we sent (2026-09-10).
+   *
+   * It exists because the failure it names is otherwise invisible: GoTrue answers an
+   * unusable `redirect_to` by substituting `site_url` rather than by erroring, so the
+   * person authenticates with Google and is then left on `https://bingd.app` with no
+   * session and nothing raised. Nobody reports "it worked and then nothing happened" as
+   * a bug, so the count has to come from the client.
+   *
+   * `problem` is a closed set on purpose. **No URL, no query string, no fragment, no
+   * email** — an OAuth `code` lives in the query and a token in the fragment, so a
+   * property that could hold either would put credentials in an analytics pipeline. The
+   * sanitized scheme/host/path goes to the flight recorder and to Sentry, which are
+   * on-device and handled-error surfaces respectively; it does not go here.
+   */
+  | {
+      name: 'sign_in_redirect_rejected';
+      props: { problem: 'no_scheme' | 'not_the_app' | 'wrong_landing' };
+    }
+  /**
    * `create_profile` answered `created`. The account now exists.
    *
    * Not an install, not a sign-in, and **not** `already_exists` — that answer means the
@@ -683,6 +703,8 @@ export const ANALYTICS_EVENTS = [
   'people_suggestions_mode_changed',
   'follow_activity_opened',
   'invite_auto_follow_succeeded',
+  // 2026-09-10, the OAuth callback guard.
+  'sign_in_redirect_rejected',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -774,6 +796,12 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   // `mutuals` or `match`. `source` is how somebody reached People, and is likewise a closed
   // set of four words (`PeopleEntry`): never a person, a handle or a referrer.
   'source',
+  // Why an OAuth callback was refused (2026-09-10, `sign_in_redirect_rejected`). Three
+  // words — `no_scheme`, `not_the_app`, `wrong_landing` — and deliberately never the URL
+  // itself: an authorization code lives in the query string and a token in the fragment,
+  // so a key that could hold one would put credentials on the wire. The sanitized
+  // scheme/host/path goes to the flight recorder and to Sentry instead.
+  'problem',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',
