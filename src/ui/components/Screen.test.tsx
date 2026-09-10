@@ -1,10 +1,12 @@
-import { render } from '@testing-library/react-native';
+import { act, render } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Keyboard, StyleSheet, View } from 'react-native';
 
 import { Screen } from './Screen';
 
 const mockInsets = { top: 47, bottom: 24, left: 0, right: 0 };
+/** What the window reported before the first render, which no keyboard can move. */
+const mockMetrics = { insets: { top: 47, bottom: 34, left: 0, right: 0 } };
 
 jest.mock('react-native-safe-area-context', () => {
   const { View: RNView } = jest.requireActual('react-native');
@@ -13,11 +15,21 @@ jest.mock('react-native-safe-area-context', () => {
       <RNView {...rest}>{children}</RNView>
     ),
     useSafeAreaInsets: () => mockInsets,
+    get initialWindowMetrics() {
+      return mockMetrics;
+    },
   };
 });
 
 beforeEach(() => {
   mockInsets.bottom = 24;
+  listeners.clear();
+  jest
+    .spyOn(Keyboard, 'addListener')
+    .mockImplementation(((event: string, listener: (payload: unknown) => void) => {
+      listeners.set(event, listener);
+      return { remove: () => listeners.delete(event) };
+    }) as never);
 });
 
 /**
@@ -33,6 +45,29 @@ const bottomPaddingOf = async (props: Record<string, unknown> = {}) => {
   const content = view.getByTestId('marker').parent;
   return StyleSheet.flatten(content?.props.style).paddingBottom;
 };
+
+/**
+ * **The keyboard, captured rather than simulated**, which is the pattern
+ * `ActivityScreen.test.tsx` already sets: `Keyboard` is a `NativeEventEmitter` with no
+ * public emit and no native side under Jest, so the test takes the listener the hook
+ * registered and hands it the frame the platform would have sent.
+ *
+ * Both event pairs are captured because the hook picks its pair from `Platform.OS`, and
+ * this assertion is about neither platform in particular.
+ */
+const listeners = new Map<string, (payload: unknown) => void>();
+
+const fire = (names: string[], payload: unknown) =>
+  act(() => {
+    const name = names.find((candidate) => listeners.has(candidate));
+    if (!name) throw new Error('the screen subscribed to no keyboard event');
+    listeners.get(name)!(payload);
+  });
+
+const keyboard = (height: number) =>
+  height > 0
+    ? fire(['keyboardWillShow', 'keyboardDidShow'], { endCoordinates: { height } })
+    : fire(['keyboardWillHide', 'keyboardDidHide'], {});
 
 describe('the bottom edge', () => {
   it('adds nothing under a tab screen', async () => {
@@ -51,5 +86,86 @@ describe('the bottom edge', () => {
     // An older device with no gesture bar still needs content off the glass.
     mockInsets.bottom = 0;
     expect(await bottomPaddingOf({ includeBottomInset: true })).toBe(16);
+  });
+});
+
+/**
+ * **A page does not resize because something in front of it opened a keyboard**
+ * (founder, physical iOS 1.0.1 build 8).
+ *
+ * The title page behind the review sheet jumped downward while the composer was being
+ * typed into and jumped back afterwards. The only keyboard-reactive input to that page's
+ * geometry is this padding: iOS drops the home indicator from `safeAreaInsets.bottom`
+ * while the keyboard covers it, Android under edge-to-edge reports the IME there, and
+ * either way the scroll view was resized underneath a reader who was not touching it.
+ *
+ * The whole trace is in `use-stable-bottom-inset.ts`. What is asserted here is the
+ * property: the number does not move for a keyboard, and it does move for a real change
+ * once the keyboard is gone.
+ */
+describe('while a keyboard is up in front of the screen', () => {
+  const openWith = async (props: Record<string, unknown> = {}) => {
+    const view = await render(
+      <Screen {...props}>
+        <View testID="marker" />
+      </Screen>,
+    );
+    const read = () =>
+      StyleSheet.flatten(view.getByTestId('marker').parent?.props.style).paddingBottom;
+    return { view, read };
+  };
+
+  it('ignores iOS dropping the home indicator under the keyboard', async () => {
+    const { read } = await openWith({ includeBottomInset: true });
+    expect(read()).toBe(24);
+
+    // The device's own report while the keyboard covers the home indicator.
+    mockInsets.bottom = 0;
+    await keyboard(291);
+
+    // The window's launch metric, which is the hardware fact the padding is about.
+    expect(read()).toBe(34);
+  });
+
+  it('ignores an Android edge-to-edge report of the keyboard itself', async () => {
+    const { read } = await openWith({ includeBottomInset: true });
+
+    mockInsets.bottom = 291;
+    await keyboard(291);
+
+    expect(read()).toBe(34);
+  });
+
+  it('takes the live inset back once the keyboard has gone', async () => {
+    const { read } = await openWith({ includeBottomInset: true });
+
+    mockInsets.bottom = 0;
+    await keyboard(291);
+    expect(read()).toBe(34);
+
+    await keyboard(0);
+    // The floor, because the inset really is zero now. Nothing is sticky.
+    expect(read()).toBe(16);
+  });
+
+  it('costs a tab screen no keyboard subscription at all', async () => {
+    /**
+     * The listener belongs to the screens that spend the inset. Four of the five tab
+     * roots pass no `includeBottomInset` and discard the answer, and they stay mounted
+     * for the life of the session — so subscribing there would re-render Collection every
+     * time somebody focused Search, for a number that is always zero.
+     */
+    const { read } = await openWith();
+
+    expect(read()).toBe(0);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('subscribes exactly once on a screen that does spend it', async () => {
+    await openWith({ includeBottomInset: true });
+
+    // One show and one hide. The pair is `useKeyboardHeight`, and the platform decides
+    // which of the two pairs it is.
+    expect(listeners.size).toBe(2);
   });
 });

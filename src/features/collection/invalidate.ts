@@ -144,6 +144,19 @@ export function invalidateAfterCollectionChange(
   invalidate(['notifications', userId]);
 
   /**
+   * **Sent to you, because a title you have just ranked is not a recommendation.**
+   *
+   * `useSentToYou` drops any recommendation whose media item this reader has ranked
+   * (see its `withoutRanked`), and nothing here had ever told it to ask again — so
+   * ranking a recommended film left it on the tab until the 30-second `staleTime`
+   * expired and something refetched, which on a screen the reader is already looking at
+   * is "it did not work".
+   *
+   * By prefix on the reader, which is the whole of that cache.
+   */
+  invalidate(['sent-to-you', userId]);
+
+  /**
    * The community aggregate for this exact title: the reader's own new rating is part
    * of it, and a score that excludes the rating you just gave reads as broken.
    *

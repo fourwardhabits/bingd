@@ -76,7 +76,38 @@ export function useSentToYou(viewerId: string) {
       });
       if (error) throw error;
 
-      const rows = (data ?? []) as Row[];
+      const served = (data ?? []) as Row[];
+      /**
+       * **A title this reader has already ranked is not a recommendation any more.**
+       *
+       * The founder found *The Last of Us* sitting in Sent to you on a physical build,
+       * on an account that had ranked it. It was not a stale row in the historical
+       * sense — it was the current invariant. `recommendations_to_me` returns every
+       * delivered recommendation the recipient policy admits, and nothing anywhere
+       * asked whether the recipient had since watched the thing. `fulfilled_at` exists
+       * (`20260827000600`) and is written by `_rank_finalize`, but it is granted to
+       * nobody, is not in the RPC's result, and is null on every recommendation older
+       * than that migration — so it could not have answered this even if it were read.
+       *
+       * Answered here, against `rankings`, for three reasons:
+       *
+       *   · **It is robust to history.** The question asked is "has this reader ranked
+       *     this media item", which is true of a recommendation from any era, with or
+       *     without a fulfilment stamp. Nothing has to be backfilled, and no row is
+       *     destroyed to make the list right.
+       *   · **It needs no migration**, so it is true on every backend this client can
+       *     reach, including the one build 8 is running against.
+       *   · **It is one bounded request.** At most `SENT_LIMIT` ids, on the reader's own
+       *     rows under `rankings_read`, only when the list has anything in it.
+       *
+       * The identity is the media item, which is what makes a season right: ranking
+       * Season 1 retires a recommendation of Season 1 and leaves one of Season 2 alone.
+       *
+       * Nothing is written and no sender is told anything. Fulfilment notifications stay
+       * exactly where they are — inside the ranking transaction, once each, for
+       * recommendations that were outstanding at the moment somebody ranked.
+       */
+      const rows = await withoutRanked(viewerId, served);
       const inherited = await inheritedMetadata(rows);
 
       return rows.map((row) => ({
@@ -101,6 +132,33 @@ export function useSentToYou(viewerId: string) {
       }));
     },
   });
+}
+
+/**
+ * The recommendations this reader has not already ranked.
+ *
+ * **A read that fails leaves the list alone**, which is the safe direction and the same
+ * one `inheritedMetadata` takes below: the cost of not knowing is a recommendation that
+ * stays on screen for one more refresh, and the cost of the other answer would be a
+ * reader's whole Sent to you disappearing because one supplementary query timed out.
+ *
+ * Not `readAllByKey`: this is not a whole-table read. It is a membership test over the
+ * ids actually on screen, which the server bounds at `SENT_LIMIT` — well inside
+ * PostgREST's own cap, so there is no page to be silently dropped.
+ */
+async function withoutRanked(viewerId: string, rows: readonly Row[]): Promise<Row[]> {
+  if (rows.length === 0) return [...rows];
+
+  const ids = [...new Set(rows.map((row) => row.media_item_id))];
+  const { data, error } = await supabase
+    .from('rankings')
+    .select('media_item_id')
+    .eq('user_id', viewerId)
+    .in('media_item_id', ids);
+  if (error) return [...rows];
+
+  const ranked = new Set((data ?? []).map((row) => (row as { media_item_id: string }).media_item_id));
+  return rows.filter((row) => !ranked.has(row.media_item_id));
 }
 
 /**
@@ -177,6 +235,30 @@ async function inheritedMetadata(
  * - It **is** a presentation cap on the list itself. A reader with more than two hundred
  *   recommendations sees the two hundred the server ranks highest — unopened first, then
  *   newest — and the rest are not reachable from this screen.
+ * - Since `withoutRanked`, the page the client holds can be **shorter** than the page the
+ *   server served, and independent review asked for both consequences to be written down
+ *   rather than discovered.
+ *
+ *   The first is harmless: a shorter page only ever makes `unopenedIsAtLeast` answer
+ *   false where it would have answered true, so the chip says `199` rather than `200+` —
+ *   an understatement of a capped list, which is the direction this rule permits. It
+ *   cannot overstate.
+ *
+ *   The second is the empty state. **A reader holding more than two hundred delivered
+ *   recommendations, of which the two hundred the server ranks highest are all already
+ *   ranked, is told nothing has been sent their way while an unranked one sits at
+ *   position 201.** That is a false sentence, and it is worth being exact about what it
+ *   is and is not. It is not new unreachability: row 201 is not on this screen today
+ *   either, by the cap. It is the cap becoming *visible* in a case where it used to be
+ *   silent.
+ *
+ *   Closing it exactly means filtering **before** the limit, which is the RPC's job and
+ *   therefore a migration — `and not exists (select 1 from rankings ...)` in
+ *   `recommendations_to_me`. That is the right fix and it is deliberately not taken in a
+ *   release fix pass: the client answer is complete for every account that can exist at
+ *   this stage, it needs no deploy, and it is true on the backend the shipped build is
+ *   already running against. Carried with the pagination debt above rather than
+ *   approximated here.
  *
  * That last one is **deferred pagination debt, not a wrong number**. Paging it needs a
  * cursor the RPC does not take, which is a migration, and it is carried into Beta

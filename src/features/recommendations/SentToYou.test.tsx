@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -41,16 +41,58 @@ jest.mock('@/lib/supabase', () => ({
       const chain = {
         select: () => chain,
         eq: () => chain,
+        // `useSentToYou` asks `rankings` which of the ids it just fetched this reader
+        // has already ranked. Swallowing `in` would make that read answer for the
+        // whole table, which is a different question.
+        in: () => chain,
         order: () => chain,
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: table === 'watchlist' ? mockWatchlist : [], error: null }),
+        then: (resolve: (value: unknown) => unknown) => {
+          if (mockFailing.has(table)) {
+            return resolve({ data: null, error: { code: '08006', message: 'unreachable' } });
+          }
+          if (table === 'watchlist') return resolve({ data: mockWatchlist, error: null });
+          if (table === 'rankings') {
+            return resolve({
+              data: mockRanked.map((id) => ({ media_item_id: id })),
+              error: null,
+            });
+          }
+          return resolve({ data: [], error: null });
+        },
       };
       return chain;
     },
   },
 }));
 
+/** Media items this reader has already ranked, as `rankings` would report them. */
+let mockRanked: string[] = [];
+/** Tables whose reads come back as a Postgres error. */
+const mockFailing = new Set<string>();
+
+/** See the `useNavigation` stand-in below. */
+const mockTabPress: (() => void)[] = [];
+const mockNavigation = {
+  focused: true,
+  addListener: (event: string, handler: () => void) => {
+    if (event === 'tabPress') mockTabPress.push(handler);
+    return () => {};
+  },
+  isFocused: () => mockNavigation.focused,
+};
+
+const pressTab = () => {
+  const handler = mockTabPress.at(-1);
+  if (!handler) throw new Error('the screen subscribed to no tabPress');
+  handler();
+};
+
 jest.mock('expo-router', () => ({
+  // The tab bar, captured rather than mounted: the screen subscribes to its navigator's
+  // `tabPress`, and `pressTab` calls what it subscribed with, which is exactly what React
+  // Navigation does with it. `focused` is mutable because "already-selected" is the whole
+  // of the contract.
+  useNavigation: () => mockNavigation,
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},
@@ -157,6 +199,8 @@ beforeEach(() => {
   mockRpcResults = { my_notifications: [], recommendations_to_me: [] };
   mockRpcErrors = {};
   mockWatchlist = [];
+  mockRanked = [];
+  mockFailing.clear();
   for (const key of Object.keys(mockReads)) delete mockReads[key];
 });
 
@@ -412,6 +456,120 @@ describe('the shared filter state', () => {
   });
 });
 
+/**
+ * **A title you have already ranked is not a recommendation** (founder, physical iOS
+ * 1.0.1 build 8).
+ *
+ * *The Last of Us* was sitting in Sent to you on an account that had ranked it. Not a
+ * stale row in the historical sense — the current invariant: `recommendations_to_me`
+ * returns every delivered recommendation the recipient policy admits, and nothing asked
+ * whether the recipient had since watched the thing. `fulfilled_at` exists but is
+ * granted to nobody, is absent from the RPC's result, and is null on every row older
+ * than the migration that added it, so it could not have answered this.
+ *
+ * The question asked instead is "has this reader ranked this media item", against
+ * `rankings`. It is true of a recommendation from any era, needs no migration, and
+ * destroys nothing.
+ */
+describe('a recommendation the reader has already ranked', () => {
+  it('is absent, however old the row is', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation(),
+      recommendation({ id: 'r2', media_item_id: 'film-2', media_title: 'Hereditary' }),
+    ];
+    // No fulfilment stamp anywhere: this is the pre-20260827000600 row the founder
+    // found, and the ranking is the whole of the evidence.
+    mockRanked = ['film-1'];
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Hereditary (2010)')).toBeTruthy());
+    expect(view.queryByText('Inception (2010)')).toBeNull();
+  });
+
+  it('leaves an unranked recommendation exactly where it was', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRanked = ['film-9'];
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+  });
+
+  it('reads the media item, so one season does not retire another', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation({
+        id: 'r1',
+        media_item_id: 'tlou-s1',
+        media_kind: 'season',
+        media_title: 'Season 1',
+        series_title: 'The Last of Us',
+      }),
+      recommendation({
+        id: 'r2',
+        media_item_id: 'tlou-s2',
+        media_kind: 'season',
+        media_title: 'Season 2',
+        series_title: 'The Last of Us',
+      }),
+    ];
+    mockRanked = ['tlou-s1'];
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    // Having watched Season 1 says nothing about Season 2, which is the same identity
+    // rule the spoiler mask and the watchlist already use.
+    await waitFor(() => expect(view.getByText('The Last of Us, S2 (2010)')).toBeTruthy());
+    expect(view.queryByText('The Last of Us, S1 (2010)')).toBeNull();
+  });
+
+  it('says nothing has been sent when every row was already ranked', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRanked = ['film-1'];
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    // The list is empty because there is nothing outstanding, not because a filter is
+    // on — so it is the "nothing sent your way" state and not the filter one.
+    await waitFor(() => expect(view.getByText('Nothing sent your way yet')).toBeTruthy());
+    expect(view.queryByText('Nothing matches your filters')).toBeNull();
+  });
+
+  it('keeps the list when the ranking read fails, rather than emptying it', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRanked = ['film-1'];
+    mockFailing.add('rankings');
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    // Not knowing costs one recommendation staying on screen for a refresh. The other
+    // answer would empty somebody's whole Sent to you because a supplementary query
+    // timed out.
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+  });
+
+  it('tells the sender nothing, then or ever', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRanked = ['film-1'];
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(view.getByText('Nothing sent your way yet')).toBeTruthy());
+
+    // Hiding is a read. Fulfilment stays where it is — inside the ranking transaction,
+    // once each — so an old row cannot be turned into a notification years later.
+    expect(mockRpc).not.toHaveBeenCalledWith(
+      'mark_recommendation_opened',
+      expect.anything(),
+    );
+  });
+});
+
 describe('how recently', () => {
   const now = Date.parse('2026-08-17T12:00:00.000Z');
 
@@ -424,5 +582,62 @@ describe('how recently', () => {
 
   it('becomes a date once the interval has stopped meaning anything', () => {
     expect(relativeTime('2026-06-01T12:00:00.000Z', now)).toMatch(/2026/);
+  });
+});
+
+/**
+ * **Re-tapping the For You tab** (founder, physical iOS 1.0.1 build 8).
+ *
+ * Sent to you, Group Picks and the two Top Rated walls are modes of this one route, so
+ * pressing the tab you are already on had nothing to pop and left the reader looking at
+ * the thing they were trying to leave. The root is the personalised wall.
+ */
+describe('re-tapping the For You tab', () => {
+  beforeEach(() => {
+    mockTabPress.length = 0;
+    mockNavigation.focused = true;
+  });
+
+  it('returns to the wall from Sent to you', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+
+    await act(async () => pressTab());
+
+    // The list is gone and the chip is off, which together are "back on the wall". The
+    // wall itself is stood in for in this file — see the note on `mockSlate`.
+    await waitFor(() => expect(view.queryByText('Inception (2010)')).toBeNull());
+    expect(view.getByText(/^Sent to you/).props.accessibilityState?.selected).not.toBe(true);
+  });
+
+  it('keeps the filters, which are answers the reader gave on purpose', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await fireEvent.press(view.getByText('Filters'));
+    await waitFor(() => expect(view.getByText('Comedy')).toBeTruthy());
+    await fireEvent.press(view.getByText('Comedy'));
+    await fireEvent.press(view.getByText('Apply'));
+    await openSent(view);
+
+    await act(async () => pressTab());
+
+    // Going back to the top of a section is not a reason to throw away what somebody
+    // chose. The same rule Collection's own note states about its medium and filters.
+    await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
+  });
+
+  it('stays where it is when the press arrives from another tab', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+
+    mockNavigation.focused = false;
+    await act(async () => pressTab());
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
   });
 });

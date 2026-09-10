@@ -4,7 +4,7 @@ import { renderWithProviders } from '@/test-utils/render';
 
 import { MOTIVATIONS, chosenMotivations, motivationsProperty } from './motivations';
 import { resetMotivationSelection } from './motivation-selection';
-import { resetOnboardingStages } from './use-onboarding-stage';
+import { advanceStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the routes: everything under app/ is bundled by expo-router's
@@ -35,6 +35,10 @@ jest.mock('expo-router', () => ({
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
+  // The two screens before the profile form read the account id instead, which is
+  // what an `onboarding` session can answer. See `useCurrentUserId`.
+  useCurrentUserId: () => 'user-1',
+  useAuth: () => ({ status: 'onboarding', userId: 'user-1', email: null }),
 }));
 
 jest.mock('@/lib/supabase', () => ({
@@ -256,11 +260,22 @@ describe('step 4, the answers', () => {
     }
   });
 
-  it('continues into the picker', async () => {
+  /**
+   * **Continue goes to the profile form, because this screen runs before it now**
+   * (founder's reordering, 2026-09-09).
+   *
+   * The stage still advances to `taste` — that is where the flow is up to, and it is what
+   * a relaunch has to remember — but the next *screen* is the account. Ranking writes need
+   * an account row and the age and Terms gate belongs to `create_profile`, so the form
+   * stays in front of the picker; what moved is the two screens that write nothing but a
+   * device preference.
+   */
+  it('continues to the profile form, and records that the flow reached the picker', async () => {
     const view = await openWith(['favorites']);
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
 
-    expect(mockReplace).toHaveBeenCalledWith('/onboarding/taste');
+    expect(mockReplace).toHaveBeenCalledWith('/(auth)/create-profile');
+    await waitFor(() => expect(stageInMemory('user-1')).toBe('taste'));
   });
 
   /**
@@ -271,5 +286,36 @@ describe('step 4, the answers', () => {
   it('returns to the question when there is nothing to answer', async () => {
     await renderWithProviders(<AnswersScreen />);
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/onboarding/motivations'));
+  });
+
+  /**
+   * **And the stage goes back with them, which is what stops the recovery being a loop**
+   * (independent review of the founder's reordering).
+   *
+   * The selection and the stage are separate preference keys written by the same
+   * Continue, so one can persist without the other. With the stage left at `answers`,
+   * routing reads it as authoritative and replaces the question with this screen the
+   * instant it navigates away; the screen hydrates the same empty selection and the pair
+   * never settles. Correcting the stage makes both authorities say the same thing, and
+   * the navigation becomes agreement rather than an argument.
+   */
+  it('rewinds the stage with it, so routing does not send them straight back', async () => {
+    await advanceStage('user-1', 'answers');
+    expect(stageInMemory('user-1')).toBe('answers');
+
+    await renderWithProviders(<AnswersScreen />);
+
+    await waitFor(() => expect(stageInMemory('user-1')).toBe('motivations'));
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/motivations');
+  });
+
+  it('leaves a stage that is already behind it alone', async () => {
+    // A rewind is a repair, not a second way to advance: it only ever moves backwards.
+    await advanceStage('user-1', 'motivations');
+
+    await renderWithProviders(<AnswersScreen />);
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/onboarding/motivations'));
+    expect(stageInMemory('user-1')).toBe('motivations');
   });
 });

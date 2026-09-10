@@ -70,15 +70,38 @@ describe('the app directory', () => {
    *     whole file lets a route name mentioned in prose satisfy the assertion, and the
    *     block above this guard names several.
    */
-  it('declares every onboarding route inside the signed-in guard', () => {
+  /**
+   * **Every onboarding route is behind *a* guard, and this walks all of them.**
+   *
+   * It used to slice between the first opening tag and the first closing one, which was
+   * the whole of the guard when there was one. There are two since 2026-09-09:
+   * motivations and *How bingd. helps* run before the profile exists, so they sit behind
+   * `ready || onboarding` while everything after the form stays behind `ready`. A
+   * single-block slice would have reported the new pair as unguarded, which is the
+   * opposite of what happened to them.
+   *
+   * What the assertion is about is unchanged and is the thing that actually bit: an
+   * onboarding screen added as a file and never declared is still served by expo-router
+   * (it builds its tree from the directory) and is then outside every guard, where
+   * `useCurrentProfile` and `useCurrentUserId` throw on an involuntary exit.
+   */
+  it('declares every onboarding route inside a guard', () => {
     const source = readFileSync(join(APP, '_layout.tsx'), 'utf8');
     const layout = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
-    const open = layout.indexOf('<Stack.Protected');
-    const close = layout.indexOf('</Stack.Protected>');
-    expect(open).toBeGreaterThan(-1);
-    expect(close).toBeGreaterThan(open);
-    const guarded = layout.slice(open, close);
+    /** Every guarded region, in order. */
+    const blocks: string[] = [];
+    let cursor = 0;
+    for (;;) {
+      const open = layout.indexOf('<Stack.Protected', cursor);
+      if (open === -1) break;
+      const close = layout.indexOf('</Stack.Protected>', open);
+      expect(close).toBeGreaterThan(open);
+      blocks.push(layout.slice(open, close));
+      cursor = close + 1;
+    }
+    expect(blocks.length).toBeGreaterThan(0);
+    const guarded = blocks.join('\n');
 
     const ONBOARDING = join(APP, 'onboarding');
     const routes = walk(ONBOARDING)

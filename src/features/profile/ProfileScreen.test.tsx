@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Share } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -128,7 +128,29 @@ jest.mock('@/features/awards/ProfileAwards', () => {
   };
 });
 
+/** See the `useNavigation` stand-in below. */
+const mockTabPress: (() => void)[] = [];
+const mockNavigation = {
+  focused: true,
+  addListener: (event: string, handler: () => void) => {
+    if (event === 'tabPress') mockTabPress.push(handler);
+    return () => {};
+  },
+  isFocused: () => mockNavigation.focused,
+};
+
+const pressTab = () => {
+  const handler = mockTabPress.at(-1);
+  if (!handler) throw new Error('the screen subscribed to no tabPress');
+  handler();
+};
+
 jest.mock('expo-router', () => ({
+  // The tab bar, captured rather than mounted: the screen subscribes to its navigator's
+  // `tabPress`, and `pressTab` calls what it subscribed with, which is exactly what React
+  // Navigation does with it. `focused` is mutable because "already-selected" is the whole
+  // of the contract.
+  useNavigation: () => mockNavigation,
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},
@@ -701,6 +723,42 @@ describe('the shape of the page', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
+  /**
+   * **The weekly streak is on the owner's own profile, and this is where that is
+   * asserted** (founder, physical iOS 1.0.1 build 8).
+   *
+   * The streak has its own tests, and they all passed while the founder could not find
+   * the row on a device: `StreakLine` decides what to say, and this screen decides
+   * whether anything gets to say it. Nothing had ever asserted the second half, so the
+   * row could be dropped from the profile shell — by moving `GoalsSection`, by losing
+   * `streakUserId`, by wrapping either in a condition — and every streak test would
+   * still be green.
+   *
+   * The rankings carry `created_at` inside the current week, which is the whole of what
+   * `weeklyStreak` needs to answer with a live run. The clock is pinned so the fixture
+   * is not a different week on the day this runs.
+   */
+  it('draws the weekly streak under Your 2026', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 8, 2, 12));
+    try {
+      const thisWeek = new Date(2026, 8, 1, 9).toISOString();
+      mockTables.rankings = [1, 2].map((n) => ({
+        ...rankedRow(`film-${n}`, n),
+        created_at: thisWeek,
+      }));
+
+      const view = await open();
+
+      await waitFor(() => expect(view.getByText(/🔥 1 week streak/)).toBeTruthy());
+      const found = positions(view, ['YOUR 2026', '🔥', 'BINGD. AWARDS']);
+      for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
+      const order = found.map((piece) => piece.at);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('puts the Watchlist immediately after Top ranked', async () => {
     /**
      * **The founder's ordering decision, asserted as an ordering.** Top ranked says what
@@ -817,5 +875,43 @@ describe('an award in Recent activity', () => {
     expect(view.getByText(/Spark/)).toBeTruthy();
     expect(view.getByLabelText(/Comment on Sai's activity/)).toBeTruthy();
     expect(renderedText(view.toJSON())).toContain('2026');
+  });
+});
+
+/**
+ * **Re-tapping the Profile tab** (founder, physical iOS 1.0.1 build 8).
+ *
+ * The nested states here are sheets, and a sheet is a place a reader experiences as a
+ * second screen — so pressing the tab you are already on should leave it. Today every
+ * one of them is a real `Modal` with `accessibilityViewIsModal`, so the tab bar is not
+ * touchable while one is up; the behaviour is asserted anyway, because "the tab returns
+ * you to the top of this section" is meant to be a property of the screen rather than a
+ * consequence of one component's presentation.
+ */
+describe('re-tapping the Profile tab', () => {
+  beforeEach(() => {
+    mockTabPress.length = 0;
+    mockNavigation.focused = true;
+  });
+
+  it('closes the awards sheet', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByText('See all'));
+    await waitFor(() => expect(view.getByLabelText('bingd. Awards')).toBeTruthy());
+
+    await act(async () => pressTab());
+
+    await waitFor(() => expect(view.queryByLabelText('bingd. Awards')).toBeNull());
+  });
+
+  it('leaves it open when the press arrives from another tab', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByText('See all'));
+    await waitFor(() => expect(view.getByLabelText('bingd. Awards')).toBeTruthy());
+
+    mockNavigation.focused = false;
+    await act(async () => pressTab());
+
+    expect(view.getByLabelText('bingd. Awards')).toBeTruthy();
   });
 });

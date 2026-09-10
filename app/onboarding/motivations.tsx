@@ -3,7 +3,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { useCurrentUserId } from '@/features/auth';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import {
   hydrateMotivations,
@@ -21,7 +21,7 @@ import { theme } from '@/ui/tokens';
 import { Button, Screen, Text } from '@/ui/components';
 
 /**
- * Step 3: what do you want out of bingd.?
+ * Step 1 of the flow: what do you want out of bingd.?
  *
  * ---------------------------------------------------------------------------
  * WHY THE PRODUCT ASKS AT ALL
@@ -41,31 +41,43 @@ import { Button, Screen, Text } from '@/ui/components';
  *
  * There is no maximum and no recommended count. A cap would make the reader rank their
  * own reasons before the app has shown them anything, which is a worse version of the
- * task step 6 exists for.
+ * task the ranking run exists for.
  *
  * **Continue is disabled at zero, and that is the only gate in the entire flow.** It
- * exists because step 4 has literally nothing to draw otherwise, not because an answer is
- * owed. Every other step in onboarding can be left.
+ * exists because the next screen has literally nothing to draw otherwise, not because an
+ * answer is owed. Every other step in onboarding can be left.
  */
 export default function MotivationsScreen() {
   const router = useRouter();
-  const profile = useCurrentProfile();
-  const advance = useAdvanceStage(profile.id);
+  /**
+   * **The account id, not the profile** (founder's reordering, 2026-09-09).
+   *
+   * This screen and the next now run *before* the profile form, so there is no
+   * `profiles` row yet — only the `auth.users` row a completed sign in creates.
+   * `useCurrentUserId` is what an `onboarding` session can answer, and it is all either
+   * screen ever needed: everything both of them write is a device preference keyed by
+   * account (`motivation-selection.ts`, `use-onboarding-stage.ts`, the taste phase).
+   * Nothing here writes to the database, which is why the move costs no migration and
+   * touches no RLS.
+   */
+  const userId = useCurrentUserId();
+  const advance = useAdvanceStage(userId);
   const [picked, setPicked] = useState<ReadonlySet<MotivationId>>(new Set());
 
   /**
    * `onboarding_started` fires here, because this is where onboarding now starts.
    *
    * It used to fire on arrival at the picker, which was the first screen of the flow when
-   * the flow was one screen. With auth at step 2 and two value screens after it, that
-   * would put the denominator three screens in and silently exclude everybody who left
-   * during the part of onboarding most likely to lose them.
+   * the flow was one screen. That would put the denominator several screens in and
+   * silently exclude everybody who left during the part of onboarding most likely to lose
+   * them. This screen is the first thing a signed-in account sees, so it is where the
+   * denominator belongs.
    *
    * `begin` is the same idempotent enrolment the picker still calls: two guards that
    * refuse to write over a decision already taken, in memory or on disk. Calling it from
    * both places is intended, and is why it was built that way.
    */
-  const begin = useBeginTasteOnboarding(profile.id);
+  const begin = useBeginTasteOnboarding(userId);
   useEffect(() => {
     void begin();
   }, [begin]);
@@ -80,13 +92,13 @@ export default function MotivationsScreen() {
    */
   useEffect(() => {
     let active = true;
-    void hydrateMotivations(profile.id).then((stored) => {
+    void hydrateMotivations(userId).then((stored) => {
       if (active && stored.size > 0) setPicked(stored);
     });
     return () => {
       active = false;
     };
-  }, [profile.id]);
+  }, [userId]);
 
   const toggle = (id: MotivationId) => {
     setPicked((current) => {
@@ -109,7 +121,7 @@ export default function MotivationsScreen() {
   const onContinue = () => {
     if (picked.size === 0) return;
 
-    void setMotivations(profile.id, picked);
+    void setMotivations(userId, picked);
     track({
       name: 'onboarding_motivations',
       props: { count: picked.size, picked: motivationsProperty(picked) },

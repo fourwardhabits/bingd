@@ -67,6 +67,10 @@ jest.mock('expo-router', () => ({
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'me', username: 'sai', display_name: 'Sai' }),
+  // The two screens before the profile form read the account id instead, which is
+  // what an `onboarding` session can answer. See `useCurrentUserId`.
+  useCurrentUserId: () => 'user-1',
+  useAuth: () => ({ status: 'onboarding', userId: 'user-1', email: null }),
 }));
 
 /**

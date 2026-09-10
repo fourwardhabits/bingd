@@ -2,20 +2,20 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { useAuth, useCurrentUserId } from '@/features/auth';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import {
   hydrateMotivations,
   useMotivations,
 } from '@/features/onboarding/motivation-selection';
 import { chosenMotivations } from '@/features/onboarding/motivations';
-import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import { rewindStage, useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
 import { track } from '@/lib/analytics';
 import { fontFamily, theme } from '@/ui/tokens';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 
 /**
- * Step 4: here is how that works.
+ * Step 2 of the flow: here is how that works.
  *
  * ---------------------------------------------------------------------------
  * ONE CARD PER PICK, AND THE SAME SIZE EACH
@@ -41,15 +41,27 @@ import { Button, Screen, SectionHeader, Text } from '@/ui/components';
  *
  * This screen is a function of the previous one's answer, so an empty selection is not an
  * empty state — it is a screen with nothing to be about. Rather than draw a heading over
- * nothing, it returns to step 3. That happens only when the stored selection cannot be
- * read at all, which is the same class of failure `motivation-selection.ts` accepts in
+ * nothing, it returns to the question. That happens only when the stored selection cannot
+ * be read at all, which is the same class of failure `motivation-selection.ts` accepts in
  * exchange for not putting a column on the account table.
+ *
+ * **And the stage is corrected before the navigation, which is what stops the recovery
+ * being a loop** (independent review of the founder's reordering). The selection and the
+ * stage are separate preference keys written by the same Continue, so one can persist
+ * without the other; a screen that only navigated would be sent straight back by routing,
+ * which still read `answers` as authoritative, and would hydrate the same empty selection
+ * for ever. The flow really is at the question, so that is what the stage is made to say.
  */
 export default function AnswersScreen() {
   const router = useRouter();
-  const profile = useCurrentProfile();
-  const advance = useAdvanceStage(profile.id);
-  const picked = useMotivations(profile.id);
+  /**
+   * The account id, not the profile: this screen runs before the form. See the note on
+   * the same line in `motivations.tsx` for why the move costs nothing.
+   */
+  const userId = useCurrentUserId();
+  const auth = useAuth();
+  const advance = useAdvanceStage(userId);
+  const picked = useMotivations(userId);
   const cards = chosenMotivations(picked);
 
   /**
@@ -61,21 +73,40 @@ export default function AnswersScreen() {
    */
   useEffect(() => {
     let active = true;
-    void hydrateMotivations(profile.id).then((stored) => {
-      if (active && stored.size === 0) router.replace('/onboarding/motivations');
+    void hydrateMotivations(userId).then((stored) => {
+      if (!active || stored.size > 0) return;
+      // The stage first, so routing agrees with the navigation rather than undoing it.
+      // Not awaited: the memory half of `rewindStage` is synchronous and is what the
+      // router reads, and the disk half is how it survives a relaunch.
+      void rewindStage(userId, 'motivations');
+      router.replace('/onboarding/motivations');
     });
     return () => {
       active = false;
     };
-  }, [profile.id, router]);
+  }, [userId, router]);
 
+  /**
+   * **Where Continue goes, and why it asks the auth state rather than assuming.**
+   *
+   * The stage advances to `taste` either way: that is where the flow is *up to*, and it
+   * is the answer this device has to remember. What differs is the next screen, and the
+   * profile is what decides it — a reader who came through sign in with no `profiles` row
+   * has the form next (founder's order, 2026-09-09), and one who somehow arrives here with
+   * an account already has the picker.
+   *
+   * Resolved here rather than left to `useAuthRouting`, which would also get it right, so
+   * that the write and the navigation are adjacent and synchronous. The same reason
+   * `finish` in `notifications.tsx` resolves its destination before writing `done`: no
+   * commit in between for the router to answer in, and no frame of the wrong screen.
+   */
   const onContinue = () => {
     track({
       name: 'onboarding_step_completed',
       props: { step: 'answers', outcome: 'continued' },
     });
     advance('taste');
-    router.replace('/onboarding/taste');
+    router.replace(auth.status === 'ready' ? '/onboarding/taste' : '/(auth)/create-profile');
   };
 
   return (

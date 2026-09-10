@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -52,7 +52,29 @@ jest.mock('@/lib/supabase', () => ({
 /** Mutable so a test can arrive with `?medium=` the way See all does. */
 const mockParams: { medium?: string } = {};
 
+/** See the `useNavigation` stand-in below. */
+const mockTabPress: (() => void)[] = [];
+const mockNavigation = {
+  focused: true,
+  addListener: (event: string, handler: () => void) => {
+    if (event === 'tabPress') mockTabPress.push(handler);
+    return () => {};
+  },
+  isFocused: () => mockNavigation.focused,
+};
+
+const pressTab = () => {
+  const handler = mockTabPress.at(-1);
+  if (!handler) throw new Error('the screen subscribed to no tabPress');
+  handler();
+};
+
 jest.mock('expo-router', () => ({
+  // The tab bar, captured rather than mounted: the screen subscribes to its navigator's
+  // `tabPress`, and `pressTab` calls what it subscribed with, which is exactly what React
+  // Navigation does with it. `focused` is mutable because "already-selected" is the whole
+  // of the contract.
+  useNavigation: () => mockNavigation,
   useRouter: () => ({ push: jest.fn() }),
   useLocalSearchParams: () => mockParams,
 }));
@@ -715,5 +737,64 @@ describe('when a collection read fails', () => {
     const view = await renderWithProviders(<CollectionScreen />);
 
     await waitFor(() => expect(view.queryByText('Could not load')).toBeNull());
+  });
+});
+
+/**
+ * **Re-tapping the Collection tab** (founder, physical iOS 1.0.1 build 8).
+ *
+ * Watchlist and Unranked are segments of this one route, so pressing the tab you are
+ * already on had nothing to pop. The root is the Watched list, which is the one segment
+ * that is never absent.
+ */
+describe('re-tapping the Collection tab', () => {
+  beforeEach(() => {
+    mockTabPress.length = 0;
+    mockNavigation.focused = true;
+  });
+
+  it('returns to Watched from the Watchlist', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Watchlist' }));
+    await waitFor(() =>
+      expect(view.getByRole('tab', { name: 'Watchlist' }).props.accessibilityState.selected).toBe(
+        true,
+      ),
+    );
+
+    await act(async () => pressTab());
+
+    await waitFor(() =>
+      expect(view.getByRole('tab', { name: 'Watched' }).props.accessibilityState.selected).toBe(
+        true,
+      ),
+    );
+  });
+
+  it('keeps the side the reader is on, which is remembered on purpose', async () => {
+    mockTables.user_media = [watched('s1', 'season')];
+    const view = await open();
+    await switchTo(view, 'TV');
+    await fireEvent.press(view.getByRole('tab', { name: 'Watchlist' }));
+
+    await act(async () => pressTab());
+
+    // Movies-or-TV is a device preference the founder asked to keep. Going back to the
+    // top of a section is not a reason to change which collection you are looking at.
+    await waitFor(() => expect(view.getByLabelText(/^Showing TV/)).toBeTruthy());
+  });
+
+  it('changes nothing when the press arrives from another tab', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Watchlist' }));
+
+    mockNavigation.focused = false;
+    await act(async () => pressTab());
+
+    await waitFor(() =>
+      expect(view.getByRole('tab', { name: 'Watchlist' }).props.accessibilityState.selected).toBe(
+        true,
+      ),
+    );
   });
 });

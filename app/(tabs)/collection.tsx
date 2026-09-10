@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -21,6 +21,7 @@ import {
   watchlistItems,
 } from '@/features/collection/watched-rows';
 import { readPref, writePref } from '@/lib/prefs';
+import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
@@ -317,6 +318,27 @@ export default function CollectionScreen() {
     if (segment === 'unranked' && unrankedFor(next) === 0) setSegment('watched');
     void writePref(`${profile.id}.${MEDIUM_PREF_KEY}`, next).catch(() => {});
   };
+
+  /**
+   * **Re-tapping the Collection tab** (founder, physical iOS 1.0.1 build 8).
+   *
+   * Watchlist and Unranked are segments of this one route, so pressing the tab you are
+   * already on had nothing to pop. `useTabReset` is the shared subscription and states
+   * the rules; the root of this screen is the Watched list, which is the one segment
+   * that is never absent.
+   *
+   * **The medium, the filters, the sort and the view mode all survive it**, and that is
+   * the founder's own instruction rather than an omission. Movies-or-TV is remembered on
+   * the device on purpose, and the note on `viewState` above says why the rest is held
+   * across a segment change: a filter that resets every time you glance at your
+   * watchlist is one nobody sets twice. Going back to the top of a section is not a
+   * reason to throw away what somebody deliberately chose.
+   *
+   * There is no scroll-to-top here, because there is no handle to scroll: the list lives
+   * inside `CollectionView` and belongs to it. Reaching through the boundary for a
+   * gesture would be new plumbing on a screen that passed its own physical pass.
+   */
+  useTabReset(useCallback(() => setSegment('watched'), []));
 
   const showNudge = shouldShowUnrankedNudge({
     unrankedCount,

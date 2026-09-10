@@ -62,9 +62,14 @@ const STAGE_PREF = 'onboarding.stage';
  * The steps that have a screen of their own, in the order they are walked.
  *
  * `sign_in` and the profile form are absent because neither is reached through this
- * pointer: they are gated by the auth state itself, which is a stronger rule than a
- * preference and one that a cleared device cannot lose. The opening is absent because it
- * runs before there is an account to key a stage to.
+ * pointer *by name*: both are gated by the auth state itself, which is a stronger rule
+ * than a preference and one that a cleared device cannot lose.
+ *
+ * **Since 2026-09-09 the form sits between `answers` and `taste`**, and it still needs no
+ * stage of its own: "has this account a `profiles` row" is the whole question, and
+ * `AuthState` answers it. What the stage says on an `onboarding` session is only *how far
+ * through the two value screens* somebody is, and everything past `answers` means the same
+ * thing there — the form is what is missing. See `nextRoute`.
  */
 export const STAGE_ORDER = [
   'motivations',
@@ -222,10 +227,11 @@ export function stageInMemory(userId: string): OnboardingStage | null | undefine
 /**
  * How long the stage read may hold routing before it is answered for.
  *
- * Four seconds, matching `FIRST_RUN_GRACE_MS` and `WELCOME_GRACE_MS`, and for the reason
- * both of those give: this is one Keychain lookup, so anything past it is not slow, it is
- * stuck. `nextRoute` waits on the unknown state, so this bound is what stops that wait
- * becoming the build-4 hang in a new place.
+ * Four seconds, matching `FIRST_RUN_GRACE_MS`, and for the reason it gives: this is one
+ * Keychain lookup, so anything past it is not slow, it is stuck. `nextRoute` waits on the
+ * unknown state — in *both* signed-in statuses now, since the first two steps run before
+ * there is a profile — so this bound is what stops that wait becoming the build-4 hang in
+ * a new place.
  */
 const STAGE_GRACE_MS = 4000;
 
@@ -278,6 +284,44 @@ export async function hydrateStage(userId: string): Promise<OnboardingStage | nu
  * calls to one key. `persistStage` is what makes the durable copy follow the same rule —
  * see its note for the resume this was losing.
  */
+/**
+ * Moves the account **back** to a step, which is the one thing `advanceStage` refuses.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A DELIBERATE REWIND IS NOT THE RACE THE REFUSAL EXISTS FOR
+ *
+ * `advanceStage` will not go backwards because two of its callers can be in flight at
+ * once — a screen's own Continue and a resume that is still hydrating — and the later of
+ * the two is the answer whatever order they arrive in. That argument is about a *stale*
+ * value winning. It says nothing about a screen that has just established, from the disk,
+ * that the flow is not where the stage claims it is.
+ *
+ * There is exactly one such case and it is a hang, found by independent review of the
+ * founder's reordering. `answers` is a function of the motivation selection, and the two
+ * are separate preference keys written by the same Continue — so a selection that failed
+ * to persist, or cannot be read, leaves `stage: 'answers'` beside nothing to answer.
+ * The screen's documented recovery is to return to the question; routing then reads the
+ * stage, decides `answers` is authoritative, and sends them straight back. The screen
+ * hydrates the same empty selection and the loop does not end.
+ *
+ * So the correction is to the *stage*, not to the navigation: the flow really is at the
+ * question, and once both authorities say so the router sends them there by itself. The
+ * navigation that follows is then agreement rather than an argument.
+ *
+ * Refuses to go *forwards*, which is the mirror of the rule it relaxes: a rewind is a
+ * repair, and a repair that could advance anybody would be `advanceStage` without its
+ * guard.
+ */
+export async function rewindStage(userId: string, back: OnboardingStage): Promise<void> {
+  const current = stages.get(userId);
+  if (!current || STAGE_ORDER.indexOf(current) <= STAGE_ORDER.indexOf(back)) return;
+
+  stages.set(userId, back);
+  publish();
+  note('onboarding', 'stage.rewind', back);
+  await persistStage(userId, back);
+}
+
 export async function advanceStage(userId: string, next: OnboardingStage): Promise<void> {
   const current = stages.get(userId);
   // `null` and `undefined` both mean "nothing to go backwards from". Only a real stage

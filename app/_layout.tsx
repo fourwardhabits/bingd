@@ -212,6 +212,21 @@ function Navigation() {
   const resolved = auth.status !== 'loading' && auth.status !== 'error';
   const signedIn = auth.status === 'ready';
   /**
+   * **A signed-in session, with or without a profile yet.**
+   *
+   * The founder's reordering of 2026-09-09 put the first two onboarding screens in front
+   * of the profile form, so those two run in the `onboarding` status. They cannot sit
+   * behind `signedIn` — the guard would remove the only routes the router has for that
+   * status, and nothing would ever draw — and they must not sit outside a guard either,
+   * which is the hole the note below says `Stack.Protected` closes. So they get the guard
+   * that matches what they actually need: an account.
+   *
+   * That is not a weaker gate for anything else. Every screen under `signedIn` still
+   * requires the profile, and both screens here open with `useCurrentUserId`, which
+   * throws just as hard one status earlier.
+   */
+  const hasAccount = auth.status === 'ready' || auth.status === 'onboarding';
+  /**
    * An invitation opened before there was an account to attribute it to.
    *
    * Here rather than in the signup screen because there are three ways to reach a ready
@@ -286,8 +301,8 @@ function Navigation() {
                 made on the screen itself. */}
               <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
               {/* ---------------------------------------------------------------
-                  **The other five-sixths of the first-run flow, and they belong in
-                  here beside `taste` rather than outside it.**
+                  **The rest of the first-run flow, and it belongs in here beside
+                  `taste` rather than outside it.**
 
                   They were added as files and never declared, which does not stop
                   expo-router serving them — it builds its tree from the directory —
@@ -298,17 +313,20 @@ function Navigation() {
 
                   The reachable case is not a crafted link. It is the involuntary exit
                   named above — an expired refresh token, `delete_account` — landing on
-                  somebody who is *sitting* on Motivations or People, which is where a
-                  new account spends minutes at a time reading and choosing. The
-                  context flips, the screen re-renders and raises in the same commit,
-                  and `useAuthRouting`'s effect has not run yet. On `taste` that person
-                  loses a screen; on these five they lost the tree to an error boundary.
+                  somebody who is *sitting* on People or the notification question,
+                  which is where a new account spends minutes at a time reading and
+                  choosing. The context flips, the screen re-renders and raises in the
+                  same commit, and `useAuthRouting`'s effect has not run yet. On
+                  `taste` that person loses a screen; on these they lost the tree to an
+                  error boundary.
+
+                  Motivations and *How bingd. helps* are no longer in this block. They
+                  run before the profile exists now, and have a guard of their own
+                  below.
 
                   Declared individually rather than as a group because there is no
                   `onboarding/_layout.tsx` and adding one to carry a guard this file
                   already owns would put the same decision in two places. */}
-              <Stack.Screen name="onboarding/motivations" options={{ headerShown: false }} />
-              <Stack.Screen name="onboarding/answers" options={{ headerShown: false }} />
               <Stack.Screen name="onboarding/people" options={{ headerShown: false }} />
               <Stack.Screen name="onboarding/notifications" options={{ headerShown: false }} />
               {/* A modal, like Settings, and for the same reason: it is a thing that
@@ -333,6 +351,28 @@ function Navigation() {
                   title: ROOT_SCREEN_TITLES.settings,
                 }}
               />
+            </Stack.Protected>
+
+            {/* ---------------------------------------------------------------
+                **The two screens that run before the profile exists.**
+
+                They sat in the block above until the founder's reordering of
+                2026-09-09, and they cannot stay there: `signedIn` is
+                `status === 'ready'`, which an account without a `profiles` row is
+                not, so the guard would remove the only two routes the router has
+                for that status and the navigator would have nowhere to send
+                anybody.
+
+                A guard of their own rather than no guard at all. Everything the
+                long note above says about an undeclared route still applies —
+                both open with `useCurrentUserId`, which throws on a signed-out
+                session, and the involuntary exits (an expired refresh token,
+                `delete_account`) are as reachable here as anywhere. `hasAccount`
+                is exactly the condition those two screens need and nothing
+                weaker: an `auth.users` row to key their preferences to. */}
+            <Stack.Protected guard={hasAccount}>
+              <Stack.Screen name="onboarding/motivations" options={{ headerShown: false }} />
+              <Stack.Screen name="onboarding/answers" options={{ headerShown: false }} />
             </Stack.Protected>
           </Stack>
         </RouteErrorBoundary>

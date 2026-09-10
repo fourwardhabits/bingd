@@ -1,4 +1,4 @@
-import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -70,7 +70,31 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+/**
+ * **The tab bar, captured rather than mounted.**
+ *
+ * The screen subscribes to its navigator's `tabPress`, which under this runner has no
+ * navigator to come from. The mock records what the screen subscribed with and
+ * `pressSearchTab` calls it, which is exactly what React Navigation does with it.
+ */
+const mockTabPress: (() => void)[] = [];
+const mockNavigation = {
+  focused: true,
+  addListener: (event: string, handler: () => void) => {
+    if (event === 'tabPress') mockTabPress.push(handler);
+    return () => {};
+  },
+  isFocused: () => mockNavigation.focused,
+};
+
+const pressSearchTab = () => {
+  const handler = mockTabPress.at(-1);
+  if (!handler) throw new Error('the screen subscribed to no tabPress');
+  handler();
+};
+
 jest.mock('expo-router', () => ({
+  useNavigation: () => mockNavigation,
   useRouter: () => ({ push: mockPush }),
 }));
 
@@ -1515,5 +1539,47 @@ describe('a series whose seasons the reader has already watched', () => {
     expect(labels.indexOf('Log Terrace House: Aloha State')).toBeLessThan(
       labels.indexOf('Add Terrace House: Aloha State to Watchlist'),
     );
+  });
+});
+
+/**
+ * **Re-tapping the Search tab** (founder, physical iOS 1.0.1 build 8).
+ *
+ * Search has no nested route — a query, a filter and a widened member list are states of
+ * this one screen — so the habit that works on every other tab did nothing here. Its root
+ * is an empty field with the keyboard up, which is the state the tab exists to put
+ * somebody in.
+ */
+describe('re-tapping the Search tab', () => {
+  beforeEach(() => {
+    mockTabPress.length = 0;
+    mockNavigation.focused = true;
+  });
+
+  it('clears the query and puts the cursor back in the field', async () => {
+    const view = await search('inception');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    await act(async () => pressSearchTab());
+
+    await waitFor(() => expect(view.queryByLabelText(FILM_ROW)).toBeNull());
+    expect(view.getByLabelText('Search').props.value).toBe('');
+    // The cursor going back into the field is an imperative call through the ref
+    // SearchField forwards, which this runner has no keyboard to observe. That the ref
+    // reaches the input at all is asserted in SearchField.test.tsx.
+  });
+
+  it('changes nothing when the press arrives from another tab', async () => {
+    // `tabPress` fires for this tab whether or not it was the one showing. Only the
+    // already-selected case is this feature; the other is somebody navigating here, and
+    // throwing their search away on arrival would be a different change.
+    const view = await search('inception');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    mockNavigation.focused = false;
+    await act(async () => pressSearchTab());
+
+    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+    expect(view.getByLabelText('Search').props.value).toBe('inception');
   });
 });

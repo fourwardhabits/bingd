@@ -19,20 +19,12 @@ const decide = (input: Partial<RoutingInput>) =>
     tasteNeeded: false,
     tastePending: false,
     /**
-     * An established account, on a device that has already been introduced to the app.
-     *
-     * Both defaults are the *settled* answer rather than the unknown one, so that a case
-     * about the taste rule is not silently also a case about the opening. The tests that
-     * are about those two set them explicitly.
-     */
-    /**
      * `null` is *read, and there is no stage* — an account that has never been in the
      * flow. `undefined` would be "not read yet", which routing deliberately waits on, and
      * defaulting to it would make every unrelated case a test of the hold.
      */
     stage: null,
     tasteRanked: 0,
-    welcomeSeen: true,
     ...input,
   });
 
@@ -62,44 +54,97 @@ describe('nextRoute', () => {
       expect(decide({ status: 'signed-out', group: '(auth)', screen: 'sign-in' })).toBeNull();
     });
 
-    it('sends an authenticated user with no profile to create one', () => {
-      expect(decide({ status: 'onboarding' })).toBe('/(auth)/create-profile');
+    it('sends an authenticated user with no profile to the first step of the flow', () => {
+      expect(decide({ status: 'onboarding' })).toBe('/onboarding/motivations');
     });
 
     it('pulls them back if they wander to another auth screen', () => {
       expect(decide({ status: 'onboarding', group: '(auth)', screen: 'sign-in' })).toBe(
-        '/(auth)/create-profile',
+        '/onboarding/motivations',
       );
     });
   });
 
-
-  describe('the opening, which runs before there is an account', () => {
-    it('sends a device that has never seen it to the opening rather than the form', () => {
-      expect(decide({ status: 'signed-out', welcomeSeen: false })).toBe('/(auth)/welcome');
+  /**
+   * **The founder's reordering of 2026-09-09, as a table.**
+   *
+   * Motivations and *How bingd. helps* moved in front of the profile form: they cost the
+   * reader nothing and are what earn the form, while a username, a birthday, a visibility
+   * choice and a Terms acceptance are the expensive part.
+   *
+   * The invariant that must survive it is the one the founder named — ranking writes need
+   * an account row, and the age and Terms gate belongs to `create_profile` — so the
+   * hardest case here is the one that matters most: **nothing past the two value screens
+   * is reachable without a profile.**
+   */
+  describe('the two value screens, which run before the profile exists', () => {
+    it('starts a brand new account on motivations', () => {
+      expect(decide({ status: 'onboarding', stage: null })).toBe('/onboarding/motivations');
     });
 
-    it('sends a device that has seen it straight to sign in', () => {
-      expect(decide({ status: 'signed-out', welcomeSeen: true })).toBe('/(auth)/sign-in');
-    });
-
-    /**
-     * The hold, and why it is safe to have one here at all.
-     *
-     * Guessing either way is wrong: `true` skips the opening on a genuine first launch,
-     * `false` shows it again to somebody who dismissed it. The wait is bounded in
-     * `hydrateWelcomeSeen`, which resolves an unreadable or unresponsive preference to
-     * `true` — so this state cannot outlive one Keychain read, and the app is never held
-     * on it indefinitely. That is the build-4 lesson applied rather than repeated.
-     */
-    it('moves nobody while the preference has not been answered', () => {
-      expect(decide({ status: 'signed-out', welcomeSeen: undefined })).toBeNull();
-    });
-
-    it('leaves somebody alone once they are inside the auth group', () => {
+    it('leaves somebody who is already on it alone', () => {
       expect(
-        decide({ status: 'signed-out', group: '(auth)', screen: 'welcome', welcomeSeen: false }),
+        decide({ status: 'onboarding', group: 'onboarding', screen: 'motivations' }),
       ).toBeNull();
+    });
+
+    it('carries them on to the answers screen, and leaves them there', () => {
+      expect(decide({ status: 'onboarding', stage: 'answers' })).toBe('/onboarding/answers');
+      expect(
+        decide({
+          status: 'onboarding',
+          stage: 'answers',
+          group: 'onboarding',
+          screen: 'answers',
+        }),
+      ).toBeNull();
+    });
+
+    it('sends them back to the step they left, not forward to the form', () => {
+      // A resume mid-flow. The stage is the authority, exactly as it is after the form.
+      expect(
+        decide({
+          status: 'onboarding',
+          stage: 'motivations',
+          group: '(auth)',
+          screen: 'verify',
+        }),
+      ).toBe('/onboarding/motivations');
+    });
+
+    it('moves nobody while the stage has not been read', () => {
+      // The same hold the ready branch takes, for the same reason: guessing sends
+      // somebody back a step. Bounded by hydrateStage own four seconds.
+      expect(decide({ status: 'onboarding', stage: undefined })).toBeNull();
+    });
+
+    it.each(['taste', 'people', 'notifications', 'done'] as const)(
+      'refuses to let a %s stage past the form while there is no profile',
+      (stage) => {
+        // **The invariant.** Ranking writes need an account row and the age gate belongs
+        // to create_profile, so no stage beyond the two value screens is reachable until
+        // one exists — including a device that thinks the flow is over.
+        expect(decide({ status: 'onboarding', stage })).toBe('/(auth)/create-profile');
+      },
+    );
+
+    it('leaves them on the form once they are there', () => {
+      expect(
+        decide({
+          status: 'onboarding',
+          stage: 'taste',
+          group: '(auth)',
+          screen: 'create-profile',
+        }),
+      ).toBeNull();
+    });
+
+    it('sends a finished form straight on to the picker', () => {
+      // The status flips to ready the moment the profile query answers, and the stage the
+      // answers screen wrote is what says where the flow was up to.
+      expect(decide({ status: 'ready', stage: 'taste', tasteNeeded: true })).toBe(
+        '/onboarding/taste',
+      );
     });
   });
 
@@ -319,8 +364,16 @@ describe('nextRoute', () => {
     });
 
     it('never sends a user without a profile into it', () => {
-      // The screen calls `useCurrentProfile`, which throws outside a ready session.
-      expect(decide({ status: 'onboarding', tasteNeeded: true })).toBe('/(auth)/create-profile');
+      // The picker calls `useCurrentProfile`, which throws outside a ready session — and
+      // the ranking it starts needs an account row anyway. An account that has walked the
+      // two value screens and has no profile gets the form; one that has not gets the step
+      // it is on. Neither is the picker.
+      expect(decide({ status: 'onboarding', stage: 'taste', tasteNeeded: true })).toBe(
+        '/(auth)/create-profile',
+      );
+      expect(decide({ status: 'onboarding', stage: null, tasteNeeded: true })).toBe(
+        '/onboarding/motivations',
+      );
     });
   });
 
@@ -345,8 +398,26 @@ describe('nextRoute', () => {
     const cases: { input: Partial<RoutingInput>; settled: string }[] = [
       { input: { status: 'signed-out', group: '(auth)', screen: 'sign-in' }, settled: 'sign-in' },
       {
-        input: { status: 'onboarding', group: '(auth)', screen: 'create-profile' },
+        input: {
+          status: 'onboarding',
+          stage: 'taste',
+          group: '(auth)',
+          screen: 'create-profile',
+        },
         settled: 'create-profile',
+      },
+      {
+        input: { status: 'onboarding', group: 'onboarding', screen: 'motivations' },
+        settled: 'motivations',
+      },
+      {
+        input: {
+          status: 'onboarding',
+          stage: 'answers',
+          group: 'onboarding',
+          screen: 'answers',
+        },
+        settled: 'answers',
       },
       { input: { group: 'onboarding', screen: 'taste', tasteNeeded: true }, settled: 'taste' },
       { input: { group: '(tabs)', screen: 'feed' }, settled: 'feed' },

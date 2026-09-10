@@ -107,6 +107,10 @@ jest.mock('expo-router', () => ({
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
+  // The two screens before the profile form read the account id instead, which is
+  // what an `onboarding` session can answer. See `useCurrentUserId`.
+  useCurrentUserId: () => 'user-1',
+  useAuth: () => ({ status: 'onboarding', userId: 'user-1', email: null }),
   // A visible stand-in rather than null, so this suite can assert the escape route is
   // offered without dragging the real sign-out stack into a screen test — the
   // behaviour behind the label is `account-escape.test.tsx`'s job.

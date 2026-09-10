@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -49,6 +49,7 @@ import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { languageName } from '@/lib/language';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
+import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
@@ -220,6 +221,40 @@ export default function RecommendationsScreen() {
     setTopRatedBudget(TOP_RATED_FILTER_PAGES);
     setTopMedium(next === 'topMovies' ? 'movies' : 'tv');
   };
+
+  /**
+   * **Re-tapping the For You tab** (founder, physical iOS 1.0.1 build 8).
+   *
+   * Sent to you, Group Picks, the requests sheet and the two Top Rated walls are all
+   * modes of this one route, so pressing the tab you are already on had nothing to pop
+   * and left the reader looking at the thing they were trying to leave. `useTabReset` is
+   * the same subscription the other four tabs use and states the rules; what is here is
+   * only what this screen's root *is*: the personalised wall.
+   *
+   * **The medium and the filters survive it**, which is deliberate and is the founder's
+   * own rule for Collection applied here. Movies-or-TV and a chosen genre are answers
+   * this reader gave on purpose; the mode is where they are, and going back to the top of
+   * a section is not a reason to throw away what they said. `pages` survives for the same
+   * reason — it is depth, and the scroll below is what returns them to the top of it.
+   *
+   * Already at the root, so the habit's other half applies: back to the top of the wall.
+   * No refetch. Pull-to-refresh is the gesture that means "ask again", and spending a
+   * round trip to animate a tab press is how a habit becomes expensive.
+   */
+  const wallScroller = useRef<ScrollView>(null);
+
+  useTabReset(
+    useCallback(() => {
+      if (sentOnly || topMedium !== null || groupPicking || reviewingRequests) {
+        setSentOnly(false);
+        setTopMedium(null);
+        setGroupPicking(false);
+        setReviewingRequests(false);
+        return;
+      }
+      wallScroller.current?.scrollTo({ y: 0, animated: true });
+    }, [sentOnly, topMedium, groupPicking, reviewingRequests]),
+  );
 
   /** What the selector shows. See `topMedium`. */
   const mode: ForYouMode = topMedium
@@ -958,6 +993,7 @@ export default function RecommendationsScreen() {
             )
           ) : (
             <ScrollView
+              ref={wallScroller}
               contentContainerStyle={styles.content}
               /* The only way a test can reach the scroll that pages the wall — the same
                  reason `for-you-refresh` exists on the control below. A `ScrollView` has

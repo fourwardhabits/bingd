@@ -81,6 +81,9 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
+  // The tab-press listener every tab screen subscribes to (`useTabReset`). A navigator
+  // that never fires is the right stand-in: these files are not about that behaviour.
+  useNavigation: () => ({ addListener: () => () => {}, isFocused: () => true }),
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
   useFocusEffect: () => {},

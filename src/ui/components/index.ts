@@ -13,6 +13,7 @@ export {
 } from './BucketChip';
 export { Button } from './Button';
 export { CastStrip, type CastMember } from './CastStrip';
+export { ClampedText, collapse, MARKER, type ClampedTextProps } from './ClampedText';
 export {
   DetailHeaderBackground,
   DetailHeaderTitle,
