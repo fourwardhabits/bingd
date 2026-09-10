@@ -69,10 +69,7 @@ describe('why the signup screen asks for a birthday', () => {
 
     await waitFor(() =>
       expect(
-        view.getByText(
-          'Your birthday is private and isn’t shown on your profile. We use it to ' +
-            'confirm you’re 13 or older, and may use age to improve recommendations.',
-        ),
+        view.getByText('Your birthday isn’t shown on your profile. We use it to confirm age eligibility.'),
       ).toBeTruthy(),
     );
   });
@@ -87,49 +84,52 @@ describe('why the signup screen asks for a birthday', () => {
   it('does not promise the birthday is never shown to anyone', async () => {
     const view = await renderWithProviders(<CreateProfileScreen />);
 
-    await waitFor(() => expect(view.getByText(/13 or older/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/age eligibility/i)).toBeTruthy());
 
     expect(view.queryByText(/never shown to anyone/i)).toBeNull();
     // The neighbouring forms of the same over-claim.
     expect(view.queryByText(/nobody (can )?(ever )?sees?/i)).toBeNull();
     expect(view.queryByText(/no one will ever see/i)).toBeNull();
+    // And the broadest of them, ruled out by name after build 11: a promise about what
+    // the company does with data, which this screen has no standing to make and which
+    // belongs in the Privacy Policy or nowhere.
+    expect(view.queryByText(/never sell/i)).toBeNull();
+    expect(view.queryByText(/we (do not|don.t) sell/i)).toBeNull();
   });
 
   /**
-   * **The claim widened on 2026-08-25, and the test that guarded the old one had to
-   * widen with it — carefully, because the direction it guards still matters.**
+   * **Inverted after build 11, because the thing this used to guard was removed.**
    *
-   * This used to assert that the screen said *nothing* about personalisation. That was
-   * the right rule while the retention story was "one comparison at signup and never
-   * read again": a screen promising personalisation from a value nothing personalises
-   * would have been an unbacked privacy claim in the place they do the most damage.
+   * It previously pinned a *hedge*: "may use age to improve recommendations", asserted
+   * present, with the present-tense forms asserted absent. The reasoning was that the
+   * founder intended future personalisation, so silence would rule out a use the product
+   * meant to make.
    *
-   * DOB-1 changed the underlying fact. The founder's decision is to keep the date for
-   * eligibility *and* for future personalisation and aggregate taste analysis, so
-   * silence is now the misleading option — it would rule out a use the product intends
-   * to make, and broadening it later under copy that excluded it is exactly the move
-   * this screen should not make.
-   *
-   * So what is pinned instead is the **tense**. "May also help ... as bingd. improves"
-   * is a statement about intent; "we use your birthday to recommend things" would be a
-   * statement about today, and today it is false — nothing reads the column but the
-   * age gate. The assertions below are that the hedge is present and the present-tense
-   * claim is absent.
+   * The founder's decision on physical QA of build 11 reverses that: a hedge about
+   * something the product does not do is still read as a reason the birthday was asked
+   * for, and it was the only clause on the screen naming a use that does not exist.
+   * `date_of_birth` sits in `profile_private` and its one reader anywhere is the 13+
+   * comparison in `create_profile`; no recommendation, slate, taste or match path touches
+   * it. So the screen names the only real use, and this test guards the direction that
+   * still matters — that no personalisation claim comes back **in any tense**, hedged or
+   * otherwise. A future release that genuinely personalises from age changes the product
+   * first and this test second.
    */
-  it('describes personalisation as a possibility, never as something already happening', async () => {
+  it('claims no personalisation from the birthday, hedged or otherwise', async () => {
     const view = await renderWithProviders(<CreateProfileScreen />);
 
-    await waitFor(() => expect(view.getByText(/13 or older/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/age eligibility/i)).toBeTruthy());
 
-    // The hedge, in whichever words carry it. It was "may also help us personalise
-    // recommendations as bingd. improves" and is now "may use age to improve
-    // recommendations" — shorter, same tense, same claim.
-    expect(view.getByText(/may use age to improve/i)).toBeTruthy();
-    // The forms that would claim it is already true.
+    // The hedge that was there, and the shapes it would come back in.
+    expect(view.queryByText(/may use age/i)).toBeNull();
+    expect(view.queryByText(/improve recommendations/i)).toBeNull();
+    expect(view.queryByText(/personalis/i)).toBeNull();
+    expect(view.queryByText(/recommend/i)).toBeNull();
+    // The present-tense forms, still absent.
     expect(view.queryByText(/we use .*to personalise/i)).toBeNull();
     expect(view.queryByText(/powers your recommendations/i)).toBeNull();
-    // And the claim that would be plainly false, which is the one the founder ruled
-    // out by name: the date is stored, in `profile_private`.
+    // And the claim that would be plainly false, which the founder ruled out by name:
+    // the date is stored, in `profile_private`.
     expect(view.queryByText(/we (do not|don.t) (save|store|keep)/i)).toBeNull();
   });
 
