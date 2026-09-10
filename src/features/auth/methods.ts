@@ -493,8 +493,14 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
     return {
       ok: false,
       cancelled: false,
+      // Apple is named only where the button exists. `signInWithApple` is gated on
+      // `AppleAuthentication.isAvailableAsync`, which is false on Android, so the
+      // original wording sent half of the users to a control that is not on their
+      // screen — advice that reads as the app being broken twice over.
       message:
-        'Google sign-in cannot start on this build. Use email or Apple to get in, and please report this.',
+        Platform.OS === 'ios'
+          ? 'Google sign-in cannot start on this build. Use email or Apple to get in, and please report this.'
+          : 'Google sign-in cannot start on this build. Use your email address to get in, and please report this.',
     };
   }
 

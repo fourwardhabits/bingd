@@ -162,15 +162,38 @@ const covers = (pattern, url) => {
   return new RegExp(`^${expr}$`).test(url);
 };
 
+/**
+ * Expo Go's callback is checked too, and it was not in the first version of this.
+ *
+ * `resolveOAuthRedirect` trusts and sends `createURL`'s answer when
+ * `executionEnvironment` is `storeClient`, which is Expo Go — and `expo-linking`
+ * resolves the scheme to `exp` there, so the value really is
+ * `exp://<host>/--/auth/callback`. That callback is registered in Supabase, but nothing
+ * checked it: the script derived its list from the three `bundleId`/`scheme` variants in
+ * `app.config.ts`, none of which describes Expo Go. So a developer could hit exactly the
+ * strand-on-bingd.app failure this whole change exists to prevent while this printed
+ * "Every variant callback is registered" and exited 0. An independent review caught it.
+ *
+ * The host is unknowable — it is whatever machine is running the dev server — so the
+ * probe is a representative address, and what it is really asking is whether a wildcard
+ * `exp:` pattern is present at all.
+ */
+const CALLBACKS = [
+  ...unique.map((scheme) => ({ label: `${scheme}://auth/callback`, probe: `${scheme}://auth/callback` })),
+  {
+    label: 'exp://<dev-server>/--/auth/callback  (Expo Go)',
+    probe: 'exp://192.168.1.5:8081/--/auth/callback',
+  },
+];
+
 const problems = [];
-for (const scheme of unique) {
-  const callback = `${scheme}://auth/callback`;
-  const by = allowed.filter((p) => covers(p, callback));
+for (const { label, probe } of CALLBACKS) {
+  const by = allowed.filter((p) => covers(p, probe));
   if (by.length === 0) {
-    problems.push(callback);
-    console.log(`  MISSING  ${callback}`);
+    problems.push(label);
+    console.log(`  MISSING  ${label}`);
   } else {
-    console.log(`  ok       ${callback}  (matched by ${by.join(', ')})`);
+    console.log(`  ok       ${label}  (matched by ${by.join(', ')})`);
   }
 }
 

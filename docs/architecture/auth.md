@@ -292,7 +292,7 @@ What this section was missing is that a paragraph is not a check. The client was
 
 None of that is in a pull request's diff of the running project, and none of it travels with a deploy: **auth email configuration is console state**. The guard is that a new project now fails a check instead of failing a person.
 
-**The OAuth redirects must be registered**, which they are, as `bingd://**`, `bingd-dev://**`, `bingd-preview://**` and `https://bingd.app/**` alongside the three exact callbacks.
+**The OAuth redirects must be registered**, which they are, as `bingd://**`, `bingd-dev://**`, `bingd-preview://**` and `https://bingd.app/**` alongside the three exact callbacks — **and `exp://**/--/auth/callback`**, which this list omitted until 2026-09-10. That one is Expo Go's: `expo-linking` resolves the scheme to `exp` when `executionEnvironment` is `storeClient`, so a dev-server sign-in really does send it, and a redirect the client sends but nobody checks is the whole shape of the defect below.
 
 **The sentence that used to end this paragraph was false, and it cost a release.** It read: *"an unregistered value is refused by Supabase before the provider is ever contacted — so the symptom names the redirect and not the provider."* GoTrue does no such thing. It **substitutes `site_url`** for a `redirect_to` it cannot use and contacts the provider anyway. Probed against production on 2026-09-10:
 
