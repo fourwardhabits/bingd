@@ -712,6 +712,12 @@ Comments, DMs, discussion boards, and long-form reviews. Destination-specific so
 > an established reader's reveals are unchanged. [`screens.md`](../design/screens.md)
 > §3–§4.
 >
+> **Amended 2026-09-09 (physical build 9).** The first-run flow no longer draws a reveal
+> per title — it is one loop of pick and rank, five times, and *Your First Five* is where
+> a score is first seen. So the quiet line has one fewer surface, and the sentence it says
+> is now made by *Your First Five*'s own copy instead. Everything above still holds for
+> every reveal outside onboarding, which is every reveal in the app.
+>
 > **Step 5's "follow someone" has a door.** The summary's second action is **Find
 > people** (replacing *See my collection*, which the bar already offers permanently), and
 > it lands on For You opened on People — the existing discovery surface, reached by a
@@ -921,7 +927,7 @@ A title alone in its band scores that band's high. Ranges do not overlap, so a b
 Three properties this is required to keep:
 
 - **Comparisons are still the only source.** The score is a function of `rankings.position` and the band sizes, and a position is only ever written by a comparison session (§11). No rating, import, or estimate can produce one.
-- **A score moves when the list moves.** Ranking a new title reflows the scores around it, because the number was always a statement about relative position. The interface never presents a score as a fixed property of the film. **Said to the reader since 2026-09-07:** Build your taste states it before the first comparison, and onboarding's reveals repeat it once under the score (§9 As-built).
+- **A score moves when the list moves.** Ranking a new title reflows the scores around it, because the number was always a statement about relative position. The interface never presents a score as a fixed property of the film. **Said to the reader since 2026-09-07:** the first reveal a reader meets states it under the score, and *Your First Five* says it in its own words at the end of onboarding (§9 As-built, amended 2026-09-09).
 - **Scores are never aggregated across users.** There is no public average, no community score, and no per-title score on any surface that is not scoped to one person's list. Averaging would turn a personal ordering into the calibrated rating this product exists to avoid.
 
 > **Required.** Do **not** display a 0–100 score or a percentile anywhere. The exact ordinal remains available as secondary detail on a title page, in the form `#18 of 142 in Movies` — with the denominator, because a bare ordinal is unreadable without it.

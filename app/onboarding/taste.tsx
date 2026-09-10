@@ -1,21 +1,14 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { useCurrentProfile, UseDifferentAccountButton } from '@/features/auth';
-import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { useRankedCollection } from '@/features/collection/use-collection';
 import { bandSizes, formatScore, scoreFor } from '@/features/collection/score';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
-import {
-  PICK_TARGET,
-  hydratePicks,
-  setPicks,
-  setRankingOutcome,
-  usePicks,
-  type PickedTitle,
-} from '@/features/onboarding/pick-five';
+import { PICK_TARGET, setRankingOutcome } from '@/features/onboarding/pick-five';
+import { useStarterMovies } from '@/features/onboarding/use-starter-movies';
 import { TasteBucketSheet, type TasteSubject } from '@/features/onboarding/TasteBucketSheet';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
 import {
@@ -29,6 +22,7 @@ import { useTrending } from '@/features/trending/use-trending';
 import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
 import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 import { track } from '@/lib/analytics';
+import { note } from '@/lib/flight-recorder';
 import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import {
@@ -43,100 +37,116 @@ import {
 } from '@/ui/components';
 
 /**
- * Steps 6, 7 and 8: choose five movies, rank them, and see the order that came out.
+ * The first five: pick one, rank it, pick the next, five times, then Your First Five.
  *
  * ---------------------------------------------------------------------------
- * WHAT CHANGED, AND WHAT DELIBERATELY DID NOT
+ * WHY THIS SCREEN WAS REBUILT (founder, physical iOS 1.0.1 build 9, 2026-09-09)
  *
- * **Changed: selection and ranking are two acts.** `Build your taste` is gone — it named
- * an abstraction over a concrete task — and so is the paragraph that screen needed to
- * explain itself. All five are chosen first, then all five are ranked. `pick-five.ts`
- * records the founder's reasoning in full.
+ * The previous version asked for all five titles first and then ranked all five. That
+ * shape had a good argument behind it — "pick five" is a task somebody can picture the
+ * end of — and it lost to two things on a device.
  *
- * **Not changed: the ranking.** The run is the real `TasteBucketSheet` and the real
- * `RankingSheet`, driving the real `rank_start` / `rank_answer` session, exactly as
- * before. Nothing here re-implements a comparison, a band, a score or a placement, and
- * the reveal is the sheet's own. The orchestration moved; the engine did not.
+ * **It is not the product.** Ranking against what you have already ranked *is* bingd.,
+ * and a flow that separates choosing from ranking teaches the app in the wrong order: the
+ * reader spends the first half of onboarding doing something the app will never ask of
+ * them again. The founder's direction is the real loop, from the first title:
  *
- * **Not changed: no watch date.** The first five may be movies somebody saw fifteen years
- * ago, and `set_bucket` writes no date, so they do not land in this year's Goals.
- * `TasteBucketSheet` explains the mechanics.
+ *     pick -> rank -> pick -> rank -> ... -> five -> Your First Five
  *
- * **Not changed: movies only.** A series cannot be ranked and a season is two navigations
- * deep, so neither is offered at the moment somebody is deciding whether this app works.
- * The strings say *movie* throughout, which is the founder's settled terminology.
+ * **And it dead-ended.** The founder chose *I liked it* for the first film, finished the
+ * comparisons, saw the post-rank completion sheet, closed it, and onboarding stopped. The
+ * cause is in the old file and it is structural rather than cosmetic: the bucket sheet's
+ * subject was derived from the run's cursor alone —
  *
- * ---------------------------------------------------------------------------
- * WHY THERE IS NO `phase` STATE VARIABLE
+ *     subject={ranking ? null : toSubject(current)}
  *
- * The phase is **derived**, from two facts that already exist:
+ * — so the moment the first placement landed, `current` advanced to the second film and
+ * the bucket sheet became visible **while the log sheet was still open on top of it**.
+ * Two React Native `<Modal>`s asked to present at once from one screen; iOS presents the
+ * first and refuses the second, React believes both are up, and closing the one that
+ * exists leaves a screen whose only remaining control is a modal that will never appear.
  *
- * | condition | phase |
- * |---|---|
- * | fewer than five chosen | the picker |
- * | five chosen, fewer than five ranked | the run |
- * | five ranked | Your First Five |
- *
- * This is the old screen's own principle — *progress is the data, not a counter* — kept
- * across a flow that now has three parts. It is also what makes a resume free: the
- * selection comes back from a preference, the count comes back from `rankings`, and the
- * screen somebody returns to is a consequence of those two rather than of a third piece of
- * state that could disagree with either.
- *
- * A stored counter would disagree the first time a placement failed. The count cannot: a
- * ranking that did not commit leaves the number where it was, which is the truth.
+ * So the fix is not "close the log sheet more carefully". It is that **the run is a state
+ * machine with one sheet in it**, below, and the log sheet is gone from onboarding
+ * entirely — which is also what the founder's brief asks for on its own terms.
  *
  * ---------------------------------------------------------------------------
- * AND WHY THE RUN OPENS ITS SHEETS WITHOUT AN EFFECT
+ * THE STATE MACHINE, AND WHY EXACTLY ONE SHEET CAN EVER BE MOUNTED
  *
- * `TasteBucketSheet` renders nothing for a null subject, so the current title *is* the
- * subject whenever the run is live and no comparison is already open over it. No
- * `useEffect` opens a sheet, which means there is no window in which the run has advanced
- * but the sheet has not caught up, and no dependency array that could open one twice.
+ *     picking            the search field and the starter grid; no sheet
+ *       | choose a title
+ *     bucket             TasteBucketSheet over that title
+ *       | how was it?                          | dismissed -> back to picking
+ *     ranking            RankingSheet over that title
+ *       | placed                               | dismissed -> back to picking
+ *     picking            progress is now n of 5
+ *
+ * `step` is one value, so the sheets are mutually exclusive *by construction* rather than
+ * by two conditions that have to agree. There is no arrangement of state in which both
+ * are non-null, which is the invariant the founder's dead end was the absence of.
+ *
+ * The payoff is still derived rather than stored — see `placed` — because progress that
+ * is a fact about `rankings` cannot disagree with `rankings`.
+ *
+ * ---------------------------------------------------------------------------
+ * NO POST-RANK SHEET, WHICH IS A CONTRACT AND NOT A HIDDEN BUTTON
+ *
+ * `RankingSheet` takes `onPlaced` here instead of `onFinishLog`, and that prop suppresses
+ * the reveal as well as the log sheet. Its own note carries the reasoning: the payoff of
+ * this flow is *Your First Five*, and five per-title reveals on the way to it are four
+ * interruptions in a sentence that has not finished. Nothing about the ranking itself
+ * changes — the same `rank_start`/`rank_answer` session, the same comparisons, the same
+ * scores, and the same celebration queue, left standing so an award earned on film three
+ * arrives after the flow rather than across it.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT A RELAUNCH DOES, AND WHY IT IS ALWAYS THE PICKER
+ *
+ * Nothing about the run is written to the device any more, and the deletion is the point.
+ * Progress is `rankings`, which survives anything; a title that was mid-comparison when
+ * the app died is simply not ranked, so it comes back as a title to pick. Reopening on
+ * the picker at *n of 5* is true, actionable and cannot strand anybody — where reopening
+ * into a sheet would restore the reader to the exact state they were in when the process
+ * ended, which on the founder's device was the state that ended it.
+ *
+ * The cost is honest and small: a film whose bucket was saved but whose comparisons never
+ * finished has a `user_media` row and no ranking, which is what any abandoned rank in the
+ * app leaves behind, and picking it again is idempotent (`set_bucket` assigns).
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT DELIBERATELY DID NOT CHANGE
+ *
+ * **The ranking engine.** Nothing here re-implements a comparison, a band, a score or a
+ * placement.
+ *
+ * **No watch date.** `set_bucket` writes none, so five films somebody saw fifteen years
+ * ago do not land in this year's Goals. `TasteBucketSheet` explains the mechanics.
+ *
+ * **Movies only.** A series cannot be ranked and a season is two navigations deep.
  */
 export default function TasteOnboardingScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
   const advance = useAdvanceStage(profile.id);
+  const queryClient = useQueryClient();
   const { width } = useWindowDimensions();
 
   const state = useTasteOnboarding(profile.id);
   const begin = useBeginTasteOnboarding(profile.id);
 
-
-  const chosen = usePicks(profile.id);
-  /** False until the stored selection has been read, so the grid is not drawn empty first. */
-  const [picksReady, setPicksReady] = useState(false);
-  /** Whether the reader has pressed `Rank these 5`. See `running` below. */
-  const [runStarted, setRunStarted] = useState(false);
-
   const [input, setInput] = useState('');
-  const [ranking, setRanking] = useState<RankingSubject | null>(null);
-  const [justRanked, setJustRanked] = useState<LoggableTitle | null>(null);
-  const [logging, setLogging] = useState<LoggableTitle | null>(null);
-  const [placement, setPlacement] = useState<PostRank | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void hydratePicks(profile.id).then(() => {
-      if (active) setPicksReady(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, [profile.id]);
+  const [step, setStep] = useState<RunStep>({ kind: 'picking' });
 
   /**
    * Enrol, or leave — the screen decides, because routing deliberately will not.
    *
-   * Unchanged in substance from the old flow. Routing sends people into the group and
-   * never takes them out, so this screen is the only thing standing between an established
-   * account that reached `/onboarding/taste` from a deep link and being marked `active`
-   * and held here.
+   * Routing sends people into the group and never takes them out, so this screen is the
+   * only thing standing between an established account that reached `/onboarding/taste`
+   * from a deep link and being marked `active` and held here.
    *
-   * `begin` is also called by the motivation step, which is where the flow really starts
-   * now. Calling it twice is free and intended: its whole design is a pair of guards that
-   * refuse to write over a decision already taken, in memory or on disk.
+   * **`begin` is called from here and nowhere else now.** It used to be called by the
+   * motivation step as well, which was the real start of the flow; that screen is gone
+   * (see `OnboardingHeader`), so this is the flow's first screen and its own enrolment.
    */
   const settled = useRef(false);
   useEffect(() => {
@@ -151,103 +161,49 @@ export default function TasteOnboardingScreen() {
   }, [state.data, begin, router]);
 
   const { results, idle, isPending, isError, retry, providerSearching } = useTitleSearch(input);
+  const starters = useStarterMovies(profile.id);
+  /**
+   * **The bridge over the deployment gap, and the floor under a young platform.**
+   *
+   * `starter_movies` arrives in `20260915000100`, and a migration is deployed on its own
+   * schedule — the beta lane points at the production project (`config/backends.cjs`), so
+   * a build can reach a backend where this function does not exist yet and PostgREST
+   * answers 404. It is also, on its own terms, allowed to return nothing: it can only
+   * answer with movies the catalogue holds.
+   *
+   * Either way the consequence would be the screen the founder already met — an empty
+   * grid on the first screen of the product — so the old source stays as the floor. It is
+   * one cached `select`, shared with the Feed's shelf and already warm on most launches,
+   * and it is only ever *read* when the better answer has none.
+   */
   const trending = useTrending();
   /**
-   * The account's ranked movies, which the run reads for its cursor and the payoff reads
-   * for its order. One query serving both, and it is the same one the reveal already
-   * warms: `apply` invalidates this key on every placement, so it follows the run without
-   * anything here asking it to.
+   * The account's ranked movies: the run's progress, and the payoff's contents.
+   *
+   * One query serving both, and it is the one the ranking already warms — `apply`
+   * invalidates this key on every placement, so it follows the run without anything here
+   * asking it to.
    */
   const rankedMovies = useRankedCollection(profile.id, 'movies');
 
-  // Movies only, on every source this screen reads.
-  const films = results.filter((result) => result.kind === 'movie');
-
+  const rankedIds = new Set((rankedMovies.data ?? []).map((entry) => entry.mediaItemId));
   /**
-   * Five chosen is not five *committed*, and the difference is one press.
+   * How many of the five are done.
    *
-   * `Rank these 5` has to mean something. Deriving the run from the selection alone would
-   * start the first comparison the instant the fifth poster was tapped, which is the
-   * interleaving the two-phase design exists to remove — and it would do it without
-   * warning, over a grid the reader was still looking at.
-   *
-   * `placed > 0` stands in for the press on a resume: somebody with placements already
-   * made has plainly begun, and asking them to press it again would be the flow having
-   * forgotten what it watched them do.
+   * The ranked movies themselves, not a counter and not a membership test against a
+   * stored selection. An account only reaches this screen with an empty collection —
+   * `readState` admits `ranked === 0 && logged === 0` — so every ranked movie on it is
+   * one this run placed, and there is no second list that could disagree.
    */
-  /**
-   * **Which of the chosen five are actually placed**, read from the rankings themselves.
-   *
-   * This used to be the global ranked *count*, and independent review found what that
-   * costs. The count is a fact about the account, not about this selection, and the two
-   * come apart the moment the selection is lost: if the `pickFive` write fails after two
-   * movies are ranked, the picker comes back empty, the reader chooses five *different*
-   * movies, and a cursor of `chosen[2]` then silently skips the first two of the new five.
-   * With all five previously ranked it was worse — any new selection satisfied the payoff
-   * immediately and none of it was ever ranked.
-   *
-   * Membership cannot drift like that. It asks the only question that matters — *has this
-   * particular movie been placed* — so a lost selection costs a re-selection and nothing
-   * else, which is what `pick-five.ts` promises. It costs no extra request either: the
-   * payoff already reads this list, and the ranking sheet invalidates its key on every
-   * placement.
-   */
-  const placedIds = new Set((rankedMovies.data ?? []).map((entry) => entry.mediaItemId));
-  const placed = chosen.filter((pick) => placedIds.has(pick.id)).length;
+  const placed = Math.min(rankedIds.size, PICK_TARGET);
+  const payoff = placed >= PICK_TARGET;
 
-  const full = chosen.length >= PICK_TARGET;
-  const payoff = full && placed >= PICK_TARGET;
-  // `placed > 0` stands in for the press on a resume, and it is now specifically *these*
-  // movies having been placed rather than any movie at all.
-  const running = full && !payoff && (runStarted || placed > 0);
-  const picking = !running && !payoff;
-
-  /**
-   * Which of the five is being ranked: the first one that has not been placed.
-   *
-   * The run walks them in the order they were chosen. A placement that failed leaves the
-   * movie unplaced and it simply comes up again, which is correct and needs no code of its
-   * own — and unlike an index, this cannot point at the wrong movie when the selection and
-   * the ranking history disagree.
-   */
-  const current = running ? (chosen.find((pick) => !placedIds.has(pick.id)) ?? null) : null;
-
-  const toggle = (title: PickedTitle) => {
-    if (chosen.some((pick) => pick.id === title.id)) {
-      void setPicks(
-        profile.id,
-        chosen.filter((pick) => pick.id !== title.id),
-      );
-      return;
-    }
-    // A sixth is not an error and not a replacement: the remaining cells have gone quiet
-    // and the primary is live, so there is nothing sensible another tap could mean.
-    if (chosen.length >= PICK_TARGET) return;
-    void setPicks(profile.id, [...chosen, title]);
-    setInput('');
-  };
-
-  const startRun = () => {
-    track({ name: 'onboarding_step_completed', props: { step: 'pick', outcome: 'continued' } });
-    setRunStarted(true);
-  };
-
-  const leavePayoff = () => {
-    track({ name: 'onboarding_step_completed', props: { step: 'payoff', outcome: 'continued' } });
-    // Recorded where it is known. The notification step reports it at the end and must not
-    // have to re-derive it from a query that may not have answered. See `rankingOutcome`.
-    void setRankingOutcome(profile.id, 'completed');
-    advance('people');
-    router.replace('/onboarding/people');
-  };
-
-  // Nothing until both answers are in. Drawing the picker first and then deciding shows the
-  // grid for a beat to somebody who is about to be sent to the feed, which is the wrong
-  // first thing to say to an account that has been in use for months.
-  // The ranked list is waited on with the other two: without it `placedIds` is empty on
-  // the first frame, and a resumed run would draw the picker for a beat before correcting
-  // itself. For a genuinely new account it resolves empty and costs nothing.
-  if (!state.data || !picksReady || rankedMovies.isPending) {
+  // Nothing until both answers are in. Drawing the picker first and then deciding shows
+  // the grid for a beat to somebody who is about to be sent to the feed, which is the
+  // wrong first thing to say to an account that has been in use for months. The ranked
+  // list is waited on with it: without it `placed` is zero on the first frame and a
+  // resumed run would draw *1 of 5* before correcting itself.
+  if (!state.data || rankedMovies.isPending) {
     return (
       <Screen>
         <Stack.Screen options={{ headerShown: false }} />
@@ -256,8 +212,63 @@ export default function TasteOnboardingScreen() {
     );
   }
 
-  const selectedIds = new Set(chosen.map((pick) => pick.id));
-  const starters = (trending.data?.items ?? []).filter((item) => item.kind === 'movie');
+  /**
+   * Send a chosen title into the run.
+   *
+   * Refuses one that is already ranked. `starter_movies` excludes them server-side and
+   * the search results are filtered below, so this is the third line of the same defence
+   * — and it is the one that would matter, because picking a title that is already placed
+   * is a step that cannot advance and five is the only way off this screen.
+   */
+  const choose = (pick: TasteSubject) => {
+    if (rankedIds.has(pick.id)) return;
+    setInput('');
+    setStep({ kind: 'bucket', pick });
+  };
+
+  /** Back to the picker, from a dismissal at either sheet. Never anywhere else. */
+  const backToPicker = () => setStep({ kind: 'picking' });
+
+  const leavePayoff = () => {
+    track({ name: 'onboarding_step_completed', props: { step: 'payoff', outcome: 'continued' } });
+    // Recorded where it is known. The notification step reports it at the end and must
+    // not have to re-derive it from a query that may not have answered.
+    void setRankingOutcome(profile.id, 'completed');
+    advance('people');
+    router.replace('/onboarding/people');
+  };
+
+  const skip = () => {
+    track({ name: 'onboarding_step_completed', props: { step: 'pick', outcome: 'skipped' } });
+    void setRankingOutcome(profile.id, 'skipped');
+    advance('people');
+    router.replace('/onboarding/people');
+  };
+
+  const films = results.filter(
+    (result) => result.kind === 'movie' && !rankedIds.has(result.id),
+  );
+  /**
+   * The grid: the community list, or the old shelf when there is no community list.
+   *
+   * The fallback is only consulted when the better source has answered with nothing, so
+   * on a backend where `starter_movies` is deployed it is never read at all. The
+   * already-ranked filter is applied to both — `starter_movies` does it in SQL and the
+   * shelf knows nothing about the caller — because offering back a movie that is already
+   * placed is a step that cannot advance.
+   */
+  const community = (starters.data ?? []).filter((item) => !rankedIds.has(item.id));
+  const grid: { id: string; title: string; year: number | null; posterUri: string | null }[] =
+    community.length > 0
+      ? community
+      : (trending.data?.items ?? [])
+          .filter((item) => item.kind === 'movie' && !rankedIds.has(item.mediaItemId))
+          .map((item) => ({
+            id: item.mediaItemId,
+            title: item.title,
+            year: item.year,
+            posterUri: posterUri(item.posterPath, 'card'),
+          }));
   const tileWidth = Math.floor(
     (width - theme.layout.gutter * 2 - theme.layout.posterGrid.gap * 2) / 3,
   );
@@ -265,20 +276,22 @@ export default function TasteOnboardingScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ headerShown: false }} />
-      <OnboardingHeader step={payoff ? 'payoff' : picking ? 'pick' : 'rank'} />
+      <OnboardingHeader step={payoff ? 'payoff' : 'rank'} />
 
       {payoff ? (
         <FirstFive onContinue={leavePayoff} />
-      ) : running ? (
-        <RunBackdrop placed={placed} />
       ) : (
         <>
           <View style={styles.intro}>
-            <Text variant="title1">Get started</Text>
-            <Text variant="body" tone="secondary">
-              Pick five movies you&apos;ve seen.
+            <Text variant="title1">
+              {placed === 0 ? 'Pick a movie you have seen' : 'Pick another one'}
             </Text>
-            <Progress chosen={chosen.length} />
+            <Text variant="body" tone="secondary">
+              {placed === 0
+                ? 'Rate it, and bingd. will ask you to compare. Five of these and your list is started.'
+                : 'Each one gets compared against the ones before it.'}
+            </Text>
+            <Progress placed={placed} />
           </View>
 
           <View style={styles.field}>
@@ -294,52 +307,49 @@ export default function TasteOnboardingScreen() {
             />
           </View>
 
-          {idle ? (
+          {idle && (starters.isPending || trending.isPending) ? (
+            // Outside the grid's own ScrollView: its content container is a wrapping row,
+            // and a skeleton laid out inside one is a row of stripes rather than a
+            // placeholder for a grid.
+            <SkeletonRow count={6} />
+          ) : idle ? (
             /**
              * The grid, which is load-bearing rather than decorative.
              *
-             * Choosing five before ranking any of them needs something to choose *from*,
-             * and a bare instruction over an empty search box asks the reader to already
-             * know what they want. These are the movies TMDB is featuring today, read out
-             * of `provider_list_cache` — one `select`, no provider quota, and real
-             * catalogue ids, so a tap goes into the same bucket sheet a search result
-             * would.
+             * A bare instruction over an empty search box asks the reader to already know
+             * what they want, five times over. These are the movies this community has
+             * ranked highest among the titles enough people have ranked to mean anything
+             * (`starter_movies`), topped up from catalogue popularity while the platform
+             * is small — and it is deliberately long, because the founder ran the old
+             * twelve-row trending shelf out after four picks.
              *
-             * **It is a starting point for the search field and claims nothing more.**
-             * Trending is what is popular now, not what this reader has seen, and the
-             * screen never says otherwise: the instruction above is the task, and the grid
-             * is simply the first place to look.
+             * **It claims nothing in words.** No heading, no "popular on bingd."; the
+             * instruction above is the task and this is simply the first place to look.
              */
             <ScrollView
               contentContainerStyle={styles.grid}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
             >
-              {starters.length === 0 ? (
+              {grid.length === 0 ? (
                 <View style={styles.status}>
                   <Text variant="body" tone="tertiary">
                     Search for a movie you have seen.
                   </Text>
                 </View>
               ) : (
-                starters.map((item) => (
+                grid.map((item) => (
                   <PickTile
-                    key={item.mediaItemId}
+                    key={item.id}
                     width={tileWidth}
                     title={item.title}
-                    posterUri={posterUri(item.posterPath, 'card')}
-                    selected={selectedIds.has(item.mediaItemId)}
-                    // At five the rest go quiet: they are not removed, because a grid that
-                    // shrank as it was used would move the tile under the reader's thumb,
-                    // and they are not tappable, because nothing a sixth tap could mean is
-                    // honest.
-                    quiet={full && !selectedIds.has(item.mediaItemId)}
+                    posterUri={item.posterUri}
                     onPress={() =>
-                      toggle({
-                        id: item.mediaItemId,
+                      choose({
+                        id: item.id,
                         title: item.title,
                         year: item.year,
-                        posterUri: posterUri(item.posterPath, 'card'),
+                        posterUri: item.posterUri,
                       })
                     }
                   />
@@ -374,7 +384,7 @@ export default function TasteOnboardingScreen() {
                   year={yearOf(film.release_date)}
                   posterUri={posterUri(film.poster_path)}
                   onPress={() =>
-                    toggle({
+                    choose({
                       id: film.id,
                       title: film.title,
                       year: yearOf(film.release_date),
@@ -387,40 +397,19 @@ export default function TasteOnboardingScreen() {
           )}
 
           <View style={styles.footer}>
-            <Button
-              label={`Rank these ${PICK_TARGET}`}
-              onPress={startRun}
-              disabled={chosen.length < PICK_TARGET}
-            />
             {/**
              * **The way out, kept.**
              *
-             * The founder's flow does not draw one, and every other step can be left, so
-             * the picker is the only screen that could hold somebody indefinitely: five is
-             * a hard requirement to reach the next control. The old screen carried this
-             * button with a comment that has not stopped being true — *somebody who cannot
-             * think of five movies they have seen must not be held on this screen forever*
-             * — and that is a stranding this codebase has already paid for once.
+             * The picker is the only screen in the flow that could hold somebody
+             * indefinitely: five rankings is a hard requirement to reach the next control,
+             * and somebody who cannot think of five movies they have seen must not be held
+             * here forever. That is a stranding this codebase has already paid for once.
              *
-             * So it stays, and it is quiet: last in the footer, tertiary, and offered under
-             * the action that makes the app work rather than beside it. It skips to the
-             * People step rather than out of onboarding, because leaving the ranking is not
-             * the same as leaving the flow, and the social half still has something to
-             * offer somebody who declined the first half.
+             * Quiet and tertiary, and it skips to the People step rather than out of
+             * onboarding — leaving the ranking is not the same as leaving the flow, and
+             * the social half still has something to offer somebody who declined this one.
              */}
-            <Button
-              label="Not now"
-              kind="tertiary"
-              onPress={() => {
-                track({
-                  name: 'onboarding_step_completed',
-                  props: { step: 'pick', outcome: 'skipped' },
-                });
-                void setRankingOutcome(profile.id, 'skipped');
-                advance('people');
-                router.replace('/onboarding/people');
-              }}
-            />
+            <Button label="Not now" kind="tertiary" onPress={skip} />
             {/* This screen has no header and Settings is unreachable from it, so for the
                 wrong account signed in on this phone it would otherwise be a locked room.
                 See `UseDifferentAccountButton`. */}
@@ -429,64 +418,48 @@ export default function TasteOnboardingScreen() {
         </>
       )}
 
-      {/* The post-rank state, and nothing else: onboarding never opens this sheet to *log*
-          something, so there is no `onRank` to give it. */}
-      <LogSheet
-        title={logging}
-        surface="onboarding"
-        postRank={placement}
-        onDone={() => {
-          setLogging(null);
-          setPlacement(null);
-          void state.refetch();
-        }}
-        onClose={() => {
-          setLogging(null);
-          setPlacement(null);
-          void state.refetch();
-        }}
-      />
-
+      {/* One sheet at a time, by construction. See the header. */}
       <TasteBucketSheet
-        // The current title *is* the subject while the run is live, unless a comparison is
-        // already open over it. No effect opens this sheet. See the header.
-        subject={ranking ? null : toSubject(current)}
-        // Dismissing the bucket question leaves the run where it is: the same title comes
-        // back, because `ranked` did not move.
-        onClose={() => setRanking(null)}
+        subject={step.kind === 'bucket' ? step.pick : null}
+        // Dismissing the question returns to the picker rather than leaving the title
+        // hanging as a cursor nothing can clear. Nothing has been written yet.
+        onClose={backToPicker}
         onChosen={(bucket) => {
-          if (!current) return;
-          setRanking({
-            id: current.id,
-            title: current.title,
-            bucket,
-            posterUri: current.posterUri,
-            kind: 'movie',
-            mode: 'start',
-          });
-          setJustRanked({
-            id: current.id,
-            title: current.title,
-            year: current.year,
-            posterUri: current.posterUri,
-            kind: 'movie',
+          if (step.kind !== 'bucket') return;
+          setStep({
+            kind: 'ranking',
+            subject: {
+              id: step.pick.id,
+              title: step.pick.title,
+              bucket,
+              posterUri: step.pick.posterUri ?? null,
+              kind: 'movie',
+              mode: 'start',
+            },
           });
         }}
       />
 
       <RankingSheet
-        subject={ranking}
-        onClose={() => {
-          setRanking(null);
-          // The count is the progress, so it is re-read rather than incremented. When it
-          // moves, the next title becomes the bucket sheet's subject on the same render.
-          void state.refetch();
-        }}
-        onFinishLog={(result) => {
-          setRanking(null);
-          if (!justRanked) return;
-          setPlacement(result);
-          setLogging(justRanked);
+        subject={step.kind === 'ranking' ? step.subject : null}
+        // Dismissed mid-comparison. The session is cancelled by the sheet itself, the
+        // title is not ranked, and the picker is where somebody can act — including on
+        // the same film again, which is why the run holds no cursor to be confused by it.
+        onClose={backToPicker}
+        /**
+         * The placement, with no reveal and no log sheet. This is the founder's
+         * "transition directly to the next picker", and it is one assignment because the
+         * progress it moves is `rankings` rather than anything held here.
+         *
+         * The starter list is invalidated with it: the movie just ranked is excluded by
+         * `starter_movies` server-side, so the grid has to ask again to stop offering it.
+         */
+        onPlaced={() => {
+          note('onboarding', 'placed', String(placed + 1));
+          setStep({ kind: 'picking' });
+          void queryClient.invalidateQueries({
+            queryKey: ['onboarding-starter-movies', profile.id],
+          });
         }}
         surface="onboarding"
       />
@@ -494,101 +467,71 @@ export default function TasteOnboardingScreen() {
   );
 }
 
-const toSubject = (pick: PickedTitle | null): TasteSubject | null =>
-  pick ? { id: pick.id, title: pick.title, year: pick.year, posterUri: pick.posterUri } : null;
+/**
+ * Where the run is, as one value.
+ *
+ * The type is the invariant: `bucket` and `ranking` cannot both be true of it, so the two
+ * sheets below cannot both be mounted. See the header for the dead end that came from
+ * deriving them separately.
+ */
+type RunStep =
+  | { kind: 'picking' }
+  | { kind: 'bucket'; pick: TasteSubject }
+  | { kind: 'ranking'; subject: RankingSubject };
 
 /** Five dots and a count, not a percentage. The number is small enough to count. */
-function Progress({ chosen }: { chosen: number }) {
+function Progress({ placed }: { placed: number }) {
   return (
     <View
       style={styles.progress}
       accessibilityRole="progressbar"
-      accessibilityLabel={`${chosen} of ${PICK_TARGET} movies chosen`}
+      accessibilityLabel={`${placed} of ${PICK_TARGET} movies ranked`}
     >
       {Array.from({ length: PICK_TARGET }, (_, index) => (
-        <View key={index} style={[styles.pip, index < chosen ? styles.pipDone : styles.pipTodo]} />
+        <View key={index} style={[styles.pip, index < placed ? styles.pipDone : styles.pipTodo]} />
       ))}
       <Text variant="footnote" tone="secondary" style={styles.progressLabel}>
-        {`${chosen} of ${PICK_TARGET}`}
+        {`${placed} of ${PICK_TARGET}`}
       </Text>
     </View>
   );
 }
 
 /**
- * One poster in the grid, selectable.
+ * One poster in the grid.
  *
- * **A check and never a number.** A badge reading 1 to 5 while somebody is choosing would
- * state an order they have not chosen: selection order is not the ranking, and the ranking
- * is precisely what the next step exists to work out. The ring is Maroon and the check is
- * neutral, for the same reason.
- *
- * The state is spoken by `accessibilityState.checked`; the ring and the tick are how the
- * same fact is said to everybody else.
+ * **No selected state any more.** Choosing is no longer an accumulation somebody can see
+ * and undo — a tap opens the bucket question for that film immediately — so the tile is a
+ * button rather than a checkbox, and it says so to a screen reader. The check mark and
+ * the quiet-at-five treatment went with the two-phase flow they described.
  */
 function PickTile({
   width,
   title,
   posterUri: uri,
-  selected,
-  quiet,
   onPress,
 }: {
   width: number;
   title: string;
   posterUri: string | null;
-  selected: boolean;
-  quiet: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
-      disabled={quiet}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected, disabled: quiet }}
+      accessibilityRole="button"
       accessibilityLabel={title}
-      style={[{ width }, styles.tile, quiet && styles.tileQuiet]}
+      style={[{ width }, styles.tile]}
     >
-      <View style={[styles.tileFrame, selected && styles.tileSelected]}>
+      <View style={styles.tileFrame}>
         <Poster uri={uri} title={title} width={width} />
       </View>
-      {selected ? (
-        <View style={styles.tileCheck} accessibilityElementsHidden importantForAccessibility="no">
-          <Ionicons name="checkmark-circle" size={22} color={theme.semantic.score} />
-        </View>
-      ) : null}
     </Pressable>
   );
 }
 
 /**
- * What sits behind the run's sheets.
- *
- * Deliberately almost nothing. The sheets are the screen for the whole of step 7, and
- * anything drawn under them competes with the question being asked on top. What it does
- * say is how far along the run is, because the sheets cannot: a comparison is about two
- * movies and has no idea it is the fourth of five.
- */
-function RunBackdrop({ placed }: { placed: number }) {
-  return (
-    <View style={styles.run}>
-      {/* One interpolated string rather than text beside an expression: React Native
-          renders the latter as two text nodes, which reads identically and is not
-          findable by the sentence it spells. */}
-      <Text variant="title1" style={styles.centre}>
-        {`Ranking your ${PICK_TARGET}`}
-      </Text>
-      <Text variant="body" tone="secondary" style={styles.centre}>
-        One quick comparison at a time.
-      </Text>
-      <Progress chosen={placed} />
-    </View>
-  );
-}
-
-/**
- * Step 8: Your First Five.
+ * Your First Five.
  *
  * ---------------------------------------------------------------------------
  * THE ORDER IS THE PAYOFF
@@ -598,15 +541,17 @@ function RunBackdrop({ placed }: { placed: number }) {
  *
  * **The scores are the real arithmetic**, `scoreFor` over `bandSizes`, which is the same
  * function the reveal and the collection use. Nothing is recomputed with a second model:
- * four movies in the loved band land on 10.0, 9.0, 8.0 and 7.0 because the band runs 10 to
- * 7 and the score interpolates across it.
+ * four movies in the loved band land on 10.0, 9.0, 8.0 and 7.0 because the band runs 10
+ * to 7 and the score interpolates across it.
  *
- * **Nothing here explains the algorithm.** The score is explained once, under the first
- * reveal. A second explanation on the payoff would turn a reward into a lesson.
+ * **And it is now the first time a score is shown at all**, which is what the per-title
+ * reveals were costing it. Nothing here explains the algorithm: the explanation belongs
+ * under the first reveal somebody meets in the app proper, and a lesson on the payoff
+ * turns a reward into homework.
  *
  * One primary action. There is no competing *Explore For You* or *Find people*: this is
- * still onboarding, and a fork at the payoff is exactly what made the social half optional
- * in the first place.
+ * still onboarding, and a fork at the payoff is what made the social half optional in the
+ * first place.
  */
 function FirstFive({ onContinue }: { onContinue: () => void }) {
   const profile = useCurrentProfile();
@@ -695,14 +640,9 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[8],
   },
   tile: { position: 'relative' },
-  tileQuiet: { opacity: 0.4 },
-  tileFrame: { borderRadius: theme.radius.control, borderWidth: 2, borderColor: 'transparent' },
-  tileSelected: { borderColor: theme.semantic.score },
-  tileCheck: { position: 'absolute', top: theme.space[1], right: theme.space[1] },
+  tileFrame: { borderRadius: theme.radius.control },
   status: { padding: theme.layout.gutter, gap: theme.space[3] },
   results: { paddingBottom: theme.space[8] },
-  run: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: theme.space[3] },
-  centre: { textAlign: 'center' },
   payoff: { paddingBottom: theme.space[6] },
   rankRow: {
     flexDirection: 'row',

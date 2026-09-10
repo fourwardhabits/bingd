@@ -117,6 +117,35 @@ export type RankingSheetProps = {
    */
   onFinishLog?: (placement: { score: number; position: number; category: string }) => void;
   /**
+   * **The placement, handed straight back, with no reveal drawn** — for a caller whose
+   * screen is the payoff.
+   *
+   * The reveal is right nearly everywhere: somebody who ranked a film from the Log tab or
+   * a title page has finished an act, and the number, the ordinal and the two controls
+   * are what that act was for.
+   *
+   * First-run onboarding is the exception, and it is the founder's blocker from physical
+   * iOS 1.0.1 build 9. The flow there is pick, rank, pick, rank, five times, and the
+   * payoff is *Your First Five* at the end of it. A per-title reveal in the middle of
+   * that is a full stop in a sentence that has not finished: the reader is asked to
+   * acknowledge a score for a film they placed two seconds ago, four more times, before
+   * being shown the list that the whole exercise was about. The founder's brief is
+   * explicit — after a successful onboarding rank, go straight to the next picker.
+   *
+   * So this is not "hide the reveal". It is a different contract: **the sheet's job ends
+   * at the placement and the caller owns what happens next.** The session is already
+   * finished and deleted server-side by the time `placed` arrives (`apply` clears
+   * `openSession`), so there is nothing left here to close down and nothing a dismissal
+   * would have to cancel.
+   *
+   * `onFinishLog` is ignored when this is set: they are two answers to the same question
+   * and a caller that wanted the log sheet would not be suppressing the screen that
+   * offers it. The celebration queue is deliberately *not* drained — an award earned on
+   * the third of five films belongs after the flow, not across it, which is the same rule
+   * *Add details* already follows.
+   */
+  onPlaced?: (placement: { score: number; position: number; category: string }) => void;
+  /**
    * Which screen opened this, for `ranking_completed` alone.
    *
    * Passed in rather than inferred from the route: the sheet is mounted by three
@@ -138,7 +167,13 @@ export type RankingSheetProps = {
  * of the mechanic. Decided by the founder, 2026-08-13. The position is visible everywhere
  * else in the app, which is why this component fetches only titles.
  */
-export function RankingSheet({ subject, onClose, onFinishLog, surface }: RankingSheetProps) {
+export function RankingSheet({
+  subject,
+  onClose,
+  onFinishLog,
+  onPlaced,
+  surface,
+}: RankingSheetProps) {
   if (!subject) return null;
 
   // Keyed by the title, so moving to a different one starts a genuinely new component
@@ -149,6 +184,7 @@ export function RankingSheet({ subject, onClose, onFinishLog, surface }: Ranking
       subject={subject}
       onClose={onClose}
       onFinishLog={onFinishLog}
+      onPlaced={onPlaced}
       surface={surface}
     />
   );
@@ -158,6 +194,7 @@ function Session({
   subject,
   onClose,
   onFinishLog,
+  onPlaced,
   surface,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
@@ -572,10 +609,47 @@ function Session({
     celebrate();
   };
 
+  /**
+   * The `onPlaced` contract: hand the placement back once, and draw no reveal.
+   *
+   * An effect rather than a branch inside `apply`, for two reasons. `apply` is a
+   * `useCallback` whose dependency list is deliberately the *subject*, so folding a
+   * caller's own closure into it would re-open the session every time the parent
+   * re-rendered. And the placement has to be handed over **after** `apply` has finished
+   * its own work — the invalidation, `ranking_completed`, the award and streak detections
+   * — because the caller's very next act is to unmount this component.
+   *
+   * The ref is what makes it once. `onPlaced` is an inline closure at the call site, so
+   * its identity changes on every render of the parent, and without the guard a parent
+   * that re-rendered before it unmounted would be told twice about one ranking.
+   */
+  const handedOver = useRef(false);
+  useEffect(() => {
+    if (!onPlaced || step?.state !== 'placed' || handedOver.current) return;
+    handedOver.current = true;
+    onPlaced({ score: step.score, position: step.position, category: step.category });
+  }, [onPlaced, step]);
+
   return (
     <Sheet visible onClose={() => void close()} label={`Rank ${subject.title}`}>
       <View style={styles.sheet}>
-        {step?.state === 'placed' ? (
+        {step?.state === 'placed' && onPlaced ? (
+          /**
+           * One frame, at most: the effect above has already handed the placement back and
+           * the caller unmounts this on its next render. It is not nothing, because a
+           * sheet that emptied itself would flash its own chrome over the screen behind it
+           * — and it is not the reveal, because suppressing that is the whole contract.
+           *
+           * Empty rather than a spinner: `LoadingScreen` is the only indeterminate
+           * spinner in this app and it earns that by being a wait of unknown length. This
+           * is a single frame with a known end.
+           */
+          <View
+            style={styles.handoff}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          />
+        ) : step?.state === 'placed' ? (
           <Reveal
             score={step.score}
             position={step.position}
@@ -1713,6 +1787,9 @@ const styles = StyleSheet.create({
   // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
   // moving off a full-height page sheet — a comparison is a small question.
   sheet: { paddingBottom: theme.space[2] },
+  // The single frame between a placement and the caller unmounting this, under the
+  // `onPlaced` contract. Tall enough that the sheet does not visibly collapse first.
+  handoff: { height: theme.space[10] },
   // No flex anywhere in here. Both halves of the old layout stretched: the screen was
   // a full-height page sheet, and the card row inside it was `flex: 1` with the posters
   // pinned to its top — so a tall device reserved ~500pt for ~330pt of content and put

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -85,6 +85,7 @@ import {
   Sheet,
   SheetRow,
   SkeletonRow,
+  usePullRefresh,
   Text,
   TitleHero,
   TitleRow,
@@ -357,6 +358,26 @@ export default function TitleScreen() {
   const credits = useCredits(titleId);
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
+  /**
+   * Pull to refresh, and **only** pull to refresh.
+   *
+   * This was `refreshing={seasons.isRefetching || personal.isRefetching}`, which is the
+   * founder's "the page behind the review sheet jumps" defect on physical build 9.
+   * `personal` is keyed under `queryKeys.title(id)`, the log sheet's note autosave
+   * invalidates that prefix while somebody is typing, and iOS reads `refreshing: true` as
+   * a *programmatic pull* — it grows the scroll view's top content inset and animates the
+   * content down to meet it, which is the blank band above the hero, and back up when the
+   * refetch settles. `use-pull-refresh.ts` carries the whole trace.
+   */
+  const pull = usePullRefresh(
+    // Memoised, because the hook's callback depends on it: a new array-builder every
+    // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
+    // page.
+    useCallback(
+      () => [refetch(), seasons.refetch(), personal.refetch()],
+      [refetch, seasons, personal],
+    ),
+  );
   /**
    * Reviews are Bingd's own public Notes on this exact title.
    *
@@ -1075,12 +1096,7 @@ export default function TitleScreen() {
         // not have. Copy that names a gesture is a promise; this is the gesture.
         refreshControl={
           <RefreshControl
-            refreshing={seasons.isRefetching || personal.isRefetching}
-            onRefresh={() => {
-              void refetch();
-              void seasons.refetch();
-              void personal.refetch();
-            }}
+            {...pull}
             // Below the transparent bar, so the spinner is not drawn under the back
             // control on a screen whose content starts at the top of the display.
             progressViewOffset={insets.top + NAV_BAR_HEIGHT}

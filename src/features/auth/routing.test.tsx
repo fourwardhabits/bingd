@@ -54,76 +54,49 @@ describe('nextRoute', () => {
       expect(decide({ status: 'signed-out', group: '(auth)', screen: 'sign-in' })).toBeNull();
     });
 
-    it('sends an authenticated user with no profile to the first step of the flow', () => {
-      expect(decide({ status: 'onboarding' })).toBe('/onboarding/motivations');
+    it('sends an authenticated user with no profile to the form', () => {
+      expect(decide({ status: 'onboarding' })).toBe('/(auth)/create-profile');
     });
 
     it('pulls them back if they wander to another auth screen', () => {
       expect(decide({ status: 'onboarding', group: '(auth)', screen: 'sign-in' })).toBe(
-        '/onboarding/motivations',
+        '/(auth)/create-profile',
       );
     });
   });
 
   /**
-   * **The founder's reordering of 2026-09-09, as a table.**
+   * **The profile form is the whole of the pre-account flow again** (founder, physical
+   * iOS 1.0.1 build 9, 2026-09-09).
    *
-   * Motivations and *How bingd. helps* moved in front of the profile form: they cost the
-   * reader nothing and are what earn the form, while a username, a birthday, a visibility
-   * choice and a Terms acceptance are the expensive part.
+   * The reordering of 2026-09-09 briefly put two value screens in front of the form —
+   * *what do you want out of bingd.?* and *here is how that works* — and carrying build 9
+   * removed both: the flow explained too much before the product did anything. So an
+   * `onboarding` session has exactly one destination, and the stage is not consulted in
+   * that status at all.
    *
-   * The invariant that must survive it is the one the founder named — ranking writes need
-   * an account row, and the age and Terms gate belongs to `create_profile` — so the
-   * hardest case here is the one that matters most: **nothing past the two value screens
-   * is reachable without a profile.**
+   * The invariant the founder named survives unchanged and is now the only rule here:
+   * ranking writes need an account row, and the age and Terms gate belongs to
+   * `create_profile` — so **nothing in the flow is reachable without a profile.**
    */
-  describe('the two value screens, which run before the profile exists', () => {
-    it('starts a brand new account on motivations', () => {
-      expect(decide({ status: 'onboarding', stage: null })).toBe('/onboarding/motivations');
+  describe('the form, which is all there is before the account exists', () => {
+    it('sends a brand new account to it', () => {
+      expect(decide({ status: 'onboarding', stage: null })).toBe('/(auth)/create-profile');
     });
 
-    it('leaves somebody who is already on it alone', () => {
-      expect(
-        decide({ status: 'onboarding', group: 'onboarding', screen: 'motivations' }),
-      ).toBeNull();
-    });
-
-    it('carries them on to the answers screen, and leaves them there', () => {
-      expect(decide({ status: 'onboarding', stage: 'answers' })).toBe('/onboarding/answers');
-      expect(
-        decide({
-          status: 'onboarding',
-          stage: 'answers',
-          group: 'onboarding',
-          screen: 'answers',
-        }),
-      ).toBeNull();
-    });
-
-    it('sends them back to the step they left, not forward to the form', () => {
-      // A resume mid-flow. The stage is the authority, exactly as it is after the form.
-      expect(
-        decide({
-          status: 'onboarding',
-          stage: 'motivations',
-          group: '(auth)',
-          screen: 'verify',
-        }),
-      ).toBe('/onboarding/motivations');
-    });
-
-    it('moves nobody while the stage has not been read', () => {
-      // The same hold the ready branch takes, for the same reason: guessing sends
-      // somebody back a step. Bounded by hydrateStage own four seconds.
-      expect(decide({ status: 'onboarding', stage: undefined })).toBeNull();
+    it('does not wait on a stage it has stopped reading', () => {
+      // This branch used to hold routing while a Keychain read settled, to choose between
+      // two screens that no longer exist. An unread stage is no longer a reason to stay on
+      // a screen that cannot create the profile the session is missing.
+      expect(decide({ status: 'onboarding', stage: undefined })).toBe('/(auth)/create-profile');
     });
 
     it.each(['taste', 'people', 'notifications', 'done'] as const)(
-      'refuses to let a %s stage past the form while there is no profile',
+      'refuses to let a %s stage into the flow while there is no profile',
       (stage) => {
         // **The invariant.** Ranking writes need an account row and the age gate belongs
-        // to create_profile, so no stage beyond the two value screens is reachable until
-        // one exists — including a device that thinks the flow is over.
+        // to create_profile, so no stage is reachable until one exists — including a
+        // device that thinks the flow is over.
         expect(decide({ status: 'onboarding', stage })).toBe('/(auth)/create-profile');
       },
     );
@@ -199,7 +172,7 @@ describe('nextRoute', () => {
      *
      * It used to be `return null` for the whole group, which protected a running flow and
      * a finished one alike. A finished flow is not a thing that needs protecting: it left
-     * `/onboarding/motivations` reachable by anybody who could type it, and that screen
+     * `/onboarding/taste` reachable by anybody who could type it, and that screen
      * calls `begin()`, so an established account arriving there had its phase written to
      * `active` and could walk the first-run steps with a collection already behind it.
      *
@@ -223,7 +196,8 @@ describe('nextRoute', () => {
     /**
      * **Not knowing is not a reason to guess**, and guessing cost two different failures.
      *
-     * Treating an unread stage as absent sent an account resting on People back to step 3;
+     * Treating an unread stage as absent sent an account resting on People back to the
+     * picker;
      * and because `readState` settles such an account to `done` on the way past, the next
      * launch fell through to the app with People and the notification question skipped.
      * The wait is bounded in `hydrateStage`, which resolves a dead Keychain to `null`.
@@ -235,7 +209,7 @@ describe('nextRoute', () => {
     /**
      * The safety net for a stage that was lost rather than merely slow. Five rankings is
      * proof the ranking run finished, and People is the step after it — so the flow
-     * resumes there rather than at the motivation question, which would make somebody
+     * resumes there rather than at the picker, which would make somebody
      * repeat the expensive step they had already done.
      */
     it('resumes after the ranking run when the stage is gone but the rankings are not', () => {
@@ -246,13 +220,13 @@ describe('nextRoute', () => {
 
     it('still starts a genuinely new account at the top', () => {
       expect(decide({ stage: null, tasteNeeded: true, tasteRanked: 0 })).toBe(
-        '/onboarding/motivations',
+        '/onboarding/taste',
       );
     });
 
     it('does not treat a part-finished run as a finished one', () => {
       expect(decide({ stage: null, tasteNeeded: true, tasteRanked: 3 })).toBe(
-        '/onboarding/motivations',
+        '/onboarding/taste',
       );
     });
   });
@@ -276,14 +250,13 @@ describe('nextRoute', () => {
   });
   describe('the first-run flow', () => {
     /**
-     * The flow now begins at the motivation question rather than at the picker.
+     * The flow begins at the picker again (founder, physical iOS 1.0.1 build 9).
      *
-     * The account exists by this point — auth is step 2 — so there is somewhere to put
-     * an answer, and the two value screens come before the reader is asked to spend any
-     * effort on a five-film selection.
+     * The two value screens that briefly came first are gone, so the first thing a new
+     * account with a profile meets is the thing the product is: pick a movie and rank it.
      */
     it('sends a brand-new account to the top of the flow', () => {
-      expect(decide({ tasteNeeded: true })).toBe('/onboarding/motivations');
+      expect(decide({ tasteNeeded: true })).toBe('/onboarding/taste');
     });
 
     it('sends an established account to the feed instead', () => {
@@ -326,18 +299,19 @@ describe('nextRoute', () => {
      * route at all requires either a stage — which `advanceStage` writes to memory
      * synchronously, so it survives any failed disk write for the life of the process — or
      * `tasteNeeded`, which is what carries somebody with no stage in. A reader on the
-     * picker walked through Motivations and Answers to get there and holds `taste`; the
-     * bucketing that flips `tasteNeeded` underneath them cannot take that away.
+     * picker was sent there by the taste rule and holds `taste` the moment that screen
+     * advances it; the bucketing that flips `tasteNeeded` underneath them cannot take
+     * that away.
      */
     it('sends an established account away from a link into the flow it never started', () => {
       expect(
-        decide({ group: 'onboarding', screen: 'motivations', stage: null, tasteNeeded: false }),
+        decide({ group: 'onboarding', screen: 'taste', stage: null, tasteNeeded: false }),
       ).toBe('/(tabs)/feed');
     });
 
     it('and does not wait for anything to say so when the stage already has', () => {
       expect(
-        decide({ group: 'onboarding', screen: 'answers', stage: 'done', tastePending: true }),
+        decide({ group: 'onboarding', screen: 'people', stage: 'done', tastePending: true }),
       ).toBe('/(tabs)/feed');
     });
 
@@ -365,14 +339,13 @@ describe('nextRoute', () => {
 
     it('never sends a user without a profile into it', () => {
       // The picker calls `useCurrentProfile`, which throws outside a ready session — and
-      // the ranking it starts needs an account row anyway. An account that has walked the
-      // two value screens and has no profile gets the form; one that has not gets the step
-      // it is on. Neither is the picker.
+      // the ranking it starts needs an account row anyway. Whatever the stage says, a
+      // session with no profile gets the form.
       expect(decide({ status: 'onboarding', stage: 'taste', tasteNeeded: true })).toBe(
         '/(auth)/create-profile',
       );
       expect(decide({ status: 'onboarding', stage: null, tasteNeeded: true })).toBe(
-        '/onboarding/motivations',
+        '/(auth)/create-profile',
       );
     });
   });
@@ -405,19 +378,6 @@ describe('nextRoute', () => {
           screen: 'create-profile',
         },
         settled: 'create-profile',
-      },
-      {
-        input: { status: 'onboarding', group: 'onboarding', screen: 'motivations' },
-        settled: 'motivations',
-      },
-      {
-        input: {
-          status: 'onboarding',
-          stage: 'answers',
-          group: 'onboarding',
-          screen: 'answers',
-        },
-        settled: 'answers',
       },
       { input: { group: 'onboarding', screen: 'taste', tasteNeeded: true }, settled: 'taste' },
       { input: { group: '(tabs)', screen: 'feed' }, settled: 'feed' },

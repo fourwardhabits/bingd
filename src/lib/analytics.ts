@@ -96,9 +96,13 @@ export type Surface =
  * and the opening is absent because it runs before an account exists to attach it to.
  */
 export type OnboardingStep =
-  | 'motivations'
-  | 'answers'
   | 'profile'
+  /**
+   * The five-title run, reported once at its end. Kept named `pick` rather than renamed
+   * with the redesign that made choosing and ranking one loop (2026-09-09): the event is
+   * emitted at the same moment, means the same thing, and renaming it would split one
+   * funnel into two that no dashboard can add together.
+   */
   | 'pick'
   | 'payoff'
   | 'people'
@@ -269,20 +273,6 @@ export type AnalyticsEvent =
         outcome: 'continued' | 'skipped';
       };
     }
-  /**
-   * What somebody said they wanted, once, as soon as there is an account to attach it to.
-   *
-   * **The closest this product gets to asking why somebody downloaded it**, and worth
-   * more than every other onboarding event combined. Nothing else in the flow says
-   * anything about intent; the rest say only whether a screen was survived.
-   *
-   * `picked` is a delimited string over the six fixed slugs rather than an array, and
-   * that is a correctness requirement rather than a style: `sanitize` accepts scalars
-   * only, so an array would be dropped *silently* and the event would arrive looking
-   * complete with its one interesting property missing. `motivationsProperty` builds it
-   * in canonical order, so two accounts that chose the same three group together.
-   */
-  | { name: 'onboarding_motivations'; props: { count: number; picked: string } }
 
   // --- Core loop ----------------------------------------------------------
   /**
@@ -661,7 +651,6 @@ export const ANALYTICS_EVENTS = [
   'onboarding_started',
   'onboarding_completed',
   'onboarding_step_completed',
-  'onboarding_motivations',
   'title_logged',
   'ranking_started',
   'ranking_completed',
@@ -781,13 +770,6 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'step',
   'variant',
   'outcome',
-  // How many of the six motivations were chosen, and which. `picked` is a delimited
-  // string over those six fixed slugs and deliberately NOT an array: `sanitize` drops
-  // arrays, so the array version of this property would vanish without a sound and the
-  // event would look complete with its only interesting field missing. Same shape as
-  // `source_mix` above, for the same reason.
-  'count',
-  'picked',
   // People activation (2026-09-08). `mode` is already above — a closed set of words, here
   // `mutuals` or `match`. `source` is how somebody reached People, and is likewise a closed
   // set of four words (`PeopleEntry`): never a person, a handle or a referrer.

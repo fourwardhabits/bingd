@@ -17,7 +17,7 @@ import { readPref, writePref } from '@/lib/prefs';
  * awaits so a decision taken during them is not overwritten. None of that is touched
  * here, and it must not be.
  *
- * What it cannot answer is **where in a ten-step flow somebody is**, because until now
+ * What it cannot answer is **where in a multi-screen flow somebody is**, because until now
  * there was nowhere to be: the flow was one screen. Overloading the phase with the answer
  * would mean editing the one piece of state four separate defects were fixed inside, to
  * carry information it was never about.
@@ -37,8 +37,8 @@ import { readPref, writePref } from '@/lib/prefs';
  *
  * `readState` has a repair branch: an account marked `active` that already has five
  * rankings is settled to `done`, so a summary cannot repeat for ever. That was correct
- * when five rankings meant the flow was over. **It no longer does** — the ranking run is
- * step 7 of ten, and People and notifications come after it. An account that closed the
+ * when five rankings meant the flow was over. **It no longer does** — People and the
+ * notification question come after the ranking run. An account that closed the
  * app on the People step has five rankings, so the taste query now answers "not needed"
  * on the next launch, and routing that trusted it alone would drop somebody into the Feed
  * with the last two steps silently skipped.
@@ -51,7 +51,7 @@ import { readPref, writePref } from '@/lib/prefs';
  * DEVICE-LOCAL, WITH THE SAME TRADE RECORDED NEXT DOOR
  *
  * A column would be the durable answer and would cost a migration, an RLS write path and
- * a review, for a pointer whose only job is to stop six screens reappearing. The cost of
+ * a review, for a pointer whose only job is to stop finished screens reappearing. The cost of
  * being wrong on this side is small and recoverable: an account halfway through on a
  * second device is read as established and is not offered the rest. That is the trade
  * `useCompleteTasteOnboarding` already documents, taken again for the same reasons.
@@ -65,27 +65,32 @@ const STAGE_PREF = 'onboarding.stage';
  * pointer *by name*: both are gated by the auth state itself, which is a stronger rule
  * than a preference and one that a cleared device cannot lose.
  *
- * **Since 2026-09-09 the form sits between `answers` and `taste`**, and it still needs no
- * stage of its own: "has this account a `profiles` row" is the whole question, and
- * `AuthState` answers it. What the stage says on an `onboarding` session is only *how far
- * through the two value screens* somebody is, and everything past `answers` means the same
- * thing there — the form is what is missing. See `nextRoute`.
+ * ---------------------------------------------------------------------------
+ * **THE TWO VALUE SCREENS ARE GONE** (founder, physical iOS 1.0.1 build 9, 2026-09-09)
+ *
+ * `motivations` — "what do you want out of bingd.?" — and `answers` — "here is how that
+ * works" — were the first two stages this list ever had, and both have been deleted along
+ * with their screens. The founder's verdict after carrying build 9 is that the flow
+ * explains too much before the product does anything, and the product teaches itself
+ * through ranking rather than through a description of its features.
+ *
+ * Nothing else depended on them. The selection they wrote was a device preference read by
+ * exactly one screen — the second of the two — so removing the first left the second with
+ * nothing to say, and removing both left no consumer anywhere. `rewindStage` went with
+ * them: it existed for one specific hang, an `answers` stage sitting beside a selection
+ * that could not be read, which is not a state that can occur now.
+ *
+ * A stage written by an older build is not a hazard: `hydrateStage` refuses any value not
+ * in this list, so a device that got as far as `answers` before updating reads as having
+ * no stage and is placed by the taste rule, which is the same answer it would have got
+ * from a cleared Keychain.
  */
-export const STAGE_ORDER = [
-  'motivations',
-  'answers',
-  'taste',
-  'people',
-  'notifications',
-  'done',
-] as const;
+export const STAGE_ORDER = ['taste', 'people', 'notifications', 'done'] as const;
 
 export type OnboardingStage = (typeof STAGE_ORDER)[number];
 
 /** Where each stage is drawn. `done` has no route: the flow ends by opening the app. */
 export const STAGE_ROUTES: Record<Exclude<OnboardingStage, 'done'>, string> = {
-  motivations: '/onboarding/motivations',
-  answers: '/onboarding/answers',
   taste: '/onboarding/taste',
   people: '/onboarding/people',
   notifications: '/onboarding/notifications',
@@ -284,44 +289,6 @@ export async function hydrateStage(userId: string): Promise<OnboardingStage | nu
  * calls to one key. `persistStage` is what makes the durable copy follow the same rule —
  * see its note for the resume this was losing.
  */
-/**
- * Moves the account **back** to a step, which is the one thing `advanceStage` refuses.
- *
- * ---------------------------------------------------------------------------
- * WHY A DELIBERATE REWIND IS NOT THE RACE THE REFUSAL EXISTS FOR
- *
- * `advanceStage` will not go backwards because two of its callers can be in flight at
- * once — a screen's own Continue and a resume that is still hydrating — and the later of
- * the two is the answer whatever order they arrive in. That argument is about a *stale*
- * value winning. It says nothing about a screen that has just established, from the disk,
- * that the flow is not where the stage claims it is.
- *
- * There is exactly one such case and it is a hang, found by independent review of the
- * founder's reordering. `answers` is a function of the motivation selection, and the two
- * are separate preference keys written by the same Continue — so a selection that failed
- * to persist, or cannot be read, leaves `stage: 'answers'` beside nothing to answer.
- * The screen's documented recovery is to return to the question; routing then reads the
- * stage, decides `answers` is authoritative, and sends them straight back. The screen
- * hydrates the same empty selection and the loop does not end.
- *
- * So the correction is to the *stage*, not to the navigation: the flow really is at the
- * question, and once both authorities say so the router sends them there by itself. The
- * navigation that follows is then agreement rather than an argument.
- *
- * Refuses to go *forwards*, which is the mirror of the rule it relaxes: a rewind is a
- * repair, and a repair that could advance anybody would be `advanceStage` without its
- * guard.
- */
-export async function rewindStage(userId: string, back: OnboardingStage): Promise<void> {
-  const current = stages.get(userId);
-  if (!current || STAGE_ORDER.indexOf(current) <= STAGE_ORDER.indexOf(back)) return;
-
-  stages.set(userId, back);
-  publish();
-  note('onboarding', 'stage.rewind', back);
-  await persistStage(userId, back);
-}
-
 export async function advanceStage(userId: string, next: OnboardingStage): Promise<void> {
   const current = stages.get(userId);
   // `null` and `undefined` both mean "nothing to go backwards from". Only a real stage
@@ -338,7 +305,7 @@ export async function advanceStage(userId: string, next: OnboardingStage): Promi
  * The stage as a subscription, for the router.
  *
  * `useSyncExternalStore` rather than state in a provider, because the writers are
- * ordinary functions called from six different screens and a context would make every one
+ * ordinary functions called from several different screens and a context would make every one
  * of them need the provider in its test. The snapshot is a plain map read, so it is
  * already stable between publishes.
  */

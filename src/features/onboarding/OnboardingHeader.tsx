@@ -4,34 +4,36 @@ import { theme } from '@/ui/tokens';
 import { BrandLockup } from '@/ui/components';
 
 /**
- * The chrome every step of the first-run flow shares, from step 3 onward.
+ * The chrome every step of the first-run flow shares, from the profile form onward.
  *
  * ---------------------------------------------------------------------------
  * WHY THIS IS ONE COMPONENT AND NOT A HEADER PER SCREEN
  *
- * Six screens draw it. A copy each is six places for the progress line to be given a
+ * Four screens draw it. A copy each is four places for the progress line to be given a
  * different height, or for one screen to quietly keep a back button the flow no longer
  * has. The flow's chrome rules are short enough to state once and are stated here
  * (`01-screen-map.md` §4):
  *
  * - **No bottom tab bar anywhere in onboarding.** The tabs belong to the app, and a
  *   person who has not finished signing up has nowhere to go with them.
- * - **No notification bell**, before step 10 or after it. The bell belongs to the app too.
- * - **The mark and the wordmark, centred.** Steps 1 and 2 carry the lockup in their
- *   content instead, at the top left, because both are brand moments rather than chrome
- *   moments, and neither of them renders this.
+ * - **No notification bell**, before the last step or after it. The bell belongs to the
+ *   app too.
+ * - **The mark and the wordmark, centred.** Sign in carries the lockup in its content
+ *   instead, at the top left, because it is a brand moment rather than a chrome moment,
+ *   and it does not render this.
  *
  * ---------------------------------------------------------------------------
  * WHY THE PROGRESS IS A LINE AND NOT A COUNT
  *
  * A flow this long has to say that it ends. What it must not do is say *how far away* the
- * end is in units somebody can dread: "step 3 of 10" turns an introduction into a form
- * with nine more pages, and it is wrong the moment a step is added or removed.
+ * end is in units somebody can dread: "step 2 of 5" turns an introduction into a form
+ * with three more pages, and it is wrong the moment a step is added or removed — which
+ * has now happened twice.
  *
  * A two-pixel line under the status bar makes the same promise without the arithmetic. It
  * is deliberately not the app's five-pip control: those count something real and countable
- * — five chosen, then five placed — and steps 6 and 7 draw them *as well*, which only
- * reads correctly because the two look nothing alike.
+ * — five movies placed — and the picker draws them *as well*, which only reads correctly
+ * because the two look nothing alike.
  *
  * The line is hidden from assistive technology. A bar with no label is noise to a screen
  * reader, and each step already announces itself by its own heading; a spoken "40 percent"
@@ -47,17 +49,21 @@ import { BrandLockup } from '@/ui/components';
  *
  * `notifications` is last and is what makes the bar full. Nothing follows it: onboarding
  * ends by opening the app, and there is no closing screen whose job is to announce that.
+ *
+ * ---------------------------------------------------------------------------
+ * **THREE STEPS LEFT IN 2026-09-09** (founder, physical iOS 1.0.1 build 9)
+ *
+ * `motivations` and `answers` were the two screens that explained the product before the
+ * product had done anything, and both are gone with their stages — the flow teaches
+ * itself by ranking. `pick` went for a different reason: choosing and ranking are no
+ * longer two halves of the run, they are one loop repeated five times
+ * (`app/onboarding/taste.tsx`), and a bar that advanced when the picker opened and again
+ * when it closed would be measuring the same step twice.
+ *
+ * The line is shorter and therefore moves further per screen, which is the truth: the
+ * flow really is shorter.
  */
-export const FLOW_STEPS = [
-  'motivations',
-  'answers',
-  'profile',
-  'pick',
-  'rank',
-  'payoff',
-  'people',
-  'notifications',
-] as const;
+export const FLOW_STEPS = ['profile', 'rank', 'payoff', 'people', 'notifications'] as const;
 
 export type FlowStep = (typeof FLOW_STEPS)[number];
 
