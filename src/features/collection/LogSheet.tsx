@@ -152,6 +152,16 @@ export type LogSheetProps = {
    * ranking sheet behind this one is still mounted. Falls back to `onClose`.
    */
   onDone?: () => void;
+  /**
+   * Whether the sheet is presented, as distinct from whether it is mounted.
+   *
+   * Defaults to `true`, so the callers that mount this only while they want it are
+   * unchanged. A screen handing straight over to another sheet sets it false and waits
+   * for `onDismissed` before mounting the next one — see `useSheetHandoff`.
+   */
+  visible?: boolean;
+  /** iOS has finished dismissing this sheet. The next presentation is safe now. */
+  onDismissed?: () => void;
 };
 
 /**
@@ -186,6 +196,8 @@ export function LogSheet({
   openWriting,
   openSection,
   onDone,
+  visible = true,
+  onDismissed,
 }: LogSheetProps) {
   if (!title) return null;
 
@@ -206,6 +218,8 @@ export function LogSheet({
       openWriting={openWriting}
       openSection={openSection}
       onDone={onDone}
+      visible={visible}
+      onDismissed={onDismissed}
     />
   );
 }
@@ -262,6 +276,9 @@ const GATE_REASON: Record<'loading' | 'ready' | 'unavailable', string | undefine
   unavailable: 'Unavailable',
 };
 
+/** A dismissing sheet answers nothing. */
+const noopClose = () => {};
+
 function Body({
   title,
   onClose,
@@ -272,10 +289,29 @@ function Body({
   openWriting = null,
   openSection = null,
   onDone,
+  visible = true,
+  onDismissed,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const logState = useLogState(profile.id, title.id);
+  /**
+   * Whether this sheet is still on screen when an awaited write comes back.
+   *
+   * `onRank` fires after `set_bucket` resolves, and a reader who pressed Close in between
+   * has already unmounted this component — the promise carries on regardless. Handing
+   * over from there latches the caller's handoff against a modal that is gone, and
+   * nothing ever settles it: on iOS that leaves every later sheet mounted invisible.
+   * A caller's own guard cannot close this, because a ref it writes from an effect trails
+   * the state by a commit. See `useSheetHandoff`.
+   */
+  const onScreen = useRef(true);
+  useEffect(
+    () => () => {
+      onScreen.current = false;
+    },
+    [],
+  );
   /**
    * What a new note opens on for this reader, once the local store answers.
    *
@@ -719,7 +755,7 @@ function Body({
 
     endSaving();
     refresh();
-    onRank?.(chosen, 'start');
+    if (onScreen.current && visible) onRank?.(chosen, 'start');
   };
 
   /**
@@ -741,7 +777,7 @@ function Body({
 
     setConfirmRebucket(null);
     setBucketEdit(next);
-    onRank?.(next, next === state.bucket ? 'rerank' : 'rebucket');
+    if (onScreen.current && visible) onRank?.(next, next === state.bucket ? 'rerank' : 'rebucket');
   };
 
   /**
@@ -1229,7 +1265,16 @@ function Body({
   };
 
   return (
-    <Sheet visible onClose={close} label={`Log ${heading}`}>
+    <Sheet
+      visible={visible}
+      // Inert while dismissing — `Sheet` stops the taps, and this stops a close that a
+      // pending promise might still call. Both matter: iOS keeps a dismissing modal's
+      // children mounted, and unmounting one mid-dismissal is the operation the handoff
+      // exists to avoid.
+      onClose={visible ? close : noopClose}
+      onDismissed={onDismissed}
+      label={`Log ${heading}`}
+    >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"

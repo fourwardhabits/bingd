@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -45,6 +45,7 @@ import {
   TitleMetadata,
   TitleRow,
   UserRow,
+  useSheetHandoff,
 } from '@/ui/components';
 
 /**
@@ -98,6 +99,22 @@ export default function LogScreen() {
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
+  /**
+   * The log sheet and the comparison hand straight over to each other, in both
+   * directions, and each handover used to unmount one <Modal> and mount the other in the
+   * same commit — the freeze audited on 2026-09-10. See useSheetHandoff.
+   */
+  const handoff = useSheetHandoff();
+  /**
+   * The sheet that is open, readable from a callback that fired after an awaited write.
+   * onRank is that callback: closing the sheet during an in-flight set_bucket would
+   * leave its closure holding a title whose sheet is already gone, and latching a
+   * handoff against a modal that will never dismiss.
+   */
+  const loggingRef = useRef(logging);
+  useEffect(() => {
+    loggingRef.current = logging;
+  }, [logging]);
   /**
    * What a finished ranking scored, held only while the log sheet is showing it.
    *
@@ -509,20 +526,27 @@ export default function LogScreen() {
 
       <SeasonPicker
         series={series}
+        visible={!handoff.dismissing}
+        onDismissed={handoff.settled}
         onClose={() => setSeries(null)}
         onPick={(season) => {
           // The series title travels with the season, or the sheet header says "Season 3"
           // and nothing else.
-          setLogging({
+          const picked = {
             id: season.id,
             title: season.title,
             year: season.year,
             posterUri: posterUri(season.posterPath, 'card'),
-            kind: 'season',
+            kind: 'season' as const,
             seriesTitle: series?.title ?? null,
             seasonNumber: season.seasonNumber,
+          };
+          // Serialised like the others: this is a page sheet handing over to the log
+          // sheet, and a page sheet's dismissal is the longest one in the app.
+          handoff.handOff(() => {
+            setLogging(picked);
+            setSeries(null);
           });
-          setSeries(null);
         }}
       />
 
@@ -542,20 +566,42 @@ export default function LogScreen() {
           setPlacement(null);
           celebrate();
         }}
+        visible={!handoff.dismissing}
+        onDismissed={handoff.settled}
         onRank={(bucket, mode) => {
-          if (!logging) return;
-          // The log sheet closes as the comparison opens. screens.md §4 asks for one
-          // continuous motion, and two stacked sheets is the opposite of that.
-          setRanking({
-            id: logging.id,
-            title: logging.title,
+          const open = loggingRef.current;
+          /**
+           * Both halves, and the second one is the correction (independent review).
+           *
+           * The closure names the title this callback was created for; the ref proves the
+           * sheet is still showing that same one. The ref alone would substitute: close
+           * mid-write, open another result, and the awaited set_bucket for the first film
+           * would open rank_start on the second with the first bucket.
+           */
+          if (!open || !logging || open.id !== logging.id) return;
+          const subject = {
+            id: open.id,
+            title: open.title,
             bucket,
-            posterUri: logging.posterUri,
-            kind: logging.kind,
+            posterUri: open.posterUri,
+            kind: open.kind,
             mode,
+          };
+          setRanked(open);
+          /**
+           * The log sheet closes as the comparison opens. screens.md §4 asks for one
+           * continuous motion, and two stacked sheets is the opposite of that.
+           *
+           * **Through the handoff since 2026-09-10.** This used to be two `setState`
+           * calls side by side, which unmounted one `<Modal>` and mounted another in the
+           * same commit — the audited freeze, on the flow this tab is for. `setLogging`
+           * moves *inside* the queued work so this sheet still has a component to finish
+           * its dismissal against.
+           */
+          handoff.handOff(() => {
+            setRanking(subject);
+            setLogging(null);
           });
-          setRanked(logging);
-          setLogging(null);
         }}
       />
 
@@ -565,11 +611,20 @@ export default function LogScreen() {
         // Back into the sheet the ranking came out of, on the title it was about.
         // `ranked` is that title held across the handoff — `logging` was cleared when the
         // comparison opened, because two stacked sheets is what screens.md §4 forbids.
+        visible={!handoff.dismissing}
+        onDismissed={handoff.settled}
         onFinishLog={(result) => {
-          setRanking(null);
-          if (!ranked) return;
-          setPlacement(result);
-          setLogging(ranked);
+          if (!ranked) {
+            setRanking(null);
+            return;
+          }
+          // The return leg of the same handover, and the same hazard pointed the other
+          // way: the comparison dismissing while the log sheet is asked to present.
+          handoff.handOff(() => {
+            setRanking(null);
+            setPlacement(result);
+            setLogging(ranked);
+          });
         }}
         surface="search"
       />

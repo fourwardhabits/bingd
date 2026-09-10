@@ -153,6 +153,18 @@ export type RankingSheetProps = {
    * where the person decided to rank something.
    */
   surface: Surface;
+  /**
+   * Whether the sheet is presented, as distinct from whether it is mounted.
+   *
+   * Defaults to `true`, so the three screens that mount this only while they want it are
+   * unchanged. Onboarding sets it `false` between a placement and the picker becoming
+   * live again, and keeps the component mounted so iOS can finish dismissing before
+   * anything else is presented — the return half of the same serialisation `handoff`
+   * does on the way in. See `Sheet`'s `onDismissed`.
+   */
+  visible?: boolean;
+  /** iOS has finished dismissing this sheet. The next presentation is safe now. */
+  onDismissed?: () => void;
 };
 
 /**
@@ -173,6 +185,8 @@ export function RankingSheet({
   onFinishLog,
   onPlaced,
   surface,
+  visible = true,
+  onDismissed,
 }: RankingSheetProps) {
   if (!subject) return null;
 
@@ -186,9 +200,14 @@ export function RankingSheet({
       onFinishLog={onFinishLog}
       onPlaced={onPlaced}
       surface={surface}
+      visible={visible}
+      onDismissed={onDismissed}
     />
   );
 }
+
+/** A dismissing sheet answers nothing. */
+const noopClose = () => {};
 
 function Session({
   subject,
@@ -196,6 +215,8 @@ function Session({
   onFinishLog,
   onPlaced,
   surface,
+  visible = true,
+  onDismissed,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -631,7 +652,19 @@ function Session({
   }, [onPlaced, step]);
 
   return (
-    <Sheet visible onClose={() => void close()} label={`Rank ${subject.title}`}>
+    <Sheet
+      visible={visible}
+      /**
+       * Inert while dismissing, for the reason `TasteBucketSheet` states: iOS keeps a
+       * dismissing modal's children mounted, so closing it again would unmount this
+       * `<Modal>` mid-dismissal — the operation the serialisation exists to avoid.
+       *
+       * Only reachable when a caller passes `visible`, which today is onboarding alone.
+       */
+      onClose={visible ? () => void close() : noopClose}
+      onDismissed={onDismissed}
+      label={`Rank ${subject.title}`}
+    >
       <View style={styles.sheet}>
         {step?.state === 'placed' && onPlaced ? (
           /**
@@ -662,11 +695,25 @@ function Session({
             onFinishLog={
               onFinishLog
                 ? () => {
-                    // `close` is a no-op against the server at this point — `apply` cleared
-                    // `openSession` the moment the placement landed, because the server
-                    // deletes a session it has finished. It is still the way out, so the
-                    // sheet unmounts through the same path every other exit uses.
-                    void close();
+                    /**
+                     * **No `close()` here, and that is the whole of a soft-lock removed**
+                     * (independent review).
+                     *
+                     * It used to call `void close()` first, on the reasoning that the
+                     * sheet should leave by the same path as every other exit. Against
+                     * the server that was harmless — `apply` clears `openSession` the
+                     * moment a placement lands — but against the *presentation* it was
+                     * fatal once the caller began serialising: `close` runs `onClose`,
+                     * the caller cleared this sheet, and the unmount batched into the
+                     * same commit that asked for the dismissal. React Native removes the
+                     * modal's listener on unmount, so `onDismiss` never fired, the
+                     * caller's handoff never settled, and every log sheet afterwards was
+                     * mounted invisible. Deterministic, and iOS only.
+                     *
+                     * So the caller owns the transition, exactly as it does for
+                     * `onPlaced`: it clears this sheet from inside its own handoff, once
+                     * the dismissal it asked for has been acknowledged.
+                     */
                     onFinishLog({
                       score: step.score,
                       position: step.position,

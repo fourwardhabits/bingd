@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -89,6 +89,7 @@ import {
   Text,
   TitleHero,
   TitleRow,
+  useSheetHandoff,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -252,6 +253,22 @@ export default function TitleScreen() {
    */
   const [openSection, setOpenSection] = useState<'who' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
+  /**
+   * The log sheet and the comparison hand straight over to each other here too, and did
+   * it by unmounting one <Modal> and mounting another in the same commit — the freeze
+   * audited on 2026-09-10. See useSheetHandoff.
+   */
+  const handoff = useSheetHandoff();
+  /**
+   * The sheet that is open, readable from a callback that fired after an awaited write.
+   * onRank is that callback: closing the sheet during an in-flight set_bucket would leave
+   * its closure holding a title whose sheet is already gone, and latch a handoff against
+   * a modal that will never dismiss.
+   */
+  const loggingRef = useRef(loggingTitle);
+  useEffect(() => {
+    loggingRef.current = loggingTitle;
+  }, [loggingTitle]);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
@@ -979,7 +996,16 @@ export default function TitleScreen() {
    * voice does not go, and the deletion behaviour behind it is untouched.
    */
   const confirmRemoval = () => {
-    setManaging(false);
+    // Serialised like the four rows beside it: an Alert is a UIAlertController presented
+    // from this same view controller, so closing the options sheet in the same commit is
+    // the swap the 2026-09-10 audit is about. See `useSheetHandoff`.
+    handoff.handOff(() => {
+      setManaging(false);
+      confirmRemovalAlert();
+    });
+  };
+
+  const confirmRemovalAlert = () => {
     Alert.alert(
       `Remove ${displayTitle ?? title.title} from your collection?`,
       'This removes your rating, watch date, review or private note, and related activity. You can log it again later.\n\nIt also removes any reactions and comments on that activity.',
@@ -1782,19 +1808,32 @@ export default function TitleScreen() {
           setActionError(null);
           celebrate();
         }}
+        visible={!handoff.dismissing}
+        onDismissed={handoff.settled}
         onRank={(bucket, mode) => {
-          if (!loggingTitle) return;
-          setRankingSubject({
-            id: loggingTitle.id,
-            title: loggingTitle.title,
+          const open = loggingRef.current;
+          // Both halves: the closure names the title this callback was made for, the ref
+          // proves the sheet still shows it. See the same guard in app/(tabs)/log.tsx.
+          if (!open || !loggingTitle || open.id !== loggingTitle.id) return;
+          const subject = {
+            id: open.id,
+            title: open.title,
             bucket,
-            posterUri: loggingTitle.posterUri,
-            kind: loggingTitle.kind,
+            posterUri: open.posterUri,
+            kind: open.kind,
             mode,
+          };
+          setRankedTitle(open);
+          // Serialised since 2026-09-10: this used to unmount this sheet and mount the
+          // comparison in one commit. Clearing the title moves inside the queued work so
+          // the dismissal has a component to finish against.
+          handoff.handOff(() => {
+            // Cleared with the swap rather than before it: moved out, the post-rank score
+            // and Done visibly popped out of the log sheet while it was still sliding away.
+            setPlacement(null);
+            setRankingSubject(subject);
+            setLoggingTitle(null);
           });
-          setRankedTitle(loggingTitle);
-          setPlacement(null);
-          setLoggingTitle(null);
         }}
       />
       <RankingSheet
@@ -1803,9 +1842,13 @@ export default function TitleScreen() {
         // Ranking is a subflow of logging, so it returns to the log rather than ending
         // at a number. The same sheet, on the same title, with the score at the top of
         // it — there is one implementation of "the rest of your log" and this is it.
+        visible={!handoff.dismissing}
+        onDismissed={handoff.settled}
         onFinishLog={(result) => {
-          setRankingSubject(null);
-          if (!rankedTitle) return;
+          if (!rankedTitle) {
+            setRankingSubject(null);
+            return;
+          }
           setLogIntent('note');
           /**
            * **Cleared, and it is the founder's "Add more details opens only the Note".**
@@ -1823,8 +1866,13 @@ export default function TitleScreen() {
            */
           setOpenWriting(null);
           setOpenSection(null);
-          setPlacement(result);
-          setLoggingTitle(rankedTitle);
+          // The return leg of the same handover, serialised for the same reason: the
+          // comparison dismissing while the log sheet is asked to present.
+          handoff.handOff(() => {
+            setRankingSubject(null);
+            setPlacement(result);
+            setLoggingTitle(rankedTitle);
+          });
         }}
         surface="title"
       />
@@ -1857,7 +1905,13 @@ export default function TitleScreen() {
        */}
       {managing ? (
         <Sheet
-          visible
+          /**
+           * Serialised like every other handover on this screen: four rows below open a
+           * log or a comparison, and tearing this <Modal> down in the same commit is the
+           * freeze audited on 2026-09-10. See useSheetHandoff.
+           */
+          visible={!handoff.dismissing}
+          onDismissed={handoff.settled}
           onClose={() => setManaging(false)}
           label={`Options for ${displayTitle ?? title.title}`}
         >
@@ -1900,8 +1954,10 @@ export default function TitleScreen() {
                     : 'Add a note'
               }
               onPress={() => {
-                setManaging(false);
-                openLog('note', hasReview ? 'public' : 'private');
+                handoff.handOff(() => {
+                  setManaging(false);
+                  openLog('note', hasReview ? 'public' : 'private');
+                });
               }}
             />
 
@@ -1932,8 +1988,10 @@ export default function TitleScreen() {
               icon="people-outline"
               label="Who I watched with"
               onPress={() => {
-                setManaging(false);
-                openLog('note', null, 'who');
+                handoff.handOff(() => {
+                  setManaging(false);
+                  openLog('note', null, 'who');
+                });
               }}
             />
 
@@ -2009,8 +2067,10 @@ export default function TitleScreen() {
               icon="star-outline"
               label="Update your rating"
               onPress={() => {
-                setManaging(false);
-                openLog();
+                handoff.handOff(() => {
+                  setManaging(false);
+                  openLog();
+                });
               }}
             />
             {/**
@@ -2033,17 +2093,19 @@ export default function TitleScreen() {
               onPress={
                 rankedBucket
                   ? () => {
-                      setManaging(false);
                       setActionError(null);
                       setRankedTitle(loggable);
-                      setRankingSubject({
-                        id: title.id,
-                        title: title.title,
-                        bucket: rankedBucket,
-                        posterUri: posterUri(title.poster_path, 'card'),
-                        // Only a film or a season is ever ranked; a series has no menu.
-                        kind: title.kind === 'season' ? 'season' : 'movie',
-                        mode: 'again',
+                      handoff.handOff(() => {
+                        setManaging(false);
+                        setRankingSubject({
+                          id: title.id,
+                          title: title.title,
+                          bucket: rankedBucket,
+                          posterUri: posterUri(title.poster_path, 'card'),
+                          // Only a film or a season is ever ranked; a series has no menu.
+                          kind: title.kind === 'season' ? 'season' : 'movie',
+                          mode: 'again',
+                        });
                       });
                     }
                   : undefined

@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { useCurrentProfile, UseDifferentAccountButton } from '@/features/auth';
 import { useRankedCollection } from '@/features/collection/use-collection';
@@ -27,6 +27,7 @@ import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import {
   Button,
+  type BucketId,
   LoadingScreen,
   Poster,
   Screen,
@@ -77,6 +78,8 @@ import {
  *       | choose a title
  *     bucket             TasteBucketSheet over that title
  *       | how was it?                          | dismissed -> back to picking
+ *     handoff            the bucket sheet dismissing, nothing presented yet
+ *       | iOS onDismiss, or immediately on Android
  *     ranking            RankingSheet over that title
  *       | placed                               | dismissed -> back to picking
  *     picking            progress is now n of 5
@@ -84,6 +87,13 @@ import {
  * `step` is one value, so the sheets are mutually exclusive *by construction* rather than
  * by two conditions that have to agree. There is no arrangement of state in which both
  * are non-null, which is the invariant the founder's dead end was the absence of.
+ *
+ * **`handoff` is the 2026-09-10 fix and it is about UIKit rather than about React.**
+ * One value stopped the two sheets being *visible* together; it did not stop them being
+ * swapped in one commit, which unmounts one `<Modal>` and mounts another while the first
+ * is still animating out. UIKit refuses to present over a dismissing controller, React
+ * believes it presented, and the transparent window that survives eats every touch — the
+ * picker draws correctly underneath and is dead. `RunStep` carries the full account.
  *
  * The payoff is still derived rather than stored — see `placed` — because progress that
  * is a fact about `rankings` cannot disagree with `rankings`.
@@ -136,6 +146,17 @@ export default function TasteOnboardingScreen() {
 
   const [input, setInput] = useState('');
   const [step, setStep] = useState<RunStep>({ kind: 'picking' });
+  /**
+   * The current step, readable from a callback that fired after an awaited request.
+   *  is that callback and its closure can be several transitions old.
+   */
+  const stepRef = useRef(step);
+  // Assigned in an effect rather than during render: React 19 forbids touching a ref
+  // while rendering, and the ordering is right anyway — child effects run before this
+  // one, and the placement it serves lands a round trip later.
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
 
   /**
    * Enrol, or leave — the screen decides, because routing deliberately will not.
@@ -228,6 +249,35 @@ export default function TasteOnboardingScreen() {
   const placed = Math.min(rankedIds.size, PICK_TARGET);
   const payoff = placed >= PICK_TARGET;
 
+  /**
+   * `handoff` -> `ranking`, once the bucket sheet's presentation is actually gone.
+   *
+   * A functional update and a `kind` check, so it is idempotent: iOS firing `onDismiss`
+   * more than once costs nothing and cannot build a second subject. Nothing here is
+   * recomputed — the pick and the bucket were carried through the `handoff` state
+   * precisely so this is an assignment rather than a derivation.
+   *
+   * Only iOS reaches it. Android never enters `handoff` at all; the branch is at the
+   * call site in `onChosen`, which is where its reasoning lives.
+   */
+  const handOver = useCallback(() => {
+    setStep((current) => {
+      if (current.kind !== 'handoff') return current;
+      // No bucket means the question was closed rather than answered, so the dismissal
+      // was all there was to wait for.
+      return current.bucket ? rankingStepFor({ pick: current.pick, bucket: current.bucket }) : { kind: 'picking' };
+    });
+  }, []);
+
+
+  /**
+   * iOS has finished dismissing the comparison sheet: act on whatever was picked during
+   * it, or simply be the picker.
+   */
+  const finishReturn = useCallback(() => {
+    setStep((current) => (current.kind === 'returning' ? { kind: 'picking' } : current));
+  }, []);
+
   // Nothing until both answers are in. Drawing the picker first and then deciding shows
   // the grid for a beat to somebody who is about to be sent to the feed, which is the
   // wrong first thing to say to an account that has been in use for months. The ranked
@@ -253,11 +303,70 @@ export default function TasteOnboardingScreen() {
   const choose = (pick: TasteSubject) => {
     if (rankedIds.has(pick.id)) return;
     setInput('');
-    setStep({ kind: 'bucket', pick });
+    setStep((current) => {
+      // Picked while the comparison sheet is still dismissing: held rather than acted on,
+      // so the bucket sheet is not presented over a dismissing controller. `returning`
+      // carries the reasoning.
+      /**
+       * A dismissing sheet still covers the screen — its window is up until UIKit takes
+       * it down — so a poster is not reachable during `returning` any more than during
+       * `handoff`, and RNTL models that faithfully through `accessibilityViewIsModal`.
+       * Left alone rather than queued: machinery for a state nobody can reach is
+       * machinery no test can hold to account.
+       */
+      if (current.kind === 'returning') return current;
+      /**
+       * During `handoff` the bucket sheet is still on screen, so a poster is not
+       * reachable and this should not be possible — but replacing the step if it ever
+       * were would discard a `set_bucket` that has already committed, leaving a title
+       * bucketed and never ranked with nothing left to fire `handOver` (independent
+       * review). Left alone rather than overwritten.
+       */
+      if (current.kind === 'handoff') return current;
+      return { kind: 'bucket', pick };
+    });
   };
 
-  /** Back to the picker, from a dismissal at either sheet. Never anywhere else. */
-  const backToPicker = () => setStep({ kind: 'picking' });
+  /**
+   * The bucket question was closed rather than answered.
+   *
+   * Serialised like every other exit (independent review): unmounting it here would leave
+   * a presented `<Modal>` dismissing with the picker live behind it, so a poster tapped
+   * inside that window presents a *second* bucket sheet over the first. Same class as the
+   * bug this file is about, reached by Close instead of by a placement. Nothing has been
+   * written, so `handoff` carries no bucket and lands on the picker.
+   */
+  const backToPicker = () =>
+    setStep((current) =>
+      current.kind === 'bucket' && Platform.OS === 'ios'
+        ? { kind: 'handoff', pick: current.pick }
+        : { kind: 'picking' },
+    );
+
+  /**
+   * The comparison sheet was dismissed — placed, or abandoned mid-comparison.
+   *
+   * iOS keeps it mounted through the slide-out so nothing presents over it; Android has
+   * no presentation to serialise against and goes straight back to the picker.
+   */
+  const returnToPicker = () =>
+    setStep((current) => {
+      if (current.kind === 'ranking') {
+        return Platform.OS === 'ios'
+          ? { kind: 'returning', subject: current.subject }
+          : { kind: 'picking' };
+      }
+      /**
+       * Already dismissing, so this is a second `onClose` and it must do nothing.
+       *
+       * `Session.close()` awaits `rankCancel` before calling back, so two taps on Close
+       * produce two calls — and the second used to force `picking`, unmounting the
+       * `<Modal>` mid-dismissal with `finishReturn` never firing. That is the freeze,
+       * reached through the fix for it (independent review).
+       */
+      if (current.kind === 'returning') return current;
+      return { kind: 'picking' };
+    });
 
   const leavePayoff = () => {
     track({ name: 'onboarding_step_completed', props: { step: 'payoff', outcome: 'continued' } });
@@ -467,32 +576,94 @@ export default function TasteOnboardingScreen() {
 
       {/* One sheet at a time, by construction. See the header. */}
       <TasteBucketSheet
-        subject={step.kind === 'bucket' ? step.pick : null}
+        // Mounted through `handoff` as well, so the dismissal it is in the middle of has
+        // a component to finish against. `visible` is what actually closes it.
+        subject={
+          step.kind === 'bucket' ? step.pick : step.kind === 'handoff' ? step.pick : null
+        }
+        visible={step.kind === 'bucket'}
         // Dismissing the question returns to the picker rather than leaving the title
         // hanging as a cursor nothing can clear. Nothing has been written yet.
         onClose={backToPicker}
         onChosen={(bucket) => {
-          if (step.kind !== 'bucket') return;
-          setStep({
-            kind: 'ranking',
-            subject: {
-              id: step.pick.id,
-              title: step.pick.title,
-              bucket,
-              posterUri: step.pick.posterUri ?? null,
-              kind: 'movie',
-              mode: 'start',
-            },
+          /**
+           * **A functional update, because this closure outlives the render it came
+           * from** (independent review, verified experimentally).
+           *
+           * `set_bucket` is awaited before `onChosen` fires, so somebody can press Close
+           * in between. `step` captured here still says `bucket`, so the guarded version
+           * of this read as "still on the question" when the sheet had already been
+           * closed and unmounted — and moved the run into `handoff`. A modal that was
+           * never presented never dismisses, so `onDismiss` never came and the step was
+           * terminal: the title bucketed, never ranked, and the picker showing a number
+           * that would not move. Android, which does not enter `handoff`, carried on
+           * ranking — so the two platforms disagreed about the same tap.
+           *
+           * Reading the current state closes it: a run that is no longer on the question
+           * is left exactly where it is, which is what pressing Close asked for.
+           */
+          setStep((current) => {
+            if (current.kind !== 'bucket') return current;
+            const handoff = { kind: 'handoff', pick: current.pick, bucket } as const;
+          /**
+           * iOS waits; Android does not, and the branch is here rather than in an effect.
+           *
+           * On iOS, going straight to `ranking` asks UIKit to present the comparison
+           * sheet while this one is still dismissing — see `RunStep`'s `handoff`.
+           *
+           * On Android there is nothing to wait for: a modal is a view in the same
+           * window, `onDismiss` is iOS-only in React Native, and parking in `handoff`
+           * would strand the flow on the platform that never had the bug. Deciding it
+           * here keeps that a branch on one value instead of an effect that sets state
+           * as soon as it runs — which is a cascading render, and which lint refuses.
+           *
+           * **No timeout on the iOS side, and the reason is not an escape hatch.**
+           *
+           * An earlier version of this note claimed a missed `onDismiss` would cost only
+           * a tap, because the picker is mounted underneath. That is wrong and an
+           * independent review said so: if the callback never came, the dismissal never
+           * completed, so the window is still there and the picker is exactly as
+           * untappable as it was before this fix. There is no degraded mode to fall back
+           * on.
+           *
+           * It carries no watchdog because the callback is not best-effort. React
+           * Native's modal dismisses on `visible=false` while mounted and calls
+           * `onDismiss` from the completion on both the legacy and Fabric renderers —
+           * checked in `Modal.js`, `RCTModalHostView.m` and
+           * `RCTModalHostViewComponentView.mm` rather than assumed. A timer here would be
+           * a guess at an animation length in front of every ranking, guarding a path
+           * that fires or does not fire for reasons a delay cannot influence.
+           */
+            return Platform.OS === 'ios' ? handoff : rankingStepFor(handoff);
           });
         }}
+        onDismissed={handOver}
       />
 
       <RankingSheet
-        subject={step.kind === 'ranking' ? step.subject : null}
+        /**
+         * Mounted through `returning` as well, so the dismissal it is in the middle of
+         * has a component to finish against — the return half of `handoff`.
+         *
+         * Without this the loop still had one unserialised swap left in it (independent
+         * review): the comparison sheet dismissed by unmounting, so a poster tapped
+         * inside that ~300ms would present the bucket sheet over a dismissing controller
+         * and strand the screen exactly as before. Once per turn of the loop rather than
+         * once per run.
+         */
+        subject={
+          step.kind === 'ranking'
+            ? step.subject
+            : step.kind === 'returning'
+              ? step.subject
+              : null
+        }
+        visible={step.kind === 'ranking'}
+        onDismissed={finishReturn}
         // Dismissed mid-comparison. The session is cancelled by the sheet itself, the
         // title is not ranked, and the picker is where somebody can act — including on
         // the same film again, which is why the run holds no cursor to be confused by it.
-        onClose={backToPicker}
+        onClose={returnToPicker}
         /**
          * The placement, with no reveal and no log sheet. This is the founder's
          * "transition directly to the next picker", and it is one assignment because the
@@ -502,13 +673,29 @@ export default function TasteOnboardingScreen() {
          * `starter_movies` server-side, so the grid has to ask again to stop offering it.
          */
         onPlaced={() => {
-          if (step.kind !== 'ranking') return;
-          const id = step.subject.id;
+          /**
+           * Read through the ref, not through the closure (independent review).
+           *
+           * This fires from an effect after an awaited RPC, so the `step` it closed over
+           * may be several transitions old — and acting on a stale one could drop the
+           * `confirmed` record for a placement the server had already made.
+           *
+           * A ref rather than a functional `setStep`, because two pieces of state move
+           * here and a state updater must stay pure: calling `setConfirmed` from inside
+           * one is a side effect in a function React is free to run twice, and it cost a
+           * placement that never reached the count.
+           */
+          const current = stepRef.current;
+          if (current.kind !== 'ranking') return;
+          const subject = current.subject;
           note('onboarding', 'placed', String(placed + 1));
           // Before the step changes, so the picker cannot draw one frame with the old
           // count. See `confirmed` for the sixth-ranking race this closes.
-          setConfirmed((was) => (was.includes(id) ? was : [...was, id]));
-          setStep({ kind: 'picking' });
+          setConfirmed((was) => (was.includes(subject.id) ? was : [...was, subject.id]));
+          // `returning` rather than `picking` on iOS: the picker is revealed either way,
+          // but the sheet stays mounted until its dismissal is acknowledged so the next
+          // pick cannot present over it.
+          setStep(Platform.OS === 'ios' ? { kind: 'returning', subject } : { kind: 'picking' });
           void queryClient.invalidateQueries({
             queryKey: ['onboarding-starter-movies', profile.id],
           });
@@ -529,7 +716,61 @@ export default function TasteOnboardingScreen() {
 type RunStep =
   | { kind: 'picking' }
   | { kind: 'bucket'; pick: TasteSubject }
-  | { kind: 'ranking'; subject: RankingSubject };
+  /**
+   * The bucket sheet is dismissing and the comparison sheet has not been asked for yet.
+   *
+   * **This state is the 2026-09-10 freeze fix and it exists for iOS's benefit alone.**
+   * `bucket` and `ranking` are two different `<Modal>`s, so moving straight between them
+   * unmounted one and mounted the other *in the same commit* — and UIKit cannot present a
+   * view controller while it is still dismissing another from the same presenter. The
+   * presentation is refused, React believes it succeeded, and the transparent window left
+   * behind swallows every touch: the picker underneath draws correctly and is dead, which
+   * is exactly what the founder photographed. Force-quitting clears it because the window
+   * belongs to the process.
+   *
+   * Why the **first** title and not the others: `rank_start` "places it outright when its
+   * band is empty" (`20260825000200`), so film one on a new account has no comparisons at
+   * all. The comparison sheet presents and is dismissed again within one round trip,
+   * while the bucket sheet's 300ms slide-out is still running. Films two to five are held
+   * open by a person answering comparisons, so the dismissal has long finished.
+   *
+   * The subject is carried through so nothing has to be recomputed on the far side.
+   */
+  | { kind: 'handoff'; pick: TasteSubject; bucket?: BucketId }
+  | { kind: 'ranking'; subject: RankingSubject }
+  /**
+   * The comparison sheet dismissing, with the picker already live behind it.
+   *
+   * The return half of `handoff`, and the second unserialised swap in this loop
+   * (independent review). The comparison sheet used to dismiss by unmounting, so a poster
+   * tapped inside its ~300ms slide-out presented the bucket sheet over a dismissing
+   * controller — the same freeze, once per turn rather than once per run.
+   *
+   * Nothing is queued across it: the dismissing sheet's window still covers the screen,
+   * so no poster is reachable until it is gone. What this state buys is the invariant
+   * itself — the comparison sheet is never *unmounted while presented*, on the placement
+   * path or on a dismissal mid-comparison.
+   */
+  | { kind: 'returning'; subject: RankingSubject };
+
+/**
+ * The comparison step for a title and the bucket it was just given.
+ *
+ * One function because two callers build it — iOS after the dismissal is acknowledged,
+ * Android immediately — and two copies of a subject is how the two platforms would come
+ * to rank slightly different things.
+ */
+const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep => ({
+  kind: 'ranking',
+  subject: {
+    id: from.pick.id,
+    title: from.pick.title,
+    bucket: from.bucket,
+    posterUri: from.pick.posterUri ?? null,
+    kind: 'movie',
+    mode: 'start',
+  },
+});
 
 /** Five dots and a count, not a percentage. The number is small enough to count. */
 function Progress({ placed }: { placed: number }) {

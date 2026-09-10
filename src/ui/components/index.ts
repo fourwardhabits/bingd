@@ -85,3 +85,4 @@ export { TitleMetadata, type TitleMetadataProps } from './TitleMetadata';
 export { TitleRow } from './TitleRow';
 export { UserRow, type UserRowProps } from './UserRow';
 export { Wordmark, type WordmarkProps } from './Wordmark';
+export { useSheetHandoff } from './use-sheet-handoff';

@@ -12,6 +12,53 @@ export type SheetProps = {
   /** Announced when the sheet opens. */
   label: string;
   children: React.ReactNode;
+  /**
+   * Called when iOS has **finished** dismissing the presented view controller.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THIS EXISTS, AND WHY IT IS OPTIONAL
+   *
+   * Almost every caller in this app renders `<Sheet visible ...>` — the literal `true` —
+   * and dismisses by unmounting the component. That is fine when nothing else wants the
+   * screen next: UIKit is asked to dismiss, and the frame it takes to animate is nobody's
+   * business.
+   *
+   * It is **not** fine when a second sheet is mounted in the same commit, because UIKit
+   * cannot present a view controller while it is still dismissing another from the same
+   * presenter. The presentation is refused, React believes it succeeded, and the window
+   * that is left behind is transparent and swallows every touch — the screen underneath
+   * draws correctly and is dead. Force-quitting clears it because the window is
+   * process-local. That is the 2026-09-10 onboarding freeze, reproduced twice.
+   *
+   * So a caller that hands straight over to another sheet keeps this one mounted, sets
+   * `visible` false, waits for this callback, and only then mounts the next.
+   *
+   * **Every chained handover found so far does that.** The audit of 2026-09-10 covered:
+   * the onboarding run (`app/onboarding/taste.tsx`), the log sheet and the comparison in
+   * both directions on `app/(tabs)/log.tsx` and `app/title/[id].tsx`, the season picker
+   * handing over to the log sheet, and the title screen's Ranked options opening either
+   * of them, and the profile menu's Report row opening `ReportSheet`. `useSheetHandoff`
+   * is the shared mechanism; this prop is what it waits on.
+   *
+   * **That list was wrong twice before it was right**, so treat it as the current state
+   * of a search rather than a proof of completeness: its first pass enumerated named
+   * sheet *components* and so missed `SeasonPicker` (a bare `<Modal>`) and the title
+   * screen's inline options sheet; a later pass missed the profile menu. If you are
+   * adding a row that closes one sheet and opens another, it belongs here.
+   *
+   * **Do not "simplify" one of those back into a pair of `setState` calls.** That is
+   * precisely the shape of the bug, and it does not look like one: the screen renders
+   * perfectly and stops accepting touches.
+   *
+   * A caller that opens *one* sheet and closes it back to the screen underneath needs
+   * none of this and passes the literal `true`, as most of them do.
+   *
+   * **iOS only.** React Native fires `onDismiss` on iOS and not on Android, which is
+   * correct rather than a gap: an Android modal is a view in the same window and has no
+   * presentation to serialise against. Callers branch on the platform rather than waiting
+   * for a callback that will not arrive.
+   */
+  onDismissed?: () => void;
 };
 
 /**
@@ -39,7 +86,7 @@ export type SheetProps = {
  * it lifts the sheet clear, and it re-resolves `maxHeight: '90%'` against the space
  * that is actually left, so a tall sheet shrinks instead of running off the top.
  */
-export function Sheet({ visible, onClose, label, children }: SheetProps) {
+export function Sheet({ visible, onClose, label, children, onDismissed }: SheetProps) {
   const keyboard = useKeyboardHeight();
   const insets = useSafeAreaInsets();
 
@@ -66,10 +113,31 @@ export function Sheet({ visible, onClose, label, children }: SheetProps) {
       transparent
       animationType="slide"
       onRequestClose={onClose}
+      onDismiss={onDismissed}
       accessibilityViewIsModal
       statusBarTranslucent
     >
-      <View style={[styles.root, keyboard > 0 && { paddingBottom: keyboard }]}>
+      {/**
+       * **Nothing in a dismissing sheet answers, and this is where that is decided once.**
+       *
+       * iOS keeps a modal's children mounted for the whole slide-out, so every control on
+       * a sheet that is closing is still live: its Close button, its Done, its chips, and
+       * the backdrop behind them. Any of them taken during that window unmounts this
+       * `<Modal>` **mid-dismissal**, which is the operation the whole serialisation exists
+       * to avoid, and it lands the screen in exactly the state it was fixed out of.
+       *
+       * Guarding the handlers one at a time was the first attempt and an independent
+       * review found the ones that had been missed — a sheet has more ways out than
+       * anybody enumerates correctly. `pointerEvents` is the same rule stated once, for
+       * every sheet in the app and every control on it, including ones added later.
+       *
+       * Only reachable for a caller that drives `visible`; the twenty-odd callers that
+       * pass the literal `true` are unaffected, because it is never false for them.
+       */}
+      <View
+        pointerEvents={visible ? 'auto' : 'none'}
+        style={[styles.root, keyboard > 0 && { paddingBottom: keyboard }]}
+      >
         {/* Tapping away closes.
 
             Hidden from the accessibility tree on purpose. Every sheet in the app

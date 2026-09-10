@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -11,6 +11,26 @@ import { resetTasteIntent } from './use-taste-onboarding';
 // Not colocated with the route: everything under app/ is bundled by expo-router's
 // require.context. See app-directory.test.ts.
 import TasteScreen from '../../../app/onboarding/taste';
+
+/**
+ * Dismissals waiting to be acknowledged, when a test wants to stand inside the gap.
+ *
+ * iOS takes about 300ms to slide a sheet away and only then calls `onDismiss`. That gap
+ * is where the bug lived, so one test below holds it open deliberately.
+ */
+/** The shared faithful Modal lives in jest.setup.js; this drives its held dismissals. */
+const dismissals = () =>
+  (globalThis as unknown as { __modalDismissals: { hold: boolean; pending: (() => void)[] } })
+    .__modalDismissals;
+const releaseDismissals = async () => {
+  const waiting = dismissals().pending.splice(0);
+  // Inside `act`: each of these calls `setStep`, and driving React state from outside it
+  // is what makes the suite print the act warning with a stack pointing here.
+  await act(async () => {
+    waiting.forEach((done) => done());
+  });
+};
+
 
 /**
  * The first five, as a loop: pick, rank, pick, rank (founder, physical iOS 1.0.1 build 9).
@@ -240,6 +260,8 @@ const starterGrid = (ids: string[]) => {
 let mockStarterIds: string[] = [];
 
 beforeEach(() => {
+  // Dismissals acknowledge themselves unless a test says otherwise, which is what a
+  // device does. Reset both halves so a held one cannot leak into the next case.
   issued = 0;
   mockRpc.mockReset();
   mockReplace.mockReset();
@@ -318,6 +340,35 @@ const open = async () => {
 const search = async (view: Awaited<ReturnType<typeof open>>, term: string) => {
   await fireEvent.changeText(view.getByLabelText('Search for a movie'), term);
   await waitFor(() => expect(view.getByLabelText(/Inception, 2010/)).toBeTruthy());
+};
+
+/**
+ * Answer *How was it?* and then finish the dismissal the way iOS would.
+ *
+ * ---------------------------------------------------------------------------
+ * **The second half is the test playing UIKit's part, and it is not a workaround.**
+ *
+ * Since the 2026-09-10 freeze fix the run does not go straight from the bucket sheet to
+ * the comparison sheet. It waits in `handoff` until the bucket sheet's presentation is
+ * actually gone, because UIKit refuses to present a view controller over one that is
+ * still dismissing and the transparent window left behind eats every touch. On iOS the
+ * signal is `<Modal onDismiss>`; jest has no UIKit and never fires it, so the run
+ * correctly waits forever here unless the test supplies it.
+ *
+ * `onDismiss` is only passed by the bucket sheet, so the modal carrying one is the modal
+ * being dismissed — no other sheet has to be told apart from it.
+ *
+ * **What this cannot prove**: that iOS really serialises the two presentations. Only a
+ * device can. What it does prove is the contract this side of the boundary — that the
+ * comparison sheet is not asked for until the dismissal is acknowledged, and that the run
+ * completes when it is.
+ */
+const chooseBucket = async (view: Awaited<ReturnType<typeof open>>, label = 'I liked it') => {
+  await fireEvent.press(view.getByLabelText(label));
+  // The bucket sheet closes, the mocked modal reports its dismissal, and the run leaves
+  // `handoff` for the comparison. Waiting on the question being *gone* is the observable
+  // half of that; the comparison arriving is what each caller then asserts.
+  await waitFor(() => expect(view.queryByText('How was it?')).toBeNull());
 };
 
 describe('the picker', () => {
@@ -460,7 +511,7 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
@@ -472,7 +523,7 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     // `rank_start` is the same session opener the Log tab drives. Nothing about the
     // ranking algorithm is reimplemented by onboarding.
@@ -494,7 +545,7 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
     expect(view.getByText('Pick another one')).toBeTruthy();
@@ -512,13 +563,105 @@ describe('one turn of the loop', () => {
    * became visible underneath the log sheet that had just opened. Two modals, one
    * presented, and closing the one that existed left nothing.
    */
-  it('never has the bucket question open at the same time as anything else', async () => {
+  /**
+   * **The 2026-09-10 freeze, pinned at the only place a test can reach it.**
+   *
+   * The founder ranked the first movie on a clean account and the app died: the picker
+   * drew correctly at *1 of 5*, posters and all, and the screen took no touches. Force
+   * quitting recovered it every time, and the server showed the ranking had completed —
+   * no leftover session, no orphan row — so nothing was wrong with the data.
+   *
+   * The cause is two `<Modal>`s swapped in one commit. Choosing a bucket unmounted the
+   * bucket sheet and mounted the comparison sheet in the same render, and UIKit will not
+   * present a view controller over one that is still dismissing: the presentation is
+   * refused, React believes it succeeded, and the transparent window that survives eats
+   * every touch. It is the **first** movie because `rank_start` "places it outright when
+   * its band is empty" — film one has no comparisons, so the comparison sheet presents
+   * and is dismissed again inside the 300ms the bucket sheet is still sliding away. Films
+   * two to five are held open by a person answering, so the dismissal has long finished.
+   *
+   * So the invariant is not "one sheet mounted", which was already true and was not
+   * enough. It is **the next presentation is not requested until the last dismissal is
+   * acknowledged**, and this test stands inside that gap and looks.
+   */
+  it('asks for no second sheet until the bucket sheet has actually gone', async () => {
+    dismissals().hold = true;
     const view = await open();
     await search(view, 'inception');
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('I liked it'));
+
+    /**
+     * Mid-dismissal. The question is **still on screen** — iOS keeps a dismissing modal's
+     * children mounted and the mock is faithful about that — but nothing has been asked
+     * to present over it. Before the fix the comparison sheet was already mounted at this
+     * moment, which is exactly where iOS refused it.
+     */
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_bucket', expect.anything()));
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
+
+    // And the controls still rendered in that window answer nothing, so a second tap
+    // cannot write a second bucket over the one already on its way.
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'set_bucket')).toHaveLength(1);
+
+    await releaseDismissals();
+
+    // And once iOS says the presentation is gone, the run carries on exactly as before.
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('rank_start', expect.anything()),
+    );
+  });
+
+  /**
+   * **The return leg: the comparison sheet is never unmounted while it is presented.**
+   *
+   * The audit that followed the freeze asked whether the same hazard existed pointing the
+   * other way. It does not reach the user the way the outward leg does — a dismissing
+   * sheet's window still covers the screen, so no poster is tappable until it is gone,
+   * which RNTL models through accessibilityViewIsModal and this test relies on. What
+   * is worth pinning is the invariant itself: the sheet stays mounted through its own
+   * dismissal, on the placement path and on a dismissal mid-comparison alike, so nothing
+   * ever asks UIKit to tear down a controller it is still animating.
+   */
+  it('keeps the comparison sheet mounted until its dismissal is acknowledged', async () => {
+    starterGrid(['film-1', 'film-2']);
+    dismissals().hold = true;
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('I liked it'));
+
+    // Through the bucket handoff and the placement, leaving the comparison sheet's own
+    // dismissal outstanding.
+    await releaseDismissals();
+    await waitFor(() =>
+      expect(mockRpc.mock.calls.some(([name]) => name === 'rank_start')).toBe(true),
+    );
+
+    // Still mounted, and still covering the screen: the picker exists but is not
+    // reachable, which is what a sheet that has not finished dismissing looks like.
+    expect(view.queryByLabelText('Rank Inception')).toBeTruthy();
+    expect(view.queryByLabelText('Starter 2')).toBeNull();
+
+    await releaseDismissals();
+
+    // Gone, and the picker is live again at the number the placement moved it to.
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    expect(view.getByLabelText('Starter 2')).toBeTruthy();
+  });
+
+  it('never has the bucket question open at the same time as anything else', async () => {
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+
+    await chooseBucket(view);
 
     await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
     expect(view.queryAllByText('How was it?')).toHaveLength(0);
@@ -532,7 +675,7 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     await waitFor(() =>
       expect(view.getByLabelText(`${already + 1} of 5 movies ranked`)).toBeTruthy(),
@@ -547,7 +690,7 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
   });
@@ -576,7 +719,7 @@ describe('one turn of the loop', () => {
     // learn about the fifth placement on its own.
     holdReadsOf('rankings');
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     // Five placed, and the flow says so from what it watched happen rather than from a
     // query that has not answered. No sixth picker, so no sixth ranking.
@@ -594,7 +737,7 @@ describe('one turn of the loop', () => {
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('I liked it'));
+    await chooseBucket(view);
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
     expect(callsTo('rank_start')).toHaveLength(1);

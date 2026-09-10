@@ -4,7 +4,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import type { Surface } from '@/lib/analytics';
-import { Sheet, SheetRow } from '@/ui/components';
+import { Sheet, SheetRow, useSheetHandoff } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { useSocialWrites, type Relationship } from './use-social';
@@ -48,6 +48,8 @@ export type ProfileMenuProps = {
  */
 export function ProfileMenu({ userId, name, viewerId, relationship, surface }: ProfileMenuProps) {
   const [open, setOpen] = useState(false);
+  /** The Report row opens a second sheet; this serialises the swap. */
+  const handoff = useSheetHandoff();
   const [reporting, setReporting] = useState(false);
   const { block, unblock, busy } = useSocialWrites(viewerId, surface);
 
@@ -90,7 +92,18 @@ export function ProfileMenu({ userId, name, viewerId, relationship, surface }: P
 
       {/* Mounted only while open, like every other sheet in the app. */}
       {open ? (
-        <Sheet visible onClose={() => setOpen(false)} label={`Options for ${name}`}>
+        <Sheet
+          /**
+           * Serialised: the Report row below opens ReportSheet, whose Modal is mounted
+           * permanently and toggled by `visible` — so unmounting this one in the same
+           * commit asks UIKit to present over a dismissal. That is the freeze audited on
+           * 2026-09-10, and this surface was missed by its first pass. See useSheetHandoff.
+           */
+          visible={!handoff.dismissing}
+          onDismissed={handoff.settled}
+          onClose={() => setOpen(false)}
+          label={`Options for ${name}`}
+        >
           <View style={styles.menu}>
             {/* Report first, and above the block, because it is the lighter of the two
                 and the one somebody is more often looking for. A block is between two
@@ -102,8 +115,10 @@ export function ProfileMenu({ userId, name, viewerId, relationship, surface }: P
               label="Report"
               value={`Tells whoever runs bingd. about ${name}`}
               onPress={() => {
-                setOpen(false);
-                setReporting(true);
+                handoff.handOff(() => {
+                  setOpen(false);
+                  setReporting(true);
+                });
               }}
             />
             {blocked ? (
@@ -115,10 +130,14 @@ export function ProfileMenu({ userId, name, viewerId, relationship, surface }: P
                   busy
                     ? undefined
                     : () => {
-                        setOpen(false);
-                        void (async () => {
-                          say(await unblock({ userId }), 'Could not unblock');
-                        })();
+                        // Unblock writes and shows an Alert only on failure; the close is
+                        // still serialised so the write never races the dismissal.
+                        handoff.handOff(() => {
+                          setOpen(false);
+                          void (async () => {
+                            say(await unblock({ userId }), 'Could not unblock');
+                          })();
+                        });
                       }
                 }
                 disabledReason={busy ? 'Saving your last change.' : undefined}
@@ -132,8 +151,12 @@ export function ProfileMenu({ userId, name, viewerId, relationship, surface }: P
                   busy
                     ? undefined
                     : () => {
-                        setOpen(false);
-                        confirmBlock();
+                        // An Alert is a UIAlertController presented from this same view
+                        // controller, so it is the same swap as opening another sheet.
+                        handoff.handOff(() => {
+                          setOpen(false);
+                          confirmBlock();
+                        });
                       }
                 }
                 disabledReason={busy ? 'Saving your last change.' : undefined}

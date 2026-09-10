@@ -8,6 +8,9 @@ import { posterUri } from '@/lib/images';
 
 import { useSeasons, yearOf } from './use-title-search';
 
+/** A dismissing sheet answers nothing. */
+const noopClose = () => {};
+
 export type SeasonPickerProps = {
   series: { id: string; title: string } | null;
   onClose: () => void;
@@ -19,6 +22,17 @@ export type SeasonPickerProps = {
     /** Travels with the season so the log sheet can head itself "The Last of Us, S1". */
     seasonNumber: number;
   }) => void;
+  /**
+   * Whether the picker is presented, as distinct from whether it is mounted.
+   *
+   * Defaults to `true`. A caller that hands straight over to another sheet sets it false
+   * and waits for `onDismissed`, so UIKit is never asked to present over a dismissal —
+   * see `useSheetHandoff`. This one is a bare `<Modal presentationStyle="pageSheet">`
+   * rather than a `Sheet`, and a page sheet's dismissal is the *longest* in the app.
+   */
+  visible?: boolean;
+  /** iOS has finished dismissing. The next presentation is safe now. */
+  onDismissed?: () => void;
 };
 
 /**
@@ -27,7 +41,13 @@ export type SeasonPickerProps = {
  * and has to be made obvious here (screens.md §6), so tapping a series opens its seasons
  * rather than failing with an error the user did nothing to deserve.
  */
-export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
+export function SeasonPicker({
+  series,
+  onClose,
+  onPick,
+  visible = true,
+  onDismissed,
+}: SeasonPickerProps) {
   const { data: seasons = [], isPending, isError, isFetched } = useSeasons(series?.id ?? null);
 
   // A series found through search has no season rows yet, and this is the first
@@ -47,13 +67,31 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
 
   return (
     <Modal
-      visible
+      visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      /**
+       * Inert while dismissing, and the dismissal is reported.
+       *
+       * This hands straight over to the log sheet, and doing that by unmounting a
+       * presented `<Modal>` is the freeze audited on 2026-09-10 — with the longest
+       * dismissal in the app behind it, because a page sheet slides the full height.
+       * See `useSheetHandoff`.
+       */
+      onRequestClose={visible ? onClose : noopClose}
+      onDismiss={onDismissed}
       accessibilityViewIsModal
     >
-      <SafeAreaView style={styles.sheet} edges={['top', 'bottom', 'left', 'right']}>
+      {/* Nothing in a dismissing sheet answers. iOS keeps these children mounted for the
+          whole slide-out, so Close and every season row stay live otherwise — and a tap
+          on one unmounts this Modal mid-dismissal, which is the operation the handoff
+          exists to avoid. Sheet states the same rule for every other sheet in the app;
+          this one is a bare Modal and needs its own. */}
+      <SafeAreaView
+        pointerEvents={visible ? 'auto' : 'none'}
+        style={styles.sheet}
+        edges={['top', 'bottom', 'left', 'right']}
+      >
         <View style={styles.header}>
           <View style={styles.headerText}>
             <Text variant="title2" numberOfLines={2}>

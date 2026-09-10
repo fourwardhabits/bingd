@@ -50,3 +50,74 @@ jest.mock('expo-constants', () => ({
     },
   },
 }));
+
+/**
+ * A `<Modal>` that reports its own dismissal, which is the part of iOS jest does not have.
+ *
+ * ---------------------------------------------------------------------------
+ * **Why every suite needs this and not just the one that found the bug.**
+ *
+ * Since 2026-09-10 the screens that hand one sheet straight over to another keep the
+ * outgoing one mounted, close it with `visible`, and wait for `onDismiss` before
+ * presenting the next — because UIKit refuses to present over a dismissing controller and
+ * the transparent window it leaves behind swallows every touch. `useSheetHandoff` carries
+ * the account.
+ *
+ * React Native never fires `onDismiss` under jest, so without this every handover test in
+ * the app would wait forever — and that is the fix working, not the fix broken. This
+ * supplies the one callback the platform owes.
+ *
+ * Faithful in the two ways that matter, and no further:
+ *
+ *   - **children stay rendered through the dismissal**, because iOS keeps them, which is
+ *     precisely why a dismissing sheet's controls have to be made inert; and
+ *   - **`onDismiss` fires only on the true -> false transition**, never on mount and
+ *     never on unmount — a modal unmounted while still visible reports nothing, which is
+ *     the behaviour that made the bug possible and must not be papered over.
+ *
+ * `globalThis.__modalDismissals.hold` lets a test stand inside the gap.
+ */
+globalThis.__modalDismissals = { hold: false, pending: [] };
+
+jest.mock('react-native/Libraries/Modal/Modal', () => {
+  const React = require('react');
+  function MockModal(props) {
+    const prev = React.useRef(Boolean(props.visible));
+    const [dismissing, setDismissing] = React.useState(false);
+    // Derived during render, not in the effect. `dismissing` cannot be set until after
+    // the commit where `visible` flips false, so a mock that relied on it alone rendered
+    // null for exactly that one commit — unmounting and remounting the children it is
+    // supposed to keep. That re-ran rank_start and reset the very state the guards under
+    // test depend on.
+    const closing = prev.current && !props.visible;
+    React.useEffect(() => {
+      if (closing && props.onDismiss) {
+        const done = props.onDismiss;
+        setDismissing(true);
+        const finish = () => {
+          setDismissing(false);
+          done();
+        };
+        if (globalThis.__modalDismissals.hold) globalThis.__modalDismissals.pending.push(finish);
+        else finish();
+      }
+      prev.current = Boolean(props.visible);
+      // Deps rather than every render: the only thing this has to react to is a change
+      // in visible, which is exactly when prev needs updating.
+    }, [closing, props.onDismiss, props.visible]);
+    // A host element named 'Modal', not a fragment: tests reach the real component by
+    // type to dispatch `requestClose` (the Android back button), and a fragment leaves
+    // them nothing to find.
+    const { children, ...rest } = props;
+    return props.visible || closing || dismissing
+      ? React.createElement('Modal', rest, children)
+      : null;
+  }
+  // `react-native`'s index resolves this module's `default`.
+  return { __esModule: true, default: MockModal };
+});
+
+beforeEach(() => {
+  globalThis.__modalDismissals.hold = false;
+  globalThis.__modalDismissals.pending.length = 0;
+});
