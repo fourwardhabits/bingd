@@ -61,18 +61,48 @@ const text = (id, value) => {
   if (el) el.textContent = value;
 };
 
+/**
+ * Every element this name paints: the one holding the id, plus any mirror of it.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THERE ARE MIRRORS
+ * ---------------------------------------------------------------------------
+ *
+ * The router's four pages are one card with one install row, so an id was enough. The
+ * front page is a landing page now, and it needs the same row in three places: the
+ * hero, the closing band, and a sticky bar on a phone. An id cannot appear three times
+ * and copying the decision three times is how two of them end up disagreeing, which is
+ * exactly the defect `installLabel` was moved into `router.mjs` to prevent.
+ *
+ * So the decision stays in one place and is *mirrored*. `data-install="primary-install"`
+ * means "whatever the primary install button became, be that too". Nothing here decides
+ * anything: the id is still what `paintInstall` addresses, and a page with no mirrors
+ * behaves exactly as it did.
+ *
+ * The selector is built from a literal argument, never from the URL, which is the same
+ * rule this file keeps for `href`.
+ */
+const targets = (id) => {
+  const found = [];
+  const byId = document.getElementById(id);
+  if (byId) found.push(byId);
+  for (const el of document.querySelectorAll(`[data-install="${id}"]`)) found.push(el);
+  return found;
+};
+
 const show = (id, visible = true) => {
-  const el = document.getElementById(id);
-  if (el) el.hidden = !visible;
+  for (const el of targets(id)) el.hidden = !visible;
 };
 
 /** Fills an anchor and reveals it. `href` is always ours; see `router.mjs`. */
 const link = (id, href, label) => {
-  const el = document.getElementById(id);
-  if (!el || !href) return false;
-  el.href = href;
-  if (label) el.textContent = label;
-  el.hidden = false;
+  const found = targets(id);
+  if (found.length === 0 || !href) return false;
+  for (const el of found) {
+    el.href = href;
+    if (label) el.textContent = label;
+    el.hidden = false;
+  }
   return true;
 };
 
