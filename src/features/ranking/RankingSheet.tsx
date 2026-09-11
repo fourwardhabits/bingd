@@ -153,6 +153,20 @@ export type RankingSheetProps = {
    * where the person decided to rank something.
    */
   surface: Surface;
+  /**
+   * Whether the sheet is presented, as distinct from whether it is mounted.
+   *
+   * Defaults to `true`, so the three screens that mount this only while they want it are
+   * unchanged. Onboarding sets it `false` between a placement and the picker becoming
+   * live again, and keeps the component mounted so iOS can finish dismissing before
+   * anything else is presented — the return half of the same serialisation `handoff`
+   * does on the way in. See `Sheet`'s `onDismissed`.
+   */
+  visible?: boolean;
+  /** iOS has finished dismissing this sheet. The next presentation is safe now. */
+  onDismissed?: () => void;
+  /** iOS has finished presenting. A dismissal asked for now will complete. See Sheet. */
+  onShown?: () => void;
 };
 
 /**
@@ -173,6 +187,9 @@ export function RankingSheet({
   onFinishLog,
   onPlaced,
   surface,
+  visible = true,
+  onDismissed,
+  onShown,
 }: RankingSheetProps) {
   if (!subject) return null;
 
@@ -186,9 +203,15 @@ export function RankingSheet({
       onFinishLog={onFinishLog}
       onPlaced={onPlaced}
       surface={surface}
+      visible={visible}
+      onDismissed={onDismissed}
+      onShown={onShown}
     />
   );
 }
+
+/** A dismissing sheet answers nothing. */
+const noopClose = () => {};
 
 function Session({
   subject,
@@ -196,6 +219,9 @@ function Session({
   onFinishLog,
   onPlaced,
   surface,
+  visible = true,
+  onDismissed,
+  onShown,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -631,14 +657,32 @@ function Session({
   }, [onPlaced, step]);
 
   return (
-    <Sheet visible onClose={() => void close()} label={`Rank ${subject.title}`}>
+    <Sheet
+      visible={visible}
+      /**
+       * Inert while dismissing, for the reason `TasteBucketSheet` states: iOS keeps a
+       * dismissing modal's children mounted, so closing it again would unmount this
+       * `<Modal>` mid-dismissal — the operation the serialisation exists to avoid.
+       *
+       * Only reachable when a caller passes `visible`, which today is onboarding alone.
+       */
+      onClose={visible ? () => void close() : noopClose}
+      onDismissed={onDismissed}
+      onShown={onShown}
+      label={`Rank ${subject.title}`}
+    >
       <View style={styles.sheet}>
         {step?.state === 'placed' && onPlaced ? (
           /**
-           * One frame, at most: the effect above has already handed the placement back and
-           * the caller unmounts this on its next render. It is not nothing, because a
-           * sheet that emptied itself would flash its own chrome over the screen behind it
-           * — and it is not the reveal, because suppressing that is the whole contract.
+           * What this sheet shows between the placement landing and it going away.
+           *
+           * Usually one frame — the effect above has already handed the placement back
+           * and the caller drops this on its next render. A caller that serialises the
+           * dismissal holds it longer: onboarding keeps this mounted with `visible` false
+           * until iOS reports the presentation gone, which is most of a slide-out. Either
+           * way it is not nothing, because a sheet that emptied itself would flash its own
+           * chrome over the screen behind it — and it is not the reveal, because
+           * suppressing that is the whole contract.
            *
            * Empty rather than a spinner: `LoadingScreen` is the only indeterminate
            * spinner in this app and it earns that by being a wait of unknown length. This
@@ -666,6 +710,14 @@ function Session({
                     // `openSession` the moment the placement landed, because the server
                     // deletes a session it has finished. It is still the way out, so the
                     // sheet unmounts through the same path every other exit uses.
+                    //
+                    // **This becomes wrong the moment a caller serialises its handover**,
+                    // which `app/(tabs)/log.tsx` and `app/title/[id].tsx` will: `close`
+                    // runs `onClose`, the caller clears this sheet, and the unmount lands
+                    // in the same commit as the dismissal request — React Native drops a
+                    // modal's listener on unmount, so `onDismiss` never fires and the
+                    // handoff never settles. Deferred with that work, deliberately: the
+                    // onboarding path here uses `onPlaced` and never reaches this line.
                     void close();
                     onFinishLog({
                       score: step.score,
