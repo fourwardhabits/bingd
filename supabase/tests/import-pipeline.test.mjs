@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 
 import { createTestDb } from './harness.mjs';
 
@@ -821,6 +821,122 @@ describe('staging refuses what apply would choke on', () => {
     const raw = await stageOne({ ...staged('x', { correlation: 'nameless|2001' }), name: null });
     assert.equal(raw, null);
   });
+
+  it('never raises on a date that is the right shape and still not a date', async () => {
+    // `to_date('2026-02-31','YYYY-MM-DD')` raises 22008, and so do 2023-02-29 and
+    // 2024-06-31 — every one of which passes a `^\d{4}-\d{2}-\d{2}$` guard. One of them in
+    // one row used to make `import_stage` itself raise and reject the whole page of up to
+    // a thousand rows, which is worse than the bug it replaced.
+    for (const bad of ['2026-02-31', '2023-02-29', '2024-06-31', '2026-13-45', '0000-00-00']) {
+      const key = `bad date ${bad}|2001`;
+      const raw = await stageOne(
+        staged(`Bad Date ${bad}`, { correlation: key, watchedOn: bad }));
+      assert.ok(raw, `${bad}: the row must still be staged`);
+      assert.equal(raw.watchedOn, undefined, `${bad}: the unreadable date is dropped`);
+    }
+  });
+
+  it('never raises on an unreadable date inside a viewing either', async () => {
+    const raw = await stageOne(staged('Bad Viewing Date', {
+      correlation: 'bad viewing date|2001',
+      watches: [
+        { diaryUri: 'https://boxd.it/bv1', watchedOn: '2026-02-31', isRewatch: false },
+        { diaryUri: 'https://boxd.it/bv2', watchedOn: '2024-02-03', isRewatch: false },
+      ],
+    }));
+    assert.ok(raw);
+    assert.equal(raw.watches.length, 1);
+    assert.equal(raw.watches[0].diaryUri, 'https://boxd.it/bv2');
+  });
+
+  it('drops a rating above five, which the collection would refuse later', async () => {
+    // `^[0-5](\.[05])?$` admits 5.5, and `imported_titles`' CHECK then rejects it at apply
+    // time — so the film was dropped and reported to the reader as one we could not find,
+    // over a rating.
+    const raw = await stageOne(
+      staged('Rating Overflow', { correlation: 'rating overflow|2001', rating: 5.5 }));
+    assert.ok(raw);
+    assert.equal(raw.rating, undefined);
+  });
+
+  it('survives a watches array that is not an array of objects', async () => {
+    const raw = await stageOne({
+      ...staged('Odd Watches', { correlation: 'odd watches|2001' }),
+      watches: ['not an object', 42, null],
+    });
+    assert.ok(raw);
+    assert.equal(raw.watches, undefined);
+  });
+
+  it('survives watches being an object rather than an array', async () => {
+    const raw = await stageOne({
+      ...staged('Object Watches', { correlation: 'object watches|2001' }),
+      watches: { diaryUri: 'https://boxd.it/x', watchedOn: '2024-01-01' },
+    });
+    assert.ok(raw);
+    assert.equal(raw.watches, undefined);
+  });
+});
+
+describe('the worker cannot be stopped by its surroundings', () => {
+  let quinn;
+
+  before(async () => {
+    quinn = await t.createUser({ username: 'pipe_quinn' });
+  });
+
+  afterEach(async () => {
+    await t.sql(`delete from app_config where key = 'import.provider_grace_minutes'`);
+    await t.sql(
+      `insert into app_config (key, value) values ('import.provider_grace_minutes', '30'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+  });
+
+  it('is not stopped by a nonsense grace setting', async () => {
+    // The read is outside every handler, so an operator typo in one config row used to
+    // raise every minute, for ever, for every account.
+    await t.sql(
+      `update app_config set value = '"soon"'::jsonb where key = 'import.provider_grace_minutes'`);
+
+    const film = `Grace Typo ${seq}`;
+    await t.createMovie(film, seq);
+    seq += 1;
+
+    const jobId = await importArchive(quinn, [
+      staged(film, { correlation: `${film.toLowerCase()}|2001` })]);
+
+    const { rows } = await t.sql(`select status from import_jobs where id = $1`, [jobId]);
+    assert.equal(rows[0].status, 'done');
+  });
+
+  it('settles a job whose matched title was deleted from the catalogue', async () => {
+    // `import_rows.media_item_id` is `on delete set null`, so a catalogue row removed
+    // between matching and applying left a row that was `matched` and pointed at nothing:
+    // the apply loop could not select it, and it held the job open until the job died.
+    const doomed = `Doomed Title ${seq}`;
+    await t.createMovie(doomed, seq);
+    seq += 1;
+
+    await t.actAs(quinn);
+    const { rows: created } = await t.sql(`select import_create() as id`);
+    const jobId = created[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged(doomed, { correlation: `${doomed.toLowerCase()}|2001` })])]);
+    await t.sql(`select import_ready($1) as r`, [jobId]);
+    await t.actAs(null);
+
+    await t.sql(`select _import_match_batch($1, 100)`, [jobId]);
+    await t.sql(
+      `delete from media_items where id = (select media_item_id from import_rows where job_id = $1)`,
+      [jobId]);
+
+    await runJob(jobId);
+
+    const { rows } = await t.sql(`select status, counts from import_jobs where id = $1`, [jobId]);
+    assert.equal(rows[0].status, 'done', 'a vanished title must not hold the job open');
+    assert.equal(rows[0].counts.unmatched, 1);
+    assert.equal(rows[0].counts.stragglers, 0);
+  });
 });
 
 describe('an import does not disturb what the person built here', () => {
@@ -971,7 +1087,11 @@ describe('the provider tier', () => {
 
   it('matches a row the provider places, and teaches the shared cache', async () => {
     await stageNeedsProvider(1);
-    const film = await t.createMovie(`Provider Found ${seq}`, seq++);
+    // Dated and agreeing with the staged year (2001), because the provider writer is now
+    // held to the same bar as the local one: `match.mjs`'s confidence rule accepts on title
+    // alone when either side has no year, which is exactly the weak evidence the cache
+    // must not take.
+    const film = await datedMovie(`Provider Found ${seq}`, 2001);
 
     const { rows } = await t.sql(`select * from _import_provider_claim(50)`);
     await t.sql(`select _import_provider_resolve($1, $2)`, [rows[0].row_id, film]);
@@ -984,6 +1104,25 @@ describe('the provider tier', () => {
     const { rows: cached } = await t.sql(
       `select media_item_id from letterboxd_matches where media_item_id = $1`, [film]);
     assert.equal(cached.length, 1, 'a provider match teaches the cache like a local one');
+  });
+
+  it('does not teach the cache when the provider placed it on title alone', async () => {
+    // `isConfident` accepts on the squashed title when the result has no release date —
+    // the same weak evidence class the local writer was changed to exclude. Leaving the
+    // provider writer open left the cross-account poisoning reachable by the other road.
+    await stageNeedsProvider(1);
+    const undated = await t.createMovie(`Provider Undated ${seq}`, seq++);
+
+    const { rows } = await t.sql(`select * from _import_provider_claim(50)`);
+    await t.sql(`select _import_provider_resolve($1, $2)`, [rows[0].row_id, undated]);
+
+    const { rows: after } = await t.sql(
+      `select status from import_rows where job_id = $1`, [jobId]);
+    assert.equal(after[0].status, 'matched', 'the row is still placed for this account');
+
+    const { rows: cached } = await t.sql(
+      `select 1 from letterboxd_matches where media_item_id = $1`, [undated]);
+    assert.equal(cached.length, 0, 'but it is not asserted across accounts');
   });
 
   it('lets the job finish even when the provider never places anything', async () => {

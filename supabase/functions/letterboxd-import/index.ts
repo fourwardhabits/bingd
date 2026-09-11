@@ -173,7 +173,13 @@ Deno.serve(async (request: Request) => {
     const parts = token.split('.');
     if (parts.length !== 3) return false;
     try {
-      return JSON.parse(atob(parts[1]!))?.role === 'service_role';
+      // base64**url** — `atob` wants `+` and `/` and demands padding, so a raw JWT payload
+      // throws without these two lines and the fallback is silently dead. `push-sender`
+      // does the same conversion, and the fallback exists for the same reason it does
+      // there: Supabase issues `sb_secret_…` keys alongside the legacy JWTs, so an equality
+      // test against the env var is not always the whole answer.
+      const padded = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, '=')))?.role === 'service_role';
     } catch {
       return false;
     }

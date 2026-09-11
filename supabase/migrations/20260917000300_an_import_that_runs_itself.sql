@@ -12,18 +12,22 @@
 --
 -- `20260826000300` and `20260826000700` already solved "a queue that drains itself" for
 -- push: a pg_cron tick, a claim with `FOR UPDATE SKIP LOCKED`, a `claimed_at` lease that
--- expires so a dead worker cannot strand a row, an attempt counter, a dead letter, and a
--- raise when the project is unconfigured so pg_cron records a failure rather than 1,221
--- silent successes.
+-- expires so a dead worker cannot strand a row, an attempt counter and a dead letter.
+-- Same problem, so: same shape, same five-minute lease, same three-failures-or-six-attempts
+-- dead letter. A second queue architecture would be a second set of edge cases to get wrong.
 --
--- That is the same problem, so this is the same shape with the same numbers -- a five
--- minute lease, three failures or six attempts to the dead letter. A second queue
--- architecture would be a second set of edge cases to get wrong.
+-- **But not the same numbers, and that distinction cost a blocker.** In `push_outbox` a
+-- claim is one message: six attempts means six tries at one piece of work. Here a claim is
+-- one *slice* of a job that may need hundreds, so an unreset ceiling of six dead-lettered
+-- every library over about four hundred films partway through apply. The counters here
+-- bound **unproductive** claims — any slice that moves a row resets them — and a 24-hour
+-- wall clock bounds what the counters no longer can.
 --
--- **What is different** is that the work is SQL rather than HTTP. Matching a title against
--- the local catalogue and applying a collection row are both things Postgres can do, so
--- the tick does them directly and the Edge Function is needed only for the provider tier.
--- A project with no provider configured still imports; it simply resolves fewer titles.
+-- **What is also different** is that the work is SQL rather than HTTP. Matching a title
+-- against the local catalogue and applying a collection row are both things Postgres can
+-- do, so the tick does them directly and the Edge Function is needed only for the provider
+-- tier. A project with no provider configured still imports; it resolves fewer titles, and
+-- says so.
 -- ===========================================================================
 
 
@@ -88,6 +92,36 @@ create index import_jobs_due on import_jobs (created_at)
 -- ---------------------------------------------------------------------------
 -- 2. Creating and staging — the only two things a client does
 -- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- A date, or null, for any text at all
+--
+-- **No regex can make a date cast total**, and this is the second attempt at that lesson.
+-- A format guard of `^\d{4}-\d{2}-\d{2}$` admits `2026-02-31`, `2023-02-29` and
+-- `2024-06-31` — every one of which raises `22008 date/time field value out of range` —
+-- and those are precisely the values a naive date-arithmetic bug in a client parser
+-- produces. One of them in one row of a thousand-row page made `import_stage` itself raise
+-- and rejected the entire page.
+--
+-- `::date` inside the handler rather than `to_date`, deliberately: `to_date` would roll
+-- `2026-02-31` forward to the 3rd of March, and inventing a viewing date nobody recorded
+-- is worse than discarding the one that was unreadable.
+-- ---------------------------------------------------------------------------
+create or replace function _safe_date(p_text text)
+returns date
+language plpgsql
+immutable
+as $$
+begin
+  return p_text::date;
+exception when others then
+  return null;
+end;
+$$;
+
+comment on function _safe_date(text) is
+  'A date, or null, for any text — including text that is the right shape and still not a date, like 2026-02-31. Exists because the staging boundary must never raise on a client value: one unreadable date used to reject a whole page of a thousand rows. Immutable: it is a pure function of its argument.';
+
 
 create or replace function import_create()
 returns uuid
@@ -199,27 +233,30 @@ begin
                                  between 1870 and extract(year from current_date)::integer + 5
                         then (r->>'year')::integer end,
            'filmUri',   left(r->>'filmUri', 300),
+           -- Both bounds. An upper one was missing, and `^[0-5](\.[05])?$` admits `5.5` —
+           -- which passed staging and was then refused by `imported_titles`' CHECK at
+           -- apply time, so the film was dropped and reported to the reader as a title we
+           -- could not find, over a rating.
            'rating',    case when r->>'rating' ~ '^[0-5](\.[05])?$'
-                             and (r->>'rating')::numeric >= 0.5
+                             and (r->>'rating')::numeric between 0.5 and 5.0
                         then (r->>'rating')::numeric end,
            'bucket',    case when r->>'bucket' in ('loved', 'fine', 'not_for_me')
                         then r->>'bucket' end,
-           'watchedOn', case when r->>'watchedOn' ~ '^\d{4}-\d{2}-\d{2}$'
-                             and to_date(r->>'watchedOn', 'YYYY-MM-DD')
-                                 between date '1870-01-01' and current_date + 1
-                        then to_date(r->>'watchedOn', 'YYYY-MM-DD') end,
+           'watchedOn', case when _safe_date(r->>'watchedOn')
+                                  between date '1870-01-01' and current_date + 1
+                        then _safe_date(r->>'watchedOn') end,
            'watches',   (
              select jsonb_agg(jsonb_build_object(
                       'diaryUri',  left(w->>'diaryUri', 300),
-                      'watchedOn', to_date(w->>'watchedOn', 'YYYY-MM-DD'),
+                      'watchedOn', _safe_date(w->>'watchedOn'),
                       'isRewatch', coalesce(w->>'isRewatch' = 'true', false)
                     ))
                from jsonb_array_elements(
                       case when jsonb_typeof(r->'watches') = 'array'
                            then r->'watches' else '[]'::jsonb end) w
-              where w->>'diaryUri' is not null
-                and w->>'watchedOn' ~ '^\d{4}-\d{2}-\d{2}$'
-                and to_date(w->>'watchedOn', 'YYYY-MM-DD')
+              where jsonb_typeof(w) = 'object'
+                and w->>'diaryUri' is not null
+                and _safe_date(w->>'watchedOn')
                     between date '1870-01-01' and current_date + 1
            )
          )),
@@ -436,6 +473,14 @@ begin
   -- so a value that escapes is inert (20260917000100).
   perform set_config('bingd.import_running', txid_current()::text, true);
 
+  -- `import_rows.media_item_id` is `on delete set null`, so a catalogue row deleted between
+  -- matching and applying leaves a row that is `matched` and points at nothing. The loop
+  -- below cannot select it, so without this it would sit there for ever holding the job
+  -- open. It is honestly unplaceable now: the title it was matched to is gone.
+  update import_rows
+     set status = 'unmatched'
+   where job_id = p_job_id and status = 'matched' and media_item_id is null;
+
   for v_row in
     select id, kind, correlation, media_item_id, raw
       from import_rows
@@ -495,9 +540,12 @@ begin
         -- was not sanctioned either, so the conservative reading wins: the import does not
         -- touch the watched state of a row somebody built here.
         --
-        -- Nothing is lost. The Letterboxd date is still recorded, as provenance, in
-        -- `imported_watches` below — where a future history model can find it and where no
-        -- leaderboard reads it.
+        -- The Letterboxd dates are still recorded, as provenance, in `imported_watches`
+        -- below — where a future history model can find them and where no leaderboard
+        -- reads them. That covers every viewing the diary knew about, which is where the
+        -- real client gets `watchedOn` from; a payload carrying a bare `watchedOn` and no
+        -- `watches` entry would have nowhere to put it, and no client this codebase ships
+        -- produces one.
         -- ---------------------------------------------------------------------------
         update user_media
            set bucket = coalesce(bucket, (v_row.raw->>'bucket')::taste_bucket)
@@ -563,11 +611,19 @@ begin
 
       update import_rows set status = 'applied' where id = v_row.id;
 
-    exception when others then
-      -- Poison. Marked so the slice makes progress and the next tick does not meet it
-      -- again; counted as unmatched, because from the reader's side a row that could not
-      -- be written is a film that did not arrive, which is the same sentence.
-      update import_rows set status = 'unmatched', candidates = null where id = v_row.id;
+    exception
+      -- A deadlock or a serialisation failure is the scheduler's problem, not the row's.
+      -- Marking it terminal would silently lose a film to a race it should simply have
+      -- retried, so class 40 goes back up and the slice is retried whole.
+      when deadlock_detected or serialization_failure or lock_not_available then
+        raise;
+
+      when others then
+        -- Poison: a constraint, a cast, a title deleted since matching. Marked so the
+        -- slice makes progress and the next tick does not meet it again, and counted as
+        -- unmatched — from the reader's side a row that could not be written is a film
+        -- that did not arrive, which is the same sentence.
+        update import_rows set status = 'unmatched', candidates = null where id = v_row.id;
     end;
 
     v_done := v_done + 1;
@@ -578,7 +634,7 @@ end;
 $$;
 
 comment on function _import_apply_batch(uuid, integer) is
-  'One bounded slice of apply, under the import marker so nothing announces. Watched rows before watchlist rows, because every watch signal fires _leave_watchlist. Never touches a ranked title, fills only nulls on a natively logged one, and writes the watchlist directly rather than through set_watchlist so no watchlist_added events are produced. Writes no rankings and no scores: this function has no statement that could. Internal.';
+  'One bounded slice of apply, under the import marker so nothing announces. Watched rows before watchlist rows, because every watch signal fires _leave_watchlist. Never touches a ranked title, fills only an absent bucket on a natively logged one and never its watched state, and writes the watchlist directly rather than through set_watchlist so no watchlist_added events are produced. Writes no rankings and no scores: this function has no statement that could. Internal.';
 
 revoke execute on function _import_apply_batch(uuid, integer) from public, anon, authenticated;
 
@@ -622,8 +678,14 @@ begin
   -- the cumulative total as its own result and any title a native action had since claimed
   -- silently dropped out. The summary screen reads these.
   --
-  -- `stragglers` is deliberately reported rather than assumed to be zero: it is the only
-  -- place a row left `pending` or `matched` by a settle that fired early would show up.
+  -- `stragglers` should always be zero, because the settle gate refuses to call this while
+  -- any row is still `pending` or usefully `matched`. It is reported anyway, as the one
+  -- number that would change if that gate were ever weakened — an assertion carried in the
+  -- data rather than only in a test. It is not a safety net; it is a canary.
+  --
+  -- (The first version of this comment called it "the only place a row left behind would
+  -- show up", which was true of the code it was written for and stopped being true when
+  -- the gate was tightened.)
   select jsonb_build_object(
            'applied',    count(*) filter (where status = 'applied'),
            'ambiguous',  count(*) filter (where status = 'ambiguous'),
@@ -711,22 +773,36 @@ security definer
 set search_path = public
 as $$
 declare
-  v_uri text;
+  v_uri  text;
+  v_year integer;
 begin
   if p_media_item_id is not null then
     update import_rows
        set media_item_id = p_media_item_id, status = 'matched', candidates = null
      where id = p_row_id
-    returning raw->>'filmUri' into v_uri;
+    returning raw->>'filmUri', (raw->>'year')::integer into v_uri, v_year;
 
-    -- The shared cache learns from the provider too, and only ever a FILM uri. This reads
-    -- `raw->>'filmUri'`, which `import_stage` builds from the client's `filmUri` field
-    -- alone -- never from a `watches` element, where the per-viewing diary URIs live. No
-    -- second check on the match itself: `match.mjs`'s `isConfident` already holds the
-    -- provider to the same title-and-year bar the local strong tier uses.
-    if v_uri is not null then
+    -- ---------------------------------------------------------------------------
+    -- The same bar the local writer has, applied here rather than assumed.
+    --
+    -- Only a FILM uri can reach this: it reads `raw->>'filmUri'`, which `import_stage`
+    -- builds from the client's `filmUri` field alone and never from a `watches` element.
+    --
+    -- And only a match the years agreed on. An earlier version left this to
+    -- `match.mjs`'s `isConfident`, on the reasoning that it holds the provider to the
+    -- local strong tier's bar — which is false: `isConfident` accepts on the squashed
+    -- title alone when the export had no year, or when the provider's own result has no
+    -- release date. That is exactly the weak evidence class the local writer was changed
+    -- to exclude, so leaving it open here left the cross-account poisoning reachable by
+    -- the other road.
+    -- ---------------------------------------------------------------------------
+    if v_uri is not null and v_year is not null then
       insert into letterboxd_matches (letterboxd_uri, media_item_id)
-      values (v_uri, p_media_item_id)
+      select v_uri, p_media_item_id
+        from media_items mi
+       where mi.id = p_media_item_id
+         and mi.release_date is not null
+         and abs(extract(year from mi.release_date)::integer - v_year) <= 1
       on conflict (letterboxd_uri) do nothing;
     end if;
 
@@ -813,6 +889,7 @@ declare
   v_url      text;
   v_key      text;
   v_provider boolean;
+  v_waiting  boolean := false;
   v_grace    integer;
 begin
   select count(*) into v_due
@@ -826,8 +903,12 @@ begin
   -- Resolved once per tick, because every job's settle decision needs it: a job may only
   -- wait on the provider tier if there is a provider tier to wait for.
   v_provider := _import_provider_configured();
+  -- Shape-tested before the cast. An operator typo in one `app_config` row must not raise
+  -- here, where the raise is outside every handler and would stop every import for every
+  -- account, once a minute, for ever.
   v_grace := coalesce(
-    (select (value #>> '{}')::integer from app_config where key = 'import.provider_grace_minutes'),
+    (select case when value #>> '{}' ~ '^\d{1,5}$' then (value #>> '{}')::integer end
+       from app_config where key = 'import.provider_grace_minutes'),
     30);
 
   -- ---------------------------------------------------------------------------
@@ -867,6 +948,11 @@ begin
     returning j.id, j.status, j.created_at
   loop
     begin
+      -- Both are per-job. Declared once and reset here, because a loop variable that keeps
+      -- the previous job's answer is how one job's provider wait becomes another job's.
+      v_slice := 0;
+      v_waiting := false;
+
       if v_job.status = 'matching' then
         v_slice := _import_match_batch(v_job.id, p_slice);
 
@@ -882,21 +968,25 @@ begin
       else
         v_slice := _import_apply_batch(v_job.id, p_slice);
 
+        -- **Waiting on the provider is a wait, not a stall.**
+        --
+        -- Without this distinction the attempt ceiling always beat the grace period: six
+        -- unproductive claims is about six minutes, the grace is thirty, so a job whose
+        -- Edge Function was undeployed or rate-limited dead-lettered at eight minutes with
+        -- half the archive written, `provider_attempts` still at zero, and no counts at
+        -- all. That is strictly worse than settling the row as honestly unmatched.
+        v_waiting := v_provider
+                 and v_job.created_at >= now() - (v_grace || ' minutes')::interval
+                 and exists (select 1 from import_rows
+                              where job_id = v_job.id
+                                and status = 'needs_provider'
+                                and provider_attempts < 3);
+
         if not exists (select 1 from import_rows
-                        where job_id = v_job.id and status in ('pending', 'matched'))
-           and (
-             -- Nothing is waiting on the provider...
-             not exists (select 1 from import_rows
-                          where job_id = v_job.id
-                            and status = 'needs_provider'
-                            and provider_attempts < 3)
-             -- ...or there is no provider to wait for...
-             or not v_provider
-             -- ...or it has had long enough. Without this an unreachable Edge Function
-             -- would leave every job with an unplaceable title in it open for ever, and
-             -- `import_jobs_one_live` would lock the account out of importing again.
-             or v_job.created_at < now() - (v_grace || ' minutes')::interval
-           )
+                        where job_id = v_job.id
+                          and (status = 'pending'
+                               or (status = 'matched' and media_item_id is not null)))
+           and not v_waiting
         then
           perform _import_settle(v_job.id);
         end if;
@@ -920,7 +1010,10 @@ begin
       -- and resets both; a slice that moved nothing leaves them standing, which is what
       -- still stops a job that genuinely cannot advance.
       -- ---------------------------------------------------------------------------
-      if v_slice > 0 then
+      -- `v_waiting` counts as progress for the same reason: the job is not stalled, it is
+      -- deliberately holding for a worker that has a ladder of its own
+      -- (`provider_attempts`) and a grace period that ends it.
+      if v_slice > 0 or v_waiting then
         update import_jobs
            set claimed_at = null, attempts = 0, failures = 0
          where id = v_job.id and completed_at is null;
@@ -958,17 +1051,40 @@ begin
       v_key := null;
     end;
 
-    if nullif(v_url, '') is not null and nullif(v_key, '') is not null then
-      perform net.http_post(
-        url     := v_url || '/letterboxd-import',
-        headers := jsonb_build_object(
-                     'Content-Type',  'application/json',
-                     'Authorization', 'Bearer ' || v_key,
-                     'apikey',        v_key
-                   ),
-        body    := jsonb_build_object('action', 'resolve'),
-        timeout_milliseconds := 20000
-      );
+    -- ---------------------------------------------------------------------------
+    -- GUARDED, BECAUSE THE PROVIDER TIER IS BEST-EFFORT AND THE TICK'S WORK IS NOT
+    --
+    -- This call sits after everything else the tick did — the row writes, the claim
+    -- release, the counters, the dead letter. Unguarded, a missing `net` schema or a
+    -- changed `http_post` signature raises here and **rolls all of that back**, every
+    -- minute, for ever: `attempts` and `failures` never persist, so the dead letter can
+    -- never fire, and `import_jobs_one_live` locks the account out of importing again with
+    -- nothing but `cron.job_run_details` to say why.
+    --
+    -- pg_net being absent or different is not hypothetical — `20260826000700` exists
+    -- because this project has already shipped a drain that recorded 1,221 silent
+    -- successes over a pipeline that had never sent anything.
+    -- ---------------------------------------------------------------------------
+    if nullif(v_url, '') is not null and nullif(v_key, '') is not null
+       and to_regprocedure('net.http_post(text, jsonb, jsonb, jsonb, integer)') is not null
+    then
+      begin
+        perform net.http_post(
+          url     := v_url || '/letterboxd-import',
+          headers := jsonb_build_object(
+                       'Content-Type',  'application/json',
+                       'Authorization', 'Bearer ' || v_key,
+                       'apikey',        v_key
+                     ),
+          body    := jsonb_build_object('action', 'resolve'),
+          timeout_milliseconds := 20000
+        );
+      exception when others then
+        -- The nudge failed. The next tick will try again, and every job remains bounded by
+        -- its own counters and by the wall clock — which is only true because this cannot
+        -- take the transaction down with it.
+        null;
+      end;
     end if;
   end if;
 
