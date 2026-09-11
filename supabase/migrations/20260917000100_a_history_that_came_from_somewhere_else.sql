@@ -428,7 +428,7 @@ as $$
        and p_metric in ('titles', 'movies', 'tv')
        -- A leaderboard is a record of what somebody did here. An import is a record of
        -- what they did somewhere else, and a dateless imported row would otherwise be
-       -- attributed to the month the import ran (20260916000100).
+       -- attributed to the month the import ran (20260917000100).
        and um.source <> 'imported'
        -- **The month this watch belongs to** (20260903000100). The watch date where the
        -- reader gave one, and otherwise the day the row entered their collection --
@@ -454,7 +454,7 @@ as $$
      where p_timeframe = 'all_time'
        and p_metric in ('titles', 'movies', 'tv')
        -- The same rule, and the sharper case: all-time is the board a new account could
-       -- otherwise top on its first day (20260916000100).
+       -- otherwise top on its first day (20260917000100).
        and um.source <> 'imported'
        -- No date test. `user_media` is keyed (user, title), so this is already a count
        -- of distinct titles.
@@ -530,7 +530,7 @@ $$;
 -- ===========================================================================
 
 comment on function _leaderboard_counts(text, text) is
-  'One person, one number, for one metric and one timeframe, over exactly the accounts the caller may read OR may find -- can_view_profile or can_discover_profile, which since 20260902000100 admits an unapproved private account while still refusing a block in either direction, a suspended account and a deleted one. Since 20260916000100 the two watched metrics exclude user_media.source = ''imported'': a leaderboard records what somebody did in bingd, and a dateless imported row would otherwise be attributed to the month the import ran. Since 20260903000100 the monthly watched metrics attribute a row to coalesce(watched_on, created_at at UTC). All-time watched has no date test. Monthly reviews reads note_first_published_at, an event an edit cannot move; all-time reviews counts titles currently carrying a public note -- neither needs the import predicate, because an import writes no notes. Never returns which titles. Internal: leaderboard and my_leaderboard_standing are the callers, and both validate their arguments first.';
+  'One person, one number, for one metric and one timeframe, over exactly the accounts the caller may read OR may find -- can_view_profile or can_discover_profile, which since 20260902000100 admits an unapproved private account while still refusing a block in either direction, a suspended account and a deleted one. Since 20260917000100 the two watched metrics exclude user_media.source = ''imported'': a leaderboard records what somebody did in bingd, and a dateless imported row would otherwise be attributed to the month the import ran. Since 20260903000100 the monthly watched metrics attribute a row to coalesce(watched_on, created_at at UTC). All-time watched has no date test. Monthly reviews reads note_first_published_at, an event an edit cannot move; all-time reviews counts titles currently carrying a public note -- neither needs the import predicate, because an import writes no notes. Never returns which titles. Internal: leaderboard and my_leaderboard_standing are the callers, and both validate their arguments first.';
 
 
 -- ---------------------------------------------------------------------------

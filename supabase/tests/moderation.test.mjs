@@ -467,11 +467,16 @@ describe('the guard is wired in, not merely present', () => {
     'list_items_by_list',
     'my_capabilities',
     'unranked_queue',
-    // 20260916000100. Two counts over the caller's own collection, SECURITY INVOKER, so
+    // 20260917000100. Two counts over the caller's own collection, SECURITY INVOKER, so
     // RLS decides whose rows they are and a suspended account reads exactly what it could
     // already read row by row. It exists so the Collection header does not wait on a
     // serial keyset traversal of the whole collection, and it writes nothing.
     'collection_counts',
+    // 20260917000300. One job's progress, for the screen drawing it. SECURITY INVOKER over
+    // import_jobs_own, so a suspended account sees its own job and nobody else's — and
+    // watching an import it can no longer advance changes nothing. The three write RPCs
+    // beside it (import_create, import_stage, import_ready) all call the guard.
+    'import_status',
     'username_available',
     'search_titles',
     // Reachable only because search_titles runs as the caller and folds the query through

@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * The Letterboxd import safety layer — `20260916000100`.
+ * The Letterboxd import safety layer — `20260917000100`.
  *
  * ---------------------------------------------------------------------------
  * THE ACCEPTANCE CRITERION IS THE FIRST SUITE, AND IT IS THE POINT
@@ -299,7 +299,7 @@ describe('an import is silent', () => {
   });
 
   it('still evaluates the watchlist award during an import, silently', async () => {
-    // The deliberate asymmetry in 20260916000100: two of the three award triggers skip
+    // The deliberate asymmetry in 20260917000100: two of the three award triggers skip
     // their per-row work during an import and `_award_touch_watchlist` does not, because a
     // single track over a watchlist is not the quadratic the guard exists to remove.
     //
