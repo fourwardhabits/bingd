@@ -92,7 +92,7 @@ Revisited during design and changed, as anticipated. The tabs are **Feed, Collec
 
 The evidence is in `../design/screens.md` §2: both reference apps give the user's own collection a top-level tab and neither hides it behind a profile, and in Beli the center button *is* search. Confirmed by the founder and now a founder decision, recorded in `decision-log.md` §12.
 
-### INF-5 — Definition of activation
+### ~~INF-5 — Definition of activation~~ — **SETTLED 2026-09-11, as two numbers**
 
 **Recorded as:** Activation is "the user has ranked 10 titles." The activation-*rate* metric adds a 24-hour bound. Attribution reporting uses the unbounded definition.
 

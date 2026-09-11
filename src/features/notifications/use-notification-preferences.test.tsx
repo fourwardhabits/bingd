@@ -403,7 +403,7 @@ describe('the screen', () => {
 
     expect(view.getByText('bingd. Awards')).toBeTruthy();
     expect(
-      view.getByText('Somebody you invited joins bingd. and finishes their first five.'),
+      view.getByText('Somebody you invited joins bingd. And again when they finish their first five.'),
     ).toBeTruthy();
     expect(view.queryByText(/Invite and Award/)).toBeNull();
   });

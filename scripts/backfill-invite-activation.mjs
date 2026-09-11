@@ -323,7 +323,21 @@ async function main() {
     );
     const heldKeys = new Set(held.map((row) => row.tier_key));
     const crossing = tiers
-      .filter((t) => t.threshold > before && t.threshold <= after && !heldKeys.has(t.tier_key))
+      /**
+       * **Not `threshold > before`, and the review was right about why.**
+       *
+       * `_maybe_award_unlocks` does not require a *new* crossing. It walks the tiers
+       * ascending, skips any already on `award_unlocks`, and inserts - and announces -
+       * every unheld tier the metric now meets. So an inviter already sitting above a
+       * tier they somehow do not hold gets it posted publicly and pushed on this UPDATE,
+       * and a report listing only tiers crossed *by this run* would never have mentioned
+       * it. The predicate has to be the function own one: meets it, and does not hold it.
+       *
+       * Unreachable for the present population, where `before` is 0 for every inviter and
+       * the two agree. But this line is the gate somebody reads before writing, and one
+       * that is only right for today data is not a gate.
+       */
+      .filter((t) => t.threshold <= after && !heldKeys.has(t.tier_key))
       .map((t) => t.tier_key);
 
     console.log(

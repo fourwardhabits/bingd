@@ -91,11 +91,11 @@ describe('reading the server\u2019s answer', () => {
 
   it('reports an activation only when the server says one happened', async () => {
     /**
-     * PRD §28's tenth ranking, and the flag is the server's.
+     * The invite activation bar, and the flag is the server's.
      *
      * `_maybe_activate_invite` flips `invite_attributions.activated_at` under a row
      * lock and returns true only for the transaction that flipped it — so two devices
-     * finishing the tenth ranking together produce one true and one false, and a retry
+     * finishing the fifth ranking together produce one true and one false, and a retry
      * produces false. Counting on the client would emit for accounts that were never
      * invited and again after a reinstall.
      */

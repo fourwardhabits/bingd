@@ -133,18 +133,21 @@ describe('accepting an invitation', () => {
   });
 
   /**
-   * **The one sentence that tells the invitee what they have to do, and it was unpinned.**
+   * **The one sentence stating the activation bar to the person who has to clear it, and
+   * it was unpinned by anything.**
    *
-   * This screen is the only place the activation bar is stated to the person who has to
-   * clear it. It read "Rank ten titles and they will hear about it" until 2026-09-11,
-   * when activation moved to the completed First Five — and no test anywhere held it, so
-   * the copy and the SQL were free to disagree silently. They did, for as long as it took
-   * somebody to look.
+   * It read "Rank ten titles and they will hear about it" until 2026-09-11, so the copy
+   * and the SQL were free to disagree in silence, and did.
    *
-   * A wrong number here costs more than a wrong number in Settings. The reader has just
-   * arrived, is about to be handed the onboarding run, and is being told how much of it
-   * counts. "Ten" would send them past the end of First Five looking for a milestone that
-   * had already happened.
+   * **It carries no number now, and that is the finding rather than a preference.** An
+   * independent review asked who actually reaches this text, and the answer is: only an
+   * account that is already past onboarding. A signed-out invitee is sent to sign-in and
+   * their token is redeemed silently by `useRedeemPendingInvite`, whose outcome "is not
+   * rendered anywhere"; a signed-in account mid-flow is redirected to its stage by
+   * `nextRoute`. So the reader here has finished First Five — or skipped the taste step
+   * and has none — and "rank your first five" would name an event already in their past,
+   * an instruction they cannot perform. `_maybe_activate_invite` counts `>=`, so what is
+   * true for both of them is the same sentence: keep ranking, and the next one does it.
    *
    * Pinned both ways, because the sentence is rewritable and the contract is not.
    */
@@ -155,7 +158,7 @@ describe('accepting an invitation', () => {
     await fireEvent.press(view.getByText('Accept invitation'));
 
     await waitFor(() =>
-      expect(view.getByText(/Rank your first five and they will hear about it\./)).toBeTruthy(),
+      expect(view.getByText(/Keep ranking and they will hear about it\./)).toBeTruthy(),
     );
     // The retired contract, which must not come back under any wording.
     expect(view.queryByText(/ten titles/i)).toBeNull();

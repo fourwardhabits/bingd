@@ -79,7 +79,7 @@ export type NotificationKind =
    * refuses.
    *
    * **Not to be confused with `invite_activated` above.** That is the analytics
-   * milestone at the tenth ranking and is unchanged; this is the social event at
+   * milestone at the tenth ranking, a different number from the invite bar, and is unchanged; this is the social event at
    * acceptance. Two moments, two rows, and neither stands in for the other.
    *
    * Filed only when the invitee's follow was auto-approved. A **private** inviter still

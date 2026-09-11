@@ -9,8 +9,8 @@ import { createTestDb } from './harness.mjs';
  * When `redeem_invite` told the inviter something, until this migration it told them the
  * wrong thing: a plain `follow` row — "Ada Lovelace started following you" — with nothing
  * in it saying this person came through their invitation. The sentence that says so,
- * "joined bingd. from your invite", belonged to `invite_activated`, which fires at the
- * invitee's *tenth ranking*. So the interesting fact arrived days late or never, and the
+ * "joined bingd. from your invite", belonged to `invite_activated`, which fires once the
+ * invitee has finished their *first five*. So the interesting fact arrived late or never,
  * moment it actually happened was reported as something duller.
  *
  * (Since `20260912000200` there is one acceptance that tells the inviter nothing at all —
@@ -281,14 +281,16 @@ describe('acceptance and activation stay two events', () => {
     await redeem(token);
     assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
 
-    // The tenth ranking, which is what `_maybe_activate_invite` counts (PRD §28) and
-    // which `_rank_finalize` is the only caller of.
-    await rankTitles(invitee, 10);
+    // The **fifth** ranking, which is the bar since 20260916000100 and is the completed
+    // First Five. Ranked exactly at the boundary rather than past it: this asserted at ten
+    // and went on passing when the bar moved, because ten still clears five. A test that
+    // cannot fail when the contract changes is not pinning the contract.
+    await rankTitles(invitee, 5);
     const { rows: attributed } = await t.sql(
       `select activated_at from invite_attributions where invitee_id = $1`,
       [invitee],
     );
-    assert.ok(attributed[0].activated_at, 'the tenth ranking activates');
+    assert.ok(attributed[0].activated_at, 'the fifth ranking activates');
 
     // Both rows, one of each. This is the property the old copy collapsed: the inviter
     // learns that somebody joined *when they joined*, and separately that they stuck
