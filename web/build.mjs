@@ -2594,7 +2594,7 @@ ${installRow({})}
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>
         <a href="/support">Support</a>
-        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>
+        ${plain(`<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>`)}
       </nav>
       <p class="legal">
         This product uses the TMDB API but is not endorsed or certified by TMDB. Film and
