@@ -43,9 +43,18 @@ import { supabase } from '@/lib/supabase';
 import { readArchive, type ArchivePreview, type ReadFailure } from './read-archive';
 import type { StagingRow } from './payload';
 
-/** What the server says about a job, as `import_status` returns it. */
+/**
+ * What the server says about a job, as `import_status` returns it.
+ *
+ * **All seven values `import_jobs_known_status` permits, not the five this pipeline
+ * writes.** `parsing` and `preview` are from the original 2026-08-13 table and nothing
+ * reaches them today, but the check constraint still admits them, and a union that omitted
+ * them would make the cast below a lie — which matters because the code that consumes it
+ * treats "not a terminal state" as "keep waiting". Listing them keeps that reasoning
+ * exhaustive rather than accidentally correct.
+ */
 export type ImportJobStatus = {
-  readonly status: 'pending' | 'matching' | 'applying' | 'done' | 'failed';
+  readonly status: 'pending' | 'parsing' | 'matching' | 'preview' | 'applying' | 'done' | 'failed';
   readonly counts: ImportCounts;
   readonly completedAt: string | null;
 };
