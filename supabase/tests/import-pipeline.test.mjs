@@ -1173,6 +1173,122 @@ describe('the shared cache takes only strong evidence', () => {
   });
 });
 
+describe('what survives a finished job', () => {
+  let rhea;
+
+  before(async () => {
+    rhea = await t.createUser({ username: 'pipe_rhea' });
+    // Two catalogue rows that squash identically: the ambiguous case.
+    await t.sql(
+      `insert into media_items (kind, tmdb_id, title, release_date)
+       values ('movie', $1, 'Twin Title', '1990-01-01'), ('movie', $2, 'Twin Title', '1990-06-01')`,
+      [seq++, seq++]);
+  });
+
+  it('keeps only the name and year of a row it could not place', async () => {
+    // Contract V3 §14: the export is not retained indefinitely, and a completed job used to
+    // keep its unresolved rows' whole payload for ever — film URI, rating, bucket, watch
+    // date, and every diary URI attached to them.
+    const jobId = await importArchive(rhea, [
+      staged('Twin Title', {
+        correlation: 'twin title|1990',
+        year: 1990,
+        filmUri: 'https://boxd.it/TWIN',
+        rating: 4.5,
+        bucket: 'loved',
+        watchedOn: '2024-05-06',
+        watches: [{ diaryUri: 'https://boxd.it/PRIVATE', watchedOn: '2024-05-06', isRewatch: true }],
+      }),
+      staged('Nobody Can Place This', { correlation: 'nobody can place this|2001' }),
+    ]);
+
+    const { rows } = await t.sql(
+      `select status, raw, candidates from import_rows where job_id = $1 order by status`, [jobId]);
+    assert.equal(rows.length, 2, 'unresolved rows are retained, not deleted');
+
+    for (const row of rows) {
+      assert.deepEqual(
+        Object.keys(row.raw).sort(),
+        ['name', 'year'].filter((k) => k in row.raw).sort(),
+        'only the fields the repair surface renders survive',
+      );
+      assert.ok(row.raw.name, 'the name survives, or the repair list is a count of nothing');
+      assert.equal(row.raw.filmUri, undefined);
+      assert.equal(row.raw.rating, undefined);
+      assert.equal(row.raw.bucket, undefined);
+      assert.equal(row.raw.watchedOn, undefined);
+      assert.equal(row.raw.watches, undefined);
+    }
+
+    const all = JSON.stringify(rows);
+    assert.ok(!all.includes('PRIVATE'), 'no diary URI may survive a finished job');
+    assert.ok(!all.includes('TWIN'), 'no film URI either');
+  });
+
+  it('leaves an ambiguous row its candidates, which are what resolve it', async () => {
+    const { rows } = await t.sql(
+      `select candidates from import_rows where status = 'ambiguous' and candidates is not null`);
+    assert.ok(rows.length >= 1, 'candidates live in their own column and are not redacted');
+  });
+});
+
+describe('a page that is too heavy', () => {
+  let sam;
+  let jobId;
+
+  before(async () => {
+    sam = await t.createUser({ username: 'pipe_sam' });
+    await t.actAs(sam);
+    const { rows } = await t.sql(`select import_create() as id`);
+    jobId = rows[0].id;
+  });
+
+  after(() => t.actAs(null));
+
+  it('accepts a page the size a real export actually produces', async () => {
+    // Measured: 171-185 bytes a row, so a thousand real rows is about 190 KiB. This builds
+    // one deliberately fatter than that and it must still pass.
+    const page = Array.from({ length: 900 }, (_, i) => staged(`Heavy ${i}`, {
+      correlation: `heavy ${i}|2001`,
+      watches: [{ diaryUri: `https://boxd.it/h${i}`, watchedOn: '2024-01-02', isRewatch: false }],
+    }));
+    const bytes = Buffer.byteLength(JSON.stringify(page), 'utf8');
+    assert.ok(bytes > 190 * 1024, `the fixture should exceed a real page (was ${bytes})`);
+
+    const { rows } = await t.sql(`select import_stage($1, $2::jsonb) as r`, [
+      jobId, JSON.stringify(page)]);
+    assert.equal(rows[0].r.staged, 900);
+    assert.ok(rows[0].r.bytes > 0, 'the call reports what it weighed');
+  });
+
+  it('refuses a page past the byte bound, and says what the bound is', async () => {
+    // A row limit is not a payload limit: this is 5 rows and several megabytes.
+    const page = Array.from({ length: 5 }, (_, i) => staged(`Bloat ${i}`, {
+      correlation: `bloat ${i}|2001`,
+      name: 'x'.repeat(600_000),
+    }));
+
+    await assert.rejects(
+      () => t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify(page)]),
+      /too large/i,
+    );
+  });
+
+  it('is not stopped by a nonsense byte bound', async () => {
+    await t.sql(
+      `insert into app_config (key, value) values ('import.max_page_bytes', '"lots"'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+    try {
+      const { rows } = await t.sql(`select import_stage($1, $2::jsonb) as r`, [
+        jobId, JSON.stringify([staged('After Typo', { correlation: 'after typo|2001' })])]);
+      assert.equal(rows[0].r.staged, 1, 'an operator typo must not stop every import');
+    } finally {
+      await t.sql(
+        `update app_config set value = '2097152'::jsonb where key = 'import.max_page_bytes'`);
+    }
+  });
+});
+
 describe('the provider tier', () => {
   let nina;
   let jobId;
