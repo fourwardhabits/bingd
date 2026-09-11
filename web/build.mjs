@@ -1936,11 +1936,460 @@ for (const route of ROUTES) {
  * available per platform — the App Store on iOS, the Play opt-in on Android — instead of
  * one sentence trying to describe both.
  */
-const ROOT_BODY = `        <p>
-          Build your favourites through quick comparisons, see what friends are watching,
-          and find your next binge.
-        </p>`;
+/**
+ * The front page's own stylesheet.
+ *
+ * Separate from `styles` rather than an extension of it, and that is the whole reason
+ * this change is safe to make on the eve of a launch. `styles` is shared by the four
+ * router pages and, through `documentStyles`, by the four legal documents: eight pages
+ * whose layout is pinned by tests and whose one job is to not break. A landing page is
+ * a different kind of object from a fallback card, and growing one out of the other is
+ * how the two-column privacy policy happened (see `documentStyles`).
+ *
+ * So the router keeps exactly the stylesheet it had, and this one owes it nothing.
+ *
+ * **Tokens are copied from `src/ui/tokens/color.ts` via docs/product/brand.md**, which
+ * is the canonical reference. Note Paper is the page ground here and Parchment is the
+ * accent band, which is the way round the app uses them; the router pages have it
+ * inverted, and rather than restyle eight tested pages on a launch night the two live
+ * side by side and this one matches the product.
+ */
+const LANDING_STYLES = `
+      :root {
+        --paper: #fbf8f4;
+        --parchment: #f5ebdd;
+        --maroon: #773744;
+        --ink: #242326;
+        --secondary: #5f5a56;
+        --tertiary: #6e6862;
+        --amber: #d4a64c;
+        --hairline: rgba(36, 35, 38, 0.12);
+        --shadow: rgba(36, 35, 38, 0.14);
+        --inverse: #f5ebdd;
+      }
 
+      * { box-sizing: border-box; }
+
+      html { scroll-behavior: smooth; }
+      @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 17px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .wrap { width: 100%; max-width: 66rem; margin-inline: auto; padding-inline: 1.25rem; }
+
+      /* Serif is for moments, sans is for use. brand.md section 4. */
+      h1, h2 {
+        font-family: 'DM Serif Display', Georgia, 'Times New Roman', serif;
+        font-weight: 400;
+        letter-spacing: -0.015em;
+        line-height: 1.12;
+        margin: 0;
+      }
+
+      h1 { font-size: clamp(2.05rem, 7vw, 3.4rem); }
+      h2 { font-size: clamp(1.7rem, 5.2vw, 2.4rem); }
+
+      p { margin: 0; }
+      a { color: var(--maroon); }
+      a:focus-visible, a.button:focus-visible { outline: 2px solid var(--maroon); outline-offset: 3px; }
+
+      [hidden] { display: none !important; }
+
+      /* --------------------------------------------------------------- masthead */
+
+      .masthead { display: flex; align-items: center; gap: 0.5rem; padding-top: 1.25rem; }
+      .masthead img { width: 30px; height: 30px; border-radius: 7px; }
+      .masthead .mark {
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: 1.5rem;
+        line-height: 1;
+        color: var(--maroon);
+      }
+
+      /* ------------------------------------------------------------------- hero */
+
+      .hero { padding: 2.25rem 0 3.25rem; }
+      .hero .lede {
+        margin-top: 1rem;
+        font-size: clamp(1.0625rem, 2.6vw, 1.1875rem);
+        color: var(--secondary);
+        max-width: 34rem;
+      }
+
+      /* ---------------------------------------------------------------- buttons */
+
+      .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
+
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0.875rem 1.5rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--maroon);
+        background: var(--maroon);
+        color: var(--inverse);
+        font-size: 1.0625rem;
+        font-weight: 500;
+        text-decoration: none;
+      }
+
+      /* 0.65 rather than 0.45: a control's boundary needs 3:1 under WCAG 1.4.11, and
+         0.45 measures 2.23 against Paper. This measures 3.45 on Paper and 3.28 on the
+         Parchment band. The label was never the problem at 8.22; the edge was. */
+      a.button.secondary {
+        background: transparent;
+        color: var(--maroon);
+        border-color: rgba(119, 55, 68, 0.65);
+      }
+
+      .fineprint { margin-top: 0.875rem; font-size: 0.875rem; color: var(--tertiary); max-width: 32rem; }
+
+      /* --------------------------------------------------------------- sections */
+
+      section { padding: 3.5rem 0; }
+
+      /* One alternating band so the page has a rhythm without a rule under every
+         heading. */
+      .band { background: var(--parchment); }
+
+      .kicker {
+        margin: 0 0 0.625rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--maroon);
+      }
+
+      .section-lede { margin-top: 1rem; font-size: 1.0625rem; color: var(--secondary); max-width: 36rem; }
+
+      /* A section is copy and a picture, side by side once there is room for both. */
+      .split { display: grid; gap: 2.5rem; align-items: center; }
+
+      @media (min-width: 56rem) {
+        .split { grid-template-columns: 1fr 1fr; gap: 4rem; }
+        .split.flip .split-copy { order: 2; }
+      }
+
+      /* The other half of the same defect: a grid item is min-width: auto too, so a
+         1fr track cannot go below its content's min-content width. */
+      .split > * { min-width: 0; }
+
+      /* ----------------------------------------------------------------- phones */
+
+      .phone {
+        display: block;
+        width: 100%;
+        max-width: 18rem;
+        height: auto;
+        margin-inline: auto;
+        border-radius: 1rem;
+        border: 1px solid var(--hairline);
+        box-shadow: 0 18px 44px var(--shadow);
+        background: var(--paper);
+      }
+
+      .phone-pair { display: flex; justify-content: center; gap: 1rem; min-width: 0; }
+
+      /* min-width: 0 is load-bearing and was missing.
+         --------------------------------------------------------------------------
+         A flex item defaults to min-width: auto, whose content-based minimum is
+         clamped by max-width — so each phone had a hard floor of 13rem and the pair
+         had one of 27rem, which nothing could shrink. With the 1.25rem gutters that
+         needs a 29.5rem viewport, and the second phone only stepped out below 26rem.
+         Every phone between those two numbers scrolled sideways: 430pt is an iPhone
+         Plus and a Pro Max, and it overflowed by 42px. The same floor sat inside the
+         two-column grid at 56rem, because a 1fr track is minmax(auto, 1fr) and the
+         auto minimum is that same min-content width, so a 900px desktop window
+         overflowed too.
+         Nothing on this page sets overflow-x, so both were a real horizontal
+         scrollbar, and a page wider than the viewport also breaks the full-bleed
+         .band and the inset: auto 0 0 0 sticky bar. */
+      .phone-pair .phone { max-width: 13rem; margin-inline: 0; min-width: 0; flex: 0 1 auto; }
+
+      /* And the breakpoint, corrected with it. Two phones stop being legible at about
+         29.5rem rather than 26, which is the width the pair actually needs. */
+      @media (max-width: 30rem) {
+        .phone-pair .phone + .phone { display: none; }
+        .phone-pair .phone { max-width: 16rem; }
+      }
+
+      /* The detail crop. A wide close-up rather than a phone, because the frame it
+         comes from carries a line the shipped app no longer draws; see web/shots.mjs. */
+      .detail {
+        display: block;
+        width: 100%;
+        max-width: 22rem;
+        height: auto;
+        margin-inline: auto;
+        border-radius: 0.75rem;
+        border: 1px solid var(--hairline);
+        box-shadow: 0 14px 34px var(--shadow);
+      }
+
+      /* ------------------------------------------------------------------ steps */
+
+      .steps { list-style: none; margin: 2rem 0 0; padding: 0; display: grid; gap: 1.5rem; }
+      .steps li { display: grid; grid-template-columns: 1.75rem 1fr; gap: 0.875rem; }
+      .steps .n {
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: 1.5rem;
+        line-height: 1.2;
+        color: var(--maroon);
+      }
+      .steps b { display: block; font-weight: 600; font-size: 1rem; }
+      .steps .d { display: block; color: var(--secondary); font-size: 0.9375rem; }
+
+      /* ------------------------------------------------------------------ notes */
+
+      .notes { margin: 1.75rem 0 0; padding: 0; list-style: none; display: grid; gap: 1.125rem; }
+      .notes li { position: relative; padding-left: 1.125rem; color: var(--secondary); font-size: 0.9375rem; }
+      .notes li::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0.6rem;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--amber);
+      }
+      .notes b { color: var(--ink); font-weight: 600; }
+
+      /* -------------------------------------------------------------- final CTA */
+
+      .closer { background: var(--maroon); color: var(--inverse); text-align: center; }
+      .closer h2 { color: var(--inverse); }
+      .closer .section-lede { color: rgba(245, 235, 221, 0.82); margin-inline: auto; }
+      .closer .actions { justify-content: center; }
+      .closer a.button { background: var(--inverse); color: var(--maroon); border-color: var(--inverse); }
+      .closer a.button.secondary {
+        background: transparent;
+        color: var(--inverse);
+        border-color: rgba(245, 235, 221, 0.5);
+      }
+      .closer .fineprint { color: rgba(245, 235, 221, 0.74); margin-inline: auto; }
+
+      /* The focus ring inverts with everything else. It was var(--maroon) on a maroon
+         ground, which is a 1.00:1 outline: a keyboard user got no visible focus at all
+         on the one button this band exists for. */
+      .closer a:focus-visible, .closer a.button:focus-visible { outline-color: var(--inverse); }
+
+      /* ----------------------------------------------------------------- footer */
+
+      footer { padding: 2.5rem 0 3rem; font-size: 0.875rem; color: var(--tertiary); }
+      footer nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin-bottom: 1.25rem; }
+      footer a { color: var(--maroon); text-underline-offset: 3px; }
+      footer .legal { max-width: 40rem; }
+      footer .legal + .legal { margin-top: 0.625rem; }
+
+      /* ------------------------------------------------------------- sticky CTA */
+
+      /* The only behaviour on this page, and it is CSS rather than script: the bar is
+         display:none until it contains an install button that page.mjs has unhidden. A
+         browser without :has() never shows it, which is the right way round. The
+         failure is a missing convenience rather than a bar with a dead button in it. */
+      .sticky {
+        display: none;
+        position: fixed;
+        inset: auto 0 0 0;
+        padding: 0.75rem 1.25rem calc(0.75rem + env(safe-area-inset-bottom));
+        background: rgba(251, 248, 244, 0.94);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid var(--hairline);
+        z-index: 10;
+      }
+      .sticky a.button { width: 100%; }
+
+      /* 55.99rem, not 56: at exactly 896px the two-column query and this one both
+         matched, which is a one-pixel window where the page is a desktop grid with a
+         phone's sticky bar on it. */
+      @media (max-width: 55.99rem) {
+        .sticky:has(a.button:not([hidden])) { display: block; }
+
+        /* The reservation has to carry the safe-area inset, because the bar does.
+           5.5rem flat left the bar overlapping the last 22px of the footer on any
+           phone with a home indicator, and more than that when a two-line label
+           ("Join the bingd. Android beta" at 320pt) makes the button taller. */
+        body:has(.sticky a.button:not([hidden])) {
+          padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+        }
+      }
+`;
+
+/**
+ * The product shots the front page ships, with their real dimensions.
+ *
+ * Generated by `web/shots.mjs` from the founder's device captures and committed, the
+ * same way `shot-collection.jpg` and `shot-ranking.jpg` are: the whole site must build
+ * from `web/` alone. Width and height are stated on every `<img>` so the page reserves
+ * the space before the bytes arrive. A landing page that reflows under a thumb as it
+ * loads is a landing page somebody taps the wrong thing on.
+ *
+ * **`feed` has every display name and avatar blurred, and that is not decoration.**
+ * The site has never shown the Feed because every capture of it contains other people's
+ * accounts, handles and faces. The founder resolved the same tension on the App Store
+ * by blurring them; the live listing's 04-social frame is the precedent this follows.
+ */
+const SHOT = {
+  compare: {
+    src: '/shot-compare.webp',
+    w: 760,
+    h: 1526,
+    alt: 'The bingd. ranking sheet asking which did you like more, with two film posters side by side to choose between',
+  },
+  /**
+   * A crop, not a phone, and the reason is correctness rather than composition.
+   *
+   * The frame it comes from reads `#12 Movies &middot; #3 Adventure &middot; #1 Fantasy`,
+   * and the shipped app cannot draw that: the overall placement and the genre ranks are
+   * mutually exclusive branches of one flag, and a title at position 12 gets the genre
+   * ranks alone. The capture predates the change. Cropped to the part that is still
+   * true, which is also the part the section is about. See `web/shots.mjs`.
+   */
+  reveal: {
+    src: '/shot-reveal.webp',
+    w: 640,
+    h: 389,
+    detail: true,
+    alt: 'A bingd. score reveal, showing 9.1 in a maroon tile above the name of the film it belongs to',
+  },
+  movies: {
+    src: '/shot-movies.webp',
+    w: 640,
+    h: 1286,
+    alt: 'A ranked bingd. movie collection as a grid of posters, each one carrying its own score out of ten',
+  },
+  tv: {
+    src: '/shot-tv.webp',
+    w: 640,
+    h: 1285,
+    alt: 'A ranked bingd. TV collection as a grid of posters, each season carrying its own score out of ten',
+  },
+  feed: {
+    src: '/shot-feed.webp',
+    w: 640,
+    h: 1285,
+    alt: 'The bingd. feed, showing trending titles above friends&rsquo; recent activity, with names and faces blurred',
+  },
+  foryou: {
+    src: '/shot-foryou.webp',
+    w: 640,
+    h: 1286,
+    alt: 'The bingd. For you wall, a grid of suggested films each with a control to save it or to dismiss it',
+  },
+  watchlist: {
+    src: '/shot-watchlist.webp',
+    w: 640,
+    h: 1286,
+    alt: 'A bingd. watchlist of nine films shown as a grid of posters, under the heading nine titles',
+  },
+};
+
+/** One `<img>`, eager only where it is above the fold. */
+const shot = (key, { eager = false } = {}) => {
+  const s = SHOT[key];
+  const loading = eager ? 'fetchpriority="high"' : 'loading="lazy" decoding="async"';
+  return `<img class="${s.detail ? 'detail' : 'phone'}" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
+               alt="${s.alt}" />`;
+};
+
+/**
+ * The install row, which the page needs in three places.
+ *
+ * `page.mjs` fills `#primary-install` on a phone and the `#install-ios` /
+ * `#install-android` pair on anything else, and it now mirrors whatever it filled into
+ * every element carrying the same name in `data-install`. That is what lets one
+ * decision paint the hero, the closing band and the sticky bar without any of the three
+ * knowing what platform it is on.
+ *
+ * `primary` is the hero copy and keeps the ids; the rest are mirrors. A mirror nothing
+ * fills stays hidden, so a platform with no destination shows one honest sentence
+ * instead of three dead buttons.
+ */
+const installRow = ({ primary = false } = {}) => {
+  const name = (id) => (primary ? ` id="${id}"` : ` data-install="${id}"`);
+  return `          <div class="actions">
+            <a class="button"${name('primary-install')} hidden href="#"></a>
+
+            <span${name('desktop-choices')} hidden style="display: contents">
+              <a class="button"${name('install-ios')} hidden href="#"></a>
+              <a class="button secondary"${name('install-android')} hidden href="#"></a>
+            </span>
+          </div>
+
+          <p class="fineprint"${name('no-destination')} hidden>${UNAVAILABLE}</p>`;
+};
+
+/**
+ * What the page says under the buttons about where it can actually be installed from.
+ *
+ * Derived from `distribution.config.json` rather than written out, because the two
+ * facts in it are not symmetric and one of them will change without this sentence being
+ * reread. iOS is a public listing. Android is a **closed test** whose opt-in page is the
+ * only way in: somebody sent to the plain Play listing before opting in is told the app
+ * is unavailable for their device, which reads as Bingd being broken rather than as
+ * them not having joined yet.
+ */
+const AVAILABILITY = [
+  distribution.ios?.storeUrl
+    ? 'Free on the App Store.'
+    : distribution.ios?.betaUrl
+      ? 'On iPhone through TestFlight.'
+      : null,
+  distribution.android?.storeUrl
+    ? 'Free on Google Play.'
+    : distribution.android?.optInUrl
+      ? 'Android is not on Google Play yet, so the Android button is the tester opt-in page you have to join from first.'
+      : null,
+]
+  .filter(Boolean)
+  .join(' ');
+
+/**
+ * `/` &mdash; the landing page, and Cloudflare Pages' fallback for anything unmatched.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS PAGE IS FOR, WHICH IT HAS NOW BEEN WRONG ABOUT TWICE
+ * ---------------------------------------------------------------------------
+ *
+ * First it was a holding page saying Bingd was in closed testing, with nothing to tap:
+ * the founder followed TestFlight's developer-website link onto it on 2026-09-10 and
+ * correctly reported a dead end. Then it grew the install row, which fixed the dead end
+ * and left a page that still could not tell a stranger what Bingd *is*.
+ *
+ * That second reading is what this replaces. `/` is the address on the App Store
+ * listing, in the privacy policy, in the Terms and in TestFlight's developer-website
+ * field, and it is where a link posted to Reddit or forwarded in a group chat lands.
+ * Its job is ten seconds of comprehension and one tap.
+ *
+ * ---------------------------------------------------------------------------
+ * THE RULES IT IS WRITTEN UNDER
+ * ---------------------------------------------------------------------------
+ *
+ *   - **Every claim is a shipped behaviour.** The three bucket labels, the comparison
+ *     question, Too close to call, the watchlist clearing itself, Taste Match refusing
+ *     to show a number it cannot compute: each is the product's own wording or its own
+ *     rule. Nothing here is a roadmap item written in the present tense.
+ *   - **No fabricated proof.** No testimonials, no press logos, no install counts, no
+ *     star average, no "join thousands". There are none of those to report, and an
+ *     invented one is the fastest way to lose the exact reader this page is for.
+ *   - **The screenshots are real and unretouched except for the blur**, which is what
+ *     lets the Feed be shown at all. See `SHOT`.
+ *   - **It still carries no analytics and no third-party origin but the font host.**
+ *     Either would need the privacy policy edited first, which is a document rather
+ *     than a detail.
+ */
 await writeFile(
   join(dist, 'index.html'),
   `<!doctype html>
@@ -1948,63 +2397,308 @@ await writeFile(
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>bingd.</title>
+    <title>bingd. &mdash; rank the movies and TV you watch</title>
     <!-- No robots meta, and no X-Robots-Tag on / either. This page is the install page
          and the address published on the App Store listing, in the privacy policy, in
          the Terms and in TestFlight's developer-website field; a launch page that asks
          not to be found is the wrong half of the trade the old mode-keyed rule made.
          The routes that name an account keep both, unconditionally. -->
-    <meta name="description" content="Rank movies and TV with friends. Build your favourites through quick comparisons, see what friends are watching, and find your next binge." />
-${social({ share: 'bingd.', path: '/' })}
+    <meta name="description" content="Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, and see where your friends put theirs." />
+    <link rel="canonical" href="${ORIGIN}/" />
+    <meta name="theme-color" content="#773744" />
+
+    <meta property="og:site_name" content="bingd." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="bingd. &mdash; rank the movies and TV you watch" />
+    <meta property="og:description" content="Quick head-to-head comparisons instead of star ratings. Build a ranked collection, see what your friends are watching, and find your next binge." />
+    <meta property="og:image" content="${ORIGIN}/social-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The bingd. wordmark" />
+    <meta property="og:url" content="${ORIGIN}/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="bingd. &mdash; rank the movies and TV you watch" />
+    <meta name="twitter:description" content="Quick head-to-head comparisons instead of star ratings. Build a ranked collection, see what your friends are watching, and find your next binge." />
+    <meta name="twitter:image" content="${ORIGIN}/social-card.png" />
+
+    <link rel="icon" href="/bingd-icon.png" />
+    <link rel="apple-touch-icon" href="/bingd-icon.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
 
-    <style>${styles}</style>
+    <style>${LANDING_STYLES}</style>
   </head>
 
   <body>
+    <header class="wrap masthead">
+      <img src="/bingd-icon.png" width="30" height="30" alt="" />
+      <span class="mark">bingd.</span>
+    </header>
+
     <main>
-      <div class="pitch">
-        <h1>bingd.</h1>
-        <p class="tagline">Rank movies &amp; TV with friends.</p>
+      <section class="hero wrap" id="get">
+        <div class="split">
+          <div class="split-copy">
+            <h1>Rank what you watch.<br />See where it really lands.</h1>
+            <p class="lede">
+              No stars. bingd. asks which of two you liked more, a few times over, and
+              puts each film or season exactly where it belongs in your collection, with
+              a score out of ten. Then you get to see where your friends put theirs.
+            </p>
 
-        <div class="card">
-${ROOT_BODY}
+${installRow({ primary: true })}
 
-          <div class="actions">
-            <a class="button" id="primary-install" hidden href="#"></a>
-
-            <span id="desktop-choices" hidden>
-              <a class="button" id="install-ios" hidden href="#"></a>
-              <a class="button" id="install-android" hidden href="#"></a>
-            </span>
+            <p class="fineprint">${AVAILABILITY}</p>
           </div>
 
-          <p id="no-destination" hidden>${UNAVAILABLE}</p>
+          <div>${shot('compare', { eager: true })}</div>
         </div>
-      </div>
+      </section>
 
-${SHOWCASE}
+      <section class="band">
+        <div class="wrap split flip">
+          <div class="split-copy">
+            <p class="kicker">How it works</p>
+            <h2>Stars were never the right question.</h2>
+            <p class="section-lede">
+              Is it a four, or a four and a half? Nobody actually knows. But everybody
+              knows which of two films they liked more, so that is the only thing bingd.
+              ever asks you.
+            </p>
 
-      <footer>
-        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> &middot;
-        <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
-        <a href="/support">Support</a>
-      </footer>
+            <ol class="steps">
+              <li>
+                <span class="n">1</span>
+                <span>
+                  <b>Log it.</b>
+                  <span class="d">How was it? I liked it, it was fine, or I didn&rsquo;t
+                  like it.</span>
+                </span>
+              </li>
+              <li>
+                <span class="n">2</span>
+                <span>
+                  <b>Compare it.</b>
+                  <span class="d">A handful of head-to-head choices against things you
+                  have already ranked. Too tough gets you a different pairing, for the
+                  ones you cannot call and the ones you cannot remember.</span>
+                </span>
+              </li>
+              <li>
+                <span class="n">3</span>
+                <span>
+                  <b>See where it landed.</b>
+                  <span class="d">A score out of ten, worked out from where it ended up
+                  rather than typed in, and a place in a list you can argue with.</span>
+                </span>
+              </li>
+            </ol>
+          </div>
+
+          <div>${shot('reveal')}</div>
+        </div>
+      </section>
+
+      <section>
+        <div class="wrap split">
+          <div class="split-copy">
+            <p class="kicker">Your collection</p>
+            <h2>A list that is finally in your order.</h2>
+            <p class="section-lede">
+              Everything you rank takes its place, so &ldquo;what are your top five&rdquo;
+              stops being a question you have to think about. Movies and TV live in one
+              profile, and a season is ranked on its own, so a brilliant first year never
+              has to carry a show that fell apart later.
+            </p>
+            <ul class="notes">
+              <li><b>Watched and Watchlist in one place</b>, filterable and sortable, and
+              the watchlist clears itself when you log the thing.</li>
+              <li><b>Writing is optional.</b> A ranking with no words at all is finished.
+              Reviews are there if you want an audience, and a private note is there if
+              you do not.</li>
+            </ul>
+          </div>
+
+          <div class="phone-pair">
+            ${shot('movies')}
+            ${shot('tv')}
+          </div>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="wrap split flip">
+          <div class="split-copy">
+            <p class="kicker">Friends</p>
+            <h2>Better with the people you already argue with.</h2>
+            <p class="section-lede">
+              Follow someone and their rankings turn up in a feed that is strictly
+              chronological. Nothing reorders it, and nobody is in it you did not follow.
+              React, reply, and send a title straight to a person instead of losing it in
+              a group chat.
+            </p>
+            <ul class="notes">
+              <li><b>Taste Match</b> appears on a profile once the two of you have both
+              ranked enough for the number to mean anything. Until then it says so,
+              rather than showing you a percentage it made up.</li>
+              <li><b>Group Picks</b> is the one to try first. Choose who is watching
+              tonight, and bingd. finds the things you can all agree on.</li>
+            </ul>
+          </div>
+
+          <div>${shot('feed')}</div>
+        </div>
+      </section>
+
+      <section>
+        <div class="wrap split">
+          <div class="split-copy">
+            <p class="kicker">What&rsquo;s next</p>
+            <h2>And a straight answer to &ldquo;what should I watch&rdquo;.</h2>
+            <p class="section-lede">
+              For you is built out of what you have ranked, so it gets sharper the more
+              of your taste it has seen. Anything a friend sends you waits in one place
+              until you deal with it, and everything you mean to get to sits on the
+              watchlist until you do.
+            </p>
+          </div>
+
+          <div class="phone-pair">
+            ${shot('foryou')}
+            ${shot('watchlist')}
+          </div>
+        </div>
+      </section>
+
+      <section class="closer">
+        <div class="wrap">
+          <h2>Start with five you love.</h2>
+          <p class="section-lede">
+            That is enough for bingd. to have an opinion about everything else.
+          </p>
+
+${installRow({})}
+
+          <p class="fineprint">${AVAILABILITY}</p>
+        </div>
+      </section>
     </main>
+
+    <footer class="wrap">
+      <nav>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/support">Support</a>
+        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>
+      </nav>
+      <p class="legal">
+        This product uses the TMDB API but is not endorsed or certified by TMDB. Film and
+        series information and artwork come from
+        <a href="https://www.themoviedb.org">TMDB</a>.
+      </p>
+      <p class="legal">bingd. is made by ${LEGAL_ENTITY}.</p>
+    </footer>
+
+    <div class="sticky">
+      <a class="button" data-install="primary-install" hidden href="#"></a>
+    </div>
+
+    <!--
+      The install row is painted by page.mjs, because which destination a visitor should
+      get is a per-platform decision. That means a page whose module does not load or
+      does not run has no install link in it at all, which for this page is the whole
+      point missing. So the iOS listing is also a plain anchor here.
+
+      iOS rather than both, and no platform detection: this is the fallback for a
+      browser that is not running the module, so it cannot detect anything. It names
+      the one store that exists, and it is built from the configured URL rather than
+      written out, so it cannot outlive that URL.
+    -->
+    ${
+      distribution.ios?.storeUrl
+        ? `<noscript>
+      <p class="fineprint" style="text-align: center">
+        <a href="${distribution.ios.storeUrl}">Get bingd. on the App Store</a>
+      </p>
+    </noscript>`
+        : ''
+    }
 
     <script type="application/json" id="bingd-config">${jsonBlock({
       page: 'generic',
       distribution: shippedDistribution,
     })}</script>
     <script type="module" src="/page.mjs"></script>
+
+    <!-- Structured data, deliberately the short version. Name, what it is, where it
+         runs, and that it costs nothing. No aggregateRating and no ratingCount, because
+         bingd. has neither a rating to state nor a number of ratings to state it over,
+         and a structured-data field is precisely where an invented one would be
+         believed without anybody reading it. -->
+    <script type="application/ld+json">${jsonBlock({
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'bingd.',
+      applicationCategory: 'EntertainmentApplication',
+      operatingSystem: 'iOS',
+      url: `${ORIGIN}/`,
+      description:
+        'Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, see what your friends are watching, and find what to watch next.',
+      author: { '@type': 'Person', name: 'Suraj Kandukuri' },
+      ...(distribution.ios?.storeUrl ? { installUrl: distribution.ios.storeUrl } : {}),
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    })}</script>
   </body>
 </html>
+`,
+);
+
+/**
+ * `robots.txt` and `sitemap.xml`, which are hygiene plus one small real defect.
+ *
+ * The defect first. Cloudflare Pages answers an unmatched path with `index.html` and a
+ * **200**, so `/robots.txt` has been serving the front page's HTML as a robots file for
+ * as long as the site has existed. A crawler reading that gets a parse failure rather
+ * than a 404, which is the same shape of silent wrongness that made `assetlinks.json`
+ * get written empty rather than omitted.
+ *
+ * **Nothing is disallowed here, deliberately.** The four routes that name an account are
+ * kept out of the index by `X-Robots-Tag` and a robots meta tag, and a `Disallow` would
+ * make that worse rather than better: a crawler told not to fetch a URL never reads the
+ * noindex on it, so a `/u/<handle>` already known to Google would stay in the index with
+ * nothing able to withdraw it. Blocking a crawl and de-indexing are opposite
+ * instructions and only one of them is wanted here.
+ *
+ * The sitemap lists the five pages a stranger should be able to find, and none of the
+ * four that name an account.
+ */
+const PUBLIC_PAGES = ['/', '/privacy', '/terms', '/support', '/account-deletion'];
+
+await writeFile(
+  join(dist, 'robots.txt'),
+  `# Generated by web/build.mjs.
+#
+# Nothing is disallowed. The routes that must not be indexed carry X-Robots-Tag and a
+# robots meta tag instead, because a crawler told not to fetch a URL never reads the
+# noindex on it.
+User-agent: *
+Allow: /
+
+Sitemap: ${ORIGIN}/sitemap.xml
+`,
+);
+
+await writeFile(
+  join(dist, 'sitemap.xml'),
+  `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${PUBLIC_PAGES.map((path) => `  <url><loc>${ORIGIN}${path}</loc></url>`).join('\n')}
+</urlset>
 `,
 );
 
