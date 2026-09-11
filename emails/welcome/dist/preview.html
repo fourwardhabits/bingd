@@ -37,6 +37,14 @@
       }
       iframe { display: block; border: 0; background: #f5ebdd; }
       figure { margin: 0; }
+      ol.inbox { list-style: none; margin: 0 0 10px; padding: 0; border: 1px solid #cdc3b4; border-radius: 8px; overflow: hidden; background: #fbf8f4; }
+      ol.inbox li { display: grid; grid-template-columns: 10rem 1fr auto; gap: 12px; align-items: baseline; padding: 12px 14px; border-bottom: 1px solid #e6dccc; }
+      ol.inbox li:last-child { border-bottom: 0; }
+      ol.inbox .from { font-weight: 600; }
+      ol.inbox .line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      ol.inbox .pre { color: #8a827a; font-weight: 400; }
+      ol.inbox .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #2f5334; background: #d8e6d9; border-radius: 4px; padding: 2px 6px; }
+
       table.meta { border-collapse: collapse; width: 100%; font-size: 13px; background: #fbf8f4; }
       table.meta th, table.meta td { border: 1px solid #e0d6c6; padding: 8px 10px; text-align: left; vertical-align: top; }
       table.meta th { background: #f5ebdd; font-weight: 600; }
@@ -955,6 +963,26 @@
         inversion over the light palette, which is what the light palette is chosen to
         survive.
       </p>
+
+      <h2>In an inbox</h2>
+      <ol class="inbox">
+        <li class="row">
+          <span class="from">Suraj from bingd.</span>
+          <span class="line"><b>I built bingd. Tell me what you think.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read all of them.</span></span>
+          <span class="tag">recommended</span>
+        </li>
+        <li class="row">
+          <span class="from">Suraj from bingd.</span>
+          <span class="line"><b>Thanks for trying bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read all of them.</span></span>
+          
+        </li>
+        <li class="row">
+          <span class="from">Suraj from bingd.</span>
+          <span class="line"><b>A note from Suraj, who made bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read all of them.</span></span>
+          
+        </li>
+      </ol>
+      <p class="sub">A subject is only ever read in a list, beside a sender name.</p>
 
       <h2>Subject and preheader</h2>
       <div class="pair">

@@ -536,6 +536,35 @@ ${copy.footer.unsubscribeLabel}: ${UNSUBSCRIBE_TOKEN}
 // actually need answering before a send.
 // ---------------------------------------------------------------------------
 
+/**
+ * Each subject option as an inbox row.
+ *
+ * A subject line is never read on its own. It is read in a list, next to a sender name,
+ * with as much of the preheader as the row has space for, and it is read in about a
+ * second against nine other rows. Judging one as a sentence in a config file is judging
+ * it in the one context nobody sees it in.
+ *
+ * The sender name is the other half and is usually the half that decides an open, which
+ * is why it is rendered here rather than described. `Suraj from bingd.` reads as a
+ * person; `bingd.` reads as a service.
+ *
+ * Deliberately not pixel-faithful to any one client. It is the shape they share: bold
+ * sender, bold subject, the preheader trailing in grey and truncated by the width.
+ */
+const FROM_NAME = 'Suraj from bingd.';
+
+const inboxRow = (subject, note) => `
+        <li class="row">
+          <span class="from">${esc(FROM_NAME)}</span>
+          <span class="line"><b>${esc(subject)}</b><span class="pre"> &mdash; ${esc(copy.preheader.chosen)}</span></span>
+          ${note ? `<span class="tag">${esc(note)}</span>` : ''}
+        </li>`;
+
+const inboxRows = [
+  inboxRow(copy.subject.chosen, 'recommended'),
+  ...copy.subject.alternatives.map((alternative) => inboxRow(alternative, '')),
+].join('');
+
 const escAttr = (value) => esc(value).replace(/'/g, '&#39;');
 
 const targetRows = Object.entries(targets.targets)
@@ -604,6 +633,14 @@ const preview = `<!doctype html>
       }
       iframe { display: block; border: 0; background: #f5ebdd; }
       figure { margin: 0; }
+      ol.inbox { list-style: none; margin: 0 0 10px; padding: 0; border: 1px solid #cdc3b4; border-radius: 8px; overflow: hidden; background: #fbf8f4; }
+      ol.inbox li { display: grid; grid-template-columns: 10rem 1fr auto; gap: 12px; align-items: baseline; padding: 12px 14px; border-bottom: 1px solid #e6dccc; }
+      ol.inbox li:last-child { border-bottom: 0; }
+      ol.inbox .from { font-weight: 600; }
+      ol.inbox .line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      ol.inbox .pre { color: #8a827a; font-weight: 400; }
+      ol.inbox .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #2f5334; background: #d8e6d9; border-radius: 4px; padding: 2px 6px; }
+
       table.meta { border-collapse: collapse; width: 100%; font-size: 13px; background: #fbf8f4; }
       table.meta th, table.meta td { border: 1px solid #e0d6c6; padding: 8px 10px; text-align: left; vertical-align: top; }
       table.meta th { background: #f5ebdd; font-weight: 600; }
@@ -665,6 +702,11 @@ const preview = `<!doctype html>
         inversion over the light palette, which is what the light palette is chosen to
         survive.
       </p>
+
+      <h2>In an inbox</h2>
+      <ol class="inbox">${inboxRows}
+      </ol>
+      <p class="sub">A subject is only ever read in a list, beside a sender name.</p>
 
       <h2>Subject and preheader</h2>
       <div class="pair">
@@ -963,6 +1005,35 @@ const artifact = `<title>Welcome Email Review</title>
   ol.decisions b { display: block; margin-bottom: 3px; }
   ol.decisions span { color: var(--muted); font-size: 0.9rem; }
 
+  /* The inbox mock. A list, because that is what it is. */
+  ol.inbox { list-style: none; margin: 0; padding: 0; border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; background: var(--surface); }
+  ol.inbox .row {
+    display: grid;
+    grid-template-columns: 11rem 1fr auto;
+    gap: 14px;
+    align-items: baseline;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  ol.inbox .row:last-child { border-bottom: 0; }
+  ol.inbox .from { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ol.inbox .line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  ol.inbox .pre { color: var(--faint); font-weight: 400; }
+  ol.inbox .tag {
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ok);
+    background: var(--ok-soft);
+    border-radius: 4px;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+  @media (max-width: 640px) {
+    ol.inbox .row { grid-template-columns: 1fr; gap: 4px; }
+    ol.inbox .tag { justify-self: start; }
+  }
+
   .foot { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--hairline); color: var(--faint); font-size: 0.8rem; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1023,6 +1094,21 @@ const artifact = `<title>Welcome Email Review</title>
       one thing no preview can show: it ignores that block entirely and runs its own
       inversion over the light palette, which is what the light palette is chosen to
       survive.
+    </p>
+  </section>
+
+  <section>
+    <h2>In an inbox</h2>
+    <p class="sub" style="margin-bottom:18px">
+      A subject line is only ever read in a list, beside a sender name, with the
+      preheader trailing off the end of the row. The sender name is the half that
+      usually decides the open.
+    </p>
+    <ol class="inbox">${inboxRows}
+    </ol>
+    <p class="sub" style="margin-top:14px">
+      <code>Suraj from bingd.</code> reads as a person. <code>bingd.</code> reads as a
+      service, and this email's whole claim is that a person wrote it.
     </p>
   </section>
 
