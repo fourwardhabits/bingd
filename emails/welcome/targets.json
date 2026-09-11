@@ -1,0 +1,90 @@
+{
+  "$comment": [
+    "EVERY LINK IN THE WELCOME EMAIL, AND WHAT IS ACTUALLY BEHIND IT.",
+    "",
+    "The rule this file exists to enforce: a call to action must never point at a",
+    "destination that does not really exist. That is easy to say and easy to lose, because",
+    "a CTA is written months before anybody clicks it and a feature can be real without",
+    "being reachable from an email. So each destination carries its classification as",
+    "data, `build.mjs` reads it, and a `D` refuses to render.",
+    "",
+    "THE FOUR CLASSIFICATIONS",
+    "",
+    "  A  Directly deep-linkable. The path is in `web/deep-links.config.json`'s",
+    "     `appPaths`, so Apple's AASA and the Android intent filter both claim it, an",
+    "     Expo Router screen receives it, and `web/build.mjs` publishes a fallback page",
+    "     for somebody who does not have the app.",
+    "  B  App-open plus a clear instruction. The link opens the app somewhere real, and",
+    "     the copy says where to go from there, because the surface the card is about has",
+    "     no route of its own.",
+    "  C  Needs a user-specific link that a send job can genuinely produce.",
+    "  D  Not currently practical. Kept here with its reasoning rather than deleted, so",
+    "     that the next person to want it can see what would have to change.",
+    "",
+    "Everything below was checked against the repository and, where it says so, against",
+    "the production database, on 2026-09-11."
+  ],
+
+  "origin": "https://bingd.app",
+
+  "targets": {
+    "founderProfile": {
+      "classification": "A",
+      "url": "https://bingd.app/u/saisurajkan",
+      "capability": "A public profile with a Follow control on it.",
+      "deepLink": "/u/* is in appPaths. Apple's AASA claims it, the Android intent filter claims it, and app/u/[username].tsx renders the profile. FollowControl is in the trailing half of the action row for anybody who is not the reader.",
+      "webFallback": "web/dist/u.html resolves display_name and the avatar through PostgREST under the profiles_read policy, shows them, and offers the install row plus an Open in bingd. button on the custom scheme.",
+      "needsUserData": false,
+      "verified": "2026-09-11, against production: profiles?username=eq.saisurajkan returns display_name 'Suraj Kandukuri' to the anon key, which means the account is public and active. A private or suspended account would return zero rows and the page would show the generic card instead.",
+      "caveat": "A Universal Link opened from inside Gmail's in-app browser on iOS does not always hand off to the app. The fallback page is the recovery: it carries an Open in bingd. button on the bingd:// scheme, which is the one thing that opens an installed app from a page on its own domain."
+    },
+
+    "ownProfile": {
+      "classification": "B",
+      "url": "https://bingd.app/u/{{handle}}",
+      "capability": "Invite friends exists and is finished: create_invite_link mints one reusable personal token per account, https://bingd.app/i/<token> resolves it, and accepting it creates a follow edge. It is on the Profile tab, beside Share Profile.",
+      "deepLink": "None reaches it. The four claimed paths are /u/*, /lists/*, /title/* and /i/*, and none of them is the Profile tab. /u/<the reader's own handle> resolves to the visitor view of their own profile, which deliberately has no Invite friends control: ProfileActions leaves the trailing half empty for the reader themselves, because inviting people from somebody's profile page would be a sentence with the wrong subject.",
+      "webFallback": "The same u.html, showing the reader their own public profile. Harmless, and it carries the Open in bingd. button.",
+      "needsUserData": true,
+      "userData": "The recipient's own handle, which the send job already has: it is reading profiles to get the address and the display name.",
+      "whyNotC": "A personalised invite URL would be the better card and it is not safely producible. create_invite_link is SECURITY DEFINER and reads auth.uid(), so a service-role job calling it has no caller to mint for. Reading invite_tokens directly only helps the minority who have already tapped Invite friends, and a two-day-old account almost never has. Minting rows for people from a job means writing invite_tokens on their behalf, which is a change to the invite system and out of scope here. Personalising for some recipients and instructing the rest is worse than one honest instruction for everybody.",
+      "verified": "2026-09-11, against the repository: supabase/migrations/20260817001300_recommend_to_a_friend.sql for create_invite_link, src/features/profile/InviteFriendsButton.tsx for where the control lives, src/features/profile/ProfileActions.tsx for why the reader's own /u/ page does not have it."
+    },
+
+    "founderTitle": {
+      "classification": "A",
+      "url": "https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa",
+      "founderInput": true,
+      "capability": "A title page with Rank, Watchlist and Recommend on it.",
+      "deepLink": "/title/* is in appPaths and app/title/[id].tsx receives the id.",
+      "webFallback": "web/dist/title.html reads media_items, which is world-readable, and shows the film's name, year and poster before offering the install row. A visitor without the app sees what they were sent rather than a generic card.",
+      "needsUserData": false,
+      "verified": "2026-09-11, against production: media_items holds The Wolf of Wall Street (2013) at this id. Read straight from PostgREST rather than through the search RPC on purpose, because search calls the TMDB adapter and writes to the catalogue cache.",
+      "founderNote": "THIS IS THE ONE THING IN THE EMAIL THAT SHOULD BE CHANGED BEFORE IT GOES OUT. It is set to The Wolf of Wall Street because it is the founder's own number one at 10.0 and his bio already makes the joke about it, so the card writes itself and it asks a question somebody might answer. But 'what I am watching now' is a fact only he knows and it moves. To swap it: open the title in bingd., tap Share, and paste the link. It is exactly this URL with a different id."
+    }
+  },
+
+  "$rejectedComment": [
+    "CTAs that were considered and are not in the email. Recorded because the reasoning is",
+    "the useful part, and because 'why is Group Picks not a button' is a question that will",
+    "be asked again."
+  ],
+  "rejected": {
+    "groupPicks": {
+      "classification": "D",
+      "capability": "Real and shipped. src/features/recommendations/GroupPicksSheet.tsx, server side in the invoker RPC deployed to production on 2026-09-07.",
+      "whyD": "Three reasons, any one of which is enough. It has no route: it is a chip on the For you wall that opens a sheet, so there is nothing for a link to address. The For you tab is not a claimed path either, so no https link opens the app there. And it refuses to work until the reader follows somebody: with nobody to pick from, the sheet says 'Nobody to watch with yet. Follow people to get picks for a group.' A welcome email lands on exactly the accounts most likely to hit that.",
+      "instead": "It is named in the founder's note as his favourite thing, which is what he asked for and is also the honest treatment. The Follow me card is what makes it usable, so the two are in the right order on the page."
+    },
+    "personalInviteLink": {
+      "classification": "C in principle, D tonight",
+      "whyD": "See ownProfile.whyNotC. It would need a new SECURITY DEFINER function that mints a token for a named user id, callable by the service role, plus a migration to deploy it. That is a change to the invite system and this workstream does not make one.",
+      "ifYouWantIt": "It is the single highest-leverage change to this email. A card carrying https://bingd.app/i/<their own token> turns 'go and find your invite link' into one tap, and it keeps the attribution that makes Invite Instigator and the invite funnel measurable."
+    },
+    "openTheApp": {
+      "classification": "D",
+      "whyD": "There is no generic 'open the app' link that works from an email. bingd:// is a custom scheme: mail clients do not reliably linkify it, and on a device without the app a tap does nothing at all, which is the worst failure a CTA has. https://bingd.app/ is not in appPaths, so on iOS it opens the browser even for somebody who has the app installed. Android claims the whole host and would open the app, which makes the behaviour differ by platform for the same link.",
+      "instead": "Every card uses a claimed path, so 'open the app' is a side effect of going somewhere real."
+    }
+  }
+}

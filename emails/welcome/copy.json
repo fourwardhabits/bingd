@@ -1,0 +1,160 @@
+{
+  "$comment": [
+    "THE EDITABLE COPY SOURCE FOR THE WELCOME EMAIL.",
+    "",
+    "This file is the thing to edit. `build.mjs` renders it into `dist/welcome.html`,",
+    "`dist/welcome.txt` and `dist/preview.html`; nothing else in this directory contains",
+    "a sentence a reader will see, which is deliberate. Copy and markup drifting apart is",
+    "how an email ends up saying one thing in HTML and another in plain text, and the",
+    "plain-text half is the one nobody looks at before sending.",
+    "",
+    "Run `node emails/welcome/build.mjs` after any edit. It rebuilds all three files and",
+    "refuses if a link has no verified destination.",
+    "",
+    "WHAT IS STILL A DRAFT: `note.paragraphs` below. It is written close to final and in",
+    "the founder's register as far as anybody else can guess at it, but it claims to be",
+    "from a specific person and it should sound like him rather than like a good",
+    "impression of him. Everything else here can ship as written.",
+    "",
+    "Words that are not negotiable, from docs/product/brand.md: the name is `bingd.`,",
+    "always lowercase, and the full stop is part of it. No exclamation marks anywhere.",
+    "No em dashes. `Rank`, never `rate`."
+  ],
+
+  "$subjectComment": [
+    "Three options. The first is the recommendation, and the reason is the email's stated",
+    "primary objective: replies. It asks a question, which is the one thing a subject line",
+    "can do that makes answering feel like the obvious response rather than an extra step.",
+    "",
+    "`Welcome to bingd.` is deliberately not here. It is the most-sent subject line in",
+    "software and it promises a template. So is anything with an emoji, a countdown or the",
+    "word `unlock`."
+  ],
+  "subject": {
+    "chosen": "I built bingd. Tell me what you think.",
+    "alternatives": [
+      "Thanks for trying bingd.",
+      "A note from Suraj, who made bingd."
+    ]
+  },
+
+  "$preheaderComment": [
+    "The grey line an inbox shows after the subject. Roughly 40 to 90 characters: shorter",
+    "and clients pad it with whatever the email's first words happen to be, longer and it",
+    "is cut mid-sentence on a phone.",
+    "",
+    "It says the same thing the subject says, one step more concrete, and it is the second",
+    "of three places the reply invitation appears before anybody has scrolled."
+  ],
+  "preheader": {
+    "chosen": "Hit reply and it comes straight to me. I read all of them.",
+    "alternatives": ["A few things worth trying, and an inbox I actually watch."]
+  },
+
+  "masthead": "bingd.",
+
+  "$noteComment": [
+    "DRAFT. FOUNDER TO EDIT.",
+    "",
+    "Target 150 to 225 words; this is about 205. The shape it is trying to hold:",
+    "",
+    "  1. thank them, and say who is writing,",
+    "  2. why this exists, told as a problem the reader also has rather than as a mission,",
+    "  3. two honest admissions, because an early product that pretends otherwise reads",
+    "     worse than one that says so,",
+    "  4. the one ask that actually matters, which is a second person,",
+    "  5. the favourite feature, offered as an opinion rather than a feature tour,",
+    "  6. the reply invitation, stated so plainly it cannot be read as a formality.",
+    "",
+    "If you rewrite it, keep 6. Everything else in this email is replaceable and that",
+    "sentence is the reason the email is being sent at all.",
+    "",
+    "`{{greeting}}` renders as `Hi <name>,` when the account has a display name whose",
+    "first word looks like a name, and as `Hi,` otherwise. It never falls back to the",
+    "handle: `Hi saisurajkan,` is worse than no name at all, and it is the exact tell that",
+    "a person did not write this."
+  ],
+  "note": {
+    "status": "DRAFT - FOUNDER TO EDIT",
+    "greeting": "{{greeting}}",
+    "paragraphs": [
+      "Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.",
+      "I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.",
+      "Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed, Taste Match and Group Picks all need somebody on the other end before they do anything at all.",
+      "Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.",
+      "If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one."
+    ],
+    "signoff": ["— Suraj", "Founder, bingd."],
+    "$signoffLinkComment": [
+      "A small text link beside the signature, which is the only place in the email where",
+      "naming the founder's own profile is not a pitch. Verified against production on",
+      "2026-09-11: the handle resolves and the account is public, so the web fallback names",
+      "him rather than showing the generic card.",
+      "",
+      "Set to null to remove it. The Follow me card below points at the same place, so this",
+      "is a convenience rather than a second ask."
+    ],
+    "signoffLink": { "label": "my profile on bingd.", "target": "founderProfile" }
+  },
+
+  "$cardsComment": [
+    "Three, and they are secondary to the note by design. Each one names a destination in",
+    "`targets.json`, and `build.mjs` refuses to render a card whose target is classified",
+    "`D`, so a CTA cannot quietly outlive the capability behind it.",
+    "",
+    "Ordered easiest first. Follow me is one tap and it is the only one that pays off",
+    "immediately, because a feed with nobody in it is the first thing a new account sees.",
+    "Bring someone is the one that matters most and it is also the one that asks most, so",
+    "it is not first. Rank something is a way back into the loop for somebody who has not",
+    "opened the app since the day they signed up.",
+    "",
+    "GROUP PICKS IS NOT A CARD, AND THAT IS ON PURPOSE. It has no route of its own, no",
+    "deep link, and it refuses to do anything until the reader follows somebody. A card",
+    "for it would be a button that lands on an empty state. It is in the note instead,",
+    "as an opinion, which is where the founder wanted it and also where it is true."
+  ],
+  "cards": {
+    "intro": "A few things worth trying",
+    "items": [
+      {
+        "title": "Follow me",
+        "body": "It gives you one person in your feed straight away, and I would like to see what you are watching.",
+        "action": "Open my profile",
+        "target": "founderProfile"
+      },
+      {
+        "title": "Bring one person in",
+        "body": "One friend you already trade recommendations with is worth more than twenty strangers. Your invite link is in the app, under Profile, and it never changes.",
+        "action": "Open bingd.",
+        "target": "ownProfile",
+        "instruction": "Then tap Profile at the bottom, then Invite friends."
+      },
+      {
+        "title": "Rank what I am watching",
+        "body": "People keep telling me that having this at number one is a red flag. Rank it yourself and tell me I am wrong.",
+        "action": "Open the title",
+        "target": "founderTitle"
+      }
+    ]
+  },
+
+  "$footerComment": [
+    "Deliberately four short lines and no navigation, no social icons and no logo.",
+    "",
+    "The address and the unsubscribe are not padding. This message carries an ask to",
+    "invite somebody and an ask to try a feature, which under CAN-SPAM's primary-purpose",
+    "test is enough to read as commercial however warmly it is written. The simple",
+    "treatment is to give it an unsubscribe and a postal address and stop arguing about",
+    "which bucket it is in. See automation/README.md.",
+    "",
+    "`postalAddress` is a FOUNDER INPUT and the build refuses to produce a sendable file",
+    "while it is null. There is no company, so this is a personal address or a PO box, and",
+    "inventing a plausible one would be worse than the build failing."
+  ],
+  "footer": {
+    "signature": "bingd. is made by Suraj Kandukuri.",
+    "reason": "You are getting this because you made a bingd. account. It is the only email of its kind I will send you.",
+    "postalAddress": null,
+    "unsubscribeLabel": "Unsubscribe"
+  }
+}
