@@ -66,6 +66,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | `title_logged` | `set_bucket` answered `ok` | the collector | `media_kind`, `surface`, `bucket` |
 | `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
 | `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
+| `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
 
 ### Social and discovery
@@ -347,6 +348,25 @@ the session are none. It carries the same `mode` vocabulary as the completion so
 join on it, and `media_kind` comes from the title being ranked rather than from the
 server's answer, because a comparison carries no category. **`ranking_started` minus
 `ranking_completed`, per `mode`, is the abandonment rate.**
+
+**`comparison_info_opened`** is the recognition question, counted. A comparison the reader
+cannot answer from two posters is the one that loses them, and Details is the escape hatch
+built for it; nothing said how often it is reached for, or whether the two kinds reach for
+it at anything like the same rate. The memory-aid pass of 2026-09-11 is built on the claim
+that a season needs it far more than a film does, because a poster with a number on it is
+the same poster in every season of a show, and this is the only number that can test that.
+
+It fires on the press that opens the sheet, so a Details pressed while the opponent is
+still loading emits nothing. Twice in one comparison is a reader who checked both sides,
+which is a real act rather than a duplicate.
+
+**There is deliberately no `comparison_info_outcome`.** The obvious companion event says
+what the reader did next — picked, gave up, or left — and it is not specified, because a
+comparison has four ways out and one of them is Undo, which rolls the pair back
+*underneath* the answer: an outcome event would then attribute one comparison's Details to
+the next comparison's pick. Joining `comparison_info_opened` against `ranking_started` and
+`ranking_completed` at the session level answers the coarse version of the question with
+no such hazard, and that is what to read first.
 
 **`watchlist_added`** is an addition. Removals are not measured; nothing in the beta asks.
 It carries **no `media_kind`**, deliberately: the watchlist accepts a whole series as well
@@ -706,6 +726,7 @@ a number that looks like growth and is not.
 | `onboarding_completed` | once per flow | guarded on the flow having already *ended*, so two buttons on one summary report one completion |
 | `follow_created` | approximately once | `already_applied` carries no state and emits nothing; a known existing edge, and a relationship not yet read, both emit nothing |
 | `watchlist_added` | approximately once | additions only, `ok` only |
+| `comparison_info_opened` | once per open | the press that opens nothing — Details while the opponent is still loading — emits nothing; two opens in one comparison are two events on purpose |
 | `for_you_slate_shown` | once per distinct slate per process | guarded by `noteImpressions`' own returned set, so a re-render, a bookmark or a page already recorded emits nothing; the server's hour-truncated impression key is the second guard |
 | `streak_state_viewed` | once per profile mount | a component-lifetime ref, so scrolling the profile tab is not a second view; a relaunch is |
 
