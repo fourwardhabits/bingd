@@ -39,6 +39,11 @@ const ALLOWED = {
   // Signed-in reads.
   'my_capabilities()': ['authenticated'],
   'unranked_queue(integer)': ['authenticated'],
+  // 20260916000100. Two counts over the caller's own collection. SECURITY INVOKER and
+  // argument-free, so RLS decides whose rows they are and there is no subject to pass:
+  // another account's logged count is owner-only by design, and this cannot ask for one.
+  // Not anon, which has no collection to count.
+  'collection_counts()': ['authenticated'],
   // Not anon: it answers which usernames exist, and a signed-out client has no
   // account to create, so the grant would buy enumeration and nothing else.
   'username_available(text)': ['authenticated'],

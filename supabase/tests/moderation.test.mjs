@@ -467,6 +467,11 @@ describe('the guard is wired in, not merely present', () => {
     'list_items_by_list',
     'my_capabilities',
     'unranked_queue',
+    // 20260916000100. Two counts over the caller's own collection, SECURITY INVOKER, so
+    // RLS decides whose rows they are and a suspended account reads exactly what it could
+    // already read row by row. It exists so the Collection header does not wait on a
+    // serial keyset traversal of the whole collection, and it writes nothing.
+    'collection_counts',
     'username_available',
     'search_titles',
     // Reachable only because search_titles runs as the caller and folds the query through
