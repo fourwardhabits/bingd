@@ -403,8 +403,28 @@ describe('the screen', () => {
 
     expect(view.getByText('bingd. Awards')).toBeTruthy();
     expect(
-      view.getByText('Somebody you invited joins bingd. and ranks their first ten titles.'),
+      view.getByText('Somebody you invited joins bingd. and finishes their first five.'),
     ).toBeTruthy();
     expect(view.queryByText(/Invite and Award/)).toBeNull();
+  });
+
+  /**
+   * **The number in this row is a promise about when a notification arrives.**
+   *
+   * It read "their first ten titles" from the day this switch started governing real
+   * traffic until 2026-09-11, when invite activation moved to the completed First Five.
+   * A stale number here is not cosmetic: this row is where somebody goes to find out why
+   * they never heard about a friend who joined, and it would have told them to keep
+   * waiting for five rankings that were never going to be needed.
+   *
+   * Pinned as an absence as well as a presence. The wording above is one sentence anybody
+   * may rewrite; the **retired contract** is what must never come back, and a substring
+   * assertion is what says so whatever the surrounding copy becomes.
+   */
+  it('never states the retired ten-ranking activation contract', async () => {
+    const view = await renderLoaded();
+
+    expect(view.queryByText(/first ten/i)).toBeNull();
+    expect(view.queryByText(/ten titles/i)).toBeNull();
   });
 });

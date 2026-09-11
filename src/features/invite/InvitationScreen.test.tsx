@@ -132,6 +132,36 @@ describe('accepting an invitation', () => {
     await waitFor(() => expect(view.getByText(/asked to follow @ada/)).toBeTruthy());
   });
 
+  /**
+   * **The one sentence that tells the invitee what they have to do, and it was unpinned.**
+   *
+   * This screen is the only place the activation bar is stated to the person who has to
+   * clear it. It read "Rank ten titles and they will hear about it" until 2026-09-11,
+   * when activation moved to the completed First Five — and no test anywhere held it, so
+   * the copy and the SQL were free to disagree silently. They did, for as long as it took
+   * somebody to look.
+   *
+   * A wrong number here costs more than a wrong number in Settings. The reader has just
+   * arrived, is about to be handed the onboarding run, and is being told how much of it
+   * counts. "Ten" would send them past the end of First Five looking for a milestone that
+   * had already happened.
+   *
+   * Pinned both ways, because the sentence is rewritable and the contract is not.
+   */
+  it('tells the invitee the bar their inviter is actually waiting on', async () => {
+    mockRpcResult = { status: 'ok', inviter_username: 'ada', follow_state: 'approved' };
+
+    const view = await renderWithProviders(<InvitationScreen />);
+    await fireEvent.press(view.getByText('Accept invitation'));
+
+    await waitFor(() =>
+      expect(view.getByText(/Rank your first five and they will hear about it\./)).toBeTruthy(),
+    );
+    // The retired contract, which must not come back under any wording.
+    expect(view.queryByText(/ten titles/i)).toBeNull();
+    expect(view.queryByText(/first ten/i)).toBeNull();
+  });
+
   it('refuses a malformed token without calling the server', async () => {
     mockToken = 'not-a-token';
 
