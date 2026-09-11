@@ -15,10 +15,19 @@
 
 type Extra = Record<string, unknown>;
 
+/**
+ * Staging, and it has to be.
+ *
+ * This fixture named the production project while most cases below describe a preview or
+ * development build — a combination the module now refuses outright, because it is the
+ * accident worth refusing. The fixture was describing builds that must never exist.
+ */
 const BASE: Extra = {
-  supabaseUrl: 'https://abheeqyjzekiowkztfxv.supabase.co',
+  supabaseUrl: 'https://fjxhcbowoxuzulwirzyr.supabase.co',
   supabaseAnonKey: 'anon-key-for-tests',
 };
+
+const PRODUCTION_URL = 'https://abheeqyjzekiowkztfxv.supabase.co';
 
 function loadEnv(extra: Extra) {
   let loaded!: typeof import('./env');
@@ -104,6 +113,82 @@ describe('the environment badge is a different question, and stays on the varian
     expect(loadEnv({ ...BASE, variant: 'preview', lane: 'preview' }).showEnvironmentBadge).toBe(
       true,
     );
+  });
+});
+
+/**
+ * The invariant the founder asked for in as many words: a preview build MUST fail early
+ * if its configured backend resolves to the production project.
+ *
+ * `config/backends.cjs` refuses this wherever the Expo config resolves, which covers both
+ * `eas build` and `eas update`. This is the runtime half, and the two failures are not
+ * interchangeable: the build-time one is a red log, and this one is the only thing standing
+ * between a mistyped dashboard variable and a Beta-badged app writing real rows.
+ */
+describe('a staging build pointed at production refuses to start', () => {
+  it('throws for a preview build and names the project', () => {
+    expect(() =>
+      loadEnv({ ...BASE, supabaseUrl: PRODUCTION_URL, variant: 'preview', lane: 'preview' }),
+    ).toThrow(/bingd-production/);
+  });
+
+  it('throws for a development build too', () => {
+    expect(() =>
+      loadEnv({
+        ...BASE,
+        supabaseUrl: PRODUCTION_URL,
+        variant: 'development',
+        lane: 'development',
+      }),
+    ).toThrow(/must never talk to the production/);
+  });
+
+  /**
+   * Beta is the case that makes this rule keyed on the variant rather than the lane. It
+   * carries the production identity and uses production on purpose, and breaking that
+   * would move every closed tester to an empty database with no symptom at all.
+   */
+  it('allows beta, which is the production variant using production deliberately', () => {
+    const beta = loadEnv({
+      ...BASE,
+      supabaseUrl: PRODUCTION_URL,
+      variant: 'production',
+      lane: 'beta',
+    });
+    expect(beta.env.supabaseUrl).toBe(PRODUCTION_URL);
+    expect(beta.isRelease).toBe(false);
+  });
+
+  it('allows a preview build against staging, which is the whole point of the lane', () => {
+    expect(loadEnv({ ...BASE, variant: 'preview', lane: 'preview' }).env.supabaseUrl).toMatch(
+      /fjxhcbowoxuzulwirzyr/,
+    );
+  });
+
+  /**
+   * A host that merely *contains* the ref is not the ref. The rule parses the URL rather
+   * than matching a substring, and this is the case that tells the two apart.
+   */
+  it('is not fooled by a hostile URL that only mentions the project', () => {
+    expect(() =>
+      loadEnv({
+        ...BASE,
+        supabaseUrl: 'https://evil.example/?x=abheeqyjzekiowkztfxv.supabase.co',
+        variant: 'preview',
+      }),
+    ).not.toThrow();
+  });
+
+  /**
+   * The seam this arrangement creates, asserted rather than trusted: the ref is restated
+   * in `env.ts` instead of imported from the build-time module, so something has to hold
+   * the two together.
+   */
+  it('names the same production project config/backends.cjs does', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PRODUCTION_REF, supabaseProjectRef } = require('../../config/backends.cjs');
+    expect(PRODUCTION_URL).toBe(`https://${PRODUCTION_REF}.supabase.co`);
+    expect(supabaseProjectRef(PRODUCTION_URL)).toBe(PRODUCTION_REF);
   });
 });
 

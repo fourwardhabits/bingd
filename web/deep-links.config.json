@@ -19,20 +19,26 @@
   "appleTeamId": "98729PG8GD",
 
   "$variantsComment": [
+    "One variant, and it is the shipped app. The staging variants were removed on",
+    "2026-09-11 with the physical staging separation: app.config.ts now declares",
+    "associatedDomains and the Android intent filter only for the production",
+    "variant, so a claim here for app.bingd.preview would be the site authorising",
+    "an app that no longer asks. A published statement that a staging build may",
+    "act for bingd.app is not something to leave lying around because it happens",
+    "to be inert.",
+    "",
+    "What this costs, stated rather than discovered: the preview build installed",
+    "in August verified App Links against the statement that used to be here, and",
+    "loses that verification when this deploys. Nothing replaces it, deliberately.",
+    "Physical deep-link testing is done on a production-variant build.",
+    "",
     "production carries two fingerprints and both are load-bearing. The first is",
     "the EAS upload keystore, which signs anything installed straight from EAS.",
     "The second is the Google Play app-signing key (Play Console > Setup > App",
     "integrity): Play strips the upload signature and re-signs with this key, so",
     "it is the certificate every device that installed from the closed test",
     "actually checks. Removing either silently breaks App Links for that install",
-    "path.",
-    "",
-    "preview's fingerprint arrived with the first preview build: EAS creates one",
-    "keystore per application identifier, on first use, so each variant has its own.",
-    "development still has none, because no development build has been made.",
-    "",
-    "preview is distributed as an APK straight from EAS and is never re-signed, so",
-    "unlike production this one fingerprint is the whole story."
+    "path."
   ],
   "variants": [
     {
@@ -42,13 +48,7 @@
         "A1:5B:92:A7:0F:AD:0D:78:77:FE:4C:6D:DE:EB:AE:DD:95:79:F1:31:70:2D:D7:79:CF:76:09:B1:BF:C9:B9:00",
         "D3:A1:05:A0:AD:F8:EE:42:6E:44:EE:90:27:BC:9E:4B:4C:2B:02:D4:D9:B0:D9:37:10:70:F0:2E:A8:D0:29:A7"
       ]
-    },
-    {
-      "name": "preview",
-      "bundleId": "app.bingd.preview",
-      "androidSha256": ["BB:CF:BC:E6:86:B6:C3:3E:EA:17:21:A3:B1:39:D0:BC:F3:0B:3C:CD:E9:1F:E5:06:1B:2D:8B:F8:BD:A4:0B:2D"]
-    },
-    { "name": "development", "bundleId": "app.bingd.dev", "androidSha256": [] }
+    }
   ],
 
   "$pathsComment": [

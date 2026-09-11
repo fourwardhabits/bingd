@@ -942,7 +942,13 @@ describe('the built site', () => {
     const aasa = JSON.parse(read('.well-known', 'apple-app-site-association'));
     const claimed = aasa.applinks.details[0].components.map((c) => c['/']);
     const appConfig = readFileSync(join(here, '..', 'app.config.ts'), 'utf8');
-    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    // The closing bracket is indented 10 now that the block sits inside the
+    // `claimsWebLinks` ternary, and the old `\n {4}\],` ran straight past it to the next
+    // line that was exactly four spaces and a bracket — the Sentry plugin entry, some
+    // 3,600 characters later. Every assertion still passed, against most of the rest of
+    // the file. The range stops short of the 14-space `data: [ ... ],` close inside, so
+    // this still captures the whole filter and nothing beyond it.
+    const filters = /intentFilters: \[([\s\S]*?)\n {4,12}\],/.exec(appConfig)?.[1] ?? '';
     const prefixes = [...filters.matchAll(/pathPrefix: '([^']+)'/g)].map(([, value]) => value);
 
     for (const dir of documents) {
@@ -1001,17 +1007,44 @@ describe('the app the site claims to open', () => {
    * variant table is read out of the source. Brittle on purpose: if the shape of that
    * table changes this fails and somebody looks, which is the correct outcome. A softer
    * read would return an empty list and quietly assert nothing.
+   *
+   * It has now done that job once, on 2026-09-11, when the table gained a per-variant
+   * icon and went multi-line.
    */
   const declaredVariants = [
-    ...appConfig.matchAll(/^ {2}(\w+): \{ name: '[^']*', bundleId: '([^']+)'/gm),
+    ...appConfig.matchAll(/^ {2}(\w+): \{\r?\n\s*name: '[^']*',\r?\n\s*bundleId: '([^']+)',/gm),
   ].map(([, name, bundleId]) => ({ name, bundleId }));
 
   it('reads every variant out of app.config.ts, or the rest of this block asserts nothing', () => {
     assert.equal(declaredVariants.length, 3, `parsed ${JSON.stringify(declaredVariants)}`);
+  });
+
+  /**
+   * **Three applications are built, and one of them claims the domain.**
+   *
+   * This asserted the two lists were equal, which was right while every variant declared
+   * `associatedDomains` and the Android intent filter unconditionally. They are gated on
+   * the production variant now (physical staging separation, 2026-09-11): a staging build
+   * asserts nothing about bingd.app, so the site must not go on authorising an
+   * application that no longer asks. A published claim for `app.bingd.preview` is not
+   * worth keeping merely because it is inert — Apple's file would be naming an appID no
+   * shipped binary carries, and `assetlinks.json` would be delegating this domain's URLs
+   * to a certificate that signs staging builds.
+   *
+   * So the relationship is a subset now, pinned from both ends rather than loosened: the
+   * variants the site claims are exactly the variants the app gates the claim in for,
+   * read out of the gate itself.
+   */
+  it('claims exactly the variants whose builds actually declare the domain', () => {
+    const gate = /const claimsWebLinks = variant === '(\w+)';/.exec(appConfig);
+    assert.ok(gate, 'app.config.ts no longer gates the domain claim on a variant');
+
+    const claiming = declaredVariants.filter((v) => v.name === gate[1]);
+    assert.equal(claiming.length, 1, `no variant is named ${gate[1]}`);
     assert.deepEqual(
-      declaredVariants.map((v) => v.bundleId).sort(),
       links.variants.map((v) => v.bundleId).sort(),
-      'app.config.ts and deep-links.config.json do not build the same set of applications',
+      claiming.map((v) => v.bundleId).sort(),
+      'the site claims a different set of applications than app.config.ts entitles',
     );
   });
 
@@ -1026,14 +1059,14 @@ describe('the app the site claims to open', () => {
     const aasa = JSON.parse(read('.well-known', 'apple-app-site-association'));
     const claimed = new Set(aasa.applinks.details[0].appIDs);
 
-    for (const variant of declaredVariants) {
+    for (const variant of links.variants) {
       const appId = `${links.appleTeamId}.${variant.bundleId}`;
       assert.ok(
         claimed.has(appId),
         `${variant.name} builds ${variant.bundleId}, which is unclaimed as ${appId}`,
       );
     }
-    assert.equal(claimed.size, declaredVariants.length, 'the file claims an appID no variant builds');
+    assert.equal(claimed.size, links.variants.length, 'the file claims an appID no variant builds');
 
     // webcredentials carries the same list, and is what lets the keychain offer a saved
     // password and Sign in with Apple's associated domain behave.
@@ -1054,7 +1087,13 @@ describe('the app the site claims to open', () => {
     // autoVerify is what makes Android fetch assetlinks.json at install time. Without it
     // the intent filter still matches, but the app appears in a chooser instead of
     // opening — which reads as the link not working rather than as a missing flag.
-    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    // The closing bracket is indented 10 now that the block sits inside the
+    // `claimsWebLinks` ternary, and the old `\n {4}\],` ran straight past it to the next
+    // line that was exactly four spaces and a bracket — the Sentry plugin entry, some
+    // 3,600 characters later. Every assertion still passed, against most of the rest of
+    // the file. The range stops short of the 14-space `data: [ ... ],` close inside, so
+    // this still captures the whole filter and nothing beyond it.
+    const filters = /intentFilters: \[([\s\S]*?)\n {4,12}\],/.exec(appConfig)?.[1] ?? '';
     assert.match(filters, /autoVerify: true/);
     assert.match(filters, /scheme: 'https'/);
     assert.match(filters, new RegExp(`host: '${literal(links.domain)}'`));
@@ -1081,7 +1120,13 @@ describe('the app the site claims to open', () => {
      * claim in `deep-links.config.json` that is not of the `/<segment>/*` shape fails
      * rather than being silently skipped.
      */
-    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    // The closing bracket is indented 10 now that the block sits inside the
+    // `claimsWebLinks` ternary, and the old `\n {4}\],` ran straight past it to the next
+    // line that was exactly four spaces and a bracket — the Sentry plugin entry, some
+    // 3,600 characters later. Every assertion still passed, against most of the rest of
+    // the file. The range stops short of the 14-space `data: [ ... ],` close inside, so
+    // this still captures the whole filter and nothing beyond it.
+    const filters = /intentFilters: \[([\s\S]*?)\n {4,12}\],/.exec(appConfig)?.[1] ?? '';
     const prefixes = [...filters.matchAll(/pathPrefix: '([^']+)'/g)].map(([, value]) => value);
 
     const expected = links.appPaths.map((claimed) => {
@@ -1135,13 +1180,18 @@ describe('the app the site claims to open', () => {
 
   it('writes an Android statement for every variant that has a certificate', () => {
     /**
-     * Three variants, two statements, and the missing one is correct.
+     * Three variants, one statement, and the two that are missing are correct.
      *
-     * `app.bingd.dev` has no fingerprint because no development build has been made, and
-     * a statement cannot be invented for a certificate that does not exist. The
-     * consequence is worth stating here rather than discovering on a device: **an
-     * Android development build cannot verify App Links.** Physical Android testing has
-     * to use the Preview build, whose fingerprint is present.
+     * This said "two statements" and sent physical Android App Link testing to the
+     * **Preview** build, "whose fingerprint is present". It is not present any more: the
+     * staging separation of 2026-09-11 stopped the preview variant declaring the intent
+     * filter at all, so authorising its certificate here would delegate this domain's
+     * URLs to a key that signs staging builds, for an app that no longer asks.
+     *
+     * The consequence is worth stating here rather than discovering on a device: **only a
+     * production-variant build can verify App Links.** That is the closed-test build or
+     * the App Store one — not preview, and not development, which never had a certificate
+     * because no development build has been made.
      *
      * The production entry carries two fingerprints: the EAS upload key, and the Play
      * app-signing key that Play substitutes when it re-signs. Both stay — a device that
