@@ -539,7 +539,23 @@ describe('details, as an affordance', () => {
     await sheet.ready('Film P');
 
     await fireEvent.press(sheet.getByLabelText('Details about Film P'));
-    const showAll = await waitFor(() => sheet.getByLabelText('Show all 8 episodes'));
+    /**
+     * **The longest wait in this file, and it needs to say so.**
+     *
+     * Four sequential round trips stand between the press and this control: the
+     * opponent's card row, the recall row, the credits facet, and the episode list. At
+     * the file-wide five seconds it passes alone every time and failed once inside a
+     * full parallel run where this suite took 161 seconds rather than its usual thirty —
+     * which is the contention class `jest.setup.js` already describes, met by the test
+     * that happens to have the deepest chain.
+     *
+     * Raised here rather than globally: every other wait in this file is one hop, and a
+     * budget raised for all of them would hide a real stall somewhere else. The test
+     * timeout goes with it, because a `waitFor` cannot outlive the test holding it.
+     */
+    const showAll = await waitFor(() => sheet.getByLabelText('Show all 8 episodes'), {
+      timeout: 20000,
+    });
     await fireEvent.press(showAll);
     await waitFor(() => expect(sheet.getByText('8 · Episode title 8')).toBeTruthy());
 
@@ -548,7 +564,9 @@ describe('details, as an affordance', () => {
 
     // Six again, and the offer back. This is a different sheet, not the same one
     // re-shown with a decision still in it.
-    await waitFor(() => expect(sheet.getByLabelText('Show all 8 episodes')).toBeTruthy());
+    await waitFor(() => expect(sheet.getByLabelText('Show all 8 episodes')).toBeTruthy(), {
+      timeout: 20000,
+    });
     expect(sheet.queryByText('8 · Episode title 8')).toBeNull();
-  });
+  }, 45000);
 });
