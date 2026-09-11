@@ -2,6 +2,10 @@
 --
 -- *** THIS FILE IS NOT IN supabase/migrations/ AND HAS NOT BEEN APPLIED ANYWHERE. ***
 --
+-- The timestamp is 20260916 and not 20260912, because 20260912000100 is already taken
+-- by `20260912000100_a_signup_that_becomes_a_connection.sql`, which has been applied.
+-- Two files with one timestamp is a collision nobody sees until the push.
+--
 -- It sits here so that nothing can pick it up: `supabase db push` walks
 -- `supabase/migrations/`, and a file outside it is inert. Move it there in the commit
 -- that turns the automation on, not before. See README.md step 3.

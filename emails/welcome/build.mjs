@@ -122,8 +122,16 @@ const C = {
  *   - **Outlook on Windows** does neither and renders the inline styles, so it stays
  *     light. That is correct and not a bug.
  *
- * `#B98C97` rather than Maroon on a dark ground: Maroon against `#1C1917` is about 2.4
- * to 1, which fails at any size. The lighter rose measures about 6.4 to 1.
+ * `#B98C97` rather than Maroon on a dark ground. Measured, because the first version of
+ * this comment guessed and guessed generously in both directions:
+ *
+ *   `#773744` on `#1C1917`   **2.01:1**  fails at any size
+ *   `#B98C97` on `#1C1917`   **6.05:1**  passes AA and AAA for body text
+ *   `#B98C97` on `#262120`   **5.50:1**  the raised card, which is where accents sit
+ *   `#773744` on `#FBF8F4`   **8.22:1**  the light theme, comfortably AAA
+ *
+ * The number that matters is the third: accents sit on the raised card rather than on
+ * the ground, so 5.50 is the real one and it is the one that was not stated.
  */
 const DARK = {
   ground: '#14110F',
@@ -194,11 +202,33 @@ const UNSUBSCRIBE_TOKEN = '{{unsubscribeUrl}}';
 const button = ({ href, label, kind = 'primary' }) => {
   const fill = kind === 'primary' ? C.maroon : C.paper;
   const ink = kind === 'primary' ? C.inverse : C.maroon;
-  const border = C.maroon;
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">
+
+  /**
+   * The dark class goes on the **table**, so the rule can reach both the cell's
+   * background and the anchor's colour. It was on neither: `.dk-fill` and
+   * `.dk-outline` were written in the stylesheet and never emitted, which meant that
+   * in Apple Mail's dark mode the card inverted around two buttons that kept their
+   * inline near-white `bgcolor` and sat on it as white slabs.
+   */
+  const dark = kind === 'primary' ? 'dk-fill' : 'dk-outline';
+
+  /**
+   * Padding on the cell as well as on the anchor, and a width on the table.
+   *
+   * Word's rendering engine, which is what Outlook on Windows uses, ignores
+   * `display:inline-block` and `min-height` on an anchor, so a button whose whole shape
+   * lives on the `<a>` collapses toward text height there. Stating it on the `<td>`
+   * too costs nothing and is what Outlook actually paints.
+   *
+   * The `width` is the other half, and it is why the media query used to do nothing: a
+   * table with no width shrink-fits to its content under auto-layout, so making the
+   * anchor a block widened a box that was already exactly label-width. `btn-wrap` is
+   * what the media query widens.
+   */
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" class="btn-wrap ${dark}" style="border-collapse:separate;">
                         <tr>
-                          <td class="btn" align="center" bgcolor="${fill}" style="background-color:${fill};border:1px solid ${border};border-radius:6px;">
-                            <a href="${esc(href)}" style="display:inline-block;min-height:24px;padding:13px 22px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:600;color:${ink};text-decoration:none;">${esc(label)}</a>
+                          <td class="btn" align="center" bgcolor="${fill}" style="background-color:${fill};border:1px solid ${C.maroon};border-radius:6px;padding:2px;">
+                            <a href="${esc(href)}" style="display:inline-block;min-height:24px;padding:11px 20px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:600;color:${ink};text-decoration:none;">${esc(label)}</a>
                           </td>
                         </tr>
                       </table>`;
@@ -280,8 +310,11 @@ const html = `<!DOCTYPE html>
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
-        /* A button that is only as wide as its label is a small target at arm's
-           length on a moving train. */
+        /* A button only as wide as its label is a small target at arm's length on a
+           moving train. The width has to be on the table: under auto-layout a table
+           with no width shrink-fits to its content, so widening only the anchor
+           widens a box that is already exactly label-width. */
+        .btn-wrap { width: 100% !important; }
         .btn a { display: block !important; text-align: center !important; }
       }
 
@@ -358,10 +391,16 @@ const html = `<!DOCTYPE html>
                  only works on a desktop is a column layout for the minority. -->
             <tr>
               <td class="gutter" style="padding:24px 36px 4px;">
-                <p style="margin:0 0 16px;font-family:${FONT};font-size:12px;line-height:16px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:${C.tertiary};" class="dk-tertiary">${esc(copy.cards.intro)}</p>
+                <p style="margin:0 0 16px;font-family:${FONT};font-size:16px;line-height:24px;color:${C.ink};" class="dk-text">${esc(copy.cards.intro)}</p>
 
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${cards}
                 </table>
+
+                <!-- The reply ask, one more time, where a skimmer's eye stops. It was in
+                     the preheader and in the note's last paragraph, which are the top of
+                     the email and about 700px down a phone; somebody who scrolled
+                     straight to the buttons met it nowhere. -->
+                <p style="margin:18px 0 0;font-family:${FONT};font-size:15px;line-height:24px;color:${C.secondary};" class="dk-secondary">${esc(copy.closer)}</p>
               </td>
             </tr>
 
@@ -442,8 +481,10 @@ ${copy.note.signoff.join('\n')}${signoffTextLink}
 
 ${'-'.repeat(72)}
 
-${copy.cards.intro.toUpperCase()}
+${copy.cards.intro}
 ${textCards}
+${wrap(copy.closer)}
+
 ${'-'.repeat(72)}
 
 ${copy.footer.signature}
