@@ -67,6 +67,32 @@ const TOP = 0.030;
 const BOTTOM = 0.043;
 
 /**
+ * A frame that is cropped to a detail rather than shown as a whole phone.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE REVEAL IS CROPPED, WHICH IS A CORRECTNESS FIX AND NOT A DESIGN ONE
+ * ---------------------------------------------------------------------------
+ *
+ * The 2026-08-31 capture of the score reveal reads
+ * `#12 Movies · #3 Adventure · #1 Fantasy` on one line. **The shipped app cannot
+ * produce that line.** `RankingSheet.tsx` sets `showsOverall = position <= TOP_RANK_SHOWN`
+ * with `TOP_RANK_SHOWN = 10`, and the overall placement and the genre ranks are written
+ * from that one flag as mutually exclusive branches: a title at position 12 renders its
+ * genre ranks and no overall line at all. The capture predates that change.
+ *
+ * A marketing page showing a screen the product cannot draw is a lie whether or not
+ * anybody notices, and it is the exact thing the front page's own rules forbid. The
+ * options were to drop the shot, to reshoot it, or to crop it. Reshooting needs a device
+ * and a seeded account; dropping it loses the payoff image the section is about.
+ *
+ * So it is cropped to the part that is still true: the score, which is the moment, and
+ * the title under it. Cropping is what every other frame here already gets, and the
+ * stale line is below the cut. The result is a wide detail rather than a phone, which
+ * is why it renders with its own class.
+ */
+const DETAIL = { left: 0, top: 1094, width: 1080, height: 656 };
+
+/**
  * `[x, y, width, height]` in source pixels, blurred before the crop.
  *
  * Only the Feed needs any. Sigma 14 at 1080px wide is past the point where letterforms
@@ -92,7 +118,8 @@ const SHOTS = [
     source: 'Screenshot_20260831_094054_bingd.jpg',
     name: 'shot-reveal',
     width: 640,
-    alt: 'A bingd. score reveal showing 9.1 and the title placed at number 12 of the reader’s movies',
+    detail: DETAIL,
+    alt: 'A bingd. score reveal, showing 9.1 in a maroon tile above the title it belongs to',
   },
   {
     source: 'Screenshot_20260831_093909_bingd.jpg',
@@ -159,11 +186,17 @@ for (const shot of SHOTS) {
     image = sharp(await sharp(file).composite(patches).toBuffer());
   }
 
-  const top = Math.round(h * TOP);
-  const height = h - top - Math.round(h * BOTTOM);
+  // A detail names its own rectangle; everything else is the whole frame minus the
+  // host phone's status and navigation bars.
+  const box = shot.detail ?? {
+    left: 0,
+    top: Math.round(h * TOP),
+    width: w,
+    height: h - Math.round(h * TOP) - Math.round(h * BOTTOM),
+  };
 
   const buffer = await image
-    .extract({ left: 0, top, width: w, height })
+    .extract(box)
     .resize({ width: shot.width })
     .webp({ quality: 80, effort: 6 })
     .toBuffer();

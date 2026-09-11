@@ -326,11 +326,13 @@ a lookup on every unfurl request. Deferred, see `deferred-roadmap.md` §45.
 `og:url` is the **route prefix** and never the visited URL, so the token, handle or id in
 a link is not copied into a card that messaging services fetch, log and cache.
 
-**Two app screenshots, and neither has a person in it.** `shot-collection.jpg` and
-`shot-ranking.jpg` are cropped from the store set, with the Android status and navigation
-bars removed. They were chosen out of fifteen on one criterion: the feed screens are the
-better advertisement and every one of them has other people's accounts, handles and faces
-in it. These two have posters and scores and nothing else.
+**Two app screenshots on the router's pages, and neither has a person in it.**
+`shot-collection.jpg` and `shot-ranking.jpg` are cropped from the store set, with the
+Android status and navigation bars removed. They were chosen out of fifteen on one
+criterion: the feed screens are the better advertisement and every one of them has other
+people's accounts, handles and faces in it. These two have posters and scores and nothing
+else. **They are still exactly these two, and still only on the router's four pages** —
+the front page has its own set as of 2026-09-11, below.
 
 **The site still has no analytics of its own.** The one measurement it takes is
 `record_invite_open`, called from the invitation page only, and the published privacy
@@ -411,3 +413,102 @@ must reach the web router and offer the beta destination for that platform, or s
 honestly that there is none. There is no deferred attribution — a token does not survive a
 trip through the App Store or Play, and the invitation page says so to the person it
 affects.
+
+
+---
+
+## The front page became a landing page — 2026-09-11
+
+`/` has now been wrong about its own job twice, and the second time is what this records.
+
+It began as a holding page saying Bingd was in closed testing, with nothing to tap; the
+founder followed TestFlight's developer-website link onto it on 2026-09-10 and correctly
+reported a dead end. The fix that day gave it the install row. What it still could not do
+was tell a stranger what bingd. **is** — and `/` is where a link posted to Reddit, sent
+round a film club or forwarded in a group chat lands.
+
+So it is a landing page: hero, the mechanic in three steps, the collection, the social
+layer, discovery, a closing install band, and a footer. Prepared on branch
+`gtm/landing-and-welcome-email`, **not merged and not on `bingd.app`** at the time of
+writing.
+
+### What is deliberately unchanged
+
+Everything except `/`. This was checked rather than assumed: the built `i.html`,
+`u.html`, `title.html`, `lists.html`, all four documents, `_headers`, `_redirects`,
+`router.mjs` and both `.well-known` files are **byte-identical** to what `main` produces.
+The only two outputs that differ are `index.html` and `page.mjs`.
+
+`page.mjs` differs for one reason: the landing page needs the install row in three places
+(hero, closing band, sticky bar) and an id cannot appear three times. So `link()` and
+`show()` now paint the element holding the id **plus** any element carrying the same name
+in `data-install`. Nothing about *which* destination anybody gets moved — `destinationFor`
+and `installLabel` in `router.mjs` are untouched, which is where those decisions live and
+where they are tested.
+
+### The front page's own stylesheet
+
+`LANDING_STYLES`, separate from `styles` rather than an extension of it. `styles` is
+shared by the four router pages and, through `documentStyles`, by the four documents:
+eight pages whose layout is pinned by tests. Growing a landing page out of that stylesheet
+is how the privacy policy became a two-column grid on any window wider than 896px.
+
+One consequence worth knowing: the front page uses **Paper as the ground and Parchment as
+the accent band**, which is the way round the app uses them, and the router pages have it
+inverted. That divergence is deliberate for now. Do not "fix" it by changing `styles`.
+
+### The Feed is on the site, with the names blurred
+
+The rule above — no accounts, no handles, no faces — is why the site had never shown a
+Feed, which is also its best advertisement. The founder resolved the same tension himself
+on the App Store: the live listing's `04-social` frame shows the Feed with **every display
+name and avatar blurred**.
+
+`web/shots.mjs` applies that published decision to the web. It is run by hand, its outputs
+are committed into `web/src/` beside the existing two, and `sharp` is an authoring-time
+dependency that Cloudflare never installs. The blur regions are stated in source pixels
+and checked by eye, because a region that drifts shows up immediately as a legible name.
+
+Seven shots: `shot-compare`, `shot-reveal`, `shot-movies`, `shot-tv`, `shot-feed`,
+`shot-foryou`, `shot-watchlist`. WebP, 640px wide (760 for the hero), about 480KB for the
+page and every image together, with only the hero eager.
+
+### `robots.txt` and `sitemap.xml`, and one small real defect
+
+Pages answers an unmatched path with `index.html` and a **200**, so `/robots.txt` has been
+serving the front page's HTML to crawlers for as long as the site has existed. Same shape
+of silent wrongness as the `assetlinks.json` case that made the file get written empty
+rather than omitted.
+
+**Nothing is disallowed in it, deliberately.** The four routes that name an account are
+kept out of the index by `X-Robots-Tag` and a robots meta tag, and a `Disallow` would
+defeat that: a crawler told not to fetch a URL never reads the noindex on it, so a
+`/u/<handle>` Google already knows would stay indexed with nothing able to withdraw it.
+Blocking a crawl and de-indexing are opposite instructions. A test asserts the absence.
+
+### The site still has no analytics, and adding some is not a small change
+
+Unchanged and still true. Two `web_app_store_clicked` / `web_android_beta_clicked` events
+were asked for and are **not** here, because neither available route is cheap:
+
+- **A third-party script** (PostHog is already a named processor for the *app*) adds an
+  origin to a site whose `_headers` comment and whose tests both rest on there being no
+  third-party origin beyond the font host, and the privacy policy's processor list
+  describes PostHog as receiving product analytics from the app.
+- **A Supabase RPC**, the way `record_invite_open` works, needs a migration, which is a
+  production database change.
+
+Either needs the privacy policy edited first, and that is a document rather than a detail.
+
+**What is free and already running:** App Store Connect's App Analytics attributes product
+page views by **Web Referrer**, so installs originating at bingd.app are already countable
+with no code at all. Play Console does the same. Start there.
+
+### What is still true from the sections above
+
+The Pages project is git-connected, every branch gets a preview at
+`<branch-slug>.bingd.pages.dev` (truncated to 28 characters — this branch is
+`gtm-landing-and-welcome-emai`), and a push of any branch is the safe way to check a
+deploy without touching the live domain. That was used here: the preview served the new
+page, both `.well-known` files with correct content types, and every router route, before
+anything went near `main`.

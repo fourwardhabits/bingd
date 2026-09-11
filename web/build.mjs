@@ -2043,10 +2043,13 @@ const LANDING_STYLES = `
         text-decoration: none;
       }
 
+      /* 0.65 rather than 0.45: a control's boundary needs 3:1 under WCAG 1.4.11, and
+         0.45 measures 2.23 against Paper. This measures 3.45 on Paper and 3.28 on the
+         Parchment band. The label was never the problem at 8.22; the edge was. */
       a.button.secondary {
         background: transparent;
         color: var(--maroon);
-        border-color: rgba(119, 55, 68, 0.45);
+        border-color: rgba(119, 55, 68, 0.65);
       }
 
       .fineprint { margin-top: 0.875rem; font-size: 0.875rem; color: var(--tertiary); max-width: 32rem; }
@@ -2078,6 +2081,10 @@ const LANDING_STYLES = `
         .split.flip .split-copy { order: 2; }
       }
 
+      /* The other half of the same defect: a grid item is min-width: auto too, so a
+         1fr track cannot go below its content's min-content width. */
+      .split > * { min-width: 0; }
+
       /* ----------------------------------------------------------------- phones */
 
       .phone {
@@ -2092,14 +2099,42 @@ const LANDING_STYLES = `
         background: var(--paper);
       }
 
-      .phone-pair { display: flex; justify-content: center; gap: 1rem; }
-      .phone-pair .phone { max-width: 13rem; margin-inline: 0; }
+      .phone-pair { display: flex; justify-content: center; gap: 1rem; min-width: 0; }
 
-      /* Two phones do not fit legibly under about 26rem, so the second steps out of
-         the way rather than being shown badly. */
-      @media (max-width: 26rem) {
+      /* min-width: 0 is load-bearing and was missing.
+         --------------------------------------------------------------------------
+         A flex item defaults to min-width: auto, whose content-based minimum is
+         clamped by max-width — so each phone had a hard floor of 13rem and the pair
+         had one of 27rem, which nothing could shrink. With the 1.25rem gutters that
+         needs a 29.5rem viewport, and the second phone only stepped out below 26rem.
+         Every phone between those two numbers scrolled sideways: 430pt is an iPhone
+         Plus and a Pro Max, and it overflowed by 42px. The same floor sat inside the
+         two-column grid at 56rem, because a 1fr track is minmax(auto, 1fr) and the
+         auto minimum is that same min-content width, so a 900px desktop window
+         overflowed too.
+         Nothing on this page sets overflow-x, so both were a real horizontal
+         scrollbar, and a page wider than the viewport also breaks the full-bleed
+         .band and the inset: auto 0 0 0 sticky bar. */
+      .phone-pair .phone { max-width: 13rem; margin-inline: 0; min-width: 0; flex: 0 1 auto; }
+
+      /* And the breakpoint, corrected with it. Two phones stop being legible at about
+         29.5rem rather than 26, which is the width the pair actually needs. */
+      @media (max-width: 30rem) {
         .phone-pair .phone + .phone { display: none; }
         .phone-pair .phone { max-width: 16rem; }
+      }
+
+      /* The detail crop. A wide close-up rather than a phone, because the frame it
+         comes from carries a line the shipped app no longer draws; see web/shots.mjs. */
+      .detail {
+        display: block;
+        width: 100%;
+        max-width: 22rem;
+        height: auto;
+        margin-inline: auto;
+        border-radius: 0.75rem;
+        border: 1px solid var(--hairline);
+        box-shadow: 0 14px 34px var(--shadow);
       }
 
       /* ------------------------------------------------------------------ steps */
@@ -2145,6 +2180,11 @@ const LANDING_STYLES = `
       }
       .closer .fineprint { color: rgba(245, 235, 221, 0.74); margin-inline: auto; }
 
+      /* The focus ring inverts with everything else. It was var(--maroon) on a maroon
+         ground, which is a 1.00:1 outline: a keyboard user got no visible focus at all
+         on the one button this band exists for. */
+      .closer a:focus-visible, .closer a.button:focus-visible { outline-color: var(--inverse); }
+
       /* ----------------------------------------------------------------- footer */
 
       footer { padding: 2.5rem 0 3rem; font-size: 0.875rem; color: var(--tertiary); }
@@ -2171,9 +2211,19 @@ const LANDING_STYLES = `
       }
       .sticky a.button { width: 100%; }
 
-      @media (max-width: 56rem) {
+      /* 55.99rem, not 56: at exactly 896px the two-column query and this one both
+         matched, which is a one-pixel window where the page is a desktop grid with a
+         phone's sticky bar on it. */
+      @media (max-width: 55.99rem) {
         .sticky:has(a.button:not([hidden])) { display: block; }
-        body:has(.sticky a.button:not([hidden])) { padding-bottom: 5.5rem; }
+
+        /* The reservation has to carry the safe-area inset, because the bar does.
+           5.5rem flat left the bar overlapping the last 22px of the footer on any
+           phone with a home indicator, and more than that when a two-line label
+           ("Join the bingd. Android beta" at 320pt) makes the button taller. */
+        body:has(.sticky a.button:not([hidden])) {
+          padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+        }
       }
 `;
 
@@ -2198,11 +2248,21 @@ const SHOT = {
     h: 1526,
     alt: 'The bingd. ranking sheet asking which did you like more, with two film posters side by side to choose between',
   },
+  /**
+   * A crop, not a phone, and the reason is correctness rather than composition.
+   *
+   * The frame it comes from reads `#12 Movies &middot; #3 Adventure &middot; #1 Fantasy`,
+   * and the shipped app cannot draw that: the overall placement and the genre ranks are
+   * mutually exclusive branches of one flag, and a title at position 12 gets the genre
+   * ranks alone. The capture predates the change. Cropped to the part that is still
+   * true, which is also the part the section is about. See `web/shots.mjs`.
+   */
   reveal: {
     src: '/shot-reveal.webp',
     w: 640,
-    h: 1285,
-    alt: 'A bingd. score reveal reading 9.1, placing the film at number 12 of the reader&rsquo;s movies and number 1 in fantasy',
+    h: 389,
+    detail: true,
+    alt: 'A bingd. score reveal, showing 9.1 in a maroon tile above the name of the film it belongs to',
   },
   movies: {
     src: '/shot-movies.webp',
@@ -2240,7 +2300,7 @@ const SHOT = {
 const shot = (key, { eager = false } = {}) => {
   const s = SHOT[key];
   const loading = eager ? 'fetchpriority="high"' : 'loading="lazy" decoding="async"';
-  return `<img class="phone" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
+  return `<img class="${s.detail ? 'detail' : 'phone'}" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
                alt="${s.alt}" />`;
 };
 
@@ -2343,7 +2403,7 @@ await writeFile(
          the Terms and in TestFlight's developer-website field; a launch page that asks
          not to be found is the wrong half of the trade the old mode-keyed rule made.
          The routes that name an account keep both, unconditionally. -->
-    <meta name="description" content="bingd. ranks the movies and TV you watch through quick head-to-head comparisons instead of star ratings. Build a collection in your own order, see what your friends are watching, and find your next binge." />
+    <meta name="description" content="Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, and see where your friends put theirs." />
     <link rel="canonical" href="${ORIGIN}/" />
     <meta name="theme-color" content="#773744" />
 
@@ -2425,16 +2485,16 @@ ${installRow({ primary: true })}
                 <span>
                   <b>Compare it.</b>
                   <span class="d">A handful of head-to-head choices against things you
-                  have already ranked. Too tough is an answer, for the ones you cannot
-                  call and the ones you cannot remember.</span>
+                  have already ranked. Too tough gets you a different pairing, for the
+                  ones you cannot call and the ones you cannot remember.</span>
                 </span>
               </li>
               <li>
                 <span class="n">3</span>
                 <span>
                   <b>See where it landed.</b>
-                  <span class="d">A score out of ten, and a position you can argue with:
-                  #12 of your movies, #1 in fantasy.</span>
+                  <span class="d">A score out of ten, worked out from where it ended up
+                  rather than typed in, and a place in a list you can argue with.</span>
                 </span>
               </li>
             </ol>
@@ -2477,9 +2537,10 @@ ${installRow({ primary: true })}
             <p class="kicker">Friends</p>
             <h2>Better with the people you already argue with.</h2>
             <p class="section-lede">
-              Follow someone and their rankings turn up in a plain chronological feed. No
-              algorithm, no strangers, nothing injected. React, reply, and send a title
-              straight to a person instead of losing it in a group chat.
+              Follow someone and their rankings turn up in a feed that is strictly
+              chronological. Nothing reorders it, and nobody is in it you did not follow.
+              React, reply, and send a title straight to a person instead of losing it in
+              a group chat.
             </p>
             <ul class="notes">
               <li><b>Taste Match</b> appears on a profile once the two of you have both
@@ -2538,7 +2599,7 @@ ${installRow({})}
       <p class="legal">
         This product uses the TMDB API but is not endorsed or certified by TMDB. Film and
         series information and artwork come from
-        <a href="https://www.themoviedb.org" rel="noopener">TMDB</a>.
+        <a href="https://www.themoviedb.org">TMDB</a>.
       </p>
       <p class="legal">bingd. is made by ${LEGAL_ENTITY}.</p>
     </footer>
@@ -2546,6 +2607,27 @@ ${installRow({})}
     <div class="sticky">
       <a class="button" data-install="primary-install" hidden href="#"></a>
     </div>
+
+    <!--
+      The install row is painted by page.mjs, because which destination a visitor should
+      get is a per-platform decision. That means a page whose module does not load or
+      does not run has no install link in it at all, which for this page is the whole
+      point missing. So the iOS listing is also a plain anchor here.
+
+      iOS rather than both, and no platform detection: this is the fallback for a
+      browser that is not running the module, so it cannot detect anything. It names
+      the one store that exists, and it is built from the configured URL rather than
+      written out, so it cannot outlive that URL.
+    -->
+    ${
+      distribution.ios?.storeUrl
+        ? `<noscript>
+      <p class="fineprint" style="text-align: center">
+        <a href="${distribution.ios.storeUrl}">Get bingd. on the App Store</a>
+      </p>
+    </noscript>`
+        : ''
+    }
 
     <script type="application/json" id="bingd-config">${jsonBlock({
       page: 'generic',
