@@ -50,7 +50,13 @@ const resendKey = process.env.RESEND_API_KEY;
  */
 const FROM = process.env.WELCOME_FROM ?? null;
 const REPLY_TO = process.env.WELCOME_REPLY_TO ?? null;
-const UNSUBSCRIBE_MAILTO = process.env.WELCOME_UNSUBSCRIBE ?? null;
+const UNSUBSCRIBE = process.env.WELCOME_UNSUBSCRIBE ?? null;
+
+/**
+ * Whether the auth.users email lookup exists yet. It does not. See the branch that
+ * reads it, which is where the consequence of pretending otherwise is written out.
+ */
+const LOOKUP_IMPLEMENTED = false;
 
 const stop = (reason) => {
   console.log(`\n  Not sending: ${reason}\n`);
@@ -59,7 +65,7 @@ const stop = (reason) => {
 
 if (!url || !serviceKey) stop('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.');
 if (!DRY && !resendKey) stop('RESEND_API_KEY is not set.');
-if (!DRY && (!FROM || !REPLY_TO || !UNSUBSCRIBE_MAILTO)) {
+if (!DRY && (!FROM || !REPLY_TO || !UNSUBSCRIBE)) {
   stop(
     'WELCOME_FROM, WELCOME_REPLY_TO and WELCOME_UNSUBSCRIBE must all be set. ' +
       'None of them has a safe default: the From address needs a verified domain, the ' +
@@ -181,15 +187,34 @@ let failed = 0;
 
 for (const person of candidates) {
   // The address lives on auth.users, which PostgREST does not expose. The real worker
-  // reads it through a SECURITY DEFINER function that returns exactly (id, email) for a
-  // set of ids and nothing else, so the service role never carries a general read over
-  // the auth schema. That function is part of step 3 in README.md and is not written
-  // yet, which is one of the reasons this file cannot send today.
+  // reads it through a SECURITY DEFINER function returning exactly (id, email) for a set
+  // of ids and nothing else, so the service role never carries a general read over the
+  // auth schema. That function is step 3 in README.md and is not written yet.
   const address = null;
 
   if (DRY) {
     console.log(`  would mail  ${person.username.padEnd(20)} ${greeting(person.display_name)}`);
     continue;
+  }
+
+  /**
+   * **Hold, do not drop** — and this is the branch that got it wrong.
+   *
+   * It used to write a `no_address` row here. The eligibility read excludes anybody who
+   * has a row **at all**, whatever the status says, so while the address lookup above is
+   * an unimplemented `null` that write would have permanently marked every eligible
+   * account as having no address and none of them would ever be mailed. One run, with
+   * the flag on before the lookup existed, and the entire cohort is silently burned.
+   *
+   * That is the exact failure the gate-before-claim ordering exists to prevent, arriving
+   * one step later. So a missing lookup stops the run rather than consuming anybody, and
+   * a genuinely address-less account is only recorded once there is a lookup that could
+   * have found one.
+   */
+  if (!LOOKUP_IMPLEMENTED) {
+    console.log('\n  Stopping: the email lookup is not implemented, so nothing can be sent.');
+    console.log('  Nothing was recorded. Everybody eligible now is still eligible.\n');
+    process.exit(0);
   }
 
   if (!address) {
@@ -224,7 +249,7 @@ for (const person of candidates) {
     .split('{{handle}}')
     .join(person.username)
     .split('{{unsubscribeUrl}}')
-    .join(UNSUBSCRIBE_MAILTO);
+    .join(UNSUBSCRIBE);
 
   const text = textTemplate
     .split('{{greeting}}')
@@ -232,7 +257,7 @@ for (const person of candidates) {
     .split('{{handle}}')
     .join(person.username)
     .split('{{unsubscribeUrl}}')
-    .join(UNSUBSCRIBE_MAILTO);
+    .join(UNSUBSCRIBE);
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -250,10 +275,20 @@ for (const person of candidates) {
       text,
       headers: {
         // What gives Gmail and Apple Mail their own one-tap unsubscribe control. Without
-        // these the footer link is the only route, and a reader who cannot find it uses
+        // it the footer link is the only route, and a reader who cannot find that uses
         // the spam button instead, which costs the sending domain rather than the list.
-        'List-Unsubscribe': `<${UNSUBSCRIBE_MAILTO}>`,
-        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'List-Unsubscribe': `<${UNSUBSCRIBE}>`,
+
+        /**
+         * **Only with an HTTPS endpoint.** RFC 8058 one-click is defined over HTTPS
+         * POST; pairing this header with a `mailto:` is invalid, and an invalid pair is
+         * worse than a plain `List-Unsubscribe` because a receiver may discard both
+         * rather than fall back. So it is conditional on what the value actually is,
+         * which means turning the endpoint on is the only edit required later.
+         */
+        ...(UNSUBSCRIBE.startsWith('https://')
+          ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+          : {}),
       },
     }),
   });

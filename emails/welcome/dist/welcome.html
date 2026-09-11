@@ -30,8 +30,11 @@
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
-        /* A button that is only as wide as its label is a small target at arm's
-           length on a moving train. */
+        /* A button only as wide as its label is a small target at arm's length on a
+           moving train. The width has to be on the table: under auto-layout a table
+           with no width shrink-fits to its content, so widening only the anchor
+           widens a box that is already exactly label-width. */
+        .btn-wrap { width: 100% !important; }
         .btn a { display: block !important; text-align: center !important; }
       }
 
@@ -88,7 +91,7 @@
                       <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">{{greeting}}</p>
                       <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.</p>
                       <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.</p>
-                      <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed, Taste Match and Group Picks all need somebody on the other end before they do anything at all.</p>
+                      <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed and Group Picks have nothing to show until somebody is on the other end of them.</p>
                       <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.</p>
                       <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one.</p>
                       <p style="margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;" class="dk-text">— Suraj<br />Founder, bingd.<br /><a href="https://bingd.app/u/saisurajkan" style="font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:14px;color:#773744;text-decoration:underline;" class="dk-accent">my profile on bingd.</a></p>
@@ -112,7 +115,7 @@
                  only works on a desktop is a column layout for the minority. -->
             <tr>
               <td class="gutter" style="padding:24px 36px 4px;">
-                <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:16px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6E6862;" class="dk-tertiary">A few things worth trying</p>
+                <p style="margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;" class="dk-text">A few things worth trying</p>
 
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
@@ -122,10 +125,10 @@
                       <td style="padding:20px 20px 18px;">
                         <p style="margin:0;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:19px;line-height:24px;color:#242326;" class="dk-text">Follow me</p>
                         <p style="margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;" class="dk-secondary">It gives you one person in your feed straight away, and I would like to see what you are watching.</p>
-                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="btn-wrap dk-fill" style="border-collapse:separate;">
                         <tr>
-                          <td class="btn" align="center" bgcolor="#773744" style="background-color:#773744;border:1px solid #773744;border-radius:6px;">
-                            <a href="https://bingd.app/u/saisurajkan" style="display:inline-block;min-height:24px;padding:13px 22px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#F5EBDD;text-decoration:none;">Open my profile</a>
+                          <td class="btn" align="center" bgcolor="#773744" style="background-color:#773744;border:1px solid #773744;border-radius:6px;padding:2px;">
+                            <a href="https://bingd.app/u/saisurajkan" style="display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#F5EBDD;text-decoration:none;">Open my profile</a>
                           </td>
                         </tr>
                       </table>
@@ -141,15 +144,15 @@
                     <tr>
                       <td style="padding:20px 20px 18px;">
                         <p style="margin:0;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:19px;line-height:24px;color:#242326;" class="dk-text">Bring one person in</p>
-                        <p style="margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;" class="dk-secondary">One friend you already trade recommendations with is worth more than twenty strangers. Your invite link is in the app, under Profile, and it never changes.</p>
-                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">
+                        <p style="margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;" class="dk-secondary">Nearly everything here needs a second person. This link is your own profile the way a stranger sees it, install button and all, so it is something you can forward as it stands.</p>
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="btn-wrap dk-outline" style="border-collapse:separate;">
                         <tr>
-                          <td class="btn" align="center" bgcolor="#FBF8F4" style="background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;">
-                            <a href="https://bingd.app/u/{{handle}}" style="display:inline-block;min-height:24px;padding:13px 22px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;">Open bingd.</a>
+                          <td class="btn" align="center" bgcolor="#FBF8F4" style="background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;">
+                            <a href="https://bingd.app/u/{{handle}}" style="display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;">See your profile</a>
                           </td>
                         </tr>
                       </table>
-                        <p style="margin:10px 0 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:19px;color:#6E6862;" class="dk-tertiary">Then tap Profile at the bottom, then Invite friends.</p>
+                        <p style="margin:10px 0 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:19px;color:#6E6862;" class="dk-tertiary">For the proper invite, the one that connects the two of you automatically, open bingd. and tap Invite friends on your profile.</p>
                       </td>
                     </tr>
                   </table>
@@ -161,11 +164,11 @@
                     <tr>
                       <td style="padding:20px 20px 18px;">
                         <p style="margin:0;font-family:Georgia, 'Times New Roman', 'DM Serif Display', serif;font-size:19px;line-height:24px;color:#242326;" class="dk-text">Rank what I am watching</p>
-                        <p style="margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;" class="dk-secondary">People keep telling me that having this at number one is a red flag. Rank it yourself and tell me I am wrong.</p>
-                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">
+                        <p style="margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;" class="dk-secondary">The Wolf of Wall Street is my number one and people keep telling me that is a red flag. Rank it yourself and tell me I am wrong.</p>
+                        <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="btn-wrap dk-outline" style="border-collapse:separate;">
                         <tr>
-                          <td class="btn" align="center" bgcolor="#FBF8F4" style="background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;">
-                            <a href="https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa" style="display:inline-block;min-height:24px;padding:13px 22px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;">Open the title</a>
+                          <td class="btn" align="center" bgcolor="#FBF8F4" style="background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;">
+                            <a href="https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa" style="display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;">Open the title</a>
                           </td>
                         </tr>
                       </table>
@@ -176,6 +179,12 @@
                 </td>
               </tr>
                 </table>
+
+                <!-- The reply ask, one more time, where a skimmer's eye stops. It was in
+                     the preheader and in the note's last paragraph, which are the top of
+                     the email and about 700px down a phone; somebody who scrolled
+                     straight to the buttons met it nowhere. -->
+                <p style="margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;" class="dk-secondary">Whichever of those you try, tell me how it went. Replies come to me.</p>
               </td>
             </tr>
 

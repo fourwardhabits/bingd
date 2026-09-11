@@ -12,8 +12,8 @@ times you end up with a list that is actually yours.
 
 Two honest things. It is early, so you will find rough edges. And bingd.
 gets much better once one person you already talk about films with is on
-it, because the feed, Taste Match and Group Picks all need somebody on
-the other end before they do anything at all.
+it, because the feed and Group Picks have nothing to show until somebody
+is on the other end of them.
 
 Group Picks is my favourite thing in here, for what it is worth. You
 choose who is watching tonight and it finds the things you can all agree
@@ -29,7 +29,7 @@ my profile on bingd.: https://bingd.app/u/saisurajkan
 
 ------------------------------------------------------------------------
 
-A FEW THINGS WORTH TRYING
+A few things worth trying
 
 FOLLOW ME
 It gives you one person in your feed straight away, and I would like to
@@ -37,16 +37,19 @@ see what you are watching.
 https://bingd.app/u/saisurajkan
 
 BRING ONE PERSON IN
-One friend you already trade recommendations with is worth more than
-twenty strangers. Your invite link is in the app, under Profile, and it
-never changes.
-Then tap Profile at the bottom, then Invite friends.
+Nearly everything here needs a second person. This link is your own
+profile the way a stranger sees it, install button and all, so it is
+something you can forward as it stands.
+For the proper invite, the one that connects the two of you
+automatically, open bingd. and tap Invite friends on your profile.
 https://bingd.app/u/{{handle}}
 
 RANK WHAT I AM WATCHING
-People keep telling me that having this at number one is a red flag.
-Rank it yourself and tell me I am wrong.
+The Wolf of Wall Street is my number one and people keep telling me that
+is a red flag. Rank it yourself and tell me I am wrong.
 https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa
+
+Whichever of those you try, tell me how it went. Replies come to me.
 
 ------------------------------------------------------------------------
 

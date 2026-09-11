@@ -43,8 +43,10 @@
     "and clients pad it with whatever the email's first words happen to be, longer and it",
     "is cut mid-sentence on a phone.",
     "",
-    "It says the same thing the subject says, one step more concrete, and it is the second",
-    "of three places the reply invitation appears before anybody has scrolled."
+    "It says the same thing the subject says, one step more concrete, and it is the first",
+    "of three places the reply invitation appears: here, the note's last paragraph, and one",
+    "line under the last card. The third exists because the first two are the top of the",
+    "email and 700 pixels down a phone, and a reader who skims to the buttons met neither."
   ],
   "preheader": {
     "chosen": "Hit reply and it comes straight to me. I read all of them.",
@@ -56,7 +58,8 @@
   "$noteComment": [
     "DRAFT. FOUNDER TO EDIT.",
     "",
-    "Target 150 to 225 words; this is about 205. The shape it is trying to hold:",
+    "Target 150 to 225 words; this is 216, and 222 once the greeting and the signature",
+    "are counted. The shape it is trying to hold:",
     "",
     "  1. thank them, and say who is writing,",
     "  2. why this exists, told as a problem the reader also has rather than as a mission,",
@@ -80,7 +83,7 @@
     "paragraphs": [
       "Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.",
       "I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.",
-      "Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed, Taste Match and Group Picks all need somebody on the other end before they do anything at all.",
+      "Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed and Group Picks have nothing to show until somebody is on the other end of them.",
       "Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.",
       "If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one."
     ],
@@ -124,14 +127,14 @@
       },
       {
         "title": "Bring one person in",
-        "body": "One friend you already trade recommendations with is worth more than twenty strangers. Your invite link is in the app, under Profile, and it never changes.",
-        "action": "Open bingd.",
+        "body": "Nearly everything here needs a second person. This link is your own profile the way a stranger sees it, install button and all, so it is something you can forward as it stands.",
+        "action": "See your profile",
         "target": "ownProfile",
-        "instruction": "Then tap Profile at the bottom, then Invite friends."
+        "instruction": "For the proper invite, the one that connects the two of you automatically, open bingd. and tap Invite friends on your profile."
       },
       {
         "title": "Rank what I am watching",
-        "body": "People keep telling me that having this at number one is a red flag. Rank it yourself and tell me I am wrong.",
+        "body": "The Wolf of Wall Street is my number one and people keep telling me that is a red flag. Rank it yourself and tell me I am wrong.",
         "action": "Open the title",
         "target": "founderTitle"
       }
@@ -151,6 +154,16 @@
     "while it is null. There is no company, so this is a personal address or a PO box, and",
     "inventing a plausible one would be worse than the build failing."
   ],
+  "$closerComment": [
+    "The reply ask, again, under the cards.",
+    "",
+    "It was in the preheader and in the note's last paragraph, which are the top of the",
+    "email and about 700px down a phone. A reader who skims straight to the three buttons",
+    "met it nowhere. This is the line after the last button, and it is the last thing in",
+    "the email that is not a footer."
+  ],
+  "closer": "Whichever of those you try, tell me how it went. Replies come to me.",
+
   "footer": {
     "signature": "bingd. is made by Suraj Kandukuri.",
     "reason": "You are getting this because you made a bingd. account. It is the only email of its kind I will send you.",
