@@ -150,7 +150,20 @@ const targets = JSON.parse(await readFile(join(here, 'targets.json'), 'utf8'));
 const substitutions = {
   '{{greeting}}': flag('--greeting') ?? 'Hi,',
   '{{handle}}': flag('--handle') ?? 'preview',
-  '{{unsubscribeUrl}}': 'https://bingd.app/#unsubscribe-not-built-yet',
+  /**
+   * An unsubscribe that works, with nothing to build.
+   *
+   * The first draft pointed at `https://bingd.app/#unsubscribe-not-built-yet`, which is
+   * a dead fragment on the landing page. A visible Unsubscribe link that goes nowhere is
+   * a worse position than no link at all, because it is an affirmative representation.
+   *
+   * A `mailto:` to the Reply-To address is the honest v1: the mailbox is one somebody
+   * reads by definition, Gmail and Apple Mail both surface their own control from the
+   * `List-Unsubscribe` header below, and there is no endpoint to deploy. What it costs
+   * is that a human has to act on the mail. Build the HTTPS one-click endpoint before
+   * volume, not before launch.
+   */
+  '{{unsubscribeUrl}}': `mailto:${replyTo}?subject=${encodeURIComponent('Unsubscribe')}`,
 };
 
 const fill = (body) =>
@@ -232,6 +245,18 @@ const response = await fetch('https://api.resend.com/emails', {
     subject,
     html,
     text,
+    headers: {
+      /**
+       * What gives Gmail and Apple Mail their own one-tap control, so a reader who
+       * cannot find the footer link uses that instead of the spam button.
+       *
+       * **No `List-Unsubscribe-Post` beside it.** RFC 8058 one-click requires an HTTPS
+       * endpoint; pairing the Post header with a `mailto:` is invalid, and an invalid
+       * header set is worse than a plain `List-Unsubscribe` because a receiver may
+       * discard both. Add it in the same commit that adds the endpoint.
+       */
+      'List-Unsubscribe': `<mailto:${replyTo}?subject=${encodeURIComponent('Unsubscribe')}>`,
+    },
   }),
 });
 
@@ -254,7 +279,8 @@ console.log(`  SENT. id ${body?.id}`);
 console.log('');
 console.log('  Check, in this order:');
 console.log('    1. Does the From line read like a person rather than a system?');
-console.log('    2. Hit reply. Does it address the mailbox you meant?');
+console.log('    2. Hit reply. Does it address the mailbox you meant? The email asks');
+console.log('       twice, in the last paragraph and under the cards.');
 console.log('    3. Read it on a phone. Do the three buttons reach a thumb?');
 console.log('    4. Turn the phone to dark mode and open it again.');
 console.log('    5. Tap all three buttons on a phone that HAS bingd. installed.');

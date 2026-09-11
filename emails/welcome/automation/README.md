@@ -58,7 +58,7 @@ The other two options and why not:
 ```
 .github/workflows/welcome-email.yml     NOT WRITTEN. The trigger. See step 5.
 emails/welcome/automation/
-  20260912000100_welcome_email.sql      the ledger and the two switches. NOT APPLIED.
+  20260916000100_welcome_email.sql      the ledger and the two switches. NOT APPLIED.
   send-welcome.mjs                      the worker. Runs, refuses, exits 0.
 emails/welcome/build.mjs                renders the template the worker sends
 ```
@@ -195,7 +195,7 @@ Five steps, in this order. Steps 1 and 2 are the founder's and nobody else's.
    `copy.json`.
 2. **Approve the copy.** Rewrite the note, send yourself a test, read it on a phone in
    both light and dark, tap all three buttons on a phone that has bingd. installed.
-3. **Apply the migration.** Move `20260912000100_welcome_email.sql` into
+3. **Apply the migration.** Move `20260916000100_welcome_email.sql` into
    `supabase/migrations/`, review it, and push it to staging first. It creates the ledger
    and inserts both switches at their safe defaults, so applying it changes no behaviour.
 4. **Create the secrets.** `RESEND_API_KEY` as a new key, not the one named `Supabase`,
