@@ -90,15 +90,30 @@ export default function suite() {
         await t2.end().catch(() => {});
       }
 
-      const claimed = await db.rows(
-        `select id, attempts from import_jobs where id in ($1, $2) order by id`,
+      // **Both jobs progressed**, which is the property. Each tick claims one job, so if
+      // the second worker had queued on the first's row instead of skipping it, only one
+      // job would have been matched — and with `t2`'s call awaited before `t1` commits,
+      // a blocking claim would not merely be slow, it would deadlock and time out.
+      //
+      // Asserted on the rows rather than on `attempts`, because a productive slice now
+      // resets that counter: the ceiling bounds unproductive claims, not claims.
+      const pending = await db.rows(
+        `select r.job_id, count(*)::int as n
+           from import_rows r
+          where r.job_id in ($1, $2) and r.status = 'pending'
+          group by r.job_id`,
         [jobA, jobB],
       );
-      assert.equal(claimed.length, 2);
-      assert.deepEqual(
-        claimed.map((r) => r.attempts).sort(),
-        [1, 1],
-        'W1: each worker took a different job, so each job was attempted exactly once',
+      assert.deepEqual(pending, [], 'W1: neither job was starved by the other');
+
+      const matched = await db.rows(
+        `select job_id, media_item_id from import_rows where job_id in ($1, $2) order by job_id`,
+        [jobA, jobB],
+      );
+      assert.equal(matched.length, 2);
+      assert.ok(
+        matched.every((r) => r.media_item_id !== null),
+        'W1: both jobs were matched, so both workers did real work',
       );
 
       // Both films must be findable by the matcher; neither job may have been starved.

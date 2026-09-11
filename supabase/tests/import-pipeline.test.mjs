@@ -48,6 +48,24 @@ const staged = (name, over = {}) => ({
   ...over,
 });
 
+/**
+ * A catalogue film with a real release date.
+ *
+ * `harness.createMovie` leaves `release_date` null, which is faithful to the catalogue —
+ * undated stubs are ordinary, because it caches whatever anybody searched for — but it
+ * means every fixture film is matched by the weak title-only tier. Only a match whose
+ * years actually agreed is allowed to teach the shared cross-account cache, so a test
+ * about the cache has to build a film the strong tier can reach.
+ */
+const datedMovie = async (title, year) => {
+  const { rows } = await t.sql(
+    `insert into media_items (kind, tmdb_id, title, release_date, provenance)
+     values ('movie', $1, $2, $3, 'manual') returning id`,
+    [-Math.abs(seq++), title, `${year}-06-01`],
+  );
+  return rows[0].id;
+};
+
 /** Runs a whole job to completion the way the cron tick would, but deterministically. */
 const runJob = async (jobId, { slice = 500, ticks = 40 } = {}) => {
   for (let i = 0; i < ticks; i += 1) {
@@ -453,7 +471,8 @@ describe('the shared match cache', () => {
   before(async () => {
     frank = await t.createUser({ username: 'pipe_frank' });
     grace = await t.createUser({ username: 'pipe_grace' });
-    film = await t.createMovie('Cached Film', seq++);
+    // Dated, so the strong tier reaches it — only that tier may teach the shared cache.
+    film = await datedMovie('Cached Film', 2001);
   });
 
   it('learns a film URI from one import and never a diary URI', async () => {
@@ -639,6 +658,252 @@ describe('the worker', () => {
 });
 
 // ===========================================================================
+
+describe('a long import, through many small slices', () => {
+  let liam;
+
+  before(async () => {
+    liam = await t.createUser({ username: 'pipe_liam' });
+  });
+
+  it('finishes rather than dead-lettering partway through', async () => {
+    // THE defect the first version of this suite could not see. `attempts` is incremented
+    // on every claim, and a claim is one *slice* of a long job — so an unreset ceiling of
+    // six dead-lettered any library over about four hundred films, having already written
+    // an arbitrary prefix of it.
+    //
+    // Every fixture above uses slice 500 and finishes in four ticks, which is exactly why
+    // they all passed. This one uses a slice small enough that the job needs far more
+    // claims than the ceiling allows.
+    const rows = [];
+    for (let i = 0; i < 30; i += 1) {
+      const name = `Long Import ${seq}`;
+      await t.createMovie(name, seq);
+      rows.push(staged(name, { correlation: `${name.toLowerCase()}|2001` }));
+      seq += 1;
+    }
+
+    await t.actAs(liam);
+    const { rows: created } = await t.sql(`select import_create() as id`);
+    const jobId = created[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify(rows)]);
+    await t.sql(`select import_ready($1) as r`, [jobId]);
+    await t.actAs(null);
+
+    // Slice 3 over 30 rows: at least 20 productive claims, against a ceiling of 6.
+    await runJob(jobId, { slice: 3, ticks: 60 });
+
+    const { rows: job } = await t.sql(
+      `select status, counts, attempts from import_jobs where id = $1`, [jobId]);
+    assert.equal(job[0].status, 'done', 'a long job must not exhaust its attempt ceiling');
+    assert.equal(job[0].counts.applied, 30);
+    assert.equal(job[0].counts.stragglers, 0, 'no row may be left behind by a phase advance');
+    assert.equal(await count('user_media', `user_id = '${liam}'`), 30);
+  });
+});
+
+describe('a row the database refuses', () => {
+  let mona;
+
+  before(async () => {
+    mona = await t.createUser({ username: 'pipe_mona' });
+  });
+
+  it('costs one film, not the whole library', async () => {
+    // A malformed value used to raise inside the apply slice, roll the whole batch back,
+    // and dead-letter the job three ticks later having written nothing at all.
+    const good = `Survivor ${seq}`;
+    await t.createMovie(good, seq++);
+    const bad = `Poison ${seq}`;
+    await t.createMovie(bad, seq++);
+
+    await t.actAs(mona);
+    const { rows: created } = await t.sql(`select import_create() as id`);
+    const jobId = created[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged(good, { correlation: `${good.toLowerCase()}|2001` }),
+      staged(bad, { correlation: `${bad.toLowerCase()}|2001` }),
+    ])]);
+    await t.sql(`select import_ready($1) as r`, [jobId]);
+    await t.actAs(null);
+
+    // Corrupt one staged row past the point staging validated it — which is what a schema
+    // change, or a value nobody anticipated, would look like at apply time.
+    await t.sql(
+      `update import_rows set raw = jsonb_set(raw, '{bucket}', '"not_a_bucket"')
+        where job_id = $1 and correlation = $2`,
+      [jobId, `${bad.toLowerCase()}|2001`],
+    );
+
+    await runJob(jobId, { slice: 2 });
+
+    const { rows: job } = await t.sql(`select status, counts from import_jobs where id = $1`, [jobId]);
+    assert.equal(job[0].status, 'done', 'one bad row must not fail the job');
+    assert.equal(job[0].counts.applied, 1);
+    assert.equal(job[0].counts.unmatched, 1, 'the film that could not be written is reported');
+    assert.equal(await count('user_media', `user_id = '${mona}'`), 1, 'the good film arrived');
+  });
+});
+
+describe('staging refuses what apply would choke on', () => {
+  let nora;
+  let jobId;
+
+  before(async () => {
+    nora = await t.createUser({ username: 'pipe_nora' });
+    await t.actAs(nora);
+    const { rows } = await t.sql(`select import_create() as id`);
+    jobId = rows[0].id;
+  });
+
+  after(() => t.actAs(null));
+
+  const stageOne = async (row) => {
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([row])]);
+    const { rows } = await t.sql(
+      `select raw from import_rows where job_id = $1 and correlation = $2`,
+      [jobId, row.correlation],
+    );
+    return rows[0]?.raw ?? null;
+  };
+
+  it('drops a rating that is not a Letterboxd star rather than storing it', async () => {
+    // 4.3 would pass every cast and then violate imported_titles' CHECK at apply time.
+    const raw = await stageOne(staged('Bad Rating', { correlation: 'bad rating|2001', rating: 4.3 }));
+    assert.ok(raw, 'the row is still staged');
+    assert.equal(raw.rating, undefined, 'the bad value is dropped, the row survives');
+  });
+
+  it('drops an unparseable date rather than storing it', async () => {
+    const raw = await stageOne(
+      staged('Bad Date', { correlation: 'bad date|2001', watchedOn: 'not-a-date' }));
+    assert.ok(raw);
+    assert.equal(raw.watchedOn, undefined);
+  });
+
+  it('drops a bucket that is not a bucket', async () => {
+    const raw = await stageOne(
+      staged('Bad Bucket', { correlation: 'bad bucket|2001', bucket: 'adored' }));
+    assert.ok(raw);
+    assert.equal(raw.bucket, undefined);
+  });
+
+  it('rebuilds watches element by element, so nothing rides along inside one', async () => {
+    // The projection comment used to claim this and `watches` was a verbatim passthrough.
+    const raw = await stageOne(staged('Nested Junk', {
+      correlation: 'nested junk|2001',
+      watches: [{
+        diaryUri: 'https://boxd.it/ok',
+        watchedOn: '2024-01-02',
+        isRewatch: false,
+        review: 'ARBITRARY BLOB THE CLIENT SENT',
+      }],
+    }));
+
+    assert.equal(raw.watches.length, 1);
+    assert.deepEqual(Object.keys(raw.watches[0]).sort(), ['diaryUri', 'isRewatch', 'watchedOn']);
+    assert.ok(!JSON.stringify(raw).includes('ARBITRARY BLOB'));
+  });
+
+  it('drops a viewing whose date is unusable but keeps the rest', async () => {
+    const raw = await stageOne(staged('Mixed Watches', {
+      correlation: 'mixed watches|2001',
+      watches: [
+        { diaryUri: 'https://boxd.it/bad', watchedOn: 'nope', isRewatch: false },
+        { diaryUri: 'https://boxd.it/good', watchedOn: '2024-02-03', isRewatch: true },
+      ],
+    }));
+    assert.equal(raw.watches.length, 1);
+    assert.equal(raw.watches[0].diaryUri, 'https://boxd.it/good');
+  });
+
+  it('refuses a nameless row outright', async () => {
+    const raw = await stageOne({ ...staged('x', { correlation: 'nameless|2001' }), name: null });
+    assert.equal(raw, null);
+  });
+});
+
+describe('an import does not disturb what the person built here', () => {
+  let owen;
+  let film;
+
+  before(async () => {
+    owen = await t.createUser({ username: 'pipe_owen' });
+    film = await t.createMovie(`Native Standing ${seq}`, seq);
+    seq += 1;
+  });
+
+  it('leaves a natively logged film on this month’s board', async () => {
+    // A native log with no date is attributed to the month it was logged. Filling that
+    // null with a 2019 date from Letterboxd would silently remove it from this month's
+    // board — the mirror of "imported rows never count toward monthly", and equally
+    // unsanctioned.
+    await t.actAs(owen);
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved') as r`, [film]);
+    await t.actAs(null);
+
+    const before = await t.asUser(owen, async () => {
+      const { rows } = await t.sql(`select * from my_leaderboard_standing('titles', 'month')`);
+      return rows[0]?.metric_count ?? 0;
+    });
+    assert.equal(before, 1);
+
+    await importArchive(owen, [
+      staged(`Native Standing ${seq - 1}`, {
+        correlation: `native standing ${seq - 1}|2001`,
+        watchedOn: '2019-03-04',
+        watches: [{ diaryUri: 'https://boxd.it/ns', watchedOn: '2019-03-04', isRewatch: false }],
+      }),
+    ]);
+
+    const after = await t.asUser(owen, async () => {
+      const { rows } = await t.sql(`select * from my_leaderboard_standing('titles', 'month')`);
+      return rows[0]?.metric_count ?? 0;
+    });
+    assert.equal(after, 1, 'an import must not move a native row off this month');
+
+    const { rows } = await t.sql(
+      `select watched_on, source from user_media where user_id = $1 and media_item_id = $2`,
+      [owen, film]);
+    assert.equal(rows[0].watched_on, null, 'the native watched state is untouched');
+    assert.equal(rows[0].source, 'in_app');
+
+    // And nothing was lost: the Letterboxd date is still recorded as provenance.
+    assert.equal(await count('imported_watches', `user_id = '${owen}'`), 1);
+  });
+});
+
+describe('the shared cache takes only strong evidence', () => {
+  let pat;
+
+  before(async () => {
+    pat = await t.createUser({ username: 'pipe_pat' });
+  });
+
+  it('does not learn from a title-only match against an undated catalogue row', async () => {
+    // The catalogue is a cache of whatever anybody searched for, so undated stubs are
+    // ordinary. A stub for one Nosferatu would otherwise capture the URI of another and
+    // hand it to every later importer, permanently and with no eviction path.
+    await t.sql(
+      `insert into media_items (kind, tmdb_id, title, release_date) values ('movie', $1, 'Undated Stub', null)`,
+      [seq++]);
+
+    await importArchive(pat, [
+      staged('Undated Stub', {
+        correlation: 'undated stub|2001',
+        filmUri: 'https://boxd.it/UNDATEDSTUB',
+      }),
+    ]);
+
+    // It still lands in the person's own collection — good enough for the account that
+    // told us the name and year.
+    assert.equal(await count('user_media', `user_id = '${pat}'`), 1);
+
+    const { rows } = await t.sql(
+      `select 1 from letterboxd_matches where letterboxd_uri = 'https://boxd.it/UNDATEDSTUB'`);
+    assert.equal(rows.length, 0, 'a weak match must not be asserted across accounts');
+  });
+});
 
 describe('the provider tier', () => {
   let nina;

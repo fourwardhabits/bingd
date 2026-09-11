@@ -152,17 +152,39 @@ Deno.serve(async (request: Request) => {
   const url = Deno.env.get('SUPABASE_URL') ?? '';
   const authorization = request.headers.get('Authorization') ?? '';
 
+  // ---------------------------------------------------------------------------
   // The database is the only caller. `verify_jwt` has already proven the token genuine;
   // this checks it is the service role rather than a signed-in person.
-  if (!authorization.includes(serviceKey)) {
-    const role = (() => {
-      try {
-        return JSON.parse(atob(authorization.replace('Bearer ', '').split('.')[1] ?? ''))?.role;
-      } catch {
-        return null;
-      }
-    })();
-    if (role !== 'service_role') return json({ error: { code: 'BG403', message: 'service role required' } }, 403);
+  //
+  // `push-sender`'s shape: compare the stripped token to the key, and fall back to the
+  // `role` claim, because Supabase now issues `sb_secret_…` keys alongside the legacy JWTs
+  // and which one the platform injects is not this function's business.
+  //
+  // **The empty-key case is refused explicitly.** An earlier version tested
+  // `authorization.includes(serviceKey)`, which is true of every string when `serviceKey`
+  // is `''` — so a project with the env var missing skipped the role check entirely. It
+  // happened to fail later, when `createClient(url, '')` could not authenticate, which is
+  // failing closed by accident rather than by design.
+  // ---------------------------------------------------------------------------
+  const token = authorization.replace(/^Bearer\s+/i, '').trim();
+
+  const claimsServiceRole = (() => {
+    if (serviceKey !== '' && token === serviceKey) return true;
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    try {
+      return JSON.parse(atob(parts[1]!))?.role === 'service_role';
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!claimsServiceRole) {
+    return json({ error: { code: 'BG403', message: 'service role required' } }, 403);
+  }
+
+  if (serviceKey === '' || url === '') {
+    return json({ error: { code: 'BG500', message: 'function is not configured' } }, 500);
   }
 
   const tmdbKey = Deno.env.get('TMDB_API_KEY') ?? '';

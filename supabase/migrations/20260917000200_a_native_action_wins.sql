@@ -81,6 +81,13 @@
 create or replace function _source_follows_the_watch()
 returns trigger
 language plpgsql
+-- SECURITY DEFINER for the same reason its sibling below is: it calls `_importing()`,
+-- whose EXECUTE is revoked from `authenticated`. Safe today without it only because
+-- `user_media` carries a SELECT policy and nothing else, so every writer is already a
+-- definer function — but the day anybody adds an UPDATE policy or a SECURITY INVOKER
+-- writer, every update to this table would throw `permission denied for function
+-- _importing`. A trigger that depends on nobody ever widening a policy is not a trigger.
+security definer
 set search_path = public
 as $$
 begin

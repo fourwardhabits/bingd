@@ -103,13 +103,26 @@ begin
   -- A live job is reused rather than refused. The client that lost its connection
   -- mid-stage should be able to carry on, and `import_rows_once` makes re-posting the
   -- pages it already sent free.
+  --
+  -- **But only for an hour.** A client that crashed halfway through staging leaves its
+  -- rows behind, and without this bound the person's *next* export — a different archive,
+  -- weeks later — would stage onto the same job and import both as one. An abandoned
+  -- `pending` job is discarded rather than adopted; a job the worker already has is left
+  -- alone, because that one is making progress.
   select id into v_id
     from import_jobs
-   where user_id = auth.uid() and completed_at is null
+   where user_id = auth.uid()
+     and completed_at is null
+     and (status <> 'pending' or created_at > now() - interval '1 hour')
    order by created_at desc
    limit 1;
 
   if v_id is not null then return v_id; end if;
+
+  -- Whatever is left is abandoned. Deleting it frees `import_jobs_one_live`, and its rows
+  -- go with it: a half-staged archive is not evidence of anything.
+  delete from import_jobs
+   where user_id = auth.uid() and completed_at is null and status = 'pending';
 
   insert into import_jobs (user_id, status) values (auth.uid(), 'pending')
   returning id into v_id;
@@ -154,25 +167,67 @@ begin
     raise exception 'too many rows in one page' using errcode = '22023';
   end if;
 
+  -- ---------------------------------------------------------------------------
+  -- THIS IS THE ONLY VALIDATION BOUNDARY, SO IT VALIDATES EVERYTHING
+  --
+  -- Every value below is cast and range-checked *here*, where a bad one is one dropped
+  -- row. An earlier version cast the scalars and passed `watches` through verbatim, and
+  -- independent review showed what that costs: a single unparseable date or a rating of
+  -- 4.3 raised inside the apply slice, rolled back the whole batch, and three ticks later
+  -- dead-lettered a two-thousand-film import having written nothing. One malformed row
+  -- must cost one row.
+  --
+  -- It is also what makes the projection comment true. `watches` is rebuilt element by
+  -- element, so an arbitrary blob nested inside it is dropped exactly as a top-level one
+  -- is, and `import_rows.raw` cannot become a channel for the files this import refuses
+  -- to read.
+  --
+  -- `nullif(..., '')` before each cast, because `->>'x'` on an absent key and on an empty
+  -- string both mean "not given" and only one of them survives a cast.
+  -- ---------------------------------------------------------------------------
   insert into import_rows (job_id, kind, correlation, raw, status)
   select p_job_id,
          r->>'kind',
          r->>'correlation',
-         -- Only the fields the contract keeps. Anything else the client sent is dropped
-         -- here rather than stored and ignored, so the staging table cannot quietly become
-         -- a channel for data this import does not import.
+         -- Each value is shape-tested *before* it is cast, in a CASE, so a malformed one
+         -- yields null rather than raising. A bad value costs that value; it does not cost
+         -- the row, and it certainly does not cost the job.
          jsonb_strip_nulls(jsonb_build_object(
-           'name',       r->>'name',
-           'year',       (r->>'year')::integer,
-           'filmUri',    r->>'filmUri',
-           'rating',     (r->>'rating')::numeric,
-           'bucket',     r->>'bucket',
-           'watchedOn',  (r->>'watchedOn')::date,
-           'watches',    r->'watches'
+           'name',      left(r->>'name', 200),
+           'year',      case when r->>'year' ~ '^\d{4}$'
+                             and (r->>'year')::integer
+                                 between 1870 and extract(year from current_date)::integer + 5
+                        then (r->>'year')::integer end,
+           'filmUri',   left(r->>'filmUri', 300),
+           'rating',    case when r->>'rating' ~ '^[0-5](\.[05])?$'
+                             and (r->>'rating')::numeric >= 0.5
+                        then (r->>'rating')::numeric end,
+           'bucket',    case when r->>'bucket' in ('loved', 'fine', 'not_for_me')
+                        then r->>'bucket' end,
+           'watchedOn', case when r->>'watchedOn' ~ '^\d{4}-\d{2}-\d{2}$'
+                             and to_date(r->>'watchedOn', 'YYYY-MM-DD')
+                                 between date '1870-01-01' and current_date + 1
+                        then to_date(r->>'watchedOn', 'YYYY-MM-DD') end,
+           'watches',   (
+             select jsonb_agg(jsonb_build_object(
+                      'diaryUri',  left(w->>'diaryUri', 300),
+                      'watchedOn', to_date(w->>'watchedOn', 'YYYY-MM-DD'),
+                      'isRewatch', coalesce(w->>'isRewatch' = 'true', false)
+                    ))
+               from jsonb_array_elements(
+                      case when jsonb_typeof(r->'watches') = 'array'
+                           then r->'watches' else '[]'::jsonb end) w
+              where w->>'diaryUri' is not null
+                and w->>'watchedOn' ~ '^\d{4}-\d{2}-\d{2}$'
+                and to_date(w->>'watchedOn', 'YYYY-MM-DD')
+                    between date '1870-01-01' and current_date + 1
+           )
          )),
          'pending'
     from jsonb_array_elements(p_rows) r
+   -- The only three things that make a row unusable rather than merely incomplete.
    where r->>'correlation' is not null
+     and r->>'name' is not null
      and r->>'kind' in ('watched', 'watchlist')
   on conflict (job_id, kind, correlation) do nothing;
 
@@ -232,9 +287,11 @@ grant execute on function import_ready(uuid) to authenticated;
 --   T1b squashed title, catalogue row undated      heuristic, local, free
 --   ..  anything left goes to needs_provider, and the provider tier decides
 --
--- A diary-entry URI can never enter `letterboxd_matches`, because the only URI staged on a
--- row is `filmUri`, and the client's parser reads the diary's URI column into the per-
--- viewing payload and never into that field. The cache is global and unattributed, so one
+-- A diary-entry URI can never enter `letterboxd_matches`. Diary URIs *are* staged — inside
+-- `raw->'watches'`, where the per-viewing provenance needs them — so the guarantee is not
+-- that they are absent. It is that both writers of that cache read `raw->>'filmUri'` and
+-- nothing else, and `import_stage` builds `filmUri` from the client's `filmUri` field
+-- alone, never from a `watches` element. The cache is global and unattributed, so one
 -- account's bad row would otherwise be every later importer's bad row.
 --
 -- **Ambiguity is left unresolved rather than guessed.** Two catalogue rows with the same
@@ -301,15 +358,35 @@ begin
 
   get diagnostics v_done = row_count;
 
-  -- Every confirmed local match teaches the shared cache, so the next importer of the same
-  -- film resolves it at T0 for nothing. Only a FILM uri is ever written here.
+  -- ---------------------------------------------------------------------------
+  -- ONLY A MATCH THE YEARS AGREED ON TEACHES THE SHARED CACHE
+  --
+  -- `letterboxd_matches` is global, unattributed, permanent and has no eviction path, so a
+  -- wrong row in it is every later importer's wrong row, for ever. It therefore takes
+  -- evidence from the strong tier only: a unique squashed title **and** a release year
+  -- within one of the export's.
+  --
+  -- T1b — a unique squashed title against a catalogue row with no `release_date` — is
+  -- deliberately excluded. The catalogue is a cache of whatever anybody has searched for,
+  -- so undated stubs are ordinary; a stub for one *Nosferatu* would otherwise capture the
+  -- URI of another and hand it to everybody. It is good enough to place a film in the
+  -- collection of the person who told us its name and year, and not good enough to assert
+  -- across accounts.
+  --
+  -- The provider tier is held to the same bar by `match.mjs`'s `isConfident`, which is why
+  -- `_import_provider_resolve` may write here without a second check.
+  -- ---------------------------------------------------------------------------
   insert into letterboxd_matches (letterboxd_uri, media_item_id)
   select distinct r.raw->>'filmUri', r.media_item_id
     from import_rows r
+    join media_items mi on mi.id = r.media_item_id
    where r.job_id = p_job_id
      and r.status = 'matched'
      and r.media_item_id is not null
      and r.raw->>'filmUri' is not null
+     and (r.raw->>'year') is not null
+     and mi.release_date is not null
+     and abs(extract(year from mi.release_date)::integer - (r.raw->>'year')::integer) <= 1
   on conflict (letterboxd_uri) do nothing;
 
   return v_done;
@@ -365,12 +442,26 @@ begin
      where job_id = p_job_id
        and status = 'matched'
        and media_item_id is not null
-     -- Watched first. `kind` sorts 'watched' after 'watchlist' alphabetically, so the
-     -- ordering is stated explicitly rather than inherited from the collation.
+     -- Watched first, and ordered by an explicit `case` rather than by `kind` — which
+     -- would happen to work, since 'watched' sorts before 'watchlist', and would be a
+     -- correctness guarantee resting on a collation nobody chose for this purpose.
      order by case when kind = 'watched' then 0 else 1 end, id
      limit greatest(coalesce(p_limit, 200), 1)
      for update skip locked
   loop
+    -- ---------------------------------------------------------------------------
+    -- ONE ROW'S FAILURE COSTS ONE ROW
+    --
+    -- A subtransaction per row. Without it any error raised below — a cast, a constraint,
+    -- a foreign key to a title deleted since matching — rolls back the entire slice, and
+    -- the next tick meets the same row and rolls back again until the job dead-letters
+    -- having written nothing. Independent review reproduced exactly that.
+    --
+    -- The cost is a subtransaction per applied row, which is what `begin ... exception`
+    -- means in plpgsql. At a couple of hundred rows a slice that is not a concern, and it
+    -- is the difference between one lost film and a lost library.
+    -- ---------------------------------------------------------------------------
+    begin
     -- Serialise against a ranking or a log on the same title, exactly as every other
     -- collection writer does.
     perform _lock_media(v_user, v_row.media_item_id);
@@ -390,10 +481,26 @@ begin
         null;
 
       elsif v_source = 'in_app' then
-        -- Logged here. Fill what is empty and touch nothing that is not.
+        -- ---------------------------------------------------------------------------
+        -- Logged here. Fill the bucket if it is empty, and **leave `watched_on` alone.**
+        --
+        -- Filling a null date looks like the same "fill only what is empty" rule the
+        -- bucket gets, and it is not, because an empty `watched_on` is load-bearing:
+        -- `_leaderboard_counts` attributes a monthly row to
+        -- `coalesce(watched_on, created_at)`, so writing a 2019 date onto a film somebody
+        -- logged here last week silently removes it from this month's board.
+        --
+        -- The locked contract says an import never counts toward the monthly leaderboard.
+        -- An import that *decrements* a native row's standing is the mirror of that and
+        -- was not sanctioned either, so the conservative reading wins: the import does not
+        -- touch the watched state of a row somebody built here.
+        --
+        -- Nothing is lost. The Letterboxd date is still recorded, as provenance, in
+        -- `imported_watches` below — where a future history model can find it and where no
+        -- leaderboard reads it.
+        -- ---------------------------------------------------------------------------
         update user_media
-           set watched_on = coalesce(watched_on, (v_row.raw->>'watchedOn')::date),
-               bucket     = coalesce(bucket, (v_row.raw->>'bucket')::taste_bucket)
+           set bucket = coalesce(bucket, (v_row.raw->>'bucket')::taste_bucket)
          where user_id = v_user and media_item_id = v_row.media_item_id;
 
       else
@@ -454,7 +561,15 @@ begin
       end if;
     end if;
 
-    update import_rows set status = 'applied' where id = v_row.id;
+      update import_rows set status = 'applied' where id = v_row.id;
+
+    exception when others then
+      -- Poison. Marked so the slice makes progress and the next tick does not meet it
+      -- again; counted as unmatched, because from the reader's side a row that could not
+      -- be written is a film that did not arrive, which is the same sentence.
+      update import_rows set status = 'unmatched', candidates = null where id = v_row.id;
+    end;
+
     v_done := v_done + 1;
   end loop;
 
@@ -502,19 +617,24 @@ begin
           'truth-worm','passport-mode','time-hopper','genre-gremlin',
           'two-screen-life']);
 
+  -- Every number is about THIS job. An earlier version counted `user_media where source =
+  -- 'imported'` and `imported_watches` for the whole account, so a second import reported
+  -- the cumulative total as its own result and any title a native action had since claimed
+  -- silently dropped out. The summary screen reads these.
+  --
+  -- `stragglers` is deliberately reported rather than assumed to be zero: it is the only
+  -- place a row left `pending` or `matched` by a settle that fired early would show up.
   select jsonb_build_object(
            'applied',    count(*) filter (where status = 'applied'),
            'ambiguous',  count(*) filter (where status = 'ambiguous'),
            'unmatched',  count(*) filter (where status in ('unmatched', 'needs_provider')),
-           'watched',    (select count(*) from user_media
-                           where user_id = v_user and source = 'imported'),
-           'watchlist',  (select count(*) from watchlist w
-                           where w.user_id = v_user
-                             and exists (select 1 from import_rows ir
-                                          where ir.job_id = p_job_id
-                                            and ir.kind = 'watchlist'
-                                            and ir.media_item_id = w.media_item_id)),
-           'viewings',   (select count(*) from imported_watches where user_id = v_user)
+           'stragglers', count(*) filter (where status in ('pending', 'matched')),
+           'watched',    count(*) filter (where status = 'applied' and kind = 'watched'),
+           'watchlist',  count(*) filter (where status = 'applied' and kind = 'watchlist'),
+           'viewings',   coalesce(sum(
+                           case when status = 'applied' and kind = 'watched'
+                                then jsonb_array_length(coalesce(raw->'watches', '[]'::jsonb))
+                                else 0 end), 0)
          )
     into v_counts
     from import_rows where job_id = p_job_id;
@@ -599,9 +719,11 @@ begin
      where id = p_row_id
     returning raw->>'filmUri' into v_uri;
 
-    -- The shared cache learns from the provider too, and only ever a FILM uri: `filmUri`
-    -- is the only URI staged on a row, and the client's parser never reads the diary's
-    -- URI column into it.
+    -- The shared cache learns from the provider too, and only ever a FILM uri. This reads
+    -- `raw->>'filmUri'`, which `import_stage` builds from the client's `filmUri` field
+    -- alone -- never from a `watches` element, where the per-viewing diary URIs live. No
+    -- second check on the match itself: `match.mjs`'s `isConfident` already holds the
+    -- provider to the same title-and-year bar the local strong tier uses.
     if v_uri is not null then
       insert into letterboxd_matches (letterboxd_uri, media_item_id)
       values (v_uri, p_media_item_id)
@@ -627,14 +749,54 @@ revoke execute on function _import_provider_resolve(uuid, uuid) from public, ano
 -- ---------------------------------------------------------------------------
 -- 6. The tick
 --
--- `_drain_push_outbox`'s shape, including the parts that look like paranoia and are not:
--- an idle short-circuit so an empty queue costs nothing, and a **raise** when the project
--- cannot do the work, because pg_cron records a failure and nothing else it can see.
+-- `_drain_push_outbox`'s shape, with one deliberate difference.
 --
--- Unlike push, the common path needs no HTTP at all. The Edge Function is called only when
--- rows are waiting on the provider tier, and a project with no provider configured still
--- finishes the job -- those rows simply end `unmatched`.
+-- Taken from it: the idle short-circuit, so an empty queue costs nothing and a project
+-- with no imports never invokes anything; the claim with `for update skip locked` and a
+-- five-minute lease; and the dead letter.
+--
+-- **Not** taken from it: the raise when the project is unconfigured. The push drain raises
+-- because an unconfigured project cannot send push at all and pg_cron records a failure
+-- only on an exception. Here an unconfigured project is not broken — the local matcher
+-- places most titles without any provider, and the rest end honestly unmatched — so this
+-- asks for the provider tier and carries on without it.
 -- ---------------------------------------------------------------------------
+
+-- Whether this project has a provider tier at all: an Edge Function base URL and a service
+-- key to call it with, exactly what `_drain_push_outbox` requires. A project with neither
+-- still imports — it places fewer titles — so this is a question rather than a demand, and
+-- it is what stops a job waiting on a worker that does not exist.
+create or replace function _import_provider_configured()
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_url text;
+  v_key text;
+begin
+  select value #>> '{}' into v_url from app_config where key = 'functions.base_url';
+  begin
+    select decrypted_secret into v_key
+      from vault.decrypted_secrets where name = 'service_role_key';
+  exception when others then
+    v_key := null;
+  end;
+  return nullif(v_url, '') is not null and nullif(v_key, '') is not null;
+end;
+$$;
+
+comment on function _import_provider_configured() is
+  'Whether an Edge Function base URL and a service key both exist, which is what the provider tier needs. Read once per tick, because a job may only wait on the provider if there is one -- otherwise an unconfigured project would leave every import with an unplaceable title in it open for ever. Internal.';
+
+revoke execute on function _import_provider_configured() from public, anon, authenticated;
+
+
+insert into app_config (key, value) values ('import.provider_grace_minutes', '30'::jsonb)
+  on conflict (key) do nothing;
+
 
 create or replace function _drain_import_jobs(p_jobs integer default 3, p_slice integer default 200)
 returns jsonb
@@ -643,12 +805,15 @@ security definer
 set search_path = public
 as $$
 declare
-  v_due     integer;
-  v_job     record;
-  v_worked  integer := 0;
-  v_posted  integer := 0;
-  v_url     text;
-  v_key     text;
+  v_due      integer;
+  v_job      record;
+  v_worked   integer := 0;
+  v_slice    integer := 0;
+  v_posted   integer := 0;
+  v_url      text;
+  v_key      text;
+  v_provider boolean;
+  v_grace    integer;
 begin
   select count(*) into v_due
     from import_jobs
@@ -658,14 +823,31 @@ begin
     return jsonb_build_object('status', 'idle', 'due', 0);
   end if;
 
-  -- Dead letter first, on the same thresholds push uses. A job that has failed three times
-  -- or been attempted six is not going to succeed by being tried again, and leaving it
-  -- claimed for ever would block the account's next import behind `import_jobs_one_live`.
+  -- Resolved once per tick, because every job's settle decision needs it: a job may only
+  -- wait on the provider tier if there is a provider tier to wait for.
+  v_provider := _import_provider_configured();
+  v_grace := coalesce(
+    (select (value #>> '{}')::integer from app_config where key = 'import.provider_grace_minutes'),
+    30);
+
+  -- ---------------------------------------------------------------------------
+  -- Dead letter first. Three counters, and each one bounds a different failure.
+  --
+  --   failures >= 3   three *consecutive* unproductive slices that raised
+  --   attempts >= 6   six consecutive claims that moved nothing
+  --   age > 24h       everything else
+  --
+  -- The first two are reset by any slice that moves a row, which is what stops them
+  -- dead-lettering a long import partway through — and is also why the third exists.
+  -- Without a wall clock, a job that alternates one good slice with one bad one resets
+  -- both counters for ever and never finishes and never dies, holding the account's
+  -- `import_jobs_one_live` slot the whole time.
+  -- ---------------------------------------------------------------------------
   update import_jobs
      set status = 'failed', completed_at = now(), claimed_at = null,
          last_error = coalesce(last_error, 'exhausted')
    where completed_at is null
-     and (failures >= 3 or attempts >= 6);
+     and (failures >= 3 or attempts >= 6 or created_at < now() - interval '24 hours');
 
   for v_job in
     with due as (
@@ -682,28 +864,75 @@ begin
        set claimed_at = now(), attempts = j.attempts + 1
       from due
      where j.id = due.id
-    returning j.id, j.status
+    returning j.id, j.status, j.created_at
   loop
     begin
       if v_job.status = 'matching' then
-        if _import_match_batch(v_job.id, p_slice) = 0 then
+        v_slice := _import_match_batch(v_job.id, p_slice);
+
+        -- **The phase advances on what is left, not on what the slice returned.** Both
+        -- slice functions use `for update skip locked`, so a zero can mean "nothing left"
+        -- or "another worker holds the rest" — and reading the second as the first strands
+        -- rows in a phase nothing will revisit.
+        if not exists (select 1 from import_rows
+                        where job_id = v_job.id and status = 'pending') then
           update import_jobs set status = 'applying' where id = v_job.id;
         end if;
+
       else
-        if _import_apply_batch(v_job.id, p_slice) = 0 then
+        v_slice := _import_apply_batch(v_job.id, p_slice);
+
+        if not exists (select 1 from import_rows
+                        where job_id = v_job.id and status in ('pending', 'matched'))
+           and (
+             -- Nothing is waiting on the provider...
+             not exists (select 1 from import_rows
+                          where job_id = v_job.id
+                            and status = 'needs_provider'
+                            and provider_attempts < 3)
+             -- ...or there is no provider to wait for...
+             or not v_provider
+             -- ...or it has had long enough. Without this an unreachable Edge Function
+             -- would leave every job with an unplaceable title in it open for ever, and
+             -- `import_jobs_one_live` would lock the account out of importing again.
+             or v_job.created_at < now() - (v_grace || ' minutes')::interval
+           )
+        then
           perform _import_settle(v_job.id);
         end if;
       end if;
 
       v_worked := v_worked + 1;
 
-      update import_jobs
-         set claimed_at = null, failures = 0
-       where id = v_job.id and completed_at is null;
+      -- ---------------------------------------------------------------------------
+      -- A PRODUCTIVE SLICE CLEARS BOTH COUNTERS, AND THAT IS THE WHOLE FIX
+      --
+      -- `attempts` is incremented on every claim, and a claim here is one *slice* of a
+      -- long job rather than one unit of work as it is in `push_outbox`. A clean import
+      -- needs roughly `2 * ceil(rows / slice) + 2` claims, so an unreset ceiling of six
+      -- dead-letters any library over about four hundred films — partway through apply,
+      -- with an arbitrary prefix of the collection already written.
+      --
+      -- Independent review reproduced it at thirty rows. The suite missed it because its
+      -- fixtures all finished in four ticks.
+      --
+      -- So the counters bound **unproductive** claims. A slice that moved rows is progress
+      -- and resets both; a slice that moved nothing leaves them standing, which is what
+      -- still stops a job that genuinely cannot advance.
+      -- ---------------------------------------------------------------------------
+      if v_slice > 0 then
+        update import_jobs
+           set claimed_at = null, attempts = 0, failures = 0
+         where id = v_job.id and completed_at is null;
+      else
+        update import_jobs
+           set claimed_at = null
+         where id = v_job.id and completed_at is null;
+      end if;
 
     exception when others then
       -- One job's failure is not the tick's. Record it and carry on: the lease expiry and
-      -- the attempt counter are what eventually stop a job that cannot progress.
+      -- the counters are what eventually stop a job that cannot progress.
       update import_jobs
          set failures = failures + 1, claimed_at = null,
              last_error = left(sqlerrm, 300)
@@ -720,7 +949,7 @@ begin
      and r.provider_attempts < 3
      and j.completed_at is null;
 
-  if v_posted > 0 then
+  if v_posted > 0 and v_provider then
     select value #>> '{}' into v_url from app_config where key = 'functions.base_url';
     begin
       select decrypted_secret into v_key
