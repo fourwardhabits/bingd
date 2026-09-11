@@ -92,13 +92,25 @@ Revisited during design and changed, as anticipated. The tabs are **Feed, Collec
 
 The evidence is in `../design/screens.md` §2: both reference apps give the user's own collection a top-level tab and neither hides it behind a profile, and in Beli the center button *is* search. Confirmed by the founder and now a founder decision, recorded in `decision-log.md` §12.
 
-### INF-5 — Definition of activation
+### ~~INF-5 — Definition of activation~~ — **SETTLED 2026-09-11, as two numbers**
 
 **Recorded as:** Activation is "the user has ranked 10 titles." The activation-*rate* metric adds a 24-hour bound. Attribution reporting uses the unbounded definition.
 
 **Why it is an inference:** v0.5 contained two near-definitions and the founder chose neither.
 
 **Cost to overturn:** Low, but it must be settled before invite and share attribution reporting is built, or the numbers will not reconcile.
+
+**Settled 2026-09-11, by splitting it in two.** The founder took the decision, and it is now
+two numbers rather than one because they answer two questions:
+
+- the **activation metric** keeps "ranked 10 titles", with the 24-hour bound for the rate;
+- **invite activation** — `invite_attributions.activated_at`, which decides whether an
+  attribution counts — is **5**, the completed *Your First Five*.
+
+The inference above was made before onboarding existed. Onboarding now has an ending, and the
+old number sat five titles past it: an invitee who did exactly what the app asked finished
+setting up and their inviter was told nothing. Shipped as `20260916000100`; PRD §17 and §28
+carry the reasoning, and `decision-log.md` INF-5 records the split.
 
 ---
 

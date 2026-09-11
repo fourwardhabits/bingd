@@ -691,19 +691,44 @@ describe('revoke_invite_link', () => {
 });
 
 describe('activation', () => {
-  it('lands on the tenth ranked title and not the ninth', async () => {
+  it('lands on the fifth ranked title and not the fourth', async () => {
+    /**
+     * The bar is `invite.activation_rankings`, and it became **five** in
+     * `20260916000100` — the completed *Your First Five*, which is where onboarding
+     * itself stops asking. It was ten from `20260819000500` until then, taken from PRD
+     * §28's definition of product activation, and ten sat five titles past the moment
+     * the app declares a new person set up.
+     *
+     * Four and five rather than nine and ten, and both halves matter: the fourth must
+     * not activate, or the bar is "somebody tapped something"; the fifth must, or an
+     * invitee who did exactly what they were told still does not count.
+     */
     const inviter = await newUser('act_inviter');
     const invitee = await newUser('act_invitee');
     const token = await mintLink(inviter);
     await t.actAs(invitee);
     await redeem(token);
 
-    await rankTitles(invitee, 9);
-    assert.equal((await attribution(invitee)).activated_at, null, 'nine is not activation');
+    await rankTitles(invitee, 4);
+    assert.equal((await attribution(invitee)).activated_at, null, 'four is not activation');
     assert.equal((await inbox(inviter)).length, 0);
 
-    await rankTitles(invitee, 1, 9);
-    assert.ok((await attribution(invitee)).activated_at, 'the tenth activates');
+    await rankTitles(invitee, 1, 4);
+    assert.ok((await attribution(invitee)).activated_at, 'the fifth activates');
+  });
+
+  it('reads the bar from app_config rather than from a literal', async () => {
+    /**
+     * The configured row is what every live environment reads, so "the number is five"
+     * has to be a fact about `app_config` and not only about a function body.
+     * `config-defaults.test.mjs` covers the other half — the written fallback a
+     * database with no row would use.
+     */
+    const { rows } = await t.sql(
+      `select (value)::integer as n from app_config where key = 'invite.activation_rankings'`,
+    );
+    assert.equal(rows.length, 1, 'the key must exist');
+    assert.equal(rows[0].n, 5);
   });
 
   it('files exactly one notification, and no more as ranking continues', async () => {
@@ -717,9 +742,9 @@ describe('activation', () => {
       .id;
     assert.equal(rows[0].actor_id, invitee);
 
-    // Eleven, twelve, thirteen. The guard is on the column, so the transition happened
-    // once and nothing after it can happen again.
-    await rankTitles(invitee, 3, 10);
+    // Six, seven, eight. The guard is on the column, so the transition happened once
+    // and nothing after it can happen again.
+    await rankTitles(invitee, 3, 5);
     assert.equal(
       (
         await inbox(
@@ -741,34 +766,34 @@ describe('activation', () => {
     await t.actAs(invitee);
     await redeem(token);
 
-    await rankTitles(invitee, 9, 2000);
+    await rankTitles(invitee, 4, 2000);
 
-    const tenth = await rankOne(invitee, await t.createMovie('The tenth', 902100));
-    assert.equal(tenth.activated, true);
+    const fifth = await rankOne(invitee, await t.createMovie('The fifth', 902100));
+    assert.equal(fifth.activated, true);
 
-    const eleventh = await rankOne(invitee, await t.createMovie('The eleventh', 902101));
-    assert.equal(eleventh.activated, false);
+    const sixth = await rankOne(invitee, await t.createMovie('The sixth', 902101));
+    assert.equal(sixth.activated, false);
   });
 
   it('reports false for an account that was never invited', async () => {
     // Most rankings. The read is on the primary key, so this costs one index probe.
     const nobody = await newUser('uninvited');
-    await rankTitles(nobody, 9, 3000);
+    await rankTitles(nobody, 4, 3000);
 
-    const tenth = await rankOne(nobody, await t.createMovie('Tenth for nobody', 903100));
-    assert.equal(tenth.activated, false);
+    const fifth = await rankOne(nobody, await t.createMovie('Fifth for nobody', 903100));
+    assert.equal(fifth.activated, false);
     assert.equal(await attribution(nobody), null);
   });
 
-  it('activates late for somebody who was already past ten when they redeemed', async () => {
+  it('activates late for somebody who was already past the bar when they redeemed', async () => {
     /**
      * The reason the count is `>=` and not `=`. Redeeming after ranking is ordinary —
      * an existing user is sent a link by a friend — and an `=` would mean their next
-     * ranking is the eleventh, and activation never happens at all.
+     * ranking is the eighth, and activation never happens at all.
      */
     const inviter = await newUser('late_inviter');
     const invitee = await newUser('late_invitee');
-    await rankTitles(invitee, 12, 4000);
+    await rankTitles(invitee, 7, 4000);
 
     // Minted first: `mintLink` acts as the owner, so taking the token inline after
     // `actAs` would run the redemption as the inviter and be answered `self`.
@@ -777,7 +802,7 @@ describe('activation', () => {
     await redeem(token);
     assert.equal((await attribution(invitee)).activated_at, null, 'redemption is not activation');
 
-    await rankTitles(invitee, 1, 4012);
+    await rankTitles(invitee, 1, 4007);
     assert.ok((await attribution(invitee)).activated_at);
     assert.equal((await inbox(inviter)).length, 1);
   });
@@ -798,7 +823,7 @@ describe('activation', () => {
 
     await t.sql(`delete from profiles where id = $1`, [inviter]);
 
-    await rankTitles(invitee, 10, 5000);
+    await rankTitles(invitee, 5, 5000);
     const row = await attribution(invitee);
     assert.ok(row.activated_at, 'the activation is a fact about the invitee');
     assert.equal(row.inviter_id, null);
@@ -819,7 +844,7 @@ describe('activation', () => {
     await t.actAs(inviter);
     await call(`block(gen_random_uuid(), $1)`, [invitee]);
 
-    await rankTitles(invitee, 10, 6000);
+    await rankTitles(invitee, 5, 6000);
     assert.ok((await attribution(invitee)).activated_at);
     assert.equal((await inbox(inviter)).length, 0);
   });
@@ -838,7 +863,7 @@ describe('activation', () => {
     await t.actAs(inviter);
     await t.sql(`select set_notification_preference('invites', false)`);
 
-    await rankTitles(invitee, 10, 7000);
+    await rankTitles(invitee, 5, 7000);
     assert.ok((await attribution(invitee)).activated_at);
     assert.equal((await inbox(inviter)).length, 0);
   });
@@ -996,7 +1021,9 @@ describe('the Invite Instigator query', () => {
      *
      * Three invitees, one activated. Redeemed-but-not-activated must not count, or the
      * award becomes farmable with throwaway accounts — which is the whole reason
-     * `20260813001300` put the column there.
+     * `20260813001300` put the column there. `has_redeemed` sits at **four**, one short
+     * of the bar `20260916000100` set, so this stays the boundary case it was written
+     * to be rather than drifting into "obviously below".
      */
     const inviter = await newUser('counted');
     const token = await mintLink(inviter);
@@ -1009,9 +1036,9 @@ describe('the Invite Instigator query', () => {
       await t.actAs(user);
       await redeem(token);
     }
-    await rankTitles(activated, 10, 8000);
+    await rankTitles(activated, 5, 8000);
     await rankTitles(redeemed, 4, 8100);
-    await rankTitles(stranger, 10, 8200);
+    await rankTitles(stranger, 5, 8200);
 
     const { rows } = await t.sql(
       `select count(*)::int as n from invite_attributions

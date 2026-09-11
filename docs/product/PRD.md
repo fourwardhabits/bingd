@@ -2537,7 +2537,7 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 
 The canonical contract: **an award milestone newly earned produces exactly one social feed event, exactly one personal congratulations notification, and a push when the account is eligible for one.** Everything below is the mechanism and the two deliberate exceptions.
 
-**The ledger.** `award_unlocks` — primary key `(user_id, award, tier)` — is the durable record of "this account newly earned this tier", written by `_maybe_award_unlocks` from row-level `AFTER` triggers on the eight source tables (`user_media`, `rankings`, `watchlist`, `comments`, `title_recommendations`, `reactions`, `follows`, `invite_attributions`). The trigger fires on the qualifying *action*, whoever performed it: a reaction moves the event **actor's** Heart Magnet, a follow approval moves **both** parties' Mutual Mania, and an invitee's tenth ranking moves the **inviter's** Invite Instigator. Exactly-once is insert-wins on the primary key; replays never reach the triggers at all (the operation ledger answers them first); partial unique indexes on `feed_events` and `notifications` stand behind it as backstops. Proven by 22 PGlite tests, 3 real-Postgres races, and a mutation check.
+**The ledger.** `award_unlocks` — primary key `(user_id, award, tier)` — is the durable record of "this account newly earned this tier", written by `_maybe_award_unlocks` from row-level `AFTER` triggers on the eight source tables (`user_media`, `rankings`, `watchlist`, `comments`, `title_recommendations`, `reactions`, `follows`, `invite_attributions`). The trigger fires on the qualifying *action*, whoever performed it: a reaction moves the event **actor's** Heart Magnet, a follow approval moves **both** parties' Mutual Mania, and an invitee finishing their first five moves the **inviter's** Invite Instigator (five since 2026-09-11; §28's product-activation metric is a different number and still ten). Exactly-once is insert-wins on the primary key; replays never reach the triggers at all (the operation ledger answers them first); partial unique indexes on `feed_events` and `notifications` stand behind it as backstops. Proven by 22 PGlite tests, 3 real-Postgres races, and a mutation check.
 
 **Announcement is for post-rollout crossings only.** The migration backfilled every existing account's already-earned tiers quietly (`announced = false`) — nobody's inbox filled with history the morning after. From then on, the **highest** newly crossed tier per award per action gets one feed event (`type = 'award_earned'`, actor = the earner, `media_item_id` null, payload `{award, tier, award_name, tier_label}` and nothing else) and one congratulations notification (recipient = the earner, actorless, same payload). Tiers skipped past in one leap are recorded quietly.
 
@@ -3605,6 +3605,19 @@ However — **Required** — record `invited_by` and `founding_member` on every 
 Any future reward must count **activated** invitees only, so it cannot be farmed with throwaway accounts.
 
 > **Corrected 2026-08-19.** This clause read "recipient ranked at least one title", which contradicts §28's canonical definition — **activation is ten ranked titles** — and would have handed the future resolver two incompatible contracts to write `invite_attributions.activated_at` against. §28 wins, here and everywhere: one ranked title is a tap, and the whole point of gating a reward on activation is that it is not farmable.
+>
+> **Amended 2026-09-11 — invite activation is five, and it is no longer §28's number.** Founder decision, shipped as `20260916000100`. The correction above was right about the thing it was protecting — a tap must not count — and wrong only in assuming the two questions would stay the same question. They have not: onboarding did not exist in August, and it now ends at **Your First Five**, a pick-and-rank loop five times, after which the account has a list, a score and somebody to follow. Ten therefore sat five titles *past* the point the app itself stops asking, and an invitee who did exactly what they were told finished onboarding while their inviter was told nothing. Production on 2026-09-10 held three attributions and **zero** activations, against invitees with five, zero and five rankings.
+>
+> So the two definitions now part company deliberately, and each keeps its own job:
+>
+> | | question | number |
+> |---|---|---|
+> | **§28 activation** | did this new account get going? | ten ranked titles, 24-hour bound for the rate metric |
+> | **Invite activation** (this section) | does this attribution count? | **five** ranked titles — completed onboarding |
+>
+> **The farm-resistance argument is untouched**, because it was never carried by the ranking count. It is carried by Invite Instigator's tiers — 3, 15 and 50 **separate invitees**, each a distinct account with a distinct attribution row, and `invite_attributions` is keyed by `invitee_id` so nobody is counted twice. Five taps instead of ten does not make three fake *people* cheaper in any way that matters. And a redemption alone still never counts: `activated_at` remains a separate column from `accepted_at`, written only by `_maybe_activate_invite`.
+>
+> The number lives in exactly two places and they are changed together: the `app_config` row `invite.activation_rankings`, and the `coalesce` fallback inside `_maybe_activate_invite` — so an environment that lost the row cannot silently keep the old contract.
 
 ### Privacy and abuse — Required
 
@@ -3631,7 +3644,7 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 >
 > - **`record_invite_open(token, platform)`** — anonymous, and **returns void in every case**, so an unknown, revoked or cross-environment token is indistinguishable from a live one. It is not a token oracle. Capped per token per hour, because an anonymous caller has no identity to rate-limit. Writes to `invite_link_opens`, which no client may read.
 > - **`redeem_invite(operation_id, token)`** — authenticated, after profile creation. Writes `invite_attributions (invitee_id, inviter_id, token_id, accepted_at)` and `profiles.invited_by`. Unknown, revoked and cross-environment are **one refusal**. Self-invitation, blocks in either direction, and a suspended or deleted inviter are all refused. The primary key on `invitee_id` is what makes it idempotent: **no replay, no second token and no second device can move an attribution once written.**
-> - **Activation** — `_maybe_activate_invite`, called from `_rank_finalize`, the single place a `rankings` row is created. The criterion is §28's: **ten ranked titles**, across both categories. The transition is once, from the row lock on a guarded `UPDATE ... WHERE activated_at IS NULL` rather than from any ordering assumption.
+> - **Activation** — `_maybe_activate_invite`, called from `_rank_finalize`, the single place a `rankings` row is created. The criterion is **five ranked titles**, across both categories — ~~§28's ten~~, until `20260916000100` moved it to completed onboarding (see the 2026-09-11 amendment above). The transition is once, from the row lock on a guarded `UPDATE ... WHERE activated_at IS NULL` rather than from any ordering assumption.
 > - **The `invite_activated` notification** now has its writer. One row, to the inviter, at the activation transition — not from a client observing a column. Respects the `invites` preference category, and is not written across a block or to an account that has gone.
 > - **`invite_redeemed` and `invite_activated` analytics**, both emitted from a server outcome. `acquisition_source: 'invite'` has its first honest writer.
 > - **The web router at `bingd.app`** — `/i/*`, `/u/*`, `/title/*`, `/lists/*`, plus the two `.well-known` files. Static, no server, no third-party SDK. Platform routing offers iPhone or Android their own destination and offers a desktop browser both, never guessing.
@@ -3660,8 +3673,9 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > row — "Ada Lovelace started following you" — with nothing in it saying this person came
 > through their invitation. The sentence that *does* say so, "joined bingd. from your
 > invite", belonged to `invite_activated`, which `_maybe_activate_invite` files only once
-> the invitee has ranked ten titles. So the interesting fact arrived days late or never,
-> and the moment it actually happened was reported as something duller.
+> the invitee has ranked ten titles — ten when this was written, five since 2026-09-11. So
+> the interesting fact arrived days late or never, and the moment it actually happened was
+> reported as something duller.
 >
 > That is the redemption/activation confusion as a defect rather than a naming problem,
 > and the fix keeps both events rather than merging them:
@@ -3669,7 +3683,7 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > | | when | who is told | row |
 > |---|---|---|---|
 > | **Acceptance** | the tap on `app/i/[token].tsx` | invitee **and** inviter | `invite_welcome` + `invite_joined` |
-> | **Activation** | the invitee's tenth ranking (§28) | inviter | `invite_activated` |
+> | **Activation** | the invitee's **fifth** ranking — their tenth until 2026-09-11 | inviter | `invite_activated` |
 >
 > **`invite_joined` replaces the generic follower row rather than joining it.** Two rows
 > naming the same person for the same act is the redundancy §15 exists to prevent, and the
@@ -4871,6 +4885,10 @@ Alpha targets are **Provisional** and exist to detect direction, not to be hit p
 
 v0.5 used two near-definitions interchangeably; this is the canonical one. See INF-5.
 
+> **Amended 2026-09-11 — this number no longer decides whether an invitation counts.** The definition above is unchanged and still governs the activation *metric*: ten ranked titles, 24-hour bound for the rate. What moved is **invite activation** — `invite_attributions.activated_at`, written by `_maybe_activate_invite` — which is now **five** ranked titles (`app_config['invite.activation_rankings']`, migration `20260916000100`, founder decision). §17 carries the full reasoning; in one line, onboarding now ends at *Your First Five* and ten sat five titles past the point the app stops asking, so an invitee who completed onboarding was never counted as having arrived.
+>
+> The two are deliberately separate questions — *did this account get going* against *does this attribution count* — and INF-5's warning about near-definitions is answered by naming each rather than by forcing one number to serve both. **A future pass that moves either must state which it is moving.**
+
 | Area | Metric |
 |---|---|
 | Activation | % of new users who rank ≥10 titles within 24 hours; onboarding completion by path (starter set / search / import) |
@@ -4902,7 +4920,7 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 > | Notifications, Recommendations quality, Offline, Metadata, Monetization intent | **not measured** |
 > | Retention at day 7 / day 30, cohorts | **not built** — [`deferred-roadmap.md`](./deferred-roadmap.md) §9 |
 >
-> **Activation stays defined as ten ranked titles.** Nothing about the thin instrumentation changes the definition; `ranking_completed` is what will count toward it.
+> **Activation stays defined as ten ranked titles.** Nothing about the thin instrumentation changes the definition; `ranking_completed` is what will count toward it. (Still true of *this* metric as of 2026-09-11. **Invite** activation is five — see the amendment at the top of this section.)
 >
 > Two rules from that document are product decisions rather than implementation details, and belong here:
 >

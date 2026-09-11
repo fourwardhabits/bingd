@@ -120,7 +120,7 @@ export const SECTIONS: readonly NotificationSection[] = [
         // this switch governs real traffic — the flag was left behind by the migration
         // that made it work, and the screen was telling readers a working feature was
         // not built yet.
-        description: 'Somebody you invited joins bingd. and ranks their first ten titles.',
+        description: 'Somebody you invited joins bingd. And again when they finish their first five.',
       },
     ],
   },

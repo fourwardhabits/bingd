@@ -171,3 +171,57 @@ test('Top Rated starts at five ratings, and is not the display threshold', async
     await t.close();
   }
 });
+
+/**
+ * The invitation bar, and the reason it is in this file rather than only in
+ * `invite.test.mjs`.
+ *
+ * `_maybe_activate_invite` reads `invite.activation_rankings` with a written fallback,
+ * which is the exact shape this file exists to police. `20260916000100` moved the bar
+ * from ten to five — the completed *Your First Five*, which is where onboarding stops
+ * asking — and it moved it in **both** homes: the configured row, and the literal in
+ * the function. Changing only the row leaves a function whose source says one thing and
+ * whose behaviour says another, and a database that lost the row would then silently
+ * revert to the old contract.
+ *
+ * So the row is deleted and the boundary is exercised against the fallback alone.
+ */
+test('an invitation still activates at five when the bar is not configured', async () => {
+  const t = await createTestDb();
+  try {
+    await t.sql(`delete from app_config where key = 'invite.activation_rankings'`);
+
+    const inviter = await t.createUser({ username: 'fallback_inviter' });
+    const invitee = await t.createUser({ username: 'fallback_invitee' });
+
+    await t.actAs(inviter);
+    const minted = (await t.sql(`select create_invite_link(gen_random_uuid()) as r`)).rows[0].r;
+    assert.equal(minted.status, 'ok');
+
+    await t.actAs(invitee);
+    const redeemed = (
+      await t.sql(`select redeem_invite(gen_random_uuid(), $1) as r`, [minted.token])
+    ).rows[0].r;
+    assert.equal(redeemed.status, 'ok');
+
+    const activatedAt = async () =>
+      (
+        await t.sql(`select activated_at from invite_attributions where invitee_id = $1`, [invitee])
+      ).rows[0].activated_at;
+
+    let seq = 94000;
+    for (let i = 0; i < 4; i += 1) {
+      const film = await t.createMovie(`fallback_${i}`, seq++);
+      await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    }
+    // Previously: with the row gone the coalesce still said ten, so four was four short
+    // rather than one — and an environment missing this key activated nobody at five.
+    assert.equal(await activatedAt(), null, 'four is not activation');
+
+    const fifth = await t.createMovie('fallback_fifth', seq++);
+    await t.rankToCompletion(fifth, 'loved', async (pivot) => pivot);
+    assert.ok(await activatedAt(), 'the documented default of five should apply');
+  } finally {
+    await t.close();
+  }
+});

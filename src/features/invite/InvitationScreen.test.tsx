@@ -132,6 +132,39 @@ describe('accepting an invitation', () => {
     await waitFor(() => expect(view.getByText(/asked to follow @ada/)).toBeTruthy());
   });
 
+  /**
+   * **The one sentence stating the activation bar to the person who has to clear it, and
+   * it was unpinned by anything.**
+   *
+   * It read "Rank ten titles and they will hear about it" until 2026-09-11, so the copy
+   * and the SQL were free to disagree in silence, and did.
+   *
+   * **It carries no number now, and that is the finding rather than a preference.** An
+   * independent review asked who actually reaches this text, and the answer is: only an
+   * account that is already past onboarding. A signed-out invitee is sent to sign-in and
+   * their token is redeemed silently by `useRedeemPendingInvite`, whose outcome "is not
+   * rendered anywhere"; a signed-in account mid-flow is redirected to its stage by
+   * `nextRoute`. So the reader here has finished First Five — or skipped the taste step
+   * and has none — and "rank your first five" would name an event already in their past,
+   * an instruction they cannot perform. `_maybe_activate_invite` counts `>=`, so what is
+   * true for both of them is the same sentence: keep ranking, and the next one does it.
+   *
+   * Pinned both ways, because the sentence is rewritable and the contract is not.
+   */
+  it('tells the invitee the bar their inviter is actually waiting on', async () => {
+    mockRpcResult = { status: 'ok', inviter_username: 'ada', follow_state: 'approved' };
+
+    const view = await renderWithProviders(<InvitationScreen />);
+    await fireEvent.press(view.getByText('Accept invitation'));
+
+    await waitFor(() =>
+      expect(view.getByText(/Keep ranking and they will hear about it\./)).toBeTruthy(),
+    );
+    // The retired contract, which must not come back under any wording.
+    expect(view.queryByText(/ten titles/i)).toBeNull();
+    expect(view.queryByText(/first ten/i)).toBeNull();
+  });
+
   it('refuses a malformed token without calling the server', async () => {
     mockToken = 'not-a-token';
 

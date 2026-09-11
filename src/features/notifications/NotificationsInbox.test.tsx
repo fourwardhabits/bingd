@@ -383,7 +383,7 @@ describe('the welcome an invitation writes back', () => {
  *
  * It replaced a plain `follow` row — "Ada started following you" — which said nothing
  * about where this person came from. The sentence that did say so belonged to
- * `invite_activated`, which does not fire until the invitee's tenth ranking, so the
+ * `invite_activated`, which does not fire until the invitee has finished their first five, so the
  * inviter learnt the interesting fact days late or never.
  *
  * Where the row *leads* is asserted in `routing.test.ts`, which owns the destination

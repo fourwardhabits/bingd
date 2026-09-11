@@ -241,7 +241,7 @@ function acceptedBody(
       : followState === 'approved'
         ? ` You are now following ${who}.`
         : '';
-  return `You joined on ${who}'s invitation.${follow} Rank ten titles and they will hear about it.`;
+  return `You joined on ${who}'s invitation.${follow} Keep ranking and they will hear about it.`;
 }
 
 function Outcome({

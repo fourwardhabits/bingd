@@ -250,7 +250,7 @@ end; $$;`;
 
 /**
  * Mutant 3. The guard is what makes the transition happen once; without it every ranking
- * past the tenth re-activates.
+ * past the bar re-activates.
  */
 const REPEATABLE_ACTIVATION = `
 create or replace function _maybe_activate_invite(p_user uuid)
@@ -260,7 +260,7 @@ begin
   select ia.inviter_id into v_inviter from invite_attributions ia
    where ia.invitee_id = p_user and ia.accepted_at is not null;
   if not found then return false; end if;
-  select coalesce((select (value)::integer from app_config where key = 'invite.activation_rankings'), 10) into v_needed;
+  select coalesce((select (value)::integer from app_config where key = 'invite.activation_rankings'), 5) into v_needed;
   if (select count(*) from rankings r where r.user_id = p_user) < v_needed then return false; end if;
   update invite_attributions set activated_at = now() where invitee_id = p_user;
   if not found then return false; end if;

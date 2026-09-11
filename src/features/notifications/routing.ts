@@ -217,14 +217,14 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
     case 'recommendation':
       return [...title, ...profile, unavailable('That recommendation is no longer available.')];
 
-    /** The person who joined, filed by `_maybe_activate_invite` at their tenth ranking. */
+    /** The person who joined, filed by `_maybe_activate_invite` once they finish their first five. */
     case 'invite_activated':
       return [...profile, unavailable('That account is no longer available.')];
 
     /**
      * The same person, at the earlier of the two moments: `redeem_invite` files this
      * the instant the invitation is accepted (`20260831000100`), where
-     * `invite_activated` waits for their tenth ranking.
+     * `invite_activated` waits for their first five.
      *
      * Same destination, and that is not an oversight — both rows are about the account
      * that joined, and the useful thing to do with either is look at them. The row's

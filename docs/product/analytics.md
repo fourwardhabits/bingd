@@ -418,12 +418,21 @@ wrote nothing. It carries **no properties at all** — the inviter is another pe
 who is attributed to whom is a join on `invite_attributions` rather than a property on a
 vendor's timeline.
 
-**`invite_activated`** is ten ranked titles by an attributed invitee (§28), and it is
+**`invite_activated`** is **five** ranked titles by an attributed invitee, and it is
 **owned by the invitee** because they are the one who ranked. The server decides, not the
 client: `_maybe_activate_invite` flips `activated_at` under a row lock and reports whether
-*this* transaction was the one that flipped it, so two devices finishing the tenth ranking
+*this* transaction was the one that flipped it, so two devices finishing the fifth ranking
 together produce one event and a retry produces none. An app that counted rankings locally
 would emit this for accounts with no attribution and again after every reinstall.
+
+> **It was ten until 2026-09-11** (`20260916000100`), taken from PRD §28's definition of
+> product activation. Onboarding now ends at *Your First Five*, so ten sat five titles past
+> the point the app stops asking and an invitee who completed onboarding was never counted.
+> The two definitions have deliberately parted company: §28 still measures every new account
+> against ten ranked titles within 24 hours, and **this event** measures whether an
+> attribution counts, at completed onboarding. Nothing else about the event moved — same
+> owner, same server-decided transition, same once-per-account structural uniqueness — so no
+> historical `invite_activated` row means something different than it did.
 
 > **What the invite funnel systematically under-counts, and it is not small.** A token does
 > not survive a trip through the App Store, TestFlight or Play. Universal Links and App
