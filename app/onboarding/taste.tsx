@@ -445,6 +445,34 @@ export default function TasteOnboardingScreen() {
                 : 'Each one gets compared against the ones before it.'}
             </Text>
             <Progress placed={placed} />
+            {/* ---------------------------------------------------------------
+                **The import exists, said once, in words, going nowhere.**
+
+                Contract V3 §9 makes importing a Letterboxd history optional and available
+                at any time, and the founder's instruction was to make it discoverable
+                without making it a step — with a minimal treatment if placing it in
+                onboarding looked risky. It does: this flow ends in `Stack.Protected`
+                behind a stage machine that has stranded people twice (#131, #133), and a
+                route push from the middle of it would leave an account half-way through
+                first-run on a screen with no way back into it. A modal would be worse
+                still: two presented view controllers is the 2026-09-10 freeze.
+
+                So this is a sentence. It appears on the first title and not on the other
+                four, because it answers a thought somebody has exactly once — *I have
+                already done all of this somewhere else* — and a line that repeats for
+                five screens becomes an instruction rather than a note. It names where to
+                find the importer and does not offer to go there, so the skip path is
+                simply carrying on, which is what the person is already doing.
+
+                The real entry point is Settings ▸ Import from Letterboxd, which is
+                reachable the moment this flow is over and forever afterwards.
+                --------------------------------------------------------------- */}
+            {placed === 0 ? (
+              <Text variant="footnote" tone="tertiary">
+                Coming from Letterboxd? You can bring your whole history across later, from
+                Settings.
+              </Text>
+            ) : null}
           </View>
 
           <View style={styles.field}>

@@ -231,12 +231,57 @@ versus a zero, which is what says whether the mechanic is working before any rem
 push exists. §10b carries the measurement plan it belongs to. Deliberately no
 `streak_reminder_*` events — those describe a push that does not exist.
 
+### Letterboxd import — added 2026-09-11
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `import_opened` | the importer screen mounted, once per mount | the importer | `surface` |
+| `import_instructions_opened` | the "how to export" sheet's link to Letterboxd was tapped | the importer | `surface` |
+| `import_archive_selected` | a picked file was read, or refused, or the picker was dismissed | the importer | `outcome` |
+| `import_started` | the preview was accepted and the first page was sent | the importer | `films`, `viewings` |
+| `import_completed` | the job reached `done` **while somebody was watching** | the importer | `applied`, `unresolved` |
+
+A funnel with somebody else's app in the middle of it. The step between
+`import_instructions_opened` and `import_archive_selected` happens entirely on
+letterboxd.com and in a mail client, so those two events are the only measurement of
+whether the hand-off works at all.
+
+`surface` is `settings` or `onboarding`. The import is optional (Contract V3 §9) and
+onboarding only mentions it in a sentence, so the split is what says whether that
+sentence earns its place — without it, a discoverability problem and a completion
+problem look the same.
+
+`import_archive_selected` is the one to watch. Its failure outcomes — `not_a_zip`,
+`not_letterboxd`, `damaged`, `empty` — are the difference between "people drop off
+here" and "people drop off here *because they unzipped the file first*", which is a
+copy fix rather than a product one.
+
 ---
 
 ## 3. What each event does **not** mean
 
 This section is the point of the document. Every line here is a number somebody could
 otherwise report in good faith and be wrong about.
+
+**`import_completed` is a deliberate undercount and must never be divided by
+`import_started` and called a success rate.** Once the client calls `import_ready` the
+work happens on a `pg_cron` tick with no app attached, and the screen explicitly tells
+people they may close the app and come back. Every import that finishes after they take
+that advice completes perfectly and emits nothing. The gap between the two events is
+therefore *mostly people following the instructions*, not failures. The real completion
+rate lives in `import_jobs.status` on the server; this event answers a narrower question —
+how many people sat and watched — and that is all it may be used for.
+
+**`import_started` is the denominator worth having.** It fires after the preview was
+accepted, so it counts decisions rather than intentions, and `films` on it is the first
+real distribution of how large an import actually is — every bound in the pipeline was
+sized against a 22-film export and three generated libraries, so this is what says whether
+those guesses were right.
+
+**`import_archive_selected` with `outcome: 'cancelled'` is not a failure.** Somebody
+opened the picker and changed their mind, or went to find the file. It is counted so that
+the refusal outcomes beside it can be read as refusals rather than as everything that was
+not a success.
 
 **`sign_in_redirect_rejected`** counts a failure that is otherwise invisible, which is the
 only reason it exists. GoTrue answers a `redirect_to` it cannot use by substituting

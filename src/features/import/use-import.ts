@@ -36,7 +36,6 @@
 
 import { File } from 'expo-file-system';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { InteractionManager } from 'react-native';
 
 import { track, type ImportSelectOutcome, type ImportSurface } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
@@ -97,17 +96,20 @@ export type ImportPhase =
 const POLL_MS = 2_000;
 
 /**
- * Stops a long read from dropping frames.
+ * Stops a long read from dropping the frame that says it started.
  *
  * `unzipSync` and the CSV parse are synchronous and, on a ten-thousand-film export, take
- * long enough to notice. Handing the frame back first means the spinner has actually
- * painted before the thread is taken — otherwise the screen freezes on the *previous* state
- * and the person sees nothing happen at all.
+ * long enough to notice. Yielding the thread first lets React commit and draw the spinner;
+ * without it the screen stays on the *previous* state for the whole read and the person
+ * sees nothing happen at all — which reads as a dead button, so they press it again.
+ *
+ * A macrotask rather than `InteractionManager.runAfterInteractions`, which React Native has
+ * deprecated in favour of exactly this advice. One turn of the event loop is all that is
+ * wanted here: the commit has already been scheduled by the `setState` above, and the
+ * spinner itself animates on the native thread once drawn, so it keeps moving even while
+ * JavaScript is busy.
  */
-const yieldFrame = () =>
-  new Promise<void>((resolve) => {
-    InteractionManager.runAfterInteractions(() => resolve());
-  });
+const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const failureOutcome = (reason: ReadFailure['reason']): ImportSelectOutcome => reason;
 
@@ -299,8 +301,9 @@ export function useImport(surface: ImportSurface) {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-    // `state.phase` alone: re-running on every polled `status` would stack timers.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `state.phase` and nothing else — the effect reads only that and `jobRef`, so this is
+    // exhaustive as well as deliberate. Depending on the polled `status` would tear down and
+    // rebuild the loop on every tick, stacking a fresh timer each time.
   }, [state.phase, settle]);
 
   const openedRef = useRef(false);
