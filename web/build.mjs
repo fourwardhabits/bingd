@@ -2425,7 +2425,8 @@ ${installRow({ primary: true })}
                 <span>
                   <b>Compare it.</b>
                   <span class="d">A handful of head-to-head choices against things you
-                  have already ranked. Too close to call is an answer.</span>
+                  have already ranked. Too tough is an answer, for the ones you cannot
+                  call and the ones you cannot remember.</span>
                 </span>
               </li>
               <li>

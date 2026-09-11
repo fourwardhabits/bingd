@@ -1896,6 +1896,73 @@ describe('the release mode', () => {
   });
 
   /**
+   * The product's words, not a paraphrase of them.
+   *
+   * ---------------------------------------------------------------------------
+   * THE ONE THIS WAS WRITTEN FOR
+   * ---------------------------------------------------------------------------
+   *
+   * The page said *"Too close to call is an answer"* about the control under a
+   * comparison. The control is called **Too tough**, and it is called that on purpose:
+   * the label moved twice, and the reason it is not "too tough to call" is written out
+   * at `RankingSheet.tsx`'s own comment. Skipping a comparison covers two cases, and
+   * only one of them is the two films being close. The other is a familiar poster and
+   * an unreliable memory, and "too close to call" is the wrong sentence for *I do not
+   * remember this one well enough to say*.
+   *
+   * So a landing page that paraphrased it did not merely use different words. It
+   * narrowed a control back to the half the founder had already decided was too narrow,
+   * on the one surface a stranger reads first.
+   *
+   * ---------------------------------------------------------------------------
+   * WHAT THIS CHECKS, AND WHAT IT DELIBERATELY DOES NOT
+   * ---------------------------------------------------------------------------
+   *
+   * It checks that the front page's **quoted control labels** still exist in the client,
+   * by reading the client. It does not check the prose around them, because prose is
+   * what a landing page is for and pinning it would make every copy edit a test edit.
+   *
+   * The line it draws: if the page puts words in the product's mouth, those words have
+   * to be in the product. Everything else is the writer's.
+   */
+  it('quotes the product rather than paraphrasing it', () => {
+    const front = read('index.html');
+
+    /** `src/` is up two from `web/dist`. */
+    const client = (file) => readFileSync(join(here, '..', 'src', file), 'utf8');
+
+    const quoted = [
+      // The three buckets, which are the first thing the page describes.
+      ['I liked it', 'features/collection/score.ts'],
+      ['It was fine', 'features/collection/score.ts'],
+      // The comparison question, which is the product in one sentence.
+      ['Which did you like more', 'features/ranking/RankingSheet.tsx'],
+      // And the control that cost this test its existence.
+      ['Too tough', 'features/ranking/RankingSheet.tsx'],
+    ];
+
+    for (const [phrase, file] of quoted) {
+      if (!new RegExp(phrase, 'i').test(front)) continue;
+      assert.match(
+        client(file),
+        new RegExp(phrase, 'i'),
+        `the front page quotes "${phrase}", which src/${file} does not say`,
+      );
+    }
+
+    // The label is the whole point, so it is asserted in both directions: the page has
+    // to be using the real one rather than having quietly dropped the sentence.
+    assert.match(
+      front,
+      /Too tough/,
+      'the front page stopped naming the comparison control. If that is deliberate, ' +
+        'delete this assertion in the same commit; if it became "too close to call" ' +
+        'again, that is the paraphrase this test exists for.',
+    );
+    assert.doesNotMatch(front, /too close to call/i);
+  });
+
+  /**
    * The page makes no claim there is no evidence for.
    *
    * A landing page is where fabricated proof gets added, because it is the one surface
