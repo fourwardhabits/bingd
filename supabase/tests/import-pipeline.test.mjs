@@ -619,7 +619,28 @@ describe('the worker', () => {
     assert.equal(rows[0].r.jobs, 0, 'a live lease means another worker has it');
   });
 
-  it('dead-letters a job that keeps failing', async () => {
+  it('dead-letters a job that keeps failing with work still outstanding', async () => {
+    await t.actAs(jack);
+    const { rows: created } = await t.sql(`select import_create() as id`);
+    const jobId = created[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged('Never Matched', { correlation: 'never matched|2001' })])]);
+    await t.sql(`select import_ready($1) as r`, [jobId]);
+    await t.actAs(null);
+
+    // Still `pending`: there is real work left, so failing is the honest ending.
+    await t.sql(`update import_jobs set failures = 3 where id = $1`, [jobId]);
+    await t.sql(`select _drain_import_jobs() as r`);
+
+    const { rows } = await t.sql(`select status, completed_at from import_jobs where id = $1`, [jobId]);
+    assert.equal(rows[0].status, 'failed');
+    assert.ok(rows[0].completed_at, 'a dead job must not hold the one-live-job slot for ever');
+  });
+
+  it('settles rather than fails an exhausted job with nothing left to do', async () => {
+    // The counters can be exhausted by a job whose rows have all landed — a long provider
+    // wait, most obviously. Failing it would throw away counts the reader is owed and
+    // leave a half-written collection with no explanation.
     await t.actAs(jack);
     const { rows: created } = await t.sql(`select import_create() as id`);
     const jobId = created[0].id;
@@ -629,9 +650,9 @@ describe('the worker', () => {
     await t.sql(`update import_jobs set failures = 3 where id = $1`, [jobId]);
     await t.sql(`select _drain_import_jobs() as r`);
 
-    const { rows } = await t.sql(`select status, completed_at from import_jobs where id = $1`, [jobId]);
-    assert.equal(rows[0].status, 'failed');
-    assert.ok(rows[0].completed_at, 'a dead job must not hold the one-live-job slot for ever');
+    const { rows } = await t.sql(`select status, counts from import_jobs where id = $1`, [jobId]);
+    assert.equal(rows[0].status, 'done');
+    assert.equal(rows[0].counts.applied, 0);
   });
 
   it('lets the account start again after a job dies', async () => {
@@ -868,6 +889,47 @@ describe('staging refuses what apply would choke on', () => {
     assert.equal(raw.watches, undefined);
   });
 
+  it('never raises on a correlation long enough to overflow the index', async () => {
+    // `correlation` is the third column of a unique btree, and a btree tuple cannot exceed
+    // 2704 bytes. One unquoted comma in one CSV line puts most of a row into the Name
+    // column and produces a multi-kilobyte key — which used to raise 54000 and reject the
+    // whole page, the same failure as an unreadable date by another road.
+    const huge = 'x'.repeat(6000) + '|2001';
+    const raw = await stageOne({ ...staged('Huge Key'), correlation: huge });
+    assert.equal(raw, null, 'the truncated key is not the one we looked up');
+
+    const { rows } = await t.sql(
+      `select length(correlation) as n from import_rows where job_id = $1 order by n desc limit 1`,
+      [jobId]);
+    assert.ok(rows[0].n <= 200, 'the stored key is bounded');
+  });
+
+  it('refuses a relative date, which would fabricate a watch from the import’s own clock', async () => {
+    // `'today'::date` is a perfectly good cast. It is also the exact thing
+    // `imported_watches.watched_on` exists to never contain — a date the import invented
+    // rather than one the person recorded.
+    for (const relative of ['today', 'yesterday', 'now']) {
+      const raw = await stageOne(
+        staged(`Relative ${relative}`, {
+          correlation: `relative ${relative}|2001`, watchedOn: relative }));
+      assert.ok(raw, `${relative}: the row is still staged`);
+      assert.equal(raw.watchedOn, undefined, `${relative}: must not become a watch date`);
+    }
+  });
+
+  it('refuses a locale-dependent date, which would mean different days on different servers', async () => {
+    // `1/2/2024` is January 2nd under DateStyle MDY and February 1st under DMY. A feature
+    // whose whole value is preserving real watch dates must not reinterpret them by the
+    // locale of whichever session happened to run the RPC.
+    for (const ambiguous of ['1/2/2024', '20240102', '2024-1-2']) {
+      const raw = await stageOne(
+        staged(`Ambiguous ${ambiguous}`, {
+          correlation: `ambiguous ${ambiguous}|2001`, watchedOn: ambiguous }));
+      assert.ok(raw);
+      assert.equal(raw.watchedOn, undefined, `${ambiguous}: only ISO is a date here`);
+    }
+  });
+
   it('survives watches being an object rather than an array', async () => {
     const raw = await stageOne({
       ...staged('Object Watches', { correlation: 'object watches|2001' }),
@@ -907,6 +969,74 @@ describe('the worker cannot be stopped by its surroundings', () => {
 
     const { rows } = await t.sql(`select status from import_jobs where id = $1`, [jobId]);
     assert.equal(rows[0].status, 'done');
+  });
+
+  it('settles a job that only ever waited, rather than failing it', async () => {
+    // A provider that is configured and never answers used to dead-letter the job at about
+    // eight minutes with half the archive written and no counts at all. It should wait for
+    // the grace period and then finish honestly, reporting the rows it could not place.
+    await t.sql(
+      `insert into app_config (key, value) values ('functions.base_url', '"https://example.invalid"'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+    await t.sql(
+      `update app_config set value = '1'::jsonb where key = 'import.provider_grace_minutes'`);
+
+    try {
+      const known = `Waited Known ${seq}`;
+      await t.createMovie(known, seq);
+      seq += 1;
+
+      await t.actAs(quinn);
+      const { rows: created } = await t.sql(`select import_create() as id`);
+      const jobId = created[0].id;
+      await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+        staged(known, { correlation: `${known.toLowerCase()}|2001` }),
+        staged(`Waited Unknown ${seq}`, { correlation: `waited unknown ${seq}|2001` }),
+      ])]);
+      seq += 1;
+      await t.sql(`select import_ready($1) as r`, [jobId]);
+      await t.actAs(null);
+
+      // Two ticks of real work, then age the job past the one-minute grace.
+      await t.sql(`select _drain_import_jobs(5, 500) as r`);
+      await t.sql(`select _drain_import_jobs(5, 500) as r`);
+      await t.sql(
+        `update import_jobs set created_at = created_at - interval '5 minutes' where id = $1`,
+        [jobId]);
+
+      await runJob(jobId);
+
+      const { rows } = await t.sql(`select status, counts from import_jobs where id = $1`, [jobId]);
+      assert.equal(rows[0].status, 'done', 'a wait must end in a summary, not a failure');
+      assert.equal(rows[0].counts.applied, 1);
+      assert.equal(rows[0].counts.unmatched, 1);
+    } finally {
+      await t.sql(`delete from app_config where key = 'functions.base_url'`);
+    }
+  });
+
+  it('does not fall over when pg_net is absent', async () => {
+    // The nudge used to sit outside every handler, so a missing `net` schema rolled back
+    // the whole tick — the row writes, the claim, the counters and the dead letter — every
+    // minute, for ever, with the account locked out of importing by the one-live-job index.
+    // PGlite has no `net` schema at all, which is exactly the configuration in question.
+    await t.sql(
+      `insert into app_config (key, value) values ('functions.base_url', '"https://example.invalid"'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+
+    try {
+      const film = `No Net ${seq}`;
+      await t.createMovie(film, seq);
+      seq += 1;
+
+      const jobId = await importArchive(quinn, [
+        staged(film, { correlation: `${film.toLowerCase()}|2001` })]);
+
+      const { rows } = await t.sql(`select status from import_jobs where id = $1`, [jobId]);
+      assert.equal(rows[0].status, 'done');
+    } finally {
+      await t.sql(`delete from app_config where key = 'functions.base_url'`);
+    }
   });
 
   it('settles a job whose matched title was deleted from the catalogue', async () => {

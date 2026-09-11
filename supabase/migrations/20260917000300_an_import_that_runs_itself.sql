@@ -107,10 +107,23 @@ create index import_jobs_due on import_jobs (created_at)
 -- `2026-02-31` forward to the 3rd of March, and inventing a viewing date nobody recorded
 -- is worse than discarding the one that was unreadable.
 -- ---------------------------------------------------------------------------
+-- **STABLE, not IMMUTABLE, and the difference is not pedantry.** `date_in` is
+-- `provolatile = 's'`: `'today'` resolves against the server clock, and `'1/2/2024'` means
+-- January or February depending on the session's `DateStyle`. Labelling that immutable
+-- invites plan-time constant folding and generic-plan caching, so the same literal could
+-- resolve differently depending on which session planned the statement.
+--
+-- Which is also why every caller keeps an ISO format guard in front of it. This function
+-- makes the cast *total*; the regex is what keeps the boundary ISO-only. Between them,
+-- `2026-02-31` yields null and `today` is never reached — and `today` matters, because the
+-- whole point of `imported_watches.watched_on` is that it is a date the person recorded
+-- rather than one the import invented from its own clock.
 create or replace function _safe_date(p_text text)
 returns date
 language plpgsql
-immutable
+stable
+strict
+set search_path = public
 as $$
 begin
   return p_text::date;
@@ -120,7 +133,7 @@ end;
 $$;
 
 comment on function _safe_date(text) is
-  'A date, or null, for any text — including text that is the right shape and still not a date, like 2026-02-31. Exists because the staging boundary must never raise on a client value: one unreadable date used to reject a whole page of a thousand rows. Immutable: it is a pure function of its argument.';
+  'A date, or null, for text that has already been shape-checked as ISO — including text that is the right shape and still not a date, like 2026-02-31. Exists because the staging boundary must never raise on a client value: one unreadable date used to reject a whole page of a thousand rows. STABLE rather than IMMUTABLE because date_in is stable: it reads DateStyle, and accepts "today". Callers keep the ISO regex in front of it precisely so neither of those is ever reached.';
 
 
 create or replace function import_create()
@@ -222,7 +235,17 @@ begin
   insert into import_rows (job_id, kind, correlation, raw, status)
   select p_job_id,
          r->>'kind',
-         r->>'correlation',
+         -- **Bounded, because this is the third column of a unique btree index.** A btree
+         -- tuple cannot exceed 2704 bytes, and `correlation` is the client's normalised
+         -- `(Name, Year)` key — so one unquoted comma in one CSV line puts most of a row
+         -- into the Name column and produces a multi-kilobyte key that raises 54000 and
+         -- rejects the whole page of up to a thousand rows. `name` and `filmUri` were
+         -- bounded for this reason and this one was missed.
+         --
+         -- Truncation can in principle collide two films onto one correlation, which
+         -- `import_rows_once` then dedupes — the same outcome as a client sending the key
+         -- twice, and a far better one than refusing the import.
+         left(r->>'correlation', 200),
          -- Each value is shape-tested *before* it is cast, in a CASE, so a malformed one
          -- yields null rather than raising. A bad value costs that value; it does not cost
          -- the row, and it certainly does not cost the job.
@@ -242,8 +265,13 @@ begin
                         then (r->>'rating')::numeric end,
            'bucket',    case when r->>'bucket' in ('loved', 'fine', 'not_for_me')
                         then r->>'bucket' end,
-           'watchedOn', case when _safe_date(r->>'watchedOn')
-                                  between date '1870-01-01' and current_date + 1
+           -- The regex is the ISO contract and `_safe_date` is the totality. Dropping the
+           -- regex and relying on the cast alone let `today` and `1/2/2024` through — the
+           -- first fabricating a watch date from the import's own clock, the second meaning
+           -- a different day depending on the session's DateStyle.
+           'watchedOn', case when r->>'watchedOn' ~ '^\d{4}-\d{2}-\d{2}$'
+                             and _safe_date(r->>'watchedOn')
+                                 between date '1870-01-01' and current_date + 1
                         then _safe_date(r->>'watchedOn') end,
            'watches',   (
              select jsonb_agg(jsonb_build_object(
@@ -256,14 +284,16 @@ begin
                            then r->'watches' else '[]'::jsonb end) w
               where jsonb_typeof(w) = 'object'
                 and w->>'diaryUri' is not null
+                and w->>'watchedOn' ~ '^\d{4}-\d{2}-\d{2}$'
                 and _safe_date(w->>'watchedOn')
                     between date '1870-01-01' and current_date + 1
            )
          )),
          'pending'
     from jsonb_array_elements(p_rows) r
-   -- The only three things that make a row unusable rather than merely incomplete.
-   where r->>'correlation' is not null
+   -- The only three things that make a row unusable rather than merely incomplete. The
+   -- `left(...)` matches the SELECT list, so the not-null test and the stored value agree.
+   where left(r->>'correlation', 200) is not null
      and r->>'name' is not null
      and r->>'kind' in ('watched', 'watchlist')
   on conflict (job_id, kind, correlation) do nothing;
@@ -906,10 +936,17 @@ begin
   -- Shape-tested before the cast. An operator typo in one `app_config` row must not raise
   -- here, where the raise is outside every handler and would stop every import for every
   -- account, once a minute, for ever.
-  v_grace := coalesce(
+  -- Shape-tested, then clamped between one minute and a day.
+  --
+  -- The ceiling matters because `v_waiting` resets the attempt counters: a grace longer
+  -- than the 24-hour wall clock would make a job with a silent provider resettable for
+  -- ever and leave nothing but that clock to end it. The floor matters because a grace of
+  -- zero settles the job on the first apply tick with the provider never asked, which is
+  -- the premature settle this gate exists to prevent.
+  v_grace := least(greatest(coalesce(
     (select case when value #>> '{}' ~ '^\d{1,5}$' then (value #>> '{}')::integer end
        from app_config where key = 'import.provider_grace_minutes'),
-    30);
+    30), 1), 1440);
 
   -- ---------------------------------------------------------------------------
   -- Dead letter first. Three counters, and each one bounds a different failure.
@@ -924,6 +961,29 @@ begin
   -- both counters for ever and never finishes and never dies, holding the account's
   -- `import_jobs_one_live` slot the whole time.
   -- ---------------------------------------------------------------------------
+  -- **A job that only ever waited gets its summary, not a failure.** An exhausted job whose
+  -- rows have all landed has nothing left to do but report; failing it would throw away
+  -- counts the reader is owed and leave a half-written collection with no explanation.
+  -- Settle those first; the dead letter below then catches only jobs with real work
+  -- outstanding.
+  for v_job in
+    select j.id from import_jobs j
+     where j.completed_at is null
+       and (j.failures >= 3 or j.attempts >= 6 or j.created_at < now() - interval '24 hours')
+       and not exists (
+         select 1 from import_rows r
+          where r.job_id = j.id
+            and (r.status = 'pending'
+                 or (r.status = 'matched' and r.media_item_id is not null)))
+  loop
+    begin
+      perform _import_settle(v_job.id);
+    exception when others then
+      null;  -- it will be failed below, which is the honest outcome for a job that cannot
+             -- even summarise itself.
+    end;
+  end loop;
+
   update import_jobs
      set status = 'failed', completed_at = now(), claimed_at = null,
          last_error = coalesce(last_error, 'exhausted')
