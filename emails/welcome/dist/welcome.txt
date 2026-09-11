@@ -1,0 +1,58 @@
+{{greeting}}
+
+Thanks for giving bingd. a go. I am Suraj, and at the moment I am the
+entire team, so this is genuinely me typing.
+
+I built it because I could never answer “what should I watch”. I had
+years of films in my head in no particular order, and every app that
+offered to help wanted me to decide whether something was a four or a
+four and a half. I cannot do that. But I can always tell you which of
+two films I liked more, and it turns out that if you answer that enough
+times you end up with a list that is actually yours.
+
+Two honest things. It is early, so you will find rough edges. And bingd.
+gets much better once one person you already talk about films with is on
+it, because the feed, Taste Match and Group Picks all need somebody on
+the other end before they do anything at all.
+
+Group Picks is my favourite thing in here, for what it is worth. You
+choose who is watching tonight and it finds the things you can all agree
+on.
+
+If something is confusing, if you love something, or if the thing you
+went looking for is not there, just hit reply. It comes straight to me
+and I read every one.
+
+— Suraj
+Founder, bingd.
+my profile on bingd.: https://bingd.app/u/saisurajkan
+
+------------------------------------------------------------------------
+
+A FEW THINGS WORTH TRYING
+
+FOLLOW ME
+It gives you one person in your feed straight away, and I would like to
+see what you are watching.
+https://bingd.app/u/saisurajkan
+
+BRING ONE PERSON IN
+One friend you already trade recommendations with is worth more than
+twenty strangers. Your invite link is in the app, under Profile, and it
+never changes.
+Then tap Profile at the bottom, then Invite friends.
+https://bingd.app/u/{{handle}}
+
+RANK WHAT I AM WATCHING
+People keep telling me that having this at number one is a red flag.
+Rank it yourself and tell me I am wrong.
+https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa
+
+------------------------------------------------------------------------
+
+bingd. is made by Suraj Kandukuri.
+[POSTAL ADDRESS - FOUNDER TO SUPPLY]
+You are getting this because you made a bingd. account. It is the only
+email of its kind I will send you.
+
+Unsubscribe: {{unsubscribeUrl}}
