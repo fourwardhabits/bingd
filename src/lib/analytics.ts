@@ -640,7 +640,65 @@ export type AnalyticsEvent =
   | {
       name: 'streak_state_viewed';
       props: { weeks: number; ranked_this_week: boolean; days_left: number };
-    };
+    }
+
+  // --- Letterboxd import ----------------------------------------------------
+  /**
+   * The importer was opened, and from where.
+   *
+   * The denominator for everything below, and the only measurement of whether the
+   * onboarding mention does anything. Contract V3 §9 makes the import **optional and
+   * skippable**, which means the honest question is not "how many finished" but "how many
+   * of the people who found it finished" — and without a first step that has an entry
+   * point on it, a low completion rate and a discoverability problem look identical.
+   */
+  | { name: 'import_opened'; props: { surface: ImportSurface } }
+  /**
+   * The "how to export from Letterboxd" instructions were opened.
+   *
+   * Worth its own name because it sits on the one step of this flow that happens in
+   * **somebody else's app**. Everything between opening these instructions and coming back
+   * with a file is invisible to us, so the ratio of this to `import_archive_selected` is
+   * the only read available on whether the hand-off works.
+   */
+  | { name: 'import_instructions_opened'; props: { surface: ImportSurface } }
+  /**
+   * A file came back from the picker and was read — or could not be.
+   *
+   * **The most important event in this funnel**, because the step it measures is the one
+   * most likely to fail for reasons the person cannot see: they picked a CSV out of a
+   * folder they had already unzipped, or a screenshot, or the wrong archive entirely.
+   * `outcome` is the closed set of refusals `readArchive` can return plus `ok` and
+   * `cancelled`, and it is what turns "people drop off here" into "people drop off here
+   * *because*".
+   *
+   * **No filename, no path, no size.** A filename is somebody's own words and often their
+   * username; the archive is named after their account.
+   */
+  | { name: 'import_archive_selected'; props: { outcome: ImportSelectOutcome } }
+  /**
+   * The preview was accepted and the upload began.
+   *
+   * Counts, never titles. `films` is what would be added to the collection and `viewings`
+   * the diary entries attached to them — two numbers that say how big a real import is,
+   * which is the thing nobody currently knows and which every bound in the pipeline was
+   * guessed against.
+   */
+  | { name: 'import_started'; props: { films: number; viewings: number } }
+  /**
+   * The job reached `done` while somebody was still watching.
+   *
+   * **An undercount of completions, on purpose, and the name does not pretend otherwise.**
+   * The work finishes on a `pg_cron` tick with no client attached, so an import that
+   * completes after the app is closed emits nothing. `import_started` is the reliable
+   * denominator; this is "finished while being watched", and the gap between them is
+   * mostly people who closed the app, which they are explicitly told they may do.
+   *
+   * `unresolved` is the repair surface's own number — the films the catalogue could not
+   * place — because a completion rate that ignores it would call an import that matched
+   * nothing a success.
+   */
+  | { name: 'import_completed'; props: { applied: number; unresolved: number } };
 
 /**
  * Which of the two support rows. Spelled here rather than imported from `lib/support`,
@@ -648,6 +706,35 @@ export type AnalyticsEvent =
  * it — `support.ts` is checked against this by the compiler at the call site.
  */
 export type SupportTopicName = 'feedback' | 'problem';
+
+/**
+ * Where somebody reached the importer from.
+ *
+ * Two words, and the second one is the reason this property exists: Contract V3 §9 makes
+ * the import optional, so the onboarding mention is a *discoverability* treatment rather
+ * than a step, and the only way to tell whether it earns its place is to know which of the
+ * two doors people came through.
+ */
+export type ImportSurface = 'settings' | 'onboarding';
+
+/**
+ * What happened when a picked file was read.
+ *
+ * The refusals `readArchive` can answer with, plus the two outcomes that are not refusals.
+ * A closed set of words and never a filename: an export archive is named after the
+ * account that produced it.
+ */
+export type ImportSelectOutcome =
+  | 'ok'
+  | 'cancelled'
+  | 'not_a_zip'
+  | 'not_letterboxd'
+  | 'damaged'
+  | 'too_large'
+  | 'too_many_entries'
+  | 'entry_too_large'
+  | 'empty'
+  | 'unreadable';
 
 /** Which People list. The server's own two, so the event and the chip are one vocabulary. */
 export type PeopleSuggestionMode = 'mutuals' | 'match';
@@ -708,6 +795,12 @@ export const ANALYTICS_EVENTS = [
   'invite_auto_follow_succeeded',
   // 2026-09-10, the OAuth callback guard.
   'sign_in_redirect_rejected',
+  // 2026-09-11, the Letterboxd import (Contract V3 §9).
+  'import_opened',
+  'import_instructions_opened',
+  'import_archive_selected',
+  'import_started',
+  'import_completed',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -805,6 +898,16 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   // so a key that could hold one would put credentials on the wire. The sanitized
   // scheme/host/path goes to the flight recorder and to Sentry instead.
   'problem',
+  // The Letterboxd import (2026-09-11). Four counts and nothing else: how many films an
+  // archive held, how many viewings were attached to them, how many rows the catalogue
+  // placed, and how many it could not. `surface` and `outcome` are already above and carry
+  // the rest — deliberately never a filename, which is named after somebody's account, and
+  // never a title, because what a person has watched is the content of the import rather
+  // than a measurement of it.
+  'films',
+  'viewings',
+  'applied',
+  'unresolved',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',
