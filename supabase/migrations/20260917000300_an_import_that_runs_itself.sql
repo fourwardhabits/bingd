@@ -736,12 +736,18 @@ begin
   delete from import_rows
    where job_id = p_job_id and status in ('applied', 'duplicate');
 
+  -- **Once only, whoever calls it.** The counts are computed from `import_rows` and the
+  -- applied rows are then deleted, so a second call reads an empty table and would
+  -- overwrite a correct summary with zeroes — a person staring at "0 films" after an
+  -- import that placed all of them, which is how a successful import gets reported as data
+  -- loss. Two ticks can overlap (pg_cron does not serialise a job against itself), so this
+  -- is not hypothetical, and the guard belongs here rather than at each call site.
   update import_jobs
      set status = 'done',
          completed_at = now(),
          claimed_at = null,
          counts = counts || v_counts
-   where id = p_job_id;
+   where id = p_job_id and completed_at is null;
 
   return v_counts;
 end;
@@ -969,18 +975,32 @@ begin
   for v_job in
     select j.id from import_jobs j
      where j.completed_at is null
+       -- A job still `pending` never reached the worker at all: it was abandoned
+       -- mid-staging, and "your import finished, 0 films" is a worse sentence for it than
+       -- `failed`.
+       and j.status <> 'pending'
        and (j.failures >= 3 or j.attempts >= 6 or j.created_at < now() - interval '24 hours')
        and not exists (
          select 1 from import_rows r
           where r.job_id = j.id
             and (r.status = 'pending'
                  or (r.status = 'matched' and r.media_item_id is not null)))
+     order by j.created_at
+     limit greatest(coalesce(p_jobs, 3), 1)
+     -- Claimed, like everything else the tick touches. Two ticks can overlap — pg_cron does
+     -- not serialise a job against itself — and without this both would select the same job
+     -- and settle it twice.
+     for update skip locked
   loop
     begin
       perform _import_settle(v_job.id);
     exception when others then
-      null;  -- it will be failed below, which is the honest outcome for a job that cannot
-             -- even summarise itself.
+      -- Fall through to the dead letter below, which is the honest outcome for a job that
+      -- cannot even summarise itself — but record why, or every such job becomes
+      -- `failed / 'exhausted'` and the real cause is written down nowhere.
+      update import_jobs
+         set last_error = left(sqlerrm, 300)
+       where id = v_job.id;
     end;
   end loop;
 

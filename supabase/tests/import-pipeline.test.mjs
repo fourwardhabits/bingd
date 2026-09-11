@@ -637,6 +637,28 @@ describe('the worker', () => {
     assert.ok(rows[0].completed_at, 'a dead job must not hold the one-live-job slot for ever');
   });
 
+  it('never overwrites a finished summary with zeroes', async () => {
+    // `_import_settle` computes its counts from `import_rows` and then deletes the applied
+    // rows, so a second call reads an empty table. Two ticks can overlap — pg_cron does not
+    // serialise a job against itself — and the result was a person staring at "0 films"
+    // after an import that placed all of them, which is how a success gets reported as
+    // data loss.
+    const film = `Settle Twice ${seq}`;
+    await t.createMovie(film, seq);
+    seq += 1;
+
+    const jobId = await importArchive(jack, [
+      staged(film, { correlation: `${film.toLowerCase()}|2001` })]);
+
+    const { rows: first } = await t.sql(`select counts from import_jobs where id = $1`, [jobId]);
+    assert.equal(first[0].counts.applied, 1);
+
+    await t.sql(`select _import_settle($1)`, [jobId]);
+
+    const { rows: second } = await t.sql(`select counts from import_jobs where id = $1`, [jobId]);
+    assert.deepEqual(second[0].counts, first[0].counts, 'the summary must survive a second settle');
+  });
+
   it('settles rather than fails an exhausted job with nothing left to do', async () => {
     // The counters can be exhausted by a job whose rows have all landed — a long provider
     // wait, most obviously. Failing it would throw away counts the reader is owed and
