@@ -416,11 +416,14 @@ export type AnalyticsEvent =
    */
   | { name: 'invite_redeemed'; props?: undefined }
   /**
-   * An attributed invitee reached activation: ten ranked titles (PRD §28).
+   * An attributed invitee reached activation: **five** ranked titles — the completed
+   * *Your First Five* (PRD §17, amended 2026-09-11). It was PRD §28's ten before
+   * `20260916000100`, and §28's own activation metric still is ten; the two questions
+   * parted company when onboarding gained an ending.
    *
    * Emitted by the **invitee's** session, because they are the one who ranked. The
    * server decides: `_rank_finalize` returns `activated: true` only for the transaction
-   * whose guarded UPDATE flipped `activated_at`, so two devices finishing the tenth
+   * whose guarded UPDATE flipped `activated_at`, so two devices finishing the fifth
    * ranking at the same moment produce one event and a retry produces none.
    *
    * Nothing is inferred here. An app that counted rankings client-side would emit this

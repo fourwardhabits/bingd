@@ -213,9 +213,14 @@ Multiple high-fit lanes in controlled parallel bursts. Not one channel at a time
 | Wave 2 | 300 to 500 | retention and connection rates hold |
 | Wave 3 | 1,000+ | deliberate, once the loop is proven |
 
-Activation is **ten ranked titles**. This is not a proposal: `_maybe_activate_invite`
-already writes `invite_attributions.activated_at` at ten, so the definition is in the
-database.
+Activation is **five ranked titles** — the completed *Your First Five*, which is where
+onboarding stops asking. This is not a proposal: `_maybe_activate_invite` writes
+`invite_attributions.activated_at` at five, so the definition is in the database.
+
+> **Was ten until 2026-09-11** (`20260916000100`, founder decision). Ten predated
+> onboarding and sat five titles past the point the app itself declares somebody set up.
+> Reports written before that date counted against ten; do not compare the two series
+> without saying so.
 
 50 is a checkpoint, not a ceiling. Do not throttle organic pull. If a channel converts,
 run the next one rather than waiting.
@@ -295,7 +300,8 @@ platform-side click data each channel gives. Per-channel signup counts are an es
 during the first waves, deliberately, for the reason in 5.1. Say estimate when reporting
 them.
 
-**Activation.** Ten ranked titles. Already instrumented.
+**Activation.** Five ranked titles — completed onboarding. Already instrumented. (Ten
+before 2026-09-11; see 5.x above.)
 
 **Habit.** This is the one that matters most and the one to watch first.
 - ranking sessions on more than one distinct day

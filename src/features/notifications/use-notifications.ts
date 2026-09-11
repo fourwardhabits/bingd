@@ -52,7 +52,9 @@ export type NotificationKind =
    */
   | 'recommendation_ranked'
   /**
-   * Somebody this reader invited reached activation — ten ranked titles (PRD §28).
+   * Somebody this reader invited reached activation — **five** ranked titles, the
+   * completed *Your First Five* (PRD §17, amended 2026-09-11; ten before
+   * `20260916000100`).
    *
    * **The writer arrived on 2026-08-19** (`20260819000500`), and the order it arrived
    * in is the point. The type, its preference category and its route were all built
@@ -572,7 +574,7 @@ export function verbFor(
      * fact — and this is the row that says it at the moment it becomes true.
      *
      * The two are not duplicates in an inbox: acceptance files this one and only this
-     * one; activation files the other, later, and only if the invitee ranks ten titles.
+     * one; activation files the other, later, and only if the invitee ranks five titles.
      * An inviter can see both over a fortnight, describing two different milestones of
      * the same person, which is what the invite funnel actually has to say.
      */

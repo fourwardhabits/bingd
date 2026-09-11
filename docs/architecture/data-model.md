@@ -1053,7 +1053,9 @@ create index on invite_attributions (inviter_id);
 
 The partial unique index on `owner_id` enforces PRD §17's **one reusable personal link per user**. Regenerating revokes the old row and inserts a new one; the index permits any number of revoked rows and exactly one live one.
 
-`invite_attributions` is keyed by `invitee_id` because a person is invited once. `activated_at` is set when the invitee ranks their first title, which is what makes the invite-to-activation metric in PRD §28 a single query — and what would make any future reward farm-resistant.
+`invite_attributions` is keyed by `invitee_id` because a person is invited once. `activated_at` is set when the invitee has ranked `app_config['invite.activation_rankings']` titles, which is what makes the invite-to-activation metric a single query — and what makes any reward gated on it farm-resistant.
+
+> **Corrected 2026-09-11.** The two sentences here and in *When the attribution row is written* both read "when the invitee ranks their **first** title", which was never what shipped: `20260819000500` wrote ten and `20260916000100` wrote **five**. One ranked title is a tap, and the whole reason the column is separate from `accepted_at` is that a tap must not count. Five is the completed *Your First Five*, the point onboarding itself stops asking, and it is deliberately **not** PRD §28's product-activation metric, which stays at ten ranked titles within 24 hours. The number lives in two places that must agree — the `app_config` row, and the `coalesce` fallback inside `_maybe_activate_invite` — and `config-defaults.test.mjs` pins the second.
 
 `env` prevents a nonprod token resolving in production (PRD §17).
 
@@ -1067,7 +1069,7 @@ PRD §17 tracks `invite_signup_attributed` and `invite_accepted` as **distinct**
 
 1. A row is inserted at **signup** when the account arrived through an invite link or short code, with `accepted_at` null. This is the referral fact.
 2. `accepted_at` is set when the recipient **explicitly taps Accept**, which is also when the follow is created.
-3. `activated_at` is set when the invitee ranks their first title.
+3. `activated_at` is set when the invitee has ranked `app_config['invite.activation_rankings']` titles — **five** since `20260916000100`, ten before it. See the correction above.
 
 A row with `accepted_at` null is therefore a real state — an attributed signup that has not yet accepted — which is what PRD §17 and api.md `block` mean by voiding a *pending* invitation. Without step 1 the two analytics events cannot be distinguished and the "pending invitation" language has no referent.
 

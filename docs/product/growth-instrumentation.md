@@ -22,7 +22,27 @@ what it misses.
 | **Link created** | **Yes** | `invite_link_creations`, one row per `create_invite_link` call |
 | **Link opened** | **Yes, for the web page only** | `invite_link_opens`, one row per load of `bingd.app/i/<token>` for a live token. A tap that opened the *app* directly is not an open — the page was never loaded — so this measures the uninstalled half of the funnel and nothing else |
 | **Redeemed / signup attributed** | **Yes, with a named hole** | `invite_attributions.accepted_at`, written by `redeem_invite` |
-| **Activated** | **Yes** | `invite_attributions.activated_at`, written by `_maybe_activate_invite` at ten ranked titles |
+| **Activated** | **Yes** | `invite_attributions.activated_at`, written by `_maybe_activate_invite` at **five** ranked titles |
+
+> **The bar moved from ten to five on 2026-09-11** (`20260916000100`, founder decision).
+> Ten came from PRD §28's definition of *product* activation and was chosen before
+> onboarding existed. Onboarding now ends at **Your First Five** — a pick-and-rank loop,
+> five times — so ten sat five titles past the point the app itself stops asking, and an
+> invitee who did exactly what they were told finished onboarding uncounted. Production on
+> 2026-09-10 held three attributions and zero activations against invitees with five, zero
+> and five rankings.
+>
+> **Invite activation and PRD §28's activation metric are now deliberately different
+> numbers**, and the table above is the invite one. §28 measures every new account against
+> ten ranked titles within 24 hours; this row measures whether an *attribution* counts, and
+> its answer is completed onboarding. The anti-farming property is unaffected: it was never
+> carried by the ranking count but by Invite Instigator's tiers, which are 3, 15 and 50
+> separate invitees.
+>
+> A pre-existing invitee already past five is **not** retroactively activated by the
+> migration. `_maybe_activate_invite` only runs from `_rank_finalize`, so they activate on
+> their next ranking or not at all; closing that gap is a deliberate operator backfill
+> (`scripts/backfill-invite-activation.mjs`), not a schema change.
 
 ### The named hole, and it is the biggest number on this page
 
@@ -127,7 +147,9 @@ that never happens and therefore an arrival never counted. Independent review 26
 
 **`_maybe_activate_invite(user)`** runs from `_rank_finalize`, the single place a
 `rankings` row is created, and sets `activated_at` the first time an attributed invitee
-has ten. The transition is once, from a row lock rather than an ordering argument, and the
+has five — `app_config['invite.activation_rankings']`, and the same five written into the
+function's own fallback so a database missing the row cannot quietly keep the old
+contract. The transition is once, from a row lock rather than an ordering argument, and the
 inviter's `invite_activated` notification hangs off that transition. The activation is
 recorded even when the inviter has gone, been suspended, or blocked the invitee; the
 notification is not.

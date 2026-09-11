@@ -25,7 +25,7 @@ import { call, fire, inbox, newOp, raceContext } from './_shared.mjs';
  * reads `blocks`, like every other writer of that shape (`20260819000400`). A block
  * committing between the read and the insert must not leave an attribution behind.
  *
- * **R3. Activation happens once.** Two devices finishing the tenth ranking together
+ * **R3. Activation happens once.** Two devices finishing the fifth ranking together
  * produce one `activated_at`, one `invite_activated` row, and **one** `activated: true`
  * answer — the third is what the client emits its analytics event from, so two of them
  * is a growth number reported twice for one person.
@@ -92,7 +92,7 @@ export default function suite() {
      *
      * Deliberately *not* an insert straight into `rankings`: activation is counted from
      * that table but written by `_rank_finalize`, so a fixture that bypassed the writer
-     * would leave the account at ten with no activation and the race below would be
+     * would leave the account at the bar with no activation and the race below would be
      * measuring nothing.
      */
     const rankTitles = async (user, count, from) => {
@@ -123,13 +123,13 @@ export default function suite() {
       }
     };
 
-    /** A film, ready to be the tenth. */
+    /** A film, ready to be the fifth. */
     const film = async (n) =>
       (
         await ctx.db.rows(
           `insert into media_items (kind, tmdb_id, title, provenance)
            values ('movie', $1, $2, 'manual') returning id`,
-          [-n, `Tenth ${n}`],
+          [-n, `Bar-crossing ${n}`],
         )
       )[0].id;
 
@@ -521,12 +521,12 @@ export default function suite() {
     // R3
     // -----------------------------------------------------------------------
 
-    it('R3: two clients finishing the tenth ranking together activate once', async () => {
+    it('R3: two clients finishing the fifth ranking together activate once', async () => {
       /**
        * The invariant that carries the award, the notification and the analytics event
        * at once, so it is asserted at all three.
        *
-       * Nine movies in Loved, then **a tenth movie and a first season, fired together**.
+       * Four movies in Loved, then **a fifth movie and a first season, fired together**.
        * Both land in empty bands, so each is a single call that places directly and
        * reaches `_maybe_activate_invite` with no comparison walk in between — which makes
        * the race the one actually being claimed rather than a race between two binary
@@ -538,9 +538,9 @@ export default function suite() {
        * categories nothing serialises them, and the guarded UPDATE's row lock is the only
        * thing standing there — which is exactly the claim the migration makes.
        *
-       * It also pins the criterion: ten *titles*, across both categories, because "ten
-       * titles" is a statement about what somebody ranked and not about which tab they
-       * were on.
+       * It also pins the criterion: since `20260916000100`, **five** titles across both
+       * categories, because "five titles" is a statement about what somebody ranked and
+       * not about which tab they were on.
        *
        * `activated: true` exactly once is the strongest of the three assertions: it is
        * what `RankingSheet` emits `invite_activated` from, so two would be one person
@@ -559,12 +559,12 @@ export default function suite() {
       );
       await redeemer.end();
 
-      await rankTitles(invitee, 9, 100000);
-      assert.equal((await attribution(invitee)).activated_at, null, 'nine is not activation');
+      await rankTitles(invitee, 4, 100000);
+      assert.equal((await attribution(invitee)).activated_at, null, 'four is not activation');
 
-      const tenth = await film(200001);
-      const eleventh = await season(210001);
-      for (const item of [tenth, eleventh]) {
+      const fifth = await film(200001);
+      const sixth = await season(210001);
+      for (const item of [fifth, sixth]) {
         await db.sql(
           `insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`,
           [invitee, item],
@@ -579,8 +579,8 @@ export default function suite() {
         await t2.actAs(invitee);
 
         const [f1, f2] = await Promise.all([
-          call(t1, `rank_start($1, 'fine')`, [tenth]),
-          call(t2, `rank_start($1, 'loved')`, [eleventh]),
+          call(t1, `rank_start($1, 'fine')`, [fifth]),
+          call(t2, `rank_start($1, 'loved')`, [sixth]),
         ]);
 
         assert.equal(f1.done, true, 'an empty band places directly');
@@ -622,7 +622,7 @@ export default function suite() {
        * assertion alone would pass with the lock deleted — most interleavings are
        * harmless, which is what makes an unnamed "something blocked" worthless here.
        *
-       * The tenth title goes into an **empty band**, so the whole ranking is one call
+       * The fifth title goes into an **empty band**, so the whole ranking is one call
        * and there is exactly one place it can stop. Nothing a person would notice is
        * held up: `_rank_finalize` has already placed the title by the time this lock is
        * reached.
@@ -637,12 +637,12 @@ export default function suite() {
       await call(redeemer, `redeem_invite($1, $2)`, [await newOp(db), token]);
       await redeemer.end();
 
-      await rankTitles(invitee, 9, 300000);
+      await rankTitles(invitee, 4, 300000);
 
-      const tenth = await film(400001);
+      const fifth = await film(400001);
       await db.sql(`insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`, [
         invitee,
-        tenth,
+        fifth,
       ]);
 
       const ctl = await db.controller();
@@ -654,7 +654,7 @@ export default function suite() {
 
         await s.actAs(invitee);
         await s.begin();
-        const pending = fire(s, `rank_start($1, 'fine')`, [tenth]);
+        const pending = fire(s, `rank_start($1, 'fine')`, [fifth]);
         await s.awaitBlocked({ on: 'advisory', advisoryKey: pairKey });
 
         await ctl.releasePair(invitee, inviter);
@@ -694,7 +694,7 @@ export default function suite() {
       await call(blocker, `block($1, $2)`, [await newOp(db), invitee]);
       await blocker.end();
 
-      await rankTitles(invitee, 10, 500000);
+      await rankTitles(invitee, 5, 500000);
 
       assert.ok((await attribution(invitee)).activated_at, 'the activation is still recorded');
       assert.equal(
