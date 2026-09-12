@@ -119,6 +119,72 @@ describe('how much a page weighs', () => {
   });
 });
 
+describe('measuring a payload on a phone', () => {
+  /**
+   * **The suite could not see the bug that mattered most, because the suite runs in Node.**
+   *
+   * `paginate` and `pageBytes` measured with `Buffer.byteLength`. `Buffer` is a Node global;
+   * Hermes has none, nothing in this dependency tree installs one, and `buffer` is not a
+   * dependency — so the first real import on a device would have thrown
+   * `ReferenceError: Buffer is not defined` before a byte was sent, while every test here
+   * passed on `jest-expo`'s Node environment.
+   *
+   * So these run with the global actually removed. A test that asserts a byte count proves
+   * arithmetic; only this one proves the code can run where it ships.
+   */
+  const withoutBuffer = <T>(work: () => T): T => {
+    const had = Object.prototype.hasOwnProperty.call(globalThis, 'Buffer');
+    const saved = (globalThis as { Buffer?: unknown }).Buffer;
+    delete (globalThis as { Buffer?: unknown }).Buffer;
+    try {
+      return work();
+    } finally {
+      if (had) (globalThis as { Buffer?: unknown }).Buffer = saved;
+    }
+  };
+
+  it('paginates a real export with no Node globals present', () => {
+    const rows = stagingRows(normalise(REAL_EXPORT, { now: NOW }));
+    const pages = withoutBuffer(() => paginate(rows));
+
+    expect(pages).toHaveLength(1);
+    expect(pages[0]).toHaveLength(rows.length);
+  });
+
+  it('measures a page with no Node globals present', () => {
+    const rows = stagingRows(normalise(REAL_EXPORT, { now: NOW }));
+    expect(withoutBuffer(() => pageBytes(rows))).toBeGreaterThan(0);
+  });
+
+  it('counts UTF-8 width rather than characters', () => {
+    // A film title is not always ASCII, and the server measures `octet_length`. Counting
+    // characters would under-report every non-Latin title — which is exactly the payload
+    // most likely to be near a bound and least likely to be noticed.
+    const ascii = pageBytes([
+      { kind: 'watchlist', correlation: 'a|2001', name: 'aaaa', year: 2001, filmUri: null },
+    ]);
+    const wide = pageBytes([
+      { kind: 'watchlist', correlation: 'a|2001', name: '千と千尋', year: 2001, filmUri: null },
+    ]);
+
+    // Four characters, three bytes each, against four one-byte characters.
+    expect(wide - ascii).toBe(8);
+  });
+
+  it('counts an astral character once, not twice', () => {
+    // Iterating a string yields code points, so an emoji is one four-byte character rather
+    // than two three-byte surrogates. `.length` would say six bytes; UTF-8 says four.
+    const plain = pageBytes([
+      { kind: 'watchlist', correlation: 'a|2001', name: '', year: 2001, filmUri: null },
+    ]);
+    const emoji = pageBytes([
+      { kind: 'watchlist', correlation: 'a|2001', name: '🎬', year: 2001, filmUri: null },
+    ]);
+
+    expect(emoji - plain).toBe(4);
+  });
+});
+
 describe('paginate', () => {
   const row = (i: number, over: Record<string, unknown> = {}) => ({
     kind: 'watched' as const,

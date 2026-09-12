@@ -17,12 +17,25 @@ import { ImportScreen } from './ImportScreen';
 
 const mockBack = jest.fn();
 const mockRpc = jest.fn();
+const mockFrom = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 let mockRpcErrors: Record<string, unknown> = {};
 
 /** What the picker will answer with. `null` means the person cancelled. */
 let mockPicked: Uint8Array | null = null;
 let mockPickThrows = false;
+/**
+ * What the picker *says* the file weighs.
+ *
+ * Its own knob rather than `mockPicked.length`, because the guard it feeds exists to refuse
+ * a file **before** it is read — so the only honest test of it is one where the bytes are
+ * never fetched, which means the size cannot come from them.
+ */
+let mockPickedSize: number | undefined;
+
+/** What a `select` on `import_jobs` answers. The open-job recovery reads the table. */
+let mockLiveJob: { data: unknown; error: unknown } = { data: null, error: null };
+let mockLiveJobThrows = false;
 
 jest.mock('expo-file-system', () => ({
   File: {
@@ -31,25 +44,55 @@ jest.mock('expo-file-system', () => ({
       if (mockPicked === null) return Promise.resolve({ canceled: true, result: null });
       return Promise.resolve({
         canceled: false,
-        result: { bytes: () => Promise.resolve(mockPicked) },
+        result: {
+          size: mockPickedSize ?? mockPicked.length,
+          bytes: () => Promise.resolve(mockPicked),
+        },
       });
     },
   },
 }));
+
+/**
+ * An answer that may differ per call.
+ *
+ * `import_status` is now read twice for different reasons — once before staging, to find out
+ * whether the job `import_create` handed back is one the worker already owns, and then
+ * repeatedly by the poll. A single fixed answer cannot express "pending, then done", which
+ * is the ordinary case. So a result may be a function, and is called each time.
+ */
+const mockAnswer = (name: string) => {
+  const value = mockRpcResults[name];
+  return typeof value === 'function' ? (value as () => unknown)() : (value ?? null);
+};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
+      const data = error ? null : mockAnswer(name);
       const result = {
-        data: error ? null : (mockRpcResults[name] ?? null),
+        data,
         error,
         // `import_status` is read with `.maybeSingle()`.
-        maybeSingle: () =>
-          Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error }),
+        maybeSingle: () => Promise.resolve({ data, error }),
       };
       return Object.assign(Promise.resolve(result), result);
+    },
+    from: (table: string) => {
+      mockFrom(table);
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        is: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        maybeSingle: () =>
+          mockLiveJobThrows
+            ? Promise.reject(new Error('offline'))
+            : Promise.resolve(mockLiveJob),
+      };
+      return builder;
     },
   },
 }));
@@ -91,11 +134,15 @@ const TWO_FILMS =
 beforeEach(() => {
   mockBack.mockClear();
   mockRpc.mockClear();
+  mockFrom.mockClear();
   mockTrack.mockClear();
   mockRpcResults = {};
   mockRpcErrors = {};
   mockPicked = null;
   mockPickThrows = false;
+  mockPickedSize = undefined;
+  mockLiveJob = { data: null, error: null };
+  mockLiveJobThrows = false;
 });
 
 describe('before a file is chosen', () => {
@@ -105,7 +152,12 @@ describe('before a file is chosen', () => {
     expect(screen.getByText(/Films you.+watched/)).toBeTruthy();
     expect(screen.getByText(/Never opened/)).toBeTruthy();
     // The retention promise, which is Contract V3 §14 and the thing somebody is deciding on.
-    expect(screen.getByText(/doesn.+t keep a copy of your export/)).toBeTruthy();
+    expect(screen.getByText(/no copy of it is kept/)).toBeTruthy();
+    // **And the links, which an earlier draft of this sentence left out.** `filmUri` and
+    // every `diaryUri` do cross the wire and are kept permanently — the diary one is half
+    // the primary key that makes a re-import a no-op. Asserted here because the failure
+    // mode is a privacy sentence quietly drifting into being untrue.
+    expect(screen.getByText(/Letterboxd links/)).toBeTruthy();
   });
 
   it('counts the entry point once', async () => {
@@ -209,7 +261,19 @@ describe('uploading', () => {
     await waitFor(() => expect(screen.getByText(/close the app/)).toBeTruthy());
 
     const called = mockRpc.mock.calls.map(([name]) => name);
-    expect(called).toEqual(['import_create', 'import_stage', 'import_ready', 'import_status']);
+    // The `import_status` between `create` and `stage` is the guard against staging onto a
+    // job the worker already owns: `import_create` adopts an open job, and `import_stage`
+    // answers one that has moved on with a `22023` that used to be reported as a dropped
+    // connection. Asking first is what turns that dead end into "an import is already
+    // running", so its position in this sequence is the behaviour, not an implementation
+    // detail that happens to be observable.
+    expect(called).toEqual([
+      'import_create',
+      'import_status',
+      'import_stage',
+      'import_ready',
+      'import_status',
+    ]);
 
     const [, stageArgs] = mockRpc.mock.calls.find(([name]) => name === 'import_stage')!;
     expect((stageArgs as { p_rows: unknown[] }).p_rows).toHaveLength(2);
@@ -240,12 +304,21 @@ describe('uploading', () => {
 describe('when it is over', () => {
   it('reports what landed and does not hide what did not', async () => {
     mockPicked = exportZip(TWO_FILMS);
+    // **Pending first, done afterwards.** The pre-stage read must find a job that is still
+    // taking rows, or `start` correctly refuses to stage onto somebody else's running
+    // import and this never gets as far as the summary it is about.
+    let reads = 0;
     mockRpcResults = {
       import_create: 'job-1',
-      import_status: {
-        status: 'done',
-        counts: { applied: 1, watched: 1, watchlist: 0, viewings: 0, unmatched: 1 },
-        completed_at: '2026-09-11T00:00:00.000Z',
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              counts: { applied: 1, watched: 1, watchlist: 0, viewings: 0, unmatched: 1 },
+              completed_at: '2026-09-11T00:00:00.000Z',
+            };
       },
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
@@ -260,6 +333,137 @@ describe('when it is over', () => {
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
       props: { applied: 1, unresolved: 1 },
+    });
+  });
+});
+
+/**
+ * The paths that exist because an import outlives the screen that started it.
+ *
+ * Everything above is one person, one archive, one sitting. These are the cases where the
+ * server already has an opinion when the screen opens — which is the ordinary case for a
+ * feature whose whole promise is "you can close the app and come back".
+ */
+describe('an import that is already happening', () => {
+  it('picks up a running import when the screen opens', async () => {
+    // The promise the `working` screen makes out loud. Without this, coming back meant a
+    // fresh hook at `idle`: the running import invisible, and the next attempt to start one
+    // walking into `import_create` adopting it and `import_stage` refusing.
+    mockLiveJob = {
+      data: { id: 'job-live', status: 'working', counts: {}, completed_at: null },
+      error: null,
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(screen.getByText('Matching your films')).toBeTruthy());
+    expect(mockFrom).toHaveBeenCalledWith('import_jobs');
+  });
+
+  it('shows the summary when the import finished while they were away', async () => {
+    mockLiveJob = {
+      data: {
+        id: 'job-live',
+        status: 'done',
+        counts: { applied: 2, watched: 2, watchlist: 0, viewings: 0 },
+        completed_at: '2026-09-11T00:00:00.000Z',
+      },
+      error: null,
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(screen.getByText(/Your history is in/)).toBeTruthy());
+  });
+
+  it('ignores a half-staged job, because there is nothing to show for it', async () => {
+    // A `pending` job is an upload that did not finish. The person is here to choose a
+    // file, not to be told about a job whose contents they cannot see.
+    mockLiveJob = {
+      data: { id: 'job-half', status: 'pending', counts: {}, completed_at: null },
+      error: null,
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    expect(screen.getByText('Choose your export')).toBeTruthy();
+  });
+
+  it('still offers the importer when the lookup itself fails', async () => {
+    // The recovery is a convenience; the importer is the feature. A throw here used to be
+    // an unhandled rejection out of an effect that cannot await anything.
+    mockLiveJobThrows = true;
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    expect(screen.getByText('Choose your export')).toBeTruthy();
+  });
+
+  it('says an import is already running, and does not offer to retry it', async () => {
+    // `import_create` handed back a job the worker owns. There is nothing wrong and nothing
+    // to retry; a "Try again" here would fail identically every time.
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = {
+      import_create: 'job-1',
+      import_status: { status: 'working', counts: {}, completed_at: null },
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('Matching your films')).toBeTruthy());
+    // Not staged onto: the whole point is that the running import is left alone.
+    expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_stage');
+    // And the import that was never started is not counted as one.
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'import_started' }),
+    );
+  });
+});
+
+describe('starting over', () => {
+  it('tells the server to let go of the half-staged job', async () => {
+    // Forgetting the job id locally is not abandoning the job. `import_create` adopts an
+    // open job for an hour, so without this the *next* archive stages beside the abandoned
+    // one and both are applied as one collection.
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = { import_create: 'job-1' };
+    mockRpcErrors = { import_stage: { message: 'network' } };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+    await waitFor(() => expect(screen.getByText('Start over')).toBeTruthy());
+
+    await fireEvent.press(screen.getByText('Start over'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('import_discard', { p_job_id: 'job-1' }),
+    );
+    expect(screen.getByText('Choose your export')).toBeTruthy();
+  });
+});
+
+describe('a file that is not an export', () => {
+  it('refuses one too large to be an export without reading it', async () => {
+    // The picker deliberately filters nothing — a filter that greys out the correct file is
+    // an unrecoverable dead end — so the plausible mis-tap is a video, and the size is the
+    // only thing that can be checked before it is all in memory.
+    mockPicked = exportZip(TWO_FILMS);
+    mockPickedSize = 500 * 1024 * 1024;
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose your export'));
+
+    await waitFor(() => expect(screen.getByText('That file is too big')).toBeTruthy());
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'import_archive_selected',
+      props: { outcome: 'too_large' },
     });
   });
 });

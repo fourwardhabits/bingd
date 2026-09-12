@@ -146,7 +146,7 @@ export function paginate(
   let bytes = 2; // the enclosing `[]`
 
   for (const row of rows) {
-    const size = Buffer.byteLength(JSON.stringify(row), 'utf8') + 1; // + the comma
+    const size = utf8Bytes(JSON.stringify(row)) + 1; // + the comma
     if (page.length > 0 && (page.length >= maxRows || bytes + size > maxBytes)) {
       pages.push(page);
       page = [];
@@ -162,5 +162,32 @@ export function paginate(
 
 /** The serialised size of one page, which is what the server measures. */
 export function pageBytes(page: readonly StagingRow[]): number {
-  return Buffer.byteLength(JSON.stringify(page), 'utf8');
+  return utf8Bytes(JSON.stringify(page));
+}
+
+/**
+ * The UTF-8 width of a string, without `Buffer` and without `TextEncoder`.
+ *
+ * **`Buffer` is a Node global and does not exist on a phone.** It was used here, and every
+ * test passed, because `jest-expo` runs in Node and supplies it — so the suite could not
+ * see that the first real import would die with `ReferenceError: Buffer is not defined`
+ * before a single byte was sent. Hermes provides no `Buffer`, nothing in this dependency
+ * tree installs one, and `buffer` is not a dependency.
+ *
+ * Counted rather than encoded, because the answer is all that is wanted and allocating a
+ * second copy of a two-megabyte page to measure it would be the expensive way to ask.
+ * `src/lib/session-storage.ts` reached the same conclusion for the same reason and this
+ * mirrors its `utf8Width`.
+ *
+ * Iterating the string yields whole code points, so a surrogate pair is one four-byte
+ * character rather than two three-byte ones — which is the difference between a correct
+ * count and one that over-reports every emoji in somebody's film titles.
+ */
+export function utf8Bytes(value: string): number {
+  let bytes = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    bytes += codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+  }
+  return bytes;
 }

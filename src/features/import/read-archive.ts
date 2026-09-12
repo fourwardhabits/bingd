@@ -41,7 +41,18 @@ export type ReadFailure =
   | { readonly reason: 'not_a_zip' }
   | { readonly reason: 'damaged' }
   | { readonly reason: RefusalReason }
-  | { readonly reason: 'empty' };
+  | { readonly reason: 'empty' }
+  /**
+   * Something threw that none of the above describes.
+   *
+   * Exists so that this function is **total**. An earlier version rethrew anything that was
+   * not a `DamagedZipError`, and the caller's `try` did not cover the call — so an
+   * unexpected throw anywhere in the parse became an unhandled rejection, the phase stayed
+   * `reading` for ever, and the screen it left behind is a spinner with no buttons on it.
+   * A reader that cannot fail to return is worth more here than a precise taxonomy of
+   * failures nobody can act on anyway.
+   */
+  | { readonly reason: 'unexpected' };
 
 export type ArchivePreview = {
   readonly normalised: Normalised;
@@ -62,39 +73,32 @@ export function readArchive(
   bytes: Uint8Array,
   { now, limits = DEFAULT_LIMITS }: { now?: Date; limits?: ArchiveLimits } = {},
 ): ReadResult {
-  let source;
   try {
-    source = zipSource(bytes);
-  } catch (error) {
-    if (error instanceof NotAZipError) return { ok: false, reason: 'not_a_zip' };
-    return { ok: false, reason: 'damaged' };
-  }
+    const source = zipSource(bytes);
 
-  let found;
-  try {
     // The bounds run here, on sizes the archive declares, before a byte is inflated.
     const inspection = inspect(source, limits);
     if (!inspection.ok) return { ok: false, reason: inspection.reason };
-    found = inspection.found;
+
+    const normalised: Normalised = normalise(
+      readWanted(source, inspection.found),
+      now ? { now } : {},
+    );
+    const rows = stagingRows(normalised);
+
+    // **An archive that is a valid Letterboxd export and holds nothing.** A brand-new
+    // account exports a `watched.csv` with a header and no rows. There is nothing wrong
+    // with it and nothing to import, and saying "0 films — Import" would be a button that
+    // does nothing.
+    if (rows.length === 0) return { ok: false, reason: 'empty' };
+
+    return { ok: true, preview: { normalised, rows, pages: paginate(rows) } };
   } catch (error) {
+    // One catch for the whole read, so that adding a step above cannot reintroduce a path
+    // that escapes. The two shapes worth naming are named; everything else is `unexpected`
+    // rather than rethrown, because the caller has nowhere to put a throw.
+    if (error instanceof NotAZipError) return { ok: false, reason: 'not_a_zip' };
     if (error instanceof DamagedZipError) return { ok: false, reason: 'damaged' };
-    throw error;
+    return { ok: false, reason: 'unexpected' };
   }
-
-  let normalised: Normalised;
-  try {
-    normalised = normalise(readWanted(source, found), now ? { now } : {});
-  } catch (error) {
-    if (error instanceof DamagedZipError) return { ok: false, reason: 'damaged' };
-    throw error;
-  }
-
-  const rows = stagingRows(normalised);
-
-  // **An archive that is a valid Letterboxd export and holds nothing.** A brand-new account
-  // exports a `watched.csv` with a header and no rows. There is nothing wrong with it and
-  // nothing to import, and saying "0 films — Import" would be a button that does nothing.
-  if (rows.length === 0) return { ok: false, reason: 'empty' };
-
-  return { ok: true, preview: { normalised, rows, pages: paginate(rows) } };
 }

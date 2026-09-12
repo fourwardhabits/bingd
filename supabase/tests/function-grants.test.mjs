@@ -51,6 +51,11 @@ const ALLOWED = {
   'import_stage(uuid,jsonb)': ['authenticated'],
   'import_ready(uuid)': ['authenticated'],
   'import_status(uuid)': ['authenticated'],
+  // 20260917000500. The fifth: abandoning your own half-staged import. Deletes, which is
+  // the one thing import_jobs has no RLS policy for, so it must be definer — and it is
+  // narrowed to a pending job owned by the caller. Anything the worker has claimed is
+  // answered rather than deleted.
+  'import_discard(uuid)': ['authenticated'],
   // Not anon: it answers which usernames exist, and a signed-out client has no
   // account to create, so the grant would buy enumeration and nothing else.
   'username_available(text)': ['authenticated'],

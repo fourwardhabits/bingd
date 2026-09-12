@@ -40,6 +40,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { track, type ImportSelectOutcome, type ImportSurface } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 
+import { DEFAULT_LIMITS } from './archive';
 import { readArchive, type ArchivePreview, type ReadFailure } from './read-archive';
 import type { StagingRow } from './payload';
 
@@ -84,7 +85,26 @@ export type ImportFailure =
   /** The server refused or the connection went. Recoverable: the job survives. */
   | { readonly kind: 'upload' }
   /** The worker gave up on the job. Not recoverable by retrying the same archive. */
-  | { readonly kind: 'server' };
+  | { readonly kind: 'server' }
+  /**
+   * An import for this account is already running, so this one cannot start.
+   *
+   * Its own kind because it used to arrive dressed as `upload` — `import_stage` raises
+   * `22023` against a job the worker has claimed, `start()` caught every error the same
+   * way, and the screen said "your connection dropped, trying again picks up where it
+   * stopped". Both halves of that were false, and every retry failed identically until the
+   * running job settled. Nothing is wrong here and there is nothing to retry; the answer is
+   * to go and look at the import that is already happening.
+   */
+  | { readonly kind: 'already_running' }
+  /**
+   * The import is running and this client has lost sight of it.
+   *
+   * Not a failed import — the work carries on either way. It is the screen admitting it
+   * cannot say what is happening, which is the honest end to a poll that has come back with
+   * nothing for a solid minute, and is strictly better than a spinner with no buttons.
+   */
+  | { readonly kind: 'unknown' };
 
 export type ImportPhase =
   | { readonly phase: 'idle' }
@@ -122,6 +142,68 @@ const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const failureOutcome = (reason: ReadFailure['reason']): ImportSelectOutcome => reason;
 
+type JobRow = { status: string; counts: ImportCounts | null; completed_at: string | null };
+
+const asStatus = (row: JobRow): ImportJobStatus => ({
+  status: row.status as ImportJobStatus['status'],
+  counts: row.counts ?? {},
+  completedAt: row.completed_at,
+});
+
+/**
+ * One job's progress, or `null` if it could not be read.
+ *
+ * **Total, and the `try` is what makes that true rather than the comment.** Both callers
+ * treat `null` as "ask again later"; a throw instead would reject the poll, and the poll is
+ * the only thing that ever leaves the `working` screen — which has no buttons on it. The
+ * same shape of hole that `readArchive` closed, one layer up.
+ */
+async function readJob(jobId: string): Promise<ImportJobStatus | null> {
+  try {
+    const { data, error } = await supabase.rpc('import_status', { p_job_id: jobId }).maybeSingle();
+    if (error || data === null) return null;
+    return asStatus(data as JobRow);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The caller's open import, if one exists.
+ *
+ * Read straight from the table rather than through an RPC: `import_jobs_own` is a `select`
+ * policy for `user_id = auth.uid()`, so RLS already answers whose job this is and a definer
+ * function would add nothing but a migration.
+ *
+ * **This is what makes "you can close the app and come back" true.** The `working` screen
+ * says exactly that, and without this, coming back meant a fresh hook at `idle` with no job
+ * id — the running import invisible, and the next attempt to start one walking into
+ * `import_create` adopting it and `import_stage` refusing.
+ *
+ * **Total for a sharper reason than `readJob`.** Its one caller is an effect that runs on
+ * open and cannot await anything, so a throw here is an unhandled rejection rather than a
+ * failed read — and the recovery it powers is a convenience. Not finding a running import
+ * costs somebody one screen; crashing the screen that was about to offer it costs them the
+ * importer.
+ */
+async function findLiveJob(): Promise<{ id: string; status: ImportJobStatus } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('import_jobs')
+      .select('id, status, counts, completed_at')
+      .is('completed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || data === null) return null;
+    const row = data as JobRow & { id: string };
+    return { id: row.id, status: asStatus(row) };
+  } catch {
+    return null;
+  }
+}
+
 export function useImport(surface: ImportSurface) {
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
   const jobRef = useRef<string | null>(null);
@@ -131,11 +213,44 @@ export function useImport(surface: ImportSurface) {
    * or worse, restart polling for a screen that is gone.
    */
   const alive = useRef(true);
+  /** One upload at a time. See `start`. */
+  const uploading = useRef(false);
 
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+    };
+  }, []);
+
+  /**
+   * Picks up an import that is already running, once, on open.
+   *
+   * Only from `idle`, so it can never interrupt somebody who has already started reading a
+   * file. A `pending` job is deliberately ignored: that is a half-staged archive from an
+   * upload that did not finish, and the person is here to choose a file, not to be told
+   * about a job they cannot see the contents of. `reset()` clears those up anyway.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const live = await findLiveJob();
+      if (cancelled || !alive.current || live === null) return;
+      if (live.status.status === 'pending') return;
+
+      jobRef.current = live.id;
+      setState((current) =>
+        current.phase === 'idle'
+          ? live.status.status === 'done'
+            ? { phase: 'done', status: live.status }
+            : { phase: 'working', status: live.status }
+          : current,
+      );
+    })();
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -151,9 +266,13 @@ export function useImport(surface: ImportSurface) {
    * by email and through a browser download, and the MIME type it carries by the time it
    * reaches Files or Drive varies by all three. A filter that greys out the correct file is
    * an unrecoverable dead end — there is no "show me everything anyway" — whereas a wrong
-   * pick is caught in the next twenty milliseconds by `looksLikeZip` and answered with a
-   * sentence that says what to do instead. The validation is in the bytes, where it can be
-   * tested, rather than in a picker's idea of a file type.
+   * pick is answered with a sentence that says what to do instead. The validation is in the
+   * bytes, where it can be tested, rather than in a picker's idea of a file type.
+   *
+   * **That choice is what makes the size check below load-bearing rather than defensive.**
+   * If every file is selectable then the plausible mis-tap is a video, and `looksLikeZip`
+   * cannot run until the file has been read into memory. So the size is checked first, from
+   * the picker's own metadata, before anything is allocated.
    */
   const pick = useCallback(async () => {
     settle({ phase: 'reading' });
@@ -166,6 +285,18 @@ export function useImport(surface: ImportSurface) {
         settle({ phase: 'idle' });
         return;
       }
+
+      // **The size is checked before the file is read, not after.** `inspect`'s bomb guard
+      // runs on what the archive *declares*, which is no use at all if the whole file is
+      // already resident by the time it runs — and because the picker deliberately filters
+      // nothing, the likely mis-tap is a video out of Photos rather than an exotic attack.
+      // `size` costs nothing: the picker has already stat'd the file.
+      if (picked.result.size > DEFAULT_LIMITS.maxTotalBytes) {
+        track({ name: 'import_archive_selected', props: { outcome: 'too_large' } });
+        settle({ phase: 'failed', failure: { kind: 'archive', reason: 'too_large' } });
+        return;
+      }
+
       await yieldFrame();
       bytes = await picked.result.bytes();
     } catch {
@@ -174,7 +305,16 @@ export function useImport(surface: ImportSurface) {
       return;
     }
 
-    const result = readArchive(bytes);
+    // `readArchive` is total and cannot throw, which is what keeps this out of the
+    // spinner-with-no-buttons state. The guard is here as well because "cannot throw" is a
+    // property of that function that a later edit could quietly take away.
+    let result;
+    try {
+      result = readArchive(bytes);
+    } catch {
+      result = { ok: false, reason: 'unexpected' } as const;
+    }
+
     if (!result.ok) {
       track({ name: 'import_archive_selected', props: { outcome: failureOutcome(result.reason) } });
       settle({ phase: 'failed', failure: { kind: 'archive', reason: result.reason } });
@@ -185,10 +325,27 @@ export function useImport(surface: ImportSurface) {
     settle({ phase: 'previewing', preview: result.preview });
   }, [settle]);
 
-  /** Back to the start, keeping nothing. Used by "Choose a different file" and by Cancel. */
+  /**
+   * Back to the start, keeping nothing — **including on the server**.
+   *
+   * Forgetting the job id locally is not abandoning the job. `import_create` finds an open
+   * job by `user_id` and adopts a `pending` one for an hour, so a half-staged archive left
+   * behind by a failed upload would be adopted by the *next* import and the two would be
+   * applied as one collection. Two taps after a dropped connection, and a person ends up
+   * with films from an archive they explicitly walked away from.
+   *
+   * So the job is discarded first and the local state cleared regardless of the answer: if
+   * the call fails, the worst case is the old behaviour, and blocking "Start over" on a
+   * network round trip would strand somebody on an error screen with no way off it.
+   */
   const reset = useCallback(() => {
+    const jobId = jobRef.current;
     jobRef.current = null;
     settle({ phase: 'idle' });
+
+    if (jobId !== null) {
+      void supabase.rpc('import_discard', { p_job_id: jobId });
+    }
   }, [settle]);
 
   /**
@@ -200,20 +357,46 @@ export function useImport(surface: ImportSurface) {
    */
   const start = useCallback(
     async (preview: ArchivePreview) => {
+      // **One upload at a time.** `Button` has no press guard, so two taps in a frame would
+      // otherwise run two staging loops against the same job: their `settle` calls would
+      // interleave and make progress jump backwards, and `import_started` would be counted
+      // twice, inflating the one distribution nobody currently has.
+      if (uploading.current) return;
+      uploading.current = true;
+
       const pages = preview.pages;
       settle({ phase: 'uploading', preview, sent: 0, total: pages.length });
-      track({
-        name: 'import_started',
-        props: {
-          films: preview.rows.length,
-          viewings: preview.normalised.counts.watches,
-        },
-      });
 
       try {
         const { data: jobId, error: createError } = await supabase.rpc('import_create');
         if (createError || typeof jobId !== 'string') throw createError ?? new Error('no job');
         jobRef.current = jobId;
+
+        // **Ask what we were given before staging onto it.** `import_create` adopts any open
+        // job, including one the worker is already draining — and `import_stage` refuses a
+        // job that is no longer `pending` with a `22023` that used to surface as "your
+        // connection dropped. Trying again picks up where it stopped", which was false twice
+        // over and failed identically on every retry. Reading the status first turns that
+        // dead end into the only sensible outcome: show the import that is already running.
+        //
+        // Before `import_started`, so the event counts imports that actually began.
+        const existing = await readJob(jobId);
+        if (existing !== null && existing.status !== 'pending') {
+          settle(
+            existing.status === 'done'
+              ? { phase: 'done', status: existing }
+              : { phase: 'working', status: existing },
+          );
+          return;
+        }
+
+        track({
+          name: 'import_started',
+          props: {
+            films: preview.rows.length,
+            viewings: preview.normalised.counts.watches,
+          },
+        });
 
         for (const [index, page] of pages.entries()) {
           const { error } = await supabase.rpc('import_stage', {
@@ -226,11 +409,22 @@ export function useImport(surface: ImportSurface) {
 
         const { error: readyError } = await supabase.rpc('import_ready', { p_job_id: jobId });
         if (readyError) throw readyError;
-      } catch {
-        // The job survives a failure here and `import_rows_once` makes the pages already
-        // sent free to re-send, so the preview is kept and "Try again" is a real offer.
-        settle({ phase: 'failed', failure: { kind: 'upload' }, preview });
+      } catch (error) {
+        // `22023` from `import_stage` is "this import is no longer accepting rows" — the
+        // worker claimed the job between the status read above and this page. Rare, but it
+        // is the same dead end, and it must not be reported as a connection problem.
+        const refused = (error as { code?: string } | null)?.code === '22023';
+        settle(
+          refused
+            ? { phase: 'failed', failure: { kind: 'already_running' } }
+            : // The job survives a failure here and `import_rows_once` makes the pages
+              // already sent free to re-send, so the preview is kept and "Try again" is a
+              // real offer.
+              { phase: 'failed', failure: { kind: 'upload' }, preview },
+        );
         return;
+      } finally {
+        uploading.current = false;
       }
 
       settle({
@@ -256,39 +450,50 @@ export function useImport(surface: ImportSurface) {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
+    /**
+     * Consecutive polls that came back with nothing.
+     *
+     * **A read that fails forever must not wait forever.** This used to reschedule
+     * unconditionally on both an error and a null row, and the `working` screen has no
+     * buttons on it — so an account whose job had vanished, or a device that had lost the
+     * network for good, sat on "Matching your films" until it was force-quit.
+     *
+     * Generous, because the work really is on the server and a blip really is a blip: at two
+     * seconds a poll this is a little over a minute of uninterrupted silence before the
+     * screen admits it does not know. Any successful read resets it.
+     */
+    let blind = 0;
+    const BLIND_LIMIT = 30;
+
     const poll = async () => {
-      const { data, error } = await supabase
-        .rpc('import_status', { p_job_id: jobId })
-        .maybeSingle();
+      const status = await readJob(jobId);
 
       if (cancelled) return;
 
-      if (error) {
-        // A single failed poll is a network blip, not a failed import. The work is on the
-        // server either way, so this keeps asking rather than reporting a failure that
-        // would be this client's alone.
+      if (status === null) {
+        blind += 1;
+        if (blind >= BLIND_LIMIT) {
+          settle({ phase: 'failed', failure: { kind: 'unknown' } });
+          return;
+        }
         timer = setTimeout(() => void poll(), POLL_MS);
         return;
       }
 
-      const row = data as { status: string; counts: ImportCounts | null; completed_at: string | null } | null;
-      if (row === null) {
-        timer = setTimeout(() => void poll(), POLL_MS);
-        return;
-      }
-
-      const status: ImportJobStatus = {
-        status: row.status as ImportJobStatus['status'],
-        counts: row.counts ?? {},
-        completedAt: row.completed_at,
-      };
+      blind = 0;
 
       if (status.status === 'done') {
         track({
           name: 'import_completed',
           props: {
             applied: status.counts.applied ?? 0,
-            unresolved: (status.counts.ambiguous ?? 0) + (status.counts.unmatched ?? 0),
+            // `stragglers` counts as unresolved here for the same reason it does on the
+            // summary screen: a row nobody placed is unresolved to the person, whatever the
+            // worker's internal reason for not placing it.
+            unresolved:
+              (status.counts.ambiguous ?? 0) +
+              (status.counts.unmatched ?? 0) +
+              (status.counts.stragglers ?? 0),
           },
         });
         settle({ phase: 'done', status });

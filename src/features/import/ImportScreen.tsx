@@ -90,7 +90,10 @@ function Body({
           title="Sending your history"
           detail={
             state.total > 1
-              ? `Part ${state.sent + 1} of ${state.total}. Keep the app open for this bit.`
+              ? // `Math.min`, because after the last page `sent === total` and the screen
+                // stays up for the whole `import_ready` round trip — long enough to read
+                // "Part 10 of 9" on any export over five hundred rows.
+                `Part ${Math.min(state.sent + 1, state.total)} of ${state.total}. Keep the app open for this bit.`
               : 'Keep the app open for this bit.'
           }
         />
@@ -147,9 +150,21 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
         </Line>
       </View>
 
+      {/* **This sentence names the Letterboxd links, and an earlier draft did not.**
+
+          It said "only the film names, years, ratings and dates above", which was not what
+          crosses the wire: `filmUri` becomes `imported_titles.letterboxd_uri` and each
+          viewing's `diaryUri` becomes `imported_watches.diary_uri`, both kept permanently —
+          the second is `not null` and half the primary key, which is what makes re-importing
+          the same diary a no-op instead of a pile of duplicates.
+
+          A diary link resolves to that person's own entry page, so leaving it out of the one
+          sentence somebody reads before deciding was the omission least defensible here. The
+          links are worth keeping; pretending they are not sent is not. */}
       <Text variant="footnote" tone="tertiary">
-        The .zip stays on your phone. Bingd receives only the film names, years, ratings and
-        dates above, and doesn&rsquo;t keep a copy of your export.
+        The .zip stays on your phone. Bingd receives what&rsquo;s listed above — names, years,
+        ratings and dates — along with the Letterboxd links that identify each film and each
+        viewing. Nothing else from the archive is sent, and no copy of it is kept.
       </Text>
 
       <View style={styles.actions}>
@@ -203,16 +218,25 @@ function Preview({
       ) : null}
 
       <View style={styles.actions}>
-        <Button label={`Import ${counts.watched + counts.watchlist} films`} onPress={onStart} />
+        <Button label={importLabel(counts.watched + counts.watchlist)} onPress={onStart} />
         <Button label="Choose a different file" kind="tertiary" onPress={onReset} />
       </View>
     </View>
   );
 }
 
+/** "Import 1 film", not "Import 1 films". Every other string on this screen singularises. */
+const importLabel = (films: number) => `Import ${films} ${films === 1 ? 'film' : 'films'}`;
+
 function Summary({ counts, onDone }: { counts: ImportCounts; onDone: () => void }) {
   const applied = counts.applied ?? 0;
-  const unresolved = (counts.ambiguous ?? 0) + (counts.unmatched ?? 0);
+  // **`stragglers` counts here too.** `_import_settle` reports rows still `pending` or
+  // `matched` at settle as their own bucket, and leaving them out of this total made the
+  // summary's numbers fail to add up to the number of films the preview promised — while
+  // saying nothing at all about the difference. A row nobody placed is unresolved to the
+  // person reading this, whatever the worker's internal reason for not placing it.
+  const unresolved =
+    (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
 
   return (
     <View style={styles.block}>
@@ -272,6 +296,12 @@ function Failed({
 }) {
   const { title, detail, showHowTo } = explain(failure);
 
+  // **Two failures have nothing to retry, and offering it anyway is how a dead end gets
+  // built.** An import that is already running and one this client has lost sight of are
+  // both cases where the work is fine and pressing a button cannot help — the answer is to
+  // come back later. A prominent "Try again" there would fail identically every time.
+  const retryable = failure.kind !== 'already_running' && failure.kind !== 'unknown';
+
   return (
     <View style={styles.block}>
       <Text variant="display">{title}</Text>
@@ -279,11 +309,15 @@ function Failed({
         {detail}
       </Text>
       <View style={styles.actions}>
-        <Button label={retryLabel} onPress={onRetry} />
+        {retryable ? <Button label={retryLabel} onPress={onRetry} /> : null}
         {showHowTo ? (
           <Button label="How do I export from Letterboxd?" kind="tertiary" onPress={onHowTo} />
         ) : null}
-        <Button label="Start over" kind="tertiary" onPress={onReset} />
+        <Button
+          label="Start over"
+          kind={retryable ? 'tertiary' : 'primary'}
+          onPress={onReset}
+        />
       </View>
     </View>
   );
@@ -301,6 +335,24 @@ function explain(failure: ImportFailure): {
       // `import_rows_once` makes an already-sent page free, so a retry really does pick up.
       detail:
         'Your connection dropped part-way. Trying again picks up where it stopped — nothing is sent twice.',
+      showHowTo: false,
+    };
+  }
+
+  if (failure.kind === 'already_running') {
+    return {
+      title: 'An import is already running',
+      detail:
+        'One of your imports hasn’t finished yet, so this one can’t start. It carries on without the app open — come back in a few minutes and it should be done.',
+      showHowTo: false,
+    };
+  }
+
+  if (failure.kind === 'unknown') {
+    return {
+      title: 'We’ve lost track of that import',
+      detail:
+        'It’s still running on our side — this app just can’t see how far along it is. Check your connection and open this screen again in a few minutes.',
       showHowTo: false,
     };
   }
@@ -355,9 +407,18 @@ function explain(failure: ImportFailure): {
     case 'too_many_entries':
     case 'entry_too_large':
       return {
-        title: 'That archive is too big',
+        title: 'That file is too big',
         detail:
-          'It’s far larger than any Letterboxd export, so Bingd won’t open it. If this really is your export, let us know from Settings.',
+          'It’s far larger than any Letterboxd export, so Bingd won’t open it. Check you picked the export and not something else. If this really is your export, let us know from Settings.',
+        showHowTo: true,
+      };
+    case 'unexpected':
+      // Our bug, not theirs, and the copy should not imply otherwise by suggesting they
+      // picked the wrong thing.
+      return {
+        title: 'Something went wrong reading that',
+        detail:
+          'Bingd couldn’t make sense of the file, and that’s on us rather than on you. Trying again is worth a go; if it keeps happening, let us know from Settings.',
         showHowTo: false,
       };
   }

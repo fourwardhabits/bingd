@@ -734,7 +734,16 @@ export type ImportSelectOutcome =
   | 'too_many_entries'
   | 'entry_too_large'
   | 'empty'
-  | 'unreadable';
+  | 'unreadable'
+  /**
+   * The read threw something no refusal describes.
+   *
+   * Kept as an outcome rather than folded into `unreadable` because the two mean different
+   * things to whoever is looking at the number: `unreadable` is a file the OS would not
+   * hand over, and this is a bug in our own reader. A non-zero count here is a defect
+   * report, not a user-behaviour signal.
+   */
+  | 'unexpected';
 
 /** Which People list. The server's own two, so the event and the chip are one vocabulary. */
 export type PeopleSuggestionMode = 'mutuals' | 'match';

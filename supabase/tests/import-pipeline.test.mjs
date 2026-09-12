@@ -1474,3 +1474,141 @@ describe('staging', () => {
     );
   });
 });
+
+
+// ===========================================================================
+// Starting over — `20260917000500`
+// ===========================================================================
+
+/**
+ * **The hole this closes is two taps wide.**
+ *
+ * `import_create` adopts an open job for an hour, which is right for a client that lost
+ * its connection mid-staging and wrong for a person who pressed "Start over" and picked a
+ * different archive. Without `import_discard`, archive A's staged rows sit in the adopted
+ * job and archive B stages beside them, and the worker applies both as one collection.
+ *
+ * So the first test here is the scenario rather than the function: two archives, a Start
+ * over between them, and an assertion about which films the person ends up with. The rest
+ * are the boundaries that make it safe to call from a button.
+ */
+describe('starting over means starting over', () => {
+  let tess;
+
+  before(async () => {
+    tess = await t.createUser({ username: 'pipe_tess' });
+  });
+
+  afterEach(async () => {
+    await t.actAs(null);
+    await t.sql(`delete from import_jobs where user_id = $1`, [tess]);
+  });
+
+  it('does not import an abandoned archive alongside the one that replaced it', async () => {
+    const kept = await datedMovie('Tess Kept', 1998);
+    const abandoned = await datedMovie('Tess Abandoned', 1999);
+
+    await t.actAs(tess);
+
+    // Archive A stages, then the connection drops: no `import_ready`, job left `pending`.
+    const { rows: first } = await t.sql(`select import_create() as id`);
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [first[0].id, JSON.stringify([
+      staged('Tess Abandoned', { correlation: 'tess abandoned|1999', year: 1999 }),
+    ])]);
+
+    // Start over.
+    await t.sql(`select import_discard($1) as r`, [first[0].id]);
+
+    // Archive B, well inside the hour `import_create` would otherwise adopt within.
+    const { rows: second } = await t.sql(`select import_create() as id`);
+    assert.notEqual(second[0].id, first[0].id, 'a discarded job must not be adopted');
+
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [second[0].id, JSON.stringify([
+      staged('Tess Kept', { correlation: 'tess kept|1998', year: 1998 }),
+    ])]);
+    await t.sql(`select import_ready($1) as r`, [second[0].id]);
+    await t.actAs(null);
+    await runJob(second[0].id);
+
+    assert.equal(await count('user_media', `user_id = '${tess}' and media_item_id = '${kept}'`), 1);
+    assert.equal(
+      await count('user_media', `user_id = '${tess}' and media_item_id = '${abandoned}'`), 0,
+      'the abandoned archive must not arrive in the collection',
+    );
+  });
+
+  it('takes the staged rows with it', async () => {
+    await t.actAs(tess);
+    const { rows } = await t.sql(`select import_create() as id`);
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [rows[0].id, JSON.stringify([
+      staged('Tess Staged', { correlation: 'tess staged|2001' }),
+    ])]);
+    assert.equal(await count('import_rows', `job_id = '${rows[0].id}'`), 1);
+
+    const { rows: out } = await t.sql(`select import_discard($1) as r`, [rows[0].id]);
+    assert.equal(out[0].r.status, 'discarded');
+    // `import_rows` cascades from `import_jobs`; the staged archive goes with the job.
+    assert.equal(await count('import_rows', `job_id = '${rows[0].id}'`), 0);
+    assert.equal(await count('import_jobs', `id = '${rows[0].id}'`), 0);
+  });
+
+  it('answers "gone" rather than failing when the job is already discarded', async () => {
+    // A client that retries after a dropped response must not be told its own completed
+    // request failed. Idempotence is what makes `reset()` safe to fire and forget.
+    await t.actAs(tess);
+    const { rows } = await t.sql(`select import_create() as id`);
+    await t.sql(`select import_discard($1) as r`, [rows[0].id]);
+
+    const { rows: again } = await t.sql(`select import_discard($1) as r`, [rows[0].id]);
+    assert.equal(again[0].r.status, 'gone');
+  });
+
+  it('answers "gone" for a job id that never existed', async () => {
+    await t.actAs(tess);
+    const { rows } = await t.sql(`select import_discard(gen_random_uuid()) as r`);
+    assert.equal(rows[0].r.status, 'gone');
+  });
+
+  it('leaves a job the worker has claimed alone, and says so', async () => {
+    // **The other half of the same review finding.** Anything past `pending` may be
+    // mid-batch or holding a row lock, and a button on a phone must not race
+    // `_drain_import_jobs`. The client turns this answer into "an import is already
+    // running" rather than a retry that could never succeed.
+    await t.actAs(tess);
+    const { rows } = await t.sql(`select import_create() as id`);
+    const jobId = rows[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged('Tess Claimed', { correlation: 'tess claimed|2001' }),
+    ])]);
+    await t.sql(`select import_ready($1) as r`, [jobId]);
+
+    await t.actAs(null);
+    // 'matching' is what _drain_import_jobs sets when it claims a job; 'working' is the
+    // client's word for the same thing and is not a value the constraint admits.
+    await t.sql(`update import_jobs set status = 'matching', claimed_at = now() where id = $1`,
+      [jobId]);
+
+    await t.actAs(tess);
+    const { rows: out } = await t.sql(`select import_discard($1) as r`, [jobId]);
+    assert.equal(out[0].r.status, 'running');
+    assert.equal(out[0].r.job_status, 'matching');
+    assert.equal(await count('import_jobs', `id = '${jobId}'`), 1, 'the job must survive');
+    assert.equal(await count('import_rows', `job_id = '${jobId}'`), 1, 'its rows must survive');
+  });
+
+  it('refuses somebody else’s job, and does not delete it', async () => {
+    await t.actAs(tess);
+    const { rows } = await t.sql(`select import_create() as id`);
+    const jobId = rows[0].id;
+
+    const mallory = await t.createUser({ username: 'pipe_mallory_discard' });
+    await t.actAs(mallory);
+    await assert.rejects(
+      () => t.sql(`select import_discard($1) as r`, [jobId]),
+      /no such import/i,
+    );
+
+    await t.actAs(null);
+    assert.equal(await count('import_jobs', `id = '${jobId}'`), 1);
+  });
+});
