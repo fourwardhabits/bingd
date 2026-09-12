@@ -3,7 +3,7 @@
 **Status:** Phases 1–3 implemented on `feat/letterboxd-import`. Not merged, not on
 production, **not physically tested**.
 
-Staging (`fjxhcbowoxuzulwirzyr`) carries the whole pipeline: 127/127 migrations, the Edge
+Staging (`fjxhcbowoxuzulwirzyr`) carries the whole pipeline: 128/128 migrations, the Edge
 Function deployed, the drain scheduled and draining, 126/126 on the anon smoke. Production
 (`abheeqyjzekiowkztfxv`) has none of it — all eight `2026091700xx` migrations are pending
 there, by design.
@@ -292,7 +292,7 @@ it is down.
 Nothing in this feature has been run on a phone. Run against the **preview** lane, which
 points at staging (`fjxhcbowoxuzulwirzyr`) — never the shipped app.
 
-Staging is ready: 127/127 migrations, the edge function deployed, the drain scheduled and
+Staging is ready: 128/128 migrations, the edge function deployed, the drain scheduled and
 its last run succeeded (`import_drain_status()`), and 126/126 on the anon smoke.
 
 ### The parts only a device can answer
