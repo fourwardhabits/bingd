@@ -93,8 +93,24 @@ async function search(claim: Claim, key: string, bearer: string | null): Promise
  * one row per (kind, tmdb_id), with the provenance the catalogue expects.
  */
 async function upsert(db: SupabaseClient, result: ProviderResult): Promise<string | null> {
+  /**
+   * **`p_items`, and `media_item_id`.** Both were wrong, and between them they meant the
+   * provider tier could never resolve a single film.
+   *
+   * The argument was `p_titles`. PostgREST answers an argument mismatch with a 404, which
+   * `error` catches and this function turns into `null` — indistinguishable here from "the
+   * film could not be written". So every provider match was found, judged confident, and
+   * then silently dropped: the row went back to `needs_provider`, spent its three attempts
+   * and settled as unmatched. `remote-smoke.mjs` opens with a warning about exactly this
+   * failure mode; it is easier to walk into than to read about.
+   *
+   * The returned column was wrong too — `tmdb_upsert_titles` returns
+   * `(media_item_id, item_kind, provider_id)` and this read `.id`, so even with the
+   * argument fixed it would have gone on returning null. Two mistakes that produce one
+   * symptom, which is why the first fix alone would have looked like no fix at all.
+   */
   const { data, error } = await db.rpc('tmdb_upsert_titles', {
-    p_titles: [
+    p_items: [
       {
         kind: 'movie',
         tmdb_id: result.id,
@@ -104,7 +120,7 @@ async function upsert(db: SupabaseClient, result: ProviderResult): Promise<strin
     ],
   });
   if (error) return null;
-  return Array.isArray(data) && data.length > 0 ? (data[0].id ?? null) : null;
+  return Array.isArray(data) && data.length > 0 ? (data[0].media_item_id ?? null) : null;
 }
 
 async function resolveBatch(db: SupabaseClient, key: string, bearer: string | null) {
@@ -114,6 +130,25 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
 
   let matched = 0;
   let rateLimited = false;
+  /**
+   * **Why nothing resolved, which used to be unanswerable.**
+   *
+   * Every failure below was swallowed into the same silence, so a provider refusing every
+   * request looked exactly like a batch of films TMDB has never heard of: `matched: 0`,
+   * rows back to `needs_provider`, attempts spent, nothing anywhere saying which. That cost
+   * a staging afternoon — the credentials were wrong, the symptom was "no matches", and the
+   * only way to tell the two apart was to reason about it.
+   *
+   * Counted and reported rather than logged, because the caller is a cron tick with nobody
+   * reading its logs. The reasons are provider status codes and our own messages; no claim
+   * name and no credential goes near them.
+   */
+  let failed = 0;
+  const reasons = new Set<string>();
+  /** Claims the provider had nothing for, and claims it had too much for. */
+  const empty: number[] = [];
+  const unconfident: number[] = [];
+  let unwritable = 0;
 
   for (let i = 0; i < claims.length; i += CONCURRENCY) {
     const slice = claims.slice(i, i + CONCURRENCY) as Claim[];
@@ -121,8 +156,17 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     await Promise.all(
       slice.map(async (claim) => {
         try {
-          const chosen = pick(claim, await search(claim, key, bearer));
+          const results = await search(claim, key, bearer);
+          const chosen = pick(claim, results);
+          // **"TMDB knew nothing" and "TMDB knew several" are different problems** and both
+          // arrived as `matched: 0`. The first is an unknown film and nothing can be done;
+          // the second is the ambiguity rule working, or a query that needs narrowing. A
+          // tick that resolves nothing should say which of the two it met.
+          if (!chosen) (results.length === 0 ? empty : unconfident).push(results.length);
           const mediaItemId = chosen ? await upsert(db, chosen) : null;
+          // A confident result that could not be written is our problem, not the film
+          // being unknown, and the two used to be the same number.
+          if (chosen && !mediaItemId) unwritable += 1;
           await db.rpc('_import_provider_resolve', {
             p_row_id: claim.row_id,
             p_media_item_id: mediaItemId,
@@ -132,6 +176,8 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
           // The attempt is already spent by the claim. Leaving the row alone is the whole
           // of the retry: it stays `needs_provider` until its third attempt, and settles
           // as unmatched after that.
+          failed += 1;
+          reasons.add(String(cause).slice(0, 120));
           if (String(cause).includes('rate limited')) rateLimited = true;
         }
       }),
@@ -142,7 +188,17 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     if (rateLimited) break;
   }
 
-  return { claimed: claims.length, matched, rateLimited };
+  return {
+    claimed: claims.length,
+    matched,
+    failed,
+    rateLimited,
+    reasons: [...reasons],
+    // Counts, not titles: this answer travels to a cron tick and a runbook, never to a person.
+    noResults: empty.length,
+    notConfident: unconfident.length,
+    unwritable,
+  };
 }
 
 Deno.serve(async (request: Request) => {
@@ -193,8 +249,23 @@ Deno.serve(async (request: Request) => {
     return json({ error: { code: 'BG500', message: 'function is not configured' } }, 500);
   }
 
+  /**
+   * **The names this repo actually sets**, which is not what this read before.
+   *
+   * It asked for `TMDB_READ_TOKEN`, a name that appears nowhere else: not in
+   * `tmdb-adapter/tmdb.ts`, not in `supabase/functions/README.md`, and not in any deployed
+   * project. The convention is `TMDB_ACCESS_TOKEN` for the v4 read token (a bearer header)
+   * and `TMDB_API_KEY` for the v3 key (a query parameter), and staging has the first of
+   * those set and has had since 2026-09-01.
+   *
+   * So on a project configured exactly as the README says, this function found no
+   * credential and answered `no_provider` — silently, because that is the correct answer
+   * for a project that genuinely has none. The provider tier would simply never have run,
+   * and every title the local matcher could not place would have settled as unmatched with
+   * nothing anywhere saying why.
+   */
   const tmdbKey = Deno.env.get('TMDB_API_KEY') ?? '';
-  const tmdbBearer = Deno.env.get('TMDB_READ_TOKEN') ?? null;
+  const tmdbBearer = Deno.env.get('TMDB_ACCESS_TOKEN') ?? null;
   if (!tmdbKey && !tmdbBearer) {
     // Not an error. A project with no provider configured still imports; it places fewer
     // titles, and the rows say so.
