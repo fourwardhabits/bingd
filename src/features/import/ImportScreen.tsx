@@ -483,6 +483,17 @@ function explain(failure: ImportFailure): {
           'Bingd couldn’t make sense of the file, and that’s on us rather than on you. Trying again is worth a go; if it keeps happening, let us know from Settings.',
         showHowTo: false,
       };
+    case 'too_many_films':
+      // **A real export, and a real refusal — so the copy says so rather than implying
+      // they picked the wrong file.** This is the whole-job safety ceiling, five times the
+      // supported size, and a person who reaches it has a library nobody anticipated. The
+      // honest thing is to name the size we are built for and ask them to get in touch.
+      return {
+        title: 'That library is bigger than we can take',
+        detail:
+          'Bingd handles imports of up to about ten thousand films, and this export is well past that. Nothing has been sent. Let us know from Settings — we’d genuinely like to hear from you.',
+        showHowTo: false,
+      };
   }
 }
 

@@ -27,7 +27,14 @@
 
 import { DEFAULT_LIMITS, inspect, readWanted, type ArchiveLimits, type RefusalReason } from './archive';
 import { normalise, type Normalised } from './letterboxd';
-import { paginate, stagingRows, type StagingRow } from './payload';
+import {
+  jobBytes,
+  MAX_JOB_BYTES,
+  MAX_JOB_ROWS,
+  paginate,
+  stagingRows,
+  type StagingRow,
+} from './payload';
 import { DamagedZipError, NotAZipError, zipSource } from './zip';
 
 /**
@@ -52,7 +59,16 @@ export type ReadFailure =
    * A reader that cannot fail to return is worth more here than a precise taxonomy of
    * failures nobody can act on anyway.
    */
-  | { readonly reason: 'unexpected' };
+  | { readonly reason: 'unexpected' }
+  /**
+   * Larger than the safety ceiling a whole job may reach.
+   *
+   * Not the supported library size, which is a product recommendation of about ten
+   * thousand films; this is five times that and exists to bound a runaway client rather
+   * than to shape anybody's behaviour. `import_stage` enforces the same bound and is the
+   * authority -- naming it here only decides *where* somebody meets it.
+   */
+  | { readonly reason: 'too_many_films' };
 
 export type ArchivePreview = {
   readonly normalised: Normalised;
@@ -92,7 +108,23 @@ export function readArchive(
     // does nothing.
     if (rows.length === 0) return { ok: false, reason: 'empty' };
 
-    return { ok: true, preview: { normalised, rows, pages: paginate(rows) } };
+    const pages = paginate(rows);
+
+    /**
+     * **The whole-job ceiling, checked here so the refusal arrives before the upload.**
+     *
+     * `import_stage` enforces this too and is the authority — the client is not trusted
+     * with it. What this buys is where somebody meets it: at the preview, with a sentence
+     * they can read, rather than a third of the way through sending an archive.
+     *
+     * A safety ceiling rather than the supported library size; see `payload.ts`. Nobody
+     * with a real Letterboxd account will see this.
+     */
+    if (rows.length > MAX_JOB_ROWS || jobBytes(pages) > MAX_JOB_BYTES) {
+      return { ok: false, reason: 'too_many_films' };
+    }
+
+    return { ok: true, preview: { normalised, rows, pages } };
   } catch (error) {
     // One catch for the whole read, so that adding a step above cannot reintroduce a path
     // that escapes. The two shapes worth naming are named; everything else is `unexpected`

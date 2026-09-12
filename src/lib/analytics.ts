@@ -743,7 +743,14 @@ export type ImportSelectOutcome =
    * hand over, and this is a bug in our own reader. A non-zero count here is a defect
    * report, not a user-behaviour signal.
    */
-  | 'unexpected';
+  | 'unexpected'
+  /**
+   * Bigger than the whole-job safety ceiling. Distinct from `too_large`, which is the raw
+   * file: this one is a well-formed export whose normalised row count or weight is past
+   * what one job may hold. A non-zero count here is either a library nobody anticipated or
+   * a client producing rows it should not.
+   */
+  | 'too_many_films';
 
 /** Which People list. The server's own two, so the event and the chip are one vocabulary. */
 export type PeopleSuggestionMode = 'mutuals' | 'match';

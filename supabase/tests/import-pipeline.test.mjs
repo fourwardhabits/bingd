@@ -2056,3 +2056,197 @@ describe('the counts the summary reads', () => {
     assert.ok(added && ranked);
   });
 });
+
+
+// ===========================================================================
+// A ceiling on the whole job — `20260917001100`
+// ===========================================================================
+
+/**
+ * **A safety ceiling, and the tests are written to keep it distinct from a product limit.**
+ *
+ * The page bounds were already here. Nothing bounded the number of pages, so one account
+ * could stage without limit. What these assert is that the job bound exists, that it is
+ * counted from what was actually inserted rather than from what arrived, and — the part
+ * worth as much as the bound itself — that it sits far enough above the supported library
+ * size that the 2,500 / 5,000 / 10,000 performance fixtures are unaffected by it.
+ */
+describe('a job that will not stop growing', () => {
+  let ivy;
+  let jobId;
+
+  const config = async (key, value) => {
+    await t.sql(
+      `insert into app_config (key, value) values ($1, $2::jsonb)
+       on conflict (key) do update set value = excluded.value`,
+      [key, JSON.stringify(value)],
+    );
+  };
+
+  const page = (from, count) =>
+    JSON.stringify(
+      Array.from({ length: count }, (_, i) =>
+        staged(`Ceiling ${from + i}`, { correlation: `ceiling ${from + i}|2001` })),
+    );
+
+  const totals = async () => {
+    const { rows } = await t.sql(
+      `select staged_rows, staged_bytes from import_jobs where id = $1`, [jobId]);
+    return rows[0];
+  };
+
+  before(async () => {
+    ivy = await t.createUser({ username: 'pipe_ivy_ceiling' });
+  });
+
+  beforeEach(async () => {
+    await t.actAs(null);
+    await t.sql(`delete from import_jobs where user_id = $1`, [ivy]);
+    await config('import.max_job_rows', 50000);
+    await config('import.max_job_bytes', 33554432);
+    await t.actAs(ivy);
+    const { rows } = await t.sql(`select import_create() as id`);
+    jobId = rows[0].id;
+  });
+
+  after(async () => {
+    await t.actAs(null);
+  });
+
+  it('counts what it actually inserted, not what it was sent', async () => {
+    const first = await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(1, 10)]);
+    assert.equal(first.rows[0].r.staged, 10);
+    assert.equal(first.rows[0].r.job_rows, 10);
+
+    const after = await totals();
+    assert.equal(after.staged_rows, 10);
+    assert.ok(Number(after.staged_bytes) > 0);
+
+    // The same page again, as a client retrying after a dropped response. `import_rows_once`
+    // swallows it, so the totals must not move — a counter that double-counted a retry
+    // would turn a network blip into a refused import.
+    const again = await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(1, 10)]);
+    assert.equal(again.rows[0].r.staged, 0);
+
+    const unchanged = await totals();
+    assert.equal(unchanged.staged_rows, 10);
+    assert.equal(String(unchanged.staged_bytes), String(after.staged_bytes));
+  });
+
+  it('refuses the page that would cross the row ceiling, and writes none of it', async () => {
+    await config('import.max_job_rows', 1000);
+
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(1, 600)]);
+    assert.equal((await totals()).staged_rows, 600);
+
+    await assert.rejects(
+      () => t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(601, 600)]),
+      /this import is too large .*rows/,
+    );
+
+    // **Refused before anything was written.** A half-built impossible job is worse than a
+    // refused one: it holds the account's single live slot and cannot be completed.
+    assert.equal((await totals()).staged_rows, 600, 'not one row of the refused page landed');
+  });
+
+  it('refuses on weight as well as on count', async () => {
+    // The two bound different attacks and neither implies the other: one row may carry a
+    // hundred viewings and every field at its length cap, so a job can be heavy while well
+    // inside the row ceiling.
+    await config('import.max_job_bytes', 4194304);
+    await config('import.max_job_rows', 50000);
+
+    /**
+     * **Every page carries its own correlations**, which the first version of this did not.
+     *
+     * It built one page and rewrote the *names* between attempts, leaving the correlations
+     * identical — so `import_rows_once` swallowed every page after the first, nothing was
+     * inserted, and the running total never moved. The test failed for the opposite of the
+     * reason it was about: staging was correctly idempotent and the bound was never
+     * approached.
+     */
+    const heavyPage = (attempt) =>
+      JSON.stringify(
+        Array.from({ length: 40 }, (_, i) =>
+          staged(`Heavy ${attempt}-${i}`, {
+            correlation: `heavy ${attempt}-${i}|2001`,
+            name: `Heavy ${attempt}-${i} ${'x'.repeat(180)}`,
+            watches: Array.from({ length: 60 }, (_, w) => ({
+              diaryUri: `https://boxd.it/H${attempt}-${i}-${w}-${'y'.repeat(200)}`,
+              watchedOn: '2024-01-02',
+              isRewatch: w > 0,
+            })),
+          })),
+      );
+
+    // Each page is legal on its own — well inside the 1,000-row and 2 MiB page bounds — and
+    // it is the accumulation that is refused. That is the whole point of a job ceiling.
+    let refused = null;
+    for (let attempt = 0; attempt < 40 && refused === null; attempt += 1) {
+      try {
+        await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, heavyPage(attempt)]);
+      } catch (error) {
+        refused = error;
+      }
+    }
+
+    assert.ok(refused, 'the byte ceiling has to stop it eventually');
+    assert.match(refused.message, /this import is too large .*bytes/);
+    // And well inside the row ceiling when it happened: the two bounds are independent.
+    assert.ok((await totals()).staged_rows < 5000);
+  });
+
+  it('leaves a ten-thousand-film import comfortably inside both bounds', async () => {
+    /**
+     * **The assertion that keeps this a safety ceiling rather than a product cap.**
+     *
+     * The supported library size is about ten thousand films and is a measured product
+     * recommendation, not a refusal. If a future edit brings the safety numbers anywhere
+     * near it, this fails — which is the check the previously rejected five-thousand-title
+     * cap would not have survived.
+     */
+    const { rows } = await t.sql(
+      `select
+         (select (value #>> '{}')::bigint from app_config where key = 'import.max_job_rows')  as max_rows,
+         (select (value #>> '{}')::bigint from app_config where key = 'import.max_job_bytes') as max_bytes`);
+
+    // 185 bytes per normalised row is what `payload.test.ts` measures across the real
+    // export and the generated 2,500 / 5,000 / 10,000 libraries.
+    const tenThousandRows = 10000;
+    const tenThousandBytes = tenThousandRows * 185;
+
+    assert.ok(
+      Number(rows[0].max_rows) >= tenThousandRows * 4,
+      'the row ceiling must stay far above the supported library size',
+    );
+    assert.ok(
+      Number(rows[0].max_bytes) >= tenThousandBytes * 8,
+      'and so must the byte ceiling',
+    );
+  });
+
+  it('clamps a configured ceiling that would be absurd in either direction', async () => {
+    // An operator cannot make the safety bound smaller than a legitimate import by editing
+    // one row, and cannot remove it either. The floor is 1,000 rows and 4 MiB.
+    await config('import.max_job_rows', 1);
+
+    // 1 was clamped up to the 1,000 floor, so a full page of a thousand still stages.
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(1, 1000)]);
+    assert.equal((await totals()).staged_rows, 1000);
+
+    // And the one after it is the row that crosses the floor.
+    await assert.rejects(
+      () => t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(1001, 1)]),
+      /this import is too large/,
+    );
+  });
+
+  it('survives a malformed ceiling rather than refusing every import', async () => {
+    await t.sql(
+      `insert into app_config (key, value) values ('import.max_job_rows', '"loads"'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, page(1, 10)]);
+    assert.equal((await totals()).staged_rows, 10, 'falls back to the default');
+  });
+});

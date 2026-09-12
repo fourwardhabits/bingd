@@ -79,6 +79,26 @@ export const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 export const MAX_WATCHES_PER_TITLE = 100;
 
 /**
+ * The whole job's ceiling, restated from `import_stage`'s own (`20260917001100`).
+ *
+ * **A safety ceiling, not the supported library size.** Those are different questions and
+ * conflating them is how an arbitrary product cap gets built. The supported size is about
+ * ten thousand films — measured in `scale.test.ts`, and a recommendation rather than a
+ * refusal. These sit five times above it, far enough that no real Letterboxd account
+ * reaches them and close enough that a client with a runaway bug does.
+ *
+ * Restated here so the refusal happens at the preview, where somebody can still read a
+ * sentence about it, rather than a third of the way through an upload.
+ */
+export const MAX_JOB_ROWS = 50_000;
+export const MAX_JOB_BYTES = 32 * 1024 * 1024;
+
+/** What a whole staged job would weigh, as the server will measure it. */
+export function jobBytes(pages: readonly (readonly StagingRow[])[]): number {
+  return pages.reduce((total, page) => total + pageBytes(page), 0);
+}
+
+/**
  * Turns a normalised export into the rows the RPC accepts.
  *
  * Watched rows carry their own viewings; watchlist rows carry nothing but identity, because

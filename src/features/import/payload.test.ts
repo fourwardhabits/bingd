@@ -1,6 +1,9 @@
 import { generateExport } from './generate-fixture';
 import { normalise } from './letterboxd';
 import {
+  jobBytes,
+  MAX_JOB_BYTES,
+  MAX_JOB_ROWS,
   MAX_PAGE_BYTES,
   MAX_PAGE_ROWS,
   MAX_WATCHES_PER_TITLE,
@@ -254,5 +257,33 @@ describe('viewings per title', () => {
     expect(rows[0]!.watches).toHaveLength(MAX_WATCHES_PER_TITLE);
     const kept = rows[0]!.watches!.map((w) => w.watchedOn);
     expect(kept[0]!).toBe([...kept].sort().reverse()[0]!);
+  });
+});
+
+describe('the ceiling on a whole job', () => {
+  /**
+   * **A safety ceiling and not the supported library size**, and this is the test that keeps
+   * the two apart. The supported size is about ten thousand films — measured across these
+   * same generated libraries — and is a recommendation rather than a refusal. The safety
+   * numbers exist to bound a runaway client, and must stay far enough above the product
+   * size that no real Letterboxd account ever meets one.
+   *
+   * A future edit that brought them near the product size would fail here, which is the
+   * check the previously rejected five-thousand-title cap would not have survived.
+   */
+  it('leaves the largest library anybody tests with far inside it', () => {
+    const rows = stagingRows(library(10_000));
+    const pages = paginate(rows);
+
+    expect(rows.length).toBeLessThan(MAX_JOB_ROWS / 4);
+    expect(jobBytes(pages)).toBeLessThan(MAX_JOB_BYTES / 8);
+  });
+
+  it('measures a job as the sum of the pages the server will be sent', () => {
+    const rows = stagingRows(normalise(REAL_EXPORT, { now: NOW }));
+    const pages = paginate(rows);
+
+    expect(jobBytes(pages)).toBe(pages.reduce((n, page) => n + pageBytes(page), 0));
+    expect(jobBytes([])).toBe(0);
   });
 });
