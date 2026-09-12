@@ -38,7 +38,7 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  * the only part of this function that makes a decision, and therefore the only part worth
  * a suite of its own.
  */
-import { pick } from './match.mjs';
+import { catalogueItem, pick } from './match.mjs';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -63,7 +63,17 @@ const CONCURRENCY = 8;
 const BATCH = 50;
 
 export type Claim = { row_id: string; name: string; year: number | null };
-export type ProviderResult = { id: number; title: string; release_date?: string | null };
+export type ProviderResult = {
+  id: number;
+  title: string;
+  release_date?: string | null;
+  original_title?: string | null;
+  overview?: string | null;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  original_language?: string | null;
+  popularity?: number | null;
+};
 
 async function search(claim: Claim, key: string, bearer: string | null): Promise<ProviderResult[]> {
   const url = new URL('https://api.themoviedb.org/3/search/movie');
@@ -90,7 +100,8 @@ async function search(claim: Claim, key: string, bearer: string | null): Promise
 /**
  * Writes a resolved title through the catalogue adapter's own upsert, so a film the
  * provider found enters `media_items` exactly as a search would have put it there —
- * one row per (kind, tmdb_id), with the provenance the catalogue expects.
+ * one row per (kind, tmdb_id), with the provenance the catalogue expects, and with the
+ * poster the search returned. That last part was not true until `catalogueItem`; see it.
  */
 async function upsert(db: SupabaseClient, result: ProviderResult): Promise<string | null> {
   /**
@@ -110,14 +121,7 @@ async function upsert(db: SupabaseClient, result: ProviderResult): Promise<strin
    * symptom, which is why the first fix alone would have looked like no fix at all.
    */
   const { data, error } = await db.rpc('tmdb_upsert_titles', {
-    p_items: [
-      {
-        kind: 'movie',
-        tmdb_id: result.id,
-        title: result.title,
-        release_date: result.release_date ?? null,
-      },
-    ],
+    p_items: [catalogueItem(result)],
   });
   if (error) return null;
   return Array.isArray(data) && data.length > 0 ? (data[0].media_item_id ?? null) : null;

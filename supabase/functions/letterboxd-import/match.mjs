@@ -91,3 +91,36 @@ export function pick(claim, results) {
   const confident = results.filter((r) => isConfident(claim, r));
   return confident.length === 1 ? confident[0] : null;
 }
+
+/** A string the catalogue can store, or null. TMDB sends '' for "nothing here". */
+const textOrNull = (value) => (typeof value === 'string' && value.trim() !== '' ? value : null);
+
+/**
+ * The catalogue row for a confident result, carrying everything the search already paid for.
+ *
+ * **The poster is the reason this exists** (physical QA, staging, 2026-09-12). The upsert
+ * used to send only the id, title and date, so every film the provider tier placed entered
+ * `media_items` as a stub: fourteen of one founder's twenty-four imported films showed an
+ * initials tile in Collection until each title page was opened and its detail call filled
+ * the row in. `/search/movie` had returned `poster_path` for every one of them, and the
+ * catalogue adapter's own search path (`normalize.ts` `fromSearchResult`) already keeps it.
+ *
+ * So this costs no request: it is the same response, no longer thrown away. Runtime,
+ * genres and certification are not in a search result and stay null, which the upsert's
+ * coalesce reads as "unknown" rather than overwriting what a detail call wrote. Genre ids
+ * would need the provider's genre list to become names, and a name is what the column holds.
+ */
+export function catalogueItem(result) {
+  return {
+    kind: 'movie',
+    tmdb_id: result.id,
+    title: result.title,
+    original_title: textOrNull(result.original_title),
+    release_date: textOrNull(result.release_date),
+    overview: textOrNull(result.overview),
+    poster_path: textOrNull(result.poster_path),
+    backdrop_path: textOrNull(result.backdrop_path),
+    original_language: textOrNull(result.original_language),
+    popularity: typeof result.popularity === 'number' ? result.popularity : null,
+  };
+}
