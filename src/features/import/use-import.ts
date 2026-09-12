@@ -441,12 +441,28 @@ export function useImport(surface: ImportSurface) {
 
     if (jobId === null) return;
 
+    /**
+     * **Marked before the call, cleared only on success.**
+     *
+     * The first version set `abandoned` in the failure handler, which left a window: the
+     * discard is in flight for as long as the network takes to give up, and `start` reads
+     * this ref synchronously. On the dropped connection that motivates the whole mechanism
+     * that window is seconds long and is the *normal* case, not the rare one — pick a second
+     * archive inside it and `abandoned.current` is still null, `import_create` adopts the
+     * job that is being discarded, and the two archives merge exactly as before.
+     *
+     * Pessimistic, so the window closes in the safe direction: the debt is recorded first,
+     * and a discard that succeeds clears it. The cost of being wrong is one redundant
+     * `import_discard` on the next import, which answers `gone` and is free.
+     */
+    abandoned.current = jobId;
+
     void (async () => {
       try {
         const { error } = await supabase.rpc('import_discard', { p_job_id: jobId });
-        if (error) abandoned.current = jobId;
+        if (!error && abandoned.current === jobId) abandoned.current = null;
       } catch {
-        abandoned.current = jobId;
+        // Leave the debt standing; `start` settles it before creating anything.
       }
     })();
   }, [settle]);

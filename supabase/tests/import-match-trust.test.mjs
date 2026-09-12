@@ -283,25 +283,53 @@ describe('a mapping two accounts did agree on', () => {
     assert.equal(still.media_item_id, dune, 'the established mapping holds');
 
     /**
-     * **And the rival claim is never even recorded**, which is stronger than the rule this
-     * test was written to check.
+     * **And the rival rows were placed by their own evidence, not by the mapping.**
      *
-     * T0 runs before T1. Once the URI is trusted, a later row carrying it resolves to the
-     * trusted film whatever the row calls itself — so the attacker's own import silently
-     * becomes a claim for the *correct* pair, and the film they named never enters the
-     * evidence at all. There is no competing claim to accumulate, which means a trusted
-     * mapping cannot be contested by volume even in principle.
+     * An earlier version of this asserted the opposite, and documented it as a feature: T0
+     * ran before T1 and applied the trusted film whatever the row called itself, so a
+     * disagreeing import was silently overwritten. That is the read side of the trust
+     * boundary having no guard at all — and it is what made a poisoned mapping damaging
+     * rather than merely wrong, since the victim's own archive contradicted it and was
+     * never consulted (`20260917001300`).
      *
-     * The cost is real and worth naming: an honest person whose export genuinely disagrees
-     * with an established mapping gets the established film. That is the same trade every
-     * shared cache makes, and it is why promotion demands agreement in the first place.
+     * T0 now applies the same year agreement every claim had to pass. *Rival Claim Film*
+     * (2003) does not agree with *Desert Saga* (2021), so the mapping declines and T1
+     * places the row correctly — which is both the honest outcome for these two accounts
+     * and the thing that bounds the damage of a mapping somebody did poison.
      */
     assert.equal(
-      (await claims(DUNE_URI)).filter((c) => c.media_item_id === rival).length,
-      0,
-      'a trusted URI cannot be contested: T0 places the row before T1 can name anything else',
+      (await statusOf(jobE, 'rival claim film|2003')).media_item_id,
+      rival,
+      'a trusted mapping does not speak over a row whose year contradicts it',
     );
-    assert.equal((await statusOf(jobE, 'rival claim film|2003')).media_item_id, dune);
+    assert.equal(
+      (await claims(DUNE_URI)).filter((c) => c.media_item_id === rival).length,
+      2,
+      'and the disagreement is recorded rather than absorbed',
+    );
+
+    // The established mapping is still not displaced by those two claims.
+    assert.equal((await trusted(DUNE_URI)).media_item_id, dune);
+  });
+
+  it('still answers a row that carries no year, which is the residual risk', async () => {
+    /**
+     * **What the year guard cannot cover, said out loud.**
+     *
+     * A Letterboxd export row without a year has nothing to disagree with, so T0 applies
+     * the trusted mapping unchecked. That is correct — the mapping is the only evidence
+     * there is — and it is also the surface a poisoned pair still reaches. Recorded here
+     * because the residual belongs in the suite rather than only in a document.
+     */
+    await matchArchive(ana, [row('Desert Saga Of Arrakeen', 2021, DUNE_URI)]);
+    await matchArchive(ben, [row('Desert Saga Of Arrakeen', 2021, DUNE_URI)]);
+
+    const g = await t.createUser({ username: 'trust_g_noyear' });
+    const jobG = await matchArchive(g, [
+      row('Something Else Entirely', 2021, DUNE_URI, { year: null, correlation: 'something else entirely|' }),
+    ]);
+
+    assert.equal((await statusOf(jobG, 'something else entirely|')).media_item_id, dune);
   });
 });
 

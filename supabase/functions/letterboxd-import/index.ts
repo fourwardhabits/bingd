@@ -177,8 +177,28 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
           // of the retry: it stays `needs_provider` until its third attempt, and settles
           // as unmatched after that.
           failed += 1;
-          reasons.add(String(cause).slice(0, 120));
-          if (String(cause).includes('rate limited')) rateLimited = true;
+          /**
+           * **A classification, not the message.**
+           *
+           * `String(cause)` is not only the two errors thrown above: a transport failure in
+           * Deno's `fetch` produces `TypeError: error sending request for url (…?query=<the
+           * film's title>&…)`. Slicing that to 120 characters cuts the credential but keeps
+           * roughly thirty characters of somebody's film title — and this answer travels to
+           * `net.http_post`, landing in `net._http_response`, a table with none of the
+           * retention discipline the rest of this feature has. A `Set` of fifty claims would
+           * have carried fifty titles there.
+           *
+           * The operator needs to know *which kind* of failure, which is what these are.
+           */
+          const text = String(cause);
+          reasons.add(
+            text.includes('rate limited')
+              ? 'rate_limited'
+              : /provider (\d{3})/.exec(text)?.[1]
+                ? `provider_${/provider (\d{3})/.exec(text)![1]}`
+                : 'transport',
+          );
+          if (text.includes('rate limited')) rateLimited = true;
         }
       }),
     );

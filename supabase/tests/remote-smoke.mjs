@@ -1066,6 +1066,9 @@ expectRefused(
 );
 expectRefused('anon cannot execute unschedule_import_drain', await rpc('unschedule_import_drain', {}));
 expectRefused('anon cannot execute import_drain_status', await rpc('import_drain_status', {}));
+// 20260917001200. The sweep retires abandoned jobs and deletes their rows; a client
+// reaching it could clear somebody else's half-staged import.
+expectRefused('anon cannot execute _import_sweep_abandoned', await rpc('_import_sweep_abandoned', {}));
 
 /**
  * The staging table and the two provenance tables.

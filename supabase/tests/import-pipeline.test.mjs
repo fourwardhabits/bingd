@@ -1711,7 +1711,7 @@ describe('what survives a job that failed', () => {
     return rows[0]?.raw ?? null;
   };
 
-  it('keeps only the name and year when the job is dead-lettered', async () => {
+  it('keeps nothing at all when the job is dead-lettered', async () => {
     const jobId = await stagedPrivateRow();
 
     // Exhaust the attempt budget the way a job that keeps erroring does, then run the tick
@@ -1725,26 +1725,41 @@ describe('what survives a job that failed', () => {
     assert.equal(job[0].status, 'failed');
     assert.ok(job[0].completed_at, 'a dead-lettered job is completed');
 
-    const raw = await rawOf(jobId);
-    assert.ok(raw, 'the row survives, because the count is what the repair surface renders');
-    assert.deepEqual(Object.keys(raw).sort(), ['name', 'year']);
-
-    // Said again as the thing that actually matters, so a future `jsonb_build_object` that
-    // grows a field fails here rather than shipping.
-    const serialised = JSON.stringify(raw);
-    for (const secret of ['VERAFILM', 'VERADIARY', 'rating', 'bucket', 'watchedOn', 'watches']) {
-      assert.ok(!serialised.includes(secret), `a failed job must not keep ${secret}`);
-    }
+    /**
+     * **Deleted, not redacted** (`20260917001300`).
+     *
+     * An earlier version kept the name and year here, reasoning by analogy with a completed
+     * job's unresolved rows. But those have a reader and these do not: the repair surface
+     * belongs to a finished import, and nothing anywhere renders the leftovers of one that
+     * failed. Redaction answered "what may we keep" without ever asking "why are we keeping
+     * it".
+     */
+    assert.equal(await count('import_rows', `job_id = '${jobId}'`), 0);
   });
 
-  it('still keeps the name and year, so the count is not lost with the payload', async () => {
-    const jobId = await stagedPrivateRow();
-    await t.sql(`update import_jobs set failures = 3 where id = $1`, [jobId]);
-    await t.sql(`select _drain_import_jobs(5, 500) as r`);
+  it('keeps nothing when the sweep retires an abandoned job either', async () => {
+    // The other road to `failed`, and the same answer. A half-staged archive nobody came
+    // back for has even less of a reader than a dead-lettered one.
+    //
+    // Staged without `import_ready`, because that is what "abandoned" means: the sweep
+    // takes only `pending` jobs, and `stagedPrivateRow` hands its job to the worker.
+    await t.actAs(vera);
+    const { rows: created } = await t.sql(`select import_create() as id`);
+    const jobId = created[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged('Vera Walked Away', {
+        correlation: 'vera walked away|2001',
+        filmUri: 'https://boxd.it/VERAGONE',
+        watches: [{ diaryUri: 'https://boxd.it/VERAGONEDIARY', watchedOn: '2024-05-06', isRewatch: false }],
+      }),
+    ])]);
+    await t.actAs(null);
 
-    const raw = await rawOf(jobId);
-    assert.equal(raw.name, 'Vera Private');
-    assert.equal(raw.year, 2001);
+    await t.sql(
+      `update import_jobs set created_at = now() - interval '30 hours' where id = $1`, [jobId]);
+    assert.equal((await t.sql(`select _import_sweep_abandoned() as n`)).rows[0].n, 1);
+
+    assert.equal(await count('import_rows', `job_id = '${jobId}'`), 0);
   });
 });
 
@@ -2046,13 +2061,27 @@ describe('the counts the summary reads', () => {
     ];
     const jobId = await importArchive(ada, watchedRows);
 
+    // **`already` is in this sum**, and was not: the total omitted it while no test in the
+    // file ever built a job where it was non-zero, so a regression that moved rows into it
+    // would have passed twice over. The re-import below is that job.
     const c = await countsOf(jobId);
-    const total = (c.watched ?? 0) + (c.kept ?? 0) + (c.ambiguous ?? 0)
+    const total = (c.watched ?? 0) + (c.kept ?? 0) + (c.already ?? 0) + (c.ambiguous ?? 0)
       + (c.unmatched ?? 0) + (c.stragglers ?? 0);
     assert.equal(total, watchedRows.length, 'every watched row is counted exactly once');
     assert.equal(c.watched, 1);
     assert.equal(c.kept, 1);
+    assert.equal(c.already, 0);
     assert.equal(c.unmatched, 1);
+
+    // The same archive again: the film this run added moves from `watched` to `already`,
+    // and the partition still holds.
+    const second = await countsOf(await importArchive(ada, watchedRows));
+    const secondTotal = (second.watched ?? 0) + (second.kept ?? 0) + (second.already ?? 0)
+      + (second.ambiguous ?? 0) + (second.unmatched ?? 0) + (second.stragglers ?? 0);
+    assert.equal(secondTotal, watchedRows.length);
+    assert.equal(second.watched, 0);
+    assert.equal(second.already, 1);
+    assert.equal(second.kept, 1);
     assert.ok(added && ranked);
   });
 });
@@ -2316,7 +2345,7 @@ describe('an archive nobody came back for', () => {
     assert.ok(raw.filmUri, 'a live job keeps its payload, which is what it is for');
   });
 
-  it('is retired and redacted once nobody has come back for a day', async () => {
+  it('is retired and cleared once nobody has come back for a day', async () => {
     const jobId = await halfStaged();
     await t.sql(
       `update import_jobs set created_at = now() - interval '30 hours' where id = $1`, [jobId]);
@@ -2329,14 +2358,11 @@ describe('an archive nobody came back for', () => {
     assert.ok(job[0].completed_at, 'and completed, so it stops holding the one live slot');
     assert.equal(job[0].last_error, 'abandoned');
 
-    // The completion trigger did the redaction, which is the point of marking it failed
-    // rather than inventing a second rule about what a finished job keeps.
-    const raw = await rawOf(jobId);
-    assert.deepEqual(Object.keys(raw).sort(), ['name', 'year']);
-    const serialised = JSON.stringify(raw);
-    for (const secret of ['ZOEFILM', 'ZOEDIARY', 'rating', 'bucket', 'watchedOn', 'watches']) {
-      assert.ok(!serialised.includes(secret), `an abandoned job must not keep ${secret}`);
-    }
+    // The completion trigger cleaned up, which is the point of marking it failed rather
+    // than inventing a second rule about what a finished job keeps. For a failed job that
+    // means deletion: nothing renders an abandoned import's leftovers (`20260917001300`).
+    assert.equal(await rawOf(jobId), null);
+    assert.equal(await count('import_rows', `job_id = '${jobId}'`), 0);
   });
 
   it('frees the account to import again', async () => {
@@ -2387,5 +2413,60 @@ describe('an archive nobody came back for', () => {
       `select prosrc from pg_proc where proname = 'schedule_import_drain'`);
     assert.match(rows[0].prosrc, /_import_sweep_abandoned/);
     assert.match(rows[0].prosrc, /_drain_import_jobs/);
+  });
+});
+
+
+// ===========================================================================
+// The watchlist count, which was the one bucket left counting attempts
+// ===========================================================================
+
+describe('a watchlist the import did not add to', () => {
+  let wren;
+
+  before(async () => {
+    wren = await t.createUser({ username: 'pipe_wren' });
+  });
+
+  beforeEach(async () => {
+    await t.actAs(null);
+    await t.sql(`delete from watchlist where user_id = $1`, [wren]);
+    await t.sql(`delete from user_media where user_id = $1`, [wren]);
+    await t.sql(`delete from import_jobs where user_id = $1`, [wren]);
+  });
+
+  const countsOfJob = async (jobId) =>
+    (await t.sql(`select counts from import_jobs where id = $1`, [jobId])).rows[0].counts;
+
+  it('does not count a film that was already on it', async () => {
+    // The defect `20260917001000` fixed for `watched` and left standing here: the apply
+    // step inserts `on conflict do nothing`, so a title already listed is a no-op — and the
+    // row existing said nothing about who put it there.
+    const film = await datedMovie(`Wanted Already ${seq}`, 2015);
+    await t.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [wren, film]);
+
+    const jobId = await importArchive(wren, [
+      staged(`Wanted Already ${seq - 1}`, {
+        kind: 'watchlist', correlation: 'wanted already|2015', year: 2015,
+      }),
+    ]);
+
+    assert.equal((await countsOfJob(jobId)).watchlist, 0, 'nothing was added');
+    assert.equal(await count('watchlist', `user_id = '${wren}'`), 1);
+  });
+
+  it('counts one the import really did add, and not again on a re-import', async () => {
+    const film = await datedMovie(`Wanted New ${seq}`, 2016);
+    const rows = [
+      staged(`Wanted New ${seq - 1}`, {
+        kind: 'watchlist', correlation: 'wanted new|2016', year: 2016,
+      }),
+    ];
+
+    assert.equal((await countsOfJob(await importArchive(wren, rows))).watchlist, 1);
+    assert.equal((await countsOfJob(await importArchive(wren, rows))).watchlist, 0,
+      're-importing forty watchlist films used to report forty additions');
+
+    assert.equal(await count('watchlist', `user_id = '${wren}' and media_item_id = '${film}'`), 1);
   });
 });
