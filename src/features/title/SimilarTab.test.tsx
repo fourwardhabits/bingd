@@ -33,6 +33,14 @@ const reads: Read[] = [];
 const tableRows: Record<string, unknown[]> = {};
 /** Tables whose read comes back as a PostgREST error, for the degradation tests. */
 const mockFailTables = new Set<string>();
+/**
+ * Tables whose read is parked rather than answered, keyed to the callbacks waiting on it.
+ *
+ * Every read in this file otherwise resolves in the same microtask as the call, which
+ * makes two queries look simultaneous when in production they are not. Parking one is the
+ * only way to assert what the screen does *between* them — see the late-scores test.
+ */
+const mockHeld = new Map<string, (() => void)[]>();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -46,6 +54,12 @@ jest.mock('@/lib/supabase', () => ({
           const object = row as Record<string, unknown>;
           return Object.entries(filters).every(([key, value]) => object[key] === value);
         });
+      };
+      /** Answers now, or when the table is released. */
+      const held = <T,>(answer: () => T): Promise<T> => {
+        const waiting = mockHeld.get(table);
+        if (!waiting) return Promise.resolve(answer());
+        return new Promise<T>((resolve) => waiting.push(() => resolve(answer())));
       };
       const chain = {
         select: () => chain,
@@ -61,18 +75,13 @@ jest.mock('@/lib/supabase', () => ({
         order: () => chain,
         limit: () => chain,
         gt: () => chain,
-        single: () =>
-          Promise.resolve({ data: rows()[0] ?? null, error: failure() }),
-        maybeSingle: () =>
-          Promise.resolve({ data: rows()[0] ?? null, error: failure() }),
-        then: (resolve: (value: unknown) => unknown) => {
-          const data = rows();
-          return Promise.resolve({
-            data,
-            error: failure(),
-            count: data.length,
-          }).then(resolve);
-        },
+        single: () => held(() => ({ data: rows()[0] ?? null, error: failure() })),
+        maybeSingle: () => held(() => ({ data: rows()[0] ?? null, error: failure() })),
+        then: (resolve: (value: unknown) => unknown) =>
+          held(() => {
+            const data = rows();
+            return { data, error: failure(), count: data.length };
+          }).then(resolve),
       };
       return chain;
     },
@@ -198,6 +207,7 @@ beforeEach(() => {
 
   reads.length = 0;
   mockFailTables.clear();
+  mockHeld.clear();
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.media_items = [film];
   tableRows.user_media = [];
@@ -270,6 +280,13 @@ const refreshControl = (view: View) =>
     .root!.queryAll(() => true)
     .map((node) => node as never as { props?: Record<string, any> })
     .find((node) => node.props?.refreshControl)?.props?.refreshControl;
+
+const holdReadsOf = (table: string) => mockHeld.set(table, []);
+const releaseReadsOf = (table: string) => {
+  const waiting = mockHeld.get(table) ?? [];
+  mockHeld.delete(table);
+  for (const answer of waiting) answer();
+};
 
 /** The first tile in the grid, as something pressable. */
 const firstTile = (view: View) => {
@@ -396,8 +413,28 @@ describe('Similar, on a film', () => {
 
     await waitFor(() => expect(view.getByText('Could not load similar titles')).toBeTruthy());
     expect(view.queryByText('No similar titles yet')).toBeNull();
-    // Asked once. Losing a claim costs the adapter no provider request, so asking is the
-    // right move — asking twice is not.
+    /**
+     * **And the adapter is not called at all** (independent review 80).
+     *
+     * A claim we can already see is one the adapter could only refuse, so asking would
+     * cost an edge-function round trip to be told what the row in hand already said. The
+     * earlier version asked once and, with the app's default `retry: 2` behind it, up to
+     * three times for one opening of the tab.
+     */
+    expect(mockCacheSimilar).not.toHaveBeenCalled();
+  });
+
+  it('makes one adapter call per opening even when the fill fails', async () => {
+    // `retry: false` on this query, against the app-wide default of three attempts. A
+    // provider refusal is about the account rather than this title, so the second and
+    // third attempts are refused too, having each cost a round trip.
+    tableRows.media_items = [film, ...three];
+    mockCacheSimilar.mockRejectedValue(new Error('BG429'));
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(view.getByText('Could not load similar titles')).toBeTruthy());
     expect(mockCacheSimilar).toHaveBeenCalledTimes(1);
   });
 
@@ -675,6 +712,25 @@ describe('Similar, on television', () => {
     expect(mockPush).not.toHaveBeenCalledWith('/title/cand-1-s1');
   });
 
+  it('never lists the show the season belongs to', async () => {
+    /**
+     * The season half of "do not list the title the reader is on".
+     *
+     * A season page's facet belongs to the **series above it**, so the id to exclude is
+     * not the page's own — it is the facet's owner. TMDB does not put a series in its own
+     * recommendations, but the data model does not forbid it, and a season page listing
+     * the show it is a season of is the most obviously wrong row this grid could carry.
+     */
+    mockOpenId = 'season-1';
+    tableRows.media_items = [season, { ...film, id: 'series-1', kind: 'series' }, show(1)];
+    tableRows.media_cache = [facet('series-1', ['series-1', 'cand-1'])];
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1']));
+  });
+
   it('never lists a film under a show', async () => {
     mockOpenId = 'series-1';
     tableRows.media_items = [series, show(1), candidate(2)];
@@ -852,6 +908,43 @@ describe('the order the provider gave', () => {
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
     expect(shown(view)[1]).toMatch(/scored 10\.0 out of 10/);
     expect(shown(view)[0]).not.toMatch(/scored/);
+  });
+
+  it('does not re-order when the reader’s scores arrive after the grid', async () => {
+    /**
+     * The order is settled before the chips exist, and stays settled when they land.
+     *
+     * Every read in this file otherwise answers in the same microtask, which makes the
+     * two queries look simultaneous and would let a reordering-on-score bug pass
+     * unnoticed. Parking `rankings` is what separates them: the grid renders from the
+     * facet alone, and the assertion after the release is that nothing moved — only that
+     * a chip appeared, on the tile that was already second.
+     */
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'cand-2',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+      },
+    ];
+    holdReadsOf('rankings');
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+    // Drawn, and carrying no score yet.
+    expect(shown(view).some((label) => /scored/.test(label))).toBe(false);
+
+    await act(async () => {
+      releaseReadsOf('rankings');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => expect(shown(view)[1]).toMatch(/scored 10\.0 out of 10/));
+    expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']);
   });
 
   it('lets nothing that is not in the facet reach the grid', async () => {

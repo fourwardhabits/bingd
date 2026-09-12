@@ -168,6 +168,22 @@ export function useSimilarTitles({ sourceId, kind, facetId, userId, enabled }: S
     queryKey: similarKey(facetId ?? sourceId ?? ''),
     enabled: asking,
     staleTime: SIMILAR_STALE_MS,
+    /**
+     * **One attempt per opening, against the app-wide default of three.**
+     *
+     * This is the only query in the app whose `queryFn` can invoke a charged edge
+     * function, and the two ways it fails are both ways a retry makes worse. A provider
+     * refusal is about the *account* — the hourly ceiling in api.md §9 — so the second
+     * and third attempts are refused too, having each cost a round trip. And a facet
+     * somebody else is filling is thrown deliberately (see `similarIds`), which without
+     * this would become three invocations of an action that can only answer "not mine"
+     * for as long as the two-minute claim stands.
+     *
+     * The retry is the reader's instead: the error state says pull down, and
+     * pull-to-refresh reaches this query. That also makes the quiet state appear at once
+     * rather than after two backoffs on a tab somebody is looking at.
+     */
+    retry: false,
     queryFn: async (): Promise<SimilarCandidate[]> => {
       const { owner, ids } = await similarIds(facetId, sourceId!);
       // The page's own two identities. TMDB does not put a title in its own
@@ -296,14 +312,17 @@ const noRefresh = async () => undefined;
  *   - **`filling`** — `tmdb_claim_facet`'s two-minute placeholder, which carries a
  *     `claimed_at` and no `ids`. Somebody else is fetching this very facet right now.
  *
- * `filling` **after our own attempt is a failure and is thrown**, and that is the one
- * thing that cannot be got wrong here. We asked the adapter, it lost the claim to the
- * holder and returned without fetching, and the row still says nothing. Returning `[]`
- * there would put "No similar titles yet" on screen about a title that has plenty, and
- * React Query would hold that answer for the hour above — the reader would be told the
- * wrong thing and then not shown the right one. Thrown, it is the quiet error state with
- * a pull-to-refresh behind it, and the retry costs no provider request because the
- * adapter refuses the claim again.
+ * `filling` **is thrown rather than flattened to `[]`**, and that is the one thing that
+ * cannot be got wrong here. Returning an empty list would put "No similar titles yet" on
+ * screen about a title that has plenty, and React Query would hold that answer for the
+ * hour above — the reader would be told the wrong thing and then not shown the right one.
+ * Thrown, it is the quiet error state with a pull-to-refresh behind it.
+ *
+ * It is thrown on the **first** read as well as after our own attempt, which is an
+ * edge-function call saved rather than a nicety: a claim we can already see is a claim
+ * the adapter would only refuse, at the cost of a round trip to be told what the row in
+ * hand already said. Between that and `retry: false` above, one opening of the tab is one
+ * adapter invocation at most, whatever state the facet is in.
  *
  * That is a real distinction rather than a defensive one: the migration's own header
  * notes that a claim turns old data into no data while a refresh runs, and says the trade
@@ -335,6 +354,11 @@ async function similarIds(
   if (facetId) {
     const first = await readFacet(facetId);
     if (first.state === 'ready') return { owner: facetId, ids: first.ids };
+    // Somebody already holds the claim, and we know it before spending anything. Calling
+    // the adapter here would be asking a question whose answer we are already looking at:
+    // it would lose the claim and return `cached`, having cost an edge-function
+    // invocation to tell us what the row said.
+    if (first.state === 'filling') throw new ClaimHeld();
   }
 
   // The **source** id, not the facet's. The adapter takes what the reader is looking at
@@ -346,13 +370,25 @@ async function similarIds(
 
   const second = await readFacet(owner);
   if (second.state === 'ready') return { owner, ids: second.ids };
-  if (second.state === 'filling') {
-    throw new Error('similar: another refresh holds this facet');
-  }
+  if (second.state === 'filling') throw new ClaimHeld();
   // Cold after our own attempt: the adapter declined to ask — no tmdb id, or a malformed
   // season. Nothing is cached, and the next open will ask again for the price of one
   // edge-function call and no provider request.
   return { owner, ids: [] };
+}
+
+/**
+ * Somebody else is refreshing this facet, so there is no answer to give yet.
+ *
+ * A named class rather than a bare `Error` because it is a *state* rather than a fault —
+ * the reader will get an answer in under two minutes — and a future version could show it
+ * differently from a provider refusal without having to match on a message string.
+ */
+class ClaimHeld extends Error {
+  constructor() {
+    super('similar: another refresh holds this facet');
+    this.name = 'ClaimHeld';
+  }
 }
 
 type FacetState =
