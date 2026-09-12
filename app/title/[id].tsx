@@ -469,7 +469,6 @@ export default function TitleScreen() {
     // and as a one-element array under other generated types — the same normalisation
     // the identity block does at `const parent =` below.
     facetId: data?.title?.kind === 'season' ? (parentOf(data.title.parent)?.id ?? null) : titleId,
-    sourceTitle: data?.title?.title ?? '',
     userId: profile.id,
     enabled: showsSimilar,
   });
@@ -1817,7 +1816,9 @@ export default function TitleScreen() {
          * travel in each tile's accessibility label already.
          *
          * The score chip is the Collection wall's, on a candidate the reader has ranked
-         * and on nothing else. Nothing new is drawn for this tab.
+         * and on nothing else. Nothing new is drawn for this tab, and the chip is the
+         * only thing on this surface the reader's own history touches: the *order* is
+         * TMDB's, unreranked (founder, 2026-09-12).
          *
          * Every destination is `/title/{id}` — the same push the seasons list above
          * makes and the same one every other surface in the app makes. For a film that
@@ -1827,16 +1828,13 @@ export default function TitleScreen() {
          * from its parent instead of invented for it.
          */}
         {activeTab === 'similar' ? (
-          similar.slate.tiles.length ? (
+          similar.tiles.length ? (
             <PosterGrid
-              tiles={similar.slate.tiles}
+              tiles={similar.tiles}
               onPressTile={(tile) => {
                 track({
                   name: 'similar_title_opened',
-                  props: {
-                    medium: title.kind === 'movie' ? 'movies' : 'tv',
-                    personalized: similar.slate.personalized,
-                  },
+                  props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
                 });
                 router.push(`/title/${tile.id}`);
               }}

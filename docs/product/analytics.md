@@ -225,7 +225,7 @@ exists to make visible.
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
 | `similar_tab_opened` | the reader pressed the **Similar** tab, on the press itself and only on a genuine change of tab | the reader | `medium` |
-| `similar_title_opened` | the reader opened a title **from** that grid | the reader | `medium`, `personalized` |
+| `similar_title_opened` | the reader opened a title **from** that grid | the reader | `medium` |
 
 Two events, because the question is a product question rather than a mechanism one: **is
 the title page a place people explore from**. Similar is the only thing on that page that
@@ -239,18 +239,14 @@ season's are its show's, resolved to series-level by the adapter, because TMDB p
 recommendations for a series and none for a season. A series and a season both report
 `tv`, for the same reason For You's two walls do.
 
-`personalized` says the reader had a taste vector behind the grid — they have ranked
-something, so the genre and language terms were live and could reorder *within* the
-provider's list. **It does not claim the order came out different**: those terms are often
-flat across a similar list, because such a list mostly shares one genre, and a flat term
-reorders nothing. Read it as "could be personalised", which is the split that matters
-when asking whether reranking is earning anything.
-
-It travels on the tap and not on the open, because at the moment the tab is pressed the
-answer is not yet known — and an event that waited for a network reply would stop counting
-the opens that failed. `false` is the shipped path for somebody who has ranked nothing
-rather than a failure: they get the provider's relevance order, under the same popularity
-prior For You applies.
+**There is deliberately no `personalized` property**, and the reason is the feature rather
+than the taxonomy. An earlier draft of the tab reranked its candidates through the For You
+scorer and carried a flag saying whether the reader's taste had been live. The founder's
+V1 does not rerank at all: the grid is TMDB's relevance order after resolving ids,
+removing the current title, deduping and dropping what the catalogue cannot resolve, and
+nothing else. So the property would be a column of `false` — the kind of permanently
+constant series §2 refuses elsewhere. It returns with the bounded rerank, if that ships,
+in the change that makes it mean something.
 
 What deliberately does not travel: which title was opened, which title it was similar
 *to*, and the position in the grid. The first two would be a `media_item_id` under

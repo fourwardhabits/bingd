@@ -212,7 +212,7 @@ describe('the privacy boundary', () => {
     }
   });
 
-  it('lets the Similar events keep the two properties they exist for', () => {
+  it('lets the Similar events keep the one property they exist for', () => {
     /**
      * The other half of the allowlist, which nothing was asserting.
      *
@@ -220,11 +220,11 @@ describe('the privacy boundary', () => {
      * drops every key the list does not name, silently — and that is not hypothetical:
      * `for_you_slate_shown` has been sending none of `medium`, `size` or `repeat_count`
      * since it shipped, and `streak_state_viewed` none of its three, because the type was
-     * widened and the list was not. So the pair below is asserted rather than assumed.
+     * widened and the list was not. So `medium` is asserted rather than assumed.
      */
-    track({ name: 'similar_title_opened', props: { medium: 'tv', personalized: true } });
+    track({ name: 'similar_title_opened', props: { medium: 'tv' } });
 
-    expect(propertiesOf()).toMatchObject({ medium: 'tv', personalized: true });
+    expect(propertiesOf()).toMatchObject({ medium: 'tv' });
   });
 });
 

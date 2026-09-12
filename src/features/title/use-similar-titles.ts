@@ -1,17 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
-import { bandSizes, scoreFor, type Bucket } from '@/features/collection/score';
-import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
-import {
-  scoreCandidate,
-  tasteFrom,
-  type Anchor,
-  type Candidate,
-  type Taste,
-} from '@/features/recommendations/rank';
+import { useMyScores, type MyScore } from '@/features/collection/use-score';
 import { posterUri } from '@/lib/images';
-import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 import { compactName } from '@/lib/titles';
 import { cacheSimilar } from '@/lib/tmdb-adapter';
@@ -52,27 +43,15 @@ type CandidateRow = {
   release_date: string | null;
   poster_path: string | null;
   kind: 'movie' | 'series' | 'season';
-  genres: string[] | null;
-  original_language: string | null;
-  popularity: number | null;
 };
 
-export type SimilarSlate = {
-  tiles: PosterTile[];
-  /**
-   * Whether the viewer had a taste vector behind this grid at all.
-   *
-   * **Not a claim that the order came out different.** It is `sampleSize > 0`: the reader
-   * has ranked something, so the genre and language terms were live. They may still have
-   * been flat across these candidates and changed nothing — which is common, because a
-   * similar list mostly shares one genre — and that is exactly the case this flag is for
-   * telling apart from a reader who could not be personalised for at all.
-   *
-   * False is not a degraded state. It is the provider's relevance order under the same
-   * popularity prior For You uses, which is what this tab ships when there is nothing to
-   * personalise with.
-   */
-  personalized: boolean;
+/** One similar title, as much of it as a poster tile needs. */
+export type SimilarCandidate = {
+  mediaItemId: string;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  kind: 'movie' | 'series';
 };
 
 export type SimilarSource = {
@@ -91,15 +70,13 @@ export type SimilarSource = {
    * parent itself and returns the row it wrote the facet against. See `similarIds`.
    */
   facetId: string | null;
-  /** What the anchor is called. Never rendered; it completes the `Anchor` shape. */
-  sourceTitle: string;
   userId: string;
   /** False until Similar is the tab being shown. */
   enabled: boolean;
 };
 
 /**
- * The titles TMDB associates with this one, ordered for this reader.
+ * The titles TMDB associates with this one, in TMDB's own order.
  *
  * ## What is reused, and what is deliberately not built
  *
@@ -109,45 +86,52 @@ export type SimilarSource = {
  * ordered ids into `media_cache` for a week. This hook is a *reader* of that facet,
  * exactly as `use-for-you.ts` is, plus the one call that fills it when it is cold.
  *
- * The ordering is `rank.ts`' own `scoreCandidate`, unchanged and with no new weight,
- * with **the source title as the single anchor**. That is what keeps the hierarchy the
- * right way up:
+ * ## The order is the provider's, and nothing else touches it
  *
- *   - the candidate *set* is the provider's association list and nothing else, so no
- *     For You candidate can appear here however well it would score;
- *   - the anchor term carries the provider's own position (`positionWeight` decays down
- *     the list) at `WEIGHTS.anchor` — 0.6, the largest weight in the system;
- *   - genre, language and popularity affinity move titles *within* that list.
+ * **Founder decision, 2026-09-12, and it is the whole shape of V1.** An earlier version
+ * reranked these through `rank.ts`' `scoreCandidate` with the source title as a single
+ * anchor, which is the same scorer For You uses. Independent review 79 worked out what
+ * that actually cost: with one anchor the position term spans about 0.30 down to 0.09
+ * across a twenty-title list, while genre, language and popularity affinity are together
+ * worth up to 0.40 — so a candidate low in TMDB's ordering could reach the top of the
+ * grid mostly because it suited the reader's general taste.
  *
- * The anchor's `score` is a flat 10 rather than the reader's own rating of the film
- * they are looking at. A rating would scale the anchor term uniformly across every
- * candidate — it cannot reorder anything — and all it would actually do is quietly hand
- * more of the ordering to taste on a film the reader disliked, which is not a rule
- * anybody asked for. The source title is the *constraint* here, not a preference.
+ * That is the wrong question answered well. This tab asks **"what else is like THIS"**;
+ * "what else would I generally like" is the For You wall, which exists, is reachable in
+ * two taps, and is better at it. So the order here is the provider's relevance order
+ * after four things and only those four:
  *
- * **How much taste can actually move a title, stated rather than left latent.** With one
- * anchor the anchor term saturates at `0.6 × saturate(1) = 0.30` for the provider's first
- * suggestion and falls to about `0.09` for its twentieth, so position is worth roughly
- * 0.21 across the whole list. The three taste terms are worth up to `0.18 + 0.12 + 0.10 =
- * 0.40` — nominally more. In practice they are nearly constant across a *similar* list,
- * which is what keeps position in front: these candidates share the source's genres and
- * language with each other, so the terms that could reorder them mostly do not vary. The
- * cases where they do vary are the cases where reranking is the point. It is worth
- * knowing that the bound is a soft one: a strongly on-taste candidate low in the list can
- * reach the top of the grid. Nothing outside the list ever can, which is the invariant
- * that matters, and it is asserted below.
+ *   1. resolving each id to a catalogue row,
+ *   2. removing the title the reader is on (and, for a season, the series above it),
+ *   3. dropping repeats,
+ *   4. dropping ids the catalogue cannot resolve, or that are the other medium.
  *
- * ## What the viewer's own data is read for
+ * **The popularity prior is gone with the rest of the scorer**, deliberately: it is
+ * weighted 0.10 in `rank.ts` and two adjacent provider positions differ by less than that
+ * near the top, so keeping it "just as a tie-break" would in fact have reordered the list.
+ * TMDB's own ordering already accounts for popularity; applying ours on top was counting
+ * it twice.
  *
- * Two ranked collections, both gated on the tab being open, and both usually already
- * cached — Collection, Profile and this page's own rank line read the same keys. They
- * give the taste vector (`tasteFrom`, spanning both media for the reason its own header
- * states) and, from the same rows, the score chip on a candidate the reader has already
- * ranked. No third read, and no new "score" of any kind: the chip is
- * `scoreFor(bucket, position, bandSizes)`, which is what every other surface shows.
+ * ## The personalisation V1 does have
+ *
+ * A candidate the reader has already ranked keeps its score chip — `PosterGrid`'s own,
+ * the one the Collection wall draws, from `useMyScores`. That is the founder's line for
+ * V1: it changes what a tile *says*, never where it sits.
  *
  * Only a film can carry one. A similar *series* is never itself rankable (AD-1), so the
  * TV half of this tab has no chips by construction rather than by omission.
+ *
+ * ## What a later bounded rerank would need
+ *
+ * Left open rather than built. `scoreCandidate(candidate, [anchor], taste)` is still the
+ * function to use and needs no new schema; reinstating it means widening the select below
+ * to `genres, original_language, popularity`, normalising the genres through
+ * `productGenres` (the taste vector is built from rows that have been through
+ * `resolveMetadata`, so a candidate still saying Animation would score against a genre
+ * the vector has never heard of), and building the vector with `tasteFrom` over
+ * `useRankedCollection` for **both** media. What it would also need, and what V1 does not
+ * attempt, is a bound: a rule saying how far a candidate may move from the position TMDB
+ * gave it. Without one this lands back where review 79 found it.
  *
  * ## Already-ranked candidates are kept
  *
@@ -155,14 +139,7 @@ export type SimilarSource = {
  * answers is "what else is like this", and "the one you gave 9.1" is a good answer to
  * it — it tells the reader the association is sound. The chip is what says so.
  */
-export function useSimilarTitles({
-  sourceId,
-  kind,
-  facetId,
-  sourceTitle,
-  userId,
-  enabled,
-}: SimilarSource) {
+export function useSimilarTitles({ sourceId, kind, facetId, userId, enabled }: SimilarSource) {
   /**
    * Whether there is anything to ask, at all.
    *
@@ -177,11 +154,11 @@ export function useSimilarTitles({
    * The catalogue half, and only that.
    *
    * Keyed on the facet's owner, so every season of a show shares one entry — they share
-   * one facet server-side too. The viewer's taste and rankings are deliberately
-   * **outside** this key: that is the lesson written at length in `use-for-you.ts`'
-   * `inputs`, where putting a per-viewer set in the key turned a bookmark tap into a new
-   * cache entry, a skeleton and a lost scroll position. Ranking something from this very
-   * page must not blank the grid it was ranked from.
+   * one facet server-side too. The viewer's own rankings are deliberately **outside**
+   * this key: that is the lesson written at length in `use-for-you.ts`' `inputs`, where
+   * putting a per-viewer set in the key turned a bookmark tap into a new cache entry, a
+   * skeleton and a lost scroll position. Ranking something from this very page must not
+   * blank the grid it was ranked from — it only lights up a chip.
    *
    * A season whose parent embed did not come back keys on **itself**, because that is the
    * only identity it has: the adapter is asked who the facet belongs to, and until it
@@ -191,7 +168,7 @@ export function useSimilarTitles({
     queryKey: similarKey(facetId ?? sourceId ?? ''),
     enabled: asking,
     staleTime: SIMILAR_STALE_MS,
-    queryFn: async (): Promise<Candidate[]> => {
+    queryFn: async (): Promise<SimilarCandidate[]> => {
       const { owner, ids } = await similarIds(facetId, sourceId!);
       // The page's own two identities. TMDB does not put a title in its own
       // recommendations, but a season page's facet belongs to the series above it and
@@ -201,9 +178,7 @@ export function useSimilarTitles({
 
       const { data, error } = await supabase
         .from('media_items')
-        .select(
-          'id, title, release_date, poster_path, kind, genres, original_language, popularity',
-        )
+        .select('id, title, release_date, poster_path, kind')
         .in('id', wanted)
         // The kind this page is about. A film's list is nearly all films and a series'
         // nearly all shows, but TMDB will put one of the other in either, and a show
@@ -219,14 +194,15 @@ export function useSimilarTitles({
       /**
        * Rebuilt in the provider's order, and **deduplicated by the walk itself**.
        *
-       * PostgREST promises nothing about row order, so the order has to come from the
-       * facet. Walking the facet list also drops every id the catalogue could not
-       * resolve — a row lost to the retention window, or one of the other kind —
-       * without a second filter, and a repeated id resolves to the same row twice,
-       * which `seen` is what stops.
+       * This walk is the whole of the ordering now. PostgREST promises nothing about row
+       * order, so the order has to come from the facet — and since nothing downstream
+       * sorts, what the facet said is what the reader sees. Walking the list also drops
+       * every id the catalogue could not resolve — a row lost to the retention window, or
+       * one of the other kind — without a second filter, and a repeated id resolves to
+       * the same row twice, which `seen` is what stops.
        */
       const seen = new Set<string>();
-      const resolved: Candidate[] = [];
+      const resolved: SimilarCandidate[] = [];
       for (const id of wanted) {
         if (seen.has(id)) continue;
         const row = byId.get(id);
@@ -238,68 +214,34 @@ export function useSimilarTitles({
           year: row.release_date ? Number(row.release_date.slice(0, 4)) : null,
           posterPath: row.poster_path,
           kind: row.kind === 'series' ? 'series' : 'movie',
-          // The product's genres rather than the provider's, for the reason
-          // `use-for-you.ts` gives at its own call: the taste vector is built from rows
-          // that have been through `resolveMetadata` and therefore say Anime, so a
-          // candidate still saying Animation would score against a genre the vector has
-          // never heard of.
-          genres: productGenres({
-            kind: row.kind,
-            genres: row.genres,
-            language: row.original_language,
-          }),
-          language: row.original_language,
-          popularity: row.popularity,
         });
       }
       return resolved;
     },
   });
 
-  // Taste spans both media, which is `useForYou`'s rule and its reasoning: somebody who
-  // ranks Japanese cinema highly means that about television too. Both gated on the tab,
-  // and both are keys the Collection and Profile screens have usually filled already.
-  const movies = useRankedCollection(userId, 'movies', { enabled });
-  const seasons = useRankedCollection(userId, 'tv_seasons', { enabled });
-
-  const taste = useMemo(
-    () => tasteFrom(signalsFrom(movies.data, seasons.data)),
-    [movies.data, seasons.data],
-  );
-
   /**
-   * The reader's own score for each ranked **film**, for the chip.
+   * The reader's own score for each title they have ranked, for the chip.
    *
-   * Derived from rows already in hand rather than from a fourth query, and derived the
-   * way every other surface derives it: a score is not stored, it is a position within a
-   * band divided by the size of that band (`use-score.ts`). Movies only — the TV
-   * candidates here are series, and a series is not a rankable unit.
+   * `useMyScores` rather than `useRankedCollection`, and that is the cheaper read of the
+   * two by some way: four columns of `rankings`, no joins, no posters, no parent embed,
+   * paged through `read-all` so a thousand-row account is not silently truncated into
+   * wrong band sizes. A score is not stored — it is a position within a band divided by
+   * the size of that band — and this is the one place in the app that answers that
+   * question for a *list* of titles.
+   *
+   * Gated on the tab, and usually already warm: Search reads the same key.
    */
-  const myScores = useMemo(() => scoresOf(movies.data), [movies.data]);
+  const myScores = useMyScores(userId, enabled);
 
-  const slate = useMemo((): SimilarSlate => {
-    const pool = candidates.data ?? [];
-    if (pool.length === 0) return { tiles: [], personalized: false };
-
-    const anchor: Anchor = {
-      // Read by nothing that matters — `scoreCandidate` separates candidates on
-      // `similarIds.indexOf`, and the hit's id only reaches an explanation this tab
-      // discards. Still the page's own identity rather than a blank, so the shape is not
-      // quietly wrong for whatever reads it next.
-      mediaItemId: facetId ?? sourceId ?? '',
-      title: sourceTitle,
-      // See the header: the source is the constraint, not a rating.
-      score: 10,
-      similarIds: pool.map((candidate) => candidate.mediaItemId),
-    };
-
-    return {
-      tiles: ordered(pool, anchor, taste)
+  const tiles = useMemo(
+    // Sliced and nothing else. The order arrived from the provider and leaves unchanged.
+    () =>
+      (candidates.data ?? [])
         .slice(0, SIMILAR_BUDGET)
-        .map((candidate) => tileFor(candidate, myScores)),
-      personalized: taste.sampleSize > 0,
-    };
-  }, [candidates.data, facetId, myScores, sourceId, sourceTitle, taste]);
+        .map((candidate) => tileFor(candidate, myScores.data)),
+    [candidates.data, myScores.data],
+  );
 
   /**
    * Memoised, because the title page puts this object in a dependency array.
@@ -309,30 +251,32 @@ export function useSimilarTitles({
    * `onRefresh` on every re-render of the page — the thing the comment at that call site
    * exists to prevent.
    */
-  return useMemo(() => ({
-    slate,
-    /**
-     * The catalogue query's states, and **only** its states.
-     *
-     * The two ranked collections are deliberately not folded in. They are an ordering
-     * input, so a slow or failed one costs the personalisation and nothing else — a grid
-     * in provider order is the shipped V1, not a failure. Making them gate the tab would
-     * mean a reader with no rankings waiting on two reads to be told what TMDB already
-     * said.
-     */
-    isPending: asking && candidates.isPending,
-    isError: candidates.isError,
-    /**
-     * The page's pull-to-refresh, which the empty and failed states both invite.
-     *
-     * **A no-op unless the tab is open, and that is the lazy gate rather than tidiness.**
-     * `refetch` is imperative: React Query runs it on a disabled query too, so handing
-     * the page an unconditional one would mean pulling down on Cast spends the provider
-     * request that this whole hook exists to defer. Returning a settled promise keeps the
-     * caller's array of refreshes uniform without giving it that power.
-     */
-    refetch: asking ? candidates.refetch : noRefresh,
-  }), [asking, candidates.isError, candidates.isPending, candidates.refetch, slate]);
+  return useMemo(
+    () => ({
+      tiles,
+      /**
+       * The catalogue query's states, and **only** its states.
+       *
+       * `useMyScores` is deliberately not folded in. It decides what a tile *says*, not
+       * whether there is a grid, so a slow or failed one costs the chips and nothing
+       * else. Making it gate the tab would mean waiting on the reader's whole ranking
+       * history to be shown what TMDB already said.
+       */
+      isPending: asking && candidates.isPending,
+      isError: candidates.isError,
+      /**
+       * The page's pull-to-refresh, which the empty and failed states both invite.
+       *
+       * **A no-op unless the tab is open, and that is the lazy gate rather than tidiness.**
+       * `refetch` is imperative: React Query runs it on a disabled query too, so handing
+       * the page an unconditional one would mean pulling down on Cast spends the provider
+       * request that this whole hook exists to defer. Returning a settled promise keeps
+       * the caller's array of refreshes uniform without giving it that power.
+       */
+      refetch: asking ? candidates.refetch : noRefresh,
+    }),
+    [asking, candidates.isError, candidates.isPending, candidates.refetch, tiles],
+  );
 }
 
 /** A refresh that is already finished, for a tab nobody has opened. Module-level so it
@@ -438,67 +382,11 @@ async function readFacet(facetId: string): Promise<FacetState> {
   return { state: 'ready', ids: ids.filter((id): id is string => typeof id === 'string') };
 }
 
-/** The ranked rows as `rank.ts` wants them: a derived score, genres and a language. */
-function signalsFrom(
-  movies: readonly RankedEntry[] | undefined,
-  seasons: readonly RankedEntry[] | undefined,
-) {
-  // Banded separately and then pooled, because a band is a band *within* Movies or
-  // within TV seasons — one set of sizes over both would score a film against the
-  // television it shares a bucket name with (`use-score.ts`).
-  return [movies ?? [], seasons ?? []].flatMap((entries) => {
-    const sizes = bandSizes(entries);
-    return entries.map((entry) => ({
-      score: scoreFor(entry.bucket, entry.position, sizes),
-      genres: entry.genres,
-      language: entry.language,
-    }));
-  });
-}
-
-function scoresOf(movies: readonly RankedEntry[] | undefined) {
-  const entries = movies ?? [];
-  const sizes = bandSizes(entries);
-  return new Map<string, { score: number; bucket: Bucket }>(
-    entries.map((entry) => [
-      entry.mediaItemId,
-      { score: scoreFor(entry.bucket, entry.position, sizes), bucket: entry.bucket },
-    ]),
-  );
-}
-
-/**
- * The provider's list, reordered by one candidate score each.
- *
- * `sort` is stable in every engine this runs on and the input is already in the
- * provider's order — so two candidates the scorer cannot separate keep the order TMDB
- * gave them.
- *
- * **What a reader with no rankings actually gets, stated exactly.** `tasteFrom([])`
- * returns empty affinity maps, so the genre and language terms are zero — but the
- * popularity prior is not part of taste and does not switch off. What is left is
- * `positionWeight` down the provider's list plus `WEIGHTS.popularity` (0.10), and since
- * two adjacent provider positions differ by less than that near the top, a markedly more
- * popular candidate a place or two down can rise. That is `rank.ts` unmodified rather
- * than a rule invented here, and it is pinned by a test rather than left to be discovered:
- * "provider order" for this tab means the provider's order as the existing scorer reads
- * it, not a verbatim copy of the facet.
- */
-function ordered(pool: readonly Candidate[], anchor: Anchor, taste: Taste): Candidate[] {
-  return pool
-    .map((candidate) => ({
-      candidate,
-      total: scoreCandidate(candidate, [anchor], taste).explanation.total,
-    }))
-    .sort((a, b) => b.total - a.total)
-    .map((entry) => entry.candidate);
-}
-
 function tileFor(
-  candidate: Candidate,
-  myScores: ReadonlyMap<string, { score: number; bucket: Bucket }>,
+  candidate: SimilarCandidate,
+  myScores: ReadonlyMap<string, MyScore> | undefined,
 ): PosterTile {
-  const mine = myScores.get(candidate.mediaItemId);
+  const mine = myScores?.get(candidate.mediaItemId);
   return {
     id: candidate.mediaItemId,
     // The app's one naming rule. A candidate here is a film or a series grouping and
@@ -508,7 +396,8 @@ function tileFor(
     year: candidate.year,
     posterUri: posterUri(candidate.posterPath, 'card'),
     // Only where the reader has one. `PosterGrid`'s own chip, the same treatment the
-    // Collection wall and For You use, and nothing new drawn for this tab.
+    // Collection wall and For You use, and nothing new drawn for this tab. It changes
+    // what a tile says and never where it sits, which is the founder's line for V1.
     score: mine?.score ?? null,
     bucket: mine?.bucket ?? null,
   };

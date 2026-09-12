@@ -636,6 +636,10 @@ export type AnalyticsEvent =
    * show's, resolved to `series` by the adapter, so a second property would be the first
    * one spelled differently. `series` and `season` both report `tv` for the same reason
    * For You's two walls do — the reader is on television either way.
+   *
+   * It is also the only property either Similar event carries, which is the tab being
+   * honest about itself: V1 shows the provider's list in the provider's order, so there
+   * is no mechanism of ours for a second property to describe.
    */
   | { name: 'similar_tab_opened'; props: { medium: 'movies' | 'tv' } }
   /**
@@ -643,19 +647,17 @@ export type AnalyticsEvent =
    *
    * The pair to the event above: opens over taps is whether the answers were any good.
    *
-   * `personalized` is the one mechanism fact worth carrying, and it is carried here
-   * rather than on the open because here it is known. It says the reader had a taste
-   * vector behind the grid — they have ranked something, so the genre and language terms
-   * were live and *could* reorder. It does **not** claim the order came out different:
-   * those terms are often flat across a similar list, which mostly shares one genre.
-   * False is the shipped V1 path rather than a failure — somebody who has ranked nothing
-   * gets the provider's relevance order — and the split is what says whether reranking is
-   * earning anything.
+   * **There is deliberately no `personalized` property.** An earlier draft carried one,
+   * because the tab reranked its candidates through the For You scorer. It does not any
+   * more — the founder's V1 is the provider's order untouched (2026-09-12) — so the
+   * property would be a column of `false`, which is the kind of permanently-constant
+   * series this file refuses elsewhere. It comes back with the bounded rerank, if that
+   * ever ships, in the change that makes it mean something.
    *
    * No title id and no position. A destination would be a `media_item_id`, which is on
    * the forbidden list, and an index would only be a rank of a thing that is not named.
    */
-  | { name: 'similar_title_opened'; props: { medium: 'movies' | 'tv'; personalized: boolean } }
+  | { name: 'similar_title_opened'; props: { medium: 'movies' | 'tv' } }
 
   // --- Weekly streak --------------------------------------------------------
   /**
@@ -861,10 +863,6 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
    * own. This one is added because the Similar events below are unreadable without it.
    */
   'medium',
-  // Whether the reader's taste moved the Similar order (2026-09-11). A boolean about
-  // the mechanism, never about the person: it says a ranked collection existed, not
-  // what is in one.
-  'personalized',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

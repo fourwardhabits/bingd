@@ -21,7 +21,7 @@ import TitleScreen from '../../../app/title/[id]';
  *   - the page's own title, duplicates and unresolvable ids are out, and the budget holds;
  *   - a candidate the reader has already ranked stays, with the score they gave it;
  *   - a season asks its **parent series'** facet and gets series back, never a Season 1;
- *   - taste reorders within the provider's list and never adds to it;
+ *   - the order is TMDB's and nothing on this side reorders it;
  *   - loading, empty and a provider refusal each leave the page usable.
  */
 
@@ -728,22 +728,31 @@ describe('Similar, on television', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Taste
+// The order, and what may not touch it
 // ---------------------------------------------------------------------------
 
 /**
- * What personalisation is allowed to do here, and what it is not.
+ * **The provider's order, exactly** (founder, 2026-09-12).
  *
- * It reorders. It does not widen: the candidate set is the provider's association list,
- * which is what keeps this a Similar tab rather than a second For You. `rank.ts`'
- * `scoreCandidate` is reused unchanged with the source title as the single anchor — see
- * `use-similar-titles.ts` for why the anchor's score is a flat 10.
+ * An earlier version of this tab reranked its candidates through `rank.ts`'
+ * `scoreCandidate` — the For You scorer — with the source title as a single anchor.
+ * Independent review 79 worked out the arithmetic: position was worth about 0.21 across a
+ * twenty-title list and the taste terms up to 0.40, so a candidate low in TMDB's ordering
+ * could reach the top of the grid mostly because it suited the reader's general taste.
+ * That answers "what would I generally like", which is the For You wall's question and
+ * not this tab's.
+ *
+ * So these are not tests that reranking is *bounded*. They are tests that there is no
+ * reranking: the only things between the facet and the grid are resolution, the two
+ * exclusions, the dedupe and the budget. Each one puts a thumb on a different scale the
+ * old version responded to, and asserts the order did not move.
  */
-describe('the reader’s taste', () => {
-  const horror = candidate(1, { genres: ['Horror'], title: 'Candidate 1' });
-  const comedy = candidate(2, { genres: ['Comedy'], title: 'Candidate 2' });
+describe('the order the provider gave', () => {
+  const first = candidate(1, { genres: ['Horror'], popularity: 1 });
+  const second = candidate(2, { genres: ['Comedy'], popularity: 500 });
 
-  const ranked = (mediaItemId: string, genres: string[]) => ({
+  /** A ranked film, carrying the metadata a taste vector would have been built from. */
+  const ranked = (mediaItemId: string, genres: string[], language = 'en') => ({
     user_id: 'user-1',
     media_item_id: mediaItemId,
     bucket: 'loved',
@@ -758,92 +767,113 @@ describe('the reader’s taste', () => {
       poster_path: null,
       genres,
       runtime_minutes: 100,
-      original_language: 'en',
+      original_language: language,
       parent_id: null,
       parent: null,
     },
   });
 
   beforeEach(() => {
-    tableRows.media_items = [film, horror, comedy];
-    // The provider's order: horror first.
+    tableRows.media_items = [film, first, second];
+    // TMDB's order: the unpopular horror film first.
     tableRows.media_cache = [facet('film-1', ['cand-1', 'cand-2'])];
   });
 
-  it('keeps the provider order for a reader who has ranked nothing', async () => {
+  it('is kept for a reader who has ranked nothing', async () => {
     const view = await open();
     await openSimilar(view);
 
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
   });
 
-  it('still applies the popularity prior when there is no taste at all', async () => {
-    /**
-     * **What "provider order" actually means here, pinned rather than assumed.**
-     *
-     * `tasteFrom([])` zeroes the genre and language terms, but popularity is not part of
-     * taste and does not switch off: `rank.ts` weights it at 0.10, and two adjacent
-     * provider positions near the top differ by less than that. So a markedly more
-     * popular candidate one place down rises, for a reader who has ranked nothing.
-     *
-     * That is the existing scorer unmodified, and the test above passes only because its
-     * two candidates share a popularity. Both are true and both are worth having: one
-     * says ties keep TMDB's order, this one says the order is the scorer's reading of it
-     * rather than a verbatim copy of the facet. Independent review 79 found the claim
-     * overstated in the first version of this file.
-     */
-    tableRows.media_items = [
-      film,
-      { ...horror, popularity: 1 },
-      { ...comedy, popularity: 500 },
-    ];
-
-    const view = await open();
-    await openSimilar(view);
-
-    await waitFor(() => expect(names(view)).toEqual(['Candidate 2', 'Candidate 1']));
-  });
-
-  it('lifts a candidate that matches what the reader has ranked', async () => {
-    // A comedy collection, and a comedy that TMDB put second. Nothing else separates the
-    // two — same popularity, same language, adjacent provider positions.
+  it('is not moved by what the reader has ranked', async () => {
+    // A wholly Comedy collection, and a comedy TMDB put second. The old version promoted
+    // it; nothing here looks at a genre at all.
     tableRows.rankings = [
       ranked('ranked-1', ['Comedy']),
       ranked('ranked-2', ['Comedy']),
       ranked('ranked-3', ['Comedy']),
+      ranked('ranked-4', ['Comedy']),
+      ranked('ranked-5', ['Comedy']),
     ];
 
     const view = await open();
     await openSimilar(view);
 
-    await waitFor(() => expect(names(view)).toEqual(['Candidate 2', 'Candidate 1']));
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
   });
 
-  it('reorders only within the provider list and never adds to it', async () => {
-    // The failure this guards against is the tab quietly becoming For You. `trend-1` is a
-    // perfect taste match sitting in the catalogue, and it is not in the facet — so it
-    // must not appear however well it would score.
+  it('is not moved by the language the reader watches in', async () => {
+    tableRows.rankings = [ranked('ranked-1', ['Comedy'], 'fr'), ranked('ranked-2', [], 'fr')];
     tableRows.media_items = [
       film,
-      horror,
-      comedy,
-      candidate(3, { id: 'trend-1', title: 'Candidate 3', genres: ['Comedy'] }),
+      { ...first, original_language: 'en' },
+      { ...second, original_language: 'fr' },
+    ];
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+  });
+
+  it('is not moved by popularity, which TMDB has already weighed', async () => {
+    /**
+     * The founder's fourth instruction, and the one most easily lost.
+     *
+     * `rank.ts` weights popularity at 0.10 and two adjacent provider positions differ by
+     * less than that near the top, so keeping the prior "only as a tie-break" would in
+     * fact have reordered the list. These two candidates are 1 and 500 on TMDB's own
+     * scale and the order is still the facet's.
+     */
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+  });
+
+  it('shows the reader their own score without moving the tile it is on', async () => {
+    // The personalisation V1 does have, and its whole boundary: the chip changes what a
+    // tile says, never where it sits. `Candidate 2` is the one the reader loved, and it
+    // stays second, where TMDB put it.
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'cand-2',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+      },
+    ];
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+    expect(shown(view)[1]).toMatch(/scored 10\.0 out of 10/);
+    expect(shown(view)[0]).not.toMatch(/scored/);
+  });
+
+  it('lets nothing that is not in the facet reach the grid', async () => {
+    // The failure this guards against is the tab quietly becoming For You. `trend-1` is a
+    // perfect taste match sitting in the catalogue, and it is not in the facet.
+    tableRows.media_items = [
+      film,
+      first,
+      second,
+      candidate(3, { id: 'trend-1', title: 'Candidate 3', genres: ['Comedy'], popularity: 900 }),
     ];
     tableRows.rankings = [ranked('ranked-1', ['Comedy'])];
 
     const view = await open();
     await openSimilar(view);
 
-    await waitFor(() => expect(names(view)).toHaveLength(2));
-    expect(names(view)).not.toContain('Candidate 3');
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
   });
 
-  it('draws the grid in provider order when the ranked read fails', async () => {
-    // Taste is an ordering input, not a gate. A reader whose collection will not load
-    // still gets TMDB's own relevance order rather than a skeleton or an error — which
-    // is why the two ranked reads are deliberately outside this tab's pending and error
-    // states. Comedy rankings are present and unreachable, so a passing assertion here
-    // cannot be the no-rankings case above wearing a different name.
+  it('draws the grid when the reader’s scores cannot be read', async () => {
+    // The chips are a decoration on a grid, not a gate in front of one. A failed
+    // `rankings` read costs the chips and nothing else.
     tableRows.rankings = [ranked('ranked-1', ['Comedy'])];
     mockFailTables.add('rankings');
 
@@ -851,6 +881,7 @@ describe('the reader’s taste', () => {
     await openSimilar(view);
 
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+    expect(shown(view).some((label) => /scored/.test(label))).toBe(false);
   });
 });
 
@@ -874,37 +905,15 @@ describe('what the tab reports', () => {
     });
   });
 
-  it('reports personalized on a ranked reader even when the order did not change', async () => {
+  it('records a title opened from it, and carries nothing but the medium', async () => {
     /**
-     * What the flag means, said out loud. It is `sampleSize > 0` — the reader has ranked
-     * something, so the taste terms were live — and **not** a claim that the grid came
-     * out different. Here the one candidate cannot be reordered at all and the flag is
-     * still true, which is the reading the spec and the code comment now carry.
+     * **`medium` and no second property**, asserted as an exact object rather than with
+     * `objectContaining`, because the thing worth pinning is the absence.
+     *
+     * An earlier draft carried `personalized`, which described a rerank this tab no
+     * longer does (founder, 2026-09-12). A flag that is now `false` for every reader on
+     * every title is a column of one value, and the spec refuses those.
      */
-    tableRows.rankings = [
-      {
-        user_id: 'user-1',
-        media_item_id: 'ranked-1',
-        bucket: 'loved',
-        position: 1,
-        category: 'movies',
-        created_at: '2026-01-01T00:00:00Z',
-        media_items: {
-          id: 'ranked-1',
-          kind: 'movie',
-          title: 'Something Ranked',
-          release_date: '2020-01-01',
-          poster_path: null,
-          // Nothing the candidate has, so every taste term is zero for it.
-          genres: ['Documentary'],
-          runtime_minutes: 100,
-          original_language: 'fr',
-          parent_id: null,
-          parent: null,
-        },
-      },
-    ];
-
     const view = await open();
     await openSimilar(view);
     await waitFor(() => expect(names(view)).toHaveLength(1));
@@ -912,20 +921,7 @@ describe('what the tab reports', () => {
 
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'similar_title_opened',
-      props: { medium: 'movies', personalized: true },
-    });
-  });
-
-  it('records a title opened from it, and whether taste had moved the order', async () => {
-    const view = await open();
-    await openSimilar(view);
-    await waitFor(() => expect(names(view)).toHaveLength(1));
-    await fireEvent.press(firstTile(view));
-
-    expect(mockTrack).toHaveBeenCalledWith({
-      name: 'similar_title_opened',
-      // False is the shipped path for a reader with no rankings, not a failure.
-      props: { medium: 'movies', personalized: false },
+      props: { medium: 'movies' },
     });
   });
 });
