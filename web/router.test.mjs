@@ -1994,7 +1994,13 @@ describe('the release mode', () => {
    */
   it('refuses the claims the product contradicts, and the em dash', () => {
     const front = read('index.html');
-    const body = front.slice(front.indexOf('<body>'));
+
+    // Found by pattern and asserted, not by indexOf('<body>'). A body tag that gained an
+    // attribute would make indexOf return -1, slice(-1) would hand every assertion below
+    // the last character of the file, and the test would pass while checking nothing.
+    const open = front.match(/<body[^>]*>/);
+    assert.ok(open, 'the front page has no <body> for these checks to be scoped to');
+    const body = front.slice(open.index);
 
     // Matched across whitespace rather than a single space: the page source wraps at 90
     // columns, and the first version of this test let the live page's own "strictly
