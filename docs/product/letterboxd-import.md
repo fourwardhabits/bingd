@@ -1,7 +1,17 @@
 # Letterboxd import
 
 **Status:** Phases 1–3 implemented on `feat/letterboxd-import`. Not merged, not on
-production, not physically tested. Staging carries the pipeline; one migration is pending.
+production, **not physically tested**.
+
+Staging (`fjxhcbowoxuzulwirzyr`) carries the whole pipeline: 127/127 migrations, the Edge
+Function deployed, the drain scheduled and draining, 126/126 on the anon smoke. Production
+(`abheeqyjzekiowkztfxv`) has none of it — all eight `2026091700xx` migrations are pending
+there, by design.
+
+Independent review of 2026-09-11 found ten defects. Four are fixed (§6a), two of them
+blockers that would have made the feature impossible rather than merely wrong. Six remain
+open and are listed rather than carried quietly; one of those is security and should be
+settled before anybody but the founder can import.
 
 The full specification is Contract V3, agreed across the audit sessions of 2026-09-08 to
 2026-09-11. This document is the part a reader needs *after* the contract: what is
@@ -186,8 +196,12 @@ fingerprint returns to `b860e0b5…` at 170 sources exactly.
 | Screen | `src/features/import/ImportScreen.tsx` |
 | Export instructions | `src/features/import/HowToExportSheet.tsx` |
 | Route | `app/settings/import.tsx` |
-| Foundations, provenance, pipeline | `supabase/migrations/2026091700010{0,2,3}*.sql` |
+| Foundations, provenance, pipeline | `supabase/migrations/20260917000{100,200,300}*.sql` |
 | Retention and byte bound | `supabase/migrations/20260917000400*.sql` |
+| Abandoning a half-staged job | `supabase/migrations/20260917000500*.sql` |
+| Installing the worker, and redacting a failed job | `supabase/migrations/20260917000600*.sql` |
+| `import_drain_status()` | `supabase/migrations/20260917000700*.sql` |
+| `unschedule_import_drain()` | `supabase/migrations/20260917000800*.sql` |
 
 ---
 
@@ -233,6 +247,43 @@ and a test asserts the absence of that predicate directly.
   staging has neither `functions.base_url` nor the vault key — for push either, so this
   predates the importer. Jobs settle immediately rather than stalling (by design), but the
   TMDB tier is not exercised on staging until those are set.
+
+---
+
+## 6b. Deploying it, and turning it off
+
+**The importer is the only feature here with a worker, and a worker has to be started.**
+`20260917000300` shipped the installer and nothing that called it; this section exists so
+that cannot happen again to whoever applies these migrations to production.
+
+### On a fresh project, in order
+
+1. **Apply the migrations** — `20260917000100` through `20260917000800`.
+2. **Deploy the Edge Function** — `supabase functions deploy letterboxd-import --project-ref <ref>`.
+   Nothing in the release path does this on its own; the thirteen-day `episode_count` drift
+   is what that costs.
+3. **Schedule the drain.** `scripts/bootstrap-production.mjs` now does it. On a project
+   where the extensions were enabled *after* the migrations ran, call
+   `schedule_import_drain()` again — the migration's own install is best-effort and will
+   have logged a notice rather than failed.
+4. **Check it** — `import_drain_status()`. A null `job` means nothing is draining and no
+   import can ever finish. `provider_ready: false` means the TMDB tier is off, and films
+   the local matcher cannot place will settle as unmatched rather than being looked up.
+
+### If it misbehaves
+
+`select unschedule_import_drain();` — the first thing to reach for, and reach for it rather
+than a deploy. Nothing is lost: jobs stay exactly where they are and resume when it is
+scheduled again.
+
+It earns that status because the worker spends provider requests and writes
+`letterboxd_matches`, which every account shares — so a bad drain is expensive and
+contagious rather than merely slow.
+
+The cost while it is off is that anybody mid-import sits on "Matching your films", which is
+the same thing an absent job costs. The 24-hour dead letter is paused with it, so jobs
+stranded during the outage settle as `failed` shortly after it comes back rather than while
+it is down.
 
 ---
 

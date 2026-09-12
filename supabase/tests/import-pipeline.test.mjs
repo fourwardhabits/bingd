@@ -1755,6 +1755,23 @@ describe('the worker has somebody to start it', () => {
     assert.ok((await grantsOn('import_drain_status')).includes('service_role'));
   });
 
+  it('ships an off switch as well as an on one', async () => {
+    // The push lane has had both halves since `20260826000300`, and `backup-and-recovery.md`
+    // names the rollback as the first thing to reach for. The import lane shipped the
+    // installer alone, so stopping a drain that was spending provider requests and writing
+    // the cross-account match cache meant a raw `cron.unschedule` as a superuser.
+    assert.ok((await grantsOn('unschedule_import_drain')).includes('service_role'));
+  });
+
+  it('answers "absent" rather than failing when there is no job to stop', async () => {
+    // An operator reaching for this in a hurry must not have to care whether somebody
+    // already pulled it, and a runbook step that fails when it is already satisfied is a
+    // step people learn to skip. PGlite has no `cron` schema at all, which is the same
+    // shape as a project whose extensions were never enabled.
+    const { rows } = await t.sql(`select unschedule_import_drain() as r`);
+    assert.equal(rows[0].r.status, 'absent');
+  });
+
   it('keeps the installer away from signed-in callers', async () => {
     const roles = await grantsOn('schedule_import_drain');
     assert.ok(!roles.includes('authenticated'), 'a phone must not schedule cron jobs');
