@@ -39,7 +39,7 @@ import { useImport, type ImportCounts, type ImportFailure, type ImportPhase } fr
  */
 export function ImportScreen({ surface }: { surface: ImportSurface }) {
   const router = useRouter();
-  const { state, pick, start, reset } = useImport(surface);
+  const { state, pick, start, reset, watchRunning } = useImport(surface);
   const [howTo, setHowTo] = useState(false);
 
   return (
@@ -50,6 +50,7 @@ export function ImportScreen({ surface }: { surface: ImportSurface }) {
           onPick={() => void pick()}
           onStart={(preview) => void start(preview)}
           onReset={reset}
+          onWatch={watchRunning}
           onHowTo={() => setHowTo(true)}
           onDone={() => router.back()}
         />
@@ -64,6 +65,7 @@ function Body({
   onPick,
   onStart,
   onReset,
+  onWatch,
   onHowTo,
   onDone,
 }: {
@@ -71,6 +73,7 @@ function Body({
   onPick: () => void;
   onStart: (preview: ArchivePreview) => void;
   onReset: () => void;
+  onWatch: () => void;
   onHowTo: () => void;
   onDone: () => void;
 }) {
@@ -121,6 +124,7 @@ function Body({
           retryLabel={state.preview ? 'Try again' : 'Choose a file'}
           onHowTo={onHowTo}
           onReset={onReset}
+          onWatch={onWatch}
         />
       );
   }
@@ -301,12 +305,14 @@ function Failed({
   retryLabel,
   onHowTo,
   onReset,
+  onWatch,
 }: {
   failure: ImportFailure;
   onRetry: () => void;
   retryLabel: string;
   onHowTo: () => void;
   onReset: () => void;
+  onWatch: () => void;
 }) {
   const { title, detail, showHowTo } = explain(failure);
 
@@ -316,6 +322,11 @@ function Failed({
   // come back later. A prominent "Try again" there would fail identically every time.
   const retryable = failure.kind !== 'already_running' && failure.kind !== 'unknown';
 
+  // **A refusal that can show you what it is refusing about.** `already_running` means this
+  // archive was not sent because another import owns the slot; naming that without offering
+  // a look at it leaves somebody guessing which of their files is in flight.
+  const watchable = failure.kind === 'already_running' && failure.status !== undefined;
+
   return (
     <View style={styles.block}>
       <Text variant="display">{title}</Text>
@@ -324,12 +335,13 @@ function Failed({
       </Text>
       <View style={styles.actions}>
         {retryable ? <Button label={retryLabel} onPress={onRetry} /> : null}
+        {watchable ? <Button label="See the import that’s running" onPress={onWatch} /> : null}
         {showHowTo ? (
           <Button label="How do I export from Letterboxd?" kind="tertiary" onPress={onHowTo} />
         ) : null}
         <Button
           label="Start over"
-          kind={retryable ? 'tertiary' : 'primary'}
+          kind={retryable || watchable ? 'tertiary' : 'primary'}
           onPress={onReset}
         />
       </View>
@@ -356,8 +368,12 @@ function explain(failure: ImportFailure): {
   if (failure.kind === 'already_running') {
     return {
       title: 'An import is already running',
+      // Says plainly that *this* file was not sent. The earlier version described the other
+      // import and left somebody to infer what had happened to the one they just chose —
+      // and the screen it led to showed the running job's counts under "Your history is
+      // in", which made the wrong inference the natural one.
       detail:
-        'One of your imports hasn’t finished yet, so this one can’t start. It carries on without the app open — come back in a few minutes and it should be done.',
+        'This file hasn’t been sent — one of your earlier imports is still going, and Bingd runs one at a time. That one carries on without the app open. Come back when it’s done and you can import this file then.',
       showHowTo: false,
     };
   }

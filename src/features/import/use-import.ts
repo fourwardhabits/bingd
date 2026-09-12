@@ -96,7 +96,17 @@ export type ImportFailure =
    * running job settled. Nothing is wrong here and there is nothing to retry; the answer is
    * to go and look at the import that is already happening.
    */
-  | { readonly kind: 'already_running' }
+  | {
+      readonly kind: 'already_running';
+      /**
+       * The job that is actually running, when it could be read.
+       *
+       * Carried so the screen can offer to show it rather than only naming it. Absent when
+       * the refusal arrived as a `22023` from `import_stage` — the worker claimed the job
+       * between the status read and the page — where there is nothing to hand over.
+       */
+      readonly status?: ImportJobStatus;
+    }
   /**
    * The import is running and this client has lost sight of it.
    *
@@ -239,6 +249,8 @@ export function useImport(surface: ImportSurface) {
   const alive = useRef(true);
   /** One upload at a time. See `start`. */
   const uploading = useRef(false);
+  /** One picker at a time. See `pick`. */
+  const picking = useRef(false);
   /**
    * A job this device walked away from and could not tell the server about.
    *
@@ -311,7 +323,7 @@ export function useImport(surface: ImportSurface) {
    * cannot run until the file has been read into memory. So the size is checked first, from
    * the picker's own metadata, before anything is allocated.
    */
-  const pick = useCallback(async () => {
+  const pickOnce = useCallback(async () => {
     settle({ phase: 'reading' });
 
     let bytes: Uint8Array;
@@ -361,6 +373,31 @@ export function useImport(surface: ImportSurface) {
     track({ name: 'import_archive_selected', props: { outcome: 'ok' } });
     settle({ phase: 'previewing', preview: result.preview });
   }, [settle]);
+
+  /**
+   * One picker at a time.
+   *
+   * **The guard is a ref, not the phase.** `settle` schedules a render; two taps inside one
+   * frame both run before it commits, so a check on `state.phase` would pass twice. `Button`
+   * has no press guard of its own — `start` learned this already — and the cost here is
+   * worse than a duplicated upload: `File.pickFileAsync` presents a view controller, iOS
+   * refuses a second presentation while the first is up, and the refused promise may never
+   * settle. That leaves the phase on `reading` for ever, which is the spinner with no
+   * buttons on it that this file keeps being about.
+   *
+   * The work lives in `pickOnce` so that every early return it makes still passes through
+   * the `finally`. Releasing the guard beside each `return` would be the version that gets
+   * one wrong later.
+   */
+  const pick = useCallback(async () => {
+    if (picking.current) return;
+    picking.current = true;
+    try {
+      await pickOnce();
+    } finally {
+      picking.current = false;
+    }
+  }, [pickOnce]);
 
   /**
    * Back to the start, keeping nothing — **including on the server**.
@@ -451,13 +488,17 @@ export function useImport(surface: ImportSurface) {
         // dead end into the only sensible outcome: show the import that is already running.
         //
         // Before `import_started`, so the event counts imports that actually began.
+        //
+        // **And it settles to a refusal, not to the running job's own screen.** Showing
+        // `working` here read as though *this* archive had been accepted: the preview was
+        // dropped without a word, and when the other import finished its summary appeared
+        // under the heading "Your history is in" — so somebody who picked a second archive
+        // was told the first one's counts and had no way to know their file was never sent.
+        // The archive is not silently replaced; the person is told which import is running
+        // and offered a look at it.
         const existing = await readJob(jobId);
         if (existing !== null && existing.status !== 'pending') {
-          settle(
-            existing.status === 'done'
-              ? { phase: 'done', status: existing }
-              : { phase: 'working', status: existing },
-          );
+          settle({ phase: 'failed', failure: { kind: 'already_running', status: existing } });
           return;
         }
 
@@ -598,5 +639,23 @@ export function useImport(surface: ImportSurface) {
     track({ name: 'import_opened', props: { surface } });
   }, [surface]);
 
-  return { state, pick, start, reset } as const;
+  /**
+   * Switch to watching the import that is already running.
+   *
+   * The other half of refusing a second archive. `start` now settles to `already_running`
+   * rather than quietly showing the running job's screen, which is honest but leaves
+   * somebody looking at a refusal with no way to see what it is talking about. This is that
+   * way: it moves to `working` for the job the refusal carried, and the existing poll picks
+   * it up from there.
+   */
+  const watchRunning = useCallback(() => {
+    setState((current) => {
+      if (current.phase !== 'failed' || current.failure.kind !== 'already_running') return current;
+      const status = current.failure.status;
+      if (status === undefined) return current;
+      return status.status === 'done' ? { phase: 'done', status } : { phase: 'working', status };
+    });
+  }, []);
+
+  return { state, pick, start, reset, watchRunning } as const;
 }

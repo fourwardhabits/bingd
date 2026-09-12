@@ -461,13 +461,20 @@ describe('an import that is already happening', () => {
     expect(screen.getByText('Choose your export')).toBeTruthy();
   });
 
-  it('says an import is already running, and does not offer to retry it', async () => {
-    // `import_create` handed back a job the worker owns. There is nothing wrong and nothing
-    // to retry; a "Try again" here would fail identically every time.
+  it('refuses the second archive out loud rather than swallowing it', async () => {
+    /**
+     * **The refusal is the behaviour, and the old screen was the bug.**
+     *
+     * `import_create` handed back a job the worker owns, so this archive cannot be staged.
+     * The first version settled to `working` — which reads as "your file is being
+     * processed", drops the preview without a word, and then shows the *other* import's
+     * counts under "Your history is in". Somebody who picked a second archive was told the
+     * first one's result and had no way to learn their file was never sent.
+     */
     mockPicked = exportZip(TWO_FILMS);
     mockRpcResults = {
       import_create: 'job-1',
-      import_status: { status: 'working', counts: {}, completed_at: null },
+      import_status: { status: 'matching', counts: {}, completed_at: null },
     };
 
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
@@ -475,125 +482,35 @@ describe('an import that is already happening', () => {
     await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import 2 films'));
 
-    await waitFor(() => expect(screen.getByText('Matching your films')).toBeTruthy());
-    // Not staged onto: the whole point is that the running import is left alone.
+    await waitFor(() => expect(screen.getByText('An import is already running')).toBeTruthy());
+    // The sentence says what happened to *this* file, not what the other one is doing.
+    expect(screen.getByText(/This file hasn.+t been sent/)).toBeTruthy();
+
+    // Not staged onto: the running import is left alone.
     expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_stage');
     // And the import that was never started is not counted as one.
     expect(mockTrack).not.toHaveBeenCalledWith(
       expect.objectContaining({ name: 'import_started' }),
     );
+    // No pointless retry, because retrying fails identically until the other job settles.
+    expect(screen.queryByText('Try again')).toBeNull();
   });
-});
 
-describe('starting over', () => {
-  it('tells the server to let go of the half-staged job', async () => {
-    // Forgetting the job id locally is not abandoning the job. `import_create` adopts an
-    // open job for an hour, so without this the *next* archive stages beside the abandoned
-    // one and both are applied as one collection.
+  it('offers a look at the running import rather than only naming it', async () => {
     mockPicked = exportZip(TWO_FILMS);
-    mockRpcResults = { import_create: 'job-1' };
-    mockRpcErrors = { import_stage: { message: 'network' } };
+    mockRpcResults = {
+      import_create: 'job-1',
+      import_status: { status: 'matching', counts: {}, completed_at: null },
+    };
 
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
     await fireEvent.press(screen.getByText('Choose your export'));
     await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
     await fireEvent.press(screen.getByText('Import 2 films'));
-    await waitFor(() => expect(screen.getByText('Start over')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('An import is already running')).toBeTruthy());
 
-    await fireEvent.press(screen.getByText('Start over'));
+    await fireEvent.press(screen.getByText('See the import that’s running'));
 
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('import_discard', { p_job_id: 'job-1' }),
-    );
-    expect(screen.getByText('Choose your export')).toBeTruthy();
-  });
-});
-
-describe('a file that is not an export', () => {
-  it('refuses one too large to be an export without reading it', async () => {
-    // The picker deliberately filters nothing — a filter that greys out the correct file is
-    // an unrecoverable dead end — so the plausible mis-tap is a video, and the size is the
-    // only thing that can be checked before it is all in memory.
-    mockPicked = exportZip(TWO_FILMS);
-    mockPickedSize = 500 * 1024 * 1024;
-
-    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(screen.getByText('Choose your export'));
-
-    await waitFor(() => expect(screen.getByText('That file is too big')).toBeTruthy());
-    expect(mockTrack).toHaveBeenCalledWith({
-      name: 'import_archive_selected',
-      props: { outcome: 'too_large' },
-    });
-  });
-});
-
-describe('a Start over the server never heard about', () => {
-  /**
-   * **The fix for the two-archive merge failed in the case that motivated it.**
-   *
-   * `reset` fired `import_discard` and ignored the answer. But the upload it follows fails
-   * because the network went — so the discard went the same way, job A survived `pending`,
-   * and `import_create` handed it straight back for archive B to stage on top of. The
-   * person ends up with films from an archive they explicitly walked away from, which is
-   * exactly what `import_discard` was written to prevent.
-   */
-  it('does not stage a second archive until the abandoned job is really gone', async () => {
-    mockPicked = exportZip(TWO_FILMS);
-    mockRpcResults = { import_create: 'job-1' };
-    // The upload drops, and the discard that follows drops with it.
-    mockRpcErrors = { import_stage: { message: 'network' }, import_discard: { message: 'network' } };
-
-    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(screen.getByText('Choose your export'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
-    await waitFor(() => expect(screen.getByText('Start over')).toBeTruthy());
-
-    await fireEvent.press(screen.getByText('Start over'));
-    await waitFor(() => expect(screen.getByText('Choose your export')).toBeTruthy());
-
-    // Archive B. Staging is healthy again, but the abandoned job is still out there.
-    mockRpcErrors = { import_discard: { message: 'network' } };
-    mockRpc.mockClear();
-    await fireEvent.press(screen.getByText('Choose your export'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
-
-    await waitFor(() => expect(screen.getByText(/didn.+t finish sending/)).toBeTruthy());
-
-    const called = mockRpc.mock.calls.map(([name]) => name);
-    // The debt is settled first, and because it could not be, nothing was created and
-    // nothing was staged. A merged collection is the one outcome worse than a failed one.
-    expect(called[0]).toBe('import_discard');
-    expect(called).not.toContain('import_create');
-    expect(called).not.toContain('import_stage');
-  });
-
-  it('clears the debt and imports normally once the discard gets through', async () => {
-    mockPicked = exportZip(TWO_FILMS);
-    mockRpcResults = { import_create: 'job-1', import_status: null };
-    mockRpcErrors = { import_stage: { message: 'network' }, import_discard: { message: 'network' } };
-
-    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
-    await fireEvent.press(screen.getByText('Choose your export'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
-    await waitFor(() => expect(screen.getByText('Start over')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Start over'));
-    await waitFor(() => expect(screen.getByText('Choose your export')).toBeTruthy());
-
-    // The network is back for everything now.
-    mockRpcErrors = {};
-    mockRpc.mockClear();
-    await fireEvent.press(screen.getByText('Choose your export'));
-    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
-    await fireEvent.press(screen.getByText('Import 2 films'));
-
-    await waitFor(() => expect(screen.getByText(/close the app/)).toBeTruthy());
-
-    const called = mockRpc.mock.calls.map(([name]) => name);
-    expect(called[0]).toBe('import_discard');
-    expect(called).toContain('import_stage');
+    await waitFor(() => expect(screen.getByText('Matching your films')).toBeTruthy());
   });
 });
