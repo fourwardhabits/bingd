@@ -23,38 +23,45 @@ import { theme } from '@/ui/tokens';
  *   - it contains `watched.csv`, `ratings.csv`, `diary.csv`, `watchlist.csv` and more;
  *   - it was produced by a **free** account, which is why nothing below says "Pro".
  *
- * **Not verified, and written to be true either way:** where exactly the control sits, and
- * how the file is delivered. Secondary sources disagree — some describe Settings ▸ Data,
- * others Settings ▸ Advanced Settings, some an immediate download and others an emailed
- * link. Rather than assert one and be wrong for half of the people reading it, the copy
- * names the destination, admits the alternative label, and covers both deliveries in one
- * sentence.
+ * **Corroborated 2026-09-11, second pass, without ever reading the live page.** The 403 is
+ * real and is not a user agent problem — `letterboxd.com` and `letterboxd.zendesk.com` both
+ * refuse a scripted fetch outright. What could be established instead, from Letterboxd's
+ * own indexed material rather than from third-party blogs:
+ *   - the export lives on the **Data** tab of Settings, and `letterboxd.com/settings/data/`
+ *     is a real Letterboxd page rather than a guessed path;
+ *   - Letterboxd's own *Importing data* page describes it as "click to generate a zip file
+ *     containing CSVs of your profile, films, reviews, lists and more" — a generated
+ *     download, not a queued email;
+ *   - nothing official conditions it on a subscription.
  *
- * **So the button is the authority, not this list.** `letterboxd.com/settings` is the one
- * URL that is certainly real regardless of which sub-tab the export lives on, and it puts
- * somebody in front of the current UI instead of our description of it. If these steps
- * drift, the button still works.
+ * That is enough to stop hedging the tab. It is **not** enough to claim the live UI was
+ * read, so two things stay soft on purpose: the possibility of an emailed link on a large
+ * account, and the mobile app, which is simply not mentioned — the export is a website URL
+ * and sending somebody hunting for it in the app is a dead end our copy would have caused.
  *
- * **Open question for the founder**, recorded rather than guessed: confirm the current
- * label and the delivery, and this copy can lose its hedge. `docs/product/letterboxd-import.md`
- * carries it as an open item.
+ * The "Pro is required" claim recurs in secondary sources and is contradicted by the
+ * founder's own free-account export, so it appears nowhere.
+ *
+ * **The button is still the authority, not this list.** It puts somebody in front of the
+ * current UI instead of our description of it.
  */
 
 /**
- * The settings root rather than a deep link to the export tab.
+ * The Data tab itself, rather than the settings root.
  *
- * A deep link would be one better tap and one worse failure: if the path has changed it
- * lands on a 404, which reads as "this app is broken" rather than "look in Settings". The
- * root has been stable for the life of the site.
+ * The root was the safer choice while the tab was a guess. It is not a guess now, and the
+ * deep link saves the one step people actually get lost on — a settings page with a dozen
+ * tabs, only one of which has the export on it. A stale path would land on Letterboxd's own
+ * 404 rather than ours, with the site's navigation still on it.
  */
-const LETTERBOXD_SETTINGS = 'https://letterboxd.com/settings/';
+const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
 
 const STEPS = [
-  'Sign in to Letterboxd — in their app or at letterboxd.com.',
-  'Open Settings, then look for Data. Some versions call it Advanced Settings; the option you want is Export Your Data.',
-  'Tap Export Your Data. Letterboxd builds a .zip file of your account.',
-  'Depending on your account, it either downloads straight away or arrives by email a few minutes later.',
-  'Save the .zip where you can find it again — Files, Downloads or Drive all work.',
+  'Open letterboxd.com in a browser and sign in — the export lives on the website.',
+  'Go to Settings, then the Data tab.',
+  'Choose Export Your Data. Letterboxd builds a .zip of your account.',
+  'It downloads when it is ready. A large account can take a minute, and Letterboxd may send you a link by email instead.',
+  'Save the .zip somewhere your phone can reach — Files, Downloads or Drive all work.',
 ] as const;
 
 export function HowToExportSheet({
@@ -68,7 +75,7 @@ export function HowToExportSheet({
 }) {
   const open = () => {
     track({ name: 'import_instructions_opened', props: { surface } });
-    void Linking.openURL(LETTERBOXD_SETTINGS).catch(() => {});
+    void Linking.openURL(LETTERBOXD_EXPORT).catch(() => {});
   };
 
   return (
@@ -105,7 +112,7 @@ export function HowToExportSheet({
           </Text>
         </View>
 
-        <Button label="Open Letterboxd settings" kind="secondary" onPress={open} />
+        <Button label="Open Letterboxd’s export page" kind="secondary" onPress={open} />
         <Button label="Done" kind="tertiary" onPress={onClose} />
       </View>
     </Sheet>

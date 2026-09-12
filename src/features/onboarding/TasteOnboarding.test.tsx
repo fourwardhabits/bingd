@@ -928,6 +928,22 @@ describe('Your First Five', () => {
     expect(rows).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth']);
   });
 
+  /**
+   * **After the five, and not during them.** The Letterboxd pointer sat on the first
+   * ranking screen in an earlier pass, which is before First Five rather than after it.
+   * It is one sentence and not a button on purpose: the flow guard replaces any route
+   * pushed out of the onboarding group, and a sheet here would be one Modal inside
+   * another. Both halves are asserted, because moving it back would pass a test that
+   * only looked for the words.
+   */
+  it('mentions the Letterboxd import once the five are placed', async () => {
+    const view = await arrive();
+
+    expect(view.getByText(/Already on Letterboxd/)).toBeTruthy();
+    // Still no fork: it names Settings and offers no way out of the flow.
+    expect(view.queryByRole('button', { name: /Letterboxd/ })).toBeNull();
+  });
+
   it('says what the five bought without explaining the algorithm again', async () => {
     const view = await arrive();
 

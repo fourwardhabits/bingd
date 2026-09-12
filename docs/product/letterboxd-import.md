@@ -19,6 +19,36 @@ It is **optional and always available**. It is not a step in onboarding; the fir
 flow mentions in one sentence that it exists, and the importer itself lives at
 **Settings ▸ Import from Letterboxd** and can be run at any time.
 
+### Where the onboarding mention sits, and why it is a sentence
+
+The direction was one optional, skippable discovery moment **after First Five**, with
+*Import from Letterboxd* and *Not now* — and an explicit fallback to a Settings-only entry
+if placing it inside onboarding would raise release risk.
+
+It would, on three counts that are facts about this codebase rather than caution:
+
+1. **A route cannot be pushed from inside the flow.** `nextRoute` in
+   `src/features/auth/session.tsx` answers any group other than `onboarding` with
+   `STAGE_ROUTES[stage]` while the stage is unfinished, so a push to `/settings/import` is
+   replaced straight back to the current step. This is the same rule that forced the
+   Diagnostics entrance on the payoff to be a long press rather than a route.
+2. **A sheet cannot carry it either.** Reaching the importer that way puts
+   `HowToExportSheet` — a `<Modal>` — inside another `<Modal>`, which is the
+   two-presented-view-controller freeze of 2026-09-10.
+3. **The payoff screen deliberately carries one action.** A fork there is what made the
+   social half of onboarding optional in the first place, and `TasteOnboarding.test.tsx`
+   asserts the absence of competing buttons.
+
+So the mention is one line on the **payoff** — after the five are placed, not during the
+run, where an earlier pass had put it. Skipping it is carrying on.
+
+> **Open decision.** A true two-action moment needs the flow guard to admit one route out
+> of the onboarding group. That is a change to the machine that stranded people twice
+> (#131, #133), so it is not in this tranche. It is a small change and a separately
+> reviewable one: an allowance in `nextRoute` for `/settings/import` while a stage is
+> unfinished, plus a return path. Worth doing on its own, with its own review, once the
+> importer has been physically tested.
+
 ---
 
 ## 2. What is read, and what is never opened
@@ -86,22 +116,39 @@ under either of the conflicting accounts, and the split is recorded here.
 - `Date` in `diary.csv` is an activity stamp in Letterboxd's own timezone, not a watch
   date; `Watched Date` is the watch date.
 
-**Not verified, and hedged in the copy:**
+**Corroborated on a second pass, 2026-09-11**, after the 403 was re-confirmed from a
+different session — it is Letterboxd refusing scripted fetches outright, on both
+`letterboxd.com` and `letterboxd.zendesk.com`, rather than anything fixable at our end.
+What could be established from Letterboxd's *own* indexed material, as distinct from the
+third-party blogs that disagree with each other:
 
-- **Where the control sits.** Sources disagree between Settings ▸ Data and Settings ▸
-  Advanced Settings. The sheet names Data and admits the other label in the same sentence.
-- **How the file is delivered.** Sources disagree between an immediate download and an
-  emailed link. The sheet covers both in one sentence rather than asserting either.
+- **Where the control sits.** The **Data** tab of Settings, and `letterboxd.com/settings/data/`
+  resolves to a real Letterboxd page rather than a guessed path. The "Advanced Settings"
+  label appears only in secondary write-ups and is most likely stale; the copy no longer
+  carries it.
+- **How the file is delivered.** Letterboxd's own *Importing data* page describes it as
+  "click to generate a zip file containing CSVs of your profile, films, reviews, lists and
+  more" — generated on demand, not queued to an inbox.
+- **No subscription gate** appears in any official material, which agrees with the
+  free-account evidence above.
 
-The sheet's button opens `https://letterboxd.com/settings/` — the settings root rather than
-a deep link, because a root that has been stable for the life of the site cannot 404 the
-way a guessed sub-path can. The live page is the authority; our list is a description.
+**Still not verified, and deliberately soft in the copy:**
+
+- Whether a very large account is emailed a link instead. One sentence allows for it rather
+  than asserting either way.
+- Whether the mobile app exposes the export at all. The copy does not mention the app: the
+  export is a website URL, and sending somebody hunting through the app for it would be a
+  dead end of our own making.
+
+The sheet's button now opens `https://letterboxd.com/settings/data/` — the Data tab itself.
+The root was right while the tab was a guess; it is not a guess now, and the deep link saves
+the step people actually get lost on. The live page is the authority; our list is a
+description.
 
 ### Open for the founder
 
-> Confirm, from a real Letterboxd account: the current menu label, and whether the export
-> downloads immediately or arrives by email. With that, `HowToExportSheet` can lose its
-> hedge and name one path.
+> One thing left, and it is small: whether a large export arrives by email rather than as a
+> download. Everything else in the steps is now corroborated from Letterboxd's own material.
 
 ---
 
