@@ -8,10 +8,9 @@ Function deployed, the drain scheduled and draining, 126/126 on the anon smoke. 
 (`abheeqyjzekiowkztfxv`) has none of it — all eight `2026091700xx` migrations are pending
 there, by design.
 
-Independent review of 2026-09-11 found ten defects. Four are fixed (§6a), two of them
-blockers that would have made the feature impossible rather than merely wrong. Six remain
-open and are listed rather than carried quietly; one of those is security and should be
-settled before anybody but the founder can import.
+Independent review of 2026-09-11 found ten defects; a second pass closed the rest and found
+four more. All fourteen are fixed (§6a, §6b), including the security finding on the shared
+match cache and a provider tier that could never have resolved a film on any project.
 
 The full specification is Contract V3, agreed across the audit sessions of 2026-09-08 to
 2026-09-11. This document is the part a reader needs *after* the contract: what is
@@ -250,7 +249,96 @@ and a test asserts the absence of that predicate directly.
 
 ---
 
-## 6b. Deploying it, and turning it off
+## 6b. Closing the six, 2026-09-12
+
+Every finding left open above is now closed, and configuring staging to prove it turned up
+three more.
+
+### The six
+
+| # | What it was | How it is closed |
+|---|---|---|
+| 3 | **Cache poisoning.** `letterboxd_matches` is global and was written directly by whichever import got there first, from a `(filmUri, name, year)` triple the client supplies in full. The guard checked `year` against the matched row's release date — i.e. name↔year — while the thing recorded was filmUri↔film. The URI was never part of the evidence. | `20260917000900`. The table splits: `letterboxd_match_claims` is what one account asserted, attributable on purpose; `letterboxd_matches` is what `import.match_trust_claims` (default 2, floored at 2 in code) distinct accounts agreed on. `_import_promote_match` is the only writer. |
+| 6 | **A second archive was swallowed.** `import_create` returns the running job, and the screen settled to `working` — so the preview vanished and the *other* import's summary appeared under "Your history is in". | The client refuses with `already_running`, says this file was not sent, and offers to watch the running import. |
+| 7 | **The summary overcounted.** Every row the worker finished with was `applied`, including the ones it deliberately left alone, and that number was rendered as "Added to your collection". | `20260917001000`. Five buckets that partition the archive, in stated units. |
+| 8 | **No whole-job ceiling.** Pages were bounded; the number of pages was not. | `20260917001100`. 50,000 rows and 32 MiB, counted on `import_jobs` from the insert's own `returning`. |
+| 9 | **`pick()` had no in-flight guard.** | A ref guard, released in a `finally`, tested at the hook level. |
+| 10 | **The provider tier was unconfigured on staging.** | Configured — and then found to be broken everywhere. See below. |
+
+### Why "trust only the provider" was not the answer to #3
+
+It is the obvious fix and it does not work, which is worth recording so nobody reaches for
+it again. `_import_provider_resolve` is handed a media item the Edge Function chose by
+searching TMDB for **the row's own name and year** — the client's, exactly as in the local
+tier. It never dereferences the URI either. Nothing in this system fetches a Letterboxd
+page, so no tier can establish that binding alone, and trusting the provider would have left
+the same attack reachable by naming a film the catalogue did not have yet.
+
+What is available is independent agreement, and it is enough, because the attack it has to
+stop is precisely "one account asserts".
+
+Three properties fell out that are stronger than the rule required:
+
+- two accounts disagreeing about one URI promote nothing, because neither *pair* reaches the
+  bar — disagreement answered by abstention, the same answer T1 gives an ambiguous title;
+- an established mapping is never displaced, so a second account buys an attacker nothing;
+- a trusted URI cannot be contested at all: T0 runs before T1, so a later row carrying it
+  resolves to the trusted film whatever it calls itself, and the rival claim is never even
+  recorded.
+
+The cost is smaller than it looks. The cache exists to spare the provider, and most of that
+survives: the provider already populates `media_items`, so once any import has caused TMDB
+to be asked about a film, every later importer matches it locally for free. The cache only
+adds something where the local tier cannot reach — an alternate title, or a year more than
+one out — which are exactly the bindings least supported by evidence.
+
+### The three found while proving it on staging
+
+**The provider tier could never have resolved a single film**, on any project:
+
+1. It read `TMDB_READ_TOKEN`, a name that appears in no other file, no deployed project and
+   not in `supabase/functions/README.md`. The convention is `TMDB_ACCESS_TOKEN`.
+2. It called `tmdb_upsert_titles` with `p_titles`; the argument is `p_items`. PostgREST
+   answers an argument mismatch with a 404, and `upsert` turns any error into `null` —
+   indistinguishable there from "the film could not be written". So every provider match was
+   found, judged confident, and silently dropped.
+3. It read `.id` from the result; that function returns `(media_item_id, item_kind,
+   provider_id)`. Two mistakes producing one symptom, which is why fixing only the first
+   would have looked like no fix at all.
+
+The function now reports why a batch resolved nothing — `failed` with reasons, `noResults`
+against `notConfident`, and `unwritable` — because those were one silence, and a cron tick
+with nobody reading its logs should be able to say whether it met an unknown film or a
+broken key.
+
+### And a fourth retention path
+
+Re-verifying retention across every terminal path found three closed and one open.
+`import_create` clears an abandoned `pending` job only when the same person imports again,
+`import_discard` is the button they did not press, and the worker's dead letter is
+unreachable for it — the tick returns `idle` unless something is `matching` or `applying`.
+So a half-staged archive from somebody who tried once and gave up was kept indefinitely, on
+the account least likely to want it kept. `20260917001200` sweeps it.
+
+### Staging, proven end to end
+
+Configured on `fjxhcbowoxuzulwirzyr` only, verified before each write: `functions.base_url`,
+and a vault `service_role_key` taken from the authenticated CLI and never written to disk.
+
+A real import, through the actual pg_cron tick rather than a hand-driven worker:
+
+| case | result |
+|---|---|
+| strong local match | *12 Angry Men* → collection, `source = imported` |
+| provider tier | *Sansho the Bailiff* → TMDB, upserted, collection |
+| controlled non-match | *Zzq Nonexistent Film* → unmatched, redacted to name and year |
+| watchlist | *12 Monkeys* → watchlist |
+| re-import | `watched 0`, `already 2`, collection still two rows |
+| trust boundary | three claims from one account, **zero** trusted mappings |
+
+---
+
+## 6c. Deploying it, and turning it off
 
 **The importer is the only feature here with a worker, and a worker has to be started.**
 `20260917000300` shipped the installer and nothing that called it; this section exists so
