@@ -67,30 +67,12 @@ const TOP = 0.030;
 const BOTTOM = 0.043;
 
 /**
- * A frame that is cropped to a detail rather than shown as a whole phone.
- *
- * ---------------------------------------------------------------------------
- * WHY THE REVEAL IS CROPPED, WHICH IS A CORRECTNESS FIX AND NOT A DESIGN ONE
- * ---------------------------------------------------------------------------
- *
- * The 2026-08-31 capture of the score reveal reads
- * `#12 Movies · #3 Adventure · #1 Fantasy` on one line. **The shipped app cannot
- * produce that line.** `RankingSheet.tsx` sets `showsOverall = position <= TOP_RANK_SHOWN`
- * with `TOP_RANK_SHOWN = 10`, and the overall placement and the genre ranks are written
- * from that one flag as mutually exclusive branches: a title at position 12 renders its
- * genre ranks and no overall line at all. The capture predates that change.
- *
- * A marketing page showing a screen the product cannot draw is a lie whether or not
- * anybody notices, and it is the exact thing the front page's own rules forbid. The
- * options were to drop the shot, to reshoot it, or to crop it. Reshooting needs a device
- * and a seeded account; dropping it loses the payoff image the section is about.
- *
- * So it is cropped to the part that is still true: the score, which is the moment, and
- * the title under it. Cropping is what every other frame here already gets, and the
- * stale line is below the cut. The result is a wide detail rather than a phone, which
- * is why it renders with its own class.
+ * There used to be a detail crop here, for the score reveal, whose 2026-08-31 capture
+ * carries a placement line the shipped app can no longer draw. The reveal left the page
+ * on 2026-09-12, when the ranking section started being illustrated by the two ranked
+ * collections instead, so the crop and its class went with it. If a detail shot comes
+ * back, the capture's stale line is the reason it has to be cropped rather than shown.
  */
-const DETAIL = { left: 0, top: 1094, width: 1080, height: 656 };
 
 /**
  * `[x, y, width, height]` in source pixels, blurred before the crop.
@@ -179,9 +161,8 @@ for (const shot of SHOTS) {
     image = sharp(await sharp(file).composite(patches).toBuffer());
   }
 
-  // A detail names its own rectangle; everything else is the whole frame minus the
-  // host phone's status and navigation bars.
-  const box = shot.detail ?? {
+  // The whole frame minus the host phone's status and navigation bars.
+  const box = {
     left: 0,
     top: Math.round(h * TOP),
     width: w,
