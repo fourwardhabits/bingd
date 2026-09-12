@@ -190,15 +190,21 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
            *
            * The operator needs to know *which kind* of failure, which is what these are.
            */
+          /**
+           * **Matched against the error's own prefix, not anywhere in it.**
+           *
+           * A loose `includes` reads the whole string — and on the transport path that
+           * string embeds the request URL, so the film's own title is in it. A film called
+           * *Rate Limited* would have aborted the rest of the batch, and one whose title
+           * contained "provider 503" would have been filed as a provider error. Anchoring
+           * to the message we threw is the difference between classifying our error and
+           * pattern-matching somebody's library.
+           */
           const text = String(cause);
-          reasons.add(
-            text.includes('rate limited')
-              ? 'rate_limited'
-              : /provider (\d{3})/.exec(text)?.[1]
-                ? `provider_${/provider (\d{3})/.exec(text)![1]}`
-                : 'transport',
-          );
-          if (text.includes('rate limited')) rateLimited = true;
+          const status = /^(?:Error: )?provider (\d{3})$/.exec(text)?.[1];
+          const limited = /^(?:Error: )?provider rate limited$/.test(text);
+          reasons.add(limited ? 'rate_limited' : status ? `provider_${status}` : 'transport');
+          if (limited) rateLimited = true;
         }
       }),
     );
@@ -297,6 +303,16 @@ Deno.serve(async (request: Request) => {
   try {
     return json({ status: 'ok', ...(await resolveBatch(db, tmdbKey, tmdbBearer)) });
   } catch (cause) {
-    return json({ error: { code: 'BG500', message: String(cause) } }, 500);
+    /**
+     * **Bounded, for the same reason the per-claim reasons are classified.**
+     *
+     * This answer travels to `net.http_post` and lands in `net._http_response`, a table with
+     * none of this feature's retention discipline. Only `resolveBatch`'s own throw reaches
+     * here — the claim RPC failing — so no film title is in scope today: `search` and
+     * `upsert` are the only places that see one and both sit inside the inner `try`. But
+     * "no title today" is a property of where the throw comes from, not of this line, and
+     * the length bound is what stops the next refactor making it untrue.
+     */
+    return json({ error: { code: 'BG500', message: String(cause).slice(0, 200) } }, 500);
   }
 });

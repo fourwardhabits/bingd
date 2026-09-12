@@ -292,6 +292,39 @@ to be asked about a film, every later importer matches it locally for free. The 
 adds something where the local tier cannot reach — an alternate title, or a year more than
 one out — which are exactly the bindings least supported by evidence.
 
+### The read side, and what guarding it costs (`20260917001300`)
+
+The split above made *writing* a shared mapping require two accounts and a year agreement.
+Reading one back required nothing: T0 looked the URI up and set `matched` without comparing
+the result against the row it was placing. So a mapping saying `<Godfather slug> → Cats
+(2019)` was applied to an export row saying `The Godfather, 1972` — a film T1 would have
+placed correctly. The victim's own archive contradicted the mapping and was never consulted.
+
+T0 now applies the same year test T1 uses. This does not stop the attack; it decides what
+the attack can buy:
+
+| | before | after |
+|---|---|---|
+| what two accounts can bind | any URI to any film | a URI to a film released **within a year** of the real one |
+| who it reaches | every later importer | only those whose export omits the year |
+
+**What it costs, stated plainly.** `20260917000900` named the cache's value as resolving
+"an alternate title, or a year more than one out". The guard removes the second half — and
+since both claim writers also require agreement within a year, such a pair can no longer be
+written either. A film Letterboxd dates to its festival year and TMDB to wide release two
+years later is now a row the cache cannot help with: it falls to T1, then the provider, and
+may end unmatched.
+
+That is a real narrowing and the trade is deliberate. An alternate *title* — the common
+case, and the one the cache was built for — still resolves, because the title is what T1
+could not match and the year is what the export still carries.
+
+**The residual.** Two colluding accounts can still mislabel a film inside a one-year window,
+and a row with no year in the export is placed by the mapping unchecked, because there is
+nothing to disagree with. Both have tests. Nothing after the fact distinguishes a poisoned
+pair from an honest one: `letterboxd_match_claims` records who claimed what, which makes an
+incident investigable, not preventable.
+
 ### The three found while proving it on staging
 
 **The provider tier could never have resolved a single film**, on any project:
