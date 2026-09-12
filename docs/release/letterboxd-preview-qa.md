@@ -73,6 +73,22 @@ Each row is one thing to look at. **Bold** is what would make it a bug.
 
 ---
 
+---
+
+## Also in this update: the comparison memory aids
+
+The preview binaries were built with this feature; the first Letterboxd OTA replaced the
+whole JS bundle and therefore took it back out. This update carries both, so it is worth a
+look that it is still there and still behaves.
+
+| # | Do this | Expect |
+|---|---|---|
+| R | Start a ranking comparison and open the details on one of the two titles | A reminder sheet: poster, overview, cast, and for a season its episodes. **No score, no community rating, no watchlist control, no reviews** — an action here would compete with the comparison you are in. |
+| S | Close it and carry on comparing | The comparison is exactly where you left it. **Not restarted, and no answer lost.** |
+| T | Open the details on a **season** | It says what that season actually was — episodes, not the show in general. |
+| U | Open it twice on the same title | The second time it opens collapsed rather than re-expanded, and quickly. |
+| V | Open it with no network | It fails quietly inside the sheet. **The comparison behind it must not break.** |
+
 ## What staging will and will not show you
 
 - **The TMDB tier works there now** and is the thing most recently fixed — a film not in
