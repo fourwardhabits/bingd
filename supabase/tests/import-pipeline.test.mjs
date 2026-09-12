@@ -2250,3 +2250,142 @@ describe('a job that will not stop growing', () => {
     assert.equal((await totals()).staged_rows, 10, 'falls back to the default');
   });
 });
+
+
+// ===========================================================================
+// Retention, across every terminal path — `20260917001200`
+// ===========================================================================
+
+/**
+ * **The fourth road out of a job, and the one nothing swept.**
+ *
+ * Complete, duplicate and dead-lettered are covered above. A job left `pending` is not:
+ * `import_create` only clears one when the same person imports again, `import_discard` is
+ * the button they did not press, and the worker's dead letter is unreachable for it because
+ * the tick returns `idle` unless something is `matching` or `applying`.
+ *
+ * So a half-staged archive from somebody who tried once and gave up sat there with its film
+ * URIs, ratings, watch dates and every diary URI — for ever, on the account least likely to
+ * come back and least likely to want it kept.
+ */
+describe('an archive nobody came back for', () => {
+  let zoe;
+
+  before(async () => {
+    zoe = await t.createUser({ username: 'pipe_zoe' });
+  });
+
+  afterEach(async () => {
+    await t.actAs(null);
+    await t.sql(`delete from import_jobs where user_id = $1`, [zoe]);
+  });
+
+  /** Stages a page and walks away: no `import_ready`, so the job stays `pending`. */
+  const halfStaged = async () => {
+    await t.actAs(zoe);
+    const { rows } = await t.sql(`select import_create() as id`);
+    const jobId = rows[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged('Zoe Abandoned', {
+        correlation: 'zoe abandoned|2001',
+        filmUri: 'https://boxd.it/ZOEFILM',
+        rating: 4.5,
+        bucket: 'loved',
+        watchedOn: '2024-03-04',
+        watches: [
+          { diaryUri: 'https://boxd.it/ZOEDIARY', watchedOn: '2024-03-04', isRewatch: false },
+        ],
+      }),
+    ])]);
+    await t.actAs(null);
+    return jobId;
+  };
+
+  const rawOf = async (jobId) => {
+    const { rows } = await t.sql(`select raw from import_rows where job_id = $1`, [jobId]);
+    return rows[0]?.raw ?? null;
+  };
+
+  it('is left alone while it is still young enough to be resumed', async () => {
+    // `import_create` adopts a pending job for an hour, so sweeping one sooner would retire
+    // a job somebody is still staging onto.
+    const jobId = await halfStaged();
+
+    assert.equal((await t.sql(`select _import_sweep_abandoned() as n`)).rows[0].n, 0);
+    const raw = await rawOf(jobId);
+    assert.ok(raw.filmUri, 'a live job keeps its payload, which is what it is for');
+  });
+
+  it('is retired and redacted once nobody has come back for a day', async () => {
+    const jobId = await halfStaged();
+    await t.sql(
+      `update import_jobs set created_at = now() - interval '30 hours' where id = $1`, [jobId]);
+
+    assert.equal((await t.sql(`select _import_sweep_abandoned() as n`)).rows[0].n, 1);
+
+    const { rows: job } = await t.sql(
+      `select status, completed_at, last_error from import_jobs where id = $1`, [jobId]);
+    assert.equal(job[0].status, 'failed');
+    assert.ok(job[0].completed_at, 'and completed, so it stops holding the one live slot');
+    assert.equal(job[0].last_error, 'abandoned');
+
+    // The completion trigger did the redaction, which is the point of marking it failed
+    // rather than inventing a second rule about what a finished job keeps.
+    const raw = await rawOf(jobId);
+    assert.deepEqual(Object.keys(raw).sort(), ['name', 'year']);
+    const serialised = JSON.stringify(raw);
+    for (const secret of ['ZOEFILM', 'ZOEDIARY', 'rating', 'bucket', 'watchedOn', 'watches']) {
+      assert.ok(!serialised.includes(secret), `an abandoned job must not keep ${secret}`);
+    }
+  });
+
+  it('frees the account to import again', async () => {
+    const jobId = await halfStaged();
+    await t.sql(
+      `update import_jobs set created_at = now() - interval '30 hours' where id = $1`, [jobId]);
+    await t.sql(`select _import_sweep_abandoned() as n`);
+
+    await t.actAs(zoe);
+    const { rows } = await t.sql(`select import_create() as id`);
+    assert.notEqual(rows[0].id, jobId, 'a retired job is not adopted');
+    await t.actAs(null);
+  });
+
+  it('leaves a job the worker is working on alone', async () => {
+    // Only `pending` is swept. Anything further along belongs to the worker, which has its
+    // own dead letter and its own attempt counters.
+    const jobId = await halfStaged();
+    await t.sql(
+      `update import_jobs set status = 'matching', created_at = now() - interval '30 hours'
+        where id = $1`, [jobId]);
+
+    assert.equal((await t.sql(`select _import_sweep_abandoned() as n`)).rows[0].n, 0);
+    const { rows } = await t.sql(`select completed_at from import_jobs where id = $1`, [jobId]);
+    assert.equal(rows[0].completed_at, null);
+  });
+
+  it('cannot be configured to retire a job somebody is still staging', async () => {
+    // The floor is an hour, in the function rather than the row, because `import_create`
+    // adopts a pending job for exactly that long.
+    await t.sql(
+      `insert into app_config (key, value) values ('import.abandoned_hours', '0'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+
+    const jobId = await halfStaged();
+    assert.equal((await t.sql(`select _import_sweep_abandoned() as n`)).rows[0].n, 0);
+    assert.ok((await rawOf(jobId)).filmUri);
+
+    await t.sql(
+      `insert into app_config (key, value) values ('import.abandoned_hours', '24'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+  });
+
+  it('is what the scheduled tick actually runs', async () => {
+    // The sweep exists and is unreachable if nothing calls it — which is exactly how the
+    // drain itself shipped uninstalled. Asserted on the command the installer schedules.
+    const { rows } = await t.sql(
+      `select prosrc from pg_proc where proname = 'schedule_import_drain'`);
+    assert.match(rows[0].prosrc, /_import_sweep_abandoned/);
+    assert.match(rows[0].prosrc, /_drain_import_jobs/);
+  });
+});
