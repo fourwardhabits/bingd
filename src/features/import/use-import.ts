@@ -88,7 +88,17 @@ export type ImportCounts = {
   readonly already?: number;
   /** **Films** on the watchlist because of this import, excluding titles already collected. */
   readonly watchlist?: number;
-  /** **Diary entries**, not films: a rewatch is one film and several viewings. */
+  /**
+   * **Diary entries**, not films: a rewatch is one film and several viewings.
+   *
+   * And **held, not added** — the one count here that is not about what this run did.
+   * `imported_watches` inserts `on conflict (user_id, diary_uri) do nothing`, and the count
+   * is every entry now on file for this job's films, so a re-import reports the same number
+   * rather than zero. That is deliberate: the screen labels it *Diary entries kept*, and
+   * "how much of your diary is here" is the question somebody actually has about it. The
+   * other counts answer "what changed"; this one answers "what have you got", which is why
+   * it is the only one without a `created_at` test behind it.
+   */
   readonly viewings?: number;
 };
 
