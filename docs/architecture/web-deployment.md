@@ -469,9 +469,19 @@ are committed into `web/src/` beside the existing two, and `sharp` is an authori
 dependency that Cloudflare never installs. The blur regions are stated in source pixels
 and checked by eye, because a region that drifts shows up immediately as a legible name.
 
-Seven shots: `shot-compare`, `shot-reveal`, `shot-movies`, `shot-tv`, `shot-feed`,
-`shot-foryou`, `shot-watchlist`. WebP, 640px wide (760 for the hero), about 480KB for the
-page and every image together, with only the hero eager.
+Six shots: `shot-compare`, `shot-movies`, `shot-tv`, `shot-feed`, `shot-foryou`,
+`shot-watchlist`. WebP, 640px wide (760 for the hero), with only the hero eager.
+
+**`shot-reveal` left on 2026-09-12**, in the v2 pass that cut the page from four content
+sections to three. The ranking section is now illustrated by the two ranked collections,
+whose posters carry the scores the copy describes, so the reveal crop was the middle step
+of a story told on either side of it. Its file, its manifest entry and its `.detail` class
+went together.
+
+The same pass is where the page stopped claiming the feed is *strictly chronological* with
+*nobody in it you did not follow*: the feed carries the reader's own rankings and a
+Trending shelf, and awards are lifted above their cause. `router.test.mjs` now refuses that
+sentence, *all bingd. asks*, *Taste Match* and the em dash on the front page.
 
 ### `robots.txt` and `sitemap.xml`, and one small real defect
 

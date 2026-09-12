@@ -2124,48 +2124,6 @@ const LANDING_STYLES = `
         .phone-pair .phone { max-width: 16rem; }
       }
 
-      /* The detail crop. A wide close-up rather than a phone, because the frame it
-         comes from carries a line the shipped app no longer draws; see web/shots.mjs. */
-      .detail {
-        display: block;
-        width: 100%;
-        max-width: 22rem;
-        height: auto;
-        margin-inline: auto;
-        border-radius: 0.75rem;
-        border: 1px solid var(--hairline);
-        box-shadow: 0 14px 34px var(--shadow);
-      }
-
-      /* ------------------------------------------------------------------ steps */
-
-      .steps { list-style: none; margin: 2rem 0 0; padding: 0; display: grid; gap: 1.5rem; }
-      .steps li { display: grid; grid-template-columns: 1.75rem 1fr; gap: 0.875rem; }
-      .steps .n {
-        font-family: 'DM Serif Display', Georgia, serif;
-        font-size: 1.5rem;
-        line-height: 1.2;
-        color: var(--maroon);
-      }
-      .steps b { display: block; font-weight: 600; font-size: 1rem; }
-      .steps .d { display: block; color: var(--secondary); font-size: 0.9375rem; }
-
-      /* ------------------------------------------------------------------ notes */
-
-      .notes { margin: 1.75rem 0 0; padding: 0; list-style: none; display: grid; gap: 1.125rem; }
-      .notes li { position: relative; padding-left: 1.125rem; color: var(--secondary); font-size: 0.9375rem; }
-      .notes li::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 0.6rem;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--amber);
-      }
-      .notes b { color: var(--ink); font-weight: 600; }
-
       /* -------------------------------------------------------------- final CTA */
 
       .closer { background: var(--maroon); color: var(--inverse); text-align: center; }
@@ -2248,22 +2206,6 @@ const SHOT = {
     h: 1526,
     alt: 'The bingd. ranking sheet asking which did you like more, with two film posters side by side to choose between',
   },
-  /**
-   * A crop, not a phone, and the reason is correctness rather than composition.
-   *
-   * The frame it comes from reads `#12 Movies &middot; #3 Adventure &middot; #1 Fantasy`,
-   * and the shipped app cannot draw that: the overall placement and the genre ranks are
-   * mutually exclusive branches of one flag, and a title at position 12 gets the genre
-   * ranks alone. The capture predates the change. Cropped to the part that is still
-   * true, which is also the part the section is about. See `web/shots.mjs`.
-   */
-  reveal: {
-    src: '/shot-reveal.webp',
-    w: 640,
-    h: 389,
-    detail: true,
-    alt: 'A bingd. score reveal, showing 9.1 in a maroon tile above the name of the film it belongs to',
-  },
   movies: {
     src: '/shot-movies.webp',
     w: 640,
@@ -2300,7 +2242,7 @@ const SHOT = {
 const shot = (key, { eager = false } = {}) => {
   const s = SHOT[key];
   const loading = eager ? 'fetchpriority="high"' : 'loading="lazy" decoding="async"';
-  return `<img class="${s.detail ? 'detail' : 'phone'}" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
+  return `<img class="phone" src="${s.src}" width="${s.w}" height="${s.h}" ${loading}
                alt="${s.alt}" />`;
 };
 
@@ -2350,7 +2292,7 @@ const AVAILABILITY = [
   distribution.android?.storeUrl
     ? 'Free on Google Play.'
     : distribution.android?.optInUrl
-      ? 'Android is not on Google Play yet, so the Android button is the tester opt-in page you have to join from first.'
+      ? 'Android is not on Google Play yet, so the Android button is the tester opt-in you join first.'
       : null,
 ]
   .filter(Boolean)
@@ -2446,9 +2388,8 @@ await writeFile(
           <div class="split-copy">
             <h1>Rank what you watch.<br />See where it really lands.</h1>
             <p class="lede">
-              No stars. bingd. asks which of two you liked more, a few times over, and
-              puts each film or season exactly where it belongs in your collection, with
-              a score out of ten. Then you get to see where your friends put theirs.
+              No stars. Pick which of two movies or shows you liked more, and bingd.
+              works out the score. Then see where your friends put theirs.
             </p>
 
 ${installRow({ primary: true })}
@@ -2464,64 +2405,13 @@ ${installRow({ primary: true })}
         <div class="wrap split flip">
           <div class="split-copy">
             <p class="kicker">How it works</p>
-            <h2>Stars were never the right question.</h2>
+            <h2>Stop guessing between a 4 and a 4.5.</h2>
             <p class="section-lede">
-              Is it a four, or a four and a half? Nobody actually knows. But everybody
-              knows which of two films they liked more, so that is the only thing bingd.
-              ever asks you.
+              Nobody knows the difference. But you do know if you liked it, and which of
+              two you liked more. Say how it was, make a few head-to-head picks, and each
+              film or season lands where it belongs. Its score out of ten comes from that
+              spot. You never pick a number.
             </p>
-
-            <ol class="steps">
-              <li>
-                <span class="n">1</span>
-                <span>
-                  <b>Log it.</b>
-                  <span class="d">How was it? I liked it, it was fine, or I didn&rsquo;t
-                  like it.</span>
-                </span>
-              </li>
-              <li>
-                <span class="n">2</span>
-                <span>
-                  <b>Compare it.</b>
-                  <span class="d">A handful of head-to-head choices against things you
-                  have already ranked. Too tough gets you a different pairing, for the
-                  ones you cannot call and the ones you cannot remember.</span>
-                </span>
-              </li>
-              <li>
-                <span class="n">3</span>
-                <span>
-                  <b>See where it landed.</b>
-                  <span class="d">A score out of ten, worked out from where it ended up
-                  rather than typed in, and a place in a list you can argue with.</span>
-                </span>
-              </li>
-            </ol>
-          </div>
-
-          <div>${shot('reveal')}</div>
-        </div>
-      </section>
-
-      <section>
-        <div class="wrap split">
-          <div class="split-copy">
-            <p class="kicker">Your collection</p>
-            <h2>A list that is finally in your order.</h2>
-            <p class="section-lede">
-              Everything you rank takes its place, so &ldquo;what are your top five&rdquo;
-              stops being a question you have to think about. Movies and TV live in one
-              profile, and a season is ranked on its own, so a brilliant first year never
-              has to carry a show that fell apart later.
-            </p>
-            <ul class="notes">
-              <li><b>Watched and Watchlist in one place</b>, filterable and sortable, and
-              the watchlist clears itself when you log the thing.</li>
-              <li><b>Writing is optional.</b> A ranking with no words at all is finished.
-              Reviews are there if you want an audience, and a private note is there if
-              you do not.</li>
-            </ul>
           </div>
 
           <div class="phone-pair">
@@ -2531,40 +2421,33 @@ ${installRow({ primary: true })}
         </div>
       </section>
 
-      <section class="band">
-        <div class="wrap split flip">
+      <section>
+        <div class="wrap split">
           <div class="split-copy">
             <p class="kicker">Friends</p>
-            <h2>Better with the people you already argue with.</h2>
+            <h2>See what your friends are watching.</h2>
             <p class="section-lede">
-              Follow someone and their rankings turn up in a feed that is strictly
-              chronological. Nothing reorders it, and nobody is in it you did not follow.
-              React, reply, and send a title straight to a person instead of losing it in
-              a group chat.
+              Follow the people you already trade recommendations with. Their rankings
+              and scores turn up in your feed, newest first. Send them a title instead of
+              losing it in a group chat. And Match shows how close your taste is, once you
+              have both ranked enough of the same titles.
             </p>
-            <ul class="notes">
-              <li><b>Taste Match</b> appears on a profile once the two of you have both
-              ranked enough for the number to mean anything. Until then it says so,
-              rather than showing you a percentage it made up.</li>
-              <li><b>Group Picks</b> is the one to try first. Choose who is watching
-              tonight, and bingd. finds the things you can all agree on.</li>
-            </ul>
           </div>
 
           <div>${shot('feed')}</div>
         </div>
       </section>
 
-      <section>
-        <div class="wrap split">
+      <section class="band">
+        <div class="wrap split flip">
           <div class="split-copy">
             <p class="kicker">What&rsquo;s next</p>
-            <h2>And a straight answer to &ldquo;what should I watch&rdquo;.</h2>
+            <h2>Spend less time deciding.</h2>
             <p class="section-lede">
-              For you is built out of what you have ranked, so it gets sharper the more
-              of your taste it has seen. Anything a friend sends you waits in one place
-              until you deal with it, and everything you mean to get to sits on the
-              watchlist until you do.
+              For you is built from what you rank, so it gets sharper as you go. Your
+              watchlist holds everything you mean to get to. And when nobody can decide,
+              Group Picks takes who is watching tonight and finds what you can all agree
+              on.
             </p>
           </div>
 

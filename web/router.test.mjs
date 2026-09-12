@@ -1795,7 +1795,14 @@ describe('the release mode', () => {
     assert.match(front, /src="\/page\.mjs"/, 'nothing wires the buttons up');
     assert.match(front, /id="bingd-config"/, 'the buttons have no distribution to read');
 
-    for (const name of ['shot-compare', 'shot-reveal', 'shot-movies', 'shot-feed']) {
+    for (const name of [
+      'shot-compare',
+      'shot-movies',
+      'shot-tv',
+      'shot-feed',
+      'shot-foryou',
+      'shot-watchlist',
+    ]) {
       assert.match(front, new RegExp(`/${name}\\.webp`), `the front page lost ${name}`);
       assert.ok(
         existsSync(join(dist, `${name}.webp`)),
@@ -1950,16 +1957,64 @@ describe('the release mode', () => {
       );
     }
 
-    // The label is the whole point, so it is asserted in both directions: the page has
-    // to be using the real one rather than having quietly dropped the sentence.
-    assert.match(
-      front,
-      /Too tough/,
-      'the front page stopped naming the comparison control. If that is deliberate, ' +
-        'delete this assertion in the same commit; if it became "too close to call" ' +
-        'again, that is the paraphrase this test exists for.',
-    );
-    assert.doesNotMatch(front, /too close to call/i);
+    // The unconditional half of this was deleted on 2026-09-12, in the commit that
+    // took the three-step list off the page — which is exactly what its own message
+    // said to do. The page no longer names the control at all, so there is nothing to
+    // paraphrase; the loop above still catches it if a later edit names it again.
+    //
+    // The refusal stays, and is the half that was always load-bearing: "too close to
+    // call" is the wrong sentence for *I do not remember this one well enough to say*,
+    // and it is the phrase a rewrite reaches for.
+    assert.doesNotMatch(front, /too\s+close\s+to\s+call/i);
+  });
+
+  /**
+   * The front page refuses the sentences the product has already disproved.
+   *
+   * The quote check above verifies a phrase the page *does* use. These are the other
+   * direction: claims a rewrite reaches for, which read as ordinary marketing and which
+   * the client contradicts. Each was on the page at some point, and the first was
+   * shipped twice before a review read the feed hook.
+   *
+   *   - **"strictly chronological" / "nobody in it you did not follow".** The feed is
+   *     `[userId, ...followees]` (`use-feed.ts`), so the reader's own rankings are in
+   *     it; a Trending shelf sits above the activity; and `_rank_finalize` moves an
+   *     award's `causal_at` so it sits above its cause. Newest first is true. The rest
+   *     is not.
+   *   - **"all bingd. asks".** Every ranking opens with *How was it?*, which sets the
+   *     score's band (`score.ts` `BAND_RANGE`), and a band of one scores its top with
+   *     no comparison at all. The comparison is the second question, not the only one.
+   *   - **"Taste Match".** The app's label is *Match*, and `PublicProfileScreen.test.tsx`
+   *     asserts the longer phrase never renders. A page naming a label the product
+   *     refuses is the paraphrase problem again.
+   *
+   * And the em dash, which is a founder house-style rule for this site's copy and is
+   * already enforced on the support page. Scoped to the body, because the `<title>`
+   * and the share cards carry one deliberately.
+   */
+  it('refuses the claims the product contradicts, and the em dash', () => {
+    const front = read('index.html');
+
+    // Found by pattern and asserted, not by indexOf('<body>'). A body tag that gained an
+    // attribute would make indexOf return -1, slice(-1) would hand every assertion below
+    // the last character of the file, and the test would pass while checking nothing.
+    const open = front.match(/<body[^>]*>/);
+    assert.ok(open, 'the front page has no <body> for these checks to be scoped to');
+    const body = front.slice(open.index);
+
+    // Matched across whitespace rather than a single space: the page source wraps at 90
+    // columns, and the first version of this test let the live page's own "strictly
+    // chronological" through because a line break sat between the two words.
+    for (const [claim, why] of [
+      [/strictly\s+chronological/i, 'the feed carries your own rankings and a Trending shelf'],
+      [/nobody\s+(?:is\s+)?in\s+it\s+you\s+did\s+not\s+follow/i, 'the feed carries your own rankings'],
+      [/all\s+bingd\.?\s+asks/i, 'every ranking asks How was it? first'],
+      [/Taste\s+Match/, 'the app calls it Match and refuses the longer label'],
+    ]) {
+      assert.doesNotMatch(body, claim, `the front page claims something false: ${why}`);
+    }
+
+    assert.doesNotMatch(body, /&mdash;|\u2014/, 'an em dash reached the front page copy');
   });
 
   /**
