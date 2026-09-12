@@ -108,6 +108,15 @@ describe('the event vocabulary', () => {
         'group_picks_generated',
         'group_picks_opened',
         'group_picks_result_opened',
+        // The Letterboxd import, 2026-09-11 (Contract V3 §9). Five names for a funnel that
+        // crosses into another app in the middle: opened, instructions opened, a file read
+        // or refused, the upload started, and a completion that is knowingly an undercount
+        // because the work finishes on a cron tick with nobody watching.
+        'import_archive_selected',
+        'import_completed',
+        'import_instructions_opened',
+        'import_opened',
+        'import_started',
         'invite_activated',
         'invite_auto_follow_succeeded',
         'invite_link_created',

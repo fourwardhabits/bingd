@@ -113,6 +113,18 @@ export default function SettingsScreen() {
               label="Notification Settings"
               onPress={() => router.push('/settings/notification-preferences')}
             />
+            {/* **Under Account rather than in a section of its own**, because importing a
+                history is something you do to your account, and a heading with one row
+                under it would announce the feature more loudly than a feature nobody is
+                required to use deserves.
+
+                Above Account & Data for the same reason Sign out is below it: this group
+                runs from the things people do often to the things they do once. */}
+            <Row
+              icon="download-outline"
+              label="Import from Letterboxd"
+              onPress={() => router.push('/settings/import')}
+            />
             <Row
               icon="shield-outline"
               label="Account & Data"

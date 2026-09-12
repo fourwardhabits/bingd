@@ -950,6 +950,39 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             This is just the start. As you rank more, your favorites get clearer and bingd.
             gets a better read on your taste.
           </Text>
+          {/* ---------------------------------------------------------------
+              **The import exists, said once, after the five, in words that go nowhere.**
+
+              Contract V3 §9 makes importing optional and available at any time, and the
+              founder's direction was one skippable discovery moment *after* First Five,
+              with the fallback of a Settings-only entry if placing it here would raise
+              release risk. It would, on three counts that are facts rather than caution:
+
+              1. **A route cannot be pushed from inside this flow.** `nextRoute` answers
+                 any group but `onboarding` with `STAGE_ROUTES[stage]` while the stage is
+                 unfinished, so a push to `/settings/import` is replaced straight back.
+                 That is the same rule the Diagnostics long-press above exists to dodge.
+              2. **A sheet cannot carry it either.** Reaching the importer that way puts
+                 `HowToExportSheet` — a `<Modal>` — inside another `<Modal>`, which is the
+                 two-presented-view-controller freeze of 2026-09-10.
+              3. **This screen deliberately has one action.** A fork at the payoff is what
+                 made the social half optional in the first place; see the note above.
+
+              So the moment is a sentence rather than a pair of buttons: it answers the
+              thought somebody has exactly once — *I have already done all of this
+              somewhere else* — and skipping it is carrying on, which is what they were
+              going to do anyway. It moved here from the first ranking screen, where an
+              earlier pass had put it: that was before First Five rather than after it.
+
+              A two-action version needs the flow guard to admit one route, which is a
+              change to the machine that stranded people twice (#131, #133) and belongs in
+              its own commit with its own review. `docs/product/letterboxd-import.md`
+              carries it as the open decision.
+              --------------------------------------------------------------- */}
+          <Text variant="footnote" tone="tertiary">
+            Already on Letterboxd? You can bring your whole history across whenever you
+            like, from Settings.
+          </Text>
         </View>
 
         {top.map((entry, index) => (

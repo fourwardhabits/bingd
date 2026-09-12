@@ -406,6 +406,20 @@ describe('the Settings hub', () => {
   });
 
   /**
+   * **The importer's permanent home.** Onboarding only mentions it in a sentence, and the
+   * flow guard replaces any route pushed out of the onboarding group — so this row is the
+   * only way anybody reaches the importer at all. A cleanup that took it would remove the
+   * feature without removing a line of it.
+   */
+  it('leads to the Letterboxd importer', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Import from Letterboxd'));
+
+    expect(mockPush).toHaveBeenCalledWith('/settings/import');
+  });
+
+  /**
    * The founder's Preview correction: Settings had a Notifications row leading to the
    * inbox, and the bell in the Feed and Profile headers already leads there.
    *

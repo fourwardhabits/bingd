@@ -1010,6 +1010,88 @@ expectRefused(
   await rpc('starter_movies', { p_limit: 1 }),
 );
 
+/**
+ * The Letterboxd importer — `20260917000100` through `20260917000500`.
+ *
+ * **These are the probes this file exists for.** `function-grants.test.mjs` asserts the
+ * same grants, but it asserts them in PGlite against migrations it just ran; this asks the
+ * database we actually ship on, through the surface a stranger actually reaches. The
+ * distinction matters more here than for most of the list above, because the import
+ * functions are `security definer` and three of them write: `import_stage` inserts rows,
+ * `import_ready` hands a job to a worker that spends provider requests, and
+ * `import_discard` deletes. A signed-out caller reaching any of them would be writing to
+ * somebody else's account or paying for their matching.
+ *
+ * Every one is probed with real arguments. A `{}` call answers 404 for an argument
+ * mismatch, which `expectRefused` would happily read as a refusal — the trap recorded at
+ * the top of this file, and the reason `import_create` is worth probing at all: it takes
+ * no arguments and so cannot hide behind one.
+ */
+expectRefused('anon cannot execute import_create', await rpc('import_create', {}));
+expectRefused(
+  'anon cannot execute import_stage',
+  await rpc('import_stage', { p_job_id: NIL, p_rows: [] }),
+);
+expectRefused('anon cannot execute import_ready', await rpc('import_ready', { p_job_id: NIL }));
+expectRefused('anon cannot execute import_status', await rpc('import_status', { p_job_id: NIL }));
+expectRefused('anon cannot execute import_discard', await rpc('import_discard', { p_job_id: NIL }));
+
+// Internal, and named here so that a future migration granting one of them by accident is
+// caught. `_drain_import_jobs` is the cron entry point and holds the service key's path to
+// the provider function; `_import_settle` writes the collection.
+expectRefused(
+  'anon cannot execute _drain_import_jobs',
+  await rpc('_drain_import_jobs', { p_jobs: 1, p_slice: 1 }),
+);
+expectRefused('anon cannot execute _import_settle', await rpc('_import_settle', { p_job_id: NIL }));
+
+// `20260917000900`. The only writer of the trusted film-URI cache. A client reaching this
+// would be binding an external film identity to a media item for every later importer,
+// which is the whole of the vulnerability that migration closed.
+expectRefused(
+  'anon cannot execute _import_promote_match',
+  await rpc('_import_promote_match', { p_uri: 'https://boxd.it/x', p_media_item_id: NIL, p_user_id: NIL, p_tier: 'local' }),
+);
+expectRefused(
+  'anon cannot execute _import_match_batch',
+  await rpc('_import_match_batch', { p_job_id: NIL, p_limit: 1 }),
+);
+expectRefused(
+  'anon cannot execute _import_provider_resolve',
+  await rpc('_import_provider_resolve', { p_row_id: NIL, p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute schedule_import_drain',
+  await rpc('schedule_import_drain', { p_schedule: '* * * * *' }),
+);
+expectRefused('anon cannot execute unschedule_import_drain', await rpc('unschedule_import_drain', {}));
+expectRefused('anon cannot execute import_drain_status', await rpc('import_drain_status', {}));
+
+/**
+ * The staging table and the two provenance tables.
+ *
+ * **Refused *or* empty, and both are a pass**, which is not the laxity it looks like. RLS
+ * on a table a role may still `select` answers with zero rows and no error — the trap that
+ * cost an afternoon on the awards viewer — so a probe demanding 403 would fail against a
+ * correctly locked table, and one demanding 200 would pass against a wide-open one. What
+ * is actually being asserted is the only thing that matters to a stranger: no row comes
+ * back. A single leaked row fails this, whichever status carries it.
+ */
+for (const table of ['import_jobs', 'import_rows', 'imported_titles', 'imported_watches',
+                     'letterboxd_matches', 'letterboxd_match_claims']) {
+  // `select=*` rather than a named column: the two provenance tables are keyed on
+  // (user_id, media_item_id[, diary_uri]) and have no `id` at all, so naming one earns a
+  // 400 that says nothing about privilege. A star cannot be wrong about the shape.
+  const res = await get(`${table}?select=*&limit=1`);
+  const refused = res.status === 401 || res.status === 403 || res.status === 404;
+  const empty = res.status === 200 && res.body.replace(/\s/g, '') === '[]';
+  report(
+    `anon reads no rows from ${table}`,
+    refused || empty ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
 const total = passed + failures.length + inconclusive.length;
 console.log(`\n${passed}/${total} passed, ${failures.length} failed, ${inconclusive.length} inconclusive\n`);
 

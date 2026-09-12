@@ -291,6 +291,7 @@ and how its accounts are cleaned up.
 | `supabase/migrations/20260826000100` | `environment_name()`, `set_environment_name()` |
 | `supabase/migrations/20260826000200` | outbox crash recovery — see [`push-operations.md`](./push-operations.md) |
 | `supabase/migrations/20260826000300` | `pg_cron` drain, `schedule_push_drain()`, `push_drain_status()` |
+| `supabase/migrations/20260917000600`–`000800` | import drain install, `import_drain_status()`, `unschedule_import_drain()` |
 | `config/production-lane.cjs` | production fail-closed backend rule, ref → environment map |
 | `scripts/bootstrap-production.mjs` | the identity step, guarded on the parsed host |
 | `.github/workflows/trending-refresh.yml` | daily Trending refresh, both lanes |
