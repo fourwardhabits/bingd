@@ -616,6 +616,45 @@ export type AnalyticsEvent =
       props: { medium: 'movies' | 'tv'; size: number; repeat_count: number };
     }
 
+  // --- Similar, on a title page ---------------------------------------------
+  /**
+   * Somebody opened the Similar tab.
+   *
+   * Two events and no more, because the question is a product question rather than a
+   * mechanism one: **is the title page a place people explore from**. The tab is the
+   * only thing on that page that costs a provider request lazily, so whether it is
+   * opened at all is the number that decides whether the request is worth making.
+   *
+   * Emitted on the press, which is the whole of what "opened" means here. Deliberately
+   * **not** deferred until the grid settles so that it could carry `personalized` — the
+   * answer is not known at press time, the reader's interest in the tab does not depend
+   * on it, and an event that waits for a network reply stops counting the opens that
+   * failed.
+   *
+   * `medium` rather than a source and a destination kind. They are the same thing by
+   * construction on this surface: a film's associations are films and a season's are its
+   * show's, resolved to `series` by the adapter, so a second property would be the first
+   * one spelled differently. `series` and `season` both report `tv` for the same reason
+   * For You's two walls do — the reader is on television either way.
+   */
+  | { name: 'similar_tab_opened'; props: { medium: 'movies' | 'tv' } }
+  /**
+   * Somebody opened a title *from* the Similar tab.
+   *
+   * The pair to the event above: opens over taps is whether the answers were any good.
+   *
+   * `personalized` is the one mechanism fact worth carrying, and it is carried here
+   * rather than on the open because here it is known and true: it says the reader had
+   * rankings behind them, so their taste moved the order within the provider's list.
+   * False is the shipped V1 path rather than a failure — somebody who has ranked nothing
+   * gets TMDB's own relevance order — and the split is what says whether reranking is
+   * earning anything.
+   *
+   * No title id and no position. A destination would be a `media_item_id`, which is on
+   * the forbidden list, and an index would only be a rank of a thing that is not named.
+   */
+  | { name: 'similar_title_opened'; props: { medium: 'movies' | 'tv'; personalized: boolean } }
+
   // --- Weekly streak --------------------------------------------------------
   /**
    * The streak section was drawn on the reader's own profile, with what it said.
@@ -708,6 +747,9 @@ export const ANALYTICS_EVENTS = [
   'invite_auto_follow_succeeded',
   // 2026-09-10, the OAuth callback guard.
   'sign_in_redirect_rejected',
+  // 2026-09-11, the Similar tab on a title page.
+  'similar_tab_opened',
+  'similar_title_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -805,6 +847,22 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   // so a key that could hold one would put credentials on the wire. The sanitized
   // scheme/host/path goes to the flight recorder and to Sentry instead.
   'problem',
+  /**
+   * Which of the two media the reader is on — `movies` or `tv` (2026-09-11, Similar).
+   *
+   * **Adding it here also lets `for_you_slate_shown.medium` reach the wire**, which it
+   * has not been doing: that event declared the property in its type and the key was
+   * never added to this list, so `sanitize` has been dropping it since the event
+   * shipped. The same is true of `size` and `repeat_count` there, and of the three
+   * `streak_state_viewed` properties — deliberately left alone here rather than fixed in
+   * passing, because each is a live series whose shape changing is a decision of its
+   * own. This one is added because the Similar events below are unreadable without it.
+   */
+  'medium',
+  // Whether the reader's taste moved the Similar order (2026-09-11). A boolean about
+  // the mechanism, never about the person: it says a ranked collection existed, not
+  // what is in one.
+  'personalized',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

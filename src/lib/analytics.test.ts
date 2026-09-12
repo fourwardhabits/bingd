@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirty canonical names and nothing else', () => {
+  it('is the thirty-two canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -99,7 +99,9 @@ describe('the event vocabulary', () => {
     // lost somebody. Its companion `onboarding_motivations` went on 2026-09-09 with the
     // two value screens it reported on: the flow no longer asks why anybody downloaded
     // the app, so nothing emits it and a name nothing emits is a name the spec must not
-    // carry.
+    // carry. The two `similar_*` names arrived 2026-09-11 with the Similar tab, which is
+    // the one thing on a title page that costs a provider request lazily — so whether it
+    // is opened at all is a number the feature is answerable by.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
         'follow_activity_opened',
@@ -126,6 +128,8 @@ describe('the event vocabulary', () => {
         'sign_in_redirect_rejected',
         'signup_completed',
         'settings_support_email_opened',
+        'similar_tab_opened',
+        'similar_title_opened',
         'review_helpful_added',
         'review_helpful_removed',
         'reviews_sort_changed',
@@ -206,6 +210,21 @@ describe('the privacy boundary', () => {
     for (const key of Object.keys(propertiesOf())) {
       expect(ALLOWED_PROPERTY_KEYS).toContain(key);
     }
+  });
+
+  it('lets the Similar events keep the two properties they exist for', () => {
+    /**
+     * The other half of the allowlist, which nothing was asserting.
+     *
+     * Declaring a property on the union is not enough to put it on the wire — `sanitize`
+     * drops every key the list does not name, silently — and that is not hypothetical:
+     * `for_you_slate_shown` has been sending none of `medium`, `size` or `repeat_count`
+     * since it shipped, and `streak_state_viewed` none of its three, because the type was
+     * widened and the list was not. So the pair below is asserted rather than assumed.
+     */
+    track({ name: 'similar_title_opened', props: { medium: 'tv', personalized: true } });
+
+    expect(propertiesOf()).toMatchObject({ medium: 'tv', personalized: true });
   });
 });
 

@@ -61,6 +61,7 @@ import {
   type TitleReview,
 } from '@/features/title/use-title-reviews';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
+import { useSimilarTitles } from '@/features/title/use-similar-titles';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
@@ -78,6 +79,7 @@ import {
   EpisodeRow,
   LoadingScreen,
   Poster,
+  PosterGrid,
   Screen,
   ScreenError,
   ScoresSection,
@@ -109,7 +111,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return <ScreenError error={error} retry={retry} />;
 }
 
-type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
+type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons' | 'similar';
 
 /**
  * How many episodes a season page draws before it offers to show the rest.
@@ -464,6 +466,32 @@ export default function TitleScreen() {
    */
   const showsEpisodes = data?.title?.kind === 'season' && (tab === null || tab === 'episodes');
   const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
+  /**
+   * The Similar tab's data, and nothing before somebody opens it.
+   *
+   * `tab === 'similar'` and not `activeTab`, which is not computed yet at this point in
+   * the render and does not need to be: Similar is the **last** entry in every tab row,
+   * so it is never the fallback and `tab === null` can never mean it. That is the
+   * difference from the Episodes gate directly above, which has to include the null
+   * because Episodes *leads* a season's row.
+   *
+   * The parent's id is the facet's owner for a season — TMDB publishes recommendations
+   * for a series and none for a season — and `use-similar-titles.ts` has the whole
+   * argument. A season whose parent embed did not come back passes null and gets an
+   * empty tab rather than a wrong one.
+   */
+  const showsSimilar = tab === 'similar';
+  const similar = useSimilarTitles({
+    sourceId: titleId,
+    kind: data?.title?.kind ?? null,
+    // `parentOf`, because PostgREST hands a `!inner`-less embed back as an object here
+    // and as a one-element array under other generated types — the same normalisation
+    // the identity block does at `const parent =` below.
+    facetId: data?.title?.kind === 'season' ? (parentOf(data.title.parent)?.id ?? null) : titleId,
+    sourceTitle: data?.title?.title ?? '',
+    userId: profile.id,
+    enabled: showsSimilar,
+  });
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
   const rankCategory: RankingCategory =
@@ -573,7 +601,7 @@ export default function TitleScreen() {
   }
 
   const title = data.title;
-  const parent = Array.isArray(title.parent) ? title.parent[0] : title.parent;
+  const parent = parentOf(title.parent);
   /**
    * The genres and language to describe this title with.
    *
@@ -873,6 +901,22 @@ export default function TitleScreen() {
         ]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
+    /**
+     * Similar, last, and present on every kind of title.
+     *
+     * Last is the founder's placement and it is also what makes the lazy fetch work:
+     * `activeTab` falls back to the *head* of this row, so an entry at the end can never
+     * become the default, and `showsSimilar` above can therefore be `tab === 'similar'`
+     * without the `tab === null` half the Episodes gate needs.
+     *
+     * Always present, on the same rule Reviews follows rather than the one Videos
+     * follows. The tab is a question — what else is like this — and unlike a trailer the
+     * answer is not knowable before it is asked: finding out costs a provider request
+     * whose whole purpose is to avoid being spent on a page nobody opened. So this is
+     * the one case where a tab that *may* turn out to have nothing is still worth
+     * offering, and "No similar titles yet" is the honest end of that.
+     */
+    { id: 'similar' as const, label: 'Similar' },
   ];
   // The chosen tab may not exist for this title — a film has no Seasons —
   // so it falls back rather than rendering nothing under a live tab row.
@@ -1519,7 +1563,19 @@ export default function TitleScreen() {
           <SegmentedTabs
             options={tabs}
             value={activeTab ?? 'details'}
-            onChange={(next) => setTab(next)}
+            onChange={(next) => {
+              // The one tab whose opening is worth counting, because it is the one that
+              // costs a provider request. Emitted on the change rather than on every
+              // render of the tab, so a reader who goes to Details and back is two opens
+              // and a reader who scrolls is none.
+              if (next === 'similar' && tab !== 'similar') {
+                track({
+                  name: 'similar_tab_opened',
+                  props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
+                });
+              }
+              setTab(next);
+            }}
           />
         </View>
 
@@ -1739,6 +1795,74 @@ export default function TitleScreen() {
               compact
               title="Seasons are still loading"
               body="Pull down to try again in a moment."
+            />
+          )
+        ) : null}
+
+        {/**
+         * Similar, as one wall of artwork.
+         *
+         * `PosterGrid` unchanged, which is the app's established answer to "a lot of
+         * titles at once" — For You and the Collection wall are the same component, and
+         * three across means the nine-title budget is exactly three rows on a phone.
+         * Deliberately not a labelled variant of it: the grid draws no titles on purpose
+         * (its own header says why), and the name, the year and the reader's score all
+         * travel in each tile's accessibility label already.
+         *
+         * The score chip is the Collection wall's, on a candidate the reader has ranked
+         * and on nothing else. Nothing new is drawn for this tab.
+         *
+         * Every destination is `/title/{id}` — the same push the seasons list above
+         * makes and the same one every other surface in the app makes. For a film that
+         * is the film; for television it is the **series**, which opens on its Seasons
+         * tab and is therefore the existing series-to-season flow rather than a second
+         * one. `use-similar-titles.ts` is where a season page's associations are taken
+         * from its parent instead of invented for it.
+         */}
+        {activeTab === 'similar' ? (
+          similar.slate.tiles.length ? (
+            <PosterGrid
+              tiles={similar.slate.tiles}
+              onPressTile={(tile) => {
+                track({
+                  name: 'similar_title_opened',
+                  props: {
+                    medium: title.kind === 'movie' ? 'movies' : 'tv',
+                    personalized: similar.slate.personalized,
+                  },
+                });
+                router.push(`/title/${tile.id}`);
+              }}
+            />
+          ) : similar.isPending ? (
+            // The same skeleton every other list on this page uses. Three rows, which is
+            // the height the grid is about to be.
+            <SkeletonRow count={3} />
+          ) : similar.isError ? (
+            /**
+             * Quiet, and the page around it keeps working.
+             *
+             * The provider can refuse — the hourly ceiling in api.md §9 is a per-user
+             * limit and this tab spends against it — and a refusal is a fact about one
+             * tab. It must never reach the route's error boundary, which is why the
+             * query's failure is read here rather than thrown: everything above the tab
+             * row is the reader's own data and TMDB has no opinion about any of it.
+             */
+            <EmptyState
+              kind="couldNotLoad"
+              compact
+              title="Could not load similar titles"
+              body="Pull down to try again in a moment."
+            />
+          ) : (
+            // A real answer rather than a failure. TMDB associates nothing with plenty of
+            // obscure titles, the adapter caches that fact deliberately, and "yet" is the
+            // honest word for something a later provider update could change.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="No similar titles yet"
+              body="Nothing is associated with this one."
             />
           )
         ) : null}
@@ -2241,6 +2365,20 @@ function formatShortDate(date: string | null) {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/**
+ * The embedded parent series, however PostgREST shaped it.
+ *
+ * A `parent:parent_id(...)` embed is a single object at runtime, and the generated
+ * types model the same relationship as a one-element array in some builds — so both
+ * shapes have to be read. It was written out inline where the identity block needs it
+ * and is a function now because the Similar tab needs the same id several hundred lines
+ * earlier, before `title` is narrowed.
+ */
+function parentOf<T>(embedded: T | T[] | null | undefined): T | null {
+  if (!embedded) return null;
+  return (Array.isArray(embedded) ? (embedded[0] ?? null) : embedded) as T | null;
 }
 
 function yearOf(date: string | null) {
