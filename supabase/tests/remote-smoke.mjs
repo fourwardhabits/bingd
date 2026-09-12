@@ -1045,6 +1045,28 @@ expectRefused(
 );
 expectRefused('anon cannot execute _import_settle', await rpc('_import_settle', { p_job_id: NIL }));
 
+// `20260917000900`. The only writer of the trusted film-URI cache. A client reaching this
+// would be binding an external film identity to a media item for every later importer,
+// which is the whole of the vulnerability that migration closed.
+expectRefused(
+  'anon cannot execute _import_promote_match',
+  await rpc('_import_promote_match', { p_uri: 'https://boxd.it/x', p_media_item_id: NIL, p_user_id: NIL, p_tier: 'local' }),
+);
+expectRefused(
+  'anon cannot execute _import_match_batch',
+  await rpc('_import_match_batch', { p_job_id: NIL, p_limit: 1 }),
+);
+expectRefused(
+  'anon cannot execute _import_provider_resolve',
+  await rpc('_import_provider_resolve', { p_row_id: NIL, p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute schedule_import_drain',
+  await rpc('schedule_import_drain', { p_schedule: '* * * * *' }),
+);
+expectRefused('anon cannot execute unschedule_import_drain', await rpc('unschedule_import_drain', {}));
+expectRefused('anon cannot execute import_drain_status', await rpc('import_drain_status', {}));
+
 /**
  * The staging table and the two provenance tables.
  *
@@ -1055,7 +1077,8 @@ expectRefused('anon cannot execute _import_settle', await rpc('_import_settle', 
  * is actually being asserted is the only thing that matters to a stranger: no row comes
  * back. A single leaked row fails this, whichever status carries it.
  */
-for (const table of ['import_jobs', 'import_rows', 'imported_titles', 'imported_watches']) {
+for (const table of ['import_jobs', 'import_rows', 'imported_titles', 'imported_watches',
+                     'letterboxd_matches', 'letterboxd_match_claims']) {
   // `select=*` rather than a named column: the two provenance tables are keyed on
   // (user_id, media_item_id[, diary_uri]) and have no `id` at all, so naming one earns a
   // 400 that says nothing about privilege. A star cannot be wrong about the shape.

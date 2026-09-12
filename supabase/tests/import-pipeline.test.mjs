@@ -475,7 +475,15 @@ describe('the shared match cache', () => {
     film = await datedMovie('Cached Film', 2001);
   });
 
-  it('learns a film URI from one import and never a diary URI', async () => {
+  /**
+   * **One import is a claim, not a mapping** (`20260917000900`).
+   *
+   * These two used to assert that a single import taught the shared cache outright. That is
+   * the vulnerability: the URI is client-supplied on every tier and no tier dereferences it,
+   * so one account could bind any URI to any title it could name, permanently, for every
+   * later importer. Promotion now needs two accounts to agree.
+   */
+  it('records a film URI as a claim, trusts nothing yet, and never touches a diary URI', async () => {
     await importArchive(frank, [
       staged('Cached Film', {
         correlation: 'cached film|2001',
@@ -484,16 +492,41 @@ describe('the shared match cache', () => {
       }),
     ]);
 
-    const { rows } = await t.sql(`select letterboxd_uri from letterboxd_matches`);
-    const uris = rows.map((r) => r.letterboxd_uri);
-    assert.ok(uris.includes('https://boxd.it/FILMURI'));
+    const { rows: claimed } = await t.sql(
+      `select letterboxd_uri from letterboxd_match_claims`);
+    const claimedUris = claimed.map((r) => r.letterboxd_uri);
+    assert.ok(claimedUris.includes('https://boxd.it/FILMURI'), 'the film URI is claimed');
+
+    const { rows: trustedRows } = await t.sql(
+      `select letterboxd_uri from letterboxd_matches`);
+    const trustedUris = trustedRows.map((r) => r.letterboxd_uri);
     assert.ok(
-      !uris.includes('https://boxd.it/DIARYURI'),
-      'a per-viewing URI must never become a global film identity',
+      !trustedUris.includes('https://boxd.it/FILMURI'),
+      'one account must not create a globally trusted mapping',
     );
+
+    // The diary URI is absent from both, which is the structural guarantee: a per-viewing
+    // URI identifies a viewing and can never denote a film.
+    for (const table of [claimedUris, trustedUris]) {
+      assert.ok(
+        !table.includes('https://boxd.it/DIARYURI'),
+        'a per-viewing URI must never become a global film identity',
+      );
+    }
   });
 
-  it('resolves the next importer for free, even under a title the catalogue would miss', async () => {
+  it('resolves the next importer for free once a second account has agreed', async () => {
+    // Hugo's import is the corroboration; Grace is then the beneficiary, and her title is
+    // one the local tier could not reach — so only the promoted URI can place it.
+    const hugo = await t.createUser({ username: 'pipe_hugo' });
+    await importArchive(hugo, [
+      staged('Cached Film', { correlation: 'cached film|2001', filmUri: 'https://boxd.it/FILMURI' }),
+    ]);
+
+    const { rows: promoted } = await t.sql(
+      `select media_item_id from letterboxd_matches where letterboxd_uri = 'https://boxd.it/FILMURI'`);
+    assert.equal(promoted[0]?.media_item_id, film, 'two agreeing accounts promote the pair');
+
     await importArchive(grace, [
       staged('Cached Film But Spelled Differently', {
         correlation: 'cached film but spelled differently|2001',
@@ -1353,10 +1386,10 @@ describe('the provider tier', () => {
     assert.equal(status[0].status, 'unmatched', 'an unknown film must eventually settle');
   });
 
-  it('matches a row the provider places, and teaches the shared cache', async () => {
+  it('matches a row the provider places, and claims it like a local one', async () => {
     await stageNeedsProvider(1);
-    // Dated and agreeing with the staged year (2001), because the provider writer is now
-    // held to the same bar as the local one: `match.mjs`'s confidence rule accepts on title
+    // Dated and agreeing with the staged year (2001), because the provider writer is held
+    // to the same bar as the local one: `match.mjs`'s confidence rule accepts on title
     // alone when either side has no year, which is exactly the weak evidence the cache
     // must not take.
     const film = await datedMovie(`Provider Found ${seq}`, 2001);
@@ -1369,9 +1402,18 @@ describe('the provider tier', () => {
     assert.equal(after[0].status, 'matched');
     assert.equal(after[0].media_item_id, film);
 
+    // **A claim, not a mapping** (`20260917000900`). The provider chose this film by
+    // searching TMDB for the client's own name and year; it never dereferenced the URI, so
+    // its confidence is about the title and cannot establish the binding alone. Trusting
+    // it outright left the poisoning reachable by naming a film the catalogue lacked.
+    const { rows: claimed } = await t.sql(
+      `select tier from letterboxd_match_claims where media_item_id = $1`, [film]);
+    assert.equal(claimed.length, 1, 'a provider match is recorded as a single claim');
+    assert.equal(claimed[0].tier, 'provider');
+
     const { rows: cached } = await t.sql(
       `select media_item_id from letterboxd_matches where media_item_id = $1`, [film]);
-    assert.equal(cached.length, 1, 'a provider match teaches the cache like a local one');
+    assert.equal(cached.length, 0, 'and one account is not enough to share it');
   });
 
   it('does not teach the cache when the provider placed it on title alone', async () => {
