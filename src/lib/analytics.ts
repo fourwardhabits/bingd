@@ -351,6 +351,31 @@ export type AnalyticsEvent =
       };
     }
   /**
+   * The Details sheet was opened on one side of a comparison.
+   *
+   * **The recognition question, counted.** A comparison the reader cannot answer from
+   * two posters is the one the ranking loses them on, and Details is the escape hatch
+   * built for it — but nothing said how often it is reached for, or whether the two
+   * kinds reach for it at anything like the same rate. The hypothesis the memory-aid
+   * pass is built on is that a season needs it far more than a film does, because a
+   * poster with a number on it is the same poster in every season of a show, and this
+   * is the only number that can say whether that is true.
+   *
+   * Fires on the press that actually opens the sheet, so a Details pressed while the
+   * opponent is still loading — which opens nothing — emits nothing. Once per open, and
+   * twice in one comparison if the reader checks both sides, which is a real thing to
+   * have done rather than a duplicate.
+   *
+   * **Nothing follows it yet, and that is deliberate.** The obvious companion is what
+   * the reader did next — picked, gave up, or left — and it is not here, because there
+   * are four ways out of a comparison and one of them (Undo) rolls the pair back
+   * underneath the answer, which makes a naive outcome event attribute one comparison's
+   * Details to the next comparison's pick. Session-level joining against
+   * `ranking_started` and `ranking_completed` answers the coarse version of the same
+   * question without that hazard.
+   */
+  | { name: 'comparison_info_opened'; props: { media_kind: MediaKind; surface: Surface } }
+  /**
    * Added to the watchlist. Removal is not an event — nothing in the beta asks.
    *
    * **No `media_kind`, deliberately.** The watchlist accepts a series as well as a film
@@ -817,6 +842,8 @@ export const ANALYTICS_EVENTS = [
   'import_archive_selected',
   'import_started',
   'import_completed',
+  // 2026-09-11, the comparison memory aids.
+  'comparison_info_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
