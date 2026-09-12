@@ -348,12 +348,85 @@ describe('when it is over', () => {
     await fireEvent.press(screen.getByText('Import 2 films'));
 
     await waitFor(() => expect(screen.getByText(/Your history is in/)).toBeTruthy());
+    // The unresolved sentence, named precisely rather than by a bare /kept/ — which now
+    // also matches the "Diary entries kept" stat and found two elements.
+    expect(screen.getByText(/couldn.+t be matched/)).toBeTruthy();
     expect(screen.getByText(/One film/)).toBeTruthy();
-    expect(screen.getByText(/kept/)).toBeTruthy();
     expect(mockTrack).toHaveBeenCalledWith({
       name: 'import_completed',
       props: { applied: 1, unresolved: 1 },
     });
+  });
+
+  /**
+   * **The counts are in two units, and the screen has to keep them apart.**
+   *
+   * `watched`, `kept` and `watchlist` are films; `viewings` is diary entries. The defect
+   * this pins is a summary that said "Added to your collection: 22" beside a collection
+   * that had not changed — every row the worker finished with was counted as an addition,
+   * including the ones it deliberately left alone.
+   */
+  it('separates what it added from what was already there', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    let reads = 0;
+    mockRpcResults = {
+      import_create: 'job-1',
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              // One film added, two left alone (one ranked here, one imported before),
+              // three diary entries across them — a rewatch is not a second film.
+              counts: {
+                applied: 3, watched: 1, kept: 1, already: 1,
+                watchlist: 0, viewings: 3,
+              },
+              completed_at: '2026-09-11T00:00:00.000Z',
+            };
+      },
+    };
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('Added to your collection')).toBeTruthy());
+    expect(screen.getByText('Already here, left alone')).toBeTruthy();
+    // Named as diary entries, because it is the one number that is not a count of films.
+    expect(screen.getByText('Diary entries kept')).toBeTruthy();
+    // And the sentence that explains why "added" is smaller than the preview promised.
+    expect(screen.getByText(/left .+ exactly as/)).toBeTruthy();
+  });
+
+  it('does not claim a history arrived when nothing did', async () => {
+    // A re-import of an archive whose films are all already ranked. Everything is `applied`
+    // — the worker finished with every row — and nothing was written.
+    mockPicked = exportZip(TWO_FILMS);
+    let reads = 0;
+    mockRpcResults = {
+      import_create: 'job-1',
+      import_status: () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 'pending', counts: null, completed_at: null }
+          : {
+              status: 'done',
+              counts: { applied: 2, watched: 0, kept: 2, watchlist: 0, viewings: 2 },
+              completed_at: '2026-09-11T00:00:00.000Z',
+            };
+      },
+    };
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('Import finished')).toBeTruthy());
+    expect(screen.queryByText(/Your history is in/)).toBeNull();
   });
 });
 

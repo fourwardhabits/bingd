@@ -241,7 +241,6 @@ function Summary({
   onDone: () => void;
   onReset: () => void;
 }) {
-  const applied = counts.applied ?? 0;
   // **`stragglers` counts here too.** `_import_settle` reports rows still `pending` or
   // `matched` at settle as their own bucket, and leaving them out of this total made the
   // summary's numbers fail to add up to the number of films the preview promised — while
@@ -250,15 +249,48 @@ function Summary({
   const unresolved =
     (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
 
+  const added = counts.watched ?? 0;
+  const kept = counts.kept ?? 0;
+  // Imported before and unchanged. Shown beside `kept` rather than beside `added`, because
+  // from the reader's side both mean "this film was already here and nothing happened to
+  // it" — the difference between the two is why, and only `kept` has a rule worth
+  // explaining.
+  const unchanged = kept + (counts.already ?? 0);
+  const watchlisted = counts.watchlist ?? 0;
+  // **The heading asks whether anything arrived, not whether the job finished.** It used to
+  // read `applied`, which counts every row the worker got to the end of — including the
+  // ones it deliberately left alone — so a re-import that changed nothing announced "Your
+  // history is in".
+  const arrived = added + watchlisted > 0;
+
   return (
     <View style={styles.block}>
-      <Text variant="display">{applied > 0 ? 'Your history is in' : 'Import finished'}</Text>
+      <Text variant="display">{arrived ? 'Your history is in' : 'Import finished'}</Text>
 
       <View style={styles.card}>
-        <Stat label="Added to your collection" value={counts.watched ?? 0} />
-        <Stat label="Added to your watchlist" value={counts.watchlist ?? 0} />
-        <Stat label="Viewings recorded" value={counts.viewings ?? 0} />
+        <Stat label="Added to your collection" value={added} />
+        {/* **Shown only when there are any**, because a row of zeroes invites the reader to
+            wonder what they did wrong. When it is non-zero it is the line that explains why
+            "added" is smaller than the number the preview promised — without it, the
+            arithmetic silently fails to add up and the import looks half-broken. */}
+        {unchanged > 0 ? <Stat label="Already here, left alone" value={unchanged} /> : null}
+        <Stat label="Added to your watchlist" value={watchlisted} />
+        {/* Named as diary entries rather than "viewings recorded", because it is the one
+            number here that is not a count of films: a film watched three times is one film
+            and three entries. */}
+        <Stat label="Diary entries kept" value={counts.viewings ?? 0} />
       </View>
+
+      {/* The sentence that makes the previous line mean something. Films somebody has
+          ranked or logged in the app are never overwritten by an import — that is the
+          provenance rule — and this is the only place the person is told it happened. */}
+      {kept > 0 ? (
+        <Text variant="footnote" tone="tertiary">
+          {kept === 1 ? 'One film was' : `${kept} films were`} already in your collection from
+          your own ranking or watch log, so the import left{' '}
+          {kept === 1 ? 'it' : 'them'} exactly as {kept === 1 ? 'it is' : 'they are'}.
+        </Text>
+      ) : null}
 
       {/* **The unmatched count is shown rather than rounded away.** These are films the
           catalogue could not place — a remake it cannot tell apart, or something it simply

@@ -1857,3 +1857,202 @@ describe('the worker has somebody to start it', () => {
     await t.sql(`delete from import_jobs where id = $1`, [created[0].id]);
   });
 });
+
+
+// ===========================================================================
+// What the summary says happened — `20260917001000`
+// ===========================================================================
+
+/**
+ * **The numbers a person reads, against what the database actually holds.**
+ *
+ * Every one of these asserts `import_jobs.counts` *and* the rows, in the same test. That
+ * pairing is the point: the defect this suite exists for was a summary saying "Added to
+ * your collection: 22" beside a `user_media` that had not changed, and the existing
+ * idempotence test caught neither half because it only ever looked at the rows.
+ *
+ * The units are not interchangeable and the tests are written to keep them apart:
+ * `watched`, `kept` and `watchlist` are films; `viewings` is diary entries, and a rewatch
+ * is one film and several of them.
+ */
+describe('the counts the summary reads', () => {
+  let ada;
+
+  before(async () => {
+    ada = await t.createUser({ username: 'pipe_ada' });
+  });
+
+  beforeEach(async () => {
+    await t.actAs(null);
+    await t.sql(`delete from rankings where user_id = $1`, [ada]);
+    await t.sql(`delete from user_media where user_id = $1`, [ada]);
+    await t.sql(`delete from watchlist where user_id = $1`, [ada]);
+    await t.sql(`delete from imported_watches where user_id = $1`, [ada]);
+    await t.sql(`delete from imported_titles where user_id = $1`, [ada]);
+    await t.sql(`delete from import_jobs where user_id = $1`, [ada]);
+  });
+
+  const countsOf = async (jobId) => {
+    const { rows } = await t.sql(`select counts from import_jobs where id = $1`, [jobId]);
+    return rows[0].counts;
+  };
+
+  it('counts one film once, however many files of the archive mentioned it', async () => {
+    // Watched, rated, in the diary and on the watchlist — one film in four places, which is
+    // ordinary for anything somebody loved. The normaliser collapses the first three into
+    // one watched row; the watchlist row is separate and must not be double-counted as a
+    // collection addition, because the apply step skips a title already collected.
+    const title = `Four Ways ${seq}`;
+    const film = await datedMovie(title, 2001);
+    const jobId = await importArchive(ada, [
+      staged(title, {
+        correlation: 'four ways|2001',
+        year: 2001,
+        rating: 4.5,
+        bucket: 'loved',
+        watches: [{ diaryUri: 'https://boxd.it/4W1', watchedOn: '2024-01-02', isRewatch: false }],
+      }),
+      staged(title, { kind: 'watchlist', correlation: 'four ways|2001', year: 2001 }),
+    ]);
+
+    const counts = await countsOf(jobId);
+    assert.equal(counts.watched, 1, 'one film');
+    assert.equal(counts.viewings, 1, 'one diary entry');
+    assert.equal(
+      counts.watchlist, 0,
+      'a watchlist row for a film already collected is not a watchlist addition',
+    );
+
+    assert.equal(await count('user_media', `user_id = '${ada}' and media_item_id = '${film}'`), 1);
+    assert.equal(await count('watchlist', `user_id = '${ada}'`), 0);
+  });
+
+  it('counts a rewatch as one film and several diary entries', async () => {
+    const title = `Rewatched Often ${seq}`;
+    const film = await datedMovie(title, 1999);
+    const jobId = await importArchive(ada, [
+      staged(title, {
+        correlation: 'rewatched often|1999',
+        year: 1999,
+        watches: [
+          { diaryUri: 'https://boxd.it/R1', watchedOn: '2022-01-02', isRewatch: false },
+          { diaryUri: 'https://boxd.it/R2', watchedOn: '2023-01-02', isRewatch: true },
+          { diaryUri: 'https://boxd.it/R3', watchedOn: '2024-01-02', isRewatch: true },
+        ],
+      }),
+    ]);
+
+    const counts = await countsOf(jobId);
+    assert.equal(counts.watched, 1, 'still one film');
+    assert.equal(counts.viewings, 3, 'three diary entries');
+    assert.equal(
+      await count('imported_watches', `user_id = '${ada}' and media_item_id = '${film}'`), 3);
+  });
+
+  it('reports nothing added when a re-import changes nothing', async () => {
+    // The defect, exactly. The first import adds the film; the second is a no-op, and used
+    // to announce the full count again under "Your history is in".
+    const title = `Repeated ${seq}`;
+    const film = await datedMovie(title, 2005);
+    const rows = [
+      staged(title, {
+        correlation: 'repeated|2005',
+        year: 2005,
+        watches: [{ diaryUri: 'https://boxd.it/RP1', watchedOn: '2024-02-02', isRewatch: false }],
+      }),
+    ];
+
+    const first = await importArchive(ada, rows);
+    assert.equal((await countsOf(first)).watched, 1);
+
+    const second = await importArchive(ada, rows);
+    const counts = await countsOf(second);
+    assert.equal(counts.watched, 0, 'nothing was added the second time');
+    // `viewings` is what is held rather than what arrived, so it is stable across a
+    // re-import rather than doubling.
+    assert.equal(counts.viewings, 1);
+
+    assert.equal(await count('user_media', `user_id = '${ada}' and media_item_id = '${film}'`), 1);
+    assert.equal(
+      await count('imported_watches', `user_id = '${ada}' and media_item_id = '${film}'`), 1);
+  });
+
+  it('counts a film the person ranked here as kept, not as added', async () => {
+    // The provenance rule, from the summary's side. Ranking is the strongest native state
+    // there is and the import writes nothing at all — so counting it as an addition was the
+    // clearest case of the summary claiming credit for work it did not do.
+    const title = `Ranked Here ${seq}`;
+    const film = await datedMovie(title, 2011);
+    await t.actAs(ada);
+    await t.sql(
+      `insert into rankings (user_id, media_item_id, category, bucket, position)
+       values ($1, $2, 'movies', 'loved', 1)`, [ada, film]);
+    await t.actAs(null);
+
+    const jobId = await importArchive(ada, [
+      staged(title, { correlation: 'ranked here|2011', year: 2011, bucket: 'not_for_me' }),
+    ]);
+
+    const counts = await countsOf(jobId);
+    assert.equal(counts.watched, 0, 'the import added nothing');
+    assert.equal(counts.kept, 1, 'and says so rather than staying silent');
+
+    // **No collection row at all**, which is the sharpest form of "wrote nothing" and the
+    // reason the first version of the `kept` filter missed this case: it required a
+    // `user_media` row to exist before it would count one as left alone.
+    assert.equal(
+      await count('user_media', `user_id = '${ada}' and media_item_id = '${film}'`), 0,
+      'a ranked title the import declined to touch has no collection row of its own',
+    );
+  });
+
+  it('counts an unmatched film and an ambiguous one without counting them as added', async () => {
+    // Two catalogue rows that squash identically: the remake case.
+    await t.sql(
+      `insert into media_items (kind, tmdb_id, title, release_date)
+       values ('movie', $1, 'Counting Twins', '1980-01-01'), ('movie', $2, 'Counting Twins', '1981-01-01')`,
+      [-Math.abs(seq++), -Math.abs(seq++)]);
+
+    const jobId = await importArchive(ada, [
+      staged('Counting Twins', { correlation: 'counting twins|1980', year: 1980 }),
+      staged('Nothing Like This Exists At All', {
+        correlation: 'nothing like this exists at all|1955', year: 1955 }),
+    ]);
+
+    const counts = await countsOf(jobId);
+    assert.equal(counts.watched, 0);
+    assert.equal(counts.kept, 0);
+    assert.equal(counts.ambiguous, 1);
+    assert.equal(counts.unmatched, 1);
+  });
+
+  it('adds up: every watched row lands in exactly one bucket', async () => {
+    // The property the screen depends on. Without it the numbers silently fail to total the
+    // count the preview promised, and the difference is never explained.
+    const addedTitle = `Sums Added ${seq}`;
+    const added = await datedMovie(addedTitle, 1990);
+    const rankedTitle = `Sums Ranked ${seq}`;
+    const ranked = await datedMovie(rankedTitle, 1991);
+    await t.actAs(ada);
+    await t.sql(
+      `insert into rankings (user_id, media_item_id, category, bucket, position)
+       values ($1, $2, 'movies', 'fine', 1)`, [ada, ranked]);
+    await t.actAs(null);
+
+    const watchedRows = [
+      staged(addedTitle, { correlation: 'sums added|1990', year: 1990 }),
+      staged(rankedTitle, { correlation: 'sums ranked|1991', year: 1991 }),
+      staged('Sums Missing Entirely', { correlation: 'sums missing entirely|1992', year: 1992 }),
+    ];
+    const jobId = await importArchive(ada, watchedRows);
+
+    const c = await countsOf(jobId);
+    const total = (c.watched ?? 0) + (c.kept ?? 0) + (c.ambiguous ?? 0)
+      + (c.unmatched ?? 0) + (c.stragglers ?? 0);
+    assert.equal(total, watchedRows.length, 'every watched row is counted exactly once');
+    assert.equal(c.watched, 1);
+    assert.equal(c.kept, 1);
+    assert.equal(c.unmatched, 1);
+    assert.ok(added && ranked);
+  });
+});

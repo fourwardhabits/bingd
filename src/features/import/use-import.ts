@@ -66,14 +66,29 @@ export type ImportJobStatus = {
  * Every field optional, because a job that has not settled has only some of them and a
  * client that assumed otherwise would render zeroes as though they were answers.
  */
+/**
+ * What a finished job reports, in the units `_import_settle` defines them in.
+ *
+ * **No two of these count the same thing, and one of them is not films.** The rule is worth
+ * stating here because the screen renders them side by side, and the defect it replaced was
+ * exactly a number in one unit read as a number in another.
+ */
 export type ImportCounts = {
   readonly staged?: number;
+  /** Rows the job finished with, whatever it did with them. Not a user-facing number. */
   readonly applied?: number;
   readonly ambiguous?: number;
   readonly unmatched?: number;
   readonly stragglers?: number;
+  /** **Films** the import now owns — it wrote the collection row. */
   readonly watched?: number;
+  /** **Films** left exactly as they were, because they were ranked or logged in the app. */
+  readonly kept?: number;
+  /** **Films** imported before and unchanged by this run. */
+  readonly already?: number;
+  /** **Films** on the watchlist because of this import, excluding titles already collected. */
   readonly watchlist?: number;
+  /** **Diary entries**, not films: a rewatch is one film and several viewings. */
   readonly viewings?: number;
 };
 
