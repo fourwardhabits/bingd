@@ -115,13 +115,6 @@ const SHOTS = [
     alt: 'The bingd. ranking sheet asking which did you like more, with two film posters side by side',
   },
   {
-    source: 'Screenshot_20260831_094054_bingd.jpg',
-    name: 'shot-reveal',
-    width: 640,
-    detail: DETAIL,
-    alt: 'A bingd. score reveal, showing 9.1 in a maroon tile above the title it belongs to',
-  },
-  {
     source: 'Screenshot_20260831_093909_bingd.jpg',
     name: 'shot-movies',
     width: 640,

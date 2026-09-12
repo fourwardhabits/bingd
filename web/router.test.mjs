@@ -1795,7 +1795,7 @@ describe('the release mode', () => {
     assert.match(front, /src="\/page\.mjs"/, 'nothing wires the buttons up');
     assert.match(front, /id="bingd-config"/, 'the buttons have no distribution to read');
 
-    for (const name of ['shot-compare', 'shot-reveal', 'shot-movies', 'shot-feed']) {
+    for (const name of ['shot-compare', 'shot-movies', 'shot-feed', 'shot-foryou']) {
       assert.match(front, new RegExp(`/${name}\\.webp`), `the front page lost ${name}`);
       assert.ok(
         existsSync(join(dist, `${name}.webp`)),
@@ -1950,15 +1950,14 @@ describe('the release mode', () => {
       );
     }
 
-    // The label is the whole point, so it is asserted in both directions: the page has
-    // to be using the real one rather than having quietly dropped the sentence.
-    assert.match(
-      front,
-      /Too tough/,
-      'the front page stopped naming the comparison control. If that is deliberate, ' +
-        'delete this assertion in the same commit; if it became "too close to call" ' +
-        'again, that is the paraphrase this test exists for.',
-    );
+    // The unconditional half of this was deleted on 2026-09-12, in the commit that
+    // took the three-step list off the page — which is exactly what its own message
+    // said to do. The page no longer names the control at all, so there is nothing to
+    // paraphrase; the loop above still catches it if a later edit names it again.
+    //
+    // The refusal stays, and is the half that was always load-bearing: "too close to
+    // call" is the wrong sentence for *I do not remember this one well enough to say*,
+    // and it is the phrase a rewrite reaches for.
     assert.doesNotMatch(front, /too close to call/i);
   });
 
