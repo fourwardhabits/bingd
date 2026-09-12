@@ -15,6 +15,13 @@ module (`expo-file-system`'s `File.pickFileAsync`, and `fflate` for the zip), an
 | Android | `8e8731a26d9c47e30da2dd709c0308db6f2d3f88` | `b517cd51-d7cd-441f-98d5-e13471719a18` (1.0.1 (7)) |
 | iOS | `aa3056e7287bb313062fff27726cfa3f2e675c8d` | `bc57cede-cd01-42ec-ac54-732fae65c8a4` (1.0.1 (7)) |
 
+**Published** from integration `2ac3388`:
+
+| platform | update group | update id |
+|---|---|---|
+| Android | `e00eb991-3919-4762-a892-ddd7e2f2d589` | `01a094d2-c11c-7108-8521-fd4ee51eb9a7` |
+| iOS | `d8b4eb32-c3de-41a1-b7f5-c5543d9baded` | `01a094d2-c11c-7d9b-a1ac-11b0bf27dfb8` |
+
 ---
 
 ## Getting the update
