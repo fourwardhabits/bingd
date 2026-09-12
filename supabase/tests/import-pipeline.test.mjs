@@ -1706,11 +1706,6 @@ describe('what survives a job that failed', () => {
     return jobId;
   };
 
-  const rawOf = async (jobId) => {
-    const { rows } = await t.sql(`select raw from import_rows where job_id = $1`, [jobId]);
-    return rows[0]?.raw ?? null;
-  };
-
   it('keeps nothing at all when the job is dead-lettered', async () => {
     const jobId = await stagedPrivateRow();
 
