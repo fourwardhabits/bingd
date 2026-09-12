@@ -191,7 +191,14 @@ async function findLiveJob(): Promise<{ id: string; status: ImportJobStatus } | 
     const { data, error } = await supabase
       .from('import_jobs')
       .select('id, status, counts, completed_at')
-      .is('completed_at', null)
+      // **Not `.is('completed_at', null)`, which is what this asked for and is why the
+      // promise above was only half true.** `_import_settle` writes `status = 'done'` and
+      // `completed_at = now()` in one statement, so a finished job never has a null
+      // `completed_at` — the filter excluded precisely the case somebody comes back for.
+      // Close the app on "Matching your films", reopen after it finishes, and you landed
+      // on the intro with the summary, the applied count and the unresolved count gone for
+      // good. Independent review; the test that claimed to cover it passed only because
+      // the mocked query builder treated `.is()` as an identity.
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -204,6 +211,23 @@ async function findLiveJob(): Promise<{ id: string; status: ImportJobStatus } | 
   }
 }
 
+/**
+ * How long a finished import is still the thing you came here to see.
+ *
+ * A window rather than an acknowledgement flag, because the flag would need durable
+ * per-device state for a screen somebody opens twice. A day is comfortably longer than any
+ * import takes and comfortably shorter than "for ever", which is the only answer that would
+ * make this annoying — and the summary it restores now offers a way on to another archive,
+ * so even inside the window it is never a dead end.
+ */
+const RECENT_COMPLETION_MS = 24 * 60 * 60 * 1000;
+
+const completedRecently = (completedAt: string | null): boolean => {
+  if (completedAt === null) return false;
+  const at = Date.parse(completedAt);
+  return Number.isFinite(at) && Date.now() - at < RECENT_COMPLETION_MS;
+};
+
 export function useImport(surface: ImportSurface) {
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
   const jobRef = useRef<string | null>(null);
@@ -215,6 +239,14 @@ export function useImport(surface: ImportSurface) {
   const alive = useRef(true);
   /** One upload at a time. See `start`. */
   const uploading = useRef(false);
+  /**
+   * A job this device walked away from and could not tell the server about.
+   *
+   * Held so that `start` can settle it before creating anything. Without it, "Start over"
+   * is only as reliable as the connection it is pressed on — and the moment it is pressed
+   * on a bad one is the moment its failure merges two archives.
+   */
+  const abandoned = useRef<string | null>(null);
 
   useEffect(() => {
     alive.current = true;
@@ -239,10 +271,15 @@ export function useImport(surface: ImportSurface) {
       if (cancelled || !alive.current || live === null) return;
       if (live.status.status === 'pending') return;
 
+      const finished = live.status.completedAt !== null;
+      // A job that finished long ago is history, not news. Picking it up would mean opening
+      // the importer onto last month's summary every time.
+      if (finished && !completedRecently(live.status.completedAt)) return;
+
       jobRef.current = live.id;
       setState((current) =>
         current.phase === 'idle'
-          ? live.status.status === 'done'
+          ? finished
             ? { phase: 'done', status: live.status }
             : { phase: 'working', status: live.status }
           : current,
@@ -334,18 +371,32 @@ export function useImport(surface: ImportSurface) {
    * applied as one collection. Two taps after a dropped connection, and a person ends up
    * with films from an archive they explicitly walked away from.
    *
-   * So the job is discarded first and the local state cleared regardless of the answer: if
-   * the call fails, the worst case is the old behaviour, and blocking "Start over" on a
-   * network round trip would strand somebody on an error screen with no way off it.
+   * The screen returns to the start immediately rather than waiting on the round trip:
+   * blocking "Start over" on the network would strand somebody on an error screen with no
+   * way off it, and the error screen they are most likely on is the one a dropped
+   * connection put them there.
+   *
+   * **But a discard that fails is remembered, not shrugged off.** The first version of this
+   * fired and forgot, which meant the fix failed in exactly the case that motivated it: the
+   * upload dropped *because the network went*, so the discard went the same way, job A
+   * survived `pending`, and the next archive merged into it anyway. `start` settles the
+   * debt before it creates anything — see `abandoned`.
    */
   const reset = useCallback(() => {
     const jobId = jobRef.current;
     jobRef.current = null;
     settle({ phase: 'idle' });
 
-    if (jobId !== null) {
-      void supabase.rpc('import_discard', { p_job_id: jobId });
-    }
+    if (jobId === null) return;
+
+    void (async () => {
+      try {
+        const { error } = await supabase.rpc('import_discard', { p_job_id: jobId });
+        if (error) abandoned.current = jobId;
+      } catch {
+        abandoned.current = jobId;
+      }
+    })();
   }, [settle]);
 
   /**
@@ -368,6 +419,26 @@ export function useImport(surface: ImportSurface) {
       settle({ phase: 'uploading', preview, sent: 0, total: pages.length });
 
       try {
+        /**
+         * **Pay off a failed "Start over" before creating anything.**
+         *
+         * `import_create` adopts an open `pending` job for an hour. If the discard that
+         * should have removed the abandoned one never reached the server, creating now
+         * would hand back that very job and this archive would stage on top of the one the
+         * person walked away from — the two applied as a single collection.
+         *
+         * Awaited, and a failure stops the import rather than proceeding hopefully. The
+         * preview is kept, so "Try again" is a real offer and the retry that succeeds is
+         * the one that also clears the debt.
+         */
+        if (abandoned.current !== null) {
+          const { error: discardError } = await supabase.rpc('import_discard', {
+            p_job_id: abandoned.current,
+          });
+          if (discardError) throw discardError;
+          abandoned.current = null;
+        }
+
         const { data: jobId, error: createError } = await supabase.rpc('import_create');
         if (createError || typeof jobId !== 'string') throw createError ?? new Error('no job');
         jobRef.current = jobId;

@@ -274,6 +274,36 @@ if (!replayed) {
   }
 }
 
+/**
+ * The import drain, and it is here for the same reason the push drain is.
+ *
+ * `20260917000300` defined `schedule_import_drain()` and nothing ever called it — no
+ * self-install block, no grant, and no step here. On a project where that is true the
+ * importer does not merely run slowly: `import_ready` sets the job `matching`, nothing
+ * drains it, `import_status` keeps answering successfully so the client's blind-poll
+ * bail-out never fires, and the person sits on a screen with no buttons. The 24-hour dead
+ * letter is inside the worker too, so `completed_at` never arrives and `import_create`
+ * re-adopts the same job for ever. `20260917000600` adds the grant and a best-effort
+ * install; this is the deliberate one, on the same footing as its neighbour.
+ */
+if (!replayed) {
+  note('import drain: skipped, the schema has not been replayed');
+} else if (!apply) {
+  note('import drain: would call schedule_import_drain()');
+} else {
+  const scheduled = await rpc('schedule_import_drain', {});
+  if (!scheduled.ok) {
+    problems.push(
+      `schedule_import_drain: ${scheduled.status} ${scheduled.body.slice(0, 300)}\n` +
+        '    Enable pg_cron and pg_net first (Supabase dashboard → Database → Extensions),\n' +
+        '    then run this again. Until it is scheduled, no Letterboxd import can finish —\n' +
+        '    every one of them strands its owner on "Matching your films".',
+    );
+  } else {
+    note(`import drain: scheduled (job ${scheduled.parsed?.jobid}, ${scheduled.parsed?.schedule})`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 4. What it looks like now
 // ---------------------------------------------------------------------------

@@ -36,6 +36,8 @@ let mockPickedSize: number | undefined;
 /** What a `select` on `import_jobs` answers. The open-job recovery reads the table. */
 let mockLiveJob: { data: unknown; error: unknown } = { data: null, error: null };
 let mockLiveJobThrows = false;
+/** Every filter the open-job lookup applied, so a test can assert what it did NOT apply. */
+let mockFilters: string[] = [];
 
 jest.mock('expo-file-system', () => ({
   File: {
@@ -80,11 +82,28 @@ jest.mock('@/lib/supabase', () => ({
       };
       return Object.assign(Promise.resolve(result), result);
     },
+    /**
+     * **The builder records its filters rather than swallowing them**, which is the whole
+     * reason this comment exists.
+     *
+     * An earlier version implemented `.is()` as an identity, and a test asserting that a
+     * finished import is restored on reopen passed against a hook that filtered
+     * `completed_at is null` — a predicate that excludes every finished job. The test was
+     * green and the behaviour was impossible. A mock that quietly accepts any query is not
+     * a stand-in for a database, it is a way of testing nothing.
+     */
     from: (table: string) => {
       mockFrom(table);
       const builder: Record<string, unknown> = {
         select: () => builder,
-        is: () => builder,
+        is: (column: string, value: unknown) => {
+          mockFilters.push(`is:${column}:${String(value)}`);
+          return builder;
+        },
+        eq: (column: string, value: unknown) => {
+          mockFilters.push(`eq:${column}:${String(value)}`);
+          return builder;
+        },
         order: () => builder,
         limit: () => builder,
         maybeSingle: () =>
@@ -143,6 +162,7 @@ beforeEach(() => {
   mockPickedSize = undefined;
   mockLiveJob = { data: null, error: null };
   mockLiveJobThrows = false;
+  mockFilters = [];
 });
 
 describe('before a file is chosen', () => {
@@ -366,7 +386,7 @@ describe('an import that is already happening', () => {
         id: 'job-live',
         status: 'done',
         counts: { applied: 2, watched: 2, watchlist: 0, viewings: 0 },
-        completed_at: '2026-09-11T00:00:00.000Z',
+        completed_at: new Date(Date.now() - 60_000).toISOString(),
       },
       error: null,
     };
@@ -374,6 +394,46 @@ describe('an import that is already happening', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
     await waitFor(() => expect(screen.getByText(/Your history is in/)).toBeTruthy());
+    // And a way on, so a restored summary is not a dead end for somebody holding a second
+    // archive.
+    expect(screen.getByText('Import another file')).toBeTruthy();
+  });
+
+  /**
+   * **The filter that made the test above a lie.**
+   *
+   * The lookup asked for `completed_at is null`, and `_import_settle` writes `done` and
+   * `completed_at` in the same statement — so a finished job was excluded from the one
+   * query meant to find it, and the summary was unreachable on reopen. The test passed
+   * because the mocked builder treated `.is()` as an identity.
+   *
+   * Asserted as the absence of the filter rather than only through the state, because that
+   * is the thing that was wrong, and a future refactor could restore the filter while some
+   * other path happened to produce a summary.
+   */
+  it('does not exclude finished jobs from the lookup', async () => {
+    await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    expect(mockFilters).not.toContain('is:completed_at:null');
+  });
+
+  it('leaves an import that finished long ago alone', async () => {
+    // Restoring it would mean opening the importer onto last month's summary for ever.
+    mockLiveJob = {
+      data: {
+        id: 'job-old',
+        status: 'done',
+        counts: { applied: 2, watched: 2, watchlist: 0, viewings: 0 },
+        completed_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      error: null,
+    };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('import_jobs'));
+    expect(screen.getByText('Choose your export')).toBeTruthy();
   });
 
   it('ignores a half-staged job, because there is nothing to show for it', async () => {
@@ -465,5 +525,75 @@ describe('a file that is not an export', () => {
       name: 'import_archive_selected',
       props: { outcome: 'too_large' },
     });
+  });
+});
+
+describe('a Start over the server never heard about', () => {
+  /**
+   * **The fix for the two-archive merge failed in the case that motivated it.**
+   *
+   * `reset` fired `import_discard` and ignored the answer. But the upload it follows fails
+   * because the network went — so the discard went the same way, job A survived `pending`,
+   * and `import_create` handed it straight back for archive B to stage on top of. The
+   * person ends up with films from an archive they explicitly walked away from, which is
+   * exactly what `import_discard` was written to prevent.
+   */
+  it('does not stage a second archive until the abandoned job is really gone', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = { import_create: 'job-1' };
+    // The upload drops, and the discard that follows drops with it.
+    mockRpcErrors = { import_stage: { message: 'network' }, import_discard: { message: 'network' } };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+    await waitFor(() => expect(screen.getByText('Start over')).toBeTruthy());
+
+    await fireEvent.press(screen.getByText('Start over'));
+    await waitFor(() => expect(screen.getByText('Choose your export')).toBeTruthy());
+
+    // Archive B. Staging is healthy again, but the abandoned job is still out there.
+    mockRpcErrors = { import_discard: { message: 'network' } };
+    mockRpc.mockClear();
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText(/didn.+t finish sending/)).toBeTruthy());
+
+    const called = mockRpc.mock.calls.map(([name]) => name);
+    // The debt is settled first, and because it could not be, nothing was created and
+    // nothing was staged. A merged collection is the one outcome worse than a failed one.
+    expect(called[0]).toBe('import_discard');
+    expect(called).not.toContain('import_create');
+    expect(called).not.toContain('import_stage');
+  });
+
+  it('clears the debt and imports normally once the discard gets through', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = { import_create: 'job-1', import_status: null };
+    mockRpcErrors = { import_stage: { message: 'network' }, import_discard: { message: 'network' } };
+
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+    await waitFor(() => expect(screen.getByText('Start over')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Start over'));
+    await waitFor(() => expect(screen.getByText('Choose your export')).toBeTruthy());
+
+    // The network is back for everything now.
+    mockRpcErrors = {};
+    mockRpc.mockClear();
+    await fireEvent.press(screen.getByText('Choose your export'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText(/close the app/)).toBeTruthy());
+
+    const called = mockRpc.mock.calls.map(([name]) => name);
+    expect(called[0]).toBe('import_discard');
+    expect(called).toContain('import_stage');
   });
 });

@@ -111,7 +111,7 @@ function Body({
       );
 
     case 'done':
-      return <Summary counts={state.status.counts} onDone={onDone} />;
+      return <Summary counts={state.status.counts} onDone={onDone} onReset={onReset} />;
 
     case 'failed':
       return (
@@ -228,7 +228,15 @@ function Preview({
 /** "Import 1 film", not "Import 1 films". Every other string on this screen singularises. */
 const importLabel = (films: number) => `Import ${films} ${films === 1 ? 'film' : 'films'}`;
 
-function Summary({ counts, onDone }: { counts: ImportCounts; onDone: () => void }) {
+function Summary({
+  counts,
+  onDone,
+  onReset,
+}: {
+  counts: ImportCounts;
+  onDone: () => void;
+  onReset: () => void;
+}) {
   const applied = counts.applied ?? 0;
   // **`stragglers` counts here too.** `_import_settle` reports rows still `pending` or
   // `matched` at settle as their own bucket, and leaving them out of this total made the
@@ -269,6 +277,12 @@ function Summary({ counts, onDone }: { counts: ImportCounts; onDone: () => void 
 
       <View style={styles.actions}>
         <Button label="Done" onPress={onDone} />
+        {/* **A way on, because this screen is now reachable without having just used it.**
+            A finished import is restored for a day after it completes, so somebody who
+            closed the app during "Matching your films" gets the summary they were owed —
+            and somebody with a second archive would otherwise meet the same summary with
+            only a Done button on it, which is a dead end wearing a tick. */}
+        <Button label="Import another file" kind="tertiary" onPress={onReset} />
       </View>
     </View>
   );

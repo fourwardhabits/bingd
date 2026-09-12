@@ -191,20 +191,78 @@ fingerprint returns to `b860e0b5…` at 170 sources exactly.
 
 ---
 
-## 7. Remaining QA
+## 6a. Independent review, 2026-09-11 — what was fixed and what was not
 
-Nothing in this feature has been run on a phone. What the automated suite cannot cover:
+A read-only review of the whole branch found ten defects. Four are fixed on this branch;
+the rest are recorded here honestly rather than quietly carried.
 
-1. **The picker itself.** `File.pickFileAsync` is mocked in tests. Needs checking on both
-   platforms, from Files/Drive/Downloads, including a file that lives in a cloud folder and
-   has to be materialised first.
-2. **A real export, end to end.** The founder's own archive, on a device, against staging.
-3. **Sheet over modal.** Settings is presented modally and `HowToExportSheet` is a `Sheet`
-   inside it. The pattern is established (`DiagnosticsSheet` does the same), but the
-   2026-09-10 freeze came from two presented view controllers, so it is worth a look.
-4. **A large import.** Ten thousand films is 22 pages; the read is synchronous and the
-   yield before it is what stops the spinner from never painting.
-5. **The worker actually draining** on staging, and the summary counts arriving.
+### Fixed
+
+| # | Defect | Fix |
+|---|---|---|
+| 1 | **Nothing installed the cron job.** `schedule_import_drain()` was defined and never called — no self-install block, no `service_role` grant, no bootstrap step. On a real project no import could *ever* finish: `import_status` kept answering `matching` successfully, so the client's blind-poll bail-out never fired and the person sat on a buttonless screen; the 24-hour dead letter is inside the worker too, so the job never completed and `import_create` re-adopted it for ever. | `20260917000600` adds the grant and a best-effort install; `20260917000700` adds `import_drain_status()`; `bootstrap-production.mjs` schedules it deliberately. **Verified on staging:** job 3, active, last run succeeded. |
+| 2 | **A failed job kept the whole payload for ever.** Every deletion and redaction lived in `_import_settle`, and the dead-letter path never calls it — so an exhausted import kept its film URIs, ratings, buckets, watch dates and every diary URI permanently, against Contract V3 §14. | A trigger on the transition into a completed job, so it covers the dead letter, the settle path and whatever writes `completed_at` next. |
+| 4 | **"Close the app and come back" was false once the import finished.** The lookup filtered `completed_at is null`, and `_import_settle` writes `done` and `completed_at` together — so a finished job was excluded from the one query meant to find it. | The filter is gone; a job that completed within a day is restored, and the summary now offers *Import another file* so it is never a dead end. |
+| 5 | **"Start over" failed exactly when it mattered.** The discard was fired and forgotten, so when the upload dropped *because the network went*, the discard went with it, the job survived `pending`, and the next archive merged into it. | A failed discard is remembered and settled before the next `import_create`; if it cannot be, the import stops rather than merging. |
+
+Finding #4 is worth a second line: the test that claimed to cover it passed only because
+the mocked query builder treated `.is()` as an identity. The mock now records its filters,
+and a test asserts the absence of that predicate directly.
+
+### Open, and deliberately not rushed
+
+- **#3 — the shared match cache can be poisoned (security).** `letterboxd_matches` maps a
+  Letterboxd film URI to a bingd title, is global across accounts, and is written from a
+  `(filmUri, name, year)` triple the client supplies in full. Any signed-in account can
+  stage one row binding a real film's URI to a different title; `on conflict do nothing`
+  makes it permanent, no contributor is recorded, and RLS means nobody can read the table
+  to audit it. Every later importer with that URI in their export gets the wrong film.
+  Not fixed here because every cheap fix is wrong: scoping the cache per account throws the
+  feature away, and a confirmation rule is a schema change that deserves its own review.
+  **This should be settled before the importer reaches anyone but the founder.**
+- **#6 — a second archive can be silently swallowed.** If `import_create` returns a job the
+  worker already owns, the preview is dropped and the *first* job's summary is shown as
+  though it were this import's result.
+- **#7 — the summary overcounts.** "Added to your collection" counts rows marked `applied`,
+  including those where nothing was written because the title was already ranked. A
+  re-import of an archive you have since ranked reports every film as added.
+- **#8 — no ceiling on rows per job.** Pages are bounded; the number of pages is not.
+- **#9 — `pick()` has no double-press guard**, unlike `start()`. Two taps could present two
+  document pickers, and iOS refuses the second. Physical QA item 1 covers it.
+- **#10 — the provider tier is unconfigured on staging.** `provider_ready: false`, because
+  staging has neither `functions.base_url` nor the vault key — for push either, so this
+  predates the importer. Jobs settle immediately rather than stalling (by design), but the
+  TMDB tier is not exercised on staging until those are set.
+
+---
+
+## 7. Physical QA checklist
+
+Nothing in this feature has been run on a phone. Run against the **preview** lane, which
+points at staging (`fjxhcbowoxuzulwirzyr`) — never the shipped app.
+
+Staging is ready: 127/127 migrations, the edge function deployed, the drain scheduled and
+its last run succeeded (`import_drain_status()`), and 126/126 on the anon smoke.
+
+### The parts only a device can answer
+
+| # | Check | Why it cannot be tested here | Watch for |
+|---|---|---|---|
+| 1 | **The picker**, on both platforms, from Files, Drive and Downloads — including a file in a cloud folder that must be materialised first | `File.pickFileAsync` is mocked | A file that cannot be selected at all; a picker that returns before the file is local |
+| 2 | **Double-tap "Choose your export"** | Review #9: `pick()` has no press guard where `start()` does | Two pickers, or a spinner that never leaves `Reading your export` |
+| 3 | **"How do I export?" from inside Settings** | Settings is a modal and the sheet is a `<Modal>` | The 2026-09-10 freeze: a screen that goes dead after the sheet closes |
+| 4 | **The founder's real export, end to end** | The only archive that is genuinely real | Counts on the preview matching the summary |
+| 5 | **A large export** (the generated 10,000-film fixture) | 22 pages; the read is synchronous | A spinner that never paints; "Part n of m" going backwards |
+| 6 | **Leave the app mid-import, come back after it finishes** | The fix for review #4 is new and unproven on a device | The summary should be waiting, with *Import another file* on it |
+| 7 | **Airplane mode during the upload, then "Start over", then a different archive** | The fix for review #5 is new | The second archive must not arrive with the first's films |
+| 8 | **The Settings row and the payoff sentence** | — | Row present under Account; sentence on *Your First Five*, not during the ranking |
+
+### What staging cannot show you
+
+- **The TMDB tier.** `provider_ready: false` — staging has no `functions.base_url` and no
+  vault service key (push is in the same state). Unmatched films will settle as unmatched
+  rather than being looked up. Set both if the provider tier needs exercising.
+- **Anything about production.** Production has none of the five migrations, by design.
 
 ---
 

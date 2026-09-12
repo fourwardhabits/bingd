@@ -1612,3 +1612,189 @@ describe('starting over means starting over', () => {
     assert.equal(await count('import_jobs', `id = '${jobId}'`), 1);
   });
 });
+
+
+// ===========================================================================
+// The failure path keeps nothing either — `20260917000600`
+// ===========================================================================
+
+/**
+ * **Retention was true on the happy path and false on the failure path.**
+ *
+ * Every deletion and redaction lived in `_import_settle`, and the dead letter in
+ * `_drain_import_jobs` does not go through it — it writes `failed` and `completed_at`
+ * straight onto the job. So an import that exhausted its attempts kept its whole staged
+ * payload permanently: film URIs, ratings, buckets, watch dates and every diary URI.
+ *
+ * That is the wrong way round. Somebody whose import failed is the least likely to come
+ * back and the least well served by us keeping their diary. Found by independent review;
+ * the existing dead-letter test asserted `status` and `completed_at` and never looked at
+ * the rows it left behind.
+ */
+describe('what survives a job that failed', () => {
+  let vera;
+
+  before(async () => {
+    vera = await t.createUser({ username: 'pipe_vera' });
+  });
+
+  afterEach(async () => {
+    await t.actAs(null);
+    await t.sql(`delete from import_jobs where user_id = $1`, [vera]);
+  });
+
+  const stagedPrivateRow = async () => {
+    await t.actAs(vera);
+    const { rows } = await t.sql(`select import_create() as id`);
+    const jobId = rows[0].id;
+    await t.sql(`select import_stage($1, $2::jsonb) as r`, [jobId, JSON.stringify([
+      staged('Vera Private', {
+        correlation: 'vera private|2001',
+        filmUri: 'https://boxd.it/VERAFILM',
+        rating: 4.5,
+        bucket: 'loved',
+        watchedOn: '2024-05-06',
+        watches: [
+          { diaryUri: 'https://boxd.it/VERADIARY', watchedOn: '2024-05-06', isRewatch: true },
+        ],
+      }),
+    ])]);
+    await t.sql(`select import_ready($1) as r`, [jobId]);
+    await t.actAs(null);
+    return jobId;
+  };
+
+  const rawOf = async (jobId) => {
+    const { rows } = await t.sql(`select raw from import_rows where job_id = $1`, [jobId]);
+    return rows[0]?.raw ?? null;
+  };
+
+  it('keeps only the name and year when the job is dead-lettered', async () => {
+    const jobId = await stagedPrivateRow();
+
+    // Exhaust the attempt budget the way a job that keeps erroring does, then run the tick
+    // that dead-letters it. Driven through the worker rather than by writing `failed`
+    // directly, so this exercises the path a real failure takes.
+    await t.sql(`update import_jobs set failures = 3 where id = $1`, [jobId]);
+    await t.sql(`select _drain_import_jobs(5, 500) as r`);
+
+    const { rows: job } = await t.sql(
+      `select status, completed_at from import_jobs where id = $1`, [jobId]);
+    assert.equal(job[0].status, 'failed');
+    assert.ok(job[0].completed_at, 'a dead-lettered job is completed');
+
+    const raw = await rawOf(jobId);
+    assert.ok(raw, 'the row survives, because the count is what the repair surface renders');
+    assert.deepEqual(Object.keys(raw).sort(), ['name', 'year']);
+
+    // Said again as the thing that actually matters, so a future `jsonb_build_object` that
+    // grows a field fails here rather than shipping.
+    const serialised = JSON.stringify(raw);
+    for (const secret of ['VERAFILM', 'VERADIARY', 'rating', 'bucket', 'watchedOn', 'watches']) {
+      assert.ok(!serialised.includes(secret), `a failed job must not keep ${secret}`);
+    }
+  });
+
+  it('still keeps the name and year, so the count is not lost with the payload', async () => {
+    const jobId = await stagedPrivateRow();
+    await t.sql(`update import_jobs set failures = 3 where id = $1`, [jobId]);
+    await t.sql(`select _drain_import_jobs(5, 500) as r`);
+
+    const raw = await rawOf(jobId);
+    assert.equal(raw.name, 'Vera Private');
+    assert.equal(raw.year, 2001);
+  });
+});
+
+
+// ===========================================================================
+// Somebody has to start the worker — `20260917000600`, `20260917000700`
+// ===========================================================================
+
+/**
+ * **The worker was never installed, and nothing could see it.**
+ *
+ * `20260917000300` defined `schedule_import_drain()` and then nothing called it: no
+ * self-install block, no grant to `service_role`, no step in the bootstrap script. The push
+ * lane it names as its precedent has all three. On a real project that means no cron job,
+ * so `_drain_import_jobs` is never called, `import_status` keeps answering `matching`
+ * successfully, the client's blind-poll bail-out never fires, and the person sits on a
+ * screen with no buttons — for ever, because the 24-hour dead letter lives inside the
+ * worker too.
+ *
+ * The entire suite above calls `_drain_import_jobs()` directly, which is the right way to
+ * test a worker and exactly why none of it noticed. So these assert the *wiring* rather
+ * than the draining: the grant that lets the bootstrap script call the installer, and a
+ * status function that answers honestly on a database with no pg_cron at all — which is
+ * this one, and is also a freshly restored production before the extensions are enabled.
+ */
+describe('the worker has somebody to start it', () => {
+  const grantsOn = async (signature) => {
+    const { rows } = await t.sql(
+      `select coalesce(array_agg(grantee order by grantee), '{}') as roles
+         from information_schema.routine_privileges
+        where specific_schema = 'public'
+          and privilege_type = 'EXECUTE'
+          and routine_name = $1`,
+      [signature],
+    );
+    return rows[0].roles;
+  };
+
+  it('lets service_role install the cron job', async () => {
+    // The one grant the bootstrap script needs, and the one that was missing: the function
+    // was revoked from public, anon and authenticated and then granted to nobody, so the
+    // documented way to install the drain could not be used by the thing that documents it.
+    assert.ok(
+      (await grantsOn('schedule_import_drain')).includes('service_role'),
+      'schedule_import_drain must be callable by service_role',
+    );
+  });
+
+  it('lets service_role ask whether it is running', async () => {
+    assert.ok((await grantsOn('import_drain_status')).includes('service_role'));
+  });
+
+  it('keeps the installer away from signed-in callers', async () => {
+    const roles = await grantsOn('schedule_import_drain');
+    assert.ok(!roles.includes('authenticated'), 'a phone must not schedule cron jobs');
+    assert.ok(!roles.includes('anon'));
+  });
+
+  it('reports no job rather than failing where pg_cron does not exist', async () => {
+    // PGlite has no `cron` schema, and neither does a Supabase project until somebody
+    // enables the extension. A status call that raised there would be useless at exactly
+    // the moment it is most needed — the first check after a restore.
+    const { rows } = await t.sql(`select import_drain_status() as s`);
+    const status = rows[0].s;
+
+    assert.equal(status.job, null, 'a null job is how "nothing is draining" is reported');
+    assert.equal(typeof status.open, 'number');
+    assert.equal(typeof status.older_than_15m, 'number');
+  });
+
+  it('counts an open job as open, and an old one as stalled', async () => {
+    // Deltas rather than absolutes: this suite shares one database with nineteen others and
+    // several of them leave jobs behind on purpose. An absolute count here would assert the
+    // tidiness of its neighbours rather than anything about this function.
+    const read = async () => (await t.sql(`select import_drain_status() as s`)).rows[0].s;
+    const before = await read();
+
+    const wendy = await t.createUser({ username: 'pipe_wendy' });
+    await t.actAs(wendy);
+    const { rows: created } = await t.sql(`select import_create() as id`);
+    await t.actAs(null);
+
+    const opened = await read();
+    assert.equal(opened.open, before.open + 1);
+    assert.equal(opened.older_than_15m, before.older_than_15m);
+
+    // The symptom the runbook alerts on: rows arrived and nothing took them.
+    await t.sql(`update import_jobs set created_at = now() - interval '30 minutes' where id = $1`,
+      [created[0].id]);
+    const stalled = await read();
+    assert.equal(stalled.older_than_15m, before.older_than_15m + 1);
+
+    await t.sql(`delete from import_jobs where id = $1`, [created[0].id]);
+  });
+});
