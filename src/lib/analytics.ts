@@ -644,10 +644,12 @@ export type AnalyticsEvent =
    * The pair to the event above: opens over taps is whether the answers were any good.
    *
    * `personalized` is the one mechanism fact worth carrying, and it is carried here
-   * rather than on the open because here it is known and true: it says the reader had
-   * rankings behind them, so their taste moved the order within the provider's list.
+   * rather than on the open because here it is known. It says the reader had a taste
+   * vector behind the grid — they have ranked something, so the genre and language terms
+   * were live and *could* reorder. It does **not** claim the order came out different:
+   * those terms are often flat across a similar list, which mostly shares one genre.
    * False is the shipped V1 path rather than a failure — somebody who has ranked nothing
-   * gets TMDB's own relevance order — and the split is what says whether reranking is
+   * gets the provider's relevance order — and the split is what says whether reranking is
    * earning anything.
    *
    * No title id and no position. A destination would be a `media_item_id`, which is on

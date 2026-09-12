@@ -361,26 +361,6 @@ export default function TitleScreen() {
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
   /**
-   * Pull to refresh, and **only** pull to refresh.
-   *
-   * This was `refreshing={seasons.isRefetching || personal.isRefetching}`, which is the
-   * founder's "the page behind the review sheet jumps" defect on physical build 9.
-   * `personal` is keyed under `queryKeys.title(id)`, the log sheet's note autosave
-   * invalidates that prefix while somebody is typing, and iOS reads `refreshing: true` as
-   * a *programmatic pull* — it grows the scroll view's top content inset and animates the
-   * content down to meet it, which is the blank band above the hero, and back up when the
-   * refetch settles. `use-pull-refresh.ts` carries the whole trace.
-   */
-  const pull = usePullRefresh(
-    // Memoised, because the hook's callback depends on it: a new array-builder every
-    // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
-    // page.
-    useCallback(
-      () => [refetch(), seasons.refetch(), personal.refetch()],
-      [refetch, seasons, personal],
-    ),
-  );
-  /**
    * Reviews are Bingd's own public Notes on this exact title.
    *
    * What this replaced fetched TMDB's reviews from a `media_cache` facet. They were
@@ -477,8 +457,9 @@ export default function TitleScreen() {
    *
    * The parent's id is the facet's owner for a season — TMDB publishes recommendations
    * for a series and none for a season — and `use-similar-titles.ts` has the whole
-   * argument. A season whose parent embed did not come back passes null and gets an
-   * empty tab rather than a wrong one.
+   * argument. A season whose parent embed did not come back passes null, which the hook
+   * resolves by asking the adapter rather than by giving up: the server takes a season
+   * id, finds the parent and says which row it wrote the facet against.
    */
   const showsSimilar = tab === 'similar';
   const similar = useSimilarTitles({
@@ -492,6 +473,32 @@ export default function TitleScreen() {
     userId: profile.id,
     enabled: showsSimilar,
   });
+  /**
+   * Pull to refresh, and **only** pull to refresh.
+   *
+   * This was `refreshing={seasons.isRefetching || personal.isRefetching}`, which is the
+   * founder's "the page behind the review sheet jumps" defect on physical build 9.
+   * `personal` is keyed under `queryKeys.title(id)`, the log sheet's note autosave
+   * invalidates that prefix while somebody is typing, and iOS reads `refreshing: true` as
+   * a *programmatic pull* — it grows the scroll view's top content inset and animates the
+   * content down to meet it, which is the blank band above the hero, and back up when the
+   * refetch settles. `use-pull-refresh.ts` carries the whole trace.
+   *
+   * **It moved below the Similar tab's hook so that it could include it**, which is not a
+   * tidy-up: the Similar tab's empty and failed states both say "pull down to try again",
+   * and that sentence was a promise nothing kept. `useSimilarTitles` returns a `refetch`
+   * that does nothing while the tab is closed, so a pull from Cast still spends nothing —
+   * the gate stays inside the hook that owns it rather than being restated here.
+   */
+  const pull = usePullRefresh(
+    // Memoised, because the hook's callback depends on it: a new array-builder every
+    // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
+    // page.
+    useCallback(
+      () => [refetch(), seasons.refetch(), personal.refetch(), similar.refetch()],
+      [refetch, seasons, personal, similar],
+    ),
+  );
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
   const rankCategory: RankingCategory =

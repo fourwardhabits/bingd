@@ -239,12 +239,18 @@ season's are its show's, resolved to series-level by the adapter, because TMDB p
 recommendations for a series and none for a season. A series and a season both report
 `tv`, for the same reason For You's two walls do.
 
-`personalized` says the reader had rankings behind them, so their taste moved the order
-*within* the provider's list. It travels on the tap and not on the open, because at the
-moment the tab is pressed the answer is not yet known — and an event that waited for a
-network reply would stop counting the opens that failed. `false` is the shipped path for
-somebody who has ranked nothing rather than a failure: they get TMDB's own relevance
-order.
+`personalized` says the reader had a taste vector behind the grid — they have ranked
+something, so the genre and language terms were live and could reorder *within* the
+provider's list. **It does not claim the order came out different**: those terms are often
+flat across a similar list, because such a list mostly shares one genre, and a flat term
+reorders nothing. Read it as "could be personalised", which is the split that matters
+when asking whether reranking is earning anything.
+
+It travels on the tap and not on the open, because at the moment the tab is pressed the
+answer is not yet known — and an event that waited for a network reply would stop counting
+the opens that failed. `false` is the shipped path for somebody who has ranked nothing
+rather than a failure: they get the provider's relevance order, under the same popularity
+prior For You applies.
 
 What deliberately does not travel: which title was opened, which title it was similar
 *to*, and the position in the grid. The first two would be a `media_item_id` under

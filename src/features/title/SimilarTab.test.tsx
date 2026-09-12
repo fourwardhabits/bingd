@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -258,6 +258,19 @@ const shown = (view: View) =>
 
 const names = (view: View) => shown(view).map((label) => label.split(',')[0]);
 
+/**
+ * The page's pull-to-refresh control.
+ *
+ * `refreshControl` is a *prop* holding an element rather than a child, so it is never a
+ * node in the host tree and cannot be queried for — the same read `TitleScreen.test.tsx`
+ * makes, for the same reason.
+ */
+const refreshControl = (view: View) =>
+  view
+    .root!.queryAll(() => true)
+    .map((node) => node as never as { props?: Record<string, any> })
+    .find((node) => node.props?.refreshControl)?.props?.refreshControl;
+
 /** The first tile in the grid, as something pressable. */
 const firstTile = (view: View) => {
   const [label] = shown(view);
@@ -281,12 +294,12 @@ describe('Similar, on a film', () => {
     tableRows.media_cache = [facet('film-1', ids)];
   };
 
-  it('is the last tab, after Details', async () => {
+  it('is the last tab, immediately after Details', async () => {
     const view = await open();
 
-    const labels = view.getAllByRole('tab').map(textOf);
-    expect(labels[labels.length - 1]).toBe('Similar');
-    expect(labels).toContain('Details');
+    // Adjacency, not merely presence. "Last, and Details is somewhere" would still pass
+    // with a tab inserted between the two, which is not what the name promises.
+    expect(view.getAllByRole('tab').map(textOf).slice(-2)).toEqual(['Details', 'Similar']);
   });
 
   it('asks for nothing until somebody opens it', async () => {
@@ -356,6 +369,85 @@ describe('Similar, on a film', () => {
 
     await waitFor(() => expect(view.getByText('No similar titles yet')).toBeTruthy());
     expect(mockCacheSimilar).not.toHaveBeenCalled();
+  });
+
+  it('says so quietly while somebody else is filling the facet', async () => {
+    /**
+     * `tmdb_claim_facet`'s two-minute placeholder: unexpired, and carrying `claimed_at`
+     * rather than `ids`. Another reader holds the claim, so the adapter refuses ours and
+     * returns without fetching, and the row still says nothing.
+     *
+     * The wrong answer here is "No similar titles yet" — it would be false about a title
+     * with plenty, and React Query would hold it for an hour. So this is the error state,
+     * which has a pull-to-refresh behind it.
+     */
+    tableRows.media_items = [film, ...three];
+    tableRows.media_cache = [
+      {
+        media_item_id: 'film-1',
+        facet: 'similar',
+        payload: { claimed_at: new Date().toISOString() },
+        expires_at: new Date(Date.now() + 2 * 60_000).toISOString(),
+      },
+    ];
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(view.getByText('Could not load similar titles')).toBeTruthy());
+    expect(view.queryByText('No similar titles yet')).toBeNull();
+    // Asked once. Losing a claim costs the adapter no provider request, so asking is the
+    // right move — asking twice is not.
+    expect(mockCacheSimilar).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not reached by a pull on a tab nobody opened', async () => {
+    /**
+     * The empty and failed states both say "pull down to try again", so the gesture has
+     * to reach this query — and `refetch` is imperative, running even on a disabled
+     * query. Wiring it naively would mean a pull from Cast or Details spends the provider
+     * request the whole tab exists to defer, which is the lazy gate defeated by its own
+     * error copy.
+     */
+    tableRows.media_items = [film, ...three];
+
+    const view = await open();
+    await act(async () => {
+      await refreshControl(view).props.onRefresh();
+    });
+
+    expect(mockCacheSimilar).not.toHaveBeenCalled();
+    expect(facetReads()).toHaveLength(0);
+  });
+
+  it('is reached by a pull once the tab is open', async () => {
+    tableRows.media_items = [film, ...three];
+    mockCacheSimilar.mockRejectedValue(new Error('BG429'));
+
+    const view = await open();
+    await openSimilar(view);
+    await waitFor(() => expect(view.getByText('Could not load similar titles')).toBeTruthy());
+
+    await act(async () => {
+      await refreshControl(view).props.onRefresh();
+    });
+
+    // The retry the error state promises, rather than a sentence about a gesture that
+    // went nowhere.
+    expect(mockCacheSimilar.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('stays usable when the cache read itself fails', async () => {
+    // Not the provider: the database. The tab must land in the same quiet state rather
+    // than taking the route's error boundary down with it.
+    tableRows.media_items = [film, ...three];
+    mockFailTables.add('media_cache');
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(view.getByText('Could not load similar titles')).toBeTruthy());
+    expect(view.getByText(/^Inception/)).toBeTruthy();
   });
 
   it('never lists the title the reader is already on', async () => {
@@ -594,21 +686,44 @@ describe('Similar, on television', () => {
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1']));
   });
 
-  it('degrades to an empty tab when a season has no parent to ask about', async () => {
-    // Malformed rather than impossible: `parent_id` is `not null` by constraint, but the
-    // embed is a read that can come back without it. The alternative to an empty tab
-    // would be asking TMDB a /tv question about a season id, which is the wrong answer
-    // delivered confidently.
+  it('falls back to the adapter when a season has no parent embed', async () => {
+    /**
+     * Malformed rather than impossible: `parent_id` is `not null` by constraint, but the
+     * embed is a read that can come back without it.
+     *
+     * The client has no series id to read a facet from — and does not need one. The
+     * adapter takes a season, resolves the parent itself, and **returns the row it wrote
+     * against**, so one call both fills the facet and says whose it is. Giving up here
+     * would lose the feature to a shape the server already knows how to handle.
+     */
     mockOpenId = 'season-1';
     tableRows.media_items = [{ ...season, parent: null }, show(1)];
-    tableRows.media_cache = [facet('series-1', ['cand-1'])];
+    mockCacheSimilar.mockImplementation(async () => {
+      tableRows.media_cache = [facet('series-1', ['cand-1'])];
+      return { id: 'series-1', written: 1 };
+    });
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1']));
+    expect(mockCacheSimilar).toHaveBeenCalledWith('season-1');
+    // The owner the *server* named, never one guessed on this side.
+    expect(facetReads().map((read) => read.filters.media_item_id)).toEqual(['series-1']);
+  });
+
+  it('shows an empty tab for a season the adapter cannot resolve either', async () => {
+    // `handleSimilar`'s `malformed_season`: it validates the parent before it claims, so
+    // this costs no provider request. Nothing is cached and nothing is shown, which is
+    // the honest end of a row that should not exist.
+    mockOpenId = 'season-1';
+    tableRows.media_items = [{ ...season, parent: null }, show(1)];
+    mockCacheSimilar.mockResolvedValue({ id: 'season-1', written: 0, reason: 'malformed_season' });
 
     const view = await open();
     await openSimilar(view);
 
     await waitFor(() => expect(view.getByText('No similar titles yet')).toBeTruthy());
-    expect(mockCacheSimilar).not.toHaveBeenCalled();
-    expect(facetReads()).toHaveLength(0);
   });
 });
 
@@ -660,6 +775,33 @@ describe('the reader’s taste', () => {
     await openSimilar(view);
 
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+  });
+
+  it('still applies the popularity prior when there is no taste at all', async () => {
+    /**
+     * **What "provider order" actually means here, pinned rather than assumed.**
+     *
+     * `tasteFrom([])` zeroes the genre and language terms, but popularity is not part of
+     * taste and does not switch off: `rank.ts` weights it at 0.10, and two adjacent
+     * provider positions near the top differ by less than that. So a markedly more
+     * popular candidate one place down rises, for a reader who has ranked nothing.
+     *
+     * That is the existing scorer unmodified, and the test above passes only because its
+     * two candidates share a popularity. Both are true and both are worth having: one
+     * says ties keep TMDB's order, this one says the order is the scorer's reading of it
+     * rather than a verbatim copy of the facet. Independent review 79 found the claim
+     * overstated in the first version of this file.
+     */
+    tableRows.media_items = [
+      film,
+      { ...horror, popularity: 1 },
+      { ...comedy, popularity: 500 },
+    ];
+
+    const view = await open();
+    await openSimilar(view);
+
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 2', 'Candidate 1']));
   });
 
   it('lifts a candidate that matches what the reader has ranked', async () => {
@@ -732,6 +874,48 @@ describe('what the tab reports', () => {
     });
   });
 
+  it('reports personalized on a ranked reader even when the order did not change', async () => {
+    /**
+     * What the flag means, said out loud. It is `sampleSize > 0` — the reader has ranked
+     * something, so the taste terms were live — and **not** a claim that the grid came
+     * out different. Here the one candidate cannot be reordered at all and the flag is
+     * still true, which is the reading the spec and the code comment now carry.
+     */
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'ranked-1',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+        created_at: '2026-01-01T00:00:00Z',
+        media_items: {
+          id: 'ranked-1',
+          kind: 'movie',
+          title: 'Something Ranked',
+          release_date: '2020-01-01',
+          poster_path: null,
+          // Nothing the candidate has, so every taste term is zero for it.
+          genres: ['Documentary'],
+          runtime_minutes: 100,
+          original_language: 'fr',
+          parent_id: null,
+          parent: null,
+        },
+      },
+    ];
+
+    const view = await open();
+    await openSimilar(view);
+    await waitFor(() => expect(names(view)).toHaveLength(1));
+    await fireEvent.press(firstTile(view));
+
+    expect(mockTrack).toHaveBeenCalledWith({
+      name: 'similar_title_opened',
+      props: { medium: 'movies', personalized: true },
+    });
+  });
+
   it('records a title opened from it, and whether taste had moved the order', async () => {
     const view = await open();
     await openSimilar(view);
@@ -743,5 +927,44 @@ describe('what the tab reports', () => {
       // False is the shipped path for a reader with no rankings, not a failure.
       props: { medium: 'movies', personalized: false },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The lifecycle, last in the file on purpose
+// ---------------------------------------------------------------------------
+
+/**
+ * **These live at the foot of the file deliberately.**
+ *
+ * A round trip through the tab row presses the same `Similar` control twice, and in this
+ * repo's RNTL setup two presses of one element inside a single test leave the renderer
+ * broken for every render *after* it — later tests then fail with "unable to find an
+ * element" and nothing points at the cause. There is nothing after these, so the cost is
+ * contained, and the behaviour is worth a test: the whole feature is a claim about when
+ * work happens.
+ */
+describe('coming back to the tab', () => {
+  beforeEach(() => {
+    tableRows.media_items = [film, candidate(1), candidate(2)];
+    mockCacheSimilar.mockImplementation(async () => {
+      tableRows.media_cache = [facet('film-1', ['cand-1', 'cand-2'])];
+      return { id: 'film-1', written: 2 };
+    });
+  });
+
+  it('serves the grid from cache and asks nobody again', async () => {
+    const view = await open();
+    await openSimilar(view);
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
+    await fireEvent.press(view.getByRole('tab', { name: 'Similar' }));
+
+    // Straight back to the grid: no skeleton, and the hour of staleTime means no second
+    // fill. The second press is the point of the test and the reason for its placement.
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
+    expect(mockCacheSimilar).toHaveBeenCalledTimes(1);
+    expect(view.queryAllByTestId('skeleton-row', { includeHiddenElements: true })).toHaveLength(0);
   });
 });

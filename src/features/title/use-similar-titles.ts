@@ -60,11 +60,17 @@ type CandidateRow = {
 export type SimilarSlate = {
   tiles: PosterTile[];
   /**
-   * Whether the viewer's own taste moved the order.
+   * Whether the viewer had a taste vector behind this grid at all.
    *
-   * False for somebody who has ranked nothing, which is not a degraded state: it is
-   * the provider's own relevance order, which is what this tab ships when there is
-   * nothing to personalise with.
+   * **Not a claim that the order came out different.** It is `sampleSize > 0`: the reader
+   * has ranked something, so the genre and language terms were live. They may still have
+   * been flat across these candidates and changed nothing — which is common, because a
+   * similar list mostly shares one genre — and that is exactly the case this flag is for
+   * telling apart from a reader who could not be personalised for at all.
+   *
+   * False is not a degraded state. It is the provider's relevance order under the same
+   * popularity prior For You uses, which is what this tab ships when there is nothing to
+   * personalise with.
    */
   personalized: boolean;
 };
@@ -78,9 +84,11 @@ export type SimilarSource = {
    *
    * A season's is its **parent series'**, because TMDB publishes recommendations for a
    * series and none for a season — the adapter resolves it the same way server-side
-   * (`handleSimilar`), and this is the client half of the same rule. Null for a season
-   * whose parent did not come back, which is the one shape that degrades to an empty
-   * tab rather than to a wrong one.
+   * (`handleSimilar`), and this is the client half of the same rule.
+   *
+   * **Null is allowed and is not the end of the tab.** It means a season whose parent
+   * embed did not come back, and the answer is to ask the adapter, which resolves the
+   * parent itself and returns the row it wrote the facet against. See `similarIds`.
    */
   facetId: string | null;
   /** What the anchor is called. Never rendered; it completes the `Anchor` shape. */
@@ -117,6 +125,18 @@ export type SimilarSource = {
  * more of the ordering to taste on a film the reader disliked, which is not a rule
  * anybody asked for. The source title is the *constraint* here, not a preference.
  *
+ * **How much taste can actually move a title, stated rather than left latent.** With one
+ * anchor the anchor term saturates at `0.6 × saturate(1) = 0.30` for the provider's first
+ * suggestion and falls to about `0.09` for its twentieth, so position is worth roughly
+ * 0.21 across the whole list. The three taste terms are worth up to `0.18 + 0.12 + 0.10 =
+ * 0.40` — nominally more. In practice they are nearly constant across a *similar* list,
+ * which is what keeps position in front: these candidates share the source's genres and
+ * language with each other, so the terms that could reorder them mostly do not vary. The
+ * cases where they do vary are the cases where reranking is the point. It is worth
+ * knowing that the bound is a soft one: a strongly on-taste candidate low in the list can
+ * reach the top of the grid. Nothing outside the list ever can, which is the invariant
+ * that matters, and it is asserted below.
+ *
  * ## What the viewer's own data is read for
  *
  * Two ranked collections, both gated on the tab being open, and both usually already
@@ -144,6 +164,16 @@ export function useSimilarTitles({
   enabled,
 }: SimilarSource) {
   /**
+   * Whether there is anything to ask, at all.
+   *
+   * Read again below, because **a disabled query reports `isPending`**: React Query's
+   * `status` is `pending` until data arrives and a query that will never run never
+   * arrives, so `isPending` alone is true forever. A tab nobody has opened would sit
+   * under a skeleton that nothing was ever going to replace.
+   */
+  const asking = enabled && Boolean(sourceId);
+
+  /**
    * The catalogue half, and only that.
    *
    * Keyed on the facet's owner, so every season of a show shares one entry — they share
@@ -152,28 +182,21 @@ export function useSimilarTitles({
    * `inputs`, where putting a per-viewer set in the key turned a bookmark tap into a new
    * cache entry, a skeleton and a lost scroll position. Ranking something from this very
    * page must not blank the grid it was ranked from.
-   */
-  /**
-   * Whether there is anything to ask, at all.
    *
-   * Read again below, because **a disabled query reports `isPending`**: React Query's
-   * `status` is `pending` until data arrives and a query that will never run never
-   * arrives, so `isPending` alone is true forever. A season with no parent to ask about
-   * would sit under a skeleton that nothing was ever going to replace — which is what
-   * "degrades gracefully" cannot mean.
+   * A season whose parent embed did not come back keys on **itself**, because that is the
+   * only identity it has: the adapter is asked who the facet belongs to, and until it
+   * answers there is no series id to share an entry with.
    */
-  const asking = enabled && Boolean(facetId) && Boolean(sourceId);
-
   const candidates = useQuery({
-    queryKey: similarKey(facetId ?? ''),
+    queryKey: similarKey(facetId ?? sourceId ?? ''),
     enabled: asking,
     staleTime: SIMILAR_STALE_MS,
     queryFn: async (): Promise<Candidate[]> => {
-      const ids = await similarIds(facetId!, sourceId!);
+      const { owner, ids } = await similarIds(facetId, sourceId!);
       // The page's own two identities. TMDB does not put a title in its own
       // recommendations, but a season page's facet belongs to the series above it and
       // nothing in the data model forbids either appearing.
-      const wanted = ids.filter((id) => id !== sourceId && id !== facetId);
+      const wanted = ids.filter((id) => id !== sourceId && id !== owner);
       if (wanted.length === 0) return [];
 
       const { data, error } = await supabase
@@ -259,7 +282,11 @@ export function useSimilarTitles({
     if (pool.length === 0) return { tiles: [], personalized: false };
 
     const anchor: Anchor = {
-      mediaItemId: facetId ?? '',
+      // Read by nothing that matters — `scoreCandidate` separates candidates on
+      // `similarIds.indexOf`, and the hit's id only reaches an explanation this tab
+      // discards. Still the page's own identity rather than a blank, so the shape is not
+      // quietly wrong for whatever reads it next.
+      mediaItemId: facetId ?? sourceId ?? '',
       title: sourceTitle,
       // See the header: the source is the constraint, not a rating.
       score: 10,
@@ -272,9 +299,17 @@ export function useSimilarTitles({
         .map((candidate) => tileFor(candidate, myScores)),
       personalized: taste.sampleSize > 0,
     };
-  }, [candidates.data, facetId, myScores, sourceTitle, taste]);
+  }, [candidates.data, facetId, myScores, sourceId, sourceTitle, taste]);
 
-  return {
+  /**
+   * Memoised, because the title page puts this object in a dependency array.
+   *
+   * Its pull-to-refresh callback lists every query the gesture reaches, and a hook that
+   * returned a fresh object literal every render would hand `RefreshControl` a new
+   * `onRefresh` on every re-render of the page — the thing the comment at that call site
+   * exists to prevent.
+   */
+  return useMemo(() => ({
     slate,
     /**
      * The catalogue query's states, and **only** its states.
@@ -287,41 +322,101 @@ export function useSimilarTitles({
      */
     isPending: asking && candidates.isPending,
     isError: candidates.isError,
-    refetch: candidates.refetch,
-  };
+    /**
+     * The page's pull-to-refresh, which the empty and failed states both invite.
+     *
+     * **A no-op unless the tab is open, and that is the lazy gate rather than tidiness.**
+     * `refetch` is imperative: React Query runs it on a disabled query too, so handing
+     * the page an unconditional one would mean pulling down on Cast spends the provider
+     * request that this whole hook exists to defer. Returning a settled promise keeps the
+     * caller's array of refreshes uniform without giving it that power.
+     */
+    refetch: asking ? candidates.refetch : noRefresh,
+  }), [asking, candidates.isError, candidates.isPending, candidates.refetch, slate]);
 }
+
+/** A refresh that is already finished, for a tab nobody has opened. Module-level so it
+ *  is the same function every render and cannot move a dependency array. */
+const noRefresh = async () => undefined;
 
 /**
- * The facet's ids, filling it first when it is cold.
+ * Which row the facet lives on, and the ids on it — filling it first when it is cold.
  *
- * The three answers `media_cache` can give are all different, and the difference is what
- * stops this asking TMDB forever:
+ * `media_cache` can be in three states and they are three different answers. Collapsing
+ * any two of them is how this either asks TMDB forever or never asks at all:
  *
- *   - **no row, or an expired one** — nobody has asked, or the week has run out. Ask.
- *   - **a row whose payload has `ids`, even `[]`** — TMDB was asked and had nothing to
- *     say. That is a real answer and the adapter writes it deliberately; an obscure film
- *     has no recommendations, and caching that fact is the whole point.
- *   - **a row with no `ids` at all** — `tmdb_claim_facet`'s two-minute placeholder:
- *     somebody else is fetching right now. Asking again is free (the adapter loses the
- *     claim and returns `cached` without spending a request), and the re-read below is
- *     what picks up their answer if it landed in between.
+ *   - **`ready`** — a payload carrying `ids`, **even `[]`**. TMDB was asked and had
+ *     nothing to say, which is a real answer the adapter writes deliberately: an obscure
+ *     film has no recommendations, and caching that fact is the whole point.
+ *   - **`cold`** — no row, or an expired one. Nobody has asked, or the week has run out.
+ *   - **`filling`** — `tmdb_claim_facet`'s two-minute placeholder, which carries a
+ *     `claimed_at` and no `ids`. Somebody else is fetching this very facet right now.
  *
- * A provider failure is left to throw. The tab's error state is quiet and the page
- * around it stays usable, which is a better answer than an empty grid saying "no similar
- * titles" about a request that was refused.
+ * `filling` **after our own attempt is a failure and is thrown**, and that is the one
+ * thing that cannot be got wrong here. We asked the adapter, it lost the claim to the
+ * holder and returned without fetching, and the row still says nothing. Returning `[]`
+ * there would put "No similar titles yet" on screen about a title that has plenty, and
+ * React Query would hold that answer for the hour above — the reader would be told the
+ * wrong thing and then not shown the right one. Thrown, it is the quiet error state with
+ * a pull-to-refresh behind it, and the retry costs no provider request because the
+ * adapter refuses the claim again.
+ *
+ * That is a real distinction rather than a defensive one: the migration's own header
+ * notes that a claim turns old data into no data while a refresh runs, and says the trade
+ * is right *because `similar` is never rendered directly*. This tab renders it directly,
+ * so the tab is where that assumption has to be paid for.
+ *
+ * ## The facet's owner is the adapter's answer when we do not know it
+ *
+ * `facetId` is null for a season whose parent embed did not come back. The old shape gave
+ * up there; it does not need to. `handleSimilar` takes the **season's** id, resolves the
+ * parent itself and returns `id` — the row it wrote against — so one call both fills the
+ * facet and says whose it is. A season that is genuinely malformed comes back as itself
+ * with nothing written, which is the empty tab, and it costs no provider request:
+ * `handleSimilar` validates the parent before it claims.
+ *
+ * A provider failure is left to throw, for the same reason as `filling`.
+ *
+ * **A title the adapter cannot ask about writes no facet**, which means this asks again
+ * the next time the tab is opened. That is a seed-catalogue row with no `tmdb_id`, and
+ * the repeat is cheap on the side that is scarce: `handleSimilar` checks the id *before*
+ * claiming, so it returns `no_tmdb_id` without spending a provider request or holding a
+ * claim. The hour of `staleTime` above is what keeps it from being asked twice in one
+ * sitting.
  */
-async function similarIds(facetId: string, sourceId: string): Promise<string[]> {
-  const first = await readFacet(facetId);
-  if (first) return first;
+async function similarIds(
+  facetId: string | null,
+  sourceId: string,
+): Promise<{ owner: string | null; ids: string[] }> {
+  if (facetId) {
+    const first = await readFacet(facetId);
+    if (first.state === 'ready') return { owner: facetId, ids: first.ids };
+  }
 
   // The **source** id, not the facet's. The adapter takes what the reader is looking at
-  // and resolves a season to its series itself; handing it the series directly would be
-  // the same call, but handing it the season is the call the server documents.
-  await cacheSimilar(sourceId);
-  return (await readFacet(facetId)) ?? [];
+  // and resolves a season to its series itself, which is both the call the server
+  // documents and the only way to learn the owner when the parent embed is missing.
+  const filled = await cacheSimilar(sourceId);
+  const owner = facetId ?? filled.id ?? null;
+  if (!owner) return { owner: null, ids: [] };
+
+  const second = await readFacet(owner);
+  if (second.state === 'ready') return { owner, ids: second.ids };
+  if (second.state === 'filling') {
+    throw new Error('similar: another refresh holds this facet');
+  }
+  // Cold after our own attempt: the adapter declined to ask — no tmdb id, or a malformed
+  // season. Nothing is cached, and the next open will ask again for the price of one
+  // edge-function call and no provider request.
+  return { owner, ids: [] };
 }
 
-async function readFacet(facetId: string): Promise<string[] | null> {
+type FacetState =
+  | { state: 'ready'; ids: string[] }
+  | { state: 'cold' }
+  | { state: 'filling' };
+
+async function readFacet(facetId: string): Promise<FacetState> {
   const { data, error } = await supabase
     .from('media_cache')
     .select('payload, expires_at')
@@ -331,14 +426,16 @@ async function readFacet(facetId: string): Promise<string[] | null> {
   if (error) throw error;
 
   const row = data as FacetRow | null;
-  if (!row) return null;
+  if (!row) return { state: 'cold' };
   // Read here rather than as a `.gt()` on the request, so "absent" and "expired" are one
-  // branch in one place.
-  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
+  // branch in one place. An expired claim is cold too, which is the two-minute promise
+  // being broken and the right thing to do about it.
+  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return { state: 'cold' };
 
   const ids = row.payload?.ids;
-  if (!Array.isArray(ids)) return null;
-  return ids.filter((id): id is string => typeof id === 'string');
+  // Unexpired and carrying no ids is the live claim, and nothing else writes that shape.
+  if (!Array.isArray(ids)) return { state: 'filling' };
+  return { state: 'ready', ids: ids.filter((id): id is string => typeof id === 'string') };
 }
 
 /** The ranked rows as `rank.ts` wants them: a derived score, genres and a language. */
@@ -375,9 +472,17 @@ function scoresOf(movies: readonly RankedEntry[] | undefined) {
  *
  * `sort` is stable in every engine this runs on and the input is already in the
  * provider's order — so two candidates the scorer cannot separate keep the order TMDB
- * gave them. That is the fallback the tab ships on for a reader with no rankings:
- * `tasteFrom([])` returns empty affinity maps, every genre and language term is zero,
- * and what is left is `positionWeight` down the provider's own list.
+ * gave them.
+ *
+ * **What a reader with no rankings actually gets, stated exactly.** `tasteFrom([])`
+ * returns empty affinity maps, so the genre and language terms are zero — but the
+ * popularity prior is not part of taste and does not switch off. What is left is
+ * `positionWeight` down the provider's list plus `WEIGHTS.popularity` (0.10), and since
+ * two adjacent provider positions differ by less than that near the top, a markedly more
+ * popular candidate a place or two down can rise. That is `rank.ts` unmodified rather
+ * than a rule invented here, and it is pinned by a test rather than left to be discovered:
+ * "provider order" for this tab means the provider's order as the existing scorer reads
+ * it, not a verbatim copy of the facet.
  */
 function ordered(pool: readonly Candidate[], anchor: Anchor, taste: Taste): Candidate[] {
   return pool
