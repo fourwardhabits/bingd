@@ -15,12 +15,18 @@ module (`expo-file-system`'s `File.pickFileAsync`, and `fflate` for the zip), an
 | Android | `8e8731a26d9c47e30da2dd709c0308db6f2d3f88` | `b517cd51-d7cd-441f-98d5-e13471719a18` (1.0.1 (7)) |
 | iOS | `aa3056e7287bb313062fff27726cfa3f2e675c8d` | `bc57cede-cd01-42ec-ac54-732fae65c8a4` (1.0.1 (7)) |
 
-**Published** from integration `2ac3388`:
+**Published** from integration `03a5d81` — staging separation + Letterboxd + comparison
+memory aids:
 
 | platform | update group | update id |
 |---|---|---|
-| Android | `e00eb991-3919-4762-a892-ddd7e2f2d589` | `01a094d2-c11c-7108-8521-fd4ee51eb9a7` |
-| iOS | `d8b4eb32-c3de-41a1-b7f5-c5543d9baded` | `01a094d2-c11c-7d9b-a1ac-11b0bf27dfb8` |
+| Android | `4d4b9a8c-0fd2-4bd2-b72d-7987790380b1` | `01a096d6-a1df-7f56-9080-01d3eda66f4a` |
+| iOS | `1b4eaca4-0e7c-42fd-8730-28ba7ff57677` | `01a096d6-a1df-7708-8b4b-382f0f8594cf` |
+
+> Supersedes the first Letterboxd OTA (`2ac3388`, groups `e00eb991…` / `d8b4eb32…`), which
+> carried the importer **without** the comparison memory aids. An OTA replaces the whole JS
+> bundle, so that update silently removed a feature the binaries had shipped with; this one
+> puts both back in one runtime.
 
 ---
 
