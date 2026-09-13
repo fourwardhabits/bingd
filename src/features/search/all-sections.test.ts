@@ -275,3 +275,66 @@ describe('the All page', () => {
     expect(new Set(headers).size).toBe(headers.length);
   });
 });
+
+describe('a page that is still arriving', () => {
+  const anna = user('a', 'annar', 'Anna Rivers');
+
+  it('keeps a drawn Users section where it is when provider titles arrive after it', () => {
+    // Two local titles, the Users section beneath them; then TMDB adds four more.
+    const local = manyTitles(2, 'Local');
+    const before = allRows({
+      query: 'anna r',
+      titles: local,
+      people: [],
+      users: [anna],
+      leadCount: 2,
+    });
+    const after = allRows({
+      query: 'anna r',
+      titles: [...local, ...manyTitles(4, 'Remote')],
+      people: [],
+      users: [anna],
+      leadCount: 2,
+    });
+
+    const usersHeader = (rows: AllRow[]) =>
+      rows.findIndex((row) => row.type === 'header' && row.section === 'users');
+    expect(usersHeader(after.rows)).toBe(usersHeader(before.rows));
+    expect(shape(after.rows)).toEqual([
+      't:Local 1',
+      't:Local 2',
+      'USERS',
+      'u:@annar',
+      'MORE-TITLES',
+      't:Remote 1',
+      't:Remote 2',
+      't:Remote 3',
+      't:Remote 4',
+    ]);
+  });
+
+  it('heads the provider titles Titles, not More titles, when no local title led', () => {
+    const { rows } = allRows({
+      query: 'anna r',
+      titles: manyTitles(2, 'Remote'),
+      people: [],
+      users: [anna],
+      leadCount: 0,
+    });
+
+    expect(shape(rows)).toEqual(['USERS', 'u:@annar', 'TITLES', 't:Remote 1', 't:Remote 2']);
+  });
+
+  it('draws no section before the local titles have answered', () => {
+    const { rows, users } = allRows({
+      query: 'anna',
+      titles: [],
+      people: [],
+      users: [anna],
+      ready: false,
+    });
+
+    expect(rows).toEqual([]);
+    expect(users).toEqual([]);
+  });
+});

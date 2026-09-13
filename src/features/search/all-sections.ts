@@ -130,7 +130,8 @@ export type AllRow =
  *    always none.
  * 2. Otherwise **titles first**, unheaded, as they always were.
  * 3. After the first `TITLE_LEAD` titles, **Cast** then **Users**, up to three each, each
- *    under its own header.
+ *    under its own header. Only titles the local pass found can lead; a provider title
+ *    always goes below the sections, so nothing it adds moves a section already drawn.
  * 4. **More titles**, the rest, under a divider header.
  *
  * With no section, a title search is exactly what it was: one unheaded list.
@@ -140,13 +141,35 @@ export function allRows({
   titles,
   people,
   users,
+  leadCount = titles.length,
+  ready = true,
 }: {
   query: string;
   titles: SearchResult[];
   people: CastSearchResult[];
   users: UserResult[];
+  /**
+   * How many of `titles` may lead the sections: the ones from the local pass, which
+   * come first. A provider title lands a second or more later, and letting it into the
+   * lead would push a section that is already drawn down under a reader's thumb, so it
+   * goes below the sections instead (independent review, 2026-09-13).
+   */
+  leadCount?: number;
+  /**
+   * False until the local title pass has answered. Accounts answer first, and a Users
+   * section drawn before the local titles would be pushed down when they arrive.
+   */
+  ready?: boolean;
 }): { rows: AllRow[]; cast: CastSearchResult[]; users: UserResult[] } {
   const namesAccount = memberQuery(query).leads;
+
+  if (!ready) {
+    return {
+      rows: titles.map((result) => ({ type: 'title' as const, result })),
+      cast: [],
+      users: [],
+    };
+  }
 
   // An `@` query names an account. Performers are not what it is asking for, and the Cast
   // chip is one tap away if it was. Otherwise a performer the query names outright comes
@@ -192,13 +215,22 @@ export function allRows({
   const sections = [...castRows, ...userRows];
   if (!sections.length) return { rows: titleRows, cast, users: shownUsers };
 
-  const rest = titleRows.slice(TITLE_LEAD);
+  const lead = Math.max(0, Math.min(TITLE_LEAD, leadCount));
+  const rest = titleRows.slice(lead);
   return {
     rows: [
-      ...titleRows.slice(0, TITLE_LEAD),
+      ...titleRows.slice(0, lead),
       ...sections,
+      // "More titles" when some led; "Titles" when none did, because nothing above the
+      // sections was a title and "more" would refer to nothing.
       ...(rest.length
-        ? [{ type: 'header' as const, section: 'more-titles' as const }, ...rest]
+        ? [
+            {
+              type: 'header' as const,
+              section: lead ? ('more-titles' as const) : ('titles' as const),
+            },
+            ...rest,
+          ]
         : []),
     ],
     cast,

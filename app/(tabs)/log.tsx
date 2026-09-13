@@ -199,6 +199,8 @@ export default function LogScreen() {
     providerAvailableAt,
     providerFailed,
     providerPeople,
+    localResultCount,
+    localAnswered,
   } = useTitleSearch(input, {
     // No title rows are drawn under Users or Cast, so no provider request is spent on them.
     wide: filter !== 'users' && filter !== 'cast',
@@ -252,6 +254,10 @@ export default function LogScreen() {
         titles: results,
         people: providerPeople,
         users: userResults,
+        // Only local titles lead, and nothing is drawn until they have answered, so a
+        // later arrival never pushes a section that is already on screen.
+        leadCount: localResultCount,
+        ready: localAnswered,
       });
     }
     if (filter === 'users') {
@@ -266,7 +272,16 @@ export default function LogScreen() {
       cast: [],
       users: [],
     };
-  }, [filter, input, results, providerPeople, userResults, filtered]);
+  }, [
+    filter,
+    input,
+    results,
+    providerPeople,
+    userResults,
+    filtered,
+    localResultCount,
+    localAnswered,
+  ]);
   const shownUsers = page.users;
 
   /**
@@ -854,7 +869,9 @@ function Results({
   // people in it, so what happened to the titles is a footer under them rather than a
   // page-level state — and an error is named as one, never as "no titles match".
   const titlesError = !peopleOnly && error;
-  const titlesEmpty = !peopleOnly && !error && results.length === 0;
+  // Not while the wider search is still out: with only people on the page, "no titles
+  // match" before the provider has answered is a claim about a question still being asked.
+  const titlesEmpty = !peopleOnly && !error && results.length === 0 && !searchingWider;
 
   return (
     <View style={styles.list}>

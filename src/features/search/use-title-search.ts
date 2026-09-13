@@ -301,7 +301,7 @@ export function useTitleSearch(
     const providerSettled =
       providerEnabled && !provider.isFetching && (provider.isFetched || provider.isError);
     const local = result.isPlaceholderData && providerSettled ? [] : result.data ?? [];
-    if (!remote.length) return local;
+    if (!remote.length) return { rows: local, localCount: local.length };
 
     // Local ordering wins, because search_titles ranks exact and prefix matches
     // deliberately (20260814040000 §3) and TMDB's relevance does not know what the
@@ -312,10 +312,13 @@ export function useTitleSearch(
     const remoteById = new Map(remote.map((row) => [row.id, row]));
     const seen = new Set(local.map((row) => row.id));
 
-    return [
-      ...local.map((row) => remoteById.get(row.id) ?? row),
-      ...remote.filter((row) => !seen.has(row.id)),
-    ];
+    return {
+      rows: [
+        ...local.map((row) => remoteById.get(row.id) ?? row),
+        ...remote.filter((row) => !seen.has(row.id)),
+      ],
+      localCount: local.length,
+    };
   }, [
     result.data,
     result.isPlaceholderData,
@@ -330,7 +333,22 @@ export function useTitleSearch(
     ...result,
     /** True while the user has typed too little to search, which is not an empty result. */
     idle: !enabled,
-    results: merged,
+    results: merged.rows,
+    /**
+     * How many of `results` came from the local pass: always the first ones, since
+     * provider-only titles are appended after them.
+     *
+     * The All page lets at most this many titles lead its Cast and Users sections. A
+     * provider title arrives a second or more after a section may already be drawn, and
+     * counting it into the lead would push that section down under a reader's thumb.
+     */
+    localResultCount: merged.localCount,
+    /**
+     * Whether the local pass has answered at all, for any query this session, or failed.
+     * Until it has, the All page draws no sections: local titles inserted above an account
+     * section that was already on screen would move it just as a provider title would.
+     */
+    localAnswered: result.data !== undefined || result.isError,
     /**
      * Retries **both** passes, which is what "Try again" has to mean.
      *
