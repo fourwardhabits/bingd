@@ -1,0 +1,300 @@
+import { act, waitFor } from '@testing-library/react-native';
+
+import { renderHookWithProviders } from '@/test-utils/render';
+
+import { resetImpressions } from './impressions';
+import { recommendationAnchorSeed, refreshRecommendations, resetRecommendationSession } from './session-seed';
+import { useForYou } from './use-for-you';
+
+/**
+ * **The TV wall's source defects, through the real hook** (For You repetition audit,
+ * 2026-09-13), and the stability of rotated anchors inside one launch.
+ *
+ * Three defects, each invisible to the existing screen suites because their Supabase mocks
+ * ignore filters — so a season row and a series row came back from the same `kind = 'series'`
+ * read and the season-versus-series mismatch could not be seen at all. This file's mock
+ * **honours `eq`, `in` and `gt`**, which is the whole point of it:
+ *
+ *   1. `social_candidates` returns what followees ranked, which on TV is a season; the TV
+ *      wall reads series, so the source contributed nothing to television.
+ *   2. The TV wall excluded `user_media` ids, which are seasons; a show the reader had
+ *      logged a season of came back as though it were unseen.
+ *   3. A TV reader with no season ranked had exactly one twenty-title trending list.
+ */
+
+jest.mock('@/lib/analytics', () => ({ track: () => {} }));
+
+const mockCacheSimilar = jest.fn();
+jest.mock('@/lib/tmdb-adapter', () => ({
+  AdapterError: class AdapterError extends Error {},
+  cacheSimilar: (id: string) => {
+    mockCacheSimilar(id);
+    return Promise.resolve();
+  },
+}));
+
+type Row = Record<string, unknown>;
+let mockTables: Record<string, Row[]> = {};
+let mockRpcResults: Record<string, unknown> = {};
+/** Every id set asked of `media_cache`, in order: which anchors a slate actually used. */
+const mockSimilarAsks: string[][] = [];
+
+jest.mock('@/lib/supabase', () => ({
+  supabase: {
+    rpc: (name: string) => Promise.resolve({ data: mockRpcResults[name] ?? null, error: null }),
+    from: (table: string) => {
+      const filters: ((row: Row) => boolean)[] = [];
+      let limit = Infinity;
+      const chain: Record<string, unknown> = {};
+      chain.select = () => chain;
+      chain.order = () => chain;
+      chain.eq = (column: string, value: unknown) => {
+        filters.push((row) => row[column] === value);
+        return chain;
+      };
+      chain.in = (column: string, values: unknown[]) => {
+        if (table === 'media_cache' && column === 'media_item_id') {
+          mockSimilarAsks.push([...(values as string[])]);
+        }
+        filters.push((row) => values.includes(row[column]));
+        return chain;
+      };
+      chain.gt = (column: string, value: string) => {
+        filters.push((row) => String(row[column]) > value);
+        return chain;
+      };
+      chain.limit = (count: number) => {
+        limit = count;
+        return chain;
+      };
+      const rows = () =>
+        (mockTables[table] ?? []).filter((row) => filters.every((keep) => keep(row))).slice(0, limit);
+      chain.maybeSingle = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
+      chain.then = (resolve: (value: unknown) => unknown) =>
+        Promise.resolve({ data: rows(), error: null }).then(resolve);
+      return chain;
+    },
+  },
+}));
+
+const show = (id: string, genre = 'Drama', popularity = 200): Row => ({
+  id,
+  title: `Show ${id}`,
+  release_date: '2021-01-01',
+  poster_path: null,
+  kind: 'series',
+  genres: [genre],
+  original_language: 'en',
+  popularity,
+  parent_id: null,
+});
+
+const seasonOf = (id: string, parent: string): Row => ({
+  id,
+  title: 'Season 1',
+  release_date: '2021-01-01',
+  poster_path: null,
+  kind: 'season',
+  genres: ['Drama'],
+  original_language: 'en',
+  popularity: 50,
+  parent_id: parent,
+});
+
+/** How a `user_media` or `rankings` row embeds its title, as the collection reads it. */
+const embedded = (media: Row) => ({
+  title: media.title,
+  season_number: 1,
+  release_date: media.release_date,
+  poster_path: null,
+  genres: media.genres,
+  runtime_minutes: null,
+  kind: media.kind,
+  original_language: media.original_language,
+  parent_id: media.parent_id,
+  parent: null,
+});
+
+const list = (key: string, ids: string[]): Row => ({ list_key: key, payload: { ids } });
+
+const wallIds = (items: { mediaItemId: string }[] | undefined) =>
+  (items ?? []).map((item) => item.mediaItemId).sort();
+
+beforeEach(() => {
+  mockTables = {};
+  mockRpcResults = {};
+  mockSimilarAsks.length = 0;
+  mockCacheSimilar.mockReset();
+  resetRecommendationSession(1);
+  resetImpressions();
+});
+
+describe('the TV wall', () => {
+  it('rolls a followee’s ranked season up to its show, instead of dropping it', async () => {
+    mockTables.media_items = [show('show-week'), show('show-social', 'Comedy'), seasonOf('season-social', 'show-social')];
+    mockTables.provider_list_cache = [list('trending.series.week', ['show-week'])];
+    mockRpcResults.social_candidates = [{ media_item_id: 'season-social', endorsements: 2 }];
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'tv'));
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+    expect(wallIds(result.current.data?.items)).toEqual(['show-social', 'show-week']);
+    // The season itself never reaches a wall of shows.
+    expect(wallIds(result.current.data?.items)).not.toContain('season-social');
+    // And it is honestly not a popularity-only wall: a followee's title is on it.
+    expect(result.current.data?.popularityOnly).toBe(false);
+    expect(result.current.data?.socialIds).toEqual(['show-social']);
+  });
+
+  it('does not recommend a show the reader has logged a season of', async () => {
+    const logged = seasonOf('season-met', 'show-met');
+    mockTables.media_items = [show('show-met'), show('show-new'), logged];
+    mockTables.provider_list_cache = [list('trending.series.week', ['show-met', 'show-new'])];
+    mockTables.user_media = [
+      { user_id: 'user-1', media_item_id: 'season-met', bucket: null, watched_on: null, created_at: '2026-09-01T00:00:00Z', media_items: embedded(logged) },
+    ];
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'tv'));
+
+    await waitFor(() => expect(result.current.data?.items).toBeDefined());
+    expect(wallIds(result.current.data?.items)).toEqual(['show-new']);
+  });
+
+  it('does not recommend a show whose season the reader ranked, even outside the anchors', async () => {
+    // Ranked `fine`: never an anchor, so the anchor lock could not have caught it.
+    const ranked = seasonOf('season-ranked', 'show-ranked');
+    mockTables.media_items = [show('show-ranked'), show('show-new'), ranked];
+    mockTables.provider_list_cache = [list('trending.series.week', ['show-ranked', 'show-new'])];
+    mockTables.rankings = [
+      { user_id: 'user-1', media_item_id: 'season-ranked', bucket: 'fine', position: 1, category: 'tv_seasons', created_at: '2026-09-01T00:00:00Z', media_items: embedded(ranked) },
+    ];
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'tv'));
+
+    await waitFor(() => expect(result.current.data?.items).toBeDefined());
+    expect(wallIds(result.current.data?.items)).toEqual(['show-new']);
+  });
+
+  it('draws on the day list beside the week list, and still calls the wall popular', async () => {
+    mockTables.media_items = [show('show-week'), show('show-day', 'Comedy'), show('show-both', 'Crime')];
+    mockTables.provider_list_cache = [
+      list('trending.series.week', ['show-week', 'show-both']),
+      list('trending.series.day', ['show-both', 'show-day']),
+    ];
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'tv'));
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
+    expect(wallIds(result.current.data?.items)).toEqual(['show-both', 'show-day', 'show-week']);
+    // Trending is trending: no anchor, no followee, and the wall says so.
+    expect(result.current.data).toMatchObject({ anchorsUsed: 0, popularityOnly: true });
+  });
+
+  it('leaves the Movies wall on the week list alone', async () => {
+    const film: Row = { ...show('film-week'), kind: 'movie' };
+    const dayFilm: Row = { ...show('film-day'), kind: 'movie' };
+    mockTables.media_items = [film, dayFilm];
+    mockTables.provider_list_cache = [
+      list('trending.movie.week', ['film-week']),
+      list('trending.movie.day', ['film-day']),
+    ];
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(1));
+    expect(wallIds(result.current.data?.items)).toEqual(['film-week']);
+  });
+});
+
+describe('selected anchors inside one launch', () => {
+  /** Twelve liked films, each with a TMDB list of one title of its own — cached unless told. */
+  const seedLikedAccount = ({ cached = true }: { cached?: boolean } = {}) => {
+    const films: Row[] = [];
+    mockTables.rankings = [];
+    mockTables.media_cache = [];
+    for (let index = 0; index < 12; index += 1) {
+      const liked: Row = { ...show(`liked-${index}`), kind: 'movie' };
+      const recommended: Row = { ...show(`rec-${index}`), kind: 'movie' };
+      films.push(liked, recommended);
+      mockTables.rankings.push({
+        user_id: 'user-1',
+        media_item_id: liked.id,
+        bucket: 'loved',
+        position: index + 1,
+        category: 'movies',
+        created_at: '2026-09-01T00:00:00Z',
+        media_items: embedded(liked),
+      });
+      if (cached) {
+        mockTables.media_cache.push({
+          media_item_id: liked.id,
+          facet: 'similar',
+          payload: { ids: [recommended.id] },
+          expires_at: '2999-01-01T00:00:00Z',
+        });
+      }
+    }
+    mockTables.media_items = films;
+    mockTables.user_media = films
+      .filter((film) => String(film.id).startsWith('liked-'))
+      .map((film) => ({ user_id: 'user-1', media_item_id: film.id }));
+  };
+
+  /** Which liked films anchored the slate, read back from the candidates they produced. */
+  const anchorsBehind = (scored: { mediaItemId: string }[]) =>
+    scored.map((item) => item.mediaItemId.replace('rec-', 'liked-')).sort();
+
+  it('reasons from the same eight on every render, refetch and Refresh of a launch', async () => {
+    seedLikedAccount();
+    const { result, rerender } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+
+    await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+    const scored = result.current.data!.scored;
+    expect(result.current.data!.anchorsUsed).toBe(8);
+    expect(anchorsBehind(scored)).toHaveLength(8);
+    expect(anchorsBehind(scored)).toEqual(expect.arrayContaining(['liked-0', 'liked-1']));
+    const reads = mockSimilarAsks.length;
+
+    await rerender(undefined);
+    await act(async () => {
+      refreshRecommendations();
+    });
+    await rerender(undefined);
+
+    // Refresh re-derives the arrangement from the cache: the scoring is the same object, so
+    // the query did not run again, no list was re-read and no anchor was re-drawn.
+    expect(result.current.data!.scored).toBe(scored);
+    expect(mockSimilarAsks).toHaveLength(reads);
+    expect(result.current.isPending).toBe(false);
+  });
+
+  it('draws different long-tail anchors on a different launch, keeping the top two', async () => {
+    seedLikedAccount();
+    const draws = new Set<string>();
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      resetRecommendationSession(seed);
+      expect(recommendationAnchorSeed()).toBeGreaterThan(0);
+      const { result, unmount } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+      await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+      const behind = anchorsBehind(result.current.data!.scored);
+      expect(behind).toEqual(expect.arrayContaining(['liked-0', 'liked-1']));
+      draws.add(behind.join());
+      await unmount();
+    }
+    expect(draws.size).toBeGreaterThan(1);
+    // Every list was already cached, so a wider, rotating budget cost no provider request.
+    expect(mockCacheSimilar).not.toHaveBeenCalled();
+  });
+
+  it('never asks the provider for more than six lists in one slate, strongest first', async () => {
+    seedLikedAccount({ cached: false });
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    const asked = mockCacheSimilar.mock.calls.map(([id]) => id as string);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.length).toBeLessThanOrEqual(6);
+    expect(asked.slice(0, 2)).toEqual(['liked-0', 'liked-1']);
+    for (const id of asked) expect(id).toMatch(/^liked-/);
+  });
+});

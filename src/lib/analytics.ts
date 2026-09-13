@@ -613,7 +613,21 @@ export type AnalyticsEvent =
    */
   | {
       name: 'for_you_slate_shown';
-      props: { medium: 'movies' | 'tv'; size: number; repeat_count: number };
+      props: {
+        medium: 'movies' | 'tv';
+        size: number;
+        repeat_count: number;
+        /**
+         * How many liked titles the wall could anchor on (2026-09-13). Anchor selection
+         * only has something to rotate above eight, so this is what separates a reader whose
+         * repetition rotation can help from one whose band is simply small.
+         */
+        liked_titles: number;
+        /** How many of this launch's anchors had a TMDB list to contribute. At most eight. */
+        anchors: number;
+        /** How many candidates survived eligibility — the universe the wall is drawn from. */
+        pool_size: number;
+      };
     }
 
   // --- Similar, on a title page ---------------------------------------------

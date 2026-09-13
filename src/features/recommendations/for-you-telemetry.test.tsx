@@ -109,8 +109,29 @@ describe('an empty For You wall, as telemetry', () => {
     expect(result.current.isError).toBe(false);
     expect(result.current.data?.items).toEqual([]);
     await waitFor(() =>
-      expect(slateShown()).toEqual([{ medium: 'movies', size: 0, repeat_count: 0 }]),
+      expect(slateShown()).toEqual([
+        { medium: 'movies', size: 0, repeat_count: 0, liked_titles: 0, anchors: 0, pool_size: 0 },
+      ]),
     );
+  });
+
+  it('says how much the wall had to rotate through, as three counts and no ids', async () => {
+    // What anchor rotation is evaluated on after outreach (2026-09-13): the liked band it
+    // draws from, how many drawn anchors had a list, and how many candidates survived.
+    mockTables.provider_list_cache = [{ payload: { ids: ['pop-1', 'pop-2'] } }];
+    mockTables.media_items = [candidate('pop-1', 'Drama'), candidate('pop-2', 'Comedy')];
+    const { result } = await render();
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+    await waitFor(() => expect(slateShown()).toHaveLength(1));
+    expect(slateShown()[0]).toEqual({
+      medium: 'movies',
+      size: 2,
+      repeat_count: 0,
+      liked_titles: 0,
+      anchors: 0,
+      pool_size: 2,
+    });
   });
 
   it('reports nothing while the slate is still loading', async () => {

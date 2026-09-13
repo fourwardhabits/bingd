@@ -2,7 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
-import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
+import {
+  useLoggedCollection,
+  useRankedCollection,
+  type RankedEntry,
+} from '@/features/collection/use-collection';
 import {
   applyFilters,
   emptyFilters,
@@ -16,7 +20,6 @@ import { supabase } from '@/lib/supabase';
 import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
 import {
-  ANCHOR_LIMIT,
   SLATE_SIZE,
   diversifyPaged,
   scoreSlate,
@@ -28,8 +31,21 @@ import {
 } from './rank';
 import { track } from '@/lib/analytics';
 
+import {
+  ANCHOR_BUDGET,
+  MAX_FILLS_PER_SLATE,
+  candidateIdsFrom,
+  selectAnchors,
+  seriesAlreadyMet,
+  socialSeriesFrom,
+  type LikedTitle,
+} from './anchors';
 import { noteImpressions } from './impressions';
-import { noteSlateOnScreen, useRecommendationArrangement } from './session-seed';
+import {
+  noteSlateOnScreen,
+  recommendationAnchorSeed,
+  useRecommendationArrangement,
+} from './session-seed';
 import { useDismissedTitles } from './use-dismissed';
 import { mergeExposure, useRecommendationExposure } from './use-exposure';
 
@@ -38,17 +54,20 @@ import { mergeExposure, useRecommendationExposure } from './use-exposure';
  *
  * Three sources, in the order they matter:
  *
- *   1. **`media_cache` facet `similar`** for the viewer's strongest few titles. This
+ *   1. **`media_cache` facet `similar`** for up to eight of the viewer's liked titles —
+ *      the top two, genre coverage, then seeded rotation, cached lists first (`anchors.ts`). This
  *      is the personalised half and the only one that can produce "because you loved
  *      X". Filled by the adapter's `similar` action the first time an anchor is used
  *      and then cached for every user, so a popular anchor is free after the first
  *      person to rank it highly.
- *   2. **`provider_list_cache` `trending.*.week`** as the popularity fallback. Week
- *      rather than day: the Feed's shelf is "what is happening now" and this is "what
- *      is worth watching", which is a slower question. It is also what makes a slate
- *      possible for somebody who has ranked nothing.
- *   3. Nothing else. There is no cross-user family in V1 — see the header of
- *      `rank.ts` for why that is what makes on-device scoring legitimate.
+ *   2. **`social_candidates`**: titles the people the reader follows put in their top
+ *      band, aggregated server-side. On TV they arrive as seasons and are rolled up to
+ *      their shows.
+ *   3. **`provider_list_cache` trending** as the popularity fallback — the week list, and
+ *      on TV the day list beside it. Week first: the Feed's shelf is "what is happening
+ *      now" and this is "what is worth watching", which is a slower question. It is also
+ *      what makes a slate possible for somebody who has ranked nothing, and a wall drawn
+ *      from it alone is still labelled "Popular right now" (`popularityOnlyFor`).
  */
 
 export type Medium = 'movies' | 'tv';
@@ -192,9 +211,20 @@ export function popularityOnlyFor(
 }
 
 const KIND_FOR: Record<Medium, 'movie' | 'series'> = { movies: 'movie', tv: 'series' };
-const TRENDING_FOR: Record<Medium, string> = {
-  movies: 'trending.movie.week',
-  tv: 'trending.series.week',
+/**
+ * The popularity fallback's lists, in the order their ids are taken.
+ *
+ * **TV reads the day list as well** (For You repetition audit, 2026-09-13). A reader who
+ * has ranked no season has no TV anchor, social titles never reached the TV wall, and so
+ * the whole TV pool for every new account was the twenty titles of one week list — the
+ * same wall on every visit. The day list is the same kind of evidence (TMDB trending,
+ * identical for everybody) and turns over faster, so it widens that pool without
+ * pretending to be taste: a wall drawn from these alone is still `popularityOnly`.
+ * Films are unchanged — their walls are anchored for anybody past First Five.
+ */
+const TRENDING_FOR: Record<Medium, readonly string[]> = {
+  movies: ['trending.movie.week'],
+  tv: ['trending.series.week', 'trending.series.day'],
 };
 
 /**
@@ -221,11 +251,26 @@ export function anchorsFrom(
   ranked: readonly RankedEntry[],
   medium: Medium,
   filters?: CollectionFilters,
-): {
-  mediaItemId: string;
-  title: string;
-  score: number;
-}[] {
+  /**
+   * This launch's selection inputs. Omitted, the first `ANCHOR_BUDGET` liked titles in
+   * order — unrotated, which is what the liked-band rule tests below read. `useForYou`
+   * selects inside its queryFn instead, where it knows which lists are already cached.
+   */
+  selection?: { seed: number; cached?: ReadonlySet<string> },
+): LikedTitle[] {
+  const liked = likedFrom(ranked, medium, filters);
+  return selection ? selectAnchors(liked, selection) : liked.slice(0, ANCHOR_BUDGET);
+}
+
+/**
+ * Every title a slate may anchor on, best first: the liked band, deduplicated to shows on
+ * TV, inside the reader's filters. {@link anchorsFrom} chooses among these.
+ */
+export function likedFrom(
+  ranked: readonly RankedEntry[],
+  medium: Medium,
+  filters?: CollectionFilters,
+): LikedTitle[] {
   /**
    * Band sizes from the **whole** category, before any narrowing.
    *
@@ -237,7 +282,7 @@ export function anchorsFrom(
    */
   const sizes = bandSizes(ranked);
   const seen = new Set<string>();
-  const anchors: { mediaItemId: string; title: string; score: number }[] = [];
+  const anchors: LikedTitle[] = [];
 
   for (const entry of anchorScope(ranked, filters)) {
     if (entry.bucket !== 'loved') continue;
@@ -250,8 +295,10 @@ export function anchorsFrom(
       mediaItemId: id,
       title: medium === 'tv' ? (entry.seriesTitle ?? entry.title) : entry.title,
       score: scoreFor(entry.bucket, entry.position, sizes),
+      // A season's genres are its show's (`resolveMetadata`), so a TV anchor covers what
+      // the show covers.
+      genres: entry.genres,
     });
-    if (anchors.length >= ANCHOR_LIMIT) break;
   }
 
   return anchors;
@@ -374,10 +421,23 @@ type CandidateRow = {
  * the newest; a slate is still a slate without it, and a reader with no follows gets
  * nothing from it on every visit by design.
  */
-async function socialCandidates(): Promise<string[]> {
+async function socialCandidates(medium: Medium): Promise<string[]> {
   const { data, error } = await supabase.rpc('social_candidates', { p_limit: 40 });
   if (error || !data) return [];
-  return (data as { media_item_id: string }[]).map((row) => row.media_item_id);
+  const ids = (data as { media_item_id: string }[]).map((row) => row.media_item_id);
+  if (medium !== 'tv' || ids.length === 0) return ids;
+
+  // A followee's TV ranking is a season; the TV wall is series. See `socialSeriesFrom`.
+  const { data: rows, error: rowsError } = await supabase
+    .from('media_items')
+    .select('id, kind, parent_id')
+    .in('id', ids)
+    .eq('kind', 'season');
+  if (rowsError || !rows) return [];
+  return socialSeriesFrom(
+    ids,
+    rows as unknown as { id: string; kind: string | null; parent_id: string | null }[],
+  );
 }
 
 async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Candidate[]> {
@@ -476,6 +536,9 @@ export function rankingFingerprint(...lists: readonly (readonly RankedEntry[])[]
  */
 export const MAX_PAGES = 5;
 
+/** How many liked titles the cached-list read covers before selection. See the queryFn. */
+const CACHED_READ_LIMIT = 100;
+
 export function useForYou(
   userId: string,
   medium: Medium,
@@ -495,6 +558,15 @@ export function useForYou(
   //
   // `useWatchlist` was read here too and no longer is: see the note on `inputs`.
   const watched = useWatched(userId);
+  /**
+   * Every logged title with its show, for the TV wall's exclusion (`seriesAlreadyMet`).
+   *
+   * `watched` is season ids and the TV wall is series ids, so without this a show the
+   * reader was part-way through came back as though it were unseen. The screen already
+   * mounts this query, so reading it here costs no request. It gates the **TV** slate
+   * only: the Movies wall has nothing to learn from it and must not wait on it.
+   */
+  const logged = useLoggedCollection(userId);
   /**
    * Dismissed titles, subtracted in `select` and deliberately NOT in the key.
    *
@@ -530,7 +602,17 @@ export function useForYou(
   const ranked = medium === 'movies' ? movies : seasons;
   // The filtered subset of *this* medium, which is what the founder asked the slate to
   // reason from: filtered movies for the Movies wall, filtered seasons for the TV one.
-  const anchorSeeds = ranked.data ? anchorsFrom(ranked.data, medium, filters) : [];
+  //
+  // The liked band only. Which of it anchors this launch is decided in the queryFn
+  // (`selectAnchors`), because the selection prefers titles whose lists are already cached
+  // and only the query can know that.
+  const liked = ranked.data ? likedFrom(ranked.data, medium, filters) : [];
+  const likedCount = liked.length;
+  /** Fixed per process: a cold launch draws new anchors; a render, refetch or Refresh does not. */
+  const anchorSeed = recommendationAnchorSeed();
+  /** The shows already met, for the TV wall. Empty on Movies, where ids already match. */
+  const metSeries =
+    medium === 'tv' ? seriesAlreadyMet(logged.data?.entries, seasons.data) : new Set<string>();
 
   /**
    * Everything the *viewer* controls that changes this slate, as one string.
@@ -568,6 +650,16 @@ export function useForYou(
   const inputs = [
     rankingFingerprint(movies.data ?? [], seasons.data ?? []),
     setFingerprint(watched.data ?? []),
+    /**
+     * **This launch's anchor seed** (2026-09-13). The rankings above no longer decide the
+     * anchors on their own — the seed does too — so a key without it could serve a slate
+     * scored from a different launch's anchors. It is fixed for the process, so it moves
+     * on a cold launch and never on a render, a refetch or a Refresh.
+     */
+    String(anchorSeed),
+    // And, on TV, the shows already met: `logged` refetches on its own clock, and a key
+    // that did not carry it could cache half an hour of a show the reader just logged.
+    setFingerprint(metSeries),
   ].join('|');
 
   /**
@@ -608,6 +700,7 @@ export function useForYou(
       movies.isSuccess &&
       seasons.isSuccess &&
       watched.isSuccess &&
+      (medium !== 'tv' || logged.isSuccess) &&
       !dismissed.isPending,
     // See the note on `inputs`: everything the viewer can change is in the key, and
     // what is left changes on a six-hour clock at fastest.
@@ -681,13 +774,30 @@ export function useForYou(
         })),
       );
 
-      let lists = await cachedSimilar(anchorSeeds.map((anchor) => anchor.mediaItemId));
+      /**
+       * **Which lists the liked band already has, before choosing** (2026-09-13).
+       *
+       * One read for the top of the band, so `selectAnchors` can take breadth from facets
+       * that cost nothing upstream. Bounded so the `in` filter stays a short URL; a liked
+       * title below the bound can still be drawn, it just gets no cached preference.
+       */
+      let lists = await cachedSimilar(
+        liked.slice(0, CACHED_READ_LIMIT).map((anchor) => anchor.mediaItemId),
+      );
+      const anchorSeeds = selectAnchors(liked, {
+        seed: anchorSeed,
+        budget: ANCHOR_BUDGET,
+        // An empty cached list is a title TMDB has nothing for: known, but no breadth.
+        cached: new Set([...lists].filter(([, ids]) => ids.length > 0).map(([id]) => id)),
+      });
 
-      // Fill what is missing, then read once more. Bounded by `ANCHOR_LIMIT`, and
+      // Fill what is missing, best-ranked first, then read those once more. At most
+      // `MAX_FILLS_PER_SLATE` — six, the old whole limit — however large the budget, and
       // each fill is a request that every later user of the same anchor avoids.
       const missing = anchorSeeds
         .filter((anchor) => !lists.has(anchor.mediaItemId))
-        .map((anchor) => anchor.mediaItemId);
+        .map((anchor) => anchor.mediaItemId)
+        .slice(0, MAX_FILLS_PER_SLATE);
 
       if (missing.length > 0) {
         // Sequentially, so a cold start is six requests spread out rather than six at
@@ -703,17 +813,21 @@ export function useForYou(
             if (cause instanceof AdapterError && cause.isRateLimit) break;
           }
         }
-        lists = await cachedSimilar(anchorSeeds.map((anchor) => anchor.mediaItemId));
+        lists = new Map([...lists, ...(await cachedSimilar(missing))]);
       }
 
       const anchors: Anchor[] = anchorSeeds.map((anchor) => ({
-        ...anchor,
+        mediaItemId: anchor.mediaItemId,
+        title: anchor.title,
+        score: anchor.score,
         similarIds: lists.get(anchor.mediaItemId) ?? [],
       }));
 
       const anchorsUsed = anchors.filter((anchor) => anchor.similarIds.length > 0).length;
 
-      const fallback = await trendingFallback(TRENDING_FOR[medium]);
+      const fallback = [
+        ...new Set((await Promise.all(TRENDING_FOR[medium].map(trendingFallback))).flat()),
+      ];
       /**
        * The third source: titles the people this reader follows put in their top band.
        *
@@ -731,14 +845,8 @@ export function useForYou(
        * Failing open. It is an enrichment of the pool, and a slate built from two sources
        * instead of three is a slightly narrower slate rather than a broken one.
        */
-      const social = await socialCandidates();
-      const candidateIds = [
-        ...new Set([
-          ...anchors.flatMap((anchor) => anchor.similarIds),
-          ...social,
-          ...fallback,
-        ]),
-      ];
+      const social = await socialCandidates(medium);
+      const candidateIds = candidateIdsFrom(anchors, social, fallback);
 
       const candidates = await candidatesFor(candidateIds, medium);
 
@@ -749,7 +857,13 @@ export function useForYou(
       // The watchlist is not excluded. The decision is explicit that a watchlisted
       // title stays and is marked Saved: wanting to see something is not having seen
       // it, and a wall that hid everything you saved would quietly punish saving.
-      const exclude = watched.data ?? new Set<string>();
+      //
+      // On TV that includes every show with a logged or ranked season (`metSeries`):
+      // the candidates are shows and the collection is seasons, so the ids never met.
+      const exclude =
+        metSeries.size > 0
+          ? new Set([...(watched.data ?? []), ...metSeries])
+          : (watched.data ?? new Set<string>());
 
       /**
        * Filtered **before** scoring, not after.
@@ -796,6 +910,8 @@ export function useForYou(
    * re-offering the bottom half as though it were new.
    */
   const items = slate.data?.items;
+  const anchorsUsed = slate.data?.anchorsUsed;
+  const poolSize = slate.data?.scored.length;
   // Read once per process (see `useRecommendationExposure`), which is exactly the
   // baseline this measurement wants: how repetitive the wall is against what previous
   // sessions showed, not against what this render just recorded.
@@ -828,7 +944,17 @@ export function useForYou(
       if (isFiltered(filters ?? emptyFilters())) return;
       if (emptyReported.current === wallKey) return;
       emptyReported.current = wallKey;
-      track({ name: 'for_you_slate_shown', props: { medium, size: 0, repeat_count: 0 } });
+      track({
+        name: 'for_you_slate_shown',
+        props: {
+          medium,
+          size: 0,
+          repeat_count: 0,
+          liked_titles: likedCount,
+          anchors: anchorsUsed ?? 0,
+          pool_size: poolSize ?? 0,
+        },
+      });
       return;
     }
     /**
@@ -852,10 +978,17 @@ export function useForYou(
           // How much of this wall the reader had already been shown. The number the
           // founder's "Jobs and Creed III again" becomes.
           repeat_count: ids.filter((id) => (exposureAtLaunch?.get(id) ?? 0) > 0).length,
+          // Whether rotation has anything to rotate, and what it produced (2026-09-13):
+          // three counts, no ids. `liked_titles` is the band anchors are drawn from,
+          // `anchors` how many of the drawn ones had a TMDB list, `pool_size` how many
+          // candidates survived eligibility.
+          liked_titles: likedCount,
+          anchors: anchorsUsed ?? 0,
+          pool_size: poolSize ?? 0,
         },
       });
     });
-  }, [wallKey, items, medium, filters, exposureAtLaunch]);
+  }, [wallKey, items, medium, filters, exposureAtLaunch, likedCount, anchorsUsed, poolSize]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.
@@ -877,7 +1010,12 @@ export function useForYou(
    * `isPending` is suppressed in that state for the same reason: a query that will not be
    * started is not loading, and saying so is what produced the skeleton that never ended.
    */
-  const sourceError = movies.error ?? seasons.error ?? watched.error ?? null;
+  const sourceError =
+    movies.error ??
+    seasons.error ??
+    watched.error ??
+    (medium === 'tv' ? logged.error : null) ??
+    null;
 
   return {
     data: slate.data,
@@ -894,6 +1032,7 @@ export function useForYou(
         void movies.refetch();
         void seasons.refetch();
         void watched.refetch();
+        if (medium === 'tv') void logged.refetch();
         return;
       }
       void slate.refetch();

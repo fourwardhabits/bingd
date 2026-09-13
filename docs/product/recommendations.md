@@ -213,7 +213,8 @@ six anchors produced.
 - `ANCHOR_LIMIT = 6` in `rank.ts`, applied in `anchorsFrom`.
 - Anchors are `loved` only, walked in **ranked position order**, so they are the reader's
   top six loved titles — deterministic, and unchanged until the reader re-ranks or
-  re-buckets. Refresh does not rotate them.
+  re-buckets. Refresh does not rotate them. **Superseded 2026-09-13 — see §10:** up to
+  eight, coverage-aware and rotated per launch.
 - A season anchors on its **series**, deduplicated, so a five-season favourite is one
   anchor rather than five.
 - Filters narrow the anchor scope too, so a filtered wall is anchored on filtered titles.
@@ -264,3 +265,96 @@ was changed and no founder decision is being forced.
 The lever, if breadth is wanted, is `ANCHOR_LIMIT` — but it is one provider request per
 anchor per slate, so raising it is a cost decision rather than a code one, and it should
 wait for the 336-hour impression window to produce data (§8).
+
+## 10. Coverage-aware anchors and the TV source fixes (2026-09-13)
+
+The For You repetition audit (2026-09-13) found the §9 truncation was the steady state an
+established reader lived in: a reporter with about sixty ranked films had ~27 liked titles,
+and the same first six generated the whole ~96-title universe on every launch — while the
+other twenty-one, often whole genres of their taste, contributed nothing. Exposure rotation
+can only reorder a universe. The founder accepted a bounded fix: wider, coverage-aware,
+rotating anchors and the TV correctness fixes. The exposure-engine work is deferred —
+`deferred-roadmap.md` §59.
+
+### 10.1 The anchor algorithm (`anchors.ts` `selectAnchors`)
+
+1. `likedFrom` builds the liked band exactly as before: `loved` only, position order,
+   seasons collapsed to their show, inside the reader's filters.
+2. **Budget eight** (`ANCHOR_BUDGET`). Eight or fewer liked titles: all of them, in order,
+   nothing duplicated.
+3. **The top two, always** (`STABLE_ANCHORS`).
+4. **Coverage.** A liked genre is *meaningful* when at least 10% of the liked band — and at
+   least two titles — carry it. While budget remains and a meaningful genre is uncovered,
+   one title is drawn from those that add an uncovered genre, weighted by evidence-weighted
+   gain × score. A horror-comedy covering two missing genres is strongly preferred over
+   spending two anchors, but the draw is seeded rather than greedy, so different launches
+   cover a genre with different films. There is no one-per-TMDB-genre rule.
+5. **Rotation.** Remaining slots are drawn from the rest of the band by score
+   (Efraimidis–Spirakis, key `u^(1/w)`, `u = unitRandom(anchorSeed, id)`).
+6. **Cached breadth first.** In steps 4 and 5 a title whose `similar` list is already cached
+   (and non-empty) is weighted ×3. The queryFn reads the cached lists for the top hundred
+   liked titles before selecting, so breadth comes from facets that cost nothing upstream.
+7. **At most six upstream fills per slate** (`MAX_FILLS_PER_SLATE` = the old whole limit),
+   strongest first. An anchor past the cap with no cached list contributes nothing that
+   launch.
+8. `anchorSeed` (`session-seed.ts`) is fixed per process and is part of the query key. A
+   **cold launch** draws a new selection; a render, refetch, Refresh or return from the
+   background does not. It is separate from the arrangement seed so pull-to-refresh cannot
+   change the key and flash the wall.
+
+Candidate generation is otherwise unchanged: each anchor's own TMDB `/recommendations`
+page 1, social and trending. `candidateIdsFrom` is that union and nothing else.
+
+### 10.2 Why eight — the budget comparison
+
+Audit scratch model on the real scorer and real `selectAnchors`: a ~60-ranking account with
+~29 liked titles across five taste neighbourhoods, 24 profiles, medians. Quality figures use
+a warm cache; calls use a cold cache over 14 daily launches with 168-hour facets and the
+six-fill cap.
+
+| | today (first 6) | budget 6 | **budget 8** | budget 10 | budget 12 |
+|---|---|---|---|---|---|
+| Unique candidate pool | 104 | 106 | **130** | 157 | 178 |
+| Meaningful liked genres covered | 5/8 | 8/8 | **8/8** | 8/8 | 8/8 |
+| Mean first-20 score | 0.556 | 0.546 | **0.572** | 0.599 | 0.625 |
+| #20 / #50 score | 0.525 / 0.433 | 0.508 / 0.423 | **0.535 / 0.455** | 0.551 / 0.473 | 0.569 / 0.489 |
+| Upstream fills, launch 1 | 6 | 6 | **6** | 6 | 6 |
+| Upstream fills per launch, days 2–14 | 0.46 | 1.54 | **2.15** | 2.54 | 2.85 |
+| First-20 overlap, 3 cold sessions 96h apart | 13 / 14 | 7 / 6 | **7 / 7** | 7 / 7 | 8 / 8 |
+
+Coverage saturates at every coverage-aware budget and repetition saturates at about 7 of 20,
+so neither improves past eight. Budget six rotated loses a little relevance; eight is above
+today's. Ten and twelve score higher — partly the scorer's breadth bonus rewarding agreement
+between more anchors — for about 20% more upstream fills each. Eight is the smallest budget
+that is broader, fresher and no less relevant, which is the founder's early-stop rule.
+The same ordering held with a high-overlap TMDB model. The cached-first weighting cut
+budget eight's steady fills from 2.77 to 2.15 per launch at no repetition cost.
+
+### 10.3 What the unit suite pins
+
+`anchor-rotation.test.ts`, over the seeded catalogue on a 60-ranking account: titles beyond
+the first six become anchors; every meaningful liked genre is represented on every launch;
+candidate membership changes between launches; the first wall's mean score stays within 5%
+of the old first-six wall; the wall stays anchor-led; nothing outside the sources can enter;
+a cached list is drawn at least 1.5× as often as an uncached neighbour. `for-you-tv.test.tsx`
+pins, through the real hook, that selection is stable across render, refetch and Refresh,
+changes across launches, and never makes more than six upstream fills. Every one of those
+was mutation-checked: removing the coverage step, the cached preference, the fill cap or the
+launch seed each fails a test.
+
+### 10.4 TV
+
+- **Social reaches TV.** `social_candidates` returns seasons; the TV wall reads series, so
+  it dropped every one. Seasons now roll up to their shows (`socialSeriesFrom`).
+- **A show already met is not recommended.** `user_media` holds seasons and the TV wall
+  holds series, so a show with a logged or ranked season came back as unseen unless it was
+  an anchor. The exclusion now includes every such show (`seriesAlreadyMet`).
+- **The day list beside the week list.** A reader with no season ranked had one
+  twenty-title list. The TV fallback now also reads `trending.series.day`; a wall drawn
+  from it alone is still `popularityOnly` and says "Popular right now".
+
+### 10.5 Telemetry
+
+`for_you_slate_shown` gains `liked_titles`, `anchors` and `pool_size` — three counts, no
+ids — so whether rotation had anything to rotate, and the pool it produced, can be read
+after outreach beside `repeat_count`.

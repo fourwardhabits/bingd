@@ -88,7 +88,12 @@ export type Taste = {
 /** Under this many ranked titles, taste is not yet worth asserting in a sentence. */
 export const CONFIDENT_AT = 5;
 
-/** How many anchors a slate reasons from. Each is one provider request, once, ever. */
+/**
+ * How many anchors per slate may be filled from the provider. Each fill is one request,
+ * once per title per cache lifetime. Since 2026-09-13 a slate reasons from up to
+ * `ANCHOR_BUDGET` (`anchors.ts`) anchors, preferring ones already cached, and this is the
+ * cap on how many of those may cost an upstream request.
+ */
 export const ANCHOR_LIMIT = 6;
 
 /**
@@ -800,7 +805,7 @@ const FRESHNESS_TEMPERATURE = 0.12;
  * the finaliser is there because raw FNV leaves ids differing by one character sorted
  * next to each other, which would make the "reordering" a rotation of the same list.
  */
-function unitRandom(seed: number, key: string): number {
+export function unitRandom(seed: number, key: string): number {
   let hash = (0x811c9dc5 ^ (seed >>> 0)) >>> 0;
   for (let index = 0; index < key.length; index += 1) {
     hash ^= key.charCodeAt(index);
