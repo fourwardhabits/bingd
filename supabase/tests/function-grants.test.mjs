@@ -39,6 +39,23 @@ const ALLOWED = {
   // Signed-in reads.
   'my_capabilities()': ['authenticated'],
   'unranked_queue(integer)': ['authenticated'],
+  // 20260917000100. Two counts over the caller's own collection. SECURITY INVOKER and
+  // argument-free, so RLS decides whose rows they are and there is no subject to pass:
+  // another account's logged count is owner-only by design, and this cannot ask for one.
+  // Not anon, which has no collection to count.
+  'collection_counts()': ['authenticated'],
+  // 20260917000300. The four things a client does during an import. Each one resolves the
+  // job from auth.uid() and refuses a job belonging to anybody else, so the job id is a
+  // handle rather than an authorisation. Not anon: there is no collection to import into.
+  'import_create()': ['authenticated'],
+  'import_stage(uuid,jsonb)': ['authenticated'],
+  'import_ready(uuid)': ['authenticated'],
+  'import_status(uuid)': ['authenticated'],
+  // 20260917000500. The fifth: abandoning your own half-staged import. Deletes, which is
+  // the one thing import_jobs has no RLS policy for, so it must be definer — and it is
+  // narrowed to a pending job owned by the caller. Anything the worker has claimed is
+  // answered rather than deleted.
+  'import_discard(uuid)': ['authenticated'],
   // Not anon: it answers which usernames exist, and a signed-out client has no
   // account to create, so the grant would buy enumeration and nothing else.
   'username_available(text)': ['authenticated'],

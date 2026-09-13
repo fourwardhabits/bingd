@@ -73,6 +73,12 @@ export type PushJob = {
    * about how the award was earned, stay server-side.
    */
   award_name?: string | null;
+  /**
+   * The Letterboxd import a lifecycle push is about, and the completed job's summary
+   * (20260917001500). Absent from a database that predates it; null for every other type.
+   */
+  import_job_id?: string | null;
+  import_counts?: { watched?: number; watchlist?: number } | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -96,6 +102,8 @@ export type PushData = {
    * nothing at all.
    */
   feedEventId: string | null;
+  /** Only on an import push, so the tap opens that exact job. */
+  importJobId?: string | null;
 };
 
 export type PushContent = {
@@ -263,6 +271,56 @@ function commentExcerpt(job: PushJob): string | null {
  * and a notification that cannot say who is not worth waking a phone for — the same rule
  * the inbox applies when it drops a row whose actor it cannot name.
  */
+/**
+ * The Letterboxd import's three pushes (20260917001500), or null for any other type.
+ *
+ * Actorless, like the award: nobody did this to the reader, they started it themselves and
+ * were told they could close the app. That is why these are the pushes that most need to
+ * arrive. The inbox rows say the same headlines (`verbFor` in `use-notifications.ts`).
+ *
+ * The completion quotes one number, the films added as watched, because it is the one the
+ * next action is about. A job that added none (every film was already here) says the
+ * history is in rather than "0 movies added", which reads as a failure.
+ */
+function importContent(job: PushJob): PushContent | null {
+  const data = (): PushData => ({
+    notificationId: job.notification_id,
+    kind: job.type,
+    actorUsername: null,
+    mediaItemId: null,
+    feedEventId: null,
+    importJobId: job.import_job_id ?? null,
+  });
+
+  switch (job.type) {
+    case 'import_started':
+      return {
+        title: 'Letterboxd import started',
+        body: 'We’re bringing your history into bingd. You can close the app, and we’ll tell you when it’s ready.',
+        data: data(),
+      };
+    case 'import_completed': {
+      const watched = Number(job.import_counts?.watched ?? 0);
+      return {
+        title: 'Your Letterboxd history is ready',
+        body:
+          watched > 0
+            ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
+            : 'Your Letterboxd history is now in bingd.',
+        data: data(),
+      };
+    }
+    case 'import_failed':
+      return {
+        title: 'We couldn’t finish your Letterboxd import',
+        body: 'Open bingd. to see what happened and try again.',
+        data: data(),
+      };
+    default:
+      return null;
+  }
+}
+
 export function contentFor(job: PushJob): PushContent | null {
   /**
    * The congratulations is the one actorless push (20260828000100): nobody did
@@ -273,6 +331,9 @@ export function contentFor(job: PushJob): PushContent | null {
    * shape with the person-and-title fields honestly null; `kind` alone routes it
    * to the reader's own Awards.
    */
+  const importPush = importContent(job);
+  if (importPush) return importPush;
+
   if (job.type === 'award_earned') {
     const award = job.award_name?.trim() || null;
     return {

@@ -51,7 +51,8 @@ empty, correct, identically-configured Bingd is
 | `app_config['env.name']` | `bootstrap-production.mjs` |
 | `app_config['functions.base_url']` | `bootstrap-production.mjs` |
 | Vault `service_role_key` | founder's password manager |
-| `pg_cron` job | `schedule_push_drain()` |
+| `pg_cron` job (push) | `schedule_push_drain()` |
+| `pg_cron` job (import) | `schedule_import_drain()` — **a restore does not bring it back**, and without it no Letterboxd import can ever finish |
 | Edge Function secrets | `supabase secrets set` |
 | Catalogue and Trending | `seed:fetch`, `catalogue:enrich`, `trending:refresh` |
 

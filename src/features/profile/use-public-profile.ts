@@ -15,9 +15,33 @@ export type PublicProfile = {
   memberSince: string | null;
   followers: number;
   following: number;
+  /** Ranked titles only, for the Taste Match line. Not what the stat row shows. */
   rankedMovies: number;
   rankedSeasons: number;
+  /** The stat row's Movies and TV: the watched collection, imports included. */
+  watchedMovies: number;
+  watchedSeasons: number;
 };
+
+/**
+ * The stat row's Movies and TV: the watched collection, imported history included.
+ *
+ * **Not the ranked count** (founder, 2026-09-12). A Letterboxd import brings a history in
+ * without ranking any of it, and a profile that said "Movies: 5" beside twenty-five watched
+ * films was misreporting the account. `profile_title_counts` counts distinct watched titles
+ * united with ranked ones, so a title that is both counts once, through the same
+ * `can_i_view` gate the rankings already sit behind.
+ *
+ * Only these two numbers moved. The ranked counts are still read where rankings are what is
+ * meant: the Taste Match line on somebody else's profile.
+ */
+async function watchedCounts(userId: string): Promise<{ movies: number; tv: number }> {
+  const { data, error } = await supabase.rpc('profile_title_counts', { p_user: userId });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { movies?: number; tv?: number } | null;
+  return { movies: row?.movies ?? 0, tv: row?.tv ?? 0 };
+}
+
 
 /**
  * Somebody else's profile, by username.
@@ -57,7 +81,7 @@ export function usePublicProfile(username: string | null) {
 
       const id = profile.id as string;
 
-      const [followers, following, movies, seasons] = await Promise.all([
+      const [followers, following, movies, seasons, watched] = await Promise.all([
         supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
@@ -78,6 +102,7 @@ export function usePublicProfile(username: string | null) {
           .select('*', { count: 'exact', head: true })
           .eq('user_id', id)
           .eq('category', 'tv_seasons'),
+        watchedCounts(id),
       ]);
 
       return {
@@ -91,6 +116,8 @@ export function usePublicProfile(username: string | null) {
         following: following.count ?? 0,
         rankedMovies: movies.count ?? 0,
         rankedSeasons: seasons.count ?? 0,
+        watchedMovies: watched.movies,
+        watchedSeasons: watched.tv,
       };
     },
   });
@@ -316,15 +343,18 @@ export function useProfileWatchlist(userId: string | null, limit = PROFILE_WATCH
  * screen it is on.
  *
  * Four rather than the five the own profile used to show. Followers, Following, Movies
- * and TV seasons describe the account as a collection; Watched and Watchlist are the
- * reader's own working state and belong in Collection, where they can be acted on. At
- * five columns a three-digit number wrapped.
+ * and TV seasons describe the account as a collection; Watchlist is the reader's own
+ * working state and belongs in Collection, where it can be acted on. At five columns a
+ * three-digit number wrapped.
+ *
+ * Movies and TV are the watched collection, imports included, since 2026-09-12. See
+ * `watchedCounts`.
  */
 export function useProfileStats(userId: string) {
   return useQuery({
     queryKey: queryKeys.profileStats(userId),
     queryFn: async () => {
-      const [followers, following, movies, seasons] = await Promise.all([
+      const [followers, following, watched] = await Promise.all([
         supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
@@ -335,28 +365,17 @@ export function useProfileStats(userId: string) {
           .select('*', { count: 'exact', head: true })
           .eq('follower_id', userId)
           .eq('state', 'approved'),
-        supabase
-          .from('rankings')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .eq('category', 'movies'),
-        supabase
-          .from('rankings')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .eq('category', 'tv_seasons'),
+        watchedCounts(userId),
       ]);
 
       if (followers.error) throw followers.error;
       if (following.error) throw following.error;
-      if (movies.error) throw movies.error;
-      if (seasons.error) throw seasons.error;
 
       return {
         followers: followers.count ?? 0,
         following: following.count ?? 0,
-        rankedMovies: movies.count ?? 0,
-        rankedSeasons: seasons.count ?? 0,
+        movies: watched.movies,
+        seasons: watched.tv,
       };
     },
   });

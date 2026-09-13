@@ -793,7 +793,7 @@ Deno.serve(async (req) => {
         const after = typeof body.after === 'string' && body.after ? body.after : undefined;
         const due =
           action === 'enrich'
-            ? await dueForEnrichment(db, limit)
+            ? await dueForEnrichment(db, limit, idList(body.ids, limit))
             : action === 'refresh'
               ? await dueForRefresh(db, limit)
               : await dueForSeasonHydration(db, limit, after);
@@ -836,4 +836,22 @@ function clamp(value: unknown, fallback: number, min: number, max: number) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The `ids` an enrich call was narrowed to, or undefined for the whole backlog.
+ *
+ * Absent means what it always meant. Present but unusable (not an array, or nothing in it
+ * that is a uuid) narrows to nothing rather than widening to everything: a caller that
+ * named rows asked for those rows, and a malformed list must not become a drain of the
+ * entire catalogue.
+ */
+function idList(value: unknown, limit: number): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((id): id is string => typeof id === 'string' && UUID.test(id))
+    .slice(0, limit);
 }

@@ -975,6 +975,28 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             </Text>
           </View>
         ))}
+
+        {/* ---------------------------------------------------------------
+            **The import, pointed at once, after the five and below them.**
+
+            Physical QA (2026-09-12): the first version was a tertiary footnote under the
+            intro, and the founder did not remember seeing it. So it is now its own small
+            card with a question for a heading, placed after the list so it never competes
+            with the payoff above it.
+
+            Still words that go nowhere, for the three reasons that have not changed: a
+            route pushed from inside this flow is replaced straight back by `nextRoute`,
+            the importer's help sheet would be a Modal inside a Modal (the 2026-09-10
+            freeze), and this screen deliberately has one action. A button here needs the
+            flow guard to admit one route, which is its own change with its own review
+            (`docs/product/letterboxd-import.md`).
+            --------------------------------------------------------------- */}
+        <View style={styles.letterboxd} accessible accessibilityRole="text">
+          <Text variant="headline">Use Letterboxd?</Text>
+          <Text variant="subhead" tone="secondary">
+            Import your history anytime from Settings.
+          </Text>
+        </View>
       </ScrollView>
 
       <View style={styles.footer}>
@@ -1012,6 +1034,14 @@ const styles = StyleSheet.create({
   status: { padding: theme.layout.gutter, gap: theme.space[3] },
   results: { paddingBottom: theme.space[8] },
   payoff: { paddingBottom: theme.space[6] },
+  letterboxd: {
+    marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[4],
+    padding: theme.space[4],
+    gap: theme.space[1],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.raised,
+  },
   rankRow: {
     flexDirection: 'row',
     alignItems: 'center',

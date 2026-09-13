@@ -606,3 +606,65 @@ Deno.test('stillQueued ignores an id that was never claimed', () => {
   const a = addressed('n-a', 'tok-a');
   assertEquals(stillQueued([a], ['n-a', 'n-elsewhere']), [a]);
 });
+
+// ---------------------------------------------------------------------------
+// The Letterboxd import tells you how it went (20260917001500)
+// ---------------------------------------------------------------------------
+
+const importJob = (type: string, overrides: Partial<PushJob> = {}) =>
+  job({
+    type,
+    actor_username: null,
+    actor_name: null,
+    import_job_id: '22222222-2222-2222-2222-222222222222',
+    ...overrides,
+  });
+
+Deno.test('an import push has no actor and still goes out, carrying the job it is about', () => {
+  for (const type of ['import_started', 'import_completed', 'import_failed']) {
+    const content = contentFor(importJob(type));
+    assert(content, `${type} produced no push`);
+    assertEquals(content.data.kind, type);
+    assertEquals(content.data.importJobId, '22222222-2222-2222-2222-222222222222');
+    assertEquals(content.data.actorUsername, null);
+    assertEquals(content.data.mediaItemId, null);
+  }
+});
+
+Deno.test('the import pushes say the same thing the import screens do, and never "matching"', () => {
+  const started = contentFor(importJob('import_started'))!;
+  assertEquals(started.title, 'Letterboxd import started');
+  assertEquals(
+    started.body,
+    'We’re bringing your history into bingd. You can close the app, and we’ll tell you when it’s ready.',
+  );
+
+  const failed = contentFor(importJob('import_failed'))!;
+  assertEquals(failed.title, 'We couldn’t finish your Letterboxd import');
+  assertEquals(failed.body, 'Open bingd. to see what happened and try again.');
+
+  for (const content of [started, failed, contentFor(importJob('import_completed'))!]) {
+    assert(!/match|process|payload|row|—/i.test(`${content.title} ${content.body}`), content.body);
+  }
+});
+
+Deno.test('the completion quotes the films added, and says something true when there are none', () => {
+  const many = contentFor(importJob('import_completed', { import_counts: { watched: 19 } }))!;
+  assertEquals(many.title, 'Your Letterboxd history is ready');
+  assertEquals(many.body, '19 movies added as watched. Ready to rank.');
+
+  const one = contentFor(importJob('import_completed', { import_counts: { watched: 1 } }))!;
+  assertEquals(one.body, '1 movie added as watched. Ready to rank.');
+
+  const none = contentFor(importJob('import_completed', { import_counts: { watched: 0 } }))!;
+  assertEquals(none.body, 'Your Letterboxd history is now in bingd.');
+
+  // A database from before the claim carried counts.
+  const unknown = contentFor(importJob('import_completed', { import_counts: undefined }))!;
+  assertEquals(unknown.body, 'Your Letterboxd history is now in bingd.');
+});
+
+Deno.test('no other push grows an import job id', () => {
+  const follow = contentFor(job({ type: 'follow' }))!;
+  assertEquals('importJobId' in follow.data, false);
+});

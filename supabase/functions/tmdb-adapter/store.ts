@@ -239,12 +239,20 @@ export async function searchResultsFor(db: Db, ids: string[]): Promise<SearchRes
     }));
 }
 
-/** Ids a maintenance pass should enrich next, newest-referenced first. */
-export async function dueForEnrichment(db: Db, limit: number) {
-  const { data, error } = await db
-    .from('tmdb_enrich_due')
-    .select('id, kind, tmdb_id')
-    .limit(limit);
+/**
+ * Ids a maintenance pass should enrich next.
+ *
+ * `only` narrows the pass to named rows, and is still intersected with the view: a row
+ * that stopped being due between the caller choosing it and this read is skipped rather
+ * than fetched again. The import worker is the caller that names rows
+ * (`_import_enrich_nudge`), so the posters of films somebody just imported are not queued
+ * behind the whole catalogue's backlog.
+ */
+export async function dueForEnrichment(db: Db, limit: number, only?: readonly string[]) {
+  if (only && only.length === 0) return [];
+  let query = db.from('tmdb_enrich_due').select('id, kind, tmdb_id');
+  if (only) query = query.in('id', [...only]);
+  const { data, error } = await query.limit(limit);
   if (error) throw new Error(`tmdb_enrich_due: ${error.message}`);
   return (data ?? []) as { id: string; kind: 'movie' | 'series'; tmdb_id: number }[];
 }

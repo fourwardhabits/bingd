@@ -140,7 +140,14 @@ export type NotificationKind =
    * editing a goal downward under an existing count, a recalculation, a relaunch and the
    * migration's own rollout all produce nothing.
    */
-  | 'goal_completed';
+  | 'goal_completed'
+  /**
+   * A Letterboxd import's lifecycle (20260917001500): accepted, finished, or failed after
+   * starting. Actorless, and `subject_type = 'import_job'` names the job a tap opens.
+   */
+  | 'import_started'
+  | 'import_completed'
+  | 'import_failed';
 
 export type Notification = {
   id: string;
@@ -270,6 +277,9 @@ const KINDS = new Set<string>([
   'friendship',
   'award_earned',
   'goal_completed',
+  'import_started',
+  'import_completed',
+  'import_failed',
 ]);
 
 /**
@@ -281,7 +291,20 @@ const KINDS = new Set<string>([
  * and it is not held to that rule. Before it existed the rule was simply "always",
  * which would have silently swallowed the first actorless notice ever written.
  */
-const ACTORLESS_KINDS = new Set<string>(['award_earned', 'goal_completed']);
+const ACTORLESS_KINDS = new Set<string>([
+  'award_earned',
+  'goal_completed',
+  'import_started',
+  'import_completed',
+  'import_failed',
+]);
+
+/** The import lifecycle kinds, which the inbox draws with the import's own mark. */
+export const IMPORT_KINDS: ReadonlySet<NotificationKind> = new Set<NotificationKind>([
+  'import_started',
+  'import_completed',
+  'import_failed',
+]);
 
 /**
  * The caller's own inbox.
@@ -614,6 +637,14 @@ export function verbFor(
       return goal
         ? `You hit your ${goal.year} ${GOAL_LABEL[goal.category]} goal 🎉`
         : 'You hit your goal 🎉';
+    // The same headlines the pushes use (`push-sender/copy.ts`) and the import screen
+    // tells the same story in: started, ready, or could not finish.
+    case 'import_started':
+      return 'Letterboxd import started';
+    case 'import_completed':
+      return 'Your Letterboxd history is ready';
+    case 'import_failed':
+      return 'We couldn’t finish your Letterboxd import';
   }
 }
 
