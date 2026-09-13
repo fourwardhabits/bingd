@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 
 /**
  * Which arrangement of For You this session is showing, and what it has already shown.
@@ -76,13 +77,45 @@ export type Arrangement = {
   current: ReadonlySet<string>;
   /** How many arrangements this session have contained each title, capped at the tiers. */
   seen: ReadonlyMap<string, number>;
+  /**
+   * When each title was last put in front of the reader **by this process**, in epoch ms
+   * (For You V2, 2026-09-13).
+   *
+   * The durable exposure (`recommendation_exposure`) is read once per session, so what the
+   * reader saw a minute ago before pressing Refresh — or before leaving the app for an
+   * hour — is not in it yet. `selection.ts` decays both by age, and this is the half only
+   * the device knows.
+   */
+  shownAt: ReadonlyMap<string, number>;
+  /**
+   * The instant this arrangement began, epoch ms. Every age `selection.ts` computes is
+   * measured from here rather than from `Date.now()`, so the wall is a pure function of
+   * the arrangement and a re-render an hour later draws exactly the same one.
+   */
+  startedAt: number;
+  /**
+   * What began it: the process starting, an explicit Refresh, or a return to the app after
+   * a meaningful absence. Recorded for tests and diagnostics; the draw treats all three
+   * alike, because `shownAt` already carries what each of them put on screen.
+   */
+  reason: 'launch' | 'refresh' | 'resume';
 };
 
 const EMPTY: Arrangement = {
   seed: nonZero(Math.floor(Math.random() * 0x7fffffff) + 1),
   current: new Set(),
   seen: new Map(),
+  shownAt: new Map(),
+  startedAt: Date.now(),
+  reason: 'launch',
 };
+
+/**
+ * How long the app must have been away before coming back counts as a new session
+ * (For You V2). One hour: a glance at another app or a phone call leaves the wall exactly
+ * as it was, and an evening's return does not show the same wall as the morning's.
+ */
+export const SESSION_IDLE_MS = 60 * 60_000;
 
 let arrangement: Arrangement = EMPTY;
 
@@ -175,19 +208,71 @@ export function noteSlateOnScreen(key: string, mediaItemIds: readonly string[]) 
  * longer counts hardest. `seen` accumulates and is capped at {@link EXPOSURE_TIERS}, which
  * is what makes the penalty relax progressively rather than lock the session's history in.
  */
-export function refreshRecommendations() {
+export function refreshRecommendations(now: number = Date.now()) {
+  advance('refresh', now, now);
+}
+
+/**
+ * The one writer behind Refresh and resume: a new seed, everything on screen marked as shown
+ * at `shownAt`, and a new `startedAt` for every age the next draw computes.
+ */
+function advance(reason: 'refresh' | 'resume', now: number, shownAtTime: number) {
   const presented = [...onScreen.values()].flat();
   const seen = new Map(arrangement.seen);
+  const shownAt = new Map(arrangement.shownAt);
   for (const id of presented) {
     seen.set(id, Math.min(EXPOSURE_TIERS, (seen.get(id) ?? 0) + 1));
+    shownAt.set(id, Math.max(shownAt.get(id) ?? 0, shownAtTime));
   }
 
   arrangement = {
     seed: nonZero(Math.imul(arrangement.seed, 1103515245) + 12345),
     current: new Set(presented),
     seen,
+    shownAt,
+    startedAt: now,
+    reason,
   };
   for (const listener of listeners) listener();
+}
+
+/** When the app last went to the background, epoch ms; null while it is in front. */
+let backgroundedAt: number | null = null;
+
+/**
+ * The app changed state. Leaving records when; coming back after {@link SESSION_IDLE_MS}
+ * begins a new arrangement whose on-screen titles count as shown at the moment the reader
+ * left. Returns whether a new session began.
+ *
+ * **Coming back sooner changes nothing** — not the seed, not the exposure, not the wall.
+ * That is the founder's rule: a few minutes in another app must not reshuffle For You.
+ */
+export function noteAppState(state: AppStateStatus | string, now: number = Date.now()): boolean {
+  if (state === 'background') {
+    backgroundedAt ??= now;
+    return false;
+  }
+  if (state !== 'active') return false;
+  const away = backgroundedAt;
+  backgroundedAt = null;
+  if (away == null || now - away < SESSION_IDLE_MS) return false;
+  advance('resume', now, away);
+  return true;
+}
+
+let lifecycleSubscribed = false;
+
+/**
+ * Subscribe to the app's state once per process, from whichever For You wall mounts first.
+ * Module-level rather than per screen, so a return to the app on another tab is still a
+ * return when the reader later opens For You.
+ */
+export function ensureRecommendationLifecycle() {
+  if (lifecycleSubscribed) return;
+  lifecycleSubscribed = true;
+  AppState.addEventListener('change', (state) => {
+    noteAppState(state);
+  });
 }
 
 /** Test seam. Nothing in the app calls this. */
@@ -209,7 +294,11 @@ export function resetRecommendationSession(seed?: number) {
     seed: nonZero(seed ?? Math.floor(Math.random() * 0x7fffffff) + 1),
     current: new Set(),
     seen: new Map(),
+    shownAt: new Map(),
+    startedAt: Date.now(),
+    reason: 'launch',
   };
+  backgroundedAt = null;
   // A fresh process draws a fresh anchor set too, so "reset" means the same thing for
   // both clocks. Derived from the same seed so a seeded test is deterministic end to end.
   anchorSeed = nonZero(seed ?? Math.floor(Math.random() * 0x7fffffff) + 1);

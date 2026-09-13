@@ -362,3 +362,108 @@ launch seed each fails a test.
 `for_you_slate_shown` gains `liked_titles`, `anchors_used` and `pool_size` — three counts, no
 ids — so whether rotation had anything to rotate, and the pool it produced, can be read
 after outreach beside `repeat_count`.
+
+## 11. For You V2 — a quality neighbourhood, decaying exposure, and sessions (2026-09-13)
+
+The founder's physical pass on #145 found the broader anchors structurally better and the
+wall still too repetitive. This is the evaluation and the change it led to. Candidate
+generation (§10) and the scoring weights are unchanged.
+
+### 11.1 What the evaluation found (production rankings, read-only, aggregates only)
+
+**Cohort.** 31 raters, 596 rankings. Movie rankings per rater: twelve at exactly five (First
+Five), then 6–24, three at 52–59, one at 112. Seven raters met a 10-ranking floor for held-out
+evaluation on films; three on TV. **Every feature finding below is low-N and is treated as
+directional at best.**
+
+**Held-out ranking quality** (5-fold within each rater; pairs the rater separated by ≥ 1.0
+score; unwatched titles never used as negatives):
+
+| films, 7 raters, 1,319 pairs | pairwise accuracy | Δ vs current [95% bootstrap CI] | raters better / worse |
+|---|---|---|---|
+| current (anchor, genre, language, popularity) | 0.444 | — | — |
+| + release decade (w 0.06 / 0.12 / 0.18) | 0.405–0.411 | −0.033 to −0.039, CIs cross 0 | 1–2 / 4 |
+| + recency band | 0.419 | −0.024 [−0.061, +0.008] | 2 / 3 |
+| + genre-pair affinity | 0.448 | +0.005 [−0.043, +0.052] | 4 / 2 |
+| − popularity | 0.454 | +0.011 [−0.045, +0.068] | 4 / 3 |
+
+TV (3 raters) leaned the other way for era and genre pairs (+0.02 to +0.04), on too few raters
+to mean anything.
+
+**Decision: no feature was added.** Era/decade *lowered* film ordering for most raters, recency
+likewise, and nothing cleared its own noise. The simpler model stays.
+
+**The finding that did decide the design.** Among a rater's own watched films the content score
+orders loved-versus-disliked **worse than chance** (0.444), and membership of an anchor's TMDB
+list is *not* more likely for loved titles (held out: loved 15% in pool, not-loved 33%; lift
+0.46). TMDB recommendations predict what someone will watch, not what they will love. A
+computed #1 is therefore a neighbourhood, not a certainty — which is the founder's principle,
+now with data behind it.
+
+**Candidate recall.** 18% of held-out loved films are present in the product's candidate pool;
+29% when every liked title is an anchor. Consistent with §10's direction; no further change here.
+
+**Signals not represented** (audited against stored data): release era/recency, genre
+combinations, watchlist saves and dismissals are readable now; Match-weighted social evidence
+and impression → rank conversion need a definer RPC; cast/director/creator credits are only
+cached for opened titles (sparse on the candidate side); opens are not recorded; keywords are
+not stored.
+
+**TMDB `/similar` (Phase C).** Not measured, and the premise needed correcting: the Similar
+tab uses the same `similar` facet For You does, which is TMDB **`/recommendations`**. The adapter
+has no `/similar` action and no TMDB credential exists outside the Edge runtime, so measuring
+its marginal value needs an adapter change and a deploy. Not added.
+
+### 11.2 The selection (`selection.ts`, `FOR_YOU_SELECTION`)
+
+1. **Qualified pool.** Candidates scoring ≥ 0.80 × the score at rank 20 (the first page's
+   frontier), clamped to 40–160. Replaces the fixed top 60.
+2. **Score-weighted sampling without replacement.** Key = `score / τ − exposure + Gumbel(seed,
+   id)`, τ = 0.15 × the pool's score spread. On a realistic pool the best title leads ~22% of
+   fresh walls, the tenth <1%; the first wall's mean score stays within 2% of strict order.
+3. **Exposure decays** from `last_shown_at`: `3 × log2(1 + count) × 0.5^(age / 96 h)`, plus
+   12 when shown within the last **18 hours**. Same-day walls do not repeat; a strong title
+   can return the next day; weeks-old exposure is nearly gone. Finite for every title.
+4. **Light diversity per page**: 0.4 per title beyond four of one primary genre, 0.25 per
+   repeat of a lead anchor; hard ceilings unchanged (four per anchor, two per franchise). No
+   genre quotas — a horror reader still gets a horror wall.
+5. **Beyond the pool** the wall continues only in strict score order.
+
+Scores and explanations are untouched, so every "Because you loved X" is unchanged.
+
+### 11.3 Sessions (`session-seed.ts`)
+
+- A **re-render** or a **return within an hour** changes nothing.
+- **Refresh** stamps what is on screen as shown now and draws a new arrangement.
+- A **return after an hour away** is a new session: new seed, and the wall that was on
+  screen stamped as shown when the reader left. The durable exposure is not re-read — every
+  wall this process drew is already stamped, and a re-read would redraw the wall twice.
+- A **cold launch** is a new session, as before, and reads the durable exposure once.
+- Anchors (§10) stay per process.
+
+### 11.4 Before and after (real production profiles, movies wall, medians)
+
+Relevance is the model's own score; "overlap" is titles shared by consecutive cold sessions.
+The fortnight window is migration `20260918000100`; the 72-hour columns are what V2 does
+before it is applied.
+
+| visits | cohort | overlap: #145 | V2, 72 h window | V2, 336 h window | visible first-9 overlap: #145 → V2 (336 h) | mean first-20 score: #145 → V2 |
+|---|---|---|---|---|---|---|
+| 6 h apart | First Five / ~20 / ~60 / 100+ | 5.3 / 1.0 / 1.0 / 0.5 | — | 5.0 / 0 / 0 / 0 | 1.0 / 0.8 / 0.5 / 0.5 → 0 / 0 / 0 / 0 | 0.500 / 0.568 / 0.532 / 0.545 → 0.501 / 0.559 / 0.523 / 0.540 |
+| 24 h apart | same | 6.8 / 1.5 / 1.3 / 1.0 | 8.3 / 3.3 / 2.5 / 1.3 | 7.3 / 3.0 / 2.0 / 1.3 | 2.0 / 1.3 / 0.8 / 1.0 → 1.3 / 0.5 / 0.8 / 0.3 | same |
+| 96 h apart | same | 15.3 / 9.0 / 6.3 / 5.3 | 14.3 / 8.0 / 5.8 / 3.8 | 9.0 / 4.3 / 3.0 / 2.3 | 5.5 / 3.8 / 2.3 / 1.5 → 2.5 / 1.3 / 1.0 / 0.3 | same |
+| Refresh in-session | same | 6 / 2 / 2 / 3 | — | 4 / 0 / 0 / 0 | — | — |
+
+Unique titles after 5 sessions 96 h apart: 30 / 45 / 63 / 66 → 44 / 57 / 76 / 78. Mean score
+across all five walls moves −1% to −3%. Next-day recurrence of a few titles is intended.
+
+**Provider cost:** none added. Selection runs on the already-fetched pool; anchor fills keep
+§10's ≤ 6 per slate. The exposure read is still one per session, now over up to a fortnight of
+the reader's own rows.
+
+### 11.5 What remains
+
+- First Five walls are pool-limited (~85 eligible): selection cannot manufacture candidates,
+  and its 96-hour overlap stays the highest of any cohort.
+- Returning within an hour keeps the wall, by design.
+- Feature additions wait for a cohort large enough to evaluate them (§11.1).

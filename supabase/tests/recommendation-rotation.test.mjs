@@ -157,14 +157,37 @@ describe('the cooldown window, and why nothing is hidden for ever', () => {
 
   beforeEach(() => t.sql(`delete from recommendation_impressions`));
 
+  /** The configured window, read rather than assumed (it moved from 72 to 336 hours). */
+  const windowHours = async () =>
+    Number((await t.sql(`select value from app_config where key = 'foryou.impression_window_hours'`)).rows[0].value);
+
+  it('remembers a fortnight by default, so the client can decay rather than forget', async () => {
+    // 20260918000100. The client decays exposure by `last_shown_at`; a window that ended at
+    // three days made every visit four days apart look like a first visit.
+    assert.equal(await windowHours(), 336);
+  });
+
+  it('keeps an impression four days old, which the old three-day window forgot', async () => {
+    await shown(alice, [film]);
+    await t.sql(
+      `update recommendation_impressions set shown_at = shown_at - interval '96 hours'
+        where user_id = $1`,
+      [alice],
+    );
+    const rows = await exposure(alice);
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].last_shown_at, 'the client decays from this, so it must come back');
+  });
+
   it('drops an impression older than the window', async () => {
     await shown(alice, [film]);
     assert.equal((await exposure(alice)).length, 1);
 
+    const hours = (await windowHours()) + 8;
     await t.sql(
-      `update recommendation_impressions set shown_at = shown_at - interval '80 hours'
+      `update recommendation_impressions set shown_at = shown_at - make_interval(hours => $2)
         where user_id = $1`,
-      [alice],
+      [alice, hours],
     );
     assert.deepEqual(await exposure(alice), [], 'a strong candidate must be able to return');
   });
@@ -186,12 +209,15 @@ describe('the cooldown window, and why nothing is hidden for ever', () => {
         where user_id = $1`,
       [alice],
     );
+    const previous = await windowHours();
     await t.sql(`update app_config set value = '12'::jsonb where key = 'foryou.impression_window_hours'`);
     try {
       assert.deepEqual(await exposure(alice), []);
     } finally {
+      // Restore what was there, not a literal: the default is a migration's to decide.
       await t.sql(
-        `update app_config set value = '72'::jsonb where key = 'foryou.impression_window_hours'`,
+        `update app_config set value = to_jsonb($1::int) where key = 'foryou.impression_window_hours'`,
+        [previous],
       );
     }
   });

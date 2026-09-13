@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { supabase } from '@/lib/supabase';
 
-import { EXPOSURE_TIERS } from './session-seed';
+import type { ExposureEntry } from './selection';
 
 /**
  * What previous sessions have already put in front of this reader.
@@ -51,19 +51,30 @@ export function useRecommendationExposure(userId: string) {
     // waits on nothing, so a long back-off spent on it is a long back-off spent on the
     // rotation being slightly better.
     retry: 1,
-    queryFn: async (): Promise<ReadonlyMap<string, number>> => {
+    queryFn: async (): Promise<ReadonlyMap<string, ExposureEntry>> => {
       const { data, error } = await supabase.rpc('recommendation_exposure');
       if (error) throw error;
 
-      const counts = new Map<string, number>();
-      for (const row of (data ?? []) as { media_item_id: string; shown_count: number }[]) {
-        // Capped at the same tiers the session uses, so a title shown thirty times last
-        // week is not permanently pinned below one shown four. Past the cap everything is
-        // equally stale and score decides again, which is the rule `EXPOSURE_TIERS`
-        // exists to state — it must mean one thing across both halves of the penalty.
-        counts.set(row.media_item_id, Math.min(EXPOSURE_TIERS, row.shown_count));
+      const entries = new Map<string, ExposureEntry>();
+      for (const row of (data ?? []) as {
+        media_item_id: string;
+        shown_count: number;
+        last_shown_at: string | null;
+      }[]) {
+        /**
+         * The count **and when**, since For You V2 (2026-09-13). The count alone could only
+         * say "seen this window", which made a title shown an hour ago and one shown three
+         * days ago equally stale — and forgot both at once when the window ran out. The
+         * last time is what `selection.ts` decays from. A row with no parseable time is
+         * treated as shown at the start of the window rather than now, the weaker claim.
+         */
+        const last = row.last_shown_at ? Date.parse(row.last_shown_at) : Number.NaN;
+        entries.set(row.media_item_id, {
+          count: Math.max(1, row.shown_count),
+          lastShownAt: Number.isFinite(last) ? last : 0,
+        });
       }
-      return counts;
+      return entries;
     },
   });
 }

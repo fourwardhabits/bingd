@@ -1,0 +1,50 @@
+-- A wall that remembers a fortnight.
+--
+-- ---------------------------------------------------------------------------
+-- What this changes, and it is one number
+-- ---------------------------------------------------------------------------
+--
+-- `recommendation_exposure()` returns the caller's For You impressions inside
+-- `foryou.impression_window_hours`. That has been **72** since `20260828000500`, and the
+-- client treated everything inside it as equally stale and everything outside it as
+-- never shown. A reader who came back every four days therefore met three quarters of
+-- the same wall: the window had forgotten all of it the day before.
+--
+-- For You V2 (client, `src/features/recommendations/selection.ts`) no longer uses the
+-- window as a verdict. It reads each title's `last_shown_at` and **decays** it -- strong
+-- suppression the same day, moderate after a few days, halving every 96 hours -- so the
+-- window only has to be long enough for the decay to finish. A fortnight is 3.5 half-lives:
+-- a title shown fourteen days ago carries under a tenth of its original penalty, which is
+-- where the client already treats it as eligible again. Nothing is blacklisted.
+--
+-- **The number becomes 336.** Measured on real production profiles (aggregates only,
+-- `docs/product/recommendations.md` §11): with visits four days apart, consecutive walls
+-- shared 15.3 / 9.0 / 6.3 / 5.3 of twenty titles (First Five / ~20 / ~60 / 100+ ranked)
+-- under the old engine; V2 with a 72-hour window shared 14.3 / 8.0 / 5.8 / 3.8; V2 with this
+-- window shares 9.0 / 4.3 / 3.0 / 2.3, at a mean-score cost of 1-3%.
+--
+-- ---------------------------------------------------------------------------
+-- What it does to clients that have not updated
+-- ---------------------------------------------------------------------------
+--
+-- They read the same function and apply their old tiers over a longer window: a title seen
+-- within the fortnight is demoted for longer than it was. That is the direction the old
+-- engine's own audit recommended (`deferred-roadmap.md` §59c), and nothing on those clients
+-- can become empty -- tiers only reorder.
+--
+-- ---------------------------------------------------------------------------
+-- Cost
+-- ---------------------------------------------------------------------------
+--
+-- One read per For You session, over the caller's own rows, served by
+-- `recommendation_impressions_cooldown (user_id, media_item_id, shown_at desc)`. The
+-- per-day write cap (`foryou.impression_rows_per_day` = 2000) bounds it at 28,000 rows for a
+-- pathological reader; an ordinary one has a few hundred.
+--
+-- An update rather than an insert, so an operator's later tuning of the row is not undone by
+-- a replayed migration, and an upsert so a database that somehow lacks the row still gets it.
+-- ===========================================================================
+
+insert into app_config (key, value)
+values ('foryou.impression_window_hours', '336'::jsonb)
+on conflict (key) do update set value = excluded.value;
