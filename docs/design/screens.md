@@ -733,7 +733,7 @@ title page, where `ScoresSection` labels whose it is.
 
 **Two empty states, and neither quotes the threshold.** A filtered wall with nothing on it
 offers *Clear filters*; an unfiltered one says titles appear once enough people have rated
-them. The number is `discovery.top_rated_min_ratings` and only the server knows it — an empty
+them. The number is `community_support_floor` (a percentile of rating count, since `20260916000200`) and only the server knows it — an empty
 page carries no row to read it off, so any figure in the copy would be a client-side copy of a
 config value right up until it moved.
 
@@ -813,6 +813,16 @@ bingd.`, in that fixed order, which is a hierarchy of relevance to one reader an
 leaderboard: me, then the people I chose, then the room. On the poster the number had nothing to
 be measured against; here it is the first term of a comparison read straight across. It is stated
 **once** on the page.
+
+> **Superseded 2026-09-13 (founder): `Your score → bingd. → Following`.** The middle two swap,
+> and the reason is sample. A reader follows a handful of people, so Following usually rests on
+> one or two ratings and often none, while bingd. is the widest population on the page; the unit
+> beside the reader's own number is the one it is compared against first, so it should be the
+> one that can bear the comparison. Everything else here stands — sample counts, the Following
+> drill-down, the empty states, the Rank control — and the order above in this section and in
+> the 2026-09-07 notes is history. The same pass made **Similar the first tab on a film**
+> (`Similar · Cast · Reviews · Videos · Details`) and second on a season and a series, after
+> Episodes and Seasons, which stay the defaults there.
 
 The units carry **no bucket word, no rank and no watch date**. All three were in the
 specification's `Your score` cell and all three were cut: `Loved` is jargon this screen has never
@@ -1270,6 +1280,32 @@ It is also **filtered to the profile's owner**. The underlying query spans every
 Low-confidence matches are visually downweighted per PRD §13. A `94% match · 8 shared` must not look more impressive than `88% match · 126 shared`, which is exactly what a bare percentage would do.
 
 **Leaderboard** ([`references/beli-405-leaderboard.jpg`](./references/beli-405-leaderboard.jpg)) ranks friends by activity within a scope. It is a social surface and it needs a deliberate tone: the Curious Collector voice, not a competitive one. Blocked users never appear, which follows automatically from `can_view_profile` (AD-5).
+
+### As built — 2026-09-13: People | Top Titles
+
+The Leaderboard mode of the Feed tab holds two boards under a secondary `SegmentedTabs` row.
+**People** is the board that existed and is unchanged in every respect: This month by default,
+the per-account remembered timeframe in the header, Titles · Movies · TV · Reviews, Match,
+privacy. **Top Titles** is its sibling: the best-supported titles on bingd. by community score.
+
+- **Movies · TV chips in place of the metrics, and no timeframe.** A community score is a
+  standing verdict, not a monthly race, so the header's timeframe selector is People's alone
+  and the slot is empty on Top Titles — no heading repeating the tab, no chevron that opens
+  nothing. TV is seasons, named `The Bear, S2`, because a season is what is ranked.
+- **Each row: rank, poster, title, the bingd. score, and the sample.** The people board's rank
+  column and top-three accent; the title page's `N ratings` words; and the score in
+  `ScoreBadge`'s **outlined** ring, the design system's treatment for a score that is not the
+  reader's own. A tie shares a number only when score and support both tie. No medal, badge,
+  XP or confidence label. Tap opens the title.
+- **Eligibility is the server's.** `top_rated_titles` filters by `community_support_floor` —
+  max(90th percentile of rating count, 3), shared with the onboarding picker since
+  `20260916000200` — and sorts the survivors by score, then support. The board is one
+  50-row read of that function through Top Rated's own `readPage`; the client neither filters
+  nor sorts. The empty state quotes no threshold, because the floor moves with the community.
+- **Each board reads only while it is on screen**, including on pull-to-refresh.
+
+The community number stays out of the ranking flow: `src/features/ranking/no-community-anchor.test.ts`
+fails if any ranking source reaches a community, following or Top Titles score.
 
 ---
 

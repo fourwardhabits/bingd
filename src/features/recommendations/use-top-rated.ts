@@ -148,10 +148,21 @@ const yearOf = (date: string | null) => (date ? Number(date.slice(0, 4)) : null)
 export const topRatedKey = (userId: string, medium: Medium) =>
   ['top-rated', userId, medium] as const;
 
-async function readPage(medium: Medium, cursor: TopRatedCursor | null): Promise<TopRatedPage> {
+/**
+ * One page of `top_rated_titles`, resolved into catalogue rows in the server's order.
+ *
+ * Exported since 2026-09-13 for the Leaderboard's Top Titles board, which is the same
+ * question asked with a longer first page. There is one read and one ordering; the two
+ * surfaces differ only in how many rows they ask for and in what they draw.
+ */
+export async function readPage(
+  medium: Medium,
+  cursor: TopRatedCursor | null,
+  limit: number = TOP_RATED_PAGE,
+): Promise<TopRatedPage> {
   const { data, error } = await supabase.rpc('top_rated_titles', {
     p_medium: medium,
-    p_limit: TOP_RATED_PAGE,
+    p_limit: limit,
     p_after_score: cursor?.score ?? null,
     p_after_count: cursor?.rating_count ?? null,
     p_after_id: cursor?.media_item_id ?? null,
@@ -224,7 +235,7 @@ async function readPage(medium: Medium, cursor: TopRatedCursor | null): Promise<
     // nothing is how that is discovered — one empty round trip at the bottom of a wall
     // nobody has ever scrolled to is a better trade than a count query per page.
     next:
-      rows.length < TOP_RATED_PAGE
+      rows.length < limit
         ? null
         : {
             score: last.score,

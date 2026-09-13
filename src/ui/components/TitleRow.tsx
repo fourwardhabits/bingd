@@ -29,6 +29,17 @@ export type TitleRowProps = {
    * globally, because the density of every other list is intentional.
    */
   spacious?: boolean;
+  /**
+   * Replaces the label built from the row's text, for a row whose meaning sits in
+   * `leading` or `trailing`.
+   *
+   * The built label reads the title, year and text lines, which is everything a plain
+   * row says. A ranked row says two more things in nodes the built label cannot see — its
+   * position and a score — and the Pressable's label hides its children from a screen
+   * reader, so without this they would be on screen and silent. Absent everywhere the
+   * built label is already the whole row, which is every caller before Top Titles.
+   */
+  accessibilityLabel?: string;
   onPress: () => void;
 };
 
@@ -61,6 +72,7 @@ export function TitleRow({
   pending = false,
   divided = false,
   spacious = false,
+  accessibilityLabel,
   onPress,
 }: TitleRowProps) {
   const compact = size !== 'sm';
@@ -70,7 +82,10 @@ export function TitleRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[title, year, secondaryLabel, tertiaryLabel].filter(Boolean).join(', ')}
+      accessibilityLabel={
+        accessibilityLabel ??
+        [title, year, secondaryLabel, tertiaryLabel].filter(Boolean).join(', ')
+      }
       accessibilityHint={pending ? 'Saved on this device, waiting to sync' : undefined}
       onPress={onPress}
       style={[

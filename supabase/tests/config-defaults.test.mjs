@@ -150,23 +150,57 @@ test('the Bingd aggregate shows from the first rating', async () => {
  *
  * Asserted separately, and the pairing is the point: a future pass that moves one of them
  * has to notice it is not moving the other.
+ *
+ * **Since 20260916000200 the discovery floor is one rule for two surfaces** — Top Rated
+ * and the onboarding picker — and it is a percentile with a floor under it rather than a
+ * fixed count: max(90th percentile of rating count, 3). The two rows it replaced
+ * (`discovery.top_rated_min_ratings` at 5 and `discovery.starter_min_ratings` at 3) are
+ * asserted absent, because a surviving row that nothing reads is a knob somebody will
+ * turn and watch do nothing.
  */
-test('Top Rated starts at five ratings, and is not the display threshold', async () => {
+test('the discovery floor is one percentile rule, and is not the display threshold', async () => {
   const t = await createTestDb();
   try {
     const { rows } = await t.sql(
-      `select key, (value)::integer as n
+      `select key, (value)::numeric as n
          from app_config
-        where key in ('discovery.top_rated_min_ratings', 'score.community_min_ratings')
+        where key in ('discovery.support_percentile', 'discovery.support_min_ratings',
+                      'score.community_min_ratings', 'discovery.top_rated_min_ratings',
+                      'discovery.starter_min_ratings')
         order by key`,
     );
     assert.deepEqual(
-      rows.map((row) => [row.key, row.n]),
+      rows.map((row) => [row.key, Number(row.n)]),
       [
-        ['discovery.top_rated_min_ratings', 5],
+        ['discovery.support_min_ratings', 3],
+        ['discovery.support_percentile', 0.9],
         ['score.community_min_ratings', 1],
       ],
     );
+  } finally {
+    await t.close();
+  }
+});
+
+/**
+ * The shape this file exists to police, applied to the floor.
+ *
+ * `community_support_floor` reads both rows with a written default. Delete them and the
+ * defaults must still apply — a missing row must never become a null bar, which
+ * `rated.n >= null` would turn into an empty Top Rated wall and an onboarding picker made
+ * entirely of the popularity fallback.
+ */
+test('the discovery floor still applies when neither row is configured', async () => {
+  const t = await createTestDb();
+  try {
+    await t.sql(
+      `delete from app_config
+        where key in ('discovery.support_percentile', 'discovery.support_min_ratings')`,
+    );
+    const { rows } = await t.sql(`select community_support_floor('movie'::media_kind) as k`);
+    // No rankings in a fresh database, so the percentile contributes nothing and the
+    // documented floor of three is the whole answer.
+    assert.equal(rows[0].k, 3);
   } finally {
     await t.close();
   }

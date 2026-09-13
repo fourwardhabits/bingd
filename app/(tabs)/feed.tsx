@@ -41,7 +41,10 @@ import {
   type ReactionKind,
 } from '@/features/feed/use-reactions';
 import { LeaderboardView } from '@/features/leaderboard/LeaderboardView';
+import { TopTitlesView } from '@/features/leaderboard/TopTitlesView';
+import { useTopTitles } from '@/features/leaderboard/use-top-titles';
 import { DEFAULT_PEOPLE_MODE, PeopleView } from '@/features/people/PeopleView';
+import type { Medium } from '@/features/recommendations/use-for-you';
 import {
   DEFAULT_METRIC,
   DEFAULT_TIMEFRAME,
@@ -71,6 +74,7 @@ import {
   MediumSelector,
   Screen,
   SectionHeader,
+  SegmentedTabs,
   SkeletonRow,
   Text,
   type IconToggleOption,
@@ -117,6 +121,20 @@ type FeedMode = 'feed' | 'leaderboard' | 'people';
 const NEXT_PAGE_THRESHOLD = 800;
 
 const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
+
+/**
+ * The two boards inside Leaderboard (founder, 2026-09-13).
+ *
+ * `People` is the board that existed, unchanged in every respect — timeframe, metric,
+ * the remembered timeframe, Match, privacy. `Top Titles` is its sibling: the best-supported
+ * titles on bingd. by community score. Labelled `People` rather than `Leaderboard` because
+ * the whole surface is the Leaderboard and the two are what it ranks.
+ */
+type LeaderboardBoard = 'people' | 'titles';
+const LEADERBOARD_BOARDS: readonly { id: LeaderboardBoard; label: string }[] = [
+  { id: 'people', label: 'People' },
+  { id: 'titles', label: 'Top Titles' },
+];
 
 const FEED_MODES = [
   // `newspaper` rather than `list`: Collection's list glyph means "the other way of
@@ -208,11 +226,24 @@ export default function FeedScreen() {
    * would have shown a feed spinner over a list of people.
    */
   const showingFeed = mode === 'feed';
+  /**
+   * Which board the Leaderboard is showing, and which medium Top Titles is on.
+   *
+   * Session state, like `metric` and unlike `timeframe`: People is the board a reader
+   * opens on, so a fresh launch lands where the Leaderboard always did, and within a
+   * mounted session the choice survives a visit to another tab because this screen stays
+   * mounted. Nothing is persisted, so nothing about People's remembered timeframe changes.
+   */
+  const [board, setBoard] = useState<LeaderboardBoard>('people');
+  const [titlesMedium, setTitlesMedium] = useState<Medium>('movies');
+  const showingPeopleBoard = showingBoard && board === 'people';
+  const showingTitlesBoard = showingBoard && board === 'titles';
   // Not fetched until the board is actually opened. The Feed is the default and most
   // readers will never toggle, so an eager read would be a request per app open for a
-  // surface nobody asked for.
-  const leaderboard = useLeaderboard(profile.id, metric, timeframe, showingBoard);
-  const standing = useMyStanding(profile.id, metric, timeframe, showingBoard);
+  // surface nobody asked for. Each board reads only while it is the one on screen.
+  const leaderboard = useLeaderboard(profile.id, metric, timeframe, showingPeopleBoard);
+  const standing = useMyStanding(profile.id, metric, timeframe, showingPeopleBoard);
+  const topTitles = useTopTitles(profile.id, titlesMedium, showingTitlesBoard);
   /**
    * Whether the shelf will draw anything, so the header row knows whether to name it.
    *
@@ -607,7 +638,9 @@ export default function FeedScreen() {
         refreshControl={
           <RefreshControl
             refreshing={
-              showingBoard
+              showingTitlesBoard
+                ? topTitles.isRefetching
+                : showingBoard
                 ? leaderboard.isRefetching
                 : showingPeople
                   ? // Its two queries live inside `PeopleView`, so this gesture reaches
@@ -621,6 +654,12 @@ export default function FeedScreen() {
               // Whichever mode is showing IS the whole screen, so the gesture means
               // "re-read this" and nothing else. Refetching the feed underneath it would
               // spend two requests to update something nobody is looking at.
+              // The board on screen, and only that one: the other board's reads are
+              // disabled while it is hidden, and refetching them would wake them.
+              if (showingTitlesBoard) {
+                void topTitles.refetch();
+                return;
+              }
               if (showingBoard) {
                 void leaderboard.refetch();
                 void standing.refetch();
@@ -718,15 +757,21 @@ export default function FeedScreen() {
               neither leaves the timeframe flush against the screen edge — which is what
               the founder photographed. Padding on the existing flex child, so the row's
               height and the toggle's position are untouched. */}
-          <View style={[styles.contentHeaderLeft, showingBoard && styles.contentHeaderInset]}>
-            {showingBoard ? (
+          <View
+            style={[styles.contentHeaderLeft, showingPeopleBoard && styles.contentHeaderInset]}
+          >
+            {/* The timeframe belongs to the People board alone. Top Titles is a standing
+                verdict with no month to choose, so the slot is empty there rather than
+                holding a heading that repeats the tab below it, or a chevron that opens
+                nothing. */}
+            {showingPeopleBoard ? (
               <MediumSelector
                 size="section"
                 value={timeframe}
                 onChange={changeTimeframe}
                 options={LEADERBOARD_TIMEFRAMES}
               />
-            ) : showingPeople ? (
+            ) : showingTitlesBoard ? null : showingPeople ? (
               // `SectionHeader` pads itself, which is why People does not take
               // `contentHeaderInset` above — the same reason Trending does not.
               <SectionHeader title="People you may know" />
@@ -751,15 +796,42 @@ export default function FeedScreen() {
         </View>
 
         {showingBoard ? (
-          <LeaderboardView
-            metric={metric}
-            onChangeMetric={changeMetric}
-            timeframe={timeframe}
-            entries={leaderboard.data}
-            standing={standing.data}
-            loading={leaderboard.isPending}
-            onPressPerson={(username) => router.push(`/u/${username}`)}
-          />
+          <>
+            {/**
+             * People | Top Titles — the secondary tab row, because the two boards are
+             * mutually exclusive views *within* the Leaderboard, which is the job
+             * `SegmentedTabs`' secondary variant exists for (Watched and Watchlist inside a
+             * collection). Primary is reserved for Movies and TV on Collection and For You.
+             */}
+            <View style={styles.boardTabs}>
+              <SegmentedTabs
+                accessibilityLabel="Leaderboard"
+                options={LEADERBOARD_BOARDS}
+                value={board}
+                onChange={setBoard}
+              />
+            </View>
+            {board === 'titles' ? (
+              <TopTitlesView
+                medium={titlesMedium}
+                onChangeMedium={setTitlesMedium}
+                titles={topTitles.data}
+                loading={topTitles.isPending}
+                failed={topTitles.isError}
+                onPressTitle={(mediaItemId) => router.push(`/title/${mediaItemId}`)}
+              />
+            ) : (
+              <LeaderboardView
+                metric={metric}
+                onChangeMetric={changeMetric}
+                timeframe={timeframe}
+                entries={leaderboard.data}
+                standing={standing.data}
+                loading={leaderboard.isPending}
+                onPressPerson={(username) => router.push(`/u/${username}`)}
+              />
+            )}
+          </>
         ) : showingPeople ? (
           /**
            * People replaces the whole content area, Trending included — the same rule the
@@ -1172,6 +1244,8 @@ const styles = StyleSheet.create({
   contentHeaderLeft: { flex: 1, justifyContent: 'center' },
   // Only the timeframe selector carries it — see the call site.
   contentHeaderInset: { paddingLeft: theme.layout.gutter },
+  // `SegmentedTabs` pads its own row to the gutter, so this only spaces it from the header.
+  boardTabs: { paddingTop: theme.space[1] },
   /**
    * The rule between discovery and activity.
    *

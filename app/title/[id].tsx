@@ -61,6 +61,7 @@ import {
   type TitleReview,
 } from '@/features/title/use-title-reviews';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
+import { useSimilarTitles } from '@/features/title/use-similar-titles';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
@@ -78,6 +79,7 @@ import {
   EpisodeRow,
   LoadingScreen,
   Poster,
+  PosterGrid,
   Screen,
   ScreenError,
   ScoresSection,
@@ -109,7 +111,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return <ScreenError error={error} retry={retry} />;
 }
 
-type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
+type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons' | 'similar';
 
 /**
  * How many episodes a season page draws before it offers to show the rest.
@@ -359,26 +361,6 @@ export default function TitleScreen() {
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
   /**
-   * Pull to refresh, and **only** pull to refresh.
-   *
-   * This was `refreshing={seasons.isRefetching || personal.isRefetching}`, which is the
-   * founder's "the page behind the review sheet jumps" defect on physical build 9.
-   * `personal` is keyed under `queryKeys.title(id)`, the log sheet's note autosave
-   * invalidates that prefix while somebody is typing, and iOS reads `refreshing: true` as
-   * a *programmatic pull* — it grows the scroll view's top content inset and animates the
-   * content down to meet it, which is the blank band above the hero, and back up when the
-   * refetch settles. `use-pull-refresh.ts` carries the whole trace.
-   */
-  const pull = usePullRefresh(
-    // Memoised, because the hook's callback depends on it: a new array-builder every
-    // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
-    // page.
-    useCallback(
-      () => [refetch(), seasons.refetch(), personal.refetch()],
-      [refetch, seasons, personal],
-    ),
-  );
-  /**
    * Reviews are Bingd's own public Notes on this exact title.
    *
    * What this replaced fetched TMDB's reviews from a `media_cache` facet. They were
@@ -464,6 +446,66 @@ export default function TitleScreen() {
    */
   const showsEpisodes = data?.title?.kind === 'season' && (tab === null || tab === 'episodes');
   const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
+  /**
+   * The Similar tab's data, when it is the tab being shown.
+   *
+   * **On a film, Similar is the default** (founder, 2026-09-13): it leads a movie's tab
+   * row, and `activeTab` falls back to the head of that row, so a reader who has chosen
+   * nothing is looking at it. That is the Episodes gate's shape exactly, and for the same
+   * reason: waiting for `tab` to be set would make the default tab the one tab that never
+   * loaded. So a film page asks for its similar titles on arrival — one read of a
+   * week-long cached facet in the ordinary case, and the provider only when it is cold.
+   *
+   * On a season and a series Similar is **second**, after Episodes and Seasons, so
+   * `tab === null` never means it there and nothing is fetched until it is chosen.
+   *
+   * Read off `data.title.kind` rather than `activeTab`, which is not computed yet at this
+   * point in the render — the constraint the Episodes gate above works under too.
+   *
+   * The parent's id is the facet's owner for a season — TMDB publishes recommendations
+   * for a series and none for a season — and `use-similar-titles.ts` has the whole
+   * argument. A season whose parent embed did not come back passes null, which the hook
+   * resolves by asking the adapter rather than by giving up: the server takes a season
+   * id, finds the parent and says which row it wrote the facet against.
+   */
+  const showsSimilar =
+    tab === 'similar' || (tab === null && data?.title?.kind === 'movie');
+  const similar = useSimilarTitles({
+    sourceId: titleId,
+    kind: data?.title?.kind ?? null,
+    // `parentOf`, because PostgREST hands a `!inner`-less embed back as an object here
+    // and as a one-element array under other generated types — the same normalisation
+    // the identity block does at `const parent =` below.
+    facetId: data?.title?.kind === 'season' ? (parentOf(data.title.parent)?.id ?? null) : titleId,
+    userId: profile.id,
+    enabled: showsSimilar,
+  });
+  /**
+   * Pull to refresh, and **only** pull to refresh.
+   *
+   * This was `refreshing={seasons.isRefetching || personal.isRefetching}`, which is the
+   * founder's "the page behind the review sheet jumps" defect on physical build 9.
+   * `personal` is keyed under `queryKeys.title(id)`, the log sheet's note autosave
+   * invalidates that prefix while somebody is typing, and iOS reads `refreshing: true` as
+   * a *programmatic pull* — it grows the scroll view's top content inset and animates the
+   * content down to meet it, which is the blank band above the hero, and back up when the
+   * refetch settles. `use-pull-refresh.ts` carries the whole trace.
+   *
+   * **It moved below the Similar tab's hook so that it could include it**, which is not a
+   * tidy-up: the Similar tab's empty and failed states both say "pull down to try again",
+   * and that sentence was a promise nothing kept. `useSimilarTitles` returns a `refetch`
+   * that does nothing while the tab is closed, so a pull from Cast still spends nothing —
+   * the gate stays inside the hook that owns it rather than being restated here.
+   */
+  const pull = usePullRefresh(
+    // Memoised, because the hook's callback depends on it: a new array-builder every
+    // render would hand `RefreshControl` a new `onRefresh` on every re-render of this
+    // page.
+    useCallback(
+      () => [refetch(), seasons.refetch(), personal.refetch(), similar.refetch()],
+      [refetch, seasons, personal, similar],
+    ),
+  );
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
   const rankCategory: RankingCategory =
@@ -573,7 +615,7 @@ export default function TitleScreen() {
   }
 
   const title = data.title;
-  const parent = Array.isArray(title.parent) ? title.parent[0] : title.parent;
+  const parent = parentOf(title.parent);
   /**
    * The genres and language to describe this title with.
    *
@@ -842,6 +884,29 @@ export default function TitleScreen() {
      * waiting for it. Never present for a film or a series grouping.
      */
     ...(isSeason ? [{ id: 'episodes' as const, label: 'Episodes' }] : []),
+    /**
+     * Similar, straight after the entry that owns the page — and therefore **first on a
+     * film** (founder, 2026-09-13).
+     *
+     * One position that produces all three rows the decision names, because Seasons and
+     * Episodes are each present on exactly one kind and neither on a film:
+     *
+     *   film     Similar · Cast · Reviews · Videos · Details
+     *   season   Episodes · Similar · Cast · Reviews · Videos · Details
+     *   series   Seasons · Similar · Cast · Videos · Details
+     *
+     * The title page is where somebody explores from, and on a film nothing else on the
+     * page answers "what next" — so the exploration tab leads. On a season and a series
+     * the page's own unit still leads: which episode, which season. The first entry is
+     * also the default (`activeTab` falls back to the head of this row), which is why
+     * `showsSimilar` fetches on a film's arrival and nowhere else.
+     *
+     * Always present, on the same rule Reviews follows rather than the one Videos follows.
+     * The answer is not knowable before it is asked — finding out is the facet read — so
+     * this is a tab that may turn out to have nothing and is still worth offering, and
+     * "No similar titles yet" is the honest end of that.
+     */
+    { id: 'similar' as const, label: 'Similar' },
     ...(cast.length ? [{ id: 'cast' as const, label: 'Cast' }] : []),
     /**
      * Reviews is **always** present, unlike Cast and Videos.
@@ -1519,7 +1584,21 @@ export default function TitleScreen() {
           <SegmentedTabs
             options={tabs}
             value={activeTab ?? 'details'}
-            onChange={(next) => setTab(next)}
+            onChange={(next) => {
+              // A deliberate move *to* Similar, and nothing else. Compared against
+              // `activeTab` rather than `tab`: on a film Similar is the default, so `tab`
+              // is still null while it is on screen, and pressing the tab you are already
+              // looking at must not count as opening it. The film's arrival on Similar is
+              // therefore not an event either — that is a page view, which the page
+              // already has — so this counts readers who chose it.
+              if (next === 'similar' && activeTab !== 'similar') {
+                track({
+                  name: 'similar_tab_opened',
+                  props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
+                });
+              }
+              setTab(next);
+            }}
           />
         </View>
 
@@ -1739,6 +1818,73 @@ export default function TitleScreen() {
               compact
               title="Seasons are still loading"
               body="Pull down to try again in a moment."
+            />
+          )
+        ) : null}
+
+        {/**
+         * Similar, as one wall of artwork.
+         *
+         * `PosterGrid` unchanged, which is the app's established answer to "a lot of
+         * titles at once" — For You and the Collection wall are the same component, and
+         * three across means the nine-title budget is exactly three rows on a phone.
+         * Deliberately not a labelled variant of it: the grid draws no titles on purpose
+         * (its own header says why), and the name, the year and the reader's score all
+         * travel in each tile's accessibility label already.
+         *
+         * The score chip is the Collection wall's, on a candidate the reader has ranked
+         * and on nothing else. Nothing new is drawn for this tab, and the chip is the
+         * only thing on this surface the reader's own history touches: the *order* is
+         * TMDB's, unreranked (founder, 2026-09-12).
+         *
+         * Every destination is `/title/{id}` — the same push the seasons list above
+         * makes and the same one every other surface in the app makes. For a film that
+         * is the film; for television it is the **series**, which opens on its Seasons
+         * tab and is therefore the existing series-to-season flow rather than a second
+         * one. `use-similar-titles.ts` is where a season page's associations are taken
+         * from its parent instead of invented for it.
+         */}
+        {activeTab === 'similar' ? (
+          similar.tiles.length ? (
+            <PosterGrid
+              tiles={similar.tiles}
+              onPressTile={(tile) => {
+                track({
+                  name: 'similar_title_opened',
+                  props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
+                });
+                router.push(`/title/${tile.id}`);
+              }}
+            />
+          ) : similar.isPending ? (
+            // The same skeleton every other list on this page uses. Three rows, which is
+            // the height the grid is about to be.
+            <SkeletonRow count={3} />
+          ) : similar.isError ? (
+            /**
+             * Quiet, and the page around it keeps working.
+             *
+             * The provider can refuse — the hourly ceiling in api.md §9 is a per-user
+             * limit and this tab spends against it — and a refusal is a fact about one
+             * tab. It must never reach the route's error boundary, which is why the
+             * query's failure is read here rather than thrown: everything above the tab
+             * row is the reader's own data and TMDB has no opinion about any of it.
+             */
+            <EmptyState
+              kind="couldNotLoad"
+              compact
+              title="Could not load similar titles"
+              body="Pull down to try again in a moment."
+            />
+          ) : (
+            // A real answer rather than a failure. TMDB associates nothing with plenty of
+            // obscure titles, the adapter caches that fact deliberately, and "yet" is the
+            // honest word for something a later provider update could change.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="No similar titles yet"
+              body="Nothing is associated with this one."
             />
           )
         ) : null}
@@ -2241,6 +2387,20 @@ function formatShortDate(date: string | null) {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/**
+ * The embedded parent series, however PostgREST shaped it.
+ *
+ * A `parent:parent_id(...)` embed is a single object at runtime, and the generated
+ * types model the same relationship as a one-element array in some builds — so both
+ * shapes have to be read. It was written out inline where the identity block needs it
+ * and is a function now because the Similar tab needs the same id several hundred lines
+ * earlier, before `title` is narrowed.
+ */
+function parentOf<T>(embedded: T | T[] | null | undefined): T | null {
+  if (!embedded) return null;
+  return (Array.isArray(embedded) ? (embedded[0] ?? null) : embedded) as T | null;
 }
 
 function yearOf(date: string | null) {

@@ -67,7 +67,7 @@ const SCORE_LOADING = 'Score loading';
  * What other people made of this title.
  *
  * ---------------------------------------------------------------------------
- * THE HEADING IS BACK, AND FOLLOWING LEADS (founder, 2026-09-07)
+ * THE HEADING IS BACK (founder, 2026-09-07), AND THE ORDER OF THE OTHER TWO
  *
  * **`SCORES`.** It was removed on 2026-09-06 on the argument that the units name
  * themselves, and that is true of each unit and not of the pair: two circles with words
@@ -77,11 +77,21 @@ const SCORE_LOADING = 'Score loading';
  * *different question* is being answered from here down. It also gives the block a
  * landmark a screen reader can jump to, which no arrangement of two units does.
  *
- * **Following first.** It ran bingd.-then-Following since the Preview pass. The founder's
- * order is the other way round now, and the reason is which number is worth more to the
- * person holding the phone: a mean over accounts they chose to follow is a signal about
- * their own taste, and the app-wide mean is a fact about the app. The narrower, more
- * personal reading leads; the broader one is the comparison beside it.
+ * **bingd. before Following, since 2026-09-13** (founder). The order has now run both ways
+ * and the history is worth keeping, because each reason was real. It was bingd.-then-
+ * Following from the Preview pass, then Following-first from 2026-09-07, on the reading
+ * that a mean over accounts the reader chose to follow is a signal about their own taste.
+ *
+ * The reason it reverses again is **sample**. On this app today a reader follows a
+ * handful of people, so Following is usually one or two ratings and often none, while
+ * bingd. is the widest population any score on the page is drawn from. The unit beside
+ * `Your score` is the one a reader compares their own number against first, and a
+ * comparison is only as good as what it rests on — so the broader, better-supported number
+ * leads and the personal one follows it. The sample count under each is unchanged and is
+ * what tells a reader how much weight either can bear.
+ *
+ * The same order everywhere this row appears: the visual row, the reading order, and the
+ * accessibility order are all the source order below, so they cannot disagree.
  *
  * ---------------------------------------------------------------------------
  * THE ROW SCROLLS SIDEWAYS, AND WHY THAT REPLACED THE RESPONSIVE FALLBACK
@@ -123,10 +133,10 @@ const SCORE_LOADING = 'Score loading';
  *
  * What that buys is the thing neither arrangement had. A score beside a poster is a
  * number with nothing to measure it against; the same number as the first of three is a
- * comparison the reader can read straight across — **me, then the people I chose, then
- * the room.** That progression is the section, and the section is the reason the page
- * exists. It is also why the order is fixed and not sorted: it is a hierarchy of
- * relevance to one reader, not a leaderboard.
+ * comparison the reader can read straight across — **me, then everyone on bingd., then the
+ * people I chose** (the middle two swapped on 2026-09-13; see above). That progression is
+ * the section, and the section is the reason the page exists. It is also why the order is
+ * fixed and not sorted: it is a hierarchy, not a leaderboard.
  *
  * The three carry **no bucket word, no rank and no watch date**. Those were all proposed
  * for the cell under `Your score` and the founder cut them: the first is jargon this
@@ -210,7 +220,7 @@ export function ScoresSection({
       </Text>
 
       <View testID="scores-layout" style={styles.layout}>
-          {/* Me, then the people I chose, then the room. The order is the whole
+          {/* Me, then everyone on bingd., then the people I chose. The order is the whole
               argument for moving the personal score in here: on the poster it was a
               number beside artwork with nothing to compare it to, and here it is the
               first term of a comparison the reader can actually read left to right. */}
@@ -239,22 +249,6 @@ export function ScoresSection({
               onPress={you.onPress}
             />
           ) : null}
-          {following ? (
-            <Score
-              score={following.score}
-              // Outlined at any count, as bingd. now is too: there is one treatment for
-              // a stated number on this row and one for the absence of one.
-              variant="outlined"
-              label="Following"
-              // The same words bingd. uses. The label above already says whose ratings
-              // these are, so counting people spent two extra lines restating it.
-              detail={ratingsDetail(following.ratingCount)}
-              emptyLabel={NO_FOLLOWING}
-              onPress={
-                following.ratingCount > 0 && onPressFollowing ? onPressFollowing : undefined
-              }
-            />
-          ) : null}
           {bingd ? (
             <Score
               score={bingd.score}
@@ -276,6 +270,22 @@ export function ScoresSection({
               label="bingd."
               detail={ratingsDetail(bingd.ratingCount)}
               emptyLabel={NOT_ENOUGH}
+            />
+          ) : null}
+          {following ? (
+            <Score
+              score={following.score}
+              // Outlined at any count, as bingd. now is too: there is one treatment for
+              // a stated number on this row and one for the absence of one.
+              variant="outlined"
+              label="Following"
+              // The same words bingd. uses. The label above already says whose ratings
+              // these are, so counting people spent two extra lines restating it.
+              detail={ratingsDetail(following.ratingCount)}
+              emptyLabel={NO_FOLLOWING}
+              onPress={
+                following.ratingCount > 0 && onPressFollowing ? onPressFollowing : undefined
+              }
             />
           ) : null}
       </View>

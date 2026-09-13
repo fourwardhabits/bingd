@@ -616,6 +616,52 @@ export type AnalyticsEvent =
       props: { medium: 'movies' | 'tv'; size: number; repeat_count: number };
     }
 
+  // --- Similar, on a title page ---------------------------------------------
+  /**
+   * Somebody moved to the Similar tab on purpose.
+   *
+   * Two events and no more, because the question is a product question rather than a
+   * mechanism one: **is the title page a place people explore from**.
+   *
+   * **Since 2026-09-13 Similar is a film's default tab**, so arriving on a film is not
+   * this event — that is a page view, which the page already reports, and a film reader
+   * who never touches the tab row still sees the grid. What this counts is a *choice*:
+   * the tab pressed while something else was showing, which on a season or series page is
+   * the only way to reach it and on a film is coming back to it. `similar_title_opened`
+   * below is therefore the better signal on films, and this one on television.
+   *
+   * Emitted on the press. Deliberately **not** deferred until the grid settles — the
+   * reader's interest in the tab does not depend on the answer, and an event that waits
+   * for a network reply stops counting the opens that failed.
+   *
+   * `medium` rather than a source and a destination kind. They are the same thing by
+   * construction on this surface: a film's associations are films and a season's are its
+   * show's, resolved to `series` by the adapter, so a second property would be the first
+   * one spelled differently. `series` and `season` both report `tv` for the same reason
+   * For You's two walls do — the reader is on television either way.
+   *
+   * It is also the only property either Similar event carries, which is the tab being
+   * honest about itself: V1 shows the provider's list in the provider's order, so there
+   * is no mechanism of ours for a second property to describe.
+   */
+  | { name: 'similar_tab_opened'; props: { medium: 'movies' | 'tv' } }
+  /**
+   * Somebody opened a title *from* the Similar tab.
+   *
+   * The pair to the event above: opens over taps is whether the answers were any good.
+   *
+   * **There is deliberately no `personalized` property.** An earlier draft carried one,
+   * because the tab reranked its candidates through the For You scorer. It does not any
+   * more — the founder's V1 is the provider's order untouched (2026-09-12) — so the
+   * property would be a column of `false`, which is the kind of permanently-constant
+   * series this file refuses elsewhere. It comes back with the bounded rerank, if that
+   * ever ships, in the change that makes it mean something.
+   *
+   * No title id and no position. A destination would be a `media_item_id`, which is on
+   * the forbidden list, and an index would only be a rank of a thing that is not named.
+   */
+  | { name: 'similar_title_opened'; props: { medium: 'movies' | 'tv' } }
+
   // --- Weekly streak --------------------------------------------------------
   /**
    * The streak section was drawn on the reader's own profile, with what it said.
@@ -708,6 +754,9 @@ export const ANALYTICS_EVENTS = [
   'invite_auto_follow_succeeded',
   // 2026-09-10, the OAuth callback guard.
   'sign_in_redirect_rejected',
+  // 2026-09-11, the Similar tab on a title page.
+  'similar_tab_opened',
+  'similar_title_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -805,6 +854,18 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   // so a key that could hold one would put credentials on the wire. The sanitized
   // scheme/host/path goes to the flight recorder and to Sentry instead.
   'problem',
+  /**
+   * Which of the two media the reader is on — `movies` or `tv` (2026-09-11, Similar).
+   *
+   * **Adding it here also lets `for_you_slate_shown.medium` reach the wire**, which it
+   * has not been doing: that event declared the property in its type and the key was
+   * never added to this list, so `sanitize` has been dropping it since the event
+   * shipped. The same is true of `size` and `repeat_count` there, and of the three
+   * `streak_state_viewed` properties — deliberately left alone here rather than fixed in
+   * passing, because each is a live series whose shape changing is a decision of its
+   * own. This one is added because the Similar events below are unreadable without it.
+   */
+  'medium',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

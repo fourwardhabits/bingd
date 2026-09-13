@@ -40,6 +40,22 @@ const topRated = async (medium, limit = 20, cursor = null) =>
 
 before(async () => {
   t = await createTestDb();
+  /**
+   * **A fixed bar of five for this shared database**, and the reason it has to be pinned.
+   *
+   * Since 20260916000200 the bar is `community_support_floor`: the 90th percentile of
+   * rating count, floored at `discovery.support_min_ratings`. That is a fact about every
+   * title in the database, so on a database every test in this file adds to, the bar would
+   * move with whichever tests had already run — and a boundary assertion that depends on
+   * test order is not a boundary assertion.
+   *
+   * A percentile of 0 is the smallest rating count present, which in this file is always
+   * at or under five, so the floor decides and the bar is exactly five throughout. The
+   * percentile itself is proved on databases of their own in `the shared support floor`
+   * at the foot of this file.
+   */
+  await t.sql(`update app_config set value = '0'::jsonb where key = 'discovery.support_percentile'`);
+  await t.sql(`update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings'`);
 });
 
 after(async () => {
@@ -110,12 +126,12 @@ describe('top_rated_titles', () => {
 
     // And the floor is the config row rather than a literal, so moving it moves the wall.
     await t.sql(
-      `update app_config set value = '4'::jsonb where key = 'discovery.top_rated_min_ratings'`,
+      `update app_config set value = '4'::jsonb where key = 'discovery.support_min_ratings'`,
     );
     const relaxed = (await topRated('movies')).map((row) => row.media_item_id);
     assert.ok(relaxed.includes(four), 'lowering the config row admits the four-rating title');
     await t.sql(
-      `update app_config set value = '5'::jsonb where key = 'discovery.top_rated_min_ratings'`,
+      `update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings'`,
     );
   });
 
@@ -375,6 +391,216 @@ describe('top_rated_titles', () => {
     await t.asAnon(async () => {
       const error = await t.errorFrom(`select * from top_rated_titles('movies', 5)`);
       assert.ok(error, 'anon has no grant on this function');
+    });
+  });
+});
+
+/**
+ * The shared support floor (20260916000200).
+ *
+ * `top_rated_titles` and `starter_movies` rank the catalogue by the same community score,
+ * and until this migration each had its own idea of how many ratings made that score worth
+ * ranking by — a fixed five on one, a percentile on the other. The founder's rule is one
+ * floor, dynamic, used by both: max(90th percentile of per-title rating count, 3).
+ *
+ * Every case here builds its own database. The floor is a fact about every title in it,
+ * so a shared population would make each assertion depend on what the others left behind
+ * — and, as `starter-movies.test.mjs` records, **the seed has to put the percentile above
+ * the floor**, or a green run proves only the floor.
+ */
+describe('the shared support floor', () => {
+  const own = async (body) => {
+    const db = await createTestDb();
+    try {
+      await body(db);
+    } finally {
+      await db.close();
+    }
+  };
+
+  let ownSeq = 830000;
+  const ownMovie = (db, title) => db.createMovie(title, ownSeq++);
+  const ownRank = (db, id, bucket) => db.rankToCompletion(id, bucket, async (pivot) => pivot);
+  const floorOf = async (db, kind) =>
+    (await db.sql(`select community_support_floor($1::media_kind) as k`, [kind])).rows[0].k;
+
+  it('is the 90th percentile when that is above the floor, and both surfaces apply it', async () => {
+    await own(async (db) => {
+      // Sixteen raters. One film everybody ranks, one five of them rank, one a single
+      // person ranks. percentile_disc(0.9) over {16, 5, 1} is 16, which is above the
+      // floor of three — the only arrangement in which the percentile, not the floor,
+      // is what decides.
+      const raters = [];
+      for (let i = 0; i < 16; i += 1) raters.push(await db.createUser({ username: `sf${i}` }));
+
+      const everybody = await ownMovie(db, 'Ranked By Everybody');
+      const handful = await ownMovie(db, 'Ranked By Five');
+      const one = await ownMovie(db, 'Ranked By One');
+
+      for (const [index, who] of raters.entries()) {
+        await db.actAs(who);
+        await ownRank(db, everybody, 'fine');
+        if (index < 5) await ownRank(db, handful, 'loved');
+        if (index === 0) await ownRank(db, one, 'loved');
+      }
+
+      assert.equal(await floorOf(db, 'movie'), 16, 'the percentile, not the floor of three');
+
+      const reader = await db.createUser({ username: 'sfreader' });
+      await db.actAs(reader);
+
+      const top = (
+        await db.sql(`select * from top_rated_titles('movies', 50, null, null, null)`)
+      ).rows;
+      assert.deepEqual(
+        top.map((row) => row.media_item_id),
+        [everybody],
+        'five ratings is over the floor and under the percentile, so only one title survives',
+      );
+      assert.equal(top[0].min_ratings, 16);
+
+      const starter = (await db.sql(`select * from starter_movies(60)`)).rows;
+      const community = starter.filter((row) => row.source === 'community');
+      assert.deepEqual(community.map((row) => row.media_item_id), [everybody]);
+
+      // The assertion the migration exists for: one floor, not two that happen to agree.
+      assert.ok(
+        starter.every((row) => row.min_ratings === top[0].min_ratings),
+        'Top Rated and the onboarding picker report the same bar',
+      );
+    });
+  });
+
+  it('filters by support first, so a perfect score on thin support never leads', async () => {
+    await own(async (db) => {
+      // The founder's case exactly: a 10.0 carried by one rating must not sit above a
+      // broadly ranked title that scores lower. Filter, then sort.
+      const raters = [];
+      for (let i = 0; i < 4; i += 1) raters.push(await db.createUser({ username: `thin${i}` }));
+
+      const broad = await ownMovie(db, 'Broadly Liked');
+      const fluke = await ownMovie(db, 'One Perfect Score');
+
+      for (const who of raters) {
+        await db.actAs(who);
+        await ownRank(db, broad, 'fine');
+      }
+      await db.actAs(raters[0]);
+      await ownRank(db, fluke, 'loved');
+
+      const reader = await db.createUser({ username: 'thinreader' });
+      await db.actAs(reader);
+      const top = (await db.sql(`select * from top_rated_titles('movies', 50, null, null, null)`))
+        .rows;
+
+      assert.ok(top.some((row) => row.media_item_id === broad));
+      assert.ok(!top.some((row) => row.media_item_id === fluke), 'one rating does not qualify');
+    });
+  });
+
+  it('reads movies and TV seasons as separate distributions', async () => {
+    await own(async (db) => {
+      // Movies get a percentile of 16. TV is far thinner, and a season ranked by three
+      // people must not be held to a bar the film wall set.
+      const raters = [];
+      for (let i = 0; i < 16; i += 1) raters.push(await db.createUser({ username: `md${i}` }));
+
+      const film = await ownMovie(db, 'A Film Everybody Ranked');
+      const show = await db.createSeries('A Thin Show', ownSeq++);
+      const season = await db.createSeason(show, 1, 'Season 1');
+
+      for (const [index, who] of raters.entries()) {
+        await db.actAs(who);
+        await ownRank(db, film, 'fine');
+        if (index < 3) await ownRank(db, season, 'loved');
+      }
+
+      assert.equal(await floorOf(db, 'movie'), 16);
+      assert.equal(await floorOf(db, 'season'), 3, 'the floor decides for a thin medium');
+
+      await db.actAs(raters[0]);
+      const tv = (await db.sql(`select * from top_rated_titles('tv', 50, null, null, null)`)).rows;
+      assert.deepEqual(tv.map((row) => row.media_item_id), [season]);
+    });
+  });
+
+  it('clamps an out-of-range percentile instead of taking both walls down', async () => {
+    await own(async (db) => {
+      const who = await db.createUser({ username: 'clamp' });
+      const film = await ownMovie(db, 'Clamped');
+      await db.actAs(who);
+      await ownRank(db, film, 'loved');
+
+      // `percentile_disc` raises outside [0, 1]. An operator typo in one row must cost a
+      // sensible bar, never an exception from Top Rated and onboarding at once.
+      await db.sql(`update app_config set value = '5'::jsonb where key = 'discovery.support_percentile'`);
+      assert.equal(await floorOf(db, 'movie'), 3);
+      assert.equal(
+        await db.errorFrom(`select * from top_rated_titles('movies', 5, null, null, null)`),
+        null,
+      );
+
+      await db.sql(`update app_config set value = '-1'::jsonb where key = 'discovery.support_percentile'`);
+      await db.sql(`update app_config set value = '0'::jsonb where key = 'discovery.support_min_ratings'`);
+      assert.equal(await floorOf(db, 'movie'), 1, 'and a floor below one is raised to one');
+    });
+  });
+
+  it('treats a malformed config row as absent, so neither wall can be taken down by one', async () => {
+    /**
+     * Independent review 81 (P1). Two surfaces stand on these rows now, and a row that
+     * raised inside the floor would fail Top Rated and the onboarding picker together.
+     * `(value)::numeric` on a jsonb string or object raises rather than returning null, so
+     * each shape is written in turn and both callers must still answer — on the documented
+     * defaults, or on a clamp, never with an exception.
+     */
+    await own(async (db) => {
+      const who = await db.createUser({ username: 'malformed' });
+      const film = await ownMovie(db, 'Malformed Config');
+      await db.actAs(who);
+      await ownRank(db, film, 'loved');
+
+      const cases = [
+        // [percentile row, min row, expected floor]
+        [`'"0.9"'`, `'"3"'`, 3], // strings: absent, so the defaults
+        [`'{"p": 0.9}'`, `'[3]'`, 3], // object and array: absent
+        [`'true'`, `'null'`, 3], // boolean and JSON null: absent
+        [`'0.9'`, `'2.5'`, 2], // a fractional minimum is floored to a whole count
+        [`'0.9'`, `'1000000000000'`, 1000000], // an enormous minimum is clamped before the cast
+      ];
+
+      for (const [pct, min, expected] of cases) {
+        await db.sql(`update app_config set value = ${pct}::jsonb where key = 'discovery.support_percentile'`);
+        await db.sql(`update app_config set value = ${min}::jsonb where key = 'discovery.support_min_ratings'`);
+
+        assert.equal(await floorOf(db, 'movie'), expected, `percentile ${pct}, minimum ${min}`);
+        assert.equal(
+          await db.errorFrom(`select * from top_rated_titles('movies', 5, null, null, null)`),
+          null,
+          `top_rated_titles must answer with percentile ${pct}, minimum ${min}`,
+        );
+        await db.actAs(who);
+        assert.equal(
+          await db.errorFrom(`select * from starter_movies(5)`),
+          null,
+          `starter_movies must answer with percentile ${pct}, minimum ${min}`,
+        );
+      }
+    });
+  });
+
+  it('is internal: no client role can call it directly', async () => {
+    await own(async (db) => {
+      const who = await db.createUser({ username: 'floorcaller' });
+      await db.asUser(who, async () => {
+        assert.ok(
+          await db.errorFrom(`select community_support_floor('movie'::media_kind)`),
+          'a signed-in client has no grant',
+        );
+      });
+      await db.asAnon(async () => {
+        assert.ok(await db.errorFrom(`select community_support_floor('movie'::media_kind)`));
+      });
     });
   });
 });

@@ -654,7 +654,9 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 
 **It is `community_score` asked about the catalogue rather than about one title**, and that is the contract: same population (public, active, not blocked in either direction), same `score_for` arithmetic over the same band bounds. `supabase/tests/top-rated.test.mjs` asserts the two agree title by title, because two community scores is the failure this function could introduce.
 
-Eligibility is `app_config discovery.top_rated_min_ratings` (seeded 5), which is deliberately **not** `score.community_min_ratings` (1). The second decides whether a title page may print a number at all; the first decides whether a title is worth recommending on the strength of it. One row per question.
+Eligibility is `community_support_floor(kind)` (since `20260916000200`): max(`percentile_disc(discovery.support_percentile)` of per-title rating count over titles of that kind with at least one rating, `discovery.support_min_ratings`), seeded 0.9 and 3. It replaced the fixed `discovery.top_rated_min_ratings` of 5, and `starter_movies` calls the same function, so Top Rated and the onboarding picker cannot hold titles to different bars. The distribution is the platform’s rather than the caller’s — it ignores blocks — so every reader sees the same cutoff; each title’s own count still excludes the caller’s blocks. The floor is deliberately **not** `score.community_min_ratings` (1): that decides whether a title page may print a number at all, this decides whether a title may be ranked by it. `community_support_floor` is internal and revoked from every client role.
+
+Supported titles are filtered first and the survivors sorted; a 10.0 on one rating never reaches the wall.
 
 Ordering is `score desc, rating_count desc, media_item_id asc` — a total order whose last term cannot change. Pagination is keyset: the cursor is all three values from the last row of the previous page, or none of them for the first. Supplying some but not all raises `22023` rather than silently returning an empty page, because a row comparison containing NULL is NULL rather than false.
 
