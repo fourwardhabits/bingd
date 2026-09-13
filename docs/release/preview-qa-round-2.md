@@ -12,12 +12,12 @@ Android `8e8731a2…`), so this is an OTA, not a binary.
 the preview OTA. The OTA calls `profile_title_counts`; the migration's poster nudge calls the
 new `tmdb-adapter`.
 
-**Published 2026-09-13** from integration `0a4fb05` (preview branch):
+**Published 2026-09-13** from integration `4583f2a` (preview branch). This is the build to QA; it supersedes the earlier round-2 update from `0a4fb05` (groups `fce0e8e6…` / `d74f4bc6…`), which lacked the First Five discovery lock.
 
 | platform | runtime | update group | update id |
 |---|---|---|---|
-| iOS | `aa3056e7…` | `fce0e8e6-5b8c-4ef7-a498-91972cda93d8` | `01a09ba8-91b2-79ba-8db4-97e54ba7e2e8` |
-| Android | `8e8731a2…` | `d74f4bc6-ea54-4fca-9bda-7ec4a215cf04` | `01a09ba8-91b2-79ae-a4cf-a348aecabb2e` |
+| iOS | `aa3056e7…` | `e5bf46c3-27da-43ac-83e7-fef3af03213e` | `01a09bf2-87ae-76ef-8feb-ea34509117e6` |
+| Android | `8e8731a2…` | `5ad3a491-c8cb-45ee-85a0-178ffcbe6183` | `01a09bf2-87ae-7eb6-8ec8-a4cf99cb9e17` |
 
 Staging was brought up first: the three functions deployed, then migrations `20260917001400`–`001600` applied.
 
