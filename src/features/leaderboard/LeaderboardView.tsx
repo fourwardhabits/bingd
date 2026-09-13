@@ -93,26 +93,43 @@ export function LeaderboardView({
         ))}
       </View>
 
-      {loading ? (
-        <View style={styles.padded}>
-          <SkeletonRow />
-          <SkeletonRow />
-          <SkeletonRow />
-        </View>
-      ) : rows.length === 0 ? (
-        <View style={styles.padded}>
-          <EmptyState kind="nothingYet" title={empty.title} body={empty.body} />
-        </View>
-      ) : (
-        <View>
-          {rows.map((entry, index) => (
+      {/**
+        * **One content container for every state and every metric** (founder physical QA,
+        * 2026-09-14).
+        *
+        * Switching Titles · Movies · TV · Reviews moved the board. The loading and empty
+        * states each sat in a wrapper with 16pt of extra top padding and a second horizontal
+        * inset — `SkeletonRow` already pads its own rows to the gutter — and the loading
+        * state drew eighteen skeleton rows (three `SkeletonRow`s of six). So a switch went
+        * rows at the top → a taller skeleton 16pt lower → rows at the top again. And a metric
+        * with nobody on it drew `EmptyState` at full size, whose `title2` heading read as a
+        * section header that the metrics with rows did not have — which is the "Titles looks
+        * different" the founder saw: Titles usually has rows, and a sparse metric usually
+        * does not.
+        *
+        * Now every state starts in this container at the same top: rows at its top edge,
+        * the skeleton's own rows at its top edge, and the empty state inset by exactly a
+        * row's vertical padding so its first line sits where a row's name would. The empty
+        * state is the compact one, so no metric grows a heading the others lack. What still
+        * differs between metrics is row content, which is the one difference the board is
+        * allowed.
+        */}
+      <View testID="leaderboard-content">
+        {loading ? (
+          <SkeletonRow count={5} />
+        ) : rows.length === 0 ? (
+          <View testID="leaderboard-empty" style={styles.emptyInset}>
+            <EmptyState kind="nothingYet" compact title={empty.title} body={empty.body} />
+          </View>
+        ) : (
+          rows.map((entry, index) => (
             <View key={entry.id}>
               {index > 0 ? <Divider /> : null}
               <LeaderboardRow entry={entry} metric={metric} onPress={onPressPerson} />
             </View>
-          ))}
-        </View>
-      )}
+          ))
+        )}
+      </View>
 
       {/* Only when they are not already above. A second copy of a row the reader can
           see is the duplication the founder asked to avoid, and `isYou` is what makes
@@ -329,7 +346,9 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
     paddingBottom: theme.space[2],
   },
-  padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  // The gutter a row pads itself to, and a row's own top padding, so the empty state's first
+  // line starts where a row's name would. See the content container above.
+  emptyInset: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

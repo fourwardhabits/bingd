@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, waitFor } from '@testing-library/react-native';
-import { BackHandler, StyleSheet, type ViewStyle } from 'react-native';
+import { BackHandler, StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -35,16 +35,11 @@ import FeedScreen from '../../../app/(tabs)/feed';
  */
 
 const mockRpc = jest.fn();
-/**
- * Catalogue rows, for the Top Titles board — which resolves the RPC's ids through a
- * `media_items` read. Every other table still answers empty, as it always has here.
- */
-const mockMediaItems: Record<string, unknown>[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: Record<string, unknown>) => mockRpc(name, args),
-    from: (table: string) => {
+    from: () => {
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
@@ -54,10 +49,7 @@ jest.mock('@/lib/supabase', () => ({
         order: () => chain,
         limit: () => chain,
         then: (resolve: (value: unknown) => unknown) =>
-          Promise.resolve({
-            data: table === 'media_items' ? mockMediaItems : [],
-            error: null,
-          }).then(resolve),
+          Promise.resolve({ data: [], error: null }).then(resolve),
       };
       return chain;
     },
@@ -207,7 +199,6 @@ beforeEach(() => {
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
-  mockMediaItems.length = 0;
 
   mockRpc.mockReset();
   mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
@@ -460,6 +451,147 @@ describe('the timeframe, remembered — and the mode, not', () => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The Leaderboard is people competing (founder physical QA, 2026-09-14).
+ *
+ * A `People | Top Titles` tab row sat on this board for one OTA and was removed: a
+ * community-score list beside a people competition was a second surface for what For You's
+ * Top Rated walls already show. Asserted as absences, because the regression would be the
+ * tab row or its read quietly coming back.
+ */
+describe('the board is people only', () => {
+  it('draws no Top Titles tab and no board tab row at all', async () => {
+    const view = await open();
+    await toBoard(view);
+
+    expect(view.queryByText('Top Titles')).toBeNull();
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
+    // The People board's own furniture is all still there.
+    expect(view.getByLabelText('Showing This month')).toBeTruthy();
+    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+      expect(view.getByText(label)).toBeTruthy();
+    }
+  });
+
+  it('reads no community-score list from the board', async () => {
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() =>
+      expect(mockRpc.mock.calls.some(([name]) => name === 'leaderboard')).toBe(true),
+    );
+
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'top_rated_titles')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **One layout skeleton for every metric** (founder physical QA, 2026-09-14).
+ *
+ * The report: Titles looked different from the other three, and the board jumped when a
+ * chip was pressed. Reproduced in the code rather than guessed at — three causes, each
+ * pinned below:
+ *
+ *   1. The loading skeleton and the empty state sat in a wrapper with 16pt of extra top
+ *      padding (and a second horizontal inset), while rows sat at the top. Rows on one
+ *      metric and no rows on another started at different heights.
+ *   2. The empty state was full-size, so a metric nobody was on drew a `title2` heading the
+ *      metrics with rows did not have — Titles, which usually has rows, looked headerless.
+ *   3. A metric switch is a new query key, so the rows collapsed to eighteen skeleton rows
+ *      and came back: the visible jump, even when both metrics had rows.
+ */
+describe('switching metrics keeps the board still', () => {
+  /** Every style a node carries, flattened, so geometry can be compared. */
+  const styleOf = (node: { props: { style?: unknown } }) =>
+    (StyleSheet.flatten(node.props.style as never) ?? {}) as ViewStyle;
+
+  it('starts every state in one content container, at the same top', async () => {
+    // Titles has people on it; Reviews has nobody. The two states that used to start at
+    // different heights.
+    mockBoard['titles|month'] = [entry()];
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    const withRows = view.getByTestId('leaderboard-content');
+    expect(styleOf(withRows).paddingTop ?? 0).toBe(0);
+    expect(styleOf(withRows).marginTop ?? 0).toBe(0);
+
+    await fireEvent.press(view.getByText('Reviews'));
+    await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
+
+    const empty = view.getByTestId('leaderboard-content');
+    expect(styleOf(empty).paddingTop ?? 0).toBe(0);
+    expect(styleOf(empty).marginTop ?? 0).toBe(0);
+    // The empty state is inset by exactly a row's own vertical padding, so its first line
+    // sits where a row's name would — not the extra 16pt that moved it.
+    const inset = styleOf(view.getByTestId('leaderboard-empty'));
+    expect(inset.paddingTop).toBe(theme.space[3]);
+    expect(inset.paddingHorizontal).toBe(theme.layout.gutter);
+  });
+
+  it('never draws a heading on an empty metric that a metric with rows lacks', async () => {
+    // The empty state's title is the compact `callout`, not the `title2` that read as a
+    // section header on sparse metrics only.
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('No watches yet this month.')).toBeTruthy());
+
+    const title = view.getByText('No watches yet this month.');
+    expect((styleOf(title) as TextStyle).fontSize).toBeLessThan(22);
+  });
+
+  it('keeps the current rows on screen while the next metric loads, instead of a skeleton', async () => {
+    mockBoard['titles|month'] = [entry()];
+    mockBoard['movies|month'] = [entry({ username: 'bea', display_name: 'Bea' })];
+    // The movies read is parked, so the moment between pressing the chip and the answer
+    // is observable — the moment the board used to collapse.
+    let release: () => void = () => {};
+    const parked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'leaderboard' && args.p_metric === 'movies'
+        ? parked.then(() => base(name, args))
+        : base(name, args),
+    );
+
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Movies'));
+
+    // In flight: the Titles rows stay exactly where they were, and no skeleton replaces them.
+    expect(view.getByText('Ada')).toBeTruthy();
+    expect(view.queryAllByTestId('skeleton-row', { includeHiddenElements: true })).toHaveLength(0);
+
+    release();
+    await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
+    expect(view.queryByText('Ada')).toBeNull();
+  });
+
+  it('still shows a skeleton the first time the board has nothing to keep', async () => {
+    // Keeping the previous board is for a switch; a board opened for the first time has no
+    // previous rows, and a blank area would read as empty rather than loading.
+    const base = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'leaderboard' ? new Promise(() => {}) : base(name, args),
+    );
+
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() =>
+      expect(view.getAllByTestId('skeleton-row', { includeHiddenElements: true }).length).toBe(5),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('the metrics', () => {
   it('offers exactly the four, in the founder’s order', async () => {
     const view = await open();
@@ -488,204 +620,6 @@ describe('the metrics', () => {
       p_timeframe: 'all_time',
       p_limit: 50,
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-
-/**
- * People | Top Titles (founder, 2026-09-13).
- *
- * The second board is added *beside* the first, and the half of this block that matters
- * most is the People half: every behaviour the tests above pin — This month by default, the
- * remembered timeframe, the four metrics, Match — must be exactly what it was, and the new
- * board must not disturb any of it on the way in or out.
- *
- * The RPC is mocked at the boundary, so the Top Titles read is asserted as the call the
- * server sees: `top_rated_titles` for the medium, one board-length page, no cursor. There is
- * no client ordering to test because there is none — the server's floor and order are
- * `supabase/tests/top-rated.test.mjs`'s subject.
- */
-describe('Top Titles beside People', () => {
-  const topRow = (id: string, score: number, count: number) => ({
-    media_item_id: id,
-    score,
-    rating_count: count,
-    min_ratings: 3,
-  });
-  const media = (id: string, title: string, over: Record<string, unknown> = {}) => ({
-    id,
-    title,
-    season_number: null,
-    release_date: '2019-05-30',
-    poster_path: `/${id}.jpg`,
-    runtime_minutes: 120,
-    kind: 'movie',
-    genres: ['Drama'],
-    original_language: 'en',
-    certification: null,
-    parent: null,
-    ...over,
-  });
-
-  const withTopTitles = () => {
-    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
-      if (name === 'top_rated_titles') {
-        return Promise.resolve({
-          data:
-            args.p_medium === 'movies'
-              ? [topRow('m-1', 9.2, 12), topRow('m-2', 8.4, 30)]
-              : [topRow('s-1', 8.8, 4)],
-          error: null,
-        });
-      }
-      if (name === 'leaderboard') {
-        return Promise.resolve({ data: mockBoard[boardKey(args)] ?? [], error: null });
-      }
-      if (name === 'my_leaderboard_standing') {
-        return Promise.resolve({
-          data: [{ metric_count: 0, rank: null, entrants: 0 }],
-          error: null,
-        });
-      }
-      return Promise.resolve({ data: [], error: null });
-    });
-    mockMediaItems.push(
-      media('m-1', 'Parasite'),
-      media('m-2', 'Past Lives'),
-      media('s-1', 'Season 2', {
-        kind: 'season',
-        season_number: 2,
-        parent: { title: 'The Bear', genres: ['Comedy'], original_language: 'en' },
-      }),
-    );
-  };
-
-  const toTopTitles = async (view: View) => {
-    await fireEvent.press(view.getByRole('tab', { name: 'Top Titles' }));
-  };
-
-  it('opens the Leaderboard on People, with its timeframe and its four metrics', async () => {
-    const view = await open();
-    await toBoard(view);
-
-    expect(view.getByRole('tab', { name: 'People' }).props.accessibilityState).toMatchObject({
-      selected: true,
-    });
-    expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
-      expect(view.getByText(label)).toBeTruthy();
-    }
-  });
-
-  it('shows no timeframe on Top Titles, and Movies and TV instead of the metrics', async () => {
-    withTopTitles();
-    const view = await open();
-    await toBoard(view);
-    await toTopTitles(view);
-
-    await waitFor(() => expect(view.queryByLabelText('Showing This month')).toBeNull());
-    expect(view.getByText('Movies')).toBeTruthy();
-    expect(view.getByText('TV')).toBeTruthy();
-    // The people board's metrics are the people board's.
-    expect(view.queryByText('Reviews')).toBeNull();
-  });
-
-  it('reads top_rated_titles for movies as one board-length page', async () => {
-    withTopTitles();
-    const view = await open();
-    await toBoard(view);
-    await toTopTitles(view);
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('top_rated_titles', {
-        p_medium: 'movies',
-        p_limit: 50,
-        p_after_score: null,
-        p_after_count: null,
-        p_after_id: null,
-      }),
-    );
-  });
-
-  it('draws each title with its rank, bingd. score and sample, and opens it', async () => {
-    withTopTitles();
-    const view = await open();
-    await toBoard(view);
-    await toTopTitles(view);
-
-    const first = await waitFor(() =>
-      view.getByRole('button', {
-        name: 'Number 1, Parasite, 2019, bingd. score 9.2 out of 10, 12 ratings',
-      }),
-    );
-    // In the server's order: a higher score on fewer ratings still leads, because the
-    // floor has already admitted both and the survivors are sorted by score.
-    expect(
-      view.getByRole('button', {
-        name: 'Number 2, Past Lives, 2019, bingd. score 8.4 out of 10, 30 ratings',
-      }),
-    ).toBeTruthy();
-
-    await fireEvent.press(first);
-    expect(mockPush).toHaveBeenCalledWith('/title/m-1');
-  });
-
-  it('reads TV as seasons, named with their show', async () => {
-    withTopTitles();
-    const view = await open();
-    await toBoard(view);
-    await toTopTitles(view);
-    await waitFor(() => expect(view.getByText('TV')).toBeTruthy());
-
-    await fireEvent.press(view.getByText('TV'));
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith(
-        'top_rated_titles',
-        expect.objectContaining({ p_medium: 'tv' }),
-      ),
-    );
-    await waitFor(() => expect(view.getByText('The Bear, S2 (2019)')).toBeTruthy());
-  });
-
-  it('does not read the people board while Top Titles is on screen', async () => {
-    withTopTitles();
-    const view = await open();
-    await toBoard(view);
-    await waitFor(() =>
-      expect(mockRpc.mock.calls.some(([name]) => name === 'leaderboard')).toBe(true),
-    );
-    await toTopTitles(view);
-    await waitFor(() =>
-      expect(mockRpc.mock.calls.some(([name]) => name === 'top_rated_titles')).toBe(true),
-    );
-
-    const peopleReads = mockRpc.mock.calls.filter(([name]) => name === 'leaderboard').length;
-    // A pull on Top Titles re-reads Top Titles, and wakes nothing on the hidden board.
-    const scroll = view.getByTestId('feed-scroll');
-    await scroll.props.refreshControl.props.onRefresh();
-
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'leaderboard')).toHaveLength(peopleReads);
-  });
-
-  it('comes back to People on the timeframe and metric the reader left it on', async () => {
-    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
-    mockBoard['reviews|all_time'] = [entry({ username: 'bea', display_name: 'Bea' })];
-    withTopTitles();
-    const view = await open();
-    await toBoard(view, 'All time');
-    await fireEvent.press(view.getByText('Reviews'));
-    await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
-
-    await toTopTitles(view);
-    await waitFor(() => expect(view.queryByText('Bea')).toBeNull());
-    await fireEvent.press(view.getByRole('tab', { name: 'People' }));
-
-    await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
-    expect(view.getByLabelText('Showing All time')).toBeTruthy();
-    // And nothing about switching boards was written to the timeframe preference.
-    expect(mockPrefWrites).toHaveLength(0);
   });
 });
 

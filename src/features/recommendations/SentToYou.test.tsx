@@ -216,7 +216,7 @@ describe('the wall and the list', () => {
     // Asserted on the category control rather than on a heading, because the headings
     // are gone: a screen reached from a tab called For you does not need a band of
     // prose saying For you.
-    await waitFor(() => expect(view.getByText('Movies')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Recommended Movies')).toBeTruthy());
     expect(view.queryByText('Inception')).toBeNull();
     expect(view.queryByText('For you')).toBeNull();
     expect(view.queryByText('Based on your taste')).toBeNull();

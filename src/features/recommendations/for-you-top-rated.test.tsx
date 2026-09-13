@@ -215,7 +215,7 @@ describe('choosing Top Rated', () => {
 
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('The Highest, 2014')).toBeTruthy());
-    await choose(view, 'Movies');
+    await choose(view, 'Recommended Movies');
 
     // It was on when Top Rated was chosen. Restoring it would draw a list of things
     // people sent this reader under a control they last pressed to leave that list.

@@ -190,8 +190,12 @@ describe('the one selector', () => {
 
     // Matched at the start rather than exactly: the chosen option carries a checkmark,
     // and the glyph is a `Text` node that lands in the accessible name behind the label.
-    expect(view.getByRole('button', { name: /^Movies/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^TV shows/ })).toBeTruthy();
+    // Founder physical QA, 2026-09-14: every entry names its list. The bare `Movies` and
+    // `TV shows` are gone, because beside `Top Rated Movies` they did not say which list.
+    expect(view.getByRole('button', { name: /^Recommended Movies/ })).toBeTruthy();
+    expect(view.getByRole('button', { name: /^Recommended TV/ })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /^Movies/ })).toBeNull();
+    expect(view.queryByRole('button', { name: /^TV shows/ })).toBeNull();
     // Added 2026-09-09. The community's order is a different answer to "what am I
     // looking at", which is the question this control asks, so it lives here rather
     // than as a chip in the row below — see the screen's own note.
@@ -222,7 +226,7 @@ describe('the one selector', () => {
       .getAllByRole('button')
       .map((node) => within(node).getAllByText(/\S/)[0]?.props.children)
       .map((label) => String(label ?? ''));
-    expect(options).toEqual(['Movies', 'TV shows', 'Top Rated Movies', 'Top Rated TV']);
+    expect(options).toEqual(['Recommended Movies', 'Recommended TV', 'Top Rated Movies', 'Top Rated TV']);
     // The For You override. Collection lists the rankable unit, which is the season;
     // the *personalised* wall holds series, and calling them seasons here would name
     // something that is not on screen.
@@ -232,7 +236,7 @@ describe('the one selector', () => {
   it('opens on Movies and says which one it is showing', async () => {
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Showing Recommended Movies');
   });
 });
 
@@ -258,7 +262,7 @@ describe('People, which is no longer here', () => {
       expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
     );
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Showing Recommended Movies');
     expect(view.queryByText('Mutuals')).toBeNull();
     expect(view.queryByText('Match')).toBeNull();
     expect(view.queryByText('Ben + 2 more')).toBeNull();
@@ -296,9 +300,9 @@ describe('the title categories', () => {
 
   it('still draws them on TV shows', async () => {
     const view = await open();
-    await choose(view, 'TV shows');
+    await choose(view, 'Recommended TV');
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV shows'));
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
     expect(view.getByText(/^Sent to you/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
@@ -326,8 +330,8 @@ describe('crossing between the two categories', () => {
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
 
-    await choose(view, 'TV shows');
-    await waitFor(() => expect(showing(view)).toBe('Showing TV shows'));
+    await choose(view, 'Recommended TV');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
     expect(view.getByText('Filters · 1')).toBeTruthy();
   });
@@ -339,8 +343,8 @@ describe('crossing between the two categories', () => {
     await fireEvent.press(view.getByText(/^Sent to you/));
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
 
-    await choose(view, 'TV shows');
-    await waitFor(() => expect(showing(view)).toBe('Showing TV shows'));
+    await choose(view, 'Recommended TV');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
     // Still the list rather than the wall, which is what the chip being on means.
     expect(view.getByText('Heat (1995)')).toBeTruthy();
