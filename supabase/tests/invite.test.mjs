@@ -149,6 +149,34 @@ describe('the token', () => {
     const result = await call(`create_invite_link(gen_random_uuid())`);
     assert.ok(!result.token.includes(result.short_code.toLowerCase()));
   });
+
+  it('is minted without attributing anybody, however many times Share is tapped', async () => {
+    /**
+     * Tapping Invite friends mints a link and opens the share sheet, which the person may
+     * dismiss. Neither is an invitation accepted: `create_invite_link` writes the token
+     * and one `invite_link_creations` row per accepted call, and attribution belongs to
+     * `redeem_invite` alone. A mint that wrote an attribution would credit an inviter
+     * for opening a sheet.
+     */
+    const owner = await newUser('sharetapper');
+    const count = async (table, column) => {
+      const { rows } = await t.sql(
+        `select count(*)::int as n from ${table} where ${column} = $1`,
+        [owner],
+      );
+      return rows[0].n;
+    };
+    const { rows: before } = await t.sql(`select count(*)::int as n from invite_attributions`);
+
+    await mintLink(owner);
+    await mintLink(owner);
+
+    assert.equal(await count('invite_tokens', 'owner_id'), 1, 'one reusable token');
+    assert.equal(await count('invite_link_creations', 'inviter_id'), 2, 'one creation per call');
+    assert.equal(await count('invite_attributions', 'inviter_id'), 0);
+    const { rows: afterMint } = await t.sql(`select count(*)::int as n from invite_attributions`);
+    assert.equal(afterMint[0].n, before[0].n, 'no attribution row anywhere');
+  });
 });
 
 describe('redeem_invite', () => {
