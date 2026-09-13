@@ -936,16 +936,16 @@ function Results({
             // The design system's one section header: maroon label, compact, no card. The
             // See all on Cast and Users selects that chip, which is where the whole list
             // already is; Titles has none, because All is already the whole title list.
-            const section = SECTION_HEADERS[item.section];
-            return item.section === 'cast' || item.section === 'users' ? (
+            const { section } = item;
+            return section === 'cast' || section === 'users' ? (
               <SectionHeader
-                title={section.title}
+                title={SECTION_TITLES[section]}
                 actionLabel="See all"
-                actionAccessibilityLabel={section.seeAll}
-                onPressAction={() => onSeeAll(item.section as AllSection)}
+                actionAccessibilityLabel={SEE_ALL_LABELS[section]}
+                onPressAction={() => onSeeAll(section)}
               />
             ) : (
-              <SectionHeader title={section.title} />
+              <SectionHeader title={SECTION_TITLES[section]} />
             );
           }
           if (item.type === 'user') {
@@ -1251,12 +1251,13 @@ function CastResults({
  * Two See alls can be on one page, so each is named for what it opens: "See all" twice
  * is two controls a screen reader cannot tell apart.
  */
-const SECTION_HEADERS = {
-  titles: { title: 'Titles', seeAll: '' },
-  'more-titles': { title: 'More titles', seeAll: '' },
-  cast: { title: 'Cast', seeAll: 'See all cast' },
-  users: { title: 'Users', seeAll: 'See all users' },
+const SECTION_TITLES = {
+  titles: 'Titles',
+  'more-titles': 'More titles',
+  cast: 'Cast',
+  users: 'Users',
 } as const;
+const SEE_ALL_LABELS = { cast: 'See all cast', users: 'See all users' } as const;
 
 const styles = StyleSheet.create({
   /**

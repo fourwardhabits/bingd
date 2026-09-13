@@ -456,6 +456,32 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     expect(mockSearchProvider).toHaveBeenCalledTimes(1);
   });
 
+  it('holds the last performers while a refined query is still on its way', async () => {
+    // Dropping them on every keystroke made the Cast section vanish and return a second
+    // later, moving the rows below it. The screen re-checks each against the new query.
+    const leo = {
+      id: 6193,
+      name: 'Leonardo DiCaprio',
+      profilePath: null,
+      knownFor: [],
+      popularity: 7.8,
+    };
+    mockSearchProvider.mockResolvedValueOnce({ titles: [], people: [leo] });
+    const { result, rerender } = await renderHook<
+      ReturnType<typeof useTitleSearch>,
+      { q: string }
+    >(({ q }) => useTitleSearch(q), { initialProps: { q: 'leonardo dicaprio' } });
+    await waitFor(() => expect(result.current.providerPeople).toEqual([leo]));
+
+    // The next answer never arrives inside this test.
+    mockSearchProvider.mockImplementation(() => new Promise(() => {}));
+    await rerender({ q: 'leonardo' });
+    await wait(1000);
+
+    expect(mockSearchProvider).toHaveBeenLastCalledWith('leonardo', 20);
+    expect(result.current.providerPeople).toEqual([leo]);
+  });
+
   it('hands on no performers where the screen draws no titles', async () => {
     mockSearchProvider.mockResolvedValue({
       titles: [],

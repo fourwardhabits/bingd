@@ -259,6 +259,13 @@ export function useTitleSearch(
     },
   });
 
+  // The latest provider answer, held across the keystrokes before the next one lands.
+  // Adjusted during render rather than in an effect, which is React's pattern for state
+  // derived from a changing input: no extra commit, and no frame showing the old value.
+  const [held, setHeld] = useState(provider.data);
+  if (provider.data && provider.data !== held) setHeld(provider.data);
+  const heldPeople = held?.people ?? NO_PEOPLE;
+
   /** The server refused this hour, whether this query was the one refused or not. */
   // Not while this query's own answer is already held: a cached provider answer is still
   // shown during the cooldown, and calling that list "your catalogue only" would be false.
@@ -353,14 +360,17 @@ export function useTitleSearch(
     providerSearching: provider.isFetching,
     providerRateLimited: rateLimited,
     /**
-     * The performers the same provider answer named, for the Cast section under All.
+     * The performers the provider named, for the Cast section under All.
      *
-     * Only for the query on screen: the provider key lags the field by its debounce, and
-     * an earlier query's performers under a later query's titles would be a wrong answer
-     * rather than an early one. Ungated here; `all-sections.ts` decides who is shown.
+     * **The last answer's, until the next one lands.** The provider key lags the field by
+     * its debounce, and dropping the performers on every keystroke made the Cast section
+     * vanish and come back a second later while somebody refined a name, moving the rows
+     * below it each time (independent review). They are safe to hold because they are
+     * never shown ungated: `all-sections.ts` checks each against the query on screen, so
+     * "leonardo dicaprio" narrowed to "leonardo" keeps DiCaprio, and a different search
+     * entirely matches nobody and shows no section.
      */
-    providerPeople:
-      wide && providerQuery === providerQueryOf(query) ? (provider.data?.people ?? NO_PEOPLE) : NO_PEOPLE,
+    providerPeople: wide ? heldPeople : NO_PEOPLE,
     /** When wider search comes back, while it is rate limited; otherwise null. The next
      *  top of the hour, which is when the server's per-account window resets. */
     providerAvailableAt: rateLimited ? cooldownUntil : null,

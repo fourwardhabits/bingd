@@ -621,19 +621,40 @@ describe('finding people', () => {
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
 
-    // The titles, then the Users section. The Titles header is not asserted here: it is
-    // inserted above cells FlashList has already laid out, and the test renderer does not
-    // reliably draw an inserted first cell. `all-sections.test.ts` asserts it in the data.
+    // The titles, unheaded as they always were, then the Users section below them.
     expect(
-      order(view, /^(Users|Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/),
+      order(view, /^(Titles|Users|Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/),
     ).toEqual([SERIES_ROW, FILM_ROW, 'Users', 'Anna Rivers, @anna']);
     // A restrained section header, announced as a header.
     expect(view.getByLabelText('Users').props.accessibilityRole).toBe('header');
   });
 
-  it('leads with Users when the query is exactly somebody’s handle', async () => {
-    withPeople([anna]);
+  it('keeps an exact handle below the leading titles, never above rows already drawn', async () => {
+    // Inserting a section above titles a reader may be about to tap moves them under
+    // their thumb. Only an `@` query leads with Users.
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [series, film], error: null });
+      if (fn === 'search_users') {
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ data: [anna], error: null }), 600),
+        );
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
     const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+
+    expect(order(view, /^(Users|Anna Rivers, @anna|Inception, 2010)/)).toEqual([
+      FILM_ROW,
+      'Users',
+      'Anna Rivers, @anna',
+    ]);
+  });
+
+  it('leads with Users for an @ query, with the titles below under their own header', async () => {
+    withPeople([anna]);
+    const view = await search('@anna');
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
@@ -990,13 +1011,15 @@ describe('Cast search', () => {
       )
       .map((node) => node.props.accessibilityLabel as string);
 
-  it('leads All with Cast when the query is a performer’s whole name, at no extra request', async () => {
+  it('shows a performer’s whole name as a Cast section on the first screen, at no extra request', async () => {
     mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
     const view = await search('leonardo dicaprio');
     await settle();
 
     await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
-    expect(castOrder(view)).toEqual(['Cast', LEO_ROW, 'Titles', SERIES_ROW, FILM_ROW]);
+    // Below the two leading titles, never inserted above rows already drawn.
+    expect(castOrder(view)).toEqual([SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
+    expect(view.getByLabelText('Cast').props.accessibilityRole).toBe('header');
     expect(mockSearchCast).not.toHaveBeenCalled();
   });
 
@@ -1006,7 +1029,7 @@ describe('Cast search', () => {
     await settle();
 
     await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
-    expect(castOrder(view)).toEqual(['Titles', SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
+    expect(castOrder(view)).toEqual([SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
   });
 
   it('leaves a weak performer match off All entirely', async () => {
@@ -1016,6 +1039,8 @@ describe('Cast search', () => {
     });
     const view = await search('dune');
     await settle();
+    // The provider did answer with that person, so an absent section is the gate's doing.
+    await waitFor(() => expect(mockSearchProvider).toHaveBeenCalledWith('dune', 20));
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
     expect(view.queryByLabelText('Cast')).toBeNull();

@@ -66,18 +66,34 @@ describe('the performer gate', () => {
     expect(castMatches(person(6, 'Emma Ho', 1.5), 'emma')).toBe(false);
   });
 
-  it('matches words from their start, folded, in any order', () => {
+  it('does not surface a famous surname on a one-word search that is usually a title', () => {
+    // "stone", "king", "fox": far more often a title search than a hunt for these people.
+    expect(castMatches(person(5, 'Emma Stone', 6.8), 'stone')).toBe(false);
+    expect(castMatches(person(7, 'Joey King', 6), 'king')).toBe(false);
+    expect(castMatches(person(8, 'Megan Fox', 9), 'fox')).toBe(false);
+    expect(castMatches(leo, 'dicaprio')).toBe(false);
+  });
+
+  it('matches several words from their start, folded, in any order', () => {
+    expect(castMatches(leo, 'leo')).toBe(true);
     expect(castMatches(leo, 'leo dicap')).toBe(true);
     expect(castMatches(leo, 'DICAPRIO leonardo')).toBe(true);
-    expect(castMatches(person(7, 'Penélope Cruz', 5), 'penelope')).toBe(true);
+    expect(castMatches(person(9, 'Penélope Cruz', 5), 'penelope')).toBe(true);
     // Not the middle of a word.
-    expect(castMatches(leo, 'caprio')).toBe(false);
+    expect(castMatches(leo, 'leo caprio')).toBe(false);
     // Every word typed has to be in the name.
     expect(castMatches(leo, 'leonardo pitt')).toBe(false);
   });
 
+  it('matches a name typed without its punctuation', () => {
+    expect(castMatches(person(10, "Lupita Nyong'o", 6), 'lupita nyongo')).toBe(true);
+    expect(castMatches(person(11, "Conan O'Brien", 4), 'conan obrien')).toBe(true);
+    // And treats that as the whole name, for the lower floor.
+    expect(castMatches(person(12, "Lupita Nyong'o", 1.2), 'lupita nyongo')).toBe(true);
+  });
+
   it('treats an unknown popularity as weak, not strong', () => {
-    expect(castMatches(person(8, 'Leonardo Nam', null), 'leonardo')).toBe(false);
+    expect(castMatches(person(13, 'Leonardo Nam', null), 'leonardo')).toBe(false);
   });
 });
 
@@ -94,7 +110,7 @@ describe('the All page', () => {
     expect(rows).toHaveLength(8);
   });
 
-  it('leads with Cast when the query is a performer’s whole name', () => {
+  it('never puts a section above the leading titles: an exact actor follows the first titles', () => {
     const { rows } = allRows({
       query: 'leonardo dicaprio',
       titles: [title('d', 'Leonardo DiCaprio: Most Wanted!')],
@@ -103,14 +119,24 @@ describe('the All page', () => {
     });
 
     expect(shape(rows)).toEqual([
+      't:Leonardo DiCaprio: Most Wanted!',
       'CAST',
       'c:Leonardo DiCaprio',
-      'TITLES',
-      't:Leonardo DiCaprio: Most Wanted!',
     ]);
   });
 
-  it('puts a partial actor match after the leading titles, not above them', () => {
+  it('shows an exact actor at the top when there are no titles at all', () => {
+    const { rows } = allRows({
+      query: 'zendaya',
+      titles: [],
+      people: [person(1, 'Zendaya', 11.2)],
+      users: [],
+    });
+
+    expect(shape(rows)).toEqual(['CAST', 'c:Zendaya']);
+  });
+
+  it('puts a partial actor match after the leading titles, and the rest under More titles', () => {
     const { rows } = allRows({
       query: 'emma',
       titles: manyTitles(10, 'Emma'),
@@ -123,7 +149,6 @@ describe('the All page', () => {
     });
 
     expect(shape(rows).slice(0, TITLE_LEAD + 4)).toEqual([
-      'TITLES',
       't:Emma 1',
       't:Emma 2',
       't:Emma 3',
@@ -131,33 +156,32 @@ describe('the All page', () => {
       'CAST',
       'c:Emma Stone',
       'c:Emma Watson',
+      'MORE-TITLES',
     ]);
-    expect(shape(rows)[TITLE_LEAD + 4]).toBe('MORE-TITLES');
     expect(rows.filter((row) => row.type === 'title')).toHaveLength(10);
   });
 
-  it('shows at most three performers', () => {
+  it('shows at most three performers, a whole-name match first', () => {
     const { cast } = allRows({
-      query: 'chris',
+      query: 'chris pratt',
       titles: [],
       people: [
-        person(1, 'Chris Hemsworth', 7.2),
-        person(2, 'Chris Pratt', 4.6),
-        person(3, 'Chris Evans', 5.5),
-        person(4, 'Chris Webster', 3.9),
+        person(1, 'Chris Pratt Jr', 7.2),
+        person(2, 'Chris Prattley', 4.6),
+        person(3, 'Chris Pratt Sr', 5.5),
+        person(4, 'Chris Pratt', 4.6),
       ],
       users: [],
     });
 
     expect(cast.map((entry) => entry.name)).toEqual([
-      'Chris Hemsworth',
       'Chris Pratt',
-      'Chris Evans',
+      'Chris Pratt Jr',
+      'Chris Prattley',
     ]);
   });
 
-  it('keeps the title first when a title and a performer share the exact name', () => {
-    // "Madonna" the film and Madonna the performer: the title rule wins, the section follows.
+  it('keeps a title and a performer that share a name in their usual places', () => {
     const { rows } = allRows({
       query: 'madonna',
       titles: [title('m', 'Madonna'), title('b', 'Becoming Madonna')],
@@ -165,13 +189,7 @@ describe('the All page', () => {
       users: [],
     });
 
-    expect(shape(rows)).toEqual([
-      'TITLES',
-      't:Madonna',
-      't:Becoming Madonna',
-      'CAST',
-      'c:Madonna',
-    ]);
+    expect(shape(rows)).toEqual(['t:Madonna', 't:Becoming Madonna', 'CAST', 'c:Madonna']);
   });
 
   it('omits a weak people match entirely, heading and all', () => {
@@ -185,8 +203,8 @@ describe('the All page', () => {
     expect(rows.some((row) => row.type === 'header')).toBe(false);
   });
 
-  it('leads with Users for an @ query, keeps its titles, and asks nothing of Cast', () => {
-    // `@` names an account: Users leads, titles keep their place below (existing rule:
+  it('leads with Users for an @ query, keeps its titles below, and asks nothing of Cast', () => {
+    // `@` names an account: Users leads, titles keep their place below it (existing rule:
     // the sigil changes order, never presence), and performers are not what was asked.
     const { rows } = allRows({
       query: '@suraj',
@@ -198,27 +216,16 @@ describe('the All page', () => {
     expect(shape(rows)).toEqual(['USERS', 'u:@suraj', 'TITLES', 't:Suraj']);
   });
 
-  it('leads with Users when the query is exactly a display name or a handle', () => {
-    for (const query of ['Anna Rivers', 'annar']) {
+  it('shows an exact handle or display name as a Users section after the leading titles', () => {
+    for (const query of ['Anna Rivers', 'annar', 'ann']) {
       const { rows } = allRows({
         query,
         titles: manyTitles(6),
         people: [],
         users: [user('a', 'annar', 'Anna Rivers')],
       });
-      expect(shape(rows)[0]).toBe('USERS');
+      expect(shape(rows).slice(TITLE_LEAD, TITLE_LEAD + 2)).toEqual(['USERS', 'u:@annar']);
     }
-  });
-
-  it('shows a partial account match as a section after the leading titles', () => {
-    const { rows } = allRows({
-      query: 'ann',
-      titles: manyTitles(6),
-      people: [],
-      users: [user('a', 'annar', 'Anna Rivers')],
-    });
-
-    expect(shape(rows).slice(TITLE_LEAD + 1, TITLE_LEAD + 3)).toEqual(['USERS', 'u:@annar']);
   });
 
   it('keeps the account gate: a match in the middle of a handle stays under the Users chip', () => {
@@ -234,35 +241,37 @@ describe('the All page', () => {
 
   it('draws Cast before Users when both match, after the titles', () => {
     const { rows } = allRows({
-      query: 'stone',
-      titles: manyTitles(5, 'Stone'),
+      query: 'emma',
+      titles: manyTitles(5, 'Emma'),
       people: [person(1, 'Emma Stone', 6.8)],
-      users: [user('s', 'stoner', 'Stone Cold')],
+      users: [user('s', 'emmaw', 'Emma W')],
     });
 
     expect(shape(rows)).toEqual([
-      'TITLES',
-      't:Stone 1',
-      't:Stone 2',
-      't:Stone 3',
-      't:Stone 4',
+      't:Emma 1',
+      't:Emma 2',
+      't:Emma 3',
+      't:Emma 4',
       'CAST',
       'c:Emma Stone',
       'USERS',
-      'u:@stoner',
+      'u:@emmaw',
       'MORE-TITLES',
-      't:Stone 5',
+      't:Emma 5',
     ]);
   });
 
-  it('needs no Titles heading when nothing but people matched', () => {
+  it('draws every header at most once, so no two rows share a key', () => {
     const { rows } = allRows({
-      query: 'zendaya',
-      titles: [],
-      people: [person(1, 'Zendaya', 11.2)],
-      users: [],
+      query: 'emma',
+      titles: manyTitles(9, 'Emma'),
+      people: [person(1, 'Emma Stone', 6.8)],
+      users: [user('s', 'emmaw', 'Emma W')],
     });
+    const headers = rows
+      .filter((row) => row.type === 'header')
+      .map((row) => (row.type === 'header' ? row.section : ''));
 
-    expect(shape(rows)).toEqual(['CAST', 'c:Zendaya']);
+    expect(new Set(headers).size).toBe(headers.length);
   });
 });
