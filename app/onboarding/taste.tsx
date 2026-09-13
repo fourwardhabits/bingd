@@ -287,7 +287,9 @@ export default function TasteOnboardingScreen() {
       if (current.kind !== 'handoff') return current;
       // No bucket means the question was closed rather than answered, so the dismissal
       // was all there was to wait for.
-      return current.bucket ? rankingStepFor({ pick: current.pick, bucket: current.bucket }) : { kind: 'picking' };
+      return current.bucket
+        ? rankingStepFor({ pick: current.pick, bucket: current.bucket })
+        : { kind: 'picking' };
     });
   }, []);
 
@@ -408,7 +410,10 @@ export default function TasteOnboardingScreen() {
     });
 
   const leavePayoff = () => {
-    track({ name: 'onboarding_step_completed', props: { step: 'payoff', outcome: 'continued' } });
+    track({
+      name: 'onboarding_step_completed',
+      props: { step: 'payoff', outcome: 'continued' },
+    });
     // Recorded where it is known. The notification step reports it at the end and must
     // not have to re-derive it from a query that may not have answered.
     void setRankingOutcome(profile.id, 'completed');
@@ -675,35 +680,35 @@ export default function TasteOnboardingScreen() {
           setStep((current) => {
             if (current.kind !== 'bucket') return current;
             const handoff = { kind: 'handoff', pick: current.pick, bucket } as const;
-          /**
-           * iOS waits; Android does not, and the branch is here rather than in an effect.
-           *
-           * On iOS, going straight to `ranking` asks UIKit to present the comparison
-           * sheet while this one is still dismissing — see `RunStep`'s `handoff`.
-           *
-           * On Android there is nothing to wait for: a modal is a view in the same
-           * window, `onDismiss` is iOS-only in React Native, and parking in `handoff`
-           * would strand the flow on the platform that never had the bug. Deciding it
-           * here keeps that a branch on one value instead of an effect that sets state
-           * as soon as it runs — which is a cascading render, and which lint refuses.
-           *
-           * **No timeout on the iOS side, and the reason is not an escape hatch.**
-           *
-           * An earlier version of this note claimed a missed `onDismiss` would cost only
-           * a tap, because the picker is mounted underneath. That is wrong and an
-           * independent review said so: if the callback never came, the dismissal never
-           * completed, so the window is still there and the picker is exactly as
-           * untappable as it was before this fix. There is no degraded mode to fall back
-           * on.
-           *
-           * It carries no watchdog because the callback is not best-effort. React
-           * Native's modal dismisses on `visible=false` while mounted and calls
-           * `onDismiss` from the completion on both the legacy and Fabric renderers —
-           * checked in `Modal.js`, `RCTModalHostView.m` and
-           * `RCTModalHostViewComponentView.mm` rather than assumed. A timer here would be
-           * a guess at an animation length in front of every ranking, guarding a path
-           * that fires or does not fire for reasons a delay cannot influence.
-           */
+            /**
+             * iOS waits; Android does not, and the branch is here rather than in an effect.
+             *
+             * On iOS, going straight to `ranking` asks UIKit to present the comparison
+             * sheet while this one is still dismissing — see `RunStep`'s `handoff`.
+             *
+             * On Android there is nothing to wait for: a modal is a view in the same
+             * window, `onDismiss` is iOS-only in React Native, and parking in `handoff`
+             * would strand the flow on the platform that never had the bug. Deciding it
+             * here keeps that a branch on one value instead of an effect that sets state
+             * as soon as it runs — which is a cascading render, and which lint refuses.
+             *
+             * **No timeout on the iOS side, and the reason is not an escape hatch.**
+             *
+             * An earlier version of this note claimed a missed `onDismiss` would cost only
+             * a tap, because the picker is mounted underneath. That is wrong and an
+             * independent review said so: if the callback never came, the dismissal never
+             * completed, so the window is still there and the picker is exactly as
+             * untappable as it was before this fix. There is no degraded mode to fall back
+             * on.
+             *
+             * It carries no watchdog because the callback is not best-effort. React
+             * Native's modal dismisses on `visible=false` while mounted and calls
+             * `onDismiss` from the completion on both the legacy and Fabric renderers —
+             * checked in `Modal.js`, `RCTModalHostView.m` and
+             * `RCTModalHostViewComponentView.mm` rather than assumed. A timer here would be
+             * a guess at an animation length in front of every ranking, guarding a path
+             * that fires or does not fire for reasons a delay cannot influence.
+             */
             return Platform.OS === 'ios' ? handoff : rankingStepFor(handoff);
           });
         }}
@@ -931,7 +936,10 @@ function Progress({ placed }: { placed: number }) {
       accessibilityLabel={`${placed} of ${PICK_TARGET} movies ranked`}
     >
       {Array.from({ length: PICK_TARGET }, (_, index) => (
-        <View key={index} style={[styles.pip, index < placed ? styles.pipDone : styles.pipTodo]} />
+        <View
+          key={index}
+          style={[styles.pip, index < placed ? styles.pipDone : styles.pipTodo]}
+        />
       ))}
       <Text variant="footnote" tone="secondary" style={styles.progressLabel}>
         {`${placed} of ${PICK_TARGET}`}
@@ -1057,8 +1065,8 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             Your First Five
           </Text>
           <Text variant="body" tone="secondary">
-            This is just the start. As you rank more, your favorites get clearer and bingd.
-            gets a better read on your taste.
+            This is just the start. As you rank more, your favorites get clearer and bingd. gets
+            a better read on your taste.
           </Text>
         </View>
 
@@ -1101,11 +1109,21 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             flow guard to admit one route, which is its own change with its own review
             (`docs/product/letterboxd-import.md`).
             --------------------------------------------------------------- */}
-        <View style={styles.letterboxd} accessible accessibilityRole="text">
-          <Text variant="headline">Use Letterboxd?</Text>
+        {/* Locked for this release (founder, 2026-09-13): informational only. It says the
+            import exists, what it brings, and exactly where it lives; the location is its
+            own line so it scans. No button, because the flow guard would replace a route
+            pushed from here. Read as one sentence, with the arrow spoken as words. */}
+        <View
+          style={styles.letterboxd}
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel="Already use Letterboxd? Import your watch history anytime from Settings, then Import from Letterboxd."
+        >
+          <Text variant="headline">Already use Letterboxd?</Text>
           <Text variant="subhead" tone="secondary">
-            Import your history anytime from Settings.
+            Import your watch history anytime from
           </Text>
+          <Text variant="callout">Settings → Import from Letterboxd</Text>
         </View>
       </ScrollView>
 
