@@ -417,6 +417,14 @@ export default function TasteOnboardingScreen() {
   };
 
   const skip = () => {
+    /**
+     * **Only from the picker** (independent review). While a placement is on its way no sheet
+     * covers this screen any more, so Not now is reachable in that window; skipping then
+     * recorded the run as skipped and left for People while the title it had just asked
+     * about was still being placed behind it. The wait is short and bounded by the request
+     * deadline, and pressing again once the picker is back does what it says.
+     */
+    if (step.kind !== 'picking') return;
     track({ name: 'onboarding_step_completed', props: { step: 'pick', outcome: 'skipped' } });
     void setRankingOutcome(profile.id, 'skipped');
     advance('people');
@@ -754,8 +762,10 @@ export default function TasteOnboardingScreen() {
             posterUri: subject.posterUri ?? null,
             score,
           });
-          // Android announces through the line's live region; iOS has none, so it is told.
-          if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(line);
+          // Told on both platforms. The line is newly mounted each time, and an Android live
+          // region announces changes rather than mounts, so TalkBack would otherwise stay
+          // silent (independent review).
+          AccessibilityInfo.announceForAccessibility(line);
           /**
            * `returning` rather than `picking` on iOS: the picker is revealed either way,
            * but the sheet stays mounted until its dismissal is acknowledged, so the next

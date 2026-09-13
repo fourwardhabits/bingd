@@ -1016,6 +1016,30 @@ describe('what a placement leaves on the picker', () => {
     expect(shows().refused).toBe(0);
   });
 
+  it('does not leave the flow from Not now while a placement is on its way', async () => {
+    let answer: () => void = () => {};
+    const server = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((fn: string, args: Record<string, unknown> = {}) =>
+      fn === 'rank_start'
+        ? new Promise((resolve) => {
+            answer = () => resolve(server(fn, args));
+          })
+        : server(fn, args),
+    );
+    const view = await placeOutright();
+
+    await fireEvent.press(view.getByLabelText('I liked it'));
+    await waitFor(() => expect(view.getByText('Ranking Inception…')).toBeTruthy());
+
+    // No sheet covers the picker in this window any more, so the control is reachable.
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    expect(mockReplace).not.toHaveBeenCalledWith('/onboarding/people');
+
+    await act(async () => answer());
+    await waitFor(() => expect(view.getByText('Inception landed at 9.0')).toBeTruthy());
+    expect(mockPrefs.get('user-1.onboarding.rankingOutcome')).not.toBe('skipped');
+  });
+
   /**
    * After the last comparison the sheet slides out still showing the pair it asked about,
    * not an empty strip, and the picker behind it already says where the title landed.
