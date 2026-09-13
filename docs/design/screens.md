@@ -733,7 +733,7 @@ title page, where `ScoresSection` labels whose it is.
 
 **Two empty states, and neither quotes the threshold.** A filtered wall with nothing on it
 offers *Clear filters*; an unfiltered one says titles appear once enough people have rated
-them. The number is `discovery.top_rated_min_ratings` and only the server knows it — an empty
+them. The number is `community_support_floor` (a percentile of rating count, since `20260916000200`) and only the server knows it — an empty
 page carries no row to read it off, so any figure in the copy would be a client-side copy of a
 config value right up until it moved.
 
@@ -813,6 +813,16 @@ bingd.`, in that fixed order, which is a hierarchy of relevance to one reader an
 leaderboard: me, then the people I chose, then the room. On the poster the number had nothing to
 be measured against; here it is the first term of a comparison read straight across. It is stated
 **once** on the page.
+
+> **Superseded 2026-09-13 (founder): `Your score → bingd. → Following`.** The middle two swap,
+> and the reason is sample. A reader follows a handful of people, so Following usually rests on
+> one or two ratings and often none, while bingd. is the widest population on the page; the unit
+> beside the reader's own number is the one it is compared against first, so it should be the
+> one that can bear the comparison. Everything else here stands — sample counts, the Following
+> drill-down, the empty states, the Rank control — and the order above in this section and in
+> the 2026-09-07 notes is history. The same pass made **Similar the first tab on a film**
+> (`Similar · Cast · Reviews · Videos · Details`) and second on a season and a series, after
+> Episodes and Seasons, which stay the defaults there.
 
 The units carry **no bucket word, no rank and no watch date**. All three were in the
 specification's `Your score` cell and all three were cut: `Loved` is jargon this screen has never

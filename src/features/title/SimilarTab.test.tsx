@@ -17,7 +17,9 @@ import TitleScreen from '../../../app/title/[id]';
  *
  * What is pinned here, in the order the feature was specified:
  *
- *   - the tab is last, and nothing is fetched until somebody opens it;
+ *   - it leads a film's tab row and follows Episodes and Seasons; where it is not the
+ *     default, nothing is fetched until somebody opens it;
+ *   - it is title-specific: two unrelated titles never share one slate for one reader;
  *   - the page's own title, duplicates and unresolvable ids are out, and the budget holds;
  *   - a candidate the reader has already ranked stays, with the score they gave it;
  *   - a season asks its **parent series'** facet and gets series back, never a Season 1;
@@ -311,23 +313,63 @@ describe('Similar, on a film', () => {
     tableRows.media_cache = [facet('film-1', ids)];
   };
 
-  it('is the last tab, immediately after Details', async () => {
+  it('leads a film’s tab row and is the tab it opens on', async () => {
+    /**
+     * Founder, 2026-09-13: **Similar · Cast · Reviews · Videos · Details** on a film.
+     *
+     * The whole row is asserted, not just the head, because the decision is an order. Cast
+     * needs credits and Videos needs a trailer, so both are seeded — a row that happened to
+     * omit them would pass an assertion about the head and say nothing about the rest.
+     */
+    withFacet(['cand-1']);
+    tableRows.media_cache.push(
+      {
+        media_item_id: 'film-1',
+        facet: 'credits',
+        payload: { cast: [{ id: 1, name: 'An Actor', character: 'Someone', profile_path: null }], crew: [] },
+      },
+      {
+        media_item_id: 'film-1',
+        facet: 'videos',
+        payload: {
+          results: [
+            { id: 'v1', key: 'YoHD9XEInc0', name: 'Trailer', type: 'Trailer', site: 'YouTube', official: true },
+          ],
+        },
+      },
+    );
+
     const view = await open();
 
-    // Adjacency, not merely presence. "Last, and Details is somewhere" would still pass
-    // with a tab inserted between the two, which is not what the name promises.
-    expect(view.getAllByRole('tab').map(textOf).slice(-2)).toEqual(['Details', 'Similar']);
+    await waitFor(() =>
+      expect(view.getAllByRole('tab').map(textOf)).toEqual([
+        'Similar',
+        'Cast',
+        'Reviews',
+        'Videos',
+        'Details',
+      ]),
+    );
+    // Selected, not merely first — and the grid is on screen without a press.
+    expect(view.getByRole('tab', { name: 'Similar' }).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1']));
   });
 
-  it('asks for nothing until somebody opens it', async () => {
-    // The whole point of the lazy gate. A cold facet is the expensive case — it is the
-    // one that would spend a provider request — so it is the one the assertion uses.
+  it('asks for its similar titles on arrival, because it is the default', async () => {
+    // The lazy gate still exists; a film just starts on the tab it guards. One adapter
+    // call for a cold facet, made without the reader touching the tab row.
     tableRows.media_items = [film, ...three];
+    mockCacheSimilar.mockImplementation(async () => {
+      tableRows.media_cache = [facet('film-1', ['cand-1'])];
+      return { id: 'film-1', written: 1 };
+    });
 
-    await open();
+    const view = await open();
 
-    expect(facetReads()).toHaveLength(0);
-    expect(mockCacheSimilar).not.toHaveBeenCalled();
+    await waitFor(() => expect(names(view)).toEqual(['Candidate 1']));
+    expect(mockCacheSimilar).toHaveBeenCalledTimes(1);
   });
 
   it('spends exactly one provider request when the facet is cold', async () => {
@@ -436,25 +478,6 @@ describe('Similar, on a film', () => {
 
     await waitFor(() => expect(view.getByText('Could not load similar titles')).toBeTruthy());
     expect(mockCacheSimilar).toHaveBeenCalledTimes(1);
-  });
-
-  it('is not reached by a pull on a tab nobody opened', async () => {
-    /**
-     * The empty and failed states both say "pull down to try again", so the gesture has
-     * to reach this query — and `refetch` is imperative, running even on a disabled
-     * query. Wiring it naively would mean a pull from Cast or Details spends the provider
-     * request the whole tab exists to defer, which is the lazy gate defeated by its own
-     * error copy.
-     */
-    tableRows.media_items = [film, ...three];
-
-    const view = await open();
-    await act(async () => {
-      await refreshControl(view).props.onRefresh();
-    });
-
-    expect(mockCacheSimilar).not.toHaveBeenCalled();
-    expect(facetReads()).toHaveLength(0);
   });
 
   it('is reached by a pull once the tab is open', async () => {
@@ -649,6 +672,69 @@ describe('Similar, on television', () => {
   /** A similar *show*. Never a season: the adapter normalises every association to one. */
   const show = (n: number) =>
     candidate(n, { kind: 'series', title: `Candidate ${n}`, runtime_minutes: null });
+
+  it('sits second on a season, after Episodes, which is still the default', async () => {
+    // Founder, 2026-09-13: Episodes · Similar · Cast · Reviews · Videos · Details. A season
+    // page's job is still "did I watch this season", so its own unit leads.
+    mockOpenId = 'season-1';
+    tableRows.media_items = [season];
+
+    const view = await open();
+
+    const labels = view.getAllByRole('tab').map(textOf);
+    expect(labels.slice(0, 2)).toEqual(['Episodes', 'Similar']);
+    expect(labels[labels.length - 1]).toBe('Details');
+    expect(view.getByRole('tab', { name: 'Episodes' }).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+  });
+
+  it('sits second on a series, after Seasons, which is still the default', async () => {
+    // A series is not rankable and its page's one job is the way down to a season, so
+    // Seasons stays first and selected. Similar follows it, as it follows Episodes.
+    mockOpenId = 'series-1';
+    tableRows.media_items = [series];
+
+    const view = await open();
+
+    const labels = view.getAllByRole('tab').map(textOf);
+    expect(labels.slice(0, 2)).toEqual(['Seasons', 'Similar']);
+    expect(view.getByRole('tab', { name: 'Seasons' }).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+  });
+
+  it('asks for nothing on a season until somebody opens it', async () => {
+    // Where Similar is not the default the lazy gate is exactly what it was. A cold facet
+    // is the expensive case — it is the one that would spend a provider request — so it is
+    // the one the assertion uses.
+    mockOpenId = 'season-1';
+    tableRows.media_items = [season, show(1)];
+
+    await open();
+
+    expect(facetReads()).toHaveLength(0);
+    expect(mockCacheSimilar).not.toHaveBeenCalled();
+  });
+
+  it('is not reached by a pull on a season whose Similar tab nobody opened', async () => {
+    /**
+     * The empty and failed states both say "pull down to try again", so the gesture has
+     * to reach this query — and `refetch` is imperative, running even on a disabled
+     * query. Wiring it naively would mean a pull from Episodes spends the provider request
+     * the tab exists to defer, which is the lazy gate defeated by its own error copy.
+     */
+    mockOpenId = 'season-1';
+    tableRows.media_items = [season, show(1)];
+
+    const view = await open();
+    await act(async () => {
+      await refreshControl(view).props.onRefresh();
+    });
+
+    expect(mockCacheSimilar).not.toHaveBeenCalled();
+    expect(facetReads()).toHaveLength(0);
+  });
 
   it('answers a season page out of its parent series facet', async () => {
     mockOpenId = 'season-1';
@@ -947,6 +1033,74 @@ describe('the order the provider gave', () => {
     expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']);
   });
 
+  it('gives two unrelated titles two different slates for the same reader', async () => {
+    /**
+     * **The quality invariant, asserted across two pages** (founder, 2026-09-13).
+     *
+     * Similar is title-specific first. The failure it must never have is the one a
+     * reader-driven source produces: every title page for one person converging on the
+     * same handful of "things you would like". So the reader here is as strongly
+     * personalised as a fixture can make them — a wholly Comedy collection — and the
+     * catalogue holds a For You-shaped pool that suits them perfectly: comedies, very
+     * popular, sitting in the trending list and in nobody's facet.
+     *
+     * Two unrelated films, each with its own facet. Each page must show exactly its own
+     * facet, the two slates must share nothing, and none of the For You pool may reach
+     * either. A version that drew on the reader rather than the title would fail all three.
+     *
+     * Two renders in one test, which this suite otherwise avoids: the first view is
+     * unmounted before the second is drawn and is never read again.
+     */
+    const horror = [
+      candidate(11, { title: 'Candidate Horror 1', genres: ['Horror'] }),
+      candidate(12, { title: 'Candidate Horror 2', genres: ['Horror'] }),
+    ];
+    const western = [
+      candidate(21, { title: 'Candidate Western 1', genres: ['Western'] }),
+      candidate(22, { title: 'Candidate Western 2', genres: ['Western'] }),
+    ];
+    const forYouPool = [
+      candidate(91, { id: 'fy-1', title: 'Candidate Crowd Pleaser 1', genres: ['Comedy'], popularity: 900 }),
+      candidate(92, { id: 'fy-2', title: 'Candidate Crowd Pleaser 2', genres: ['Comedy'], popularity: 800 }),
+    ];
+    const secondFilm = { ...film, id: 'film-2', title: 'A Western', genres: ['Western'] };
+
+    tableRows.media_items = [film, secondFilm, ...horror, ...western, ...forYouPool];
+    tableRows.media_cache = [
+      facet('film-1', ['cand-11', 'cand-12']),
+      facet('film-2', ['cand-21', 'cand-22']),
+    ];
+    tableRows.provider_list_cache = [
+      { list_key: 'trending.movie.week', payload: { ids: ['fy-1', 'fy-2'] } },
+    ];
+    tableRows.rankings = [1, 2, 3, 4, 5].map((n) => ({
+      user_id: 'user-1',
+      media_item_id: `ranked-${n}`,
+      bucket: 'loved',
+      position: n,
+      category: 'movies',
+    }));
+
+    const first = await open();
+    await waitFor(() =>
+      expect(names(first)).toEqual(['Candidate Horror 1', 'Candidate Horror 2']),
+    );
+    const firstSlate = names(first);
+    await first.unmount();
+
+    mockOpenId = 'film-2';
+    const second = await open();
+    await waitFor(() =>
+      expect(names(second)).toEqual(['Candidate Western 1', 'Candidate Western 2']),
+    );
+    const secondSlate = names(second);
+
+    expect(firstSlate.filter((name) => secondSlate.includes(name))).toEqual([]);
+    for (const slate of [firstSlate, secondSlate]) {
+      expect(slate.some((name) => name.startsWith('Candidate Crowd Pleaser'))).toBe(false);
+    }
+  });
+
   it('lets nothing that is not in the facet reach the grid', async () => {
     // The failure this guards against is the tab quietly becoming For You. `trend-1` is a
     // perfect taste match sitting in the catalogue, and it is not in the facet.
@@ -988,8 +1142,21 @@ describe('what the tab reports', () => {
     tableRows.media_cache = [facet('film-1', ['cand-1'])];
   });
 
-  it('records the open, with which medium it was', async () => {
+  it('does not count a film arriving on Similar, or a press of the tab already showing', async () => {
+    // On a film Similar is the default, so being there is a page view and not a choice.
+    // Pressing the selected tab changes nothing on screen and must change nothing on the
+    // wire either — the guard reads `activeTab`, because `tab` is still null here.
     const view = await open();
+    await openSimilar(view);
+
+    expect(mockTrack).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'similar_tab_opened' }),
+    );
+  });
+
+  it('records a deliberate move to Similar, with which medium it was', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
     await openSimilar(view);
 
     expect(mockTrack).toHaveBeenCalledWith({
@@ -1043,8 +1210,9 @@ describe('coming back to the tab', () => {
   });
 
   it('serves the grid from cache and asks nobody again', async () => {
+    // No first press: on a film Similar is the tab the page opens on, so the round trip is
+    // one press of Details and one of Similar.
     const view = await open();
-    await openSimilar(view);
     await waitFor(() => expect(names(view)).toEqual(['Candidate 1', 'Candidate 2']));
 
     await fireEvent.press(view.getByRole('tab', { name: 'Details' }));

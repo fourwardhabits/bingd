@@ -49,12 +49,14 @@ describe('the scores row', () => {
     expect(isOneRow()).toBe(true);
   });
 
-  it('reads me, then the people I follow, then the room', async () => {
+  it('reads me, then bingd., then the people I follow', async () => {
     /**
-     * **The founder's order, locked 2026-09-07.** The reader's own score leads because
-     * the section is a comparison and they are the first term of it; Following comes
-     * before bingd. because a mean over accounts they chose is a signal about their own
-     * taste and the app-wide mean is a fact about the app.
+     * **The founder's order, 2026-09-13.** The reader's own score leads because the
+     * section is a comparison and they are the first term of it. bingd. comes before
+     * Following because it is the wider sample: a reader follows a handful of people, so
+     * Following usually rests on one or two ratings, and the number beside the reader's
+     * own should be the one that can bear the comparison. (It ran Following-first from
+     * 2026-09-07 to 2026-09-13.)
      *
      * Asserted on the rendered order rather than on the props, because the props are
      * named and could be passed in any order without changing what anybody sees.
@@ -69,7 +71,31 @@ describe('the scores row', () => {
     const labels = screen
       .getAllByText(/^(bingd\.|Following|Your score)$/)
       .map((node) => node.props.children);
-    expect(labels).toEqual(['Your score', 'Following', 'bingd.']);
+    expect(labels).toEqual(['Your score', 'bingd.', 'Following']);
+  });
+
+  it('keeps that order for a screen reader, with each unit still saying its sample', async () => {
+    /**
+     * The accessibility order is the source order, so it is asserted off the same tree a
+     * screen reader walks: the pressable Following unit carries its label, and the sample
+     * counts stay attached to the population they describe after the swap. A reorder that
+     * moved the circles and left the `128 ratings` line behind would pass the label test
+     * above and read wrongly aloud.
+     */
+    await render(
+      <ScoresSection
+        you={{ score: 9.4 }}
+        bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: 8.2, ratingCount: 4 }}
+        onPressFollowing={() => {}}
+      />,
+    );
+    const texts = screen
+      .getAllByText(/^(bingd\.|Following|Your score|128 ratings|4 ratings)$/)
+      .map((node) => node.props.children);
+    expect(texts).toEqual(['Your score', 'bingd.', '128 ratings', 'Following', '4 ratings']);
+    // The drill-down is still Following's, and only Following's.
+    expect(screen.getByRole('button', { name: /^Following\. 8\.2 out of 10\. 4 ratings$/ })).toBeTruthy();
   });
 
   it('stacks each circle above its words rather than beside them', async () => {

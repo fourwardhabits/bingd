@@ -618,18 +618,21 @@ export type AnalyticsEvent =
 
   // --- Similar, on a title page ---------------------------------------------
   /**
-   * Somebody opened the Similar tab.
+   * Somebody moved to the Similar tab on purpose.
    *
    * Two events and no more, because the question is a product question rather than a
-   * mechanism one: **is the title page a place people explore from**. The tab is the
-   * only thing on that page that costs a provider request lazily, so whether it is
-   * opened at all is the number that decides whether the request is worth making.
+   * mechanism one: **is the title page a place people explore from**.
    *
-   * Emitted on the press, which is the whole of what "opened" means here. Deliberately
-   * **not** deferred until the grid settles so that it could carry `personalized` — the
-   * answer is not known at press time, the reader's interest in the tab does not depend
-   * on it, and an event that waits for a network reply stops counting the opens that
-   * failed.
+   * **Since 2026-09-13 Similar is a film's default tab**, so arriving on a film is not
+   * this event — that is a page view, which the page already reports, and a film reader
+   * who never touches the tab row still sees the grid. What this counts is a *choice*:
+   * the tab pressed while something else was showing, which on a season or series page is
+   * the only way to reach it and on a film is coming back to it. `similar_title_opened`
+   * below is therefore the better signal on films, and this one on television.
+   *
+   * Emitted on the press. Deliberately **not** deferred until the grid settles — the
+   * reader's interest in the tab does not depend on the answer, and an event that waits
+   * for a network reply stops counting the opens that failed.
    *
    * `medium` rather than a source and a destination kind. They are the same thing by
    * construction on this surface: a film's associations are films and a season's are its

@@ -447,13 +447,20 @@ export default function TitleScreen() {
   const showsEpisodes = data?.title?.kind === 'season' && (tab === null || tab === 'episodes');
   const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
   /**
-   * The Similar tab's data, and nothing before somebody opens it.
+   * The Similar tab's data, when it is the tab being shown.
    *
-   * `tab === 'similar'` and not `activeTab`, which is not computed yet at this point in
-   * the render and does not need to be: Similar is the **last** entry in every tab row,
-   * so it is never the fallback and `tab === null` can never mean it. That is the
-   * difference from the Episodes gate directly above, which has to include the null
-   * because Episodes *leads* a season's row.
+   * **On a film, Similar is the default** (founder, 2026-09-13): it leads a movie's tab
+   * row, and `activeTab` falls back to the head of that row, so a reader who has chosen
+   * nothing is looking at it. That is the Episodes gate's shape exactly, and for the same
+   * reason: waiting for `tab` to be set would make the default tab the one tab that never
+   * loaded. So a film page asks for its similar titles on arrival — one read of a
+   * week-long cached facet in the ordinary case, and the provider only when it is cold.
+   *
+   * On a season and a series Similar is **second**, after Episodes and Seasons, so
+   * `tab === null` never means it there and nothing is fetched until it is chosen.
+   *
+   * Read off `data.title.kind` rather than `activeTab`, which is not computed yet at this
+   * point in the render — the constraint the Episodes gate above works under too.
    *
    * The parent's id is the facet's owner for a season — TMDB publishes recommendations
    * for a series and none for a season — and `use-similar-titles.ts` has the whole
@@ -461,7 +468,8 @@ export default function TitleScreen() {
    * resolves by asking the adapter rather than by giving up: the server takes a season
    * id, finds the parent and says which row it wrote the facet against.
    */
-  const showsSimilar = tab === 'similar';
+  const showsSimilar =
+    tab === 'similar' || (tab === null && data?.title?.kind === 'movie');
   const similar = useSimilarTitles({
     sourceId: titleId,
     kind: data?.title?.kind ?? null,
@@ -876,6 +884,29 @@ export default function TitleScreen() {
      * waiting for it. Never present for a film or a series grouping.
      */
     ...(isSeason ? [{ id: 'episodes' as const, label: 'Episodes' }] : []),
+    /**
+     * Similar, straight after the entry that owns the page — and therefore **first on a
+     * film** (founder, 2026-09-13).
+     *
+     * One position that produces all three rows the decision names, because Seasons and
+     * Episodes are each present on exactly one kind and neither on a film:
+     *
+     *   film     Similar · Cast · Reviews · Videos · Details
+     *   season   Episodes · Similar · Cast · Reviews · Videos · Details
+     *   series   Seasons · Similar · Cast · Videos · Details
+     *
+     * The title page is where somebody explores from, and on a film nothing else on the
+     * page answers "what next" — so the exploration tab leads. On a season and a series
+     * the page's own unit still leads: which episode, which season. The first entry is
+     * also the default (`activeTab` falls back to the head of this row), which is why
+     * `showsSimilar` fetches on a film's arrival and nowhere else.
+     *
+     * Always present, on the same rule Reviews follows rather than the one Videos follows.
+     * The answer is not knowable before it is asked — finding out is the facet read — so
+     * this is a tab that may turn out to have nothing and is still worth offering, and
+     * "No similar titles yet" is the honest end of that.
+     */
+    { id: 'similar' as const, label: 'Similar' },
     ...(cast.length ? [{ id: 'cast' as const, label: 'Cast' }] : []),
     /**
      * Reviews is **always** present, unlike Cast and Videos.
@@ -907,22 +938,6 @@ export default function TitleScreen() {
         ]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
-    /**
-     * Similar, last, and present on every kind of title.
-     *
-     * Last is the founder's placement and it is also what makes the lazy fetch work:
-     * `activeTab` falls back to the *head* of this row, so an entry at the end can never
-     * become the default, and `showsSimilar` above can therefore be `tab === 'similar'`
-     * without the `tab === null` half the Episodes gate needs.
-     *
-     * Always present, on the same rule Reviews follows rather than the one Videos
-     * follows. The tab is a question — what else is like this — and unlike a trailer the
-     * answer is not knowable before it is asked: finding out costs a provider request
-     * whose whole purpose is to avoid being spent on a page nobody opened. So this is
-     * the one case where a tab that *may* turn out to have nothing is still worth
-     * offering, and "No similar titles yet" is the honest end of that.
-     */
-    { id: 'similar' as const, label: 'Similar' },
   ];
   // The chosen tab may not exist for this title — a film has no Seasons —
   // so it falls back rather than rendering nothing under a live tab row.
@@ -1570,11 +1585,13 @@ export default function TitleScreen() {
             options={tabs}
             value={activeTab ?? 'details'}
             onChange={(next) => {
-              // The one tab whose opening is worth counting, because it is the one that
-              // costs a provider request. Emitted on the change rather than on every
-              // render of the tab, so a reader who goes to Details and back is two opens
-              // and a reader who scrolls is none.
-              if (next === 'similar' && tab !== 'similar') {
+              // A deliberate move *to* Similar, and nothing else. Compared against
+              // `activeTab` rather than `tab`: on a film Similar is the default, so `tab`
+              // is still null while it is on screen, and pressing the tab you are already
+              // looking at must not count as opening it. The film's arrival on Similar is
+              // therefore not an event either — that is a page view, which the page
+              // already has — so this counts readers who chose it.
+              if (next === 'similar' && activeTab !== 'similar') {
                 track({
                   name: 'similar_tab_opened',
                   props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },

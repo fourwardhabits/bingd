@@ -167,6 +167,13 @@ jest.mock('@/lib/tmdb-adapter', () => ({
   ...jest.requireActual('@/lib/tmdb-adapter'),
   fetchSeasonEpisodes: (...args: unknown[]) => mockFetchSeasonEpisodes(...args),
   fetchWatchProviders: (...args: unknown[]) => mockFetchWatchProviders(...args),
+  /**
+   * Since 2026-09-13 a film opens on Similar, so every film in this file asks for its
+   * similar titles on arrival, and a cold facet reaches this. It is answered with "nothing
+   * written" rather than left to the real adapter, which would reach for an edge function
+   * the supabase mock does not have. What Similar does is `SimilarTab.test.tsx`'s subject.
+   */
+  cacheSimilar: () => Promise.resolve({ id: 'film-1', written: 0 }),
 }));
 
 // The device's country, which is part of the provider request. Fixed rather than left
@@ -1133,14 +1140,28 @@ describe('the cast', () => {
     tableRows.media_cache = [credits];
   });
 
-  it('names people rather than showing initials as the intended state', async () => {
+  /**
+   * The Cast tab, chosen.
+   *
+   * A film used to open on Cast. Since 2026-09-13 it opens on Similar (founder), and Cast
+   * is second, so each test here presses it — once, which is all the RNTL setup in this
+   * repo tolerates of a single element per test.
+   */
+  const openCast = async () => {
     const view = await open();
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Cast' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('tab', { name: 'Cast' }));
+    return view;
+  };
+
+  it('names people rather than showing initials as the intended state', async () => {
+    const view = await openCast();
     await waitFor(() => expect(view.getByText('Leonardo DiCaprio')).toBeTruthy());
     expect(view.getByText('Cobb')).toBeTruthy();
   });
 
   it('opens the person behind the face', async () => {
-    const view = await open();
+    const view = await openCast();
     await waitFor(() => expect(view.getByText('Leonardo DiCaprio')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('Leonardo DiCaprio, who plays Cobb'));
@@ -1150,7 +1171,7 @@ describe('the cast', () => {
   it('still lists someone with no photograph', async () => {
     // Below the top billing most people have no portrait, so a strip that only
     // worked with imagery would be half empty on every title.
-    const view = await open();
+    const view = await openCast();
     await waitFor(() => expect(view.getByText('Joseph Gordon-Levitt')).toBeTruthy());
   });
 });
@@ -2312,11 +2333,13 @@ describe('where to watch', () => {
     expect(view.queryByRole('tab', { name: 'Where to watch' })).toBeNull();
   });
 
-  it('leaves a film opening on its cast', async () => {
+  it('leaves a film opening on its default tab, which is Similar', async () => {
+    // Where to watch sits above the tab row and must not steal the default. Since
+    // 2026-09-13 a film's default is Similar (founder); it was Cast.
     const view = await open();
     await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
 
-    expect(view.getByRole('tab', { name: 'Cast' }).props.accessibilityState.selected).toBe(
+    expect(view.getByRole('tab', { name: 'Similar' }).props.accessibilityState.selected).toBe(
       true,
     );
   });
@@ -2438,14 +2461,14 @@ describe('the score row and what surrounds it', () => {
     expect(view.getByText('SCORES')).toBeTruthy();
   });
 
-  it('puts the reader’s own people before the crowd', async () => {
-    // Founder's order, 2026-09-07, reversing the Preview pass. A mean over accounts the
-    // reader chose to follow is a signal about their own taste; the app-wide mean is a
-    // fact about the app. The narrower, more personal reading leads.
+  it('puts bingd. before the reader’s own people, because it is the wider sample', async () => {
+    // Founder's order, 2026-09-13, reversing 2026-09-07. A reader follows a handful of
+    // people, so Following usually rests on one or two ratings; the number beside the
+    // reader's own should be the one that can bear the comparison.
     const view = await open();
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
-    expect(at(view, 'Following')).toBeLessThan(at(view, 'bingd.'));
+    expect(at(view, 'bingd.')).toBeLessThan(at(view, 'Following'));
   });
 
   it('follows the synopsis rather than the metadata', async () => {
@@ -2516,8 +2539,9 @@ describe('the score row and what surrounds it', () => {
     // Stated once, in the Scores row, where the reader's own number is the first term of
     // a comparison rather than a figure beside artwork with nothing to measure it by.
     expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1);
-    expect(at(view, 'Your score')).toBeLessThan(at(view, 'Following'));
-    expect(at(view, 'Following')).toBeLessThan(at(view, 'bingd.'));
+    // Your score → bingd. → Following (founder, 2026-09-13).
+    expect(at(view, 'Your score')).toBeLessThan(at(view, 'bingd.'));
+    expect(at(view, 'bingd.')).toBeLessThan(at(view, 'Following'));
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 

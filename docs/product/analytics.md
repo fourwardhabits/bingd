@@ -224,14 +224,18 @@ exists to make visible.
 
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
-| `similar_tab_opened` | the reader pressed the **Similar** tab, on the press itself and only on a genuine change of tab | the reader | `medium` |
+| `similar_tab_opened` | the reader pressed the **Similar** tab while another tab was showing — a deliberate move to it, never a press of the tab already on screen | the reader | `medium` |
 | `similar_title_opened` | the reader opened a title **from** that grid | the reader | `medium` |
 
 Two events, because the question is a product question rather than a mechanism one: **is
-the title page a place people explore from**. Similar is the only thing on that page that
-costs a provider request lazily — it is fetched when the tab is opened and not before —
-so whether it is opened at all is the number that says whether the request is worth
-making, and opens over taps is whether the answers were any good.
+the title page a place people explore from**.
+
+**Since 2026-09-13 Similar is a film's default tab** (Similar · Cast · Reviews · Videos ·
+Details) and second on seasons and series, after Episodes and Seasons. So the two events
+do different jobs by medium. On a film the grid is on screen at arrival without a press,
+arrival is a page view and not `similar_tab_opened`, and **`similar_title_opened` is the
+number to read** — how often the default answer leads somewhere. On television the tab has
+to be chosen, and `similar_tab_opened` over title-page views is how often it is.
 
 `medium` is `movies` or `tv`, and there is deliberately no second "destination" property:
 the two are the same thing by construction here. A film's associations are films; a
