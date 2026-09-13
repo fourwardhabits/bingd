@@ -143,8 +143,25 @@ export type RankingSheetProps = {
    * offers it. The celebration queue is deliberately *not* drained — an award earned on
    * the third of five films belongs after the flow, not across it, which is the same rule
    * *Add details* already follows.
+   *
+   * ---------------------------------------------------------------------------
+   * THE SHEET WAITS FOR THE FIRST ANSWER (founder, physical iOS QA, 2026-09-12)
+   *
+   * Under this contract the sheet is not asked to present until the session's first reply
+   * is known. An empty band places outright, and presenting a sheet only to take it away
+   * again one round trip later drew a sheet that rose reading *Working out what to ask…*,
+   * collapsed to an empty strip and slid out: a flash that looked broken. So a first reply
+   * of `placed` never presents anything, and the placement comes back with
+   * `presented: false` so the caller knows there is no dismissal to wait for. Any other
+   * first reply presents as before, a failure included, so its Close is reachable.
    */
-  onPlaced?: (placement: { score: number; position: number; category: string }) => void;
+  onPlaced?: (placement: {
+    score: number;
+    position: number;
+    category: string;
+    /** Whether this sheet was ever asked to present. False for an outright placement. */
+    presented: boolean;
+  }) => void;
   /**
    * Which screen opened this, for `ranking_completed` alone.
    *
@@ -237,6 +254,25 @@ function Session({
   const [step, setStep] = useState<SessionStep | null>(null);
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
+
+  /**
+   * The last comparison the reader was shown, kept so an `onPlaced` exit can slide out
+   * showing it instead of collapsing to an empty strip. Rendered from, so state.
+   */
+  const [lastComparison, setLastComparison] = useState<Extract<
+    SessionStep,
+    { state: 'comparing' }
+  > | null>(null);
+
+  /**
+   * Under `onPlaced`, whether the session has answered with anything other than an
+   * outright placement, which is what lets the sheet present. Sticky, and adjusted during
+   * render the way `Sheet` adjusts `asked`. Every other caller presents immediately, as
+   * it always has. See `onPlaced`.
+   */
+  const [opened, setOpened] = useState(false);
+  if (onPlaced && !opened && step && step.state !== 'placed') setOpened(true);
+  const present = visible && (!onPlaced || opened);
 
   /**
    * The attempt to run again if the reader asks, and **the reason the operation id is
@@ -409,6 +445,7 @@ function Session({
       }
 
       setStep(next);
+      if (next.state === 'comparing') setLastComparison(next);
       if (next.state === 'placed') {
         // Everything a finished ranking changes, named in one place so the two
         // writers cannot drift. This used to be three keys inline, and the feed was
@@ -662,12 +699,19 @@ function Session({
   useEffect(() => {
     if (!onPlaced || step?.state !== 'placed' || handedOver.current) return;
     handedOver.current = true;
-    onPlaced({ score: step.score, position: step.position, category: step.category });
-  }, [onPlaced, step]);
+    onPlaced({
+      score: step.score,
+      position: step.position,
+      category: step.category,
+      presented: opened,
+    });
+  }, [onPlaced, step, opened]);
 
   return (
     <Sheet
-      visible={visible}
+      // `present` rather than `visible`: under `onPlaced` the sheet is held back until the
+      // first answer is known. For every other caller the two are the same value.
+      visible={present}
       /**
        * Inert while dismissing, for the reason `TasteBucketSheet` states: iOS keeps a
        * dismissing modal's children mounted, so closing it again would unmount this
@@ -675,29 +719,46 @@ function Session({
        *
        * Only reachable when a caller passes `visible`, which today is onboarding alone.
        */
-      onClose={visible ? () => void close() : noopClose}
+      onClose={present ? () => void close() : noopClose}
       onDismissed={onDismissed}
       onShown={onShown}
       label={`Rank ${subject.title}`}
     >
       <View style={styles.sheet}>
-        {step?.state === 'placed' && onPlaced ? (
+        {step?.state === 'placed' && onPlaced && lastComparison ? (
           /**
-           * What this sheet shows between the placement landing and it going away.
+           * What this sheet shows between the placement landing and it going away: the
+           * last comparison, frozen.
            *
-           * Usually one frame — the effect above has already handed the placement back
-           * and the caller drops this on its next render. A caller that serialises the
-           * dismissal holds it longer: onboarding keeps this mounted with `visible` false
-           * until iOS reports the presentation gone, which is most of a slide-out. Either
-           * way it is not nothing, because a sheet that emptied itself would flash its own
-           * chrome over the screen behind it — and it is not the reveal, because
-           * suppressing that is the whole contract.
-           *
-           * Empty rather than a spinner: `LoadingScreen` is the only indeterminate
-           * spinner in this app and it earns that by being a wait of unknown length. This
-           * is a single frame with a known end.
+           * Onboarding keeps this mounted with `visible` false until iOS reports the
+           * presentation gone, which is most of a slide-out. It used to be an empty strip,
+           * and a sheet that collapses to a strip before it leaves looks broken (founder,
+           * physical iOS QA, 2026-09-12). The comparison is what was on the sheet a moment
+           * ago, so it leaves showing exactly that. Every handler is a no-op and `busy`
+           * disables the controls; `Sheet` also drops touches while dismissing. It is not
+           * the reveal, because suppressing that is the whole contract.
+           */
+          <Comparison
+            subject={subject}
+            pivotId={lastComparison.pivotId}
+            skipped={lastComparison.skipped}
+            surface={surface}
+            busy
+            onPick={noopClose}
+            onBack={noopClose}
+            onSkip={noopClose}
+            onClose={noopClose}
+          />
+        ) : step?.state === 'placed' && onPlaced ? (
+          /**
+           * The fallback when there was no comparison to freeze: a sheet that opened on a
+           * failure whose Try again then placed. An outright placement never presents, so
+           * it does not reach here. Kept so the contract never draws the reveal. Empty
+           * rather than a spinner: `LoadingScreen` is the only indeterminate spinner in
+           * this app.
            */
           <View
+            testID="ranking-handoff"
             style={styles.handoff}
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
@@ -1952,8 +2013,8 @@ const styles = StyleSheet.create({
   // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
   // moving off a full-height page sheet — a comparison is a small question.
   sheet: { paddingBottom: theme.space[2] },
-  // The single frame between a placement and the caller unmounting this, under the
-  // `onPlaced` contract. Tall enough that the sheet does not visibly collapse first.
+  // The `onPlaced` exit when there is no comparison to freeze (see the render). Tall
+  // enough that the sheet does not visibly collapse first.
   handoff: { height: theme.space[10] },
   // No flex anywhere in here. Both halves of the old layout stretched: the screen was
   // a full-height page sheet, and the card row inside it was `flex: 1` with the posters

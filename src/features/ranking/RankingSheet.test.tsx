@@ -2343,3 +2343,89 @@ describe('when the recall sheet is opened from a comparison', () => {
     expect(sheet.getByLabelText('Details about …').props.accessibilityHint).toBeUndefined();
   });
 });
+
+/**
+ * `onPlaced` holds the sheet back until the first answer is known (founder, physical iOS
+ * QA, 2026-09-12).
+ *
+ * Onboarding is the only caller. An empty band places outright, and a sheet presented for
+ * that rose reading *Working out what to ask…* and slid out as an empty strip. So under
+ * this contract nothing presents unless there is something to show, and a sheet that did
+ * present leaves on its last pair. Every other caller is untouched, which the last case and
+ * the rest of this file hold.
+ */
+describe('handing a placement back', () => {
+  it('presents nothing for an outright placement, and tells the caller so', async () => {
+    answering(placement);
+    const onPlaced = jest.fn();
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onPlaced, onShown });
+
+    await waitFor(() =>
+      expect(onPlaced).toHaveBeenCalledWith({
+        score: 8.7,
+        position: 3,
+        category: 'movies',
+        presented: false,
+      }),
+    );
+    expect(onPlaced).toHaveBeenCalledTimes(1);
+    expect(onShown).not.toHaveBeenCalled();
+    expect(sheet.queryByLabelText('Rank Film A', { includeHiddenElements: true })).toBeNull();
+    expect(
+      sheet.queryByText('Working out what to ask…', { includeHiddenElements: true }),
+    ).toBeNull();
+  });
+
+  it('presents once the first answer is a question, and reports the placement as presented', async () => {
+    answering(comparison(), placement);
+    const onPlaced = jest.fn();
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onPlaced, onShown });
+
+    await fireEvent.press(await sheet.ready('Film P'));
+
+    await waitFor(() =>
+      expect(onPlaced).toHaveBeenCalledWith(expect.objectContaining({ presented: true })),
+    );
+    expect(onShown).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the last pair on the sheet after the placement, rather than an empty strip', async () => {
+    answering(comparison(), placement);
+    const onPlaced = jest.fn();
+    const sheet = await openSheet({ onPlaced });
+
+    await fireEvent.press(await sheet.ready('Film P'));
+    await waitFor(() => expect(onPlaced).toHaveBeenCalled());
+
+    expect(sheet.getByText('Which did you like more?')).toBeTruthy();
+    expect(sheet.card('Film P').props.accessibilityState.disabled).toBe(true);
+    expect(sheet.queryByTestId('ranking-handoff', { includeHiddenElements: true })).toBeNull();
+    // Still not the reveal: suppressing it is the contract.
+    expect(sheet.queryByLabelText(/Film A scored/, { includeHiddenElements: true })).toBeNull();
+    expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull();
+  });
+
+  it('opens on a failed first answer, so its Close can be reached', async () => {
+    answering({ data: null, error: { code: '42501', message: 'suspended' } });
+    const onPlaced = jest.fn();
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onPlaced, onShown });
+
+    await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
+    expect(sheet.getByRole('button', { name: 'Close' })).toBeTruthy();
+    expect(onShown).toHaveBeenCalledTimes(1);
+    expect(onPlaced).not.toHaveBeenCalled();
+  });
+
+  it('still presents at once and reveals the score for a caller without onPlaced', async () => {
+    answering(placement);
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onShown });
+
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    expect(onShown).toHaveBeenCalledTimes(1);
+    expect(sheet.queryByTestId('ranking-handoff', { includeHiddenElements: true })).toBeNull();
+  });
+});
