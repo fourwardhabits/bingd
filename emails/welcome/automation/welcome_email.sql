@@ -10,9 +10,9 @@
 -- that moves it into `supabase/migrations/`, newer than every file there at that moment.
 -- See README.md, "Turning it on".
 --
--- Applying it changes no behaviour on its own: it creates two empty tables, inserts five
+-- Applying it changes no behaviour on its own: it creates two empty tables, inserts six
 -- configuration rows at values that mean "send nothing to nobody", and defines functions
--- that only the service role can call.
+-- that only the service role can call, all installed in one statement.
 --
 -- Proven against every real migration by supabase/tests/welcome-email.test.mjs (PGlite)
 -- and supabase/tests/concurrency/races/welcome-email.mjs (a real PostgreSQL, two
@@ -140,31 +140,117 @@ insert into app_config (key, value) values
   ('welcome.max_age_hours', '168'::jsonb),
 
   -- A ceiling on any one run, whatever the caller asks for.
-  ('welcome.max_per_run', '25'::jsonb)
+  ('welcome.max_per_run', '25'::jsonb),
+
+  -- The only addresses a canary may ever mail: a JSON array of lower-case test inboxes
+  -- the founder controls. Empty, so a canary claims nobody until somebody writes one in.
+  -- Without this a canary would be "mail any real account whose id and address you
+  -- know, with every other switch off", which is a hole, not a test.
+  ('welcome.canary_addresses', '[]'::jsonb)
 
 on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------------
--- Who is eligible
+-- The functions
 --
--- One definition, used by the dry run and by the claim, so the preview cannot describe a
--- different set of people from the one the claim takes.
+-- All of them, with their grants, in ONE `do` block, which is one statement. The
+-- Supabase CLI applies a migration statement by statement outside a transaction, and a
+-- new function is executable by PUBLIC until a later `revoke` runs; installed separately,
+-- each would be callable by any client for the moment between its `create` and its
+-- `revoke`. Inside the block, nothing exists to anybody until all of it does.
+--
+-- Function bodies are quoted `$fn$` because the block itself is `$install$`.
+-- ---------------------------------------------------------------------------
+
+do $install$
+begin
+
+-- ---------------------------------------------------------------------------
+-- Can this account receive mail at all
+--
+-- An active profile; an auth user with an address that has been confirmed; not banned,
+-- not soft-deleted, not anonymous. The claim and the retry both ask this one question,
+-- so a check cannot be present in one and missing from the other.
+-- ---------------------------------------------------------------------------
+
+create function _welcome_email_can_receive(p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $fn$
+  select exists (
+    select 1
+      from profiles p
+      join auth.users u on u.id = p.id
+     where p.id = p_user
+       and p.status = 'active'
+       and u.email is not null
+       and u.email like '%_@_%'
+       and u.email_confirmed_at is not null
+       and u.deleted_at is null
+       and (u.banned_until is null or u.banned_until <= now())
+       and not coalesce(u.is_anonymous, false)
+  );
+$fn$;
+
+revoke all on function _welcome_email_can_receive(uuid) from public, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Is this account in the scope of this run
 --
 -- Two modes and nothing else:
 --
 --   cohort   p_canary_user is null. Created at or after start_after, at least delay_hours
 --            and less than max_age_hours ago.
---   canary   p_canary_user and p_canary_email both given. Exactly that account, and only
---            if its confirmed address is exactly that address. The time window does not
---            apply, because a canary is a test account made for the purpose.
+--   canary   p_canary_user and p_canary_email both given. Exactly that account, only if
+--            its address is the address given, and only if that address is on
+--            welcome.canary_addresses. The signup window does not apply, because a canary
+--            is a test account made for the purpose.
 --
--- Both modes require: an active profile; an auth user with an address that has been
--- confirmed; not banned, not soft-deleted, not anonymous; no ledger row.
+-- The claim and the retry both ask this too, so a retry cannot reach an account the claim
+-- would not, and a canary's failed row cannot be picked up by a cohort run or the reverse.
+-- ---------------------------------------------------------------------------
+
+create function _welcome_email_in_scope(p_user uuid, p_canary_user uuid, p_canary_email text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $fn$
+  select case
+    when p_canary_user is null then exists (
+      select 1 from profiles p
+       where p.id = p_user
+         and p.created_at >= coalesce((select c.value #>> '{}' from app_config c where c.key = 'welcome.start_after'), '2099-01-01T00:00:00Z')::timestamptz
+         and p.created_at <= now() - make_interval(hours => coalesce((select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.delay_hours'), 36))
+         and p.created_at >  now() - make_interval(hours => coalesce((select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.max_age_hours'), 168))
+    )
+    else exists (
+      select 1 from auth.users u
+       where u.id = p_user
+         and p_user = p_canary_user
+         and lower(u.email) = lower(p_canary_email)
+         and lower(u.email) in (
+           select lower(a)
+             from jsonb_array_elements_text(
+                    coalesce((select c.value from app_config c where c.key = 'welcome.canary_addresses'), '[]'::jsonb)
+                  ) a
+         )
+    )
+  end;
+$fn$;
+
+revoke all on function _welcome_email_in_scope(uuid, uuid, text) from public, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Who is eligible for a first claim
 --
--- Suppressed addresses ARE returned, flagged, so that the claim can record them as
--- `suppressed` and stop reconsidering them.
---
--- Callable by nobody. Only the two functions below use it.
+-- In scope, able to receive, and no ledger row. One definition, used by the dry run and
+-- by the claim, so the preview cannot describe a different set of people from the one the
+-- claim takes. Suppressed addresses ARE returned, flagged, so the claim can record them.
 -- ---------------------------------------------------------------------------
 
 create function _welcome_email_candidates(
@@ -184,23 +270,19 @@ language plpgsql
 stable
 security definer
 set search_path = public, pg_temp
-as $$
+as $fn$
 declare
-  v_start   timestamptz;
-  v_delay   interval;
-  v_max_age interval;
-  v_cap     integer;
+  v_cap integer;
 begin
   if (p_canary_user is null) <> (p_canary_email is null) then
     raise exception 'a canary needs both an account id and its address'
       using errcode = '22023';
   end if;
 
-  -- A malformed row raises here, which fails the run before anything is claimed.
-  v_start   := coalesce((select c.value #>> '{}' from app_config c where c.key = 'welcome.start_after'), '2099-01-01T00:00:00Z')::timestamptz;
-  v_delay   := make_interval(hours => coalesce((select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.delay_hours'), 36));
-  v_max_age := make_interval(hours => coalesce((select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.max_age_hours'), 168));
-  v_cap     := coalesce((select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.max_per_run'), 25);
+  -- Read before selecting anybody: a malformed switch raises here, and the run fails
+  -- before anything is claimed.
+  perform coalesce((select c.value #>> '{}' from app_config c where c.key = 'welcome.start_after'), '2099-01-01T00:00:00Z')::timestamptz;
+  v_cap := coalesce((select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.max_per_run'), 25);
 
   return query
     select p.id,
@@ -211,37 +293,22 @@ begin
            exists (select 1 from email_suppressions s where s.email = lower(u.email))
       from profiles p
       join auth.users u on u.id = p.id
-     where case
-             when p_canary_user is null then
-                   p.created_at >= v_start
-               and p.created_at <= now() - v_delay
-               and p.created_at >  now() - v_max_age
-             else
-                   p.id = p_canary_user
-               and lower(u.email) = lower(p_canary_email)
-           end
-       and p.status = 'active'
-       and u.email is not null
-       and u.email like '%_@_%'
-       and u.email_confirmed_at is not null
-       and u.deleted_at is null
-       and (u.banned_until is null or u.banned_until <= now())
-       and not coalesce(u.is_anonymous, false)
+     where _welcome_email_in_scope(p.id, p_canary_user, p_canary_email)
+       and _welcome_email_can_receive(p.id)
        and not exists (select 1 from welcome_emails w where w.user_id = p.id)
      order by p.created_at, p.id
      limit greatest(0, least(coalesce(p_limit, v_cap), v_cap));
 end;
-$$;
+$fn$;
 
 revoke all on function _welcome_email_candidates(integer, uuid, text) from public, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- The dry run
 --
--- Who a claim would take right now, without taking anybody, plus the switches. It ignores
+-- Who a claim would take right now, taking nobody, plus the switches. It ignores
 -- delivery_enabled on purpose, because "who would this mail if I turned it on" is the
--- question a dry run exists to answer. Returns handles, never addresses: its output is
--- printed into logs.
+-- question a dry run exists to answer. Handles, never addresses: it is printed to logs.
 -- ---------------------------------------------------------------------------
 
 create function welcome_email_preview(
@@ -254,13 +321,14 @@ language sql
 stable
 security definer
 set search_path = public, pg_temp
-as $$
+as $fn$
   select jsonb_build_object(
     'delivery_enabled', coalesce((select c.value from app_config c where c.key = 'welcome.delivery_enabled') = 'true'::jsonb, false),
     'start_after',      (select c.value #>> '{}' from app_config c where c.key = 'welcome.start_after'),
     'delay_hours',      (select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.delay_hours'),
     'max_age_hours',    (select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.max_age_hours'),
     'max_per_run',      (select (c.value #>> '{}')::integer from app_config c where c.key = 'welcome.max_per_run'),
+    'canary_addresses', coalesce(jsonb_array_length((select c.value from app_config c where c.key = 'welcome.canary_addresses')), 0),
     'candidates', coalesce((
       select jsonb_agg(jsonb_build_object(
                'id', x.recipient_id,
@@ -271,7 +339,7 @@ as $$
         from _welcome_email_candidates(p_limit, p_canary_user, p_canary_email) x
     ), '[]'::jsonb)
   );
-$$;
+$fn$;
 
 revoke all on function welcome_email_preview(integer, uuid, text) from public, anon, authenticated;
 grant execute on function welcome_email_preview(integer, uuid, text) to service_role;
@@ -289,9 +357,10 @@ grant execute on function welcome_email_preview(integer, uuid, text) to service_
 --   3. New candidates: insert `claimed` with on conflict do nothing. A concurrent claim of
 --      the same person blocks on the primary key until the other commits, then does
 --      nothing. Only a row this call inserted is returned.
---   4. Retries: a `failed` row with attempts < 3, first claimed under 20 hours ago, moves
---      back to `claimed` with a compare-and-set on its status. Two runs retrying the same
---      row serialise on the row lock and the second finds it no longer `failed`.
+--   4. Retries: a `failed` row of this run's mode (cohort or canary), with attempts < 3,
+--      first claimed under 20 hours ago, still in scope, still able to receive, and not
+--      suppressed, moves back to `claimed` with a compare-and-set on its status. Two runs
+--      retrying the same row serialise on the row lock and the second finds it `claimed`.
 --
 -- The 20 hours is Resend's half of the guarantee. The worker sends with
 -- `Idempotency-Key: welcome-v1-<user_id>` and Resend honours a key for 24 hours, so a
@@ -315,7 +384,7 @@ language plpgsql
 volatile
 security definer
 set search_path = public, pg_temp
-as $$
+as $fn$
 declare
   v_enabled boolean;
   v_canary  boolean := p_canary_user is not null;
@@ -374,11 +443,9 @@ begin
      where w.status = 'failed'
        and w.attempts < 3
        and w.first_claimed_at > now() - interval '20 hours'
-       and (not v_canary or (w.user_id = p_canary_user and lower(u.email) = lower(p_canary_email)))
-       and p.status = 'active'
-       and u.email_confirmed_at is not null
-       and u.deleted_at is null
-       and (u.banned_until is null or u.banned_until <= now())
+       and w.canary = v_canary
+       and _welcome_email_in_scope(w.user_id, p_canary_user, p_canary_email)
+       and _welcome_email_can_receive(w.user_id)
        and not exists (select 1 from email_suppressions s where s.email = lower(u.email))
      order by w.first_claimed_at
      limit greatest(0, v_limit - v_taken)
@@ -401,7 +468,7 @@ begin
     end if;
   end loop;
 end;
-$$;
+$fn$;
 
 revoke all on function welcome_email_claim(integer, uuid, text) from public, anon, authenticated;
 grant execute on function welcome_email_claim(integer, uuid, text) to service_role;
@@ -426,7 +493,7 @@ language plpgsql
 volatile
 security definer
 set search_path = public, pg_temp
-as $$
+as $fn$
 begin
   if p_outcome is null or p_outcome not in ('sent', 'failed') then
     raise exception 'outcome must be sent or failed, not %', p_outcome using errcode = '22023';
@@ -443,7 +510,10 @@ begin
 
   return found;
 end;
-$$;
+$fn$;
 
 revoke all on function welcome_email_record(uuid, integer, text, text, text) from public, anon, authenticated;
 grant execute on function welcome_email_record(uuid, integer, text, text, text) to service_role;
+
+end;
+$install$;

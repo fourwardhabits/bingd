@@ -49,9 +49,19 @@ export default function suite() {
 
     const claimSql = `select recipient_id, attempt from welcome_email_claim()`;
 
+    /**
+     * An empty ledger, and every account from an earlier scenario aged out of the signup
+     * window. Emptying the ledger alone makes those accounts claimable again, and a
+     * scenario would then be counting another scenario's people.
+     */
+    const fresh = async (db) => {
+      await db.sql(`delete from welcome_emails`);
+      await db.sql(`update profiles set created_at = now() - interval '400 days'`);
+    };
+
     it('W1: two overlapping runs claim each person exactly once, and neither fails', async () => {
       const { db } = ctx;
-      await db.sql(`delete from welcome_emails`);
+      await fresh(db);
       const people = [await eligible(), await eligible(), await eligible()];
 
       const a = await db.session('run-a');
@@ -82,7 +92,7 @@ export default function suite() {
 
     const retryRace = async () => {
       const { db } = ctx;
-      await db.sql(`delete from welcome_emails`);
+      await fresh(db);
       const person = await eligible();
       await db.sql(`insert into welcome_emails (user_id, status, attempts, failed_reason) values ($1, 'failed', 1, '500 {}')`, [person]);
 
@@ -120,7 +130,7 @@ export default function suite() {
       const original = await welcomeSource();
       const guard = /(\n\s+where w\.user_id = v_row\.rid)\r?\n\s+and w\.status = 'failed'/;
       assert.match(original, guard, 'the guard this test deletes is where it expects');
-      const claimFunction = original.match(/create function welcome_email_claim\([\s\S]*?\n\$\$;/)[0];
+      const claimFunction = original.match(/create function welcome_email_claim\([\s\S]*?\n\$fn\$;/)[0];
 
       try {
         await db.sql(claimFunction.replace('create function', 'create or replace function').replace(guard, '$1'));

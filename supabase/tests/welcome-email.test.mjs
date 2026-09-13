@@ -113,6 +113,7 @@ beforeEach(async () => {
     update app_config set value = '36'::jsonb where key = 'welcome.delay_hours';
     update app_config set value = '168'::jsonb where key = 'welcome.max_age_hours';
     update app_config set value = '25'::jsonb where key = 'welcome.max_per_run';
+    update app_config set value = '[]'::jsonb where key = 'welcome.canary_addresses';
   `);
 });
 
@@ -120,6 +121,7 @@ describe('welcome email: applying the file', () => {
   it('installs every switch at a value that sends nothing to nobody', async () => {
     const { rows } = await t.sql(`select key, value from app_config where key like 'welcome.%' order by key`);
     assert.deepEqual(Object.fromEntries(rows.map((r) => [r.key, r.value])), {
+      'welcome.canary_addresses': [],
       'welcome.delay_hours': 36,
       'welcome.delivery_enabled': false,
       'welcome.max_age_hours': 168,
@@ -153,6 +155,8 @@ describe('welcome email: who can call it', () => {
         `select * from welcome_email_claim()`,
         `select welcome_email_record('${someone.id}', 1, 'sent')`,
         `select * from _welcome_email_candidates(1)`,
+        `select _welcome_email_can_receive('${someone.id}')`,
+        `select _welcome_email_in_scope('${someone.id}', null, null)`,
         `select * from welcome_emails`,
         `select * from email_suppressions`,
         `insert into email_suppressions (email, reason) values ('x@example.com', 'requested')`,
@@ -168,7 +172,9 @@ describe('welcome email: who can call it', () => {
     await t.asRole('service_role', null, async () => {
       assert.equal(await t.errorFrom(`select welcome_email_preview()`), null);
       assert.equal(await t.errorFrom(`select * from welcome_email_claim()`), null);
-      assert.equal((await t.errorFrom(`select * from _welcome_email_candidates(1)`))?.code, '42501');
+      for (const helper of [`select * from _welcome_email_candidates(1)`, `select _welcome_email_can_receive(gen_random_uuid())`, `select _welcome_email_in_scope(gen_random_uuid(), null, null)`]) {
+        assert.equal((await t.errorFrom(helper))?.code, '42501', helper);
+      }
     });
   });
 });
@@ -306,6 +312,44 @@ describe('welcome email: exactly once', () => {
     assert.deepEqual(await claim(), []);
   });
 
+  it('never lets a cohort run retry a canary failure, even for an account the cohort would not select', async () => {
+    const tester = await person({ hoursAgo: 24 * 30 });
+    await allowCanary(tester.email);
+    await claim(`welcome_email_claim(null, $1, $2)`, [tester.id, tester.email]);
+    await record(tester.id, 1, 'failed', null, '500 {}');
+
+    await t.exec(OPEN_COHORT_SQL);
+    await t.exec(`update app_config set value = to_jsonb((now() - interval '60 days')::text) where key = 'welcome.start_after'`);
+    assert.deepEqual(await claim(), [], 'the cohort does not retry what a canary claimed');
+    assert.deepEqual((await claim(`welcome_email_claim(null, $1, $2)`, [tester.id, tester.email])).map((r) => r.attempt), [2]);
+  });
+
+  it('never lets a canary run retry a cohort failure', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const due = await person();
+    await claim();
+    await record(due.id, 1, 'failed', null, '500 {}');
+    await allowCanary(due.email);
+    assert.deepEqual(await claim(`welcome_email_claim(null, $1, $2)`, [due.id, due.email]), []);
+  });
+
+  it('stops retrying once the cutoff is moved back to 2099, or the account can no longer receive', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const one = await person();
+    const two = await person();
+    await claim();
+    await record(one.id, 1, 'failed', null, '500 {}');
+    await record(two.id, 1, 'failed', null, '500 {}');
+
+    await t.exec(`update app_config set value = '"2099-01-01T00:00:00Z"'::jsonb where key = 'welcome.start_after'`);
+    assert.deepEqual(await claim(), [], 'the second switch stops retries too');
+
+    await t.exec(OPEN_COHORT_SQL);
+    await t.sql(`update auth.users set is_anonymous = true where id = $1`, [one.id]);
+    await t.sql(`update auth.users set email_confirmed_at = null where id = $1`, [two.id]);
+    assert.deepEqual(await claim(), []);
+  });
+
   it('cannot move a sent row, and refuses an outcome that is not sent or failed', async () => {
     await t.exec(OPEN_COHORT_SQL);
     const di = await person();
@@ -378,10 +422,15 @@ describe('welcome email: who is not mailed', () => {
   });
 });
 
+/** Puts addresses on welcome.canary_addresses, the only inboxes a canary may mail. */
+const allowCanary = (...addresses) =>
+  t.sql(`update app_config set value = $1::jsonb where key = 'welcome.canary_addresses'`, [JSON.stringify(addresses)]);
+
 describe('welcome email: the canary', () => {
-  it('claims exactly the named account at the named address with delivery off and the cutoff in 2099', async () => {
+  it('claims exactly the named account at the named, allowlisted address with delivery off and the cutoff in 2099', async () => {
     const bystander = await person();
     const canary = await person({ hoursAgo: 1 });
+    await allowCanary(canary.email);
 
     const taken = await claim(`welcome_email_claim(null, $1, $2)`, [canary.id, canary.email.toUpperCase()]);
     assert.deepEqual(taken.map((r) => r.recipient_id), [canary.id]);
@@ -392,9 +441,19 @@ describe('welcome email: the canary', () => {
     assert.deepEqual(await claim(`welcome_email_claim(null, $1, $2)`, [canary.id, canary.email]), [], 'the second run sends nothing');
   });
 
+  it('claims nobody, and writes nothing, when the address is not on welcome.canary_addresses', async () => {
+    const real = await person();
+    assert.deepEqual(await claim(`welcome_email_claim(null, $1, $2)`, [real.id, real.email]), [], 'a real account is not a canary');
+    assert.deepEqual(await ledger(), []);
+    await allowCanary('someone.else@example.com');
+    assert.deepEqual(await claim(`welcome_email_claim(null, $1, $2)`, [real.id, real.email]), []);
+    assert.deepEqual(await ledger(), []);
+  });
+
   it('claims nobody, and writes nothing, when the address does not match the account', async () => {
     const canary = await person();
     const other = await person();
+    await allowCanary(canary.email, other.email);
     assert.deepEqual(await claim(`welcome_email_claim(null, $1, $2)`, [canary.id, other.email]), []);
     assert.deepEqual(await ledger(), []);
   });
@@ -409,6 +468,7 @@ describe('welcome email: the canary', () => {
 
   it('still refuses a canary account that is not in a state to receive mail', async () => {
     const unconfirmed = await person({ confirmed: false });
+    await allowCanary(unconfirmed.email);
     assert.deepEqual(await claim(`welcome_email_claim(null, $1, $2)`, [unconfirmed.id, unconfirmed.email]), []);
   });
 });
@@ -647,6 +707,7 @@ describe('welcome email: the worker, against the real SQL', () => {
   it('canary on the real draft copy: one send to the test account, then zero, with the cohort untouched', async () => {
     await person();
     const canary = await person({ hoursAgo: 1, email: 'Founder.Test@Example.com' });
+    await t.sql(`update app_config set value = '["founder.test@example.com"]'::jsonb where key = 'welcome.canary_addresses'`);
     const w = world();
     const argv = ['--canary', canary.id, '--canary-email', 'founder.test@example.com'];
 

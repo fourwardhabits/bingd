@@ -47,7 +47,7 @@ on:
         type: string
         required: false
       canary_email:
-        description: Canary only. That account's exact confirmed address.
+        description: Canary only. That account's confirmed address, which must be on welcome.canary_addresses.
         type: string
         required: false
 

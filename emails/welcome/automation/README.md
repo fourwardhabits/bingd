@@ -18,7 +18,7 @@ a week are never selected, so a paused job does not send stale welcomes when res
 
 ```
 emails/welcome/automation/
-  welcome_email.sql      the ledger, the suppression list, the switches, three functions
+  welcome_email.sql      the ledger, the suppression list, the switches, the functions
   send-welcome.mjs       the worker: claim, send, record
 .github/workflows/welcome-email.yml   manual only; no schedule
 supabase/tests/welcome-email.test.mjs            the SQL against every migration, and the
@@ -41,6 +41,11 @@ In SQL, not in the worker. The worker never selects a person: it asks
 | `welcome_email_preview(limit, canary_user, canary_email)` | service role | who a claim would take right now, taking nobody. Handles only, no addresses. The dry run. |
 | `welcome_email_claim(limit, canary_user, canary_email)` | service role | the switch, the window, eligibility, suppression, the claim and the retry, in that order |
 | `welcome_email_record(user, attempt, outcome, resend_id, reason)` | service role | `claimed` → `sent` or `failed`, for exactly that attempt |
+
+All three, and two private helpers every path shares (`_welcome_email_can_receive`,
+`_welcome_email_in_scope`), are installed inside one `do` block with their grants. The
+CLI applies migration statements outside a transaction, and a function created on its own
+is executable by PUBLIC until its `revoke` runs.
 
 ### Eligibility
 
@@ -66,7 +71,8 @@ At most `welcome.max_per_run` (25) per run, whatever the caller asks for.
 3. **Retries are bounded and inside Resend's window.** A `failed` row is retried at most to
    three attempts, and only within 20 hours of its first claim, because Resend holds a key
    for 24. The retry is a compare-and-set on `status = 'failed'`, so two runs cannot retry
-   the same row.
+   the same row, and it re-asks the claim's own questions (still in scope, still able to
+   receive, not suppressed, same mode), so moving the cutoff back to 2099 stops retries too.
 4. **An unrecorded send is never retried.** If Resend accepted a message and the record
    call then failed, the row stays `claimed`, which is never picked up again. The run
    exits non-zero and says `NOT RECORDED`. Look at it; do not re-run it away.
@@ -129,6 +135,13 @@ dashboard is where to look.
 Needs: the SQL applied to the project (step 3 below), a test account in that project
 whose email you control and have signed in with, its user id, and a Resend key.
 
+First, put that inbox on the canary allowlist in the project's SQL editor. It starts
+empty, and a canary claims nobody whose address is not on it:
+
+```sql
+update app_config set value = '["founder.test@example.com"]'::jsonb where key = 'welcome.canary_addresses';
+```
+
 ```bash
 # Keys into the child process only, never onto disk. Staging shown; production is abheeqyjzekiowkztfxv.
 export SUPABASE_URL=https://fjxhcbowoxuzulwirzyr.supabase.co
@@ -152,8 +165,11 @@ select status, attempts, canary, resend_id, sent_at from welcome_emails;   -- ex
 ```
 
 A canary ignores `delivery_enabled` and the signup window, and nothing else. It claims
-nobody unless the id and the confirmed address belong to the same account, which is
-checked inside SQL before any write. The same sequence runs in CI on every pull request
+nobody unless the id and the confirmed address belong to the same account **and** that
+address is on `welcome.canary_addresses`, all checked inside SQL before any write. A
+canary's failed row is retried only by a canary run, never by the cohort, and the reverse.
+Empty the allowlist again when you are done: `update app_config set value = '[]'::jsonb
+where key = 'welcome.canary_addresses';` The same sequence runs in CI on every pull request
 (`supabase/tests/welcome-email.test.mjs`, "canary on the real draft copy").
 
 ---
