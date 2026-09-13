@@ -220,6 +220,45 @@ all". It has one, added with #112 on 2026-09-06, and it was emitted for a day be
 being written here — which is exactly the drift the pinned list in `analytics.test.ts`
 exists to make visible.
 
+### Similar, on a title page — added 2026-09-11
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `similar_tab_opened` | the reader pressed the **Similar** tab, on the press itself and only on a genuine change of tab | the reader | `medium` |
+| `similar_title_opened` | the reader opened a title **from** that grid | the reader | `medium` |
+
+Two events, because the question is a product question rather than a mechanism one: **is
+the title page a place people explore from**. Similar is the only thing on that page that
+costs a provider request lazily — it is fetched when the tab is opened and not before —
+so whether it is opened at all is the number that says whether the request is worth
+making, and opens over taps is whether the answers were any good.
+
+`medium` is `movies` or `tv`, and there is deliberately no second "destination" property:
+the two are the same thing by construction here. A film's associations are films; a
+season's are its show's, resolved to series-level by the adapter, because TMDB publishes
+recommendations for a series and none for a season. A series and a season both report
+`tv`, for the same reason For You's two walls do.
+
+**There is deliberately no `personalized` property**, and the reason is the feature rather
+than the taxonomy. An earlier draft of the tab reranked its candidates through the For You
+scorer and carried a flag saying whether the reader's taste had been live. The founder's
+V1 does not rerank at all: the grid is TMDB's relevance order after resolving ids,
+removing the current title, deduping and dropping what the catalogue cannot resolve, and
+nothing else. So the property would be a column of `false` — the kind of permanently
+constant series §2 refuses elsewhere. It returns with the bounded rerank, if that ships,
+in the change that makes it mean something.
+
+What deliberately does not travel: which title was opened, which title it was similar
+*to*, and the position in the grid. The first two would be a `media_item_id` under
+another name, and a position is a rank of something that is not named.
+
+**`medium` reached the wire for the first time with these two.** It was declared on
+`for_you_slate_shown` and never added to `ALLOWED_PROPERTY_KEYS`, so `sanitize` has been
+dropping it — along with `size`, `repeat_count`, and all three `streak_state_viewed`
+properties — since those events shipped. Adding the key here fixes `medium` everywhere it
+is declared, as a side effect rather than as a decision; the other five are left alone,
+because each is a live series whose shape changing is a call of its own.
+
 ### Weekly streak — added 2026-09-06
 
 | Event | Fires exactly when | Owner | Properties |
