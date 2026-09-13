@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, waitFor } from '@testing-library/react-native';
 import { BackHandler, StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -524,11 +524,103 @@ describe('switching metrics keeps the board still', () => {
     const empty = view.getByTestId('leaderboard-content');
     expect(styleOf(empty).paddingTop ?? 0).toBe(0);
     expect(styleOf(empty).marginTop ?? 0).toBe(0);
-    // The empty state is inset by exactly a row's own vertical padding, so its first line
-    // sits where a row's name would — not the extra 16pt that moved it.
-    const inset = styleOf(view.getByTestId('leaderboard-empty'));
-    expect(inset.paddingTop).toBe(theme.space[3]);
-    expect(inset.paddingHorizontal).toBe(theme.layout.gutter);
+    /**
+     * Nothing between the container and the empty state adds an offset — the wrapper that
+     * used to add 16pt (and a second gutter) is gone. The only vertical padding left is the
+     * compact `EmptyState`'s own, asserted by value so a change to that component shows up
+     * here. Jest has no layout engine, so rendered Y positions cannot be compared directly;
+     * what can be pinned is every offset each state introduces, which is what moved.
+     */
+    const wrapper = styleOf(view.getByTestId('leaderboard-empty'));
+    expect(wrapper.paddingTop ?? 0).toBe(0);
+    expect(wrapper.paddingHorizontal ?? 0).toBe(0);
+    expect(wrapper.marginTop ?? 0).toBe(0);
+    const summary = view.getByTestId('leaderboard-empty').queryAll(
+      (node: { props: Record<string, unknown> }) => node.props.accessibilityRole === 'summary',
+    )[0]!;
+    expect(styleOf(summary).paddingVertical).toBe(theme.space[4]);
+    expect(styleOf(summary).paddingHorizontal).toBe(theme.layout.gutter);
+  });
+
+  it('adds no offset of its own around the loading skeleton either', async () => {
+    const base = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'leaderboard' ? new Promise(() => {}) : base(name, args),
+    );
+    const view = await open();
+    await toBoard(view);
+
+    const content = view.getByTestId('leaderboard-content');
+    await waitFor(() =>
+      expect(content.queryAll((node: { props: Record<string, unknown> }) => node.props.testID === 'skeleton')).toHaveLength(1),
+    );
+    const skeleton = content.queryAll((node: { props: Record<string, unknown> }) => node.props.testID === 'skeleton')[0]!;
+    // The skeleton sits directly in the container: no wrapper, no padding, no margin.
+    expect(skeleton.parent?.props.testID).toBe('leaderboard-content');
+    expect(styleOf(skeleton).paddingTop ?? 0).toBe(0);
+    expect(styleOf(skeleton).marginTop ?? 0).toBe(0);
+  });
+
+  it('does not start the refresh spinner when a chip is pressed', async () => {
+    /**
+     * Independent review 82. `refreshing` on iOS is a programmatic pull that slides the page
+     * down; bound to `isRefetching`, it went true for every metric switch that kept the
+     * previous board. Asserted while the next metric is still in flight.
+     */
+    mockBoard['titles|month'] = [entry()];
+    const base = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'leaderboard' && args.p_metric === 'movies' ? new Promise(() => {}) : base(name, args),
+    );
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Movies'));
+
+    expect(view.getByTestId('feed-scroll').props.refreshControl.props.refreshing).toBe(false);
+    expect(view.getByTestId('leaderboard-content').props.accessibilityState).toMatchObject({
+      busy: true,
+    });
+  });
+
+  it('spins for a real pull on the board, and stops when it is answered', async () => {
+    mockBoard['titles|month'] = [entry()];
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    const control = () => view.getByTestId('feed-scroll').props.refreshControl;
+    await act(async () => {
+      control().props.onRefresh();
+    });
+    await waitFor(() => expect(control().props.refreshing).toBe(false));
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'leaderboard').length).toBeGreaterThan(1);
+  });
+
+  it('never pins a standing beside the previous metric’s rows', async () => {
+    // Review 82: the board and the standing resolve independently. Here the new metric's
+    // standing answers while the board is still parked, so the rows on screen are Titles'.
+    mockBoard['titles|month'] = [entry()];
+    mockStanding['movies|month'] = { metric_count: 3, rank: 40, entrants: 50 };
+    const base = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === 'leaderboard' && args.p_metric === 'movies' ? new Promise(() => {}) : base(name, args),
+    );
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Movies'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('my_leaderboard_standing', expect.objectContaining({ p_metric: 'movies' })),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(view.getByText('Ada')).toBeTruthy();
+    expect(view.queryByLabelText(/^You are number/)).toBeNull();
   });
 
   it('never draws a heading on an empty metric that a metric with rows lacks', async () => {

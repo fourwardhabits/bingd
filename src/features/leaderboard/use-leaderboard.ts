@@ -228,7 +228,10 @@ export function useMyStanding(
     queryKey: ['leaderboard-standing', viewerId, metric, timeframe],
     enabled: enabled && Boolean(viewerId),
     staleTime: 60_000,
-    placeholderData: keepSameViewersBoard(viewerId),
+    // Deliberately **no** placeholder here (independent review 82). The board and the
+    // standing resolve independently, so a kept standing could be drawn under a board that
+    // has already switched metric — the wrong count with the right unit. The pinned row is
+    // below the list, so its briefly absent is a row-content difference, not a jump.
     queryFn: async (): Promise<MyStanding> => {
       const { data, error } = await supabase.rpc('my_leaderboard_standing', {
         p_metric: metric,

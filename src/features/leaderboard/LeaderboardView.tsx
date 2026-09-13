@@ -21,6 +21,12 @@ export type LeaderboardViewProps = {
   entries: readonly LeaderboardEntry[] | undefined;
   standing: MyStanding | undefined;
   loading: boolean;
+  /**
+   * The rows on screen belong to the previous metric or timeframe and the next one is still
+   * loading. They stay put so the board does not jump; the container says it is busy so a
+   * screen reader does not read counts that are about to be replaced as current.
+   */
+  updating?: boolean;
   onPressPerson: (username: string) => void;
 };
 
@@ -65,6 +71,7 @@ export function LeaderboardView({
   entries,
   standing,
   loading,
+  updating = false,
   onPressPerson,
 }: LeaderboardViewProps) {
   const rows = entries ?? [];
@@ -107,18 +114,18 @@ export function LeaderboardView({
         * different" the founder saw: Titles usually has rows, and a sparse metric usually
         * does not.
         *
-        * Now every state starts in this container at the same top: rows at its top edge,
-        * the skeleton's own rows at its top edge, and the empty state inset by exactly a
-        * row's vertical padding so its first line sits where a row's name would. The empty
+        * Now every state starts in this container at the same top, and nothing between the
+        * container and each state adds an offset of its own: rows, the skeleton's rows and
+        * the compact empty state each carry only their own component padding. The empty
         * state is the compact one, so no metric grows a heading the others lack. What still
         * differs between metrics is row content, which is the one difference the board is
         * allowed.
         */}
-      <View testID="leaderboard-content">
+      <View testID="leaderboard-content" accessibilityState={{ busy: updating }}>
         {loading ? (
           <SkeletonRow count={5} />
         ) : rows.length === 0 ? (
-          <View testID="leaderboard-empty" style={styles.emptyInset}>
+          <View testID="leaderboard-empty">
             <EmptyState kind="nothingYet" compact title={empty.title} body={empty.body} />
           </View>
         ) : (
@@ -346,9 +353,6 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
     paddingBottom: theme.space[2],
   },
-  // The gutter a row pads itself to, and a row's own top padding, so the empty state's first
-  // line starts where a row's name would. See the content container above.
-  emptyInset: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

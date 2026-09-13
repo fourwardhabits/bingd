@@ -73,6 +73,7 @@ import {
   SectionHeader,
   SkeletonRow,
   Text,
+  usePullRefresh,
   type IconToggleOption,
 } from '@/ui/components';
 import { useTabReset } from '@/ui/use-tab-reset';
@@ -213,6 +214,22 @@ export default function FeedScreen() {
   // surface nobody asked for.
   const leaderboard = useLeaderboard(profile.id, metric, timeframe, showingBoard);
   const standing = useMyStanding(profile.id, metric, timeframe, showingBoard);
+  /**
+   * The board's pull-to-refresh, tracked as a **pull** and never as a fetch (independent
+   * review 82).
+   *
+   * `refreshing` on iOS is a programmatic pull: `true` grows the scroll view's top inset and
+   * slides the page down. It was bound to `leaderboard.isRefetching`, which is also true while
+   * a kept board fetches the next metric and whenever a stale metric refetches in the
+   * background — so switching chips could slide the whole screen, the exact jump the board
+   * exists not to have. `usePullRefresh` is the title page's answer to the same defect.
+   */
+  const boardPull = usePullRefresh(
+    useCallback(
+      () => [leaderboard.refetch(), standing.refetch()],
+      [leaderboard.refetch, standing.refetch],
+    ),
+  );
   /**
    * Whether the shelf will draw anything, so the header row knows whether to name it.
    *
@@ -608,7 +625,7 @@ export default function FeedScreen() {
           <RefreshControl
             refreshing={
               showingBoard
-                ? leaderboard.isRefetching
+                ? boardPull.refreshing
                 : showingPeople
                   ? // Its two queries live inside `PeopleView`, so this gesture reaches
                     // them by key below and there is no `isRefetching` up here to read.
@@ -622,8 +639,7 @@ export default function FeedScreen() {
               // "re-read this" and nothing else. Refetching the feed underneath it would
               // spend two requests to update something nobody is looking at.
               if (showingBoard) {
-                void leaderboard.refetch();
-                void standing.refetch();
+                boardPull.onRefresh();
                 return;
               }
               if (showingPeople) {
@@ -756,7 +772,10 @@ export default function FeedScreen() {
             onChangeMetric={changeMetric}
             timeframe={timeframe}
             entries={leaderboard.data}
-            standing={standing.data}
+            // Only beside a board that is current. While the rows on screen are the previous
+            // metric's, a standing for either metric would be drawn under the wrong list.
+            standing={leaderboard.isPlaceholderData ? undefined : standing.data}
+            updating={leaderboard.isPlaceholderData}
             loading={leaderboard.isPending}
             onPressPerson={(username) => router.push(`/u/${username}`)}
           />
