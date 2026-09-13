@@ -292,8 +292,8 @@ export default function ProfileScreen() {
           stats={{
             followers: stats.isPending ? '—' : (stats.data?.followers ?? 0),
             following: stats.isPending ? '—' : (stats.data?.following ?? 0),
-            movies: stats.isPending ? '—' : (stats.data?.rankedMovies ?? 0),
-            seasons: stats.isPending ? '—' : (stats.data?.rankedSeasons ?? 0),
+            movies: stats.isPending ? '—' : (stats.data?.movies ?? 0),
+            seasons: stats.isPending ? '—' : (stats.data?.seasons ?? 0),
           }}
           /**
            * `—` is a promise that a number is coming. When the read has failed it is a
