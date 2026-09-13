@@ -39,7 +39,7 @@
 --     concurrency of 8. A 10,000-film import whose films all landed on poster-less rows
 --     would take seven hours to trickle through; the realistic case after (1) is a handful.
 --
---   * **Once per title.** `tmdb_upsert_titles` stamps `fetched_at` on every write, so a
+--   * **Once per title**, for a call that succeeds. `tmdb_upsert_titles` stamps `fetched_at` on every write, so a
 --     title whose detail call came back without a poster -- TMDB genuinely has none -- has
 --     `fetched_at` later than the import that brought it and is not asked about again. That
 --     is the rule `tmdb_enrich_due` alone cannot express: it contains posterless films for
@@ -50,12 +50,20 @@
 --     every minute indefinitely. Past it, the title page's own enrichment is still there,
 --     which is exactly the behaviour before this.
 --
---   * **Guarded like the provider nudge.** No base URL, no vault key or no `pg_net`, and it
---     does nothing, and a failed post cannot take the tick's transaction down with it.
+--   * **Guarded, all of it.** No base URL, no vault key or no `pg_net`, and it does
+--     nothing. And the whole body sits inside one exception handler, not only the post: the
+--     tick is one statement, so a selection that raised (a statement timeout, say) would
+--     otherwise roll back the drain and the sweep beside it, settles and notifications
+--     included (independent review).
+--
+--   * **In no fixed order.** A detail call that fails leaves `fetched_at` alone, so ordering
+--     by recency would hand the same failing ids to every tick for three hours and starve
+--     everything behind them. Chosen at random within the window instead, which spreads the
+--     25 across every import that is still owed posters.
 --
 -- Watchlist rows are included. The importer writes them without a `source`, so they are
--- selected by age, and a native watchlist add in the window costs nothing: it came from a
--- search that carried a poster, so it is not poster-less.
+-- selected by age. A native watchlist add in the window is usually from a search that
+-- carried a poster; when it is not, enriching it is the same repair and costs the same.
 -- ===========================================================================
 
 
@@ -95,13 +103,13 @@ as $$
        group by mi.id, mi.fetched_at
       -- Not asked about since it was brought in. See "Once per title" above.
       having mi.fetched_at is null or mi.fetched_at <= max(b.created_at)
-       order by max(b.created_at) desc
+       order by random()
        limit least(greatest(coalesce(p_limit, 25), 1), 100)
     ) t;
 $$;
 
 comment on function _import_thin_titles(integer) is
-  'The poster-less catalogue titles somebody imported (or watchlisted) in the last three hours that have not been fetched from the provider since, newest first, capped at 100. What _import_enrich_nudge names to tmdb-adapter. Once per title: tmdb_upsert_titles stamps fetched_at, so a title the provider has no poster for drops out after one attempt. Internal.';
+  'The poster-less catalogue titles somebody imported (or watchlisted) in the last three hours that have not been fetched from the provider since, in random order so a failing id cannot starve the rest, capped at 100. What _import_enrich_nudge names to tmdb-adapter. Once per title: tmdb_upsert_titles stamps fetched_at, so a title the provider has no poster for drops out after one attempt. Internal.';
 
 revoke execute on function _import_thin_titles(integer) from public, anon, authenticated;
 
@@ -136,28 +144,25 @@ begin
     return jsonb_build_object('status', 'unconfigured', 'due', array_length(v_ids, 1));
   end if;
 
-  begin
-    perform net.http_post(
-      url     := v_url || '/tmdb-adapter',
-      headers := jsonb_build_object(
-                   'Content-Type',  'application/json',
-                   'Authorization', 'Bearer ' || v_key,
-                   'apikey',        v_key
-                 ),
-      body    := jsonb_build_object(
-                   'action', 'enrich',
-                   'ids',    to_jsonb(v_ids),
-                   'limit',  array_length(v_ids, 1)
-                 ),
-      timeout_milliseconds := 20000
-    );
-  exception when others then
-    -- The same rule as the provider nudge: a failed post is retried by the next tick and
-    -- must never roll back the drain and the sweep this runs beside.
-    return jsonb_build_object('status', 'post_failed', 'due', array_length(v_ids, 1));
-  end;
-
+  perform net.http_post(
+    url     := v_url || '/tmdb-adapter',
+    headers := jsonb_build_object(
+                 'Content-Type',  'application/json',
+                 'Authorization', 'Bearer ' || v_key,
+                 'apikey',        v_key
+               ),
+    body    := jsonb_build_object(
+                 'action', 'enrich',
+                 'ids',    to_jsonb(v_ids),
+                 'limit',  array_length(v_ids, 1)
+               ),
+    timeout_milliseconds := 20000
+  );
   return jsonb_build_object('status', 'posted', 'due', array_length(v_ids, 1));
+exception when others then
+  -- Anything at all, the selection included: the next tick tries again, and this must never
+  -- roll back the drain and the sweep it runs beside.
+  return jsonb_build_object('status', 'failed');
 end;
 $$;
 
@@ -208,10 +213,24 @@ revoke execute on function schedule_import_drain(text) from public, anon, authen
 grant execute on function schedule_import_drain(text) to service_role;
 
 
+-- **Only a drain that is already running is rescheduled** (independent review). An operator
+-- who stopped it with `unschedule_import_drain()` stopped it on purpose, and applying this
+-- must not quietly start it again. The existing schedule string is kept too.
 do $bootstrap$
+declare
+  v_schedule text;
 begin
-  perform schedule_import_drain();
-  raise notice 'import drain: rescheduled with the poster nudge';
+  if to_regclass('cron.job') is null then
+    raise notice 'import drain: pg_cron is not installed; nothing rescheduled';
+    return;
+  end if;
+  execute $q$ select schedule from cron.job where jobname = 'bingd-import-drain' $q$ into v_schedule;
+  if v_schedule is null then
+    raise notice 'import drain: not scheduled, so left unscheduled; schedule_import_drain() adds the poster nudge when it is started';
+    return;
+  end if;
+  perform schedule_import_drain(v_schedule);
+  raise notice 'import drain: rescheduled (%) with the poster nudge', v_schedule;
 exception when others then
   raise notice 'import drain: could not reschedule (%); call schedule_import_drain() once the extensions are on', sqlerrm;
 end;

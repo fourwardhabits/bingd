@@ -172,6 +172,8 @@ describe('an import that finishes', () => {
     assert.deepEqual(await typesFor(ada, second), ['import_started', 'import_completed']);
   });
 
+  // A behaviour, not a mechanism: the explicit exemption and the unmapped-type fallback
+  // produce the same answer, and this pins the answer either way.
   it('is delivered with every notification category switched off', async () => {
     const { rows: categories } = await t.sql(`select unnest(_notification_categories()) as c`);
     for (const { c } of categories) {

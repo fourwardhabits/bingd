@@ -665,6 +665,16 @@ describe('opened for a named import', () => {
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
   });
 
+  it('says it lost track, rather than offering a new import, when the job cannot be read', async () => {
+    // A notification tapped on a bad connection. The import is fine; the importer's intro
+    // would invite a second one.
+    mockRpcErrors = { import_status: { message: 'network' } };
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+
+    await waitFor(() => expect(screen.getByText('We lost track of that import')).toBeTruthy());
+    expect(screen.queryByText('Choose Letterboxd ZIP')).toBeNull();
+  });
+
   it('opens the importer when the job is gone', async () => {
     mockRpcResults = { import_status: null };
     const screen = await renderWithProviders(
