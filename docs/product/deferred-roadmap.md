@@ -2393,3 +2393,33 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 **Why it is deferred.** Reporting it would need a `filtered` property (or a filter count) on the event, which is the filter-context instrumentation `analytics.md` §5 already defers with its reasons.
 
 **Revisit when.** Filter context is instrumented for any other reason.
+
+---
+
+## 59. Deferred from the For You repetition fix, 2026-09-13
+
+**Deferred 2026-09-13**, by founder direction. The repetition audit found four mechanisms; the bounded launch fix shipped coverage-aware rotating anchors (budget eight) and the TV source fixes (`recommendations.md` §10). These are the exposure-engine half, left for measurement.
+
+### 59a. A return from the background is the same wall
+
+**What it is.** The arrangement and anchor seeds are module state set once per process, the durable exposure is read once per process (`staleTime: Infinity`), and no foreground handler touches For You. Returning to a still-alive app shows the identical wall, and `noteImpressions`' per-process guard means that repeat is never written — so neither `recommendation_impressions` nor `for_you_slate_shown` can see it.
+
+**Why it is deferred.** Advancing the arrangement on foreground must not recreate the render → record → re-derive loop `use-exposure.ts` documents, and it changes what a session means for every exposure rule. The founder accepted the current continuity for this tranche.
+
+**Revisit when.** Physical QA or post-outreach reports still describe identical walls across same-day opens after anchor rotation ships.
+
+### 59b. Exposure tiers stop at the top sixty
+
+**What it is.** `explore` sorts by exposure tier only inside the top `3 × limit` by score and appends the rest in strict score order, so from about the fourth daily visit the wall is almost entirely previously shown titles while dozens of never-shown eligible candidates sit below the cut. The audit's scratch model measured 18–20 of 20 repeats with 38–47 unseen eligible titles left.
+
+**Why it is deferred.** It rewrites guarantees `rank.test.ts` asserts on purpose ("no draw promotes a title from outside the pool"), and it needs a relevance floor so tiering cannot promote the weak tail. Coverage-aware anchors change the universe per launch, which blunts this before any engine change.
+
+**Revisit when.** `for_you_slate_shown` `repeat_count / size` stays high for readers whose `liked_titles` is above eight.
+
+### 59c. `foryou.impression_window_hours` is still 72
+
+**What it is.** A title shown three days ago counts as unseen. Visits more than 72 hours apart repeat ~13 of 20; daily visitors cycle every three days. Raising it is an `app_config` data write, not a migration — and on its own it only delays repetition by about two days without 59b.
+
+**Why it is deferred.** A production data write whose value depends on 59b.
+
+**Revisit when.** 59b is decided.

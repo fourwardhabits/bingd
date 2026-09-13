@@ -87,6 +87,29 @@ const EMPTY: Arrangement = {
 let arrangement: Arrangement = EMPTY;
 
 /**
+ * Which of the reader's liked titles this launch reasons from (2026-09-13).
+ *
+ * A second seed, and deliberately not {@link Arrangement.seed}. The arrangement seed moves
+ * on every Refresh, and the anchors decide the candidate *universe* — they are read by
+ * `useForYou`'s query key, so an anchor set that moved on Refresh would make every
+ * pull-to-refresh a new cache entry with no data in it: the skeleton, the white flash and
+ * the scroll jump the bookmark fix at the top of `use-for-you.ts` exists to prevent.
+ *
+ * So the two clocks are separate on purpose. **A cold launch** is a new module
+ * evaluation, a new anchor seed and therefore a different set of liked titles behind the
+ * wall — the audit's defect was that an established reader's first six liked titles
+ * produced the same universe for ever. **Inside a launch** the universe holds still:
+ * Refresh rearranges it, and a return from the background within the same process shows
+ * the same wall, which the founder accepted for this tranche.
+ *
+ * Nothing but {@link resetRecommendationSession} (a test seam) ever writes it.
+ */
+let anchorSeed = nonZero(Math.floor(Math.random() * 0x7fffffff) + 1);
+
+/** The seed `selectAnchors` draws this launch's anchors with. Stable for the process. */
+export const recommendationAnchorSeed = () => anchorSeed;
+
+/**
  * What is rendered right now, per wall, awaiting promotion by the next Refresh.
  *
  * Keyed rather than a single array because the Movies and TV walls are separate slates
@@ -187,6 +210,9 @@ export function resetRecommendationSession(seed?: number) {
     current: new Set(),
     seen: new Map(),
   };
+  // A fresh process draws a fresh anchor set too, so "reset" means the same thing for
+  // both clocks. Derived from the same seed so a seeded test is deterministic end to end.
+  anchorSeed = nonZero(seed ?? Math.floor(Math.random() * 0x7fffffff) + 1);
   for (const listener of listeners) listener();
 }
 

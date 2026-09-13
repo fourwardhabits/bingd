@@ -3,7 +3,7 @@ import type { RankedEntry } from '@/features/collection/use-collection';
 import { applyFilters, emptyFilters, type CollectionFilters } from '@/features/collection/filters';
 
 import { anchorScope, anchorsFrom, asCollectionItem, popularityOnlyFor } from './use-for-you';
-import { ANCHOR_LIMIT } from './rank';
+import { ANCHOR_BUDGET } from './anchors';
 
 /**
  * Which of the viewer's titles a slate is allowed to reason from.
@@ -96,8 +96,10 @@ describe('choosing anchors for films', () => {
     );
 
     // Each anchor costs a provider request the first time it is used. "A bounded set
-    // of strong taste anchors" is the decision; a request per ranked title is not.
-    expect(anchorsFrom(many, 'movies')).toHaveLength(ANCHOR_LIMIT);
+    // of strong taste anchors" is the decision; a request per ranked title is not. The
+    // budget is eight since 2026-09-13, with upstream fills still capped at six
+    // (`anchor-rotation.test.ts`).
+    expect(anchorsFrom(many, 'movies')).toHaveLength(ANCHOR_BUDGET);
   });
 });
 
@@ -109,6 +111,7 @@ describe('choosing anchors for television', () => {
       mediaItemId: 'show-a',
       title: 'Show show-a',
       score: expect.any(Number),
+      genres: ['Drama'],
     });
   });
 

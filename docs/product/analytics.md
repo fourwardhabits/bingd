@@ -195,7 +195,7 @@ filter *values*, and the internal group score. Saves made from a pick reuse
 
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
-| `for_you_slate_shown` | a genuinely new wall was put in front of the reader — once per distinct slate, from the same guard `noteImpressions` uses, never per render or per page already recorded | the reader | `medium`, `size`, `repeat_count` |
+| `for_you_slate_shown` | a genuinely new wall was put in front of the reader — once per distinct slate, from the same guard `noteImpressions` uses, never per render or per page already recorded | the reader | `medium`, `size`, `repeat_count`, `liked_titles`, `anchors_used`, `pool_size` |
 
 One event, and it exists to make repetition a number. Opens and saves cannot answer
 whether the wall is getting fresher: a reader shown the same nine films every week and
@@ -204,6 +204,16 @@ saving one looks identical in those numbers to a reader shown a fresh wall.
 the impression window (`foryou.impression_window_hours`); `size` beside it makes the
 ratio meaningful, and `medium` separates the two walls, which have different pool
 depths and will not improve at the same rate. No title id travels.
+
+`liked_titles`, `anchors_used` and `pool_size` (2026-09-13) say what the wall had to rotate
+through: the liked band anchors are drawn from, how many of this launch's drawn anchors
+had a TMDB list, and how many candidates survived eligibility. Anchor rotation can only
+help a reader whose `liked_titles` is above eight, so this is the split that says whether a
+high `repeat_count` is rotation's problem or a small band's.
+
+**Until 2026-09-13 only `medium` of this event reached PostHog** (and only from 2026-09-11):
+`size` and `repeat_count` were declared but never on the `ALLOWED_PROPERTY_KEYS` list, so
+`sanitize` dropped them. All six are allowed now; any series before that date has no ratio.
 
 **`size: 0` is a real value** (2026-09-07). The slate query settled successfully and the
 **unfiltered** wall drew nothing — no candidate survived scoring and the reader's own
