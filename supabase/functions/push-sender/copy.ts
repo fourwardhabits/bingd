@@ -296,7 +296,7 @@ function importContent(job: PushJob): PushContent | null {
     case 'import_started':
       return {
         title: 'Letterboxd import started',
-        body: 'We’re bringing your history into bingd. You can close the app, and we’ll tell you when it’s ready.',
+        body: 'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
         data: data(),
       };
     case 'import_completed': {

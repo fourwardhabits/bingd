@@ -150,7 +150,7 @@ function Body({
       return (
         <Waiting
           title="Importing your Letterboxd history"
-          detail="You can close bingd. Your import will keep running in the background, and we’ll let you know when it’s done. Come back here anytime to check on it."
+          detail="You can close bingd. Your import will keep running, and we’ll let you know when it’s done. Come back here anytime to check on it."
           note="This may take a few minutes, especially for larger libraries."
           action={<Button label="Leave it running" kind="secondary" onPress={onLeave} />}
         />
@@ -186,8 +186,9 @@ function Body({
  */
 const STEPS = [
   'On Letterboxd.com, go to Settings, then Data.',
-  'Choose Export your data.',
-  'Download the ZIP, then choose it here.',
+  'Generate your export.',
+  'Download the ZIP.',
+  'Come back to bingd. and choose it here.',
 ] as const;
 
 function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void }) {
