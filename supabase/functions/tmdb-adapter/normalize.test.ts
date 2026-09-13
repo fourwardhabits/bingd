@@ -367,6 +367,21 @@ Deno.test('directing and writing are kept ahead of a long producing tail', () =>
   assertEquals(crewTotal, 102);
 });
 
+Deno.test('a job that only contains the word Director is not authorship', () => {
+  const { credits } = personCredits(
+    person({
+      crew: [
+        ...Array.from({ length: 40 }, (_, index) => credit(2000 + index, { job: 'Director of Photography', popularity: 500 })),
+        credit(3, { job: 'Screenplay', popularity: 1 }),
+      ],
+    }),
+    GENRES,
+  );
+
+  assert(credits.map((entry) => entry.row.tmdb_id).includes(3));
+  assertEquals(credits.length, 30);
+});
+
 Deno.test('an empty crew job falls back to the department', () => {
   const { credits } = personCredits(
     person({ crew: [{ ...credit(1), job: '', department: 'Directing' } as never] }),

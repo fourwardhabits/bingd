@@ -591,7 +591,9 @@ const MAX_SELF_CREDITS = 10;
 const MAX_CREW_JOBS = 3;
 
 /** The crew jobs that are authorship, which a crew half keeps ahead of the rest. */
-const AUTHORSHIP = /\b(director|writer|screenplay|creator|story|novel|author)\b/i;
+// Whole job titles, so "Director of Photography", "Casting Director" and "Story Editor"
+// are not mistaken for authorship. `crewRole` joins jobs with ", ".
+const AUTHORSHIP = /(^|, )(Director|Co-Director|Writer|Screenplay|Creator|Story|Novel|Author|Teleplay)(,|$)/;
 
 /**
  * An appearance as oneself on a talk show, a news or reality programme, or an awards

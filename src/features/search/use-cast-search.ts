@@ -77,12 +77,10 @@ export function useCastSearch(input: string, enabled: boolean) {
     availableAt: rateLimited ? cooldownUntil : null,
     failed: enabled && Boolean(query.error) && !rateLimited,
     /** Asked and answered, with nothing — the one state "nobody by that name" is true in. */
-    answered:
-      active &&
-      query.isFetched &&
-      !query.isFetching &&
-      !query.error &&
-      !query.isPlaceholderData,
+    // From `held` rather than `active`: an empty answer already cached for this name is
+    // still an answer while the cooldown holds the query disabled, and gating on `active`
+    // left that case on a skeleton until the reader typed again.
+    answered: enabled && long && settled === typed && held && !query.isFetching && !query.error,
     retry: () => {
       clearProviderCooldown();
       if (long) void query.refetch();

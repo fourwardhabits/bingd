@@ -33,10 +33,10 @@ export type PersonCredit = {
 /**
  * A row cached before the adapter flagged self-appearances says nothing either way, so
  * for those the same rule is applied to what the row does carry: a series credit whose
- * character is the person themselves, or is not named at all. The genre the adapter also
- * checks is not in the payload, so a scripted series with a missing character name is
- * caught too — the right side to err on for the seven days such a row can live, because
- * the Cast half falls back to these when there is nothing else.
+ * character is the person themselves. Not one whose character is merely unnamed, which
+ * the adapter also flags: without the genre, which the payload does not carry, that
+ * would hide the many older scripted TV roles TMDB never named — and hiding a real part
+ * is the worse error for the seven days such a row can live.
  */
 const LEGACY_SELF = /^\s*(self|himself|herself|themselves|themself)\b/i;
 
@@ -272,7 +272,7 @@ export function usePerson(personId: string | null) {
                 ? credit.self
                 : credit.as === 'cast' &&
                   credit.kind === 'series' &&
-                  (!credit.role || LEGACY_SELF.test(credit.role)),
+                  LEGACY_SELF.test(credit.role ?? ''),
           };
         })
         .filter((credit): credit is PersonCredit => credit !== null);
