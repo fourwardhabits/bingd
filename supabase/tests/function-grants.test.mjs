@@ -51,6 +51,9 @@ const ALLOWED = {
   'import_stage(uuid,jsonb)': ['authenticated'],
   'import_ready(uuid)': ['authenticated'],
   'import_status(uuid)': ['authenticated'],
+  // 20260917001600. The profile stat row's Movies and TV. SECURITY INVOKER over
+  // logged_collection and rankings, both can_i_view-gated; counts only, writes nothing.
+  'profile_title_counts(uuid)': ['authenticated'],
   // 20260917000500. The fifth: abandoning your own half-staged import. Deletes, which is
   // the one thing import_jobs has no RLS policy for, so it must be definer — and it is
   // narrowed to a pending job owned by the caller. Anything the worker has claimed is
