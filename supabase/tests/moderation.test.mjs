@@ -477,6 +477,9 @@ describe('the guard is wired in, not merely present', () => {
     // watching an import it can no longer advance changes nothing. The three write RPCs
     // beside it (import_create, import_stage, import_ready) all call the guard.
     'import_status',
+    // 20260917001600. Counts a profile's watched and ranked titles through the two
+    // can_i_view-gated sources. Invoker, and writes nothing.
+    'profile_title_counts',
     'username_available',
     'search_titles',
     // Reachable only because search_titles runs as the caller and folds the query through

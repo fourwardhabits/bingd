@@ -298,9 +298,14 @@ describe('an archive that imports cleanly', () => {
     assert.equal(await count('rankings', `user_id = '${bob}'`), 0);
   });
 
-  it('writes no feed activity and no notifications', async () => {
+  // Apart from the import's own lifecycle notifications (20260917001500), which are the
+  // one thing an import is allowed to say and have their own suite: import-notifications.
+  it('writes no feed activity and no notifications about what it imported', async () => {
     assert.equal(await count('feed_events', `actor_id = '${bob}'`), 0);
-    assert.equal(await count('notifications', `recipient_id = '${bob}'`), 0);
+    assert.equal(
+      await count('notifications', `recipient_id = '${bob}' and type not in ('import_started', 'import_completed', 'import_failed')`),
+      0,
+    );
   });
 
   it('counts for nothing on either leaderboard', async () => {
@@ -575,7 +580,11 @@ describe('goals and awards after an import', () => {
     assert.equal(rows[0].n, 2, 'genuine diary dates are real viewing history');
 
     assert.equal(await count('feed_events', `actor_id = '${helen}'`), 0, 'no celebration');
-    assert.equal(await count('notifications', `recipient_id = '${helen}'`), 0, 'no notification');
+    assert.equal(
+      await count('notifications', `recipient_id = '${helen}' and type not in ('import_started', 'import_completed', 'import_failed')`),
+      0,
+      'no notification beyond the import saying how it went',
+    );
   });
 
   it('settles the award ledger once, silently', async () => {
@@ -598,7 +607,11 @@ describe('goals and awards after an import', () => {
       'the ledger must be true',
     );
     assert.equal(await count('feed_events', `actor_id = '${ivan}'`), 0);
-    assert.equal(await count('notifications', `recipient_id = '${ivan}'`), 0);
+    assert.equal(
+      await count('notifications', `recipient_id = '${ivan}' and type not in ('import_started', 'import_completed', 'import_failed')`),
+      0,
+      'the award is silent; only the import reports its own end',
+    );
   });
 });
 
