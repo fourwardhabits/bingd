@@ -42,9 +42,9 @@ preview app (a push is expected on staging; the notification inbox has the rows 
 
 | # | Do this | Expect |
 |---|---|---|
-| 8 | Settings ▸ Import from Letterboxd | *Bring your Letterboxd history*, three steps, *Choose Letterboxd ZIP*, a two-sentence privacy line. |
+| 8 | Settings ▸ Import from Letterboxd | *Bring your Letterboxd history*, four steps ending *Come back to bingd. and choose it here.*, *Choose Letterboxd ZIP*, a two-sentence privacy line. |
 | 9 | Choose the ZIP | *Ready to import*, counts, *Import N films*. **Nothing sent yet.** |
-| 10 | Import | Upload says *Keep bingd. open while we send your history.* Then *Importing your Letterboxd history* with **You can close bingd.** and *Leave it running*. **Never "Matching".** |
+| 10 | Import | Upload says *Keep bingd. open while we send your history.* Then *Importing your Letterboxd history* with **You can close bingd. Your import will keep running** and *Leave it running*. **Never "Matching".** |
 | 11 | Tap *Leave it running*, then force-quit bingd | The import keeps going on the server. |
 | 12 | Wait for the push *Letterboxd import started* (arrives right after step 10) | Tapping it opens the running import screen for that job, even after a force-quit. |
 | 13 | Wait for *Your Letterboxd history is ready* ("N movies added as watched. Ready to rank.") | Tap it with the app closed: the summary for **that** job. Try again with the app backgrounded, and from the bell inbox with the app open. |

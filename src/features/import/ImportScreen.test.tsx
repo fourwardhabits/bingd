@@ -736,7 +736,7 @@ describe('the way on', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
 
     await waitFor(() => expect(screen.getByText('Leave it running')).toBeTruthy());
-    expect(screen.getByText(/keep running in the background/)).toBeTruthy();
+    expect(screen.getByText(/Your import will keep running/)).toBeTruthy();
     expect(screen.getByText(/may take a few minutes/)).toBeTruthy();
 
     await fireEvent.press(screen.getByText('Leave it running'));

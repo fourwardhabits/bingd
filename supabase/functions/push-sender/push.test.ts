@@ -636,7 +636,7 @@ Deno.test('the import pushes say the same thing the import screens do, and never
   assertEquals(started.title, 'Letterboxd import started');
   assertEquals(
     started.body,
-    'We’re bringing your history into bingd. You can close the app, and we’ll tell you when it’s ready.',
+    'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
   );
 
   const failed = contentFor(importJob('import_failed'))!;
