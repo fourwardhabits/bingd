@@ -47,6 +47,7 @@
  *   - **Tap targets are at least 44px.**
  */
 
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,8 +55,10 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, 'dist');
 
-const copy = JSON.parse(await readFile(join(here, 'copy.json'), 'utf8'));
-const targets = JSON.parse(await readFile(join(here, 'targets.json'), 'utf8'));
+const copyRaw = await readFile(join(here, 'copy.json'), 'utf8');
+const targetsRaw = await readFile(join(here, 'targets.json'), 'utf8');
+const copy = JSON.parse(copyRaw);
+const targets = JSON.parse(targetsRaw);
 
 const problems = [];
 const warnings = [];
@@ -85,6 +88,28 @@ const target = (name) => {
     return null;
   }
   return entry;
+};
+
+/**
+ * An in-app instruction, by name. A card that sends somebody to a control with no link
+ * names it here, and `email.test.mjs` checks each label against the app's source.
+ */
+const instruction = (name) => {
+  const entry = targets.instructions?.[name];
+  if (!entry) {
+    problems.push(`copy.json names the instruction "${name}", which targets.json does not define.`);
+    return null;
+  }
+  return entry;
+};
+
+/** A card is a link or an instruction, never both and never neither. */
+const destinationOf = (item) => {
+  if (Boolean(item.target) === Boolean(item.where)) {
+    problems.push(`the card "${item.title}" must have exactly one of "target" and "where".`);
+    return null;
+  }
+  return item.target ? { kind: 'link', ...target(item.target) } : { kind: 'where', ...instruction(item.where) };
 };
 
 // ---------------------------------------------------------------------------
@@ -156,6 +181,22 @@ const esc = (value) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
+/** Word-wraps a paragraph for the plain-text part. */
+const wrap = (text, width = 72) => {
+  const out = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (line && `${line} ${word}`.length > width) {
+      out.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) out.push(line);
+  return out.join('\n');
+};
+
 // ---------------------------------------------------------------------------
 // Founder inputs the build will not invent
 // ---------------------------------------------------------------------------
@@ -181,7 +222,7 @@ const esc = (value) =>
 if (!copy.footer?.postalAddress) {
   warnings.push(
     'footer.postalAddress is null. The preview renders with a visible placeholder and ' +
-      'send-test.mjs will refuse a real send. See copy.json $footerComment.',
+      'the worker refuses to mail the cohort. See copy.json $footerComment.',
   );
 }
 
@@ -234,13 +275,20 @@ const button = ({ href, label, kind = 'primary' }) => {
                       </table>`;
 };
 
-const card = (item, index) => {
-  const destination = target(item.target);
-  if (!destination) return '';
+/**
+ * A card. A link card ends in a button; an instruction card ends where its body does,
+ * because the body already says where to tap and a button would have nowhere true to go.
+ * Only the first link card is filled, so the page has one primary action.
+ */
+let linkCards = 0;
+const card = (item) => {
+  const destination = destinationOf(item);
+  if (!destination || (destination.kind === 'link' && !destination.url)) return '';
 
-  const instruction = item.instruction
-    ? `<p style="margin:10px 0 0;font-family:${FONT};font-size:13px;line-height:19px;color:${C.tertiary};" class="dk-tertiary">${esc(item.instruction)}</p>`
-    : '';
+  const action =
+    destination.kind === 'link'
+      ? button({ href: destination.url, label: item.action, kind: linkCards++ === 0 ? 'primary' : 'secondary' })
+      : '';
 
   return `
               <tr>
@@ -249,9 +297,8 @@ const card = (item, index) => {
                     <tr>
                       <td style="padding:20px 20px 18px;">
                         <p style="margin:0;font-family:${SERIF};font-size:19px;line-height:24px;color:${C.ink};" class="dk-text">${esc(item.title)}</p>
-                        <p style="margin:8px 0 16px;font-family:${FONT};font-size:15px;line-height:23px;color:${C.secondary};" class="dk-secondary">${esc(item.body)}</p>
-                        ${button({ href: destination.url, label: item.action, kind: index === 0 ? 'primary' : 'secondary' })}
-                        ${instruction}
+                        <p style="margin:8px 0 ${action ? '16px' : '2px'};font-family:${FONT};font-size:15px;line-height:23px;color:${C.secondary};" class="dk-secondary">${esc(item.body)}</p>
+                        ${action}
                       </td>
                     </tr>
                   </table>
@@ -259,12 +306,16 @@ const card = (item, index) => {
               </tr>`;
 };
 
-const signoffLink = (() => {
-  const spec = copy.note?.signoffLink;
-  if (!spec) return '';
+/** The P.S.: a sentence and a small text link, under the signature. Optional. */
+const postscript = (() => {
+  const spec = copy.postscript;
+  if (!spec) return { html: '', text: '' };
   const destination = target(spec.target);
-  if (!destination) return '';
-  return `<br /><a href="${esc(destination.url)}" style="font-family:${FONT};font-size:14px;color:${C.maroon};text-decoration:underline;" class="dk-accent">${esc(spec.label)}</a>`;
+  if (!destination) return { html: '', text: '' };
+  return {
+    html: `<p style="margin:22px 0 0;font-family:${FONT};font-size:15px;line-height:24px;color:${C.secondary};" class="dk-secondary">${esc(spec.text)} <a href="${esc(destination.url)}" style="color:${C.maroon};text-decoration:underline;" class="dk-accent">${esc(spec.action)}</a></p>`,
+    text: `\n\n${wrap(spec.text)}\n${spec.action}: ${destination.url}`,
+  };
 })();
 
 const paragraphs = copy.note.paragraphs
@@ -370,7 +421,8 @@ const html = `<!DOCTYPE html>
                     <td>
                       <p style="margin:0 0 16px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${esc(copy.note.greeting)}</p>
                       ${paragraphs}
-                      <p style="margin:26px 0 0;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${copy.note.signoff.map(esc).join('<br />')}${signoffLink}</p>
+                      <p style="margin:26px 0 0;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${copy.note.signoff.map(esc).join('<br />')}</p>
+                      ${postscript.html}
                     </td>
                   </tr>
                 </table>
@@ -474,42 +526,18 @@ const dark = html
 // client set to prefer it.
 // ---------------------------------------------------------------------------
 
-const wrap = (text, width = 72) => {
-  const out = [];
-  let line = '';
-  for (const word of text.split(/\s+/)) {
-    if (line && `${line} ${word}`.length > width) {
-      out.push(line);
-      line = word;
-    } else {
-      line = line ? `${line} ${word}` : word;
-    }
-  }
-  if (line) out.push(line);
-  return out.join('\n');
-};
-
 const textCards = copy.cards.items
   .map((item) => {
-    const destination = target(item.target);
-    if (!destination) return '';
-    const instruction = item.instruction ? `\n${wrap(item.instruction)}` : '';
-    return `\n${item.title.toUpperCase()}\n${wrap(item.body)}${instruction}\n${destination.url}\n`;
+    const url = item.target ? targets.targets?.[item.target]?.url : null;
+    return `\n${item.title.toUpperCase()}\n${wrap(item.body)}${url ? `\n${url}` : ''}\n`;
   })
   .join('');
-
-const signoffTextLink = (() => {
-  const spec = copy.note?.signoffLink;
-  if (!spec) return '';
-  const destination = target(spec.target);
-  return destination ? `\n${spec.label}: ${destination.url}` : '';
-})();
 
 const text = `${copy.note.greeting}
 
 ${copy.note.paragraphs.map((p) => wrap(p)).join('\n\n')}
 
-${copy.note.signoff.join('\n')}${signoffTextLink}
+${copy.note.signoff.join('\n')}${postscript.text}
 
 ${'-'.repeat(72)}
 
@@ -567,30 +595,96 @@ const inboxRows = [
 
 const escAttr = (value) => esc(value).replace(/'/g, '&#39;');
 
-const targetRows = Object.entries(targets.targets)
+/**
+ * Every destination the email uses, links and in-app instructions together, as one list.
+ * Both review pages render these rows, so neither can describe a card the email no longer
+ * has.
+ */
+const usedTargets = new Set([copy.postscript?.target, ...copy.cards.items.map((i) => i.target)].filter(Boolean));
+const usedInstructions = new Set(copy.cards.items.map((i) => i.where).filter(Boolean));
+
+const destinationRows = [
+  ...Object.entries(targets.targets)
+    .filter(([name]) => usedTargets.has(name))
+    .map(([name, t]) => ({
+      name,
+      classification: t.classification,
+      where: `<a href="${escAttr(t.url)}">${esc(t.url)}</a>`,
+      evidence: `${esc(t.deepLink)} <b>Without the app:</b> ${esc(t.webFallback)}`,
+    })),
+  ...Object.entries(targets.instructions ?? {})
+    .filter(([name]) => usedInstructions.has(name))
+    .map(([name, t]) => ({
+      name,
+      classification: t.classification,
+      where: `In the app: ${t.path.map(esc).join(' &rarr; ')}`,
+      evidence: `${esc(t.capability)} <b>Needs:</b> ${esc(t.prerequisite)}`,
+    })),
+];
+
+const targetRows = destinationRows
   .map(
-    ([name, t]) => `
+    (r) => `
       <tr>
-        <td><code>${esc(name)}</code></td>
-        <td><span class="cls cls-${esc(t.classification)}">${esc(t.classification)}</span></td>
-        <td><a href="${escAttr(t.url)}">${esc(t.url)}</a></td>
-        <td>${esc(t.deepLink)}</td>
+        <td><code>${esc(r.name)}</code></td>
+        <td><span class="cls cls-${esc(r.classification)}">${esc(r.classification)}</span></td>
+        <td>${r.where}</td>
+        <td>${r.evidence}</td>
       </tr>`,
   )
   .join('');
 
-/** The same rows as `targetRows`, with the classification rendered as a chip. */
-const artifactRows = Object.entries(targets.targets)
+/** The same rows as `targetRows`, with the destination set in the mono face. */
+const artifactRows = destinationRows
   .map(
-    ([name, t]) => `
+    (r) => `
           <tr>
-            <td><code>${esc(name)}</code></td>
-            <td><span class="cls cls-${esc(t.classification)}">${esc(t.classification)}</span></td>
-            <td class="mono"><a href="${escAttr(t.url)}">${esc(t.url)}</a></td>
-            <td>${esc(t.deepLink)}</td>
+            <td><code>${esc(r.name)}</code></td>
+            <td><span class="cls cls-${esc(r.classification)}">${esc(r.classification)}</span></td>
+            <td class="mono">${r.where}</td>
+            <td>${r.evidence}</td>
           </tr>`,
   )
   .join('');
+
+/**
+ * What still stands between this email and a real send, computed from the files rather
+ * than written as prose, so it cannot go on saying "not set" after somebody set it.
+ */
+const decisions = [
+  {
+    title: 'Rewrite the note, then approve it.',
+    body:
+      copy.note.status === 'APPROVED'
+        ? 'Approved: note.status is APPROVED.'
+        : `note.status is "${esc(copy.note.status)}". Set it to APPROVED in copy.json when the words are yours. The worker mails nobody but a canary until then. Keep a reply invitation: it is why the email exists.`,
+  },
+  {
+    title: 'Postal address.',
+    body: copy.footer.postalAddress
+      ? `Set to ${esc(copy.footer.postalAddress)}.`
+      : 'Not set, so the worker refuses the cohort. A commercial email carries a physical mailing address; there is no company, so it is one you are willing to publish, usually a PO box or a virtual mailbox.',
+  },
+  {
+    title: 'Send from bingd.app.',
+    body: 'Replies go to <code>suraj@bingd.app</code>, which Cloudflare Email Routing receives. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (its DKIM record, the <code>send</code> subdomain, and a DMARC record). Until then a test send can use <code>--from "Suraj from bingd. &lt;suraj@auth.bingd.app&gt;"</code>.',
+  },
+  {
+    title: 'A Resend key of its own.',
+    body: 'Sending access, restricted to <code>bingd.app</code>, named for this email. Never the key named <code>Supabase</code>: that one is the sign-in code relay.',
+  },
+  ...(copy.postscript
+    ? [
+        {
+          title: 'The P.S. title.',
+          body: 'It names your number one at the time of writing. Swap the id in <code>targets.json</code> founderTitle if that has changed, or set <code>postscript</code> to null.',
+        },
+      ]
+    : []),
+];
+
+const decisionItems = (tag) =>
+  decisions.map((d) => `<li>${tag ? '<div>' : ''}<b>${d.title}</b> <span>${d.body}</span>${tag ? '</div>' : ''}</li>`).join('\n        ');
 
 const srcdoc = escAttr(html);
 
@@ -646,7 +740,7 @@ const preview = `<!doctype html>
       table.meta th { background: #f5ebdd; font-weight: 600; }
       code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #f0e8dc; padding: 1px 5px; border-radius: 4px; }
       .cls { display: inline-block; min-width: 1.4em; text-align: center; font-weight: 700; border-radius: 4px; padding: 1px 6px; }
-      .cls-A { background: #d8e6d9; color: #2f5334; }
+      .cls-A, .cls-I { background: #d8e6d9; color: #2f5334; }
       .cls-B { background: #f3e6c9; color: #6d5117; }
       .cls-C { background: #f3e6c9; color: #6d5117; }
       .cls-D { background: #f0d7d7; color: #7a2f2f; }
@@ -669,10 +763,9 @@ const preview = `<!doctype html>
       <div class="draft">
         <p style="margin:0 0 6px"><b>DRAFT &mdash; FOUNDER TO EDIT.</b></p>
         <p style="margin:0">
-          The founder&rsquo;s note is a draft. It claims to be from a specific person and it
-          should sound like him rather than like a good impression of him. Everything else
-          on this page can ship as written. Two things are still blocking a real send:
-          the postal address, and which mailbox <code>Reply-To</code> points at.
+          The founder&rsquo;s note is a draft and should be rewritten in his own voice.
+          Nothing is sent to anybody until <code>note.status</code> is APPROVED, the postal
+          address is set, and the automation is switched on. See the list at the bottom.
         </p>
       </div>
 
@@ -724,17 +817,17 @@ const preview = `<!doctype html>
         </div>
       </div>
 
-      <h2>Where every button actually goes</h2>
+      <h2>Where every link and instruction goes</h2>
       <table class="meta">
         <tr><th>Name</th><th>Class</th><th>Destination</th><th>What receives it</th></tr>
         ${targetRows}
       </table>
       <p class="sub" style="margin-top:12px">
-        <b>A</b> directly deep-linkable &middot; <b>B</b> opens the app, with an
-        instruction for the last step &middot; <b>C</b> needs a per-recipient link
-        &middot; <b>D</b> not currently practical, and refused by the build.
-        Group Picks is D and is why it is a sentence in the note rather than a fourth
-        card; <code>targets.json</code> carries the reasoning.
+        <b>A</b> directly deep-linkable &middot; <b>I</b> an instruction inside the app,
+        with no link, whose labels are checked against the app&rsquo;s source &middot;
+        <b>D</b> not currently practical, and refused by the build.
+        <code>targets.json</code> carries the reasoning, including why Invite friends and
+        Group Picks are instructions rather than buttons.
       </p>
 
       <h2>Plain text</h2>
@@ -742,17 +835,7 @@ const preview = `<!doctype html>
 
       <h2>Still to decide</h2>
       <ul>
-        <li><b>The note.</b> Rewrite it in your own voice. Keep the last paragraph: the
-        reply invitation is the reason this email exists.</li>
-        <li><b>Postal address.</b> ${copy.footer.postalAddress ? `Set to <code>${esc(copy.footer.postalAddress)}</code>.` : '<span class="warn">Not set. A commercial email needs one, and there is no company, so it is a home address or a PO box and that is your call.</span>'}</li>
-        <li><b>From and Reply-To.</b> Resend has one verified domain,
-        <code>auth.bingd.app</code>, so <code>suraj@bingd.app</code> cannot send until
-        <code>bingd.app</code> is added there. Reply-To needs no verification but does
-        need a mailbox somebody reads, and the release docs still record
-        <code>hello@bingd.app</code> as unconfirmed.</li>
-        <li><b>The third card&rsquo;s title.</b> It is set to The Wolf of Wall Street
-        because your bio already makes the joke. Swap it for whatever you are actually
-        watching: open the title in bingd., tap Share, paste the link.</li>
+        ${decisionItems(false)}
       </ul>
     </div>
   </body>
@@ -946,7 +1029,7 @@ const artifact = `<title>Welcome Email Review</title>
     border-radius: 4px;
     padding: 2px 7px;
   }
-  .cls-A { background: var(--ok-soft); color: var(--ok); }
+  .cls-A, .cls-I { background: var(--ok-soft); color: var(--ok); }
   .cls-B, .cls-C { background: var(--warn-soft); color: var(--warn); }
   .cls-D { background: var(--accent-soft); color: var(--accent); }
 
@@ -1055,13 +1138,12 @@ const artifact = `<title>Welcome Email Review</title>
   <div class="notice">
     <p><b>DRAFT &mdash; FOUNDER TO EDIT</b></p>
     <p>
-      The note below is a draft. It claims to be from a specific person, and it should
-      sound like him rather than like a good impression of him. Everything else here can
-      ship as written.
+      The note below is a draft and should be rewritten in the founder&rsquo;s own voice.
     </p>
     <p>
-      Two things block a real send, and neither is code: the postal address a commercial
-      email has to carry, and which mailbox <code>Reply-To</code> points at.
+      Nobody is mailed until <code>note.status</code> is APPROVED, the postal address is
+      set, and the automation is switched on, which are three separate decisions. The list
+      at the bottom says where each one stands.
     </p>
   </div>
 
@@ -1147,13 +1229,12 @@ const artifact = `<title>Welcome Email Review</title>
   </section>
 
   <section>
-    <h2>Where every button actually goes</h2>
+    <h2>Where every link and instruction goes</h2>
     <p class="sub" style="margin-bottom:18px">
       <span class="cls cls-A">A</span> directly deep-linkable &nbsp;
-      <span class="cls cls-B">B</span> opens the app, with an instruction for the last step
-      &nbsp; <span class="cls cls-D">D</span> not currently practical, and refused by the
-      build. Every row below was checked against the repository, and the two marked so were
-      checked against the production database.
+      <span class="cls cls-I">I</span> an instruction inside the app, with no link, whose
+      labels are checked against the app&rsquo;s source &nbsp;
+      <span class="cls cls-D">D</span> not currently practical, and refused by the build.
     </p>
     <div class="scroller">
       <table>
@@ -1164,10 +1245,9 @@ const artifact = `<title>Welcome Email Review</title>
       </table>
     </div>
     <p class="sub" style="margin-top:16px">
-      Group Picks is <span class="cls cls-D">D</span> and is why it is a sentence in the
-      note rather than a fourth card: it has no route, no deep link, and it refuses to do
-      anything until the reader follows somebody. A card for it would land on an empty
-      state, on exactly the accounts most likely to hit one.
+      Invite friends and Group Picks have no link that lands on them: one lives on the
+      Profile tab, the other is a chip on the For you tab with no route. So their cards say
+      where to tap and carry no button, rather than a button that opens the wrong screen.
     </p>
   </section>
 
@@ -1183,47 +1263,13 @@ const artifact = `<title>Welcome Email Review</title>
   <section>
     <h2>Still yours to decide</h2>
     <ol class="decisions">
-      <li>
-        <div>
-          <b>Rewrite the note.</b>
-          <span>Keep the last paragraph. The reply invitation is the reason the email
-          exists; everything else in it is replaceable.</span>
-        </div>
-      </li>
-      <li>
-        <div>
-          <b>Postal address.</b>
-          <span>${
-            copy.footer.postalAddress
-              ? `Set to ${esc(copy.footer.postalAddress)}.`
-              : 'Not set. This email asks the reader to invite somebody, which is enough promotional content to read as commercial, and a commercial email carries a physical mailing address. There is no company, so it is a home address or a PO box, and that is your call rather than a default.'
-          }</span>
-        </div>
-      </li>
-      <li>
-        <div>
-          <b>From and Reply-To.</b>
-          <span>Resend has one verified domain, <code>auth.bingd.app</code>, so
-          <code>suraj@bingd.app</code> cannot send until <code>bingd.app</code> is added
-          there. Reply-To needs no verification, but it does need a mailbox somebody reads,
-          and the release docs still record <code>hello@bingd.app</code> as unconfirmed for
-          receiving.</span>
-        </div>
-      </li>
-      <li>
-        <div>
-          <b>The third card&rsquo;s title.</b>
-          <span>Set to The Wolf of Wall Street, because your bio already makes the joke and
-          it is your number one at 10.0. Swap it for whatever you are actually watching:
-          open the title in bingd., tap Share, paste the link.</span>
-        </div>
-      </li>
+      ${decisionItems(true)}
     </ol>
   </section>
 
   <p class="foot">
-    Not sent to anybody. Automation written and disabled. One email, one copy file, three
-    destinations, all of them real.
+    Not sent to anybody. Automation written and disabled. One email, one copy file, and
+    every link and instruction in it checked against the app.
   </p>
 </div>
 `;
@@ -1244,6 +1290,18 @@ await writeFile(join(dist, 'welcome.txt'), text);
 await writeFile(join(dist, 'preview.html'), preview);
 await writeFile(join(dist, 'artifact.html'), artifact);
 
+/**
+ * What dist/ was rendered from. The worker refuses to send when these no longer match the
+ * files on disk, so an edit nobody rebuilt cannot go out as the previous words.
+ */
+// Line endings normalised: a Windows checkout has CRLF and CI has LF, and the same file
+// must hash the same in both or the worker would call every CI build stale.
+const sha256 = (value) => createHash('sha256').update(value.replace(/\r\n/g, '\n')).digest('hex');
+await writeFile(
+  join(dist, 'manifest.json'),
+  `${JSON.stringify({ copy: sha256(copyRaw), targets: sha256(targetsRaw) }, null, 2)}\n`,
+);
+
 const words = copy.note.paragraphs.join(' ').split(/\s+/).length;
 
 console.log(`Rendered ${dist}`);
@@ -1254,20 +1312,20 @@ console.log(`  preview.html   open this one`);
 console.log('  artifact.html  the same review page, shaped for the Artifact host');
 console.log('');
 console.log(`  subject        ${copy.subject.chosen}`);
-console.log(`  note           ${words} words (target 150-225)`);
+console.log(`  note           ${words} words (target 80-160)`);
 console.log(
-  `  cards          ${copy.cards.items.map((i) => `${i.title} [${targets.targets[i.target]?.classification}]`).join(' | ')}`,
+  `  cards          ${copy.cards.items.map((i) => `${i.title} [${i.target ? targets.targets[i.target]?.classification : targets.instructions?.[i.where]?.classification}]`).join(' | ')}`,
 );
 
-if (words < 150 || words > 225) {
-  warnings.push(`the founder note is ${words} words; the brief asks for 150 to 225.`);
+if (words < 80 || words > 160) {
+  warnings.push(`the founder note is ${words} words; the brief asks for 80 to 160.`);
 }
 
 /**
  * Gmail clips a message over roughly 102KB and shows a "View entire message" link,
  * which cuts the footer off exactly where the unsubscribe lives.
  */
-for (const rule of ['.dk-fill', '.dk-outline', '.dk-card', '.dk-text']) {
+for (const rule of ['.dk-fill', '.dk-card', '.dk-text']) {
   if (!html.includes(`class="`) || !html.includes(rule)) {
     warnings.push(`the dark-mode rule ${rule} is not in the output.`);
   }
@@ -1282,7 +1340,8 @@ for (const rule of ['.dk-fill', '.dk-outline', '.dk-card', '.dk-text']) {
 for (const cls of ['dk-fill', 'dk-outline', 'dk-card', 'dk-raised', 'dk-text', 'dk-secondary', 'dk-tertiary', 'dk-accent', 'dk-rule', 'dk-ground']) {
   const declared = html.includes(`.${cls}`);
   const used = new RegExp(`class="[^"]*\\b${cls}\\b`).test(html);
-  if (declared && !used) warnings.push(`.${cls} is styled but never put on an element.`);
+  // A second link card is optional, so an outline style with no outline button is fine.
+  if (declared && !used && cls !== 'dk-outline') warnings.push(`.${cls} is styled but never put on an element.`);
   if (used && !declared) warnings.push(`.${cls} is on an element but never styled.`);
 }
 

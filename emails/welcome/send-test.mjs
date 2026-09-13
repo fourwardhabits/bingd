@@ -3,287 +3,210 @@
  * Sends the rendered welcome email to ONE address you name, through Resend.
  *
  *   node emails/welcome/build.mjs
- *   RESEND_API_KEY=re_xxx node emails/welcome/send-test.mjs --to you@example.com
+ *   node emails/welcome/send-test.mjs --to you@example.com                      (dry run)
  *   RESEND_API_KEY=re_xxx node emails/welcome/send-test.mjs --to you@example.com --send
+ *
+ * Options: --from "Name <address>"  --reply-to <address>  --greeting "Hi Ada,"
+ *          --out <dir>  writes the exact request body as JSON and the personalised HTML
+ *          and text beside it, so every header, URL and both parts can be read before
+ *          anything is sent.
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS WILL NOT DO
  * ---------------------------------------------------------------------------
  *
- *   - **It has no default recipient.** Not a constant, not an environment variable, not
- *     the git config email. A send script that knows who to mail when nobody told it is
- *     one typo away from mailing somebody real, and the address in a repository is
- *     always the one that is out of date.
- *   - **It refuses more than one recipient**, and refuses a comma, a semicolon or a
- *     `bcc` anywhere in the arguments. This is a test harness. Anything that looks like
- *     a list is a mistake.
- *   - **It does not send unless you pass `--send`.** Without it you get a dry run that
- *     prints the exact envelope and stops. The default for a thing that cannot be
- *     recalled is to not do it.
- *   - **It is not the automation.** It sends one message, now, because you asked. See
- *     `automation/README.md` for the scheduled job, which is deliberately not wired up.
+ *   - **It has no default recipient,** and it cannot find one. It does not read a
+ *     database, does not import a Supabase client and does not look at SUPABASE_* in the
+ *     environment. The only address it can mail is the one typed after `--to`, and
+ *     `email.test.mjs` fails if this file ever grows a way to read a user list.
+ *   - **One recipient per run.** A comma, a semicolon, a second `--to`, `--cc` or `--bcc`
+ *     is refused. For a second inbox, run it a second time.
+ *   - **Nothing is sent without `--send`.**
+ *   - **It is not the automation.** It writes no ledger row. See `automation/README.md`.
  *
  * ---------------------------------------------------------------------------
- * THE KEY
+ * THE ENVELOPE
  * ---------------------------------------------------------------------------
  *
- * `RESEND_API_KEY` is read from the environment and never from a file, and this script
- * writes it nowhere. The Resend account currently holds exactly one key, named
- * `Supabase`, whose secret was shown once at creation and is in the Supabase SMTP
- * settings. **Do not go looking for it and do not reuse it.** Make a second key in the
- * Resend dashboard, call it something like `welcome-email-test`, and paste it on the
- * command line for the one run. A key that only ever exists in a shell session is a key
- * that cannot leak from this repository.
+ * The request body comes from `envelope.mjs`, the same function the automation uses, so a
+ * test send is the real message with a test recipient and `[TEST]` on the subject.
+ *
+ * From defaults to `Suraj from bingd. <suraj@bingd.app>`, which Resend refuses until
+ * `bingd.app` is verified there. Until then, test with
+ * `--from "Suraj from bingd. <suraj@auth.bingd.app>"`: the only verified domain today.
+ * Reply-To stays `suraj@bingd.app` either way, which is the thing to test.
+ *
+ * `RESEND_API_KEY` is read from the environment only and written nowhere. Make a key for
+ * this email; never reuse the one named `Supabase`, which relays every sign-in code.
  */
 
-import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, 'dist');
+import {
+  DEFAULT_FROM,
+  DEFAULT_REPLY_TO,
+  addressOf,
+  isAddress,
+  loadTemplate,
+  personalise,
+  resendPayload,
+  sendViaResend,
+  unsubscribeFor,
+} from './envelope.mjs';
 
+const here = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
+
+const die = (...lines) => {
+  console.error(['', ...lines, ''].join('\n'));
+  process.exit(1);
+};
+
+const known = new Set(['--to', '--from', '--reply-to', '--greeting', '--out', '--send']);
+for (const arg of argv) {
+  if (/^--(cc|bcc)$/.test(arg)) die(`Refusing ${arg}. This sends one message to one address.`);
+  if (arg.startsWith('--') && !known.has(arg)) die(`Unknown option ${arg}.`);
+}
+
 const flag = (name) => {
   const at = argv.indexOf(name);
   return at > -1 && argv[at + 1] && !argv[at + 1].startsWith('--') ? argv[at + 1] : null;
-};
-const has = (name) => argv.includes(name);
-
-const die = (...lines) => {
-  console.error('');
-  for (const line of lines) console.error(line);
-  console.error('');
-  process.exit(1);
 };
 
 // ---------------------------------------------------------------------------
 // The recipient
 // ---------------------------------------------------------------------------
 
-const to = flag('--to');
+if (argv.filter((a) => a === '--to').length > 1) {
+  die('One --to per run. For a second inbox, run the command again.');
+}
 
+const to = flag('--to');
 if (!to) {
   die(
     'No recipient. Pass one:',
     '',
-    '  RESEND_API_KEY=re_xxx node emails/welcome/send-test.mjs --to you@example.com',
+    '  node emails/welcome/send-test.mjs --to you@example.com',
     '',
-    'There is deliberately no default. Nothing in this repository knows which address',
-    'you actually read, and a script that guessed would eventually guess wrong at the',
-    'one moment that matters.',
+    'There is deliberately no default. Nothing in this repository knows which address you',
+    'actually read, and a script that guessed would eventually guess wrong.',
   );
 }
-
-if (/[,;]/.test(to) || argv.some((a) => /^--(cc|bcc)$/.test(a))) {
-  die(
-    `Refusing "${to}".`,
-    '',
-    'This sends one message to one address. A list, a cc or a bcc here is a mistake,',
-    'and the kind that is only noticed afterwards.',
-  );
-}
-
-if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) die(`"${to}" is not an email address.`);
-
-// ---------------------------------------------------------------------------
-// The envelope
-// ---------------------------------------------------------------------------
-
-/**
- * The From address, and the one real constraint on it tonight.
- *
- * Resend has exactly one verified domain: `auth.bingd.app`, added 2026-08-21 for the
- * Supabase SMTP relay that sends the sign-in codes. **`bingd.app` itself is not in
- * Resend**, so `suraj@bingd.app` cannot send until somebody adds the domain and its DNS
- * records, which is a founder decision and a DNS change and is not happening from here.
- *
- * So the default below is the address that works today and is wrong for the real thing:
- * `auth.` in the From line of a personal note reads like a password reset. It is fine
- * for a test, where the only question is whether the message renders.
- *
- * For the real send, add `bingd.app` to Resend and use
- * `Suraj from bingd. <suraj@bingd.app>`. See automation/README.md.
- */
-const from = flag('--from') ?? 'Suraj from bingd. <suraj@auth.bingd.app>';
-
-/**
- * Reply-To, which is the entire point of this email.
- *
- * Defaults to the From address rather than to anything clever, and prints what it used,
- * because a Reply-To pointing at a mailbox nobody opens is the failure this email cannot
- * survive: it asks four times for a reply. The release docs still record
- * `hello@bingd.app` and `support@bingd.app` as unconfirmed for *receiving*, so neither
- * is a safe default.
- */
-const replyTo = flag('--reply-to') ?? from.replace(/^.*<|>.*$/g, '');
-
-const apiKey = process.env.RESEND_API_KEY;
+if (/[,;<>\s]/.test(to) || !isAddress(to)) die(`Refusing "${to}". Pass exactly one plain address.`);
 
 // ---------------------------------------------------------------------------
 // The message
 // ---------------------------------------------------------------------------
 
-let html;
-let text;
+const from = flag('--from') ?? DEFAULT_FROM;
+const replyTo = flag('--reply-to') ?? DEFAULT_REPLY_TO;
+
+let template;
 try {
-  html = await readFile(join(dist, 'welcome.html'), 'utf8');
-  text = await readFile(join(dist, 'welcome.txt'), 'utf8');
+  template = await loadTemplate(here);
 } catch {
   die('Nothing rendered yet. Run `node emails/welcome/build.mjs` first.');
 }
+const { copy } = template;
 
-const copy = JSON.parse(await readFile(join(here, 'copy.json'), 'utf8'));
-const targets = JSON.parse(await readFile(join(here, 'targets.json'), 'utf8'));
+const unsubscribeUrl = unsubscribeFor(replyTo);
+const values = { greeting: flag('--greeting') ?? 'Hi,', handle: 'preview', unsubscribeUrl };
 
-/**
- * The per-recipient substitutions, filled here with obvious test values.
- *
- * The real job fills the same three from the recipient's row. They are left as tokens in
- * the rendered files on purpose: a template that is already personalised for somebody is
- * a template that will be sent to everybody as that somebody.
- *
- * `{{handle}}` is the recipient's own handle, which is how the second card opens the app
- * on a page belonging to them. `preview` here is a handle that certainly does not exist,
- * so a test send lands on the generic fallback rather than on a stranger's profile.
- */
-const substitutions = {
-  '{{greeting}}': flag('--greeting') ?? 'Hi,',
-  '{{handle}}': flag('--handle') ?? 'preview',
-  /**
-   * An unsubscribe that works, with nothing to build.
-   *
-   * The first draft pointed at `https://bingd.app/#unsubscribe-not-built-yet`, which is
-   * a dead fragment on the landing page. A visible Unsubscribe link that goes nowhere is
-   * a worse position than no link at all, because it is an affirmative representation.
-   *
-   * A `mailto:` to the Reply-To address is the honest v1: the mailbox is one somebody
-   * reads by definition, Gmail and Apple Mail both surface their own control from the
-   * `List-Unsubscribe` header below, and there is no endpoint to deploy. What it costs
-   * is that a human has to act on the mail. Build the HTTPS one-click endpoint before
-   * volume, not before launch.
-   */
-  '{{unsubscribeUrl}}': `mailto:${replyTo}?subject=${encodeURIComponent('Unsubscribe')}`,
-};
+let payload;
+try {
+  payload = resendPayload({
+    from,
+    replyTo,
+    to,
+    subject: `[TEST] ${copy.subject.chosen}`,
+    html: personalise(template.html, values),
+    text: personalise(template.text, values),
+    unsubscribeUrl,
+  });
+} catch (error) {
+  die(error.message);
+}
 
-const fill = (body) =>
-  Object.entries(substitutions).reduce(
-    (acc, [token, value]) => acc.split(token).join(value),
-    body,
-  );
-
-html = fill(html);
-text = fill(text);
-
-/** A test is labelled as one, in the one place nobody can miss. */
-const subject = `[TEST] ${copy.subject.chosen}`;
+const links = [...new Set([...payload.html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]))];
 
 const warnings = [];
-if (!copy.footer.postalAddress) {
-  warnings.push(
-    'footer.postalAddress is still null, so the footer shows a bracketed placeholder. ' +
-      'Fine for a test. Not fine for a real send: a commercial email needs a physical ' +
-      'mailing address.',
-  );
-}
-if (html.includes('{{')) warnings.push('the HTML still contains an unfilled {{token}}.');
-if (!/auth\.bingd\.app|@bingd\.app/.test(from)) {
-  warnings.push(`From is "${from}", which is not a bingd. domain. Resend will refuse it.`);
-}
-if (/^no-?reply@/i.test(replyTo)) {
-  warnings.push('Reply-To is a no-reply address, which defeats the entire email.');
+if (!copy.footer.postalAddress) warnings.push('footer.postalAddress is null: the footer shows a placeholder. Fine for a test.');
+if (copy.note.status !== 'APPROVED') warnings.push(`note.status is "${copy.note.status}": the automation would refuse this copy.`);
+if (!/@(auth\.)?bingd\.app$/i.test(addressOf(from))) warnings.push(`From "${from}" is not on a bingd. domain; Resend will refuse it.`);
+if (/@bingd\.app$/i.test(addressOf(from))) {
+  warnings.push('From is @bingd.app, which Resend refuses until bingd.app is verified there. If it does, retry with --from "Suraj from bingd. <suraj@auth.bingd.app>".');
 }
 
 console.log('');
-console.log('  To           ', to);
-console.log('  From         ', from);
-console.log('  Reply-To     ', replyTo);
-console.log('  Subject      ', subject);
-console.log('  HTML         ', `${(html.length / 1024).toFixed(1)}KB`);
-console.log('  Text         ', `${(text.length / 1024).toFixed(1)}KB`);
-console.log('  Links        ');
-for (const [name, t] of Object.entries(targets.targets)) {
-  console.log(`    ${t.classification}  ${name.padEnd(16)} ${fill(t.url)}`);
-}
-
+console.log('  To          ', payload.to[0]);
+console.log('  From        ', payload.from);
+console.log('  Reply-To    ', payload.reply_to);
+console.log('  Subject     ', payload.subject);
+console.log('  Headers     ', JSON.stringify(payload.headers));
+console.log('  HTML        ', `${(payload.html.length / 1024).toFixed(1)}KB, ${(payload.html.match(/<img\b/gi) ?? []).length} images`);
+console.log('  Text        ', `${(payload.text.length / 1024).toFixed(1)}KB`);
+console.log('  Links');
+for (const link of links) console.log(`     ${link}`);
 for (const warning of warnings) console.log(`\n  ! ${warning}`);
 
-if (!has('--send')) {
-  console.log('');
-  console.log('  DRY RUN. Nothing was sent.');
-  console.log('  Add --send to actually send it, with RESEND_API_KEY set.');
-  console.log('');
+const out = flag('--out');
+if (out) {
+  const dir = resolve(out);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'request.json'), `${JSON.stringify(payload, null, 2)}\n`);
+  await writeFile(join(dir, 'message.html'), payload.html);
+  await writeFile(join(dir, 'message.txt'), payload.text);
+  console.log(`\n  Wrote request.json, message.html and message.txt to ${dir}`);
+}
+
+if (!argv.includes('--send')) {
+  console.log('\n  DRY RUN. Nothing was sent. Add --send, with RESEND_API_KEY set, to send it.\n');
   process.exit(0);
 }
 
+const apiKey = process.env.RESEND_API_KEY;
 if (!apiKey) {
   die(
     'RESEND_API_KEY is not set.',
     '',
-    'Make a key in the Resend dashboard (do not reuse the one named `Supabase`, which',
-    'belongs to the auth relay), then:',
+    'Make a key in the Resend dashboard for this email (never reuse the one named Supabase):',
     '',
     '  RESEND_API_KEY=re_xxx node emails/welcome/send-test.mjs --to you@example.com --send',
   );
 }
 
 /**
- * `Idempotency-Key` is Resend's own guard against a retried request becoming a second
- * email. It matters more in the scheduled job than it does here, and it costs one header.
+ * The idempotency key includes a hash of the exact request. Resend holds a key for 24
+ * hours and refuses the same key with a different body, so a key of recipient-and-hour
+ * made "edit the copy, send again" fail for the rest of the hour. Now an identical
+ * request is deduplicated and an edited one is a new message.
  */
-const response = await fetch('https://api.resend.com/emails', {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-    'Idempotency-Key': `welcome-test-${to}-${new Date().toISOString().slice(0, 13)}`,
-  },
-  body: JSON.stringify({
-    from,
-    to: [to],
-    reply_to: replyTo,
-    subject,
-    html,
-    text,
-    headers: {
-      /**
-       * What gives Gmail and Apple Mail their own one-tap control, so a reader who
-       * cannot find the footer link uses that instead of the spam button.
-       *
-       * **No `List-Unsubscribe-Post` beside it.** RFC 8058 one-click requires an HTTPS
-       * endpoint; pairing the Post header with a `mailto:` is invalid, and an invalid
-       * header set is worse than a plain `List-Unsubscribe` because a receiver may
-       * discard both. Add it in the same commit that adds the endpoint.
-       */
-      'List-Unsubscribe': `<mailto:${replyTo}?subject=${encodeURIComponent('Unsubscribe')}>`,
-    },
-  }),
-});
+const digest = createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
+const result = await sendViaResend({ apiKey, idempotencyKey: `welcome-test-${digest}`, payload });
 
-const body = await response.json().catch(() => null);
-
-if (!response.ok) {
+if (!result.ok) {
   die(
-    `Resend refused the send: ${response.status}`,
-    JSON.stringify(body, null, 2),
+    `Resend refused the send: ${result.status}`,
+    JSON.stringify(result.body, null, 2),
     '',
-    response.status === 403 || /domain/i.test(JSON.stringify(body ?? {}))
-      ? 'A domain error here almost certainly means the From address is not on a verified ' +
-        'domain. Resend has only auth.bingd.app today.'
+    /domain/i.test(JSON.stringify(result.body ?? {}))
+      ? 'A domain error means the From address is not on a verified domain. Resend has only auth.bingd.app today.'
       : '',
   );
 }
 
-console.log('');
-console.log(`  SENT. id ${body?.id}`);
-console.log('');
-console.log('  Check, in this order:');
-console.log('    1. Does the From line read like a person rather than a system?');
-console.log('    2. Hit reply. Does it address the mailbox you meant? The email asks');
-console.log('       twice, in the last paragraph and under the cards.');
-console.log('    3. Read it on a phone. Do the three buttons reach a thumb?');
-console.log('    4. Turn the phone to dark mode and open it again.');
-console.log('    5. Tap all three buttons on a phone that HAS bingd. installed.');
-console.log('       Card one should open the app on my profile. Card three should open');
-console.log('       the app on the title. Card two opens the app on your own profile.');
+console.log(`\n  SENT. Resend id ${result.id}\n`);
+console.log('  Check, on a phone and on a desktop:');
+console.log('    1. From reads as a person. Reply-To, when you hit reply, is suraj@bingd.app.');
+console.log('    2. Reply from THIS inbox. The reply should arrive where suraj@bingd.app forwards.');
+console.log('       (Not from the same Gmail that suraj@bingd.app forwards to: Gmail hides a');
+console.log('       message that loops back to its own sender.)');
+console.log('    3. Light and dark mode. Mobile width: the Follow me button spans the card.');
+console.log('    4. With bingd. installed: Open my profile opens the app on the profile;');
+console.log('       See it on bingd. opens the title. Without it: the web page, with install.');
+console.log('    5. Unsubscribe opens a new email to suraj@bingd.app with subject Unsubscribe.');
+console.log('    6. Gmail: Show original, and check the text part and List-Unsubscribe.');
 console.log('');

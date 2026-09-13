@@ -172,7 +172,7 @@
     border-radius: 4px;
     padding: 2px 7px;
   }
-  .cls-A { background: var(--ok-soft); color: var(--ok); }
+  .cls-A, .cls-I { background: var(--ok-soft); color: var(--ok); }
   .cls-B, .cls-C { background: var(--warn-soft); color: var(--warn); }
   .cls-D { background: var(--accent-soft); color: var(--accent); }
 
@@ -273,7 +273,7 @@
   <p class="eyebrow">bingd. &middot; lifecycle</p>
   <h1>The welcome email, before anyone gets it</h1>
   <p class="sub">
-    Rendered from <code>emails/welcome/copy.json</code> on 2026-09-11.
+    Rendered from <code>emails/welcome/copy.json</code> on 2026-09-13.
     Nothing has been sent. The automation is written and switched off. Edit the copy file,
     run <code>node emails/welcome/build.mjs</code>, and this page rebuilds with it.
   </p>
@@ -281,13 +281,12 @@
   <div class="notice">
     <p><b>DRAFT &mdash; FOUNDER TO EDIT</b></p>
     <p>
-      The note below is a draft. It claims to be from a specific person, and it should
-      sound like him rather than like a good impression of him. Everything else here can
-      ship as written.
+      The note below is a draft and should be rewritten in the founder&rsquo;s own voice.
     </p>
     <p>
-      Two things block a real send, and neither is code: the postal address a commercial
-      email has to carry, and which mailbox <code>Reply-To</code> points at.
+      Nobody is mailed until <code>note.status</code> is APPROVED, the postal address is
+      set, and the automation is switched on, which are three separate decisions. The list
+      at the bottom says where each one stands.
     </p>
   </div>
 
@@ -365,7 +364,7 @@
          padded with zero-width joiners so a client cannot pull the next sentence of the
          email in after it and truncate mid-word. --&gt;
     &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
-      Hit reply and it comes straight to me. I read all of them.
+      Hit reply and it comes straight to me. I read every one.
       &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
     &lt;/div&gt;
 
@@ -390,12 +389,12 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;{{greeting}}&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed and Group Picks have nothing to show until somebody is on the other end of them.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and right now I am the whole team, so this really is me writing.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never say whether a movie was a four or a four and a half. I can always tell you which of two I liked more, though, and answer that enough times and you end up with a list that is actually yours.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;It is early, so you will find rough edges. It also gets much better once one friend you talk about movies with is on it.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one.&lt;/p&gt;
-                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;— Suraj&lt;br /&gt;Founder, bingd.&lt;br /&gt;&lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;my profile on bingd.&lt;/a&gt;&lt;/p&gt;
+                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Suraj&lt;br /&gt;Founder, bingd.&lt;/p&gt;
+                      &lt;p style=&quot;margin:22px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;P.S. My number one is The Wolf of Wall Street, and people keep telling me that is a red flag. Rank it and tell me I am wrong. &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;See it on bingd.&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -416,7 +415,7 @@
                  only works on a desktop is a column layout for the minority. --&gt;
             &lt;tr&gt;
               &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 4px;&quot;&gt;
-                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;A few things worth trying&lt;/p&gt;
+                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Three things worth trying&lt;/p&gt;
 
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
               &lt;tr&gt;
@@ -425,7 +424,7 @@
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
                         &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Follow me&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It gives you one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It puts one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
                         &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-fill&quot; style=&quot;border-collapse:separate;&quot;&gt;
                         &lt;tr&gt;
                           &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#773744&quot; style=&quot;background-color:#773744;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
@@ -433,6 +432,18 @@
                           &lt;/td&gt;
                         &lt;/tr&gt;
                       &lt;/table&gt;
+                      &lt;/td&gt;
+                    &lt;/tr&gt;
+                  &lt;/table&gt;
+                &lt;/td&gt;
+              &lt;/tr&gt;
+              &lt;tr&gt;
+                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
+                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
+                    &lt;tr&gt;
+                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one friend in&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;bingd. is better with somebody you already talk about movies with. Tap Profile, then Invite friends, and send them the link. When they join, you follow each other straight away.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -444,35 +455,8 @@
                   &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one person in&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Nearly everything here needs a second person. This link is your own profile the way a stranger sees it, install button and all, so it is something you can forward as it stands.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/u/{{handle}}&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;See your profile&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
-                        &lt;p style=&quot;margin:10px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:19px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;For the proper invite, the one that connects the two of you automatically, open bingd. and tap Invite friends on your profile.&lt;/p&gt;
-                      &lt;/td&gt;
-                    &lt;/tr&gt;
-                  &lt;/table&gt;
-                &lt;/td&gt;
-              &lt;/tr&gt;
-              &lt;tr&gt;
-                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
-                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
-                    &lt;tr&gt;
-                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Rank what I am watching&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;The Wolf of Wall Street is my number one and people keep telling me that is a red flag. Rank it yourself and tell me I am wrong.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;Open the title&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Try Group Picks tonight&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;On the For you tab, tap Group Picks and choose who is watching. It finds movies you can all agree on, and it works with anyone you follow, me included.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -485,7 +469,7 @@
                      the preheader and in the note&#39;s last paragraph, which are the top of
                      the email and about 700px down a phone; somebody who scrolled
                      straight to the buttons met it nowhere. --&gt;
-                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come to me.&lt;/p&gt;
+                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come straight to me.&lt;/p&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
@@ -498,7 +482,7 @@
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd. is made by Suraj Kandukuri.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;[POSTAL ADDRESS - FOUNDER TO SUPPLY]&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this because you made a bingd. account. It is the only email of its kind I will send you.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd. account.&lt;/p&gt;
                       &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;{{unsubscribeUrl}}&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
@@ -583,7 +567,7 @@
          padded with zero-width joiners so a client cannot pull the next sentence of the
          email in after it and truncate mid-word. --&gt;
     &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
-      Hit reply and it comes straight to me. I read all of them.
+      Hit reply and it comes straight to me. I read every one.
       &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
     &lt;/div&gt;
 
@@ -608,12 +592,12 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;{{greeting}}&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed and Group Picks have nothing to show until somebody is on the other end of them.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and right now I am the whole team, so this really is me writing.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never say whether a movie was a four or a four and a half. I can always tell you which of two I liked more, though, and answer that enough times and you end up with a list that is actually yours.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;It is early, so you will find rough edges. It also gets much better once one friend you talk about movies with is on it.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one.&lt;/p&gt;
-                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;— Suraj&lt;br /&gt;Founder, bingd.&lt;br /&gt;&lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;my profile on bingd.&lt;/a&gt;&lt;/p&gt;
+                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Suraj&lt;br /&gt;Founder, bingd.&lt;/p&gt;
+                      &lt;p style=&quot;margin:22px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;P.S. My number one is The Wolf of Wall Street, and people keep telling me that is a red flag. Rank it and tell me I am wrong. &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;See it on bingd.&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -634,7 +618,7 @@
                  only works on a desktop is a column layout for the minority. --&gt;
             &lt;tr&gt;
               &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 4px;&quot;&gt;
-                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;A few things worth trying&lt;/p&gt;
+                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Three things worth trying&lt;/p&gt;
 
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
               &lt;tr&gt;
@@ -643,7 +627,7 @@
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
                         &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Follow me&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It gives you one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It puts one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
                         &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-fill&quot; style=&quot;border-collapse:separate;&quot;&gt;
                         &lt;tr&gt;
                           &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#773744&quot; style=&quot;background-color:#773744;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
@@ -651,6 +635,18 @@
                           &lt;/td&gt;
                         &lt;/tr&gt;
                       &lt;/table&gt;
+                      &lt;/td&gt;
+                    &lt;/tr&gt;
+                  &lt;/table&gt;
+                &lt;/td&gt;
+              &lt;/tr&gt;
+              &lt;tr&gt;
+                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
+                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
+                    &lt;tr&gt;
+                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one friend in&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;bingd. is better with somebody you already talk about movies with. Tap Profile, then Invite friends, and send them the link. When they join, you follow each other straight away.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -662,35 +658,8 @@
                   &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one person in&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Nearly everything here needs a second person. This link is your own profile the way a stranger sees it, install button and all, so it is something you can forward as it stands.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/u/{{handle}}&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;See your profile&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
-                        &lt;p style=&quot;margin:10px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:19px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;For the proper invite, the one that connects the two of you automatically, open bingd. and tap Invite friends on your profile.&lt;/p&gt;
-                      &lt;/td&gt;
-                    &lt;/tr&gt;
-                  &lt;/table&gt;
-                &lt;/td&gt;
-              &lt;/tr&gt;
-              &lt;tr&gt;
-                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
-                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
-                    &lt;tr&gt;
-                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Rank what I am watching&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;The Wolf of Wall Street is my number one and people keep telling me that is a red flag. Rank it yourself and tell me I am wrong.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;Open the title&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Try Group Picks tonight&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;On the For you tab, tap Group Picks and choose who is watching. It finds movies you can all agree on, and it works with anyone you follow, me included.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -703,7 +672,7 @@
                      the preheader and in the note&#39;s last paragraph, which are the top of
                      the email and about 700px down a phone; somebody who scrolled
                      straight to the buttons met it nowhere. --&gt;
-                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come to me.&lt;/p&gt;
+                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come straight to me.&lt;/p&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
@@ -716,7 +685,7 @@
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd. is made by Suraj Kandukuri.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;[POSTAL ADDRESS - FOUNDER TO SUPPLY]&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this because you made a bingd. account. It is the only email of its kind I will send you.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd. account.&lt;/p&gt;
                       &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;{{unsubscribeUrl}}&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
@@ -801,7 +770,7 @@
          padded with zero-width joiners so a client cannot pull the next sentence of the
          email in after it and truncate mid-word. --&gt;
     &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
-      Hit reply and it comes straight to me. I read all of them.
+      Hit reply and it comes straight to me. I read every one.
       &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
     &lt;/div&gt;
 
@@ -826,12 +795,12 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;{{greeting}}&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed and Group Picks have nothing to show until somebody is on the other end of them.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and right now I am the whole team, so this really is me writing.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never say whether a movie was a four or a four and a half. I can always tell you which of two I liked more, though, and answer that enough times and you end up with a list that is actually yours.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;It is early, so you will find rough edges. It also gets much better once one friend you talk about movies with is on it.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one.&lt;/p&gt;
-                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;— Suraj&lt;br /&gt;Founder, bingd.&lt;br /&gt;&lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;my profile on bingd.&lt;/a&gt;&lt;/p&gt;
+                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Suraj&lt;br /&gt;Founder, bingd.&lt;/p&gt;
+                      &lt;p style=&quot;margin:22px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;P.S. My number one is The Wolf of Wall Street, and people keep telling me that is a red flag. Rank it and tell me I am wrong. &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;See it on bingd.&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -852,7 +821,7 @@
                  only works on a desktop is a column layout for the minority. --&gt;
             &lt;tr&gt;
               &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 4px;&quot;&gt;
-                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;A few things worth trying&lt;/p&gt;
+                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Three things worth trying&lt;/p&gt;
 
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
               &lt;tr&gt;
@@ -861,7 +830,7 @@
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
                         &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Follow me&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It gives you one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It puts one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
                         &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-fill&quot; style=&quot;border-collapse:separate;&quot;&gt;
                         &lt;tr&gt;
                           &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#773744&quot; style=&quot;background-color:#773744;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
@@ -869,6 +838,18 @@
                           &lt;/td&gt;
                         &lt;/tr&gt;
                       &lt;/table&gt;
+                      &lt;/td&gt;
+                    &lt;/tr&gt;
+                  &lt;/table&gt;
+                &lt;/td&gt;
+              &lt;/tr&gt;
+              &lt;tr&gt;
+                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
+                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
+                    &lt;tr&gt;
+                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one friend in&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;bingd. is better with somebody you already talk about movies with. Tap Profile, then Invite friends, and send them the link. When they join, you follow each other straight away.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -880,35 +861,8 @@
                   &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one person in&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Nearly everything here needs a second person. This link is your own profile the way a stranger sees it, install button and all, so it is something you can forward as it stands.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/u/{{handle}}&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;See your profile&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
-                        &lt;p style=&quot;margin:10px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:19px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;For the proper invite, the one that connects the two of you automatically, open bingd. and tap Invite friends on your profile.&lt;/p&gt;
-                      &lt;/td&gt;
-                    &lt;/tr&gt;
-                  &lt;/table&gt;
-                &lt;/td&gt;
-              &lt;/tr&gt;
-              &lt;tr&gt;
-                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
-                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
-                    &lt;tr&gt;
-                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Rank what I am watching&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;The Wolf of Wall Street is my number one and people keep telling me that is a red flag. Rank it yourself and tell me I am wrong.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;Open the title&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Try Group Picks tonight&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;On the For you tab, tap Group Picks and choose who is watching. It finds movies you can all agree on, and it works with anyone you follow, me included.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -921,7 +875,7 @@
                      the preheader and in the note&#39;s last paragraph, which are the top of
                      the email and about 700px down a phone; somebody who scrolled
                      straight to the buttons met it nowhere. --&gt;
-                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come to me.&lt;/p&gt;
+                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come straight to me.&lt;/p&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
@@ -934,7 +888,7 @@
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd. is made by Suraj Kandukuri.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;[POSTAL ADDRESS - FOUNDER TO SUPPLY]&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this because you made a bingd. account. It is the only email of its kind I will send you.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd. account.&lt;/p&gt;
                       &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;{{unsubscribeUrl}}&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
@@ -1020,7 +974,7 @@
          padded with zero-width joiners so a client cannot pull the next sentence of the
          email in after it and truncate mid-word. --&gt;
     &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
-      Hit reply and it comes straight to me. I read all of them.
+      Hit reply and it comes straight to me. I read every one.
       &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
     &lt;/div&gt;
 
@@ -1045,12 +999,12 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;{{greeting}}&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and at the moment I am the entire team, so this is genuinely me typing.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never answer “what should I watch”. I had years of films in my head in no particular order, and every app that offered to help wanted me to decide whether something was a four or a four and a half. I cannot do that. But I can always tell you which of two films I liked more, and it turns out that if you answer that enough times you end up with a list that is actually yours.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Two honest things. It is early, so you will find rough edges. And bingd. gets much better once one person you already talk about films with is on it, because the feed and Group Picks have nothing to show until somebody is on the other end of them.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Group Picks is my favourite thing in here, for what it is worth. You choose who is watching tonight and it finds the things you can all agree on.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd. a go. I am Suraj, and right now I am the whole team, so this really is me writing.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built it because I could never say whether a movie was a four or a four and a half. I can always tell you which of two I liked more, though, and answer that enough times and you end up with a list that is actually yours.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;It is early, so you will find rough edges. It also gets much better once one friend you talk about movies with is on it.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one.&lt;/p&gt;
-                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;— Suraj&lt;br /&gt;Founder, bingd.&lt;br /&gt;&lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:14px;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;my profile on bingd.&lt;/a&gt;&lt;/p&gt;
+                      &lt;p style=&quot;margin:26px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Suraj&lt;br /&gt;Founder, bingd.&lt;/p&gt;
+                      &lt;p style=&quot;margin:22px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;P.S. My number one is The Wolf of Wall Street, and people keep telling me that is a red flag. Rank it and tell me I am wrong. &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;See it on bingd.&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
                 &lt;/table&gt;
@@ -1071,7 +1025,7 @@
                  only works on a desktop is a column layout for the minority. --&gt;
             &lt;tr&gt;
               &lt;td class=&quot;gutter&quot; style=&quot;padding:24px 36px 4px;&quot;&gt;
-                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;A few things worth trying&lt;/p&gt;
+                &lt;p style=&quot;margin:0 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Three things worth trying&lt;/p&gt;
 
                 &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
               &lt;tr&gt;
@@ -1080,7 +1034,7 @@
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
                         &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Follow me&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It gives you one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;It puts one person in your feed straight away, and I would like to see what you are watching.&lt;/p&gt;
                         &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-fill&quot; style=&quot;border-collapse:separate;&quot;&gt;
                         &lt;tr&gt;
                           &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#773744&quot; style=&quot;background-color:#773744;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
@@ -1088,6 +1042,18 @@
                           &lt;/td&gt;
                         &lt;/tr&gt;
                       &lt;/table&gt;
+                      &lt;/td&gt;
+                    &lt;/tr&gt;
+                  &lt;/table&gt;
+                &lt;/td&gt;
+              &lt;/tr&gt;
+              &lt;tr&gt;
+                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
+                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
+                    &lt;tr&gt;
+                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one friend in&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;bingd. is better with somebody you already talk about movies with. Tap Profile, then Invite friends, and send them the link. When they join, you follow each other straight away.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -1099,35 +1065,8 @@
                   &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
                     &lt;tr&gt;
                       &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Bring one person in&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Nearly everything here needs a second person. This link is your own profile the way a stranger sees it, install button and all, so it is something you can forward as it stands.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/u/{{handle}}&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;See your profile&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
-                        &lt;p style=&quot;margin:10px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:19px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;For the proper invite, the one that connects the two of you automatically, open bingd. and tap Invite friends on your profile.&lt;/p&gt;
-                      &lt;/td&gt;
-                    &lt;/tr&gt;
-                  &lt;/table&gt;
-                &lt;/td&gt;
-              &lt;/tr&gt;
-              &lt;tr&gt;
-                &lt;td style=&quot;padding:0 0 12px;&quot;&gt;
-                  &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;border:1px solid #E6DCCC;border-radius:10px;&quot; class=&quot;dk-raised&quot;&gt;
-                    &lt;tr&gt;
-                      &lt;td style=&quot;padding:20px 20px 18px;&quot;&gt;
-                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Rank what I am watching&lt;/p&gt;
-                        &lt;p style=&quot;margin:8px 0 16px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;The Wolf of Wall Street is my number one and people keep telling me that is a red flag. Rank it yourself and tell me I am wrong.&lt;/p&gt;
-                        &lt;table role=&quot;presentation&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; class=&quot;btn-wrap dk-outline&quot; style=&quot;border-collapse:separate;&quot;&gt;
-                        &lt;tr&gt;
-                          &lt;td class=&quot;btn&quot; align=&quot;center&quot; bgcolor=&quot;#FBF8F4&quot; style=&quot;background-color:#FBF8F4;border:1px solid #773744;border-radius:6px;padding:2px;&quot;&gt;
-                            &lt;a href=&quot;https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa&quot; style=&quot;display:inline-block;min-height:24px;padding:11px 20px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:20px;font-weight:600;color:#773744;text-decoration:none;&quot;&gt;Open the title&lt;/a&gt;
-                          &lt;/td&gt;
-                        &lt;/tr&gt;
-                      &lt;/table&gt;
+                        &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:24px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Try Group Picks tonight&lt;/p&gt;
+                        &lt;p style=&quot;margin:8px 0 2px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:23px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;On the For you tab, tap Group Picks and choose who is watching. It finds movies you can all agree on, and it works with anyone you follow, me included.&lt;/p&gt;
                         
                       &lt;/td&gt;
                     &lt;/tr&gt;
@@ -1140,7 +1079,7 @@
                      the preheader and in the note&#39;s last paragraph, which are the top of
                      the email and about 700px down a phone; somebody who scrolled
                      straight to the buttons met it nowhere. --&gt;
-                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come to me.&lt;/p&gt;
+                &lt;p style=&quot;margin:18px 0 0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:24px;color:#5F5A56;&quot; class=&quot;dk-secondary&quot;&gt;Whichever of those you try, tell me how it went. Replies come straight to me.&lt;/p&gt;
               &lt;/td&gt;
             &lt;/tr&gt;
 
@@ -1153,7 +1092,7 @@
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd. is made by Suraj Kandukuri.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;[POSTAL ADDRESS - FOUNDER TO SUPPLY]&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this because you made a bingd. account. It is the only email of its kind I will send you.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd. account.&lt;/p&gt;
                       &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;{{unsubscribeUrl}}&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
                     &lt;/td&gt;
                   &lt;/tr&gt;
@@ -1190,17 +1129,17 @@
     <ol class="inbox">
         <li class="row">
           <span class="from">Suraj from bingd.</span>
-          <span class="line"><b>I built bingd. Tell me what you think.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read all of them.</span></span>
+          <span class="line"><b>I built bingd. Tell me what you think.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read every one.</span></span>
           <span class="tag">recommended</span>
         </li>
         <li class="row">
           <span class="from">Suraj from bingd.</span>
-          <span class="line"><b>Thanks for trying bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read all of them.</span></span>
+          <span class="line"><b>Thanks for trying bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read every one.</span></span>
           
         </li>
         <li class="row">
           <span class="from">Suraj from bingd.</span>
-          <span class="line"><b>A note from Suraj, who made bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read all of them.</span></span>
+          <span class="line"><b>A note from the person who made bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me. I read every one.</span></span>
           
         </li>
     </ol>
@@ -1220,28 +1159,27 @@
           <p class="alt">It asks a question, which is the one thing a subject line can do
           that makes replying feel like the obvious response rather than an extra step.</p>
         </div>
-        <div class="panel"><p class="label">Alternative</p><p class="value">Thanks for trying bingd.</p></div><div class="panel"><p class="label">Alternative</p><p class="value">A note from Suraj, who made bingd.</p></div>
+        <div class="panel"><p class="label">Alternative</p><p class="value">Thanks for trying bingd.</p></div><div class="panel"><p class="label">Alternative</p><p class="value">A note from the person who made bingd.</p></div>
       </div>
       <div class="stack">
         <div class="panel">
           <p class="label">Preheader &middot; recommended</p>
-          <p class="value">Hit reply and it comes straight to me. I read all of them.</p>
+          <p class="value">Hit reply and it comes straight to me. I read every one.</p>
           <p class="alt">The grey line after the subject. Second of three places the reply
           invitation appears before anybody scrolls.</p>
         </div>
-        <div class="panel"><p class="label">Alternative</p><p class="value">A few things worth trying, and an inbox I actually watch.</p></div>
+        <div class="panel"><p class="label">Alternative</p><p class="value">A few things worth trying, and an inbox I actually read.</p></div>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>Where every button actually goes</h2>
+    <h2>Where every link and instruction goes</h2>
     <p class="sub" style="margin-bottom:18px">
       <span class="cls cls-A">A</span> directly deep-linkable &nbsp;
-      <span class="cls cls-B">B</span> opens the app, with an instruction for the last step
-      &nbsp; <span class="cls cls-D">D</span> not currently practical, and refused by the
-      build. Every row below was checked against the repository, and the two marked so were
-      checked against the production database.
+      <span class="cls cls-I">I</span> an instruction inside the app, with no link, whose
+      labels are checked against the app&rsquo;s source &nbsp;
+      <span class="cls cls-D">D</span> not currently practical, and refused by the build.
     </p>
     <div class="scroller">
       <table>
@@ -1253,27 +1191,32 @@
             <td><code>founderProfile</code></td>
             <td><span class="cls cls-A">A</span></td>
             <td class="mono"><a href="https://bingd.app/u/saisurajkan">https://bingd.app/u/saisurajkan</a></td>
-            <td>/u/* is in appPaths. Apple's AASA claims it, the Android intent filter claims it, and app/u/[username].tsx renders the profile. FollowControl is in the trailing half of the action row for anybody who is not the reader.</td>
-          </tr>
-          <tr>
-            <td><code>ownProfile</code></td>
-            <td><span class="cls cls-B">B</span></td>
-            <td class="mono"><a href="https://bingd.app/u/{{handle}}">https://bingd.app/u/{{handle}}</a></td>
-            <td>None reaches Invite friends. The four claimed paths are /u/*, /lists/*, /title/* and /i/*, and none is the Profile tab. /u/&lt;the reader's own handle&gt; resolves to the visitor view of their own profile, which deliberately has no Invite control: ProfileActions leaves the trailing half empty for the reader themselves. AND THE SCREEN IT OPENS HAS NO TAB BAR ON IT. app/u/[username] is a root Stack screen declared beside (tabs) in app/_layout.tsx with headerShown true, and there is no unstable_settings.initialRouteName anywhere in app/, so on a cold start from a Universal Link there is not even a guaranteed route underneath to go back to. The card's first draft said 'tap Profile at the bottom', which named a control the reader cannot see. It now says what the link actually opens, and what that page is good for: a profile URL carries an install button, so it is forwardable as it stands. The attributed invite is named as the better path without the email claiming it can reach it.</td>
+            <td>/u/* is in appPaths; app/u/[username].tsx renders the profile with FollowControl (label Follow) in its action row. Following a public account is approved at once, so it counts for Group Picks immediately. <b>Without the app:</b> web/dist/u.html resolves the display name and avatar under the profiles_read policy and offers the install row plus Open in bingd.</td>
           </tr>
           <tr>
             <td><code>founderTitle</code></td>
             <td><span class="cls cls-A">A</span></td>
             <td class="mono"><a href="https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa">https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa</a></td>
-            <td>/title/* is in appPaths and app/title/[id].tsx receives the id.</td>
+            <td>/title/* is in appPaths and app/title/[id].tsx receives the id. <b>Without the app:</b> web/dist/title.html reads media_items, which is world-readable, and shows the title's name, year and poster before the install row.</td>
+          </tr>
+          <tr>
+            <td><code>inviteFriends</code></td>
+            <td><span class="cls cls-I">I</span></td>
+            <td class="mono">In the app: Profile &rarr; Invite friends</td>
+            <td>InviteFriendsButton on the reader's own Profile tab mints their personal invite link and opens the share sheet. Redeeming a personal link makes both follow edges approved whatever either account's privacy (20260912000200_an_invitation_is_a_connection_on_both_sides.sql), which is what 'you follow each other straight away' rests on. <b>Needs:</b> None. Every signed-in account has the button on its own profile.</td>
+          </tr>
+          <tr>
+            <td><code>groupPicks</code></td>
+            <td><span class="cls cls-I">I</span></td>
+            <td class="mono">In the app: For you &rarr; Group Picks</td>
+            <td>A chip on the For you tab opening GroupPicksSheet: pick who is watching and it finds movies you can all agree on. <b>Needs:</b> At least one approved follow. With none the sheet says 'Nobody to watch with yet'. The card says 'it works with anyone you follow, me included', and the Follow me card above it supplies one.</td>
           </tr></tbody>
       </table>
     </div>
     <p class="sub" style="margin-top:16px">
-      Group Picks is <span class="cls cls-D">D</span> and is why it is a sentence in the
-      note rather than a fourth card: it has no route, no deep link, and it refuses to do
-      anything until the reader follows somebody. A card for it would land on an empty
-      state, on exactly the accounts most likely to hit one.
+      Invite friends and Group Picks have no link that lands on them: one lives on the
+      Profile tab, the other is a chip on the For you tab with no route. So their cards say
+      where to tap and carry no button, rather than a button that opens the wrong screen.
     </p>
   </section>
 
@@ -1285,63 +1228,55 @@
     </p>
     <pre>{{greeting}}
 
-Thanks for giving bingd. a go. I am Suraj, and at the moment I am the
-entire team, so this is genuinely me typing.
+Thanks for giving bingd. a go. I am Suraj, and right now I am the whole
+team, so this really is me writing.
 
-I built it because I could never answer “what should I watch”. I had
-years of films in my head in no particular order, and every app that
-offered to help wanted me to decide whether something was a four or a
-four and a half. I cannot do that. But I can always tell you which of
-two films I liked more, and it turns out that if you answer that enough
-times you end up with a list that is actually yours.
+I built it because I could never say whether a movie was a four or a
+four and a half. I can always tell you which of two I liked more,
+though, and answer that enough times and you end up with a list that is
+actually yours.
 
-Two honest things. It is early, so you will find rough edges. And bingd.
-gets much better once one person you already talk about films with is on
-it, because the feed and Group Picks have nothing to show until somebody
-is on the other end of them.
-
-Group Picks is my favourite thing in here, for what it is worth. You
-choose who is watching tonight and it finds the things you can all agree
-on.
+It is early, so you will find rough edges. It also gets much better once
+one friend you talk about movies with is on it.
 
 If something is confusing, if you love something, or if the thing you
 went looking for is not there, just hit reply. It comes straight to me
 and I read every one.
 
-— Suraj
+Suraj
 Founder, bingd.
-my profile on bingd.: https://bingd.app/u/saisurajkan
+
+P.S. My number one is The Wolf of Wall Street, and people keep telling
+me that is a red flag. Rank it and tell me I am wrong.
+See it on bingd.: https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa
 
 ------------------------------------------------------------------------
 
-A few things worth trying
+Three things worth trying
 
 FOLLOW ME
-It gives you one person in your feed straight away, and I would like to
-see what you are watching.
+It puts one person in your feed straight away, and I would like to see
+what you are watching.
 https://bingd.app/u/saisurajkan
 
-BRING ONE PERSON IN
-Nearly everything here needs a second person. This link is your own
-profile the way a stranger sees it, install button and all, so it is
-something you can forward as it stands.
-For the proper invite, the one that connects the two of you
-automatically, open bingd. and tap Invite friends on your profile.
-https://bingd.app/u/{{handle}}
+BRING ONE FRIEND IN
+bingd. is better with somebody you already talk about movies with. Tap
+Profile, then Invite friends, and send them the link. When they join,
+you follow each other straight away.
 
-RANK WHAT I AM WATCHING
-The Wolf of Wall Street is my number one and people keep telling me that
-is a red flag. Rank it yourself and tell me I am wrong.
-https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa
+TRY GROUP PICKS TONIGHT
+On the For you tab, tap Group Picks and choose who is watching. It finds
+movies you can all agree on, and it works with anyone you follow, me
+included.
 
-Whichever of those you try, tell me how it went. Replies come to me.
+Whichever of those you try, tell me how it went. Replies come straight
+to me.
 
 ------------------------------------------------------------------------
 
 bingd. is made by Suraj Kandukuri.
 [POSTAL ADDRESS - FOUNDER TO SUPPLY]
-You are getting this because you made a bingd. account. It is the only
-email of its kind I will send you.
+You are getting this one-time note because you made a bingd. account.
 
 Unsubscribe: {{unsubscribeUrl}}
 </pre>
@@ -1350,42 +1285,16 @@ Unsubscribe: {{unsubscribeUrl}}
   <section>
     <h2>Still yours to decide</h2>
     <ol class="decisions">
-      <li>
-        <div>
-          <b>Rewrite the note.</b>
-          <span>Keep the last paragraph. The reply invitation is the reason the email
-          exists; everything else in it is replaceable.</span>
-        </div>
-      </li>
-      <li>
-        <div>
-          <b>Postal address.</b>
-          <span>Not set. This email asks the reader to invite somebody, which is enough promotional content to read as commercial, and a commercial email carries a physical mailing address. There is no company, so it is a home address or a PO box, and that is your call rather than a default.</span>
-        </div>
-      </li>
-      <li>
-        <div>
-          <b>From and Reply-To.</b>
-          <span>Resend has one verified domain, <code>auth.bingd.app</code>, so
-          <code>suraj@bingd.app</code> cannot send until <code>bingd.app</code> is added
-          there. Reply-To needs no verification, but it does need a mailbox somebody reads,
-          and the release docs still record <code>hello@bingd.app</code> as unconfirmed for
-          receiving.</span>
-        </div>
-      </li>
-      <li>
-        <div>
-          <b>The third card&rsquo;s title.</b>
-          <span>Set to The Wolf of Wall Street, because your bio already makes the joke and
-          it is your number one at 10.0. Swap it for whatever you are actually watching:
-          open the title in bingd., tap Share, paste the link.</span>
-        </div>
-      </li>
+      <li><div><b>Rewrite the note, then approve it.</b> <span>note.status is "DRAFT - FOUNDER TO EDIT". Set it to APPROVED in copy.json when the words are yours. The worker mails nobody but a canary until then. Keep a reply invitation: it is why the email exists.</span></div></li>
+        <li><div><b>Postal address.</b> <span>Not set, so the worker refuses the cohort. A commercial email carries a physical mailing address; there is no company, so it is one you are willing to publish, usually a PO box or a virtual mailbox.</span></div></li>
+        <li><div><b>Send from bingd.app.</b> <span>Replies go to <code>suraj@bingd.app</code>, which Cloudflare Email Routing receives. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (its DKIM record, the <code>send</code> subdomain, and a DMARC record). Until then a test send can use <code>--from "Suraj from bingd. &lt;suraj@auth.bingd.app&gt;"</code>.</span></div></li>
+        <li><div><b>A Resend key of its own.</b> <span>Sending access, restricted to <code>bingd.app</code>, named for this email. Never the key named <code>Supabase</code>: that one is the sign-in code relay.</span></div></li>
+        <li><div><b>The P.S. title.</b> <span>It names your number one at the time of writing. Swap the id in <code>targets.json</code> founderTitle if that has changed, or set <code>postscript</code> to null.</span></div></li>
     </ol>
   </section>
 
   <p class="foot">
-    Not sent to anybody. Automation written and disabled. One email, one copy file, three
-    destinations, all of them real.
+    Not sent to anybody. Automation written and disabled. One email, one copy file, and
+    every link and instruction in it checked against the app.
   </p>
 </div>
