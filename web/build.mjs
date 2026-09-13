@@ -2407,10 +2407,8 @@ ${installRow({ primary: true })}
             <p class="kicker">How it works</p>
             <h2>Stop guessing between a 4 and a 4.5.</h2>
             <p class="section-lede">
-              Nobody knows the difference. But you do know if you liked it, and which of
-              two you liked more. Say how it was, make a few head-to-head picks, and each
-              film or season lands where it belongs. Its score out of ten comes from that
-              spot. You never pick a number.
+              You never pick a number. Say how it was, then which of two you liked more,
+              and bingd. scores each film or season from where it lands.
             </p>
           </div>
 
@@ -2427,10 +2425,9 @@ ${installRow({ primary: true })}
             <p class="kicker">Friends</p>
             <h2>See what your friends are watching.</h2>
             <p class="section-lede">
-              Follow the people you already trade recommendations with. Their rankings
-              and scores turn up in your feed, newest first. Send them a title instead of
-              losing it in a group chat. And Match shows how close your taste is, once you
-              have both ranked enough of the same titles.
+              Follow friends to see their rankings in your feed, newest first, and send
+              them a title. Rank enough of the same titles and Match shows how close your
+              taste is.
             </p>
           </div>
 
@@ -2444,10 +2441,8 @@ ${installRow({ primary: true })}
             <p class="kicker">What&rsquo;s next</p>
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
-              For you is built from what you rank, so it gets sharper as you go. Your
-              watchlist holds everything you mean to get to. And when nobody can decide,
-              Group Picks takes who is watching tonight and finds what you can all agree
-              on.
+              For you gets sharper the more you rank. Your watchlist keeps what you mean
+              to watch. Group Picks finds something everyone watching tonight can agree on.
             </p>
           </div>
 
