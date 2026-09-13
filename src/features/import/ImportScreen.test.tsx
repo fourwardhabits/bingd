@@ -182,7 +182,7 @@ describe('before a file is chosen', () => {
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
 
     expect(screen.getByText(/movies you.+watched/)).toBeTruthy();
-    expect(screen.getByText(/never opened/)).toBeTruthy();
+    expect(screen.getByText(/never open your reviews/)).toBeTruthy();
     // The retention promise, which is Contract V3 §14 and the thing somebody is deciding on.
     expect(screen.getByText(/ZIP stays on your phone/)).toBeTruthy();
     // **And the links, which an earlier draft of this sentence left out.** `filmUri` and

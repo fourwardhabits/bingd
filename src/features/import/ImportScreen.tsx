@@ -132,8 +132,8 @@ function Body({
             state.total > 1
               ? // `Math.min`, because after the last page `sent === total` and the screen
                 // stays up for the whole `import_ready` round trip.
-                `Keep bingd. open while we send it. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
-              : 'Keep bingd. open while we send it.'
+                `Keep bingd. open while we send your history. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
+              : 'Keep bingd. open while we send your history.'
           }
         />
       );
@@ -221,8 +221,8 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
         />
         <Text variant="footnote" tone="tertiary" style={styles.privacyText}>
           Your ZIP stays on your phone. bingd. only gets what it needs: film names, years,
-          ratings, dates, and Letterboxd links. Reviews, comments, likes, and lists are never
-          opened.
+          ratings, dates, and Letterboxd links. We never open your reviews, comments, likes, or
+          lists.
         </Text>
       </View>
 
@@ -432,7 +432,7 @@ function explain(failure: ImportFailure): {
     return {
       title: 'An import is already running',
       detail:
-        'This file wasn’t sent. Your earlier import is still going, and bingd. runs one at a time. It keeps going with the app closed. Come back when it’s done to import this file.',
+        'This file wasn’t sent. Your earlier import is still running, even with the app closed, and bingd. runs one import at a time. Come back when it’s done to import this file.',
       showHowTo: false,
     };
   }
