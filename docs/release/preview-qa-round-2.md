@@ -42,7 +42,7 @@ preview app (a push is expected on staging; the notification inbox has the rows 
 | 3 | Leave the confirmation and wait | It stays. It clears when you tap the next title. |
 | 4 | While "Ranking *title*…" shows, tap *Not now* | Nothing happens until the placement lands. **You must not be sent to People mid-placement.** |
 | 5 | Finish the fifth | *Your First Five* with all five scores, as before. |
-| 6 | Look below the five | A small card: *Use Letterboxd? Import your history anytime from Settings.* **No button, no way out of the flow.** |
+| 6 | Look below the five | A card after the five: *Already use Letterboxd?* / *Import your watch history anytime from* / **Settings → Import from Letterboxd**. Easy to spot, but not competing with the list. **No button, no way out of the flow.** |
 | 7 | On People, tap *Invite friends*, then cancel the share sheet | The button never says *Inviting…* (a flash of *Opening…* before the sheet is fine). Fast double tap opens one sheet. After cancel it works again. |
 
 ## 2. Importer copy and flow
