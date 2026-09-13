@@ -6,7 +6,12 @@
  *   node emails/welcome/send-test.mjs --to you@example.com                      (dry run)
  *   RESEND_API_KEY=re_xxx node emails/welcome/send-test.mjs --to you@example.com --send
  *
- * Options: --from "Name <address>"  --reply-to <address>  --greeting "Hi Ada,"
+ * Options: --invite-url https://bingd.app/i/<token>   YOUR personal invite link, as the app's
+ *                          Invite friends button shares it. Required with --send, so the
+ *                          link you tap in the test is a real one.
+ *          --name Suraj          the first name the greeting uses ("Hey Suraj,")
+ *          --subject 1|2|3       which subject candidate to send (1 = subject.chosen)
+ *          --from "Name <address>"  --reply-to <address>
  *          --out <dir>  writes the exact request body as JSON and the personalised HTML
  *          and text beside it, so every header, URL and both parts can be read before
  *          anything is sent.
@@ -49,6 +54,7 @@ import {
   DEFAULT_FROM,
   DEFAULT_REPLY_TO,
   addressOf,
+  greetingFor,
   isAddress,
   loadTemplate,
   personalise,
@@ -65,7 +71,7 @@ const die = (...lines) => {
   process.exit(1);
 };
 
-const known = new Set(['--to', '--from', '--reply-to', '--greeting', '--out', '--send']);
+const known = new Set(['--to', '--from', '--reply-to', '--name', '--invite-url', '--subject', '--out', '--send']);
 for (const arg of argv) {
   if (/^--(cc|bcc)$/.test(arg)) die(`Refusing ${arg}. This sends one message to one address.`);
   if (arg.startsWith('--') && !known.has(arg)) die(`Unknown option ${arg}.`);
@@ -113,7 +119,30 @@ try {
 const { copy } = template;
 
 const unsubscribeUrl = unsubscribeFor(replyTo);
-const values = { greeting: flag('--greeting') ?? 'Hi,', handle: 'preview', unsubscribeUrl };
+
+/**
+ * The invite link is typed, not looked up: this script never reads a database. Paste the
+ * link your own Invite friends button shares. A dry run without one uses an all-zero token,
+ * which the resolver refuses, and says so; a real send without one is refused.
+ */
+const inviteUrl = flag('--invite-url');
+const inviteMatch = /^https:\/\/bingd\.app\/i\/([0-9a-f]{32})$/.exec(inviteUrl ?? '');
+if (inviteUrl && !inviteMatch) die(`--invite-url "${inviteUrl}" is not https://bingd.app/i/ followed by a 32-character token.`);
+if (argv.includes('--send') && !inviteMatch) {
+  die('A real test send needs --invite-url with your own invite link (Profile, Invite friends, copy the link).');
+}
+
+const subjects = [copy.subject.chosen, ...copy.subject.alternatives];
+const subjectChoice = Number(flag('--subject') ?? 1);
+if (!Number.isInteger(subjectChoice) || subjectChoice < 1 || subjectChoice > subjects.length) {
+  die(`--subject must be 1 to ${subjects.length}.`);
+}
+
+const values = {
+  greeting: greetingFor(flag('--name'), copy.letter.greeting),
+  inviteToken: inviteMatch ? inviteMatch[1] : '0'.repeat(32),
+  unsubscribeUrl,
+};
 
 let payload;
 try {
@@ -121,7 +150,7 @@ try {
     from,
     replyTo,
     to,
-    subject: `[TEST] ${copy.subject.chosen}`,
+    subject: `[TEST] ${subjects[subjectChoice - 1]}`,
     html: personalise(template.html, values),
     text: personalise(template.text, values),
     unsubscribeUrl,
@@ -134,7 +163,8 @@ const links = [...new Set([...payload.html.matchAll(/href="([^"]+)"/g)].map((m) 
 
 const warnings = [];
 if (!copy.footer.postalAddress) warnings.push('footer.postalAddress is null: the footer shows a placeholder. Fine for a test.');
-if (copy.note.status !== 'APPROVED') warnings.push(`note.status is "${copy.note.status}": the automation would refuse this copy.`);
+if (copy.letter.status !== 'APPROVED') warnings.push(`letter.status is "${copy.letter.status}": the automation would refuse this copy.`);
+if (!inviteMatch) warnings.push('No --invite-url: the invite link uses an all-zero token the resolver refuses. Fine for a dry run.');
 if (!/@(auth\.)?bingd\.app$/i.test(addressOf(from))) warnings.push(`From "${from}" is not on a bingd. domain; Resend will refuse it.`);
 if (/@bingd\.app$/i.test(addressOf(from))) {
   warnings.push('From is @bingd.app, which Resend refuses until bingd.app is verified there. If it does, retry with --from "Suraj from bingd. <suraj@auth.bingd.app>".');
@@ -204,9 +234,10 @@ console.log('    1. From reads as a person. Reply-To, when you hit reply, is sur
 console.log('    2. Reply from THIS inbox. The reply should arrive where suraj@bingd.app forwards.');
 console.log('       (Not from the same Gmail that suraj@bingd.app forwards to: Gmail hides a');
 console.log('       message that loops back to its own sender.)');
-console.log('    3. Light and dark mode. Mobile width: the Follow me button spans the card.');
-console.log('    4. With bingd. installed: Open my profile opens the app on the profile;');
-console.log('       See it on bingd. opens the title. Without it: the web page, with install.');
+console.log('    3. Light and dark mode, and a phone: the letter wraps and nothing scrolls sideways.');
+console.log('    4. "invite link" opens the invitation page for your own link. (Opening your own');
+console.log('       invite answers "self"; to see acceptance, tap it from a second account.)');
+console.log('       "follow me on bingd" opens your profile in the app, or on the web without it.');
 console.log('    5. Unsubscribe opens a new email to suraj@bingd.app with subject Unsubscribe.');
 console.log('    6. Gmail: Show original, and check the text part and List-Unsubscribe.');
 console.log('');

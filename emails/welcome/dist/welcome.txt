@@ -1,53 +1,40 @@
 {{greeting}}
 
-Thanks for giving bingd. a go. I am Suraj, and right now I am the whole
-team, so this really is me writing.
+Thanks for giving bingd a shot. I built it because the usual 1–5 star
+ratings never really felt like they captured the experience of watching
+a good movie or TV show.
 
-I built it because I could never say whether a movie was a four or a
-four and a half. I can always tell you which of two I liked more,
-though, and answer that enough times and you end up with a list that is
-actually yours.
+Here are a few of my favorite ways to use the app:
 
-It is early, so you will find rough edges. It also gets much better once
-one friend you talk about movies with is on it.
+Post-watch Ranking: Instead of picking a number, compare titles
+head-to-head and bingd builds your ranked list. That list keeps evolving
+as you discover new favorites (Avengers: Doomsday anyone?).
 
-If something is confusing, if you love something, or if the thing you
-went looking for is not there, just hit reply. It comes straight to me
-and I read every one.
+Pre-vetted Watchlist: My favorite part of the feed is not just seeing
+what my friends are watching. It's putting those titles in my watchlist
+and then teasing them about their taste later (The Emoji Movie,
+really?).
 
+Smooth Planning: The Group Picks feature (under For you) generates
+recommendations across multiple bingd users when you're struggling to
+find a pick before the popcorn runs out. It's a favorite for movie clubs
+and couples!
+
+If you want to suggest a new feature, find something confusing, or love
+the app and just want to say hi, you can hit reply to this email. It
+comes straight to me.
+
+bingd is more fun with friends, so here's your invite link
+(https://bingd.app/i/{{inviteToken}}). And if you want to see what I'm
+watching, follow me on bingd (https://bingd.app/u/saisurajkan).
+
+Happy binging,
 Suraj
-Founder, bingd.
-
-P.S. My number one is The Wolf of Wall Street, and people keep telling
-me that is a red flag. Rank it and tell me I am wrong.
-See it on bingd.: https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa
 
 ------------------------------------------------------------------------
 
-Three things worth trying
-
-FOLLOW ME
-It puts one person in your feed straight away, and I would like to see
-what you are watching.
-https://bingd.app/u/saisurajkan
-
-BRING ONE FRIEND IN
-bingd. is better with somebody you already talk about movies with. Tap
-Profile, then Invite friends, and send them the link. When they join,
-you follow each other straight away.
-
-TRY GROUP PICKS TONIGHT
-On the For you tab, tap Group Picks and choose who is watching. It finds
-movies you can all agree on, and it works with anyone you follow, me
-included.
-
-Whichever of those you try, tell me how it went. Replies come straight
-to me.
-
-------------------------------------------------------------------------
-
-bingd. is made by Suraj Kandukuri.
+bingd is made by Suraj Kandukuri.
 [POSTAL ADDRESS - FOUNDER TO SUPPLY]
-You are getting this one-time note because you made a bingd. account.
+You are getting this one-time note because you made a bingd account.
 
 Unsubscribe: {{unsubscribeUrl}}

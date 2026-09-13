@@ -54,6 +54,7 @@ import {
   DEFAULT_REPLY_TO,
   TEMPLATE_VERSION,
   greetingFor,
+  inviteUrlFor,
   isAddress,
   loadTemplate,
   personalise,
@@ -187,6 +188,7 @@ export async function run({
     log(`  start_after       ${preview.start_after}${ignored}`);
     log(`  window            ${preview.delay_hours}h to ${preview.max_age_hours}h after signup, at most ${preview.max_per_run} per run`);
     log(`  would claim       ${preview.candidates.length}`);
+    log(`  held, no invite   ${preview.waiting_for_invite_link}   (eligible, but no personal invite link yet)`);
     for (const c of preview.candidates) {
       log(`    ${c.suppressed ? 'suppressed ' : '           '}@${c.username}  signed up ${c.signed_up_at}`);
     }
@@ -216,14 +218,14 @@ export async function run({
 
   /**
    * The founder's approval gate, for the cohort. A canary goes to a test inbox and may
-   * carry a draft note and a placeholder address; nobody else's email may.
+   * carry unapproved copy and a placeholder address; nobody else's email may.
    */
-  const ready = Boolean(copy.footer?.postalAddress) && copy.note?.status === 'APPROVED';
+  const ready = Boolean(copy.footer?.postalAddress) && copy.letter?.status === 'APPROVED';
   if (!canary && !copy.footer?.postalAddress) {
     return stop('footer.postalAddress in copy.json is null. A commercial email needs a physical mailing address.', 1);
   }
-  if (!canary && copy.note?.status !== 'APPROVED') {
-    return stop(`note.status in copy.json is "${copy.note?.status}". The founder approves the copy by setting it to "APPROVED".`, 1);
+  if (!canary && copy.letter?.status !== 'APPROVED') {
+    return stop(`letter.status in copy.json is "${copy.letter?.status}". The founder approves the copy by setting it to "APPROVED".`, 1);
   }
   if (canary && !ready) {
     log('  ! canary: the copy is a draft or has no postal address. Allowed for a test inbox, refused for the cohort.');
@@ -255,10 +257,20 @@ export async function run({
   for (const [index, person] of owned.entries()) {
     if (index > 0 && pauseMs > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
 
-    const values = { greeting: greetingFor(person.display_name), handle: person.username, unsubscribeUrl };
-
     let outcome;
     try {
+      /**
+       * The recipient's own invite link, as the claim read it: never minted here. The
+       * claim only returns people who have one, so a missing or malformed token is a
+       * defect, and it fails this send (recorded, retried) rather than sending a letter
+       * whose "here's your invite link" points nowhere.
+       */
+      inviteUrlFor(person.invite_token);
+      const values = {
+        greeting: greetingFor(person.display_name, copy.letter.greeting),
+        inviteToken: person.invite_token,
+        unsubscribeUrl,
+      };
       outcome = await sendViaResend({
         fetch: fetchImpl,
         apiKey: resendKey,

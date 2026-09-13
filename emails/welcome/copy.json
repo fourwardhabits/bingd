@@ -1,123 +1,77 @@
 {
   "$comment": [
-    "THE EDITABLE COPY SOURCE FOR THE WELCOME EMAIL.",
+    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND LOCKED ON 2026-09-13.",
     "",
-    "This file is the thing to edit. `build.mjs` renders it into `dist/`; nothing else in",
-    "this directory contains a sentence a reader will see. Copy and markup drifting apart is",
-    "how an email ends up saying one thing in HTML and another in plain text.",
+    "The letter below is the founder's own prose. Do not rewrite, shorten, reorganise or",
+    "'improve' it; the parenthetical jokes are deliberate. The only edits made to what he",
+    "wrote are listed in `$edits`.",
     "",
-    "After any edit run `node emails/welcome/build.mjs`, which rebuilds everything and",
-    "refuses a link with no verified destination, and `node --test emails/`, which refuses",
-    "an instruction naming a control the app does not have.",
+    "After any edit run `node emails/welcome/build.mjs` and `node --test emails/welcome/email.test.mjs`.",
     "",
-    "Brand rules the tests hold you to: `bingd.` always lowercase with its full stop; no",
-    "exclamation marks; no em dashes; Rank, never rate; movies, not films, as the app says."
+    "A paragraph is a string, or an array of pieces: a string is text, `{ \"bold\": ... }` is",
+    "one of the three bold feature labels, and `{ \"link\": ..., \"target\": ... }` is an inline",
+    "link to a destination in targets.json. `{{firstName}}` and `{{inviteUrl}}` are filled per",
+    "recipient at send time."
   ],
 
-  "$subjectComment": [
-    "The first is the recommendation. It asks for an answer, and replies are the point of",
-    "the email. `Welcome to bingd.` is deliberately absent: it promises a template."
+  "$edits": [
+    "For You -> For you: the tab's exact label (app/(tabs)/_layout.tsx).",
+    "[VERIFY EXACT PRODUCT LABEL] -> Group Picks: the chip's exact label on the For you tab (app/(tabs)/recommendations.tsx). Nothing in the app is called Group Watch.",
+    "Avengers Doomsday -> Avengers: Doomsday, and the Emoji Movie -> The Emoji Movie: the films' titles.",
+    "[Name] -> {{firstName}}. With no usable first name the greeting is 'Hey,'."
   ],
+
   "subject": {
     "chosen": "I built bingd. Tell me what you think.",
     "alternatives": ["Thanks for trying bingd.", "A note from the person who made bingd."]
   },
 
-  "$preheaderComment": [
-    "The grey line an inbox shows after the subject. 40 to 90 characters. The first of three",
-    "places the reply invitation appears: here, the note's last paragraph, and the closer."
-  ],
+  "$preheaderComment": "The grey line after the subject in an inbox. Not part of the letter.",
   "preheader": {
-    "chosen": "Hit reply and it comes straight to me. I read every one.",
-    "alternatives": ["A few things worth trying, and an inbox I actually read."]
+    "chosen": "Hit reply and it comes straight to me.",
+    "alternatives": []
   },
 
   "masthead": "bingd.",
 
-  "$noteComment": [
-    "FOUNDER TO EDIT. Rewrite it in your own voice; it is short on purpose (80 to 160 words).",
-    "",
-    "When you are happy with the words, set `status` to \"APPROVED\". The worker refuses to",
-    "mail anybody but a canary while it says anything else, so that one field is the",
-    "approval, and it lands in the same commit as the words it approves.",
-    "",
-    "Keep the last paragraph in some form. The reply invitation is why this email exists.",
-    "",
-    "`{{greeting}}` renders as `Hi <first name>,` when the display name starts with",
-    "something that looks like a name, and `Hi,` otherwise. Never the handle."
-  ],
-  "note": {
-    "status": "DRAFT - FOUNDER TO EDIT",
-    "greeting": "{{greeting}}",
+  "letter": {
+    "status": "APPROVED",
+    "greeting": "Hey {{firstName}},",
     "paragraphs": [
-      "Thanks for giving bingd. a go. I am Suraj, and right now I am the whole team, so this really is me writing.",
-      "I built it because I could never say whether a movie was a four or a four and a half. I can always tell you which of two I liked more, though, and answer that enough times and you end up with a list that is actually yours.",
-      "It is early, so you will find rough edges. It also gets much better once one friend you talk about movies with is on it.",
-      "If something is confusing, if you love something, or if the thing you went looking for is not there, just hit reply. It comes straight to me and I read every one."
+      "Thanks for giving bingd a shot. I built it because the usual 1–5 star ratings never really felt like they captured the experience of watching a good movie or TV show.",
+      "Here are a few of my favorite ways to use the app:",
+      [
+        { "bold": "Post-watch Ranking:" },
+        " Instead of picking a number, compare titles head-to-head and bingd builds your ranked list. That list keeps evolving as you discover new favorites (Avengers: Doomsday anyone?)."
+      ],
+      [
+        { "bold": "Pre-vetted Watchlist:" },
+        " My favorite part of the feed is not just seeing what my friends are watching. It's putting those titles in my watchlist and then teasing them about their taste later (The Emoji Movie, really?)."
+      ],
+      [
+        { "bold": "Smooth Planning:" },
+        " The Group Picks feature (under For you) generates recommendations across multiple bingd users when you're struggling to find a pick before the popcorn runs out. It's a favorite for movie clubs and couples!"
+      ],
+      "If you want to suggest a new feature, find something confusing, or love the app and just want to say hi, you can hit reply to this email. It comes straight to me.",
+      [
+        "bingd is more fun with friends, so here's your ",
+        { "link": "invite link", "target": "inviteLink" },
+        ". And if you want to see what I'm watching, ",
+        { "link": "follow me on bingd", "target": "founderProfile" },
+        "."
+      ]
     ],
-    "signoff": ["Suraj", "Founder, bingd."]
+    "signoff": ["Happy binging,", "Suraj"]
   },
-
-  "$postscriptComment": [
-    "FOUNDER INPUT. A second, smaller reason to reply. The title is your number one at the",
-    "time of writing; swap it for whatever is true when you approve the email (open the title",
-    "in bingd., tap Share, and put that id into targets.json founderTitle). Set the whole",
-    "`postscript` to null to remove it."
-  ],
-  "postscript": {
-    "text": "P.S. My number one is The Wolf of Wall Street, and people keep telling me that is a red flag. Rank it and tell me I am wrong.",
-    "action": "See it on bingd.",
-    "target": "founderTitle"
-  },
-
-  "$cardsComment": [
-    "Three, secondary to the note. A card has EITHER a `target` (a link, which must be a",
-    "verified destination in targets.json) OR a `where` (an instruction inside the app with",
-    "no link, whose control names email.test.mjs checks against the app's source).",
-    "",
-    "Only one card is a link because only one of these things has a link that lands",
-    "somewhere useful. Invite friends lives on the Profile tab and no URL reaches that tab;",
-    "Group Picks is a chip on the For you tab with no route at all. A button for either would",
-    "open the wrong screen, so both are said plainly instead. See targets.json `rejected`."
-  ],
-  "cards": {
-    "intro": "Three things worth trying",
-    "items": [
-      {
-        "title": "Follow me",
-        "body": "It puts one person in your feed straight away, and I would like to see what you are watching.",
-        "action": "Open my profile",
-        "target": "founderProfile"
-      },
-      {
-        "title": "Bring one friend in",
-        "body": "bingd. is better with somebody you already talk about movies with. Tap Profile, then Invite friends, and send them the link. When they join, you follow each other straight away.",
-        "where": "inviteFriends"
-      },
-      {
-        "title": "Try Group Picks tonight",
-        "body": "On the For you tab, tap Group Picks and choose who is watching. It finds movies you can all agree on, and it works with anyone you follow, me included.",
-        "where": "groupPicks"
-      }
-    ]
-  },
-
-  "closer": "Whichever of those you try, tell me how it went. Replies come straight to me.",
 
   "$footerComment": [
-    "Four short lines, no navigation, no icons, no logo.",
-    "",
-    "The address and the unsubscribe are not padding. This message asks the reader to invite",
-    "somebody and to try a feature, which is enough to treat it as commercial email, so it",
-    "carries a sender, a physical mailing address and an unsubscribe.",
-    "",
-    "`postalAddress` is a FOUNDER INPUT. The worker refuses to mail the cohort while it is",
-    "null, and nothing here will invent one. There is no company, so it is a mailing address",
-    "you are willing to publish: a PO box or a virtual mailbox is the usual choice."
+    "Not part of the letter. The note asks the reader to invite somebody, so it is treated as",
+    "commercial email and carries a sender, a physical mailing address and an unsubscribe.",
+    "`postalAddress` is a FOUNDER INPUT: the worker refuses to mail the cohort while it is null."
   ],
   "footer": {
-    "signature": "bingd. is made by Suraj Kandukuri.",
-    "reason": "You are getting this one-time note because you made a bingd. account.",
+    "signature": "bingd is made by Suraj Kandukuri.",
+    "reason": "You are getting this one-time note because you made a bingd account.",
     "postalAddress": null,
     "unsubscribeLabel": "Unsubscribe"
   }

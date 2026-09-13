@@ -246,11 +246,47 @@ $fn$;
 revoke all on function _welcome_email_in_scope(uuid, uuid, text) from public, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
+-- The account's own invite link, if it has one
+--
+-- The email says "here's your invite link", so it links the recipient's canonical personal
+-- token: the one `create_invite_link` minted and returns on every share, at
+-- https://bingd.app/i/<token>. This reads it and never mints one. The conditions are the
+-- resolver's own (redeem_invite, 20260912000200): live, and minted in this environment,
+-- so the email can only ever carry a link that resolves. `kind = 'personal'` because a
+-- referral token redeems without connecting the two people, which is not what the
+-- sentence promises.
+--
+-- An account that has never opened Invite friends or shared a title off-platform has no
+-- token, and gets NULL here. The claim HOLDS such an account rather than sending it a
+-- broken sentence or minting a link on its behalf; what to do about them is a founder
+-- decision (README.md, "Accounts with no invite link").
+-- ---------------------------------------------------------------------------
+
+create function _welcome_email_invite_token(p_user uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $fn$
+  select t.token
+    from invite_tokens t
+   where t.owner_id = p_user
+     and t.revoked_at is null
+     and t.kind = 'personal'
+     and t.env = coalesce((select c.value #>> '{}' from app_config c where c.key = 'env.name'), 'nonprod')
+   limit 1;
+$fn$;
+
+revoke all on function _welcome_email_invite_token(uuid) from public, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
 -- Who is eligible for a first claim
 --
--- In scope, able to receive, and no ledger row. One definition, used by the dry run and
--- by the claim, so the preview cannot describe a different set of people from the one the
--- claim takes. Suppressed addresses ARE returned, flagged, so the claim can record them.
+-- In scope, able to receive, holding a live personal invite link, and no ledger row. One
+-- definition, used by the dry run and by the claim, so the preview cannot describe a
+-- different set of people from the one the claim takes. Suppressed addresses ARE
+-- returned, flagged, so the claim can record them.
 -- ---------------------------------------------------------------------------
 
 create function _welcome_email_candidates(
@@ -264,7 +300,8 @@ returns table (
   display_name    text,
   username        text,
   signed_up_at    timestamptz,
-  suppressed      boolean
+  suppressed      boolean,
+  invite_token    text
 )
 language plpgsql
 stable
@@ -290,11 +327,13 @@ begin
            p.display_name::text,
            p.username::text,
            p.created_at,
-           exists (select 1 from email_suppressions s where s.email = lower(u.email))
+           exists (select 1 from email_suppressions s where s.email = lower(u.email)),
+           _welcome_email_invite_token(p.id)
       from profiles p
       join auth.users u on u.id = p.id
      where _welcome_email_in_scope(p.id, p_canary_user, p_canary_email)
        and _welcome_email_can_receive(p.id)
+       and _welcome_email_invite_token(p.id) is not null
        and not exists (select 1 from welcome_emails w where w.user_id = p.id)
      order by p.created_at, p.id
      limit greatest(0, least(coalesce(p_limit, v_cap), v_cap));
@@ -337,7 +376,17 @@ as $fn$
                'suppressed', x.suppressed
              ) order by x.signed_up_at)
         from _welcome_email_candidates(p_limit, p_canary_user, p_canary_email) x
-    ), '[]'::jsonb)
+    ), '[]'::jsonb),
+    -- Everybody the claim would take except that they have no invite link yet: held, and
+    -- counted here so a dry run shows how many people the invite-link rule is holding.
+    'waiting_for_invite_link', (
+      select count(*)
+        from profiles p
+       where _welcome_email_in_scope(p.id, p_canary_user, p_canary_email)
+         and _welcome_email_can_receive(p.id)
+         and _welcome_email_invite_token(p.id) is null
+         and not exists (select 1 from welcome_emails w where w.user_id = p.id)
+    )
   );
 $fn$;
 
@@ -378,7 +427,8 @@ returns table (
   recipient_email text,
   display_name    text,
   username        text,
-  attempt         integer
+  attempt         integer,
+  invite_token    text
 )
 language plpgsql
 volatile
@@ -426,6 +476,7 @@ begin
       display_name    := v_row.display_name;
       username        := v_row.username;
       attempt         := 1;
+      invite_token    := v_row.invite_token;
       v_taken         := v_taken + 1;
       return next;
     end if;
@@ -436,7 +487,8 @@ begin
     select w.user_id              as rid,
            lower(u.email)::text   as remail,
            p.display_name::text   as rname,
-           p.username::text       as rhandle
+           p.username::text       as rhandle,
+           _welcome_email_invite_token(w.user_id) as rtoken
       from welcome_emails w
       join profiles p on p.id = w.user_id
       join auth.users u on u.id = w.user_id
@@ -446,6 +498,7 @@ begin
        and w.canary = v_canary
        and _welcome_email_in_scope(w.user_id, p_canary_user, p_canary_email)
        and _welcome_email_can_receive(w.user_id)
+       and _welcome_email_invite_token(w.user_id) is not null
        and not exists (select 1 from email_suppressions s where s.email = lower(u.email))
      order by w.first_claimed_at
      limit greatest(0, v_limit - v_taken)
@@ -464,6 +517,7 @@ begin
       display_name    := v_row.rname;
       username        := v_row.rhandle;
       attempt         := v_attempt;
+      invite_token    := v_row.rtoken;
       return next;
     end if;
   end loop;

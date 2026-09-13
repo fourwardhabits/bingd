@@ -1,92 +1,54 @@
 {
   "$comment": [
-    "EVERY LINK AND EVERY IN-APP INSTRUCTION IN THE WELCOME EMAIL, AND WHAT IS BEHIND IT.",
+    "EVERY LINK AND EVERY PRODUCT LABEL IN THE WELCOME EMAIL, AND WHAT IS BEHIND IT.",
     "",
-    "The rule: a call to action must never point at a destination that does not exist.",
+    "A link must never point at a destination that does not exist. `targets` carry a",
+    "classification and build.mjs refuses a D:",
+    "  A  Directly deep-linkable: the path is in web/deep-links.config.json appPaths, an",
+    "     Expo Router screen receives it, and web/build.mjs publishes a fallback page.",
+    "  C  Per recipient: the send job fills it from that account's own data.",
+    "  D  Not currently practical.",
     "",
-    "`targets` are links. Each carries a classification and `build.mjs` refuses a D:",
-    "  A  Directly deep-linkable: the path is in web/deep-links.config.json appPaths, so the",
-    "     AASA and the Android intent filter claim it, an Expo Router screen receives it,",
-    "     and web/build.mjs publishes a fallback page for somebody without the app.",
-    "  B  Opens the app somewhere real, with an instruction for the last step.",
-    "  C  Needs a per-recipient link that the send job can genuinely produce.",
-    "  D  Not currently practical. Kept with its reasoning so the next person can see why.",
+    "`labels` are product names the letter tells the reader to find. email.test.mjs reads",
+    "each file and fails if the label is no longer rendered there.",
     "",
-    "`instructions` are cards with no link. Each names the visible labels a reader has to",
-    "find and the source file that renders each one. emails/welcome/email.test.mjs reads",
-    "those files and fails if a label is gone, so a renamed tab cannot leave the email",
-    "giving directions to a control that no longer exists.",
-    "",
-    "Checked against origin/main 9f4512b on 2026-09-13."
+    "Checked against origin/main 69608b5 on 2026-09-13."
   ],
 
   "origin": "https://bingd.app",
 
   "targets": {
+    "inviteLink": {
+      "classification": "C",
+      "url": "https://bingd.app/i/{{inviteToken}}",
+      "capability": "The recipient's own personal invite link. Redeeming it connects the two people: both follow edges approved, whatever either account's privacy (20260912000200_an_invitation_is_a_connection_on_both_sides.sql).",
+      "deepLink": "/i/* is in appPaths and app/i/[token].tsx receives it. It is the exact URL the app shares: use-recommend.ts builds `https://bingd.app/i/${token}` from create_invite_link's token.",
+      "webFallback": "web/dist/i.html: the invitation page with the install row and 'I already have bingd.'.",
+      "needsUserData": true,
+      "userData": "invite_tokens.token for the recipient: live, kind personal, minted in this environment. The same three conditions redeem_invite accepts. Read by _welcome_email_invite_token; the send job never mints one.",
+      "noToken": "Tokens are minted lazily, on the first Invite friends tap or off-platform title share. An account with none is HELD by the claim (not mailed, not consumed) until the founder decides what should happen. README.md, 'Accounts with no invite link'."
+    },
+
     "founderProfile": {
       "classification": "A",
       "url": "https://bingd.app/u/saisurajkan",
-      "capability": "A public profile with a Follow control on it.",
-      "deepLink": "/u/* is in appPaths; app/u/[username].tsx renders the profile with FollowControl (label Follow) in its action row. Following a public account is approved at once, so it counts for Group Picks immediately.",
-      "webFallback": "web/dist/u.html resolves the display name and avatar under the profiles_read policy and offers the install row plus Open in bingd.",
+      "capability": "The founder's public profile, with Follow in its action row. Following a public account is approved at once.",
+      "deepLink": "/u/* is in appPaths; app/u/[username].tsx renders the profile and FollowControl.",
+      "webFallback": "web/dist/u.html resolves the display name and avatar and offers the install row plus Open in bingd.",
       "needsUserData": false,
-      "verified": "2026-09-11 against production: the handle resolves and the account is public. 2026-09-13: the route, the fallback and the control are unchanged on main.",
-      "caveat": "A Universal Link opened inside Gmail's in-app browser on iOS does not always hand off to the app; the fallback page's Open in bingd. button is the recovery."
-    },
-
-    "founderTitle": {
-      "classification": "A",
-      "url": "https://bingd.app/title/d752c0e8-9376-4aa7-bd71-57a11c8d6cfa",
-      "founderInput": true,
-      "capability": "A title page with Rank, Watchlist and Recommend on it.",
-      "deepLink": "/title/* is in appPaths and app/title/[id].tsx receives the id.",
-      "webFallback": "web/dist/title.html reads media_items, which is world-readable, and shows the title's name, year and poster before the install row.",
-      "needsUserData": false,
-      "verified": "2026-09-11 against production: media_items holds The Wolf of Wall Street (2013) at this id.",
-      "founderNote": "Used by the P.S. Swap the id for whatever your number one is when you approve the email."
+      "verified": "2026-09-11 against production: the handle resolves and the account is public. 2026-09-13: route and fallback unchanged on main; https://bingd.app/u/saisurajkan answers 200."
     }
   },
 
-  "instructions": {
-    "inviteFriends": {
-      "classification": "I",
-      "path": ["Profile", "Invite friends"],
-      "evidence": [
-        { "label": "Profile", "file": "app/(tabs)/_layout.tsx" },
-        { "label": "Invite friends", "file": "src/features/profile/InviteFriendsButton.tsx" }
-      ],
-      "capability": "InviteFriendsButton on the reader's own Profile tab mints their personal invite link and opens the share sheet. Redeeming a personal link makes both follow edges approved whatever either account's privacy (20260912000200_an_invitation_is_a_connection_on_both_sides.sql), which is what 'you follow each other straight away' rests on.",
-      "prerequisite": "None. Every signed-in account has the button on its own profile."
-    },
-    "groupPicks": {
-      "classification": "I",
-      "path": ["For you", "Group Picks"],
-      "evidence": [
-        { "label": "For you", "file": "app/(tabs)/_layout.tsx" },
-        { "label": "Group Picks", "file": "app/(tabs)/recommendations.tsx" }
-      ],
-      "capability": "A chip on the For you tab opening GroupPicksSheet: pick who is watching and it finds movies you can all agree on.",
-      "prerequisite": "At least one approved follow. With none the sheet says 'Nobody to watch with yet'. The card says 'it works with anyone you follow, me included', and the Follow me card above it supplies one."
-    }
-  },
+  "labels": [
+    { "label": "Group Picks", "file": "app/(tabs)/recommendations.tsx", "note": "The chip that opens GroupPicksSheet. Nothing in the app is called Group Watch." },
+    { "label": "For you", "file": "app/(tabs)/_layout.tsx", "note": "The tab's title, lower-case y." }
+  ],
 
   "rejected": {
-    "groupPicksLink": {
-      "classification": "D",
-      "whyD": "No route: GroupPicksSheet is local state on app/(tabs)/recommendations.tsx, and the For you tab is not a claimed path, so no https link opens it. It is an instruction card instead."
-    },
-    "ownProfileLink": {
-      "classification": "B, withdrawn",
-      "whyWithdrawn": "The previous draft linked https://bingd.app/u/<the reader's own handle> under 'Bring one person in'. That opens the visitor view of their own profile, a root Stack screen with no tab bar and no Invite control (ProfileActions leaves the trailing half empty for yourself), so the button landed next to the thing it was about and not on it. The instruction card says where Invite friends actually is."
-    },
-    "personalInviteLink": {
-      "classification": "C in principle, not built",
-      "whyNot": "A card carrying https://bingd.app/i/<the reader's own token> would be one tap instead of three. create_invite_link is SECURITY DEFINER over auth.uid(), so the service role cannot call it; the job would have to impersonate the recipient or write invite_tokens behind the function. That is a change to the invite system and a founder decision, not part of this email.",
-      "ifYouWantIt": "The single highest-leverage change available to this email, and it keeps invite attribution measurable."
-    },
-    "openTheApp": {
-      "classification": "D",
-      "whyD": "bingd:// is not reliably linkified by mail clients and does nothing without the app; https://bingd.app/ is not in appPaths, so iOS opens the browser. Every link here uses a claimed path instead."
+    "mintAtSendTime": {
+      "classification": "not built",
+      "why": "Minting a personal token for an account that has none would mean a service-role writer around create_invite_link, which is SECURITY DEFINER over auth.uid() and records an invite_link_creations row per share. Doing it for an email changes what that row means. It is one of the options in README.md, not something the send job does."
     }
   }
 }

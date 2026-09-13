@@ -44,6 +44,14 @@ export default function suite() {
       const id = await fx.createUser();
       await db.sql(`update auth.users set email = $2, email_confirmed_at = now() where id = $1`, [id, `${id}@example.com`]);
       await db.sql(`update profiles set created_at = now() - interval '40 hours' where id = $1`, [id]);
+      // A live personal invite link in this environment, which the claim requires. Written
+      // directly because the races are about the ledger, not about minting.
+      await db.sql(
+        `insert into invite_tokens (owner_id, token, short_code, env)
+         values ($1, replace(gen_random_uuid()::text, '-', ''), upper(substr(md5(random()::text), 1, 8)),
+                 coalesce((select value #>> '{}' from app_config where key = 'env.name'), 'nonprod'))`,
+        [id],
+      );
       return id;
     };
 

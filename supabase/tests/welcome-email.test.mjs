@@ -53,6 +53,21 @@ const record = async (user, attempt, outcome, resendId = null, reason = null) =>
 
 let seq = 0;
 
+/** The account's personal invite link, minted by `create_invite_link` as that account. */
+const mintInvite = async (id) => {
+  await t.actAs(id);
+  const { rows } = await t.sql(`select create_invite_link(gen_random_uuid()) as r`);
+  await t.actAs(null);
+  assert.equal(rows[0].r.status, 'ok');
+  return rows[0].r.token;
+};
+
+/** The live personal token, read straight from the table. */
+const liveToken = async (id) =>
+  (await t.sql(`select token from invite_tokens where owner_id = $1 and revoked_at is null`, [id])).rows[0]?.token ?? null;
+
+const tokenCount = async () => Number((await t.sql(`select count(*)::int as n from invite_tokens`)).rows[0].n);
+
 /** An account with a confirmed address that signed up `hoursAgo` hours ago. */
 const person = async ({
   hoursAgo = 40,
@@ -63,10 +78,14 @@ const person = async ({
   deleted = false,
   anonymous = false,
   displayName,
+  invite = true,
 } = {}) => {
   seq += 1;
   const username = `welcome_${seq}`;
   const id = await t.createUser({ username });
+  // Through the shipped writer, exactly as tapping Invite friends does, so the token the
+  // email carries is provably the one the app would share.
+  if (invite) await mintInvite(id);
   const address = email === undefined ? `Person.${seq}@Example.com` : email;
   await t.sql(
     `update auth.users
@@ -157,6 +176,7 @@ describe('welcome email: who can call it', () => {
         `select * from _welcome_email_candidates(1)`,
         `select _welcome_email_can_receive('${someone.id}')`,
         `select _welcome_email_in_scope('${someone.id}', null, null)`,
+        `select _welcome_email_invite_token('${someone.id}')`,
         `select * from welcome_emails`,
         `select * from email_suppressions`,
         `insert into email_suppressions (email, reason) values ('x@example.com', 'requested')`,
@@ -172,7 +192,7 @@ describe('welcome email: who can call it', () => {
     await t.asRole('service_role', null, async () => {
       assert.equal(await t.errorFrom(`select welcome_email_preview()`), null);
       assert.equal(await t.errorFrom(`select * from welcome_email_claim()`), null);
-      for (const helper of [`select * from _welcome_email_candidates(1)`, `select _welcome_email_can_receive(gen_random_uuid())`, `select _welcome_email_in_scope(gen_random_uuid(), null, null)`]) {
+      for (const helper of [`select * from _welcome_email_candidates(1)`, `select _welcome_email_can_receive(gen_random_uuid())`, `select _welcome_email_in_scope(gen_random_uuid(), null, null)`, `select _welcome_email_invite_token(gen_random_uuid())`]) {
         assert.equal((await t.errorFrom(helper))?.code, '42501', helper);
       }
     });
@@ -259,6 +279,7 @@ describe('welcome email: exactly once', () => {
       display_name: 'Ada Lovelace',
       username: ada.username,
       attempt: 1,
+      invite_token: await liveToken(ada.id),
     });
 
     assert.deepEqual(await claim(), [], 'a second run finds the claim');
@@ -374,6 +395,58 @@ describe('welcome email: exactly once', () => {
     await record(fay.id, 1, 'sent', 're_2');
     await t.sql(`delete from auth.users where id = $1`, [fay.id]);
     assert.deepEqual(await ledger(), []);
+    assert.deepEqual(await claim(), []);
+  });
+});
+
+describe('welcome email: the invite link', () => {
+  it('holds an account with no personal invite link, counts it in the dry run, and mints nothing', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const noLink = await person({ invite: false });
+    const before = await tokenCount();
+
+    assert.deepEqual(await claim(), []);
+    assert.deepEqual(await ledger(), [], 'held, not consumed');
+    assert.equal(await tokenCount(), before, 'the claim never mints a token');
+    const preview = (await t.sql(`select welcome_email_preview() as p`)).rows[0].p;
+    assert.equal(preview.waiting_for_invite_link, 1);
+    assert.deepEqual(preview.candidates, []);
+
+    // The moment they tap Invite friends, they are in, with exactly that token.
+    const token = await mintInvite(noLink.id);
+    const [row] = await claim();
+    assert.deepEqual([row.recipient_id, row.invite_token], [noLink.id, token]);
+  });
+
+  it('carries the replacement after a revocation, never the revoked token', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const rotated = await person();
+    const old = await liveToken(rotated.id);
+    await t.actAs(rotated.id);
+    const { rows } = await t.sql(`select revoke_invite_link(gen_random_uuid()) as r`);
+    await t.actAs(null);
+    assert.equal(rows[0].r.status, 'ok');
+    const [row] = await claim();
+    assert.equal(row.invite_token, rows[0].r.token);
+    assert.notEqual(row.invite_token, old);
+  });
+
+  it('holds an account whose only token was minted in another environment, or is not personal', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const elsewhere = await person();
+    await t.sql(`update invite_tokens set env = 'somewhere-else' where owner_id = $1`, [elsewhere.id]);
+    const referral = await person();
+    await t.sql(`update invite_tokens set kind = 'referral' where owner_id = $1`, [referral.id]);
+    assert.deepEqual(await claim(), []);
+    assert.deepEqual(await ledger(), []);
+  });
+
+  it('does not retry a failure once the account has no live link', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const lost = await person();
+    await claim();
+    await record(lost.id, 1, 'failed', null, '500 {}');
+    await t.sql(`update invite_tokens set revoked_at = now() where owner_id = $1`, [lost.id]);
     assert.deepEqual(await claim(), []);
   });
 });
@@ -536,7 +609,7 @@ const ENV = {
 async function approvedRoot(change = () => {}) {
   const dir = await mkdtemp(join(tmpdir(), 'welcome-approved-'));
   const copy = JSON.parse(await readFile(join(welcomeRoot, 'copy.json'), 'utf8'));
-  copy.note.status = 'APPROVED';
+  copy.letter.status = 'APPROVED';
   copy.footer.postalAddress = 'PO Box 1, Testville';
   change(copy);
   await writeFile(join(dir, 'copy.json'), JSON.stringify(copy, null, 2));
@@ -564,6 +637,7 @@ describe('welcome email: the worker, against the real SQL', () => {
     const ada = await person({ displayName: 'Ada Lovelace' });
     const w = world();
 
+    const tokensBefore = await tokenCount();
     const first = await go(w);
     assert.equal(first.code, 0);
     assert.deepEqual([first.claimed, first.sent, first.failed, first.unrecorded], [1, 1, 0, 0]);
@@ -576,10 +650,20 @@ describe('welcome email: the worker, against the real SQL', () => {
     assert.equal(body.reply_to, 'suraj@bingd.app');
     assert.equal(body.subject, 'I built bingd. Tell me what you think.');
     assert.deepEqual(body.headers, { 'List-Unsubscribe': '<mailto:suraj@bingd.app?subject=Unsubscribe>' });
-    assert.match(body.html, /Hi Ada,/);
-    assert.match(body.text, /^Hi Ada,/);
+    assert.match(body.html, /Hey Ada,/);
+    assert.match(body.text, /^Hey Ada,/);
     assert.doesNotMatch(body.html + body.text, /\{\{/);
     assert.match(body.html, /PO Box 1, Testville/);
+
+    // The recipient's own invite link, the exact token create_invite_link minted for them,
+    // in both parts; and the founder's profile. The run minted nothing.
+    const token = await liveToken(ada.id);
+    assert.match(token, /^[0-9a-f]{32}$/);
+    assert.ok(body.html.includes(`href="https://bingd.app/i/${token}"`), 'HTML carries the recipient invite link');
+    assert.ok(body.text.includes(`https://bingd.app/i/${token}`), 'text carries the recipient invite link');
+    assert.ok(body.html.includes('href="https://bingd.app/u/saisurajkan"'));
+    assert.ok(body.text.includes('https://bingd.app/u/saisurajkan'));
+    assert.equal(await tokenCount(), tokensBefore, 'the send job never mints an invite token');
 
     const [row] = await ledger();
     assert.deepEqual([row.status, row.resend_id, row.attempts], ['sent', 're_1', 1]);
@@ -646,7 +730,7 @@ describe('welcome email: the worker, against the real SQL', () => {
    */
   for (const [label, change, reason] of [
     ['has no postal address', (copy) => { copy.footer.postalAddress = null; }, /postalAddress/],
-    ['is still a draft', (copy) => { copy.note.status = 'DRAFT - FOUNDER TO EDIT'; }, /APPROVED/],
+    ['is not approved', (copy) => { copy.letter.status = 'DRAFT'; }, /APPROVED/],
   ]) {
     it(`refuses the cohort, before claiming anybody, while the copy ${label}`, async () => {
       await t.exec(OPEN_COHORT_SQL);

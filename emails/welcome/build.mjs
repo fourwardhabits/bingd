@@ -90,28 +90,6 @@ const target = (name) => {
   return entry;
 };
 
-/**
- * An in-app instruction, by name. A card that sends somebody to a control with no link
- * names it here, and `email.test.mjs` checks each label against the app's source.
- */
-const instruction = (name) => {
-  const entry = targets.instructions?.[name];
-  if (!entry) {
-    problems.push(`copy.json names the instruction "${name}", which targets.json does not define.`);
-    return null;
-  }
-  return entry;
-};
-
-/** A card is a link or an instruction, never both and never neither. */
-const destinationOf = (item) => {
-  if (Boolean(item.target) === Boolean(item.where)) {
-    problems.push(`the card "${item.title}" must have exactly one of "target" and "where".`);
-    return null;
-  }
-  return item.target ? { kind: 'link', ...target(item.target) } : { kind: 'where', ...instruction(item.where) };
-};
-
 // ---------------------------------------------------------------------------
 // Brand
 //
@@ -233,99 +211,54 @@ const UNSUBSCRIBE_TOKEN = '{{unsubscribeUrl}}';
 // ---------------------------------------------------------------------------
 
 /**
- * A button.
+ * One paragraph of the letter.
  *
- * Padding on the `<a>` **and** a background on the `<td>` behind it. Outlook ignores
- * padding on an anchor and paints the cell; everything else paints the anchor and gives
- * the whole rectangle a tap target. Doing only one of the two produces a button that is
- * a bare blue link in Outlook or a 20px-tall tap target on a phone.
+ * A string is plain text. An array is pieces: a string, `{ bold }` (one of the three
+ * feature labels, and nothing else is bold), or `{ link, target }` (an inline link whose
+ * destination must be verified in targets.json). No buttons and no cards: this is a
+ * letter, and the founder asked for it to look like one.
  */
-const button = ({ href, label, kind = 'primary' }) => {
-  const fill = kind === 'primary' ? C.maroon : C.paper;
-  const ink = kind === 'primary' ? C.inverse : C.maroon;
+const piecesOf = (paragraph) => (Array.isArray(paragraph) ? paragraph : [paragraph]);
 
-  /**
-   * The dark class goes on the **table**, so the rule can reach both the cell's
-   * background and the anchor's colour. It was on neither: `.dk-fill` and
-   * `.dk-outline` were written in the stylesheet and never emitted, which meant that
-   * in Apple Mail's dark mode the card inverted around two buttons that kept their
-   * inline near-white `bgcolor` and sat on it as white slabs.
-   */
-  const dark = kind === 'primary' ? 'dk-fill' : 'dk-outline';
+const paragraphHtml = (paragraph) =>
+  piecesOf(paragraph)
+    .map((piece) => {
+      if (typeof piece === 'string') return esc(piece);
+      if (piece.bold) return `<strong style="font-weight:700;color:${C.ink};" class="dk-text">${esc(piece.bold)}</strong>`;
+      if (piece.link) {
+        const destination = target(piece.target);
+        return destination
+          ? `<a href="${esc(destination.url)}" style="color:${C.maroon};text-decoration:underline;" class="dk-accent">${esc(piece.link)}</a>`
+          : esc(piece.link);
+      }
+      problems.push(`a paragraph piece is neither text, bold nor a link: ${JSON.stringify(piece)}`);
+      return '';
+    })
+    .join('');
 
-  /**
-   * Padding on the cell as well as on the anchor, and a width on the table.
-   *
-   * Word's rendering engine, which is what Outlook on Windows uses, ignores
-   * `display:inline-block` and `min-height` on an anchor, so a button whose whole shape
-   * lives on the `<a>` collapses toward text height there. Stating it on the `<td>`
-   * too costs nothing and is what Outlook actually paints.
-   *
-   * The `width` is the other half, and it is why the media query used to do nothing: a
-   * table with no width shrink-fits to its content under auto-layout, so making the
-   * anchor a block widened a box that was already exactly label-width. `btn-wrap` is
-   * what the media query widens.
-   */
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" class="btn-wrap ${dark}" style="border-collapse:separate;">
-                        <tr>
-                          <td class="btn" align="center" bgcolor="${fill}" style="background-color:${fill};border:1px solid ${C.maroon};border-radius:6px;padding:2px;">
-                            <a href="${esc(href)}" style="display:inline-block;min-height:24px;padding:11px 20px;font-family:${FONT};font-size:15px;line-height:20px;font-weight:600;color:${ink};text-decoration:none;">${esc(label)}</a>
-                          </td>
-                        </tr>
-                      </table>`;
-};
+/** The same paragraph for the plain-text part: bold is just text, a link carries its URL. */
+const paragraphText = (paragraph) =>
+  piecesOf(paragraph)
+    .map((piece) => {
+      if (typeof piece === 'string') return piece;
+      if (piece.bold) return piece.bold;
+      const url = targets.targets?.[piece.target]?.url;
+      return url ? `${piece.link} (${url})` : piece.link;
+    })
+    .join('');
 
-/**
- * A card. A link card ends in a button; an instruction card ends where its body does,
- * because the body already says where to tap and a button would have nowhere true to go.
- * Only the first link card is filled, so the page has one primary action.
- */
-let linkCards = 0;
-const card = (item) => {
-  const destination = destinationOf(item);
-  if (!destination || (destination.kind === 'link' && !destination.url)) return '';
-
-  const action =
-    destination.kind === 'link'
-      ? button({ href: destination.url, label: item.action, kind: linkCards++ === 0 ? 'primary' : 'secondary' })
-      : '';
-
-  return `
-              <tr>
-                <td style="padding:0 0 12px;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.parchment}" style="background-color:${C.parchment};border:1px solid ${C.hairline};border-radius:10px;" class="dk-raised">
-                    <tr>
-                      <td style="padding:20px 20px 18px;">
-                        <p style="margin:0;font-family:${SERIF};font-size:19px;line-height:24px;color:${C.ink};" class="dk-text">${esc(item.title)}</p>
-                        <p style="margin:8px 0 ${action ? '16px' : '2px'};font-family:${FONT};font-size:15px;line-height:23px;color:${C.secondary};" class="dk-secondary">${esc(item.body)}</p>
-                        ${action}
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>`;
-};
-
-/** The P.S.: a sentence and a small text link, under the signature. Optional. */
-const postscript = (() => {
-  const spec = copy.postscript;
-  if (!spec) return { html: '', text: '' };
-  const destination = target(spec.target);
-  if (!destination) return { html: '', text: '' };
-  return {
-    html: `<p style="margin:22px 0 0;font-family:${FONT};font-size:15px;line-height:24px;color:${C.secondary};" class="dk-secondary">${esc(spec.text)} <a href="${esc(destination.url)}" style="color:${C.maroon};text-decoration:underline;" class="dk-accent">${esc(spec.action)}</a></p>`,
-    text: `\n\n${wrap(spec.text)}\n${spec.action}: ${destination.url}`,
-  };
-})();
-
-const paragraphs = copy.note.paragraphs
+const paragraphs = copy.letter.paragraphs
   .map(
-    (text) =>
-      `<p style="margin:0 0 16px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${esc(text)}</p>`,
+    (paragraph) =>
+      `<p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${paragraphHtml(paragraph)}</p>`,
   )
   .join('\n                      ');
 
-const cards = copy.cards.items.map(card).join('');
+/**
+ * The greeting stays a token in dist/, because it depends on the recipient: the worker
+ * fills `{{greeting}}` from `copy.letter.greeting` and the display name (envelope.mjs).
+ */
+const GREETING_TOKEN = '{{greeting}}';
 
 const postal = copy.footer.postalAddress ?? '[POSTAL ADDRESS - FOUNDER TO SUPPLY]';
 
@@ -361,12 +294,6 @@ const html = `<!DOCTYPE html>
         .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
         .gutter { padding-left: 22px !important; padding-right: 22px !important; }
         .pad-top { padding-top: 28px !important; }
-        /* A button only as wide as its label is a small target at arm's length on a
-           moving train. The width has to be on the table: under auto-layout a table
-           with no width shrink-fits to its content, so widening only the anchor
-           widens a box that is already exactly label-width. */
-        .btn-wrap { width: 100% !important; }
-        .btn a { display: block !important; text-align: center !important; }
       }
 
       /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
@@ -374,18 +301,10 @@ const html = `<!DOCTYPE html>
       @media (prefers-color-scheme: dark) {
         .dk-ground { background-color: ${DARK.ground} !important; }
         .dk-card { background-color: ${DARK.card} !important; border-color: ${DARK.hairline} !important; }
-        .dk-raised { background-color: ${DARK.raised} !important; border-color: ${DARK.hairline} !important; }
         .dk-text, .dk-text * { color: ${DARK.text} !important; }
-        .dk-secondary, .dk-secondary * { color: ${DARK.secondary} !important; }
         .dk-tertiary, .dk-tertiary * { color: ${DARK.tertiary} !important; }
         .dk-accent, .dk-accent * { color: ${DARK.accent} !important; }
         .dk-rule { border-color: ${DARK.hairline} !important; }
-        /* The one filled button keeps a filled look rather than becoming a dark
-           rectangle with dark text in it. */
-        .dk-fill, .dk-fill td { background-color: ${DARK.accent} !important; border-color: ${DARK.accent} !important; }
-        .dk-fill a { color: ${DARK.ground} !important; }
-        .dk-outline td { background-color: ${DARK.raised} !important; border-color: ${DARK.accent} !important; }
-        .dk-outline a { color: ${DARK.accent} !important; }
       }
     </style>
   </head>
@@ -413,46 +332,19 @@ const html = `<!DOCTYPE html>
               </td>
             </tr>
 
-            <!-- The note. This is the email; everything under it is secondary. -->
+            <!-- The letter. The founder's own words, in his order, and nothing under it but
+                 the footer. -->
             <tr>
               <td class="gutter" style="padding:26px 36px 6px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td>
-                      <p style="margin:0 0 16px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${esc(copy.note.greeting)}</p>
+                      <p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${GREETING_TOKEN}</p>
                       ${paragraphs}
-                      <p style="margin:26px 0 0;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${copy.note.signoff.map(esc).join('<br />')}</p>
-                      ${postscript.html}
+                      <p style="margin:26px 0 0;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${copy.letter.signoff.map(esc).join('<br />')}</p>
                     </td>
                   </tr>
                 </table>
-              </td>
-            </tr>
-
-            <tr>
-              <td class="gutter" style="padding:30px 36px 0;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                  <tr><td style="border-top:1px solid ${C.hairline};font-size:0;line-height:0;" class="dk-rule">&nbsp;</td></tr>
-                </table>
-              </td>
-            </tr>
-
-            <!-- Three actions. Stacked at every width, deliberately: three columns at
-                 600px gives each card about 170px, which turns every title into two
-                 lines and every button into a word and a half. A column layout that
-                 only works on a desktop is a column layout for the minority. -->
-            <tr>
-              <td class="gutter" style="padding:24px 36px 4px;">
-                <p style="margin:0 0 16px;font-family:${FONT};font-size:16px;line-height:24px;color:${C.ink};" class="dk-text">${esc(copy.cards.intro)}</p>
-
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${cards}
-                </table>
-
-                <!-- The reply ask, one more time, where a skimmer's eye stops. It was in
-                     the preheader and in the note's last paragraph, which are the top of
-                     the email and about 700px down a phone; somebody who scrolled
-                     straight to the buttons met it nowhere. -->
-                <p style="margin:18px 0 0;font-family:${FONT};font-size:15px;line-height:24px;color:${C.secondary};" class="dk-secondary">${esc(copy.closer)}</p>
               </td>
             </tr>
 
@@ -526,24 +418,11 @@ const dark = html
 // client set to prefer it.
 // ---------------------------------------------------------------------------
 
-const textCards = copy.cards.items
-  .map((item) => {
-    const url = item.target ? targets.targets?.[item.target]?.url : null;
-    return `\n${item.title.toUpperCase()}\n${wrap(item.body)}${url ? `\n${url}` : ''}\n`;
-  })
-  .join('');
+const text = `${GREETING_TOKEN}
 
-const text = `${copy.note.greeting}
+${copy.letter.paragraphs.map((p) => wrap(paragraphText(p))).join('\n\n')}
 
-${copy.note.paragraphs.map((p) => wrap(p)).join('\n\n')}
-
-${copy.note.signoff.join('\n')}${postscript.text}
-
-${'-'.repeat(72)}
-
-${copy.cards.intro}
-${textCards}
-${wrap(copy.closer)}
+${copy.letter.signoff.join('\n')}
 
 ${'-'.repeat(72)}
 
@@ -600,8 +479,10 @@ const escAttr = (value) => esc(value).replace(/'/g, '&#39;');
  * Both review pages render these rows, so neither can describe a card the email no longer
  * has.
  */
-const usedTargets = new Set([copy.postscript?.target, ...copy.cards.items.map((i) => i.target)].filter(Boolean));
-const usedInstructions = new Set(copy.cards.items.map((i) => i.where).filter(Boolean));
+const usedTargets = new Set(
+  // `typeof` first: a string has a legacy `.link()` method, so `'text'.link` is truthy.
+  copy.letter.paragraphs.flatMap((p) => piecesOf(p)).filter((piece) => typeof piece === 'object' && piece.link).map((piece) => piece.target),
+);
 
 const destinationRows = [
   ...Object.entries(targets.targets)
@@ -610,16 +491,14 @@ const destinationRows = [
       name,
       classification: t.classification,
       where: `<a href="${escAttr(t.url)}">${esc(t.url)}</a>`,
-      evidence: `${esc(t.deepLink)} <b>Without the app:</b> ${esc(t.webFallback)}`,
+      evidence: `${esc(t.deepLink)} <b>Without the app:</b> ${esc(t.webFallback)}${t.noToken ? ` <b>No token:</b> ${esc(t.noToken)}` : ''}`,
     })),
-  ...Object.entries(targets.instructions ?? {})
-    .filter(([name]) => usedInstructions.has(name))
-    .map(([name, t]) => ({
-      name,
-      classification: t.classification,
-      where: `In the app: ${t.path.map(esc).join(' &rarr; ')}`,
-      evidence: `${esc(t.capability)} <b>Needs:</b> ${esc(t.prerequisite)}`,
-    })),
+  ...(targets.labels ?? []).map((l) => ({
+    name: l.label,
+    classification: 'label',
+    where: `Rendered by <code>${esc(l.file)}</code>`,
+    evidence: esc(l.note),
+  })),
 ];
 
 const targetRows = destinationRows
@@ -653,11 +532,8 @@ const artifactRows = destinationRows
  */
 const decisions = [
   {
-    title: 'Rewrite the note, then approve it.',
-    body:
-      copy.note.status === 'APPROVED'
-        ? 'Approved: note.status is APPROVED.'
-        : `note.status is "${esc(copy.note.status)}". Set it to APPROVED in copy.json when the words are yours. The worker mails nobody but a canary until then. Keep a reply invitation: it is why the email exists.`,
+    title: 'Pick the subject.',
+    body: `Three candidates are shown as inbox rows above. <code>subject.chosen</code> is "${esc(copy.subject.chosen)}".`,
   },
   {
     title: 'Postal address.',
@@ -666,27 +542,35 @@ const decisions = [
       : 'Not set, so the worker refuses the cohort. A commercial email carries a physical mailing address; there is no company, so it is one you are willing to publish, usually a PO box or a virtual mailbox.',
   },
   {
+    title: 'Accounts with no invite link.',
+    body: 'A personal invite token is minted the first time somebody taps Invite friends or shares a title off-platform. An account that has done neither has no link, and the claim holds it rather than send a sentence that points nowhere. A dry run counts them as <code>waiting_for_invite_link</code>. Decide: keep holding, send without that sentence, or have the send job mint the one personal link.',
+  },
+  {
     title: 'Send from bingd.app.',
-    body: 'Replies go to <code>suraj@bingd.app</code>, which Cloudflare Email Routing receives. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (its DKIM record, the <code>send</code> subdomain, and a DMARC record). Until then a test send can use <code>--from "Suraj from bingd. &lt;suraj@auth.bingd.app&gt;"</code>.',
+    body: 'Replies go to <code>suraj@bingd.app</code>. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (DKIM, the <code>send</code> subdomain, DMARC). Until then a test send uses <code>--from "Suraj from bingd. &lt;suraj@auth.bingd.app&gt;"</code>.',
   },
   {
     title: 'A Resend key of its own.',
-    body: 'Sending access, restricted to <code>bingd.app</code>, named for this email. Never the key named <code>Supabase</code>: that one is the sign-in code relay.',
+    body: 'Sending access, restricted to <code>bingd.app</code>. Never the key named <code>Supabase</code>: that one relays every sign-in code.',
   },
-  ...(copy.postscript
-    ? [
-        {
-          title: 'The P.S. title.',
-          body: 'It names your number one at the time of writing. Swap the id in <code>targets.json</code> founderTitle if that has changed, or set <code>postscript</code> to null.',
-        },
-      ]
-    : []),
+
 ];
 
 const decisionItems = (tag) =>
   decisions.map((d) => `<li>${tag ? '<div>' : ''}<b>${d.title}</b> <span>${d.body}</span>${tag ? '</div>' : ''}</li>`).join('\n        ');
 
-const srcdoc = escAttr(html);
+/**
+ * The review pages show the email as a recipient reads it, so the per-recipient tokens are
+ * filled with visible sample values. Only here: dist/welcome.html keeps its tokens.
+ */
+const SAMPLE = {
+  '{{greeting}}': 'Hey Suraj,',
+  '{{inviteToken}}': '0123456789abcdef0123456789abcdef',
+  '{{unsubscribeUrl}}': 'mailto:suraj@bingd.app?subject=Unsubscribe',
+};
+const sampled = (body) => Object.entries(SAMPLE).reduce((out, [token, value]) => out.split(token).join(value), body);
+const srcdoc = escAttr(sampled(html));
+const darkSrcdoc = escAttr(sampled(dark));
 
 const preview = `<!doctype html>
 <html lang="en">
@@ -761,11 +645,11 @@ const preview = `<!doctype html>
       </p>
 
       <div class="draft">
-        <p style="margin:0 0 6px"><b>DRAFT &mdash; FOUNDER TO EDIT.</b></p>
+        <p style="margin:0 0 6px"><b>FOUNDER COPY &middot; NOT SENT.</b></p>
         <p style="margin:0">
-          The founder&rsquo;s note is a draft and should be rewritten in his own voice.
-          Nothing is sent to anybody until <code>note.status</code> is APPROVED, the postal
-          address is set, and the automation is switched on. See the list at the bottom.
+          The letter is the founder&rsquo;s own, locked on 2026-09-13. Nothing is sent to anybody
+          until the postal address is set, a test send has been approved, and the automation
+          is switched on. See the list at the bottom.
         </p>
       </div>
 
@@ -785,7 +669,7 @@ const preview = `<!doctype html>
         </figure>
         <figure class="frame">
           <figcaption>Dark &mdash; Apple Mail</figcaption>
-          <iframe srcdoc='${escAttr(dark)}' width="390" height="900" style="background:#14110F" title="The welcome email with its dark rules forced on"></iframe>
+          <iframe srcdoc='${darkSrcdoc}' width="390" height="900" style="background:#14110F" title="The welcome email with its dark rules forced on"></iframe>
         </figure>
       </div>
       <p class="sub" style="margin-top:14px">
@@ -1136,14 +1020,14 @@ const artifact = `<title>Welcome Email Review</title>
   </p>
 
   <div class="notice">
-    <p><b>DRAFT &mdash; FOUNDER TO EDIT</b></p>
+    <p><b>FOUNDER COPY &middot; NOT SENT</b></p>
     <p>
-      The note below is a draft and should be rewritten in the founder&rsquo;s own voice.
+      The letter is the founder&rsquo;s own, locked on 2026-09-13.
     </p>
     <p>
-      Nobody is mailed until <code>note.status</code> is APPROVED, the postal address is
-      set, and the automation is switched on, which are three separate decisions. The list
-      at the bottom says where each one stands.
+      Nobody is mailed until the postal address is set, a real test send has been approved,
+      and the automation is switched on, which are separate decisions. The list at the
+      bottom says where each one stands.
     </p>
   </div>
 
@@ -1167,7 +1051,7 @@ const artifact = `<title>Welcome Email Review</title>
       </figure>
       <figure>
         <figcaption>Dark &middot; Apple Mail</figcaption>
-        <iframe srcdoc='${escAttr(dark)}' width="390" height="880" style="background:#14110F" title="The welcome email with its dark rules forced on"></iframe>
+        <iframe srcdoc='${darkSrcdoc}' width="390" height="880" style="background:#14110F" title="The welcome email with its dark rules forced on"></iframe>
       </figure>
     </div>
     <p class="sub" style="margin-top:16px">
@@ -1302,7 +1186,7 @@ await writeFile(
   `${JSON.stringify({ copy: sha256(copyRaw), targets: sha256(targetsRaw) }, null, 2)}\n`,
 );
 
-const words = copy.note.paragraphs.join(' ').split(/\s+/).length;
+const words = copy.letter.paragraphs.map(paragraphText).join(' ').split(/\s+/).length;
 
 console.log(`Rendered ${dist}`);
 console.log(`  welcome.html   ${(html.length / 1024).toFixed(1)}KB`);
@@ -1312,20 +1196,16 @@ console.log(`  preview.html   open this one`);
 console.log('  artifact.html  the same review page, shaped for the Artifact host');
 console.log('');
 console.log(`  subject        ${copy.subject.chosen}`);
-console.log(`  note           ${words} words (target 80-160)`);
-console.log(
-  `  cards          ${copy.cards.items.map((i) => `${i.title} [${i.target ? targets.targets[i.target]?.classification : targets.instructions?.[i.where]?.classification}]`).join(' | ')}`,
+console.log(`  letter         ${words} words, ${copy.letter.status}`);
+console.log(`  links          ${[...usedTargets].join(', ')}`
 );
 
-if (words < 80 || words > 160) {
-  warnings.push(`the founder note is ${words} words; the brief asks for 80 to 160.`);
-}
 
 /**
  * Gmail clips a message over roughly 102KB and shows a "View entire message" link,
  * which cuts the footer off exactly where the unsubscribe lives.
  */
-for (const rule of ['.dk-fill', '.dk-card', '.dk-text']) {
+for (const rule of ['.dk-card', '.dk-text', '.dk-accent']) {
   if (!html.includes(`class="`) || !html.includes(rule)) {
     warnings.push(`the dark-mode rule ${rule} is not in the output.`);
   }
@@ -1337,11 +1217,10 @@ for (const rule of ['.dk-fill', '.dk-card', '.dk-text']) {
  * factory wrote only `class="btn"`, so in Apple Mail's dark mode two buttons stayed
  * near-white on a dark card. The stylesheet and the markup have to agree.
  */
-for (const cls of ['dk-fill', 'dk-outline', 'dk-card', 'dk-raised', 'dk-text', 'dk-secondary', 'dk-tertiary', 'dk-accent', 'dk-rule', 'dk-ground']) {
+for (const cls of ['dk-card', 'dk-text', 'dk-tertiary', 'dk-accent', 'dk-rule', 'dk-ground']) {
   const declared = html.includes(`.${cls}`);
   const used = new RegExp(`class="[^"]*\\b${cls}\\b`).test(html);
-  // A second link card is optional, so an outline style with no outline button is fine.
-  if (declared && !used && cls !== 'dk-outline') warnings.push(`.${cls} is styled but never put on an element.`);
+  if (declared && !used) warnings.push(`.${cls} is styled but never put on an element.`);
   if (used && !declared) warnings.push(`.${cls} is on an element but never styled.`);
 }
 

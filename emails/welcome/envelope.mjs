@@ -43,16 +43,32 @@ export const addressOf = (value) => {
 
 export const isAddress = (value) => ADDRESS.test(addressOf(value));
 
-/**
- * `Hi <name>,` when the display name's first word looks like a name, `Hi,` otherwise.
- *
- * It never falls back to the handle. `Hi saisurajkan,` is worse than no name at all: it
- * is the exact tell that nobody wrote this, in an email whose whole claim is that
- * somebody did.
- */
-export const greetingFor = (displayName) => {
+/** The first word of a display name, when it looks like a name; otherwise null. */
+export const firstNameOf = (displayName) => {
   const first = String(displayName ?? '').trim().split(/\s+/)[0] ?? '';
-  return /^[\p{L}][\p{L}'’-]{1,23}$/u.test(first) ? `Hi ${first},` : 'Hi,';
+  return /^[\p{L}][\p{L}'’-]{1,23}$/u.test(first) ? first : null;
+};
+
+/**
+ * The founder's greeting (`copy.letter.greeting`, "Hey {{firstName}},") for one recipient.
+ *
+ * With no usable first name the name and the space before it go, so it reads "Hey,". It
+ * never falls back to the handle: "Hey saisurajkan," is the exact tell that nobody wrote
+ * this, in an email whose whole claim is that somebody did.
+ */
+export const greetingFor = (displayName, template = 'Hey {{firstName}},') => {
+  const first = firstNameOf(displayName);
+  return first ? template.split('{{firstName}}').join(first) : template.replace(/\s*\{\{firstName\}\}/, '');
+};
+
+/**
+ * A personal invite token as `create_invite_link` mints it: a uuid with the dashes removed
+ * (src/features/invite/pending.ts). Anything else is not a link the resolver will accept.
+ */
+export const INVITE_TOKEN = /^[0-9a-f]{32}$/;
+export const inviteUrlFor = (token) => {
+  if (!INVITE_TOKEN.test(String(token ?? ''))) throw new Error('the recipient has no valid personal invite token');
+  return `https://bingd.app/i/${token}`;
 };
 
 /**
