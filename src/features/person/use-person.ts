@@ -15,6 +15,14 @@ export type PersonCredit = {
   role: string | null;
   /** Which list TMDB had them in, which is the difference between acting and crew. */
   as: 'cast' | 'crew';
+  /**
+   * Every crew job they held on this title — "Director, Writer" — or null for none.
+   *
+   * Set on an acting credit as well, when they also worked behind the camera on it: a
+   * title is one entry, and this is what keeps a film somebody directed and starred in
+   * in the Crew half of their page. Null throughout on a row cached before 2026-09-13.
+   */
+  crewRole: string | null;
 };
 
 export type PersonDetail = {
@@ -32,6 +40,10 @@ export type PersonDetail = {
   credits: PersonCredit[];
   /** How many credits TMDB had, which is usually more than were kept. */
   creditTotal: number;
+  /** How many acting credits TMDB had, or null for a row cached before they were counted. */
+  castTotal: number | null;
+  /** How many titles they held a crew job on, with the same null. */
+  crewTotal: number | null;
 };
 
 /**
@@ -75,8 +87,16 @@ type CachedPayload = {
     deathday?: string | null;
     place_of_birth?: string | null;
   };
-  credits?: { id: string; kind: 'movie' | 'series'; role: string | null; as: 'cast' | 'crew' }[];
+  credits?: {
+    id: string;
+    kind: 'movie' | 'series';
+    role: string | null;
+    as: 'cast' | 'crew';
+    crew_role?: string | null;
+  }[];
   credit_total?: number;
+  cast_total?: number;
+  crew_total?: number;
 };
 
 const NOTHING: PersonState = { detail: null, claimed: false, stale: false };
@@ -229,6 +249,8 @@ export function usePerson(personId: string | null) {
             posterPath: item.poster_path,
             role: credit.role,
             as: credit.as,
+            // A crew credit cached before `crew_role` existed still names its job.
+            crewRole: credit.crew_role ?? (credit.as === 'crew' ? credit.role : null),
           };
         })
         .filter((credit): credit is PersonCredit => credit !== null);
@@ -246,6 +268,8 @@ export function usePerson(personId: string | null) {
           placeOfBirth: person.place_of_birth ?? null,
           credits,
           creditTotal: payload.credit_total ?? credits.length,
+          castTotal: typeof payload.cast_total === 'number' ? payload.cast_total : null,
+          crewTotal: typeof payload.crew_total === 'number' ? payload.crew_total : null,
         },
         claimed: false,
         stale: expired,

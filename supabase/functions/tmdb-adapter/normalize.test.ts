@@ -30,13 +30,14 @@ import {
   fromSeasonDetail,
   fromSearchResult,
   fromSeriesDetail,
+  castSearchResults,
   personCredits,
   personRecord,
   ratingOf,
   seasonTarget,
   seasonsOf,
 } from './normalize.ts';
-import type { TmdbPersonDetail } from './tmdb.ts';
+import { genreNames, knownGenres, type TmdbPersonDetail } from './tmdb.ts';
 
 const GENRES = new Map<number, string>([
   [28, 'Action'],
@@ -174,8 +175,8 @@ Deno.test('a credit with no media type is dropped rather than assumed', () => {
   assertEquals(credits.length, 0);
 });
 
-Deno.test('at most forty credits are kept, and the total says how many there were', () => {
-  const { credits, total } = personCredits(
+Deno.test('at most sixty acting credits are kept, and the totals say how many there were', () => {
+  const { credits, total, castTotal } = personCredits(
     person({
       cast: Array.from({ length: 300 }, (_, index) =>
         credit(index + 1, { popularity: index, character: 'Someone' }),
@@ -184,10 +185,203 @@ Deno.test('at most forty credits are kept, and the total says how many there wer
     GENRES,
   );
 
-  assertEquals(credits.length, 40);
+  assertEquals(credits.length, 60);
   assertEquals(total, 300);
-  // The forty kept are the forty most popular, not the first forty TMDB sent.
+  assertEquals(castTotal, 300);
+  // The sixty kept are the sixty most popular, not the first sixty TMDB sent.
   assertEquals(credits[0].row.tmdb_id, 300);
+});
+
+Deno.test('a busy crew career cannot crowd acting credits out of the cap', () => {
+  // The cap used to be forty across both halves, applied after the merge, so an actor
+  // with a hundred popular producer credits kept no acting credits at all — on the page
+  // Cast search sends people to so they can see what that actor has been in.
+  const { credits, crewTotal } = personCredits(
+    person({
+      cast: Array.from({ length: 10 }, (_, index) =>
+        credit(index + 1, { popularity: 1, character: 'Lead' }),
+      ),
+      crew: Array.from({ length: 100 }, (_, index) =>
+        credit(1000 + index, { popularity: 500, job: 'Producer' }),
+      ),
+    }),
+    GENRES,
+  );
+
+  assertEquals(credits.filter((entry) => entry.as === 'cast').length, 10);
+  assertEquals(credits.filter((entry) => entry.as === 'crew').length, 20);
+  assertEquals(crewTotal, 100);
+});
+
+Deno.test('a film they acted in and directed keeps its directing credit for the Crew half', () => {
+  // One entry per title, because an older client keys its rows on the title. The crew
+  // jobs ride along on the acting entry instead of being discarded by the collision.
+  const { credits, castTotal, crewTotal } = personCredits(
+    person({
+      cast: [credit(1, { character: 'Walt Kowalski' })],
+      crew: [credit(1, { job: 'Director' }), credit(1, { job: 'Producer' }), credit(1, { job: 'Director' })],
+    }),
+    GENRES,
+  );
+
+  assertEquals(credits.length, 1);
+  assertEquals(credits[0].as, 'cast');
+  assertEquals(credits[0].role, 'Walt Kowalski');
+  assertEquals(credits[0].crewRole, 'Director, Producer');
+  assertEquals(castTotal, 1);
+  assertEquals(crewTotal, 1);
+});
+
+Deno.test('a crew-only title names every job, not just the most popular one', () => {
+  const { credits } = personCredits(
+    person({
+      crew: [credit(4, { job: 'Writer', popularity: 1 }), credit(4, { job: 'Director', popularity: 9 })],
+    }),
+    GENRES,
+  );
+
+  assertEquals(credits[0].as, 'crew');
+  assertEquals(credits[0].role, 'Writer, Director');
+  assertEquals(credits[0].crewRole, 'Writer, Director');
+});
+
+Deno.test('an acting credit has no crew role when they held no crew job', () => {
+  const { credits, crewTotal } = personCredits(
+    person({ cast: [credit(1, { character: 'Cobb' })] }),
+    GENRES,
+  );
+
+  assertEquals(credits[0].crewRole, null);
+  assertEquals(crewTotal, 0);
+});
+
+Deno.test('appearing as oneself on a talk show or a ceremony is not a cast credit', () => {
+  const { credits, castTotal } = personCredits(
+    person({
+      cast: [
+        // Late-night television: Talk genre.
+        { ...credit(10, { media_type: 'tv', name: 'Late Show', character: 'Self' }), title: undefined, genre_ids: [10767] },
+        // An awards broadcast, which TMDB files with no genre at all.
+        { ...credit(11, { character: 'Himself - Nominee' }), genre_ids: [] },
+        // A documentary about the industry.
+        { ...credit(12, { character: 'Herself (archive footage)' }), genre_ids: [99] },
+        // A real part.
+        credit(13, { character: 'Jack Dawson' }),
+      ],
+    }),
+    GENRES,
+  );
+
+  assertEquals(credits.map((entry) => entry.row.tmdb_id), [13]);
+  assertEquals(castTotal, 1);
+});
+
+Deno.test('a scripted cameo as oneself keeps its credit', () => {
+  // Bill Murray in Zombieland: a comedy, so playing yourself is a performance.
+  const { credits } = personCredits(
+    person({ cast: [{ ...credit(20, { character: 'Bill Murray' }), genre_ids: [35] }, { ...credit(21, { character: 'Himself' }), genre_ids: [35, 27] }] }),
+    GENRES,
+  );
+
+  assertEquals(credits.map((entry) => entry.row.tmdb_id).sort(), [20, 21]);
+});
+
+// ---------------------------------------------------------------------------
+// castSearchResults
+// ---------------------------------------------------------------------------
+
+Deno.test('Cast search keeps performers, in TMDB order, with what they are known for', () => {
+  const results = castSearchResults(
+    [
+      {
+        id: 6193,
+        name: 'Leonardo DiCaprio',
+        known_for_department: 'Acting',
+        profile_path: '/leo.jpg',
+        known_for: [
+          { media_type: 'movie', title: 'Inception' },
+          { media_type: 'movie', title: 'Titanic' },
+          { media_type: 'movie', title: 'Inception' },
+          { media_type: 'tv', name: 'Growing Pains' },
+          { media_type: 'movie', title: 'The Revenant' },
+        ],
+      },
+      { id: 999, name: 'Leonardo Somebody', known_for_department: 'Camera' },
+      { id: 42, name: 'Leonardo Nam', known_for_department: 'Acting', profile_path: null },
+    ],
+    20,
+  );
+
+  assertEquals(results, [
+    {
+      id: 6193,
+      name: 'Leonardo DiCaprio',
+      profile_path: '/leo.jpg',
+      known_for: ['Inception', 'Titanic', 'Growing Pains'],
+    },
+    { id: 42, name: 'Leonardo Nam', profile_path: null, known_for: [] },
+  ]);
+});
+
+Deno.test('Cast search drops adult, nameless, malformed and repeated people, and honours the limit', () => {
+  const results = castSearchResults(
+    [
+      { id: 1, name: 'A', known_for_department: 'Acting', adult: true },
+      { id: 2, name: '  ', known_for_department: 'Acting' },
+      { id: -3, name: 'C', known_for_department: 'Acting' },
+      { id: 4, name: 'D', known_for_department: 'Acting' },
+      { id: 4, name: 'D again', known_for_department: 'Acting' },
+      { id: 5, name: 'E', known_for_department: 'Acting' },
+      { id: 6, name: 'F', known_for_department: 'Acting' },
+    ],
+    2,
+  );
+
+  assertEquals(results.map((person) => person.id), [4, 5]);
+});
+
+// ---------------------------------------------------------------------------
+// Genre names
+// ---------------------------------------------------------------------------
+
+Deno.test('genres a response actually carries cost no provider request when they are known', async () => {
+  let charged = 0;
+  const names = await genreNames(() => {
+    charged += 1;
+    return Promise.resolve();
+  }, [28, 10765, 99]);
+
+  assertEquals(charged, 0);
+  assertEquals(names.get(28), 'Action');
+  assertEquals(names.get(10765), 'Sci-Fi & Fantasy');
+  assertEquals(names.get(99), 'Documentary');
+});
+
+Deno.test('an unknown genre id goes to the provider rather than being named wrongly', async () => {
+  // No credential in the test environment, so reaching for the provider is observable as
+  // a refusal. What matters is that the shipped table did not answer for an id it lacks.
+  let answered = false;
+  try {
+    await genreNames(() => Promise.resolve(), [28, 424242]);
+    answered = true;
+  } catch {
+    // Expected: the live lists were asked for.
+  }
+  assertEquals(answered, false);
+});
+
+Deno.test('the shipped genre table holds every name the catalogue has ever been given', () => {
+  // The 36 distinct genre names staging's media_items held on 2026-09-13, across films
+  // and series. A name here that the table lacks would be a genre a search now drops.
+  const seen = [
+    'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family',
+    'Fantasy', 'History', 'Horror', 'Music', 'Mystery', 'Romance', 'Science Fiction',
+    'TV Movie', 'Thriller', 'War', 'Western', 'Action & Adventure', 'Kids', 'News',
+    'Reality', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'War & Politics',
+  ];
+  const names = new Set(knownGenres.values());
+  for (const name of seen) assert(names.has(name), `missing ${name}`);
+  assertEquals(knownGenres.size, 27);
 });
 
 Deno.test('a person with no credits at all is a person, not a failure', () => {

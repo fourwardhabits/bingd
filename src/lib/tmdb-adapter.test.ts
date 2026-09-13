@@ -1,5 +1,5 @@
 import { ANIME_GENRE } from './media-metadata';
-import { searchProvider, type AdapterSearchResult } from './tmdb-adapter';
+import { searchCast, searchProvider, type AdapterSearchResult } from './tmdb-adapter';
 
 /**
  * The provider search boundary, and the one thing it is allowed to change about a row.
@@ -131,5 +131,40 @@ describe('searchProvider normalises the genres it hands back', () => {
 
     expect(await searchProvider('zzzz')).toEqual([]);
     expect(mockIn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Cast search's boundary: TMDB's snake_case person into the shape the Cast row draws,
+ * through the `search-people` action, with nothing read or written on the way.
+ */
+describe('searchCast', () => {
+  it('asks the adapter for performers and hands back the row shape', async () => {
+    mockInvoke.mockResolvedValue({
+      data: {
+        results: [
+          { id: 6193, name: 'Leonardo DiCaprio', profile_path: '/leo.jpg', known_for: ['Inception'] },
+          { id: 42, name: 'Leonardo Nam', profile_path: null },
+        ],
+      },
+      error: null,
+    });
+
+    const people = await searchCast('leonardo');
+
+    expect(mockInvoke).toHaveBeenCalledWith('tmdb-adapter', {
+      body: { action: 'search-people', query: 'leonardo', limit: 20 },
+    });
+    expect(people).toEqual([
+      { id: 6193, name: 'Leonardo DiCaprio', profilePath: '/leo.jpg', knownFor: ['Inception'] },
+      { id: 42, name: 'Leonardo Nam', profilePath: null, knownFor: [] },
+    ]);
+    expect(mockIn).not.toHaveBeenCalled();
+  });
+
+  it('treats a reply with no results as nobody', async () => {
+    mockInvoke.mockResolvedValue({ data: {}, error: null });
+
+    expect(await searchCast('zzzz')).toEqual([]);
   });
 });

@@ -6,6 +6,14 @@ import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 import { AdapterError, searchProvider } from '@/lib/tmdb-adapter';
 
+import {
+  clearProviderCooldown,
+  noteProviderRateLimited,
+  PROVIDER_CACHE_MS,
+  providerCooldownUntil,
+  providerQueryOf,
+} from './provider-budget';
+
 export type SearchResult = {
   id: string;
   kind: 'movie' | 'series' | 'season';
@@ -37,17 +45,21 @@ const DEBOUNCE_MS = 180;
  * `providerEnabled`), this debounce is the main thing standing between exploratory
  * typing and the hourly ceiling, and independent review was right that at 500ms a
  * pause between words costs a request each: "spider" then "spiderman" was two. The
- * budget, stated rather than assumed — `tmdb.max_requests_per_hour` is 120, a settled
- * query costs one outbound attempt, and two more on an isolate cold enough to have
- * lost its genre map. So a session spending the whole allowance is one making a
- * distinct settled search roughly every thirty seconds for an hour without repeating
- * one. That is a real ceiling rather than a comfortable one, which is why hitting it
- * is now *visible* — see `providerFailed` and what the Log screen does with it.
+ * budget, stated rather than assumed — `tmdb.max_requests_per_hour` is 120 and a settled
+ * query costs one outbound attempt. So a session spending the whole allowance is one
+ * making a distinct settled search roughly every thirty seconds for an hour without
+ * repeating one. That is a real ceiling rather than a comfortable one, which is why
+ * hitting it is *visible* — see `providerFailed` and what the Log screen does with it.
+ *
+ * **"One attempt" was not true until 2026-09-13.** Measured on staging, every search cost
+ * three: the adapter fetched both genre lists on almost every invocation, because almost
+ * every invocation met an isolate that had never fetched them. The allowance was forty
+ * searches, which is the power-logger's report. The adapter now ships the genre table.
  *
  * Tuning the allowance itself is an `app_config` row, not a deploy, and it is a
  * founder call: the quota it protects is shared by every account.
  */
-const PROVIDER_DEBOUNCE_MS = 800;
+export const PROVIDER_DEBOUNCE_MS = 800;
 
 /** Below this every query matches half the catalogue and none of it is useful. */
 const MIN_QUERY_LENGTH = 2;
@@ -93,7 +105,20 @@ export function useDebounced<T>(value: T, delay = DEBOUNCE_MS): T {
  * also why the merge below can dedupe on `id`: a title that exists in both really is one
  * row, because the adapter upserted onto it.
  */
-export function useTitleSearch(input: string) {
+export function useTitleSearch(
+  input: string,
+  {
+    /**
+     * Whether the provider pass may run at all.
+     *
+     * False while Search is narrowed to Users or Cast, where no title row is drawn: the
+     * local pass is a table read and costs nothing worth saving, but a provider pass there
+     * spent a TMDB request against the reader's hourly ceiling on every name they typed,
+     * for a list nobody could see (2026-09-13).
+     */
+    wide = true,
+  }: { wide?: boolean } = {},
+) {
   const query = useDebounced(input.trim());
   const enabled = query.length >= MIN_QUERY_LENGTH;
 
@@ -160,7 +185,11 @@ export function useTitleSearch(input: string) {
     },
   });
 
-  const providerQuery = useDebounced(input.trim(), PROVIDER_DEBOUNCE_MS);
+  // Normalised for the provider alone: case and repeated spaces change nothing TMDB
+  // answers, and used to change the cache key and so the charge. The local pass keeps the
+  // query as typed, because `search_titles` ranks an exact match.
+  const providerQuery = providerQueryOf(useDebounced(input.trim(), PROVIDER_DEBOUNCE_MS));
+  const cooldownUntil = providerCooldownUntil();
 
   /**
    * Two conditions. Both are about *when* to ask, and neither is about the local answer.
@@ -185,24 +214,44 @@ export function useTitleSearch(input: string) {
    * putting rows on screen in one round trip — and stops deciding whether the wider
    * search happens.
    *
-   * What bounds the cost is not this gate and never was: the 500ms debounce, the
-   * half-hour cache on the query string, and `tmdb.max_requests_per_hour` at 120 per
+   * What bounds the cost is not this gate and never was: the 800ms debounce, the
+   * half-hour cache on the normalised query, and `tmdb.max_requests_per_hour` at 120 per
    * account, against which one settled query costs one request.
+   *
+   * **Two more, both 2026-09-13.** `wide` (see above), and the cooldown: once the server
+   * has refused this hour, asking again before the hour turns cannot succeed, so the
+   * provider waits for it and the screen says when that is.
    */
   const providerEnabled =
-    providerQuery === query && providerQuery.length >= MIN_QUERY_LENGTH;
+    wide &&
+    cooldownUntil === null &&
+    providerQuery === providerQueryOf(query) &&
+    providerQuery.length >= MIN_QUERY_LENGTH;
 
   const provider = useQuery({
     queryKey: queryKeys.providerSearch(providerQuery),
     enabled: providerEnabled,
     // Longer than the local pass. This one wrote rows to get its answer, and asking
     // again inside half an hour would rewrite the same rows to be told the same thing.
-    staleTime: 30 * 60_000,
+    staleTime: PROVIDER_CACHE_MS,
     // A provider failure is not worth three attempts: the local results are already on
     // screen, and the ceiling in api.md §9 counts every try.
     retry: false,
-    queryFn: () => searchProvider(providerQuery, PROVIDER_RESULTS),
+    queryFn: async () => {
+      try {
+        return await searchProvider(providerQuery, PROVIDER_RESULTS);
+      } catch (cause) {
+        if (cause instanceof AdapterError && cause.isRateLimit) noteProviderRateLimited();
+        throw cause;
+      }
+    },
   });
+
+  /** The server refused this hour, whether this query was the one refused or not. */
+  const rateLimited =
+    wide &&
+    (cooldownUntil !== null ||
+      (provider.error instanceof AdapterError && provider.error.isRateLimit));
 
   const merged = useMemo(() => {
     const remote = provider.data ?? [];
@@ -275,17 +324,24 @@ export function useTitleSearch(input: string) {
      */
     retry: () => {
       void result.refetch();
-      if (providerEnabled) void provider.refetch();
+      // A person pressing Try again is allowed to ask even inside the cooldown — see
+      // `clearProviderCooldown` for the case only they can know about.
+      if (!wide || providerQuery.length < MIN_QUERY_LENGTH) return;
+      clearProviderCooldown();
+      void provider.refetch();
     },
     /** The provider pass is supplementary, so it reports separately: local results are
      *  already on screen and must not be replaced by its spinner or its failure. */
     providerSearching: provider.isFetching,
-    providerRateLimited: provider.error instanceof AdapterError && provider.error.isRateLimit,
+    providerRateLimited: rateLimited,
+    /** When wider search comes back, while it is rate limited; otherwise null. The next
+     *  top of the hour, which is when the server's per-account window resets. */
+    providerAvailableAt: rateLimited ? cooldownUntil : null,
     /** Any provider failure, rate limit included. An empty screen means two different
      *  things — the catalogue does not have it, or the lookup broke — and only this
      *  tells them apart. Without it a missing TMDB key looks exactly like a title
      *  that does not exist. */
-    providerFailed: Boolean(provider.error),
+    providerFailed: (wide && Boolean(provider.error)) || rateLimited,
     /** True once the provider has been asked and had nothing to add, which is the only
      *  state in which "nothing matches" is the whole truth. A failed request is not an
      *  answer: it used to set this, so an adapter that was down reported the catalogue

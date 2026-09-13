@@ -1,6 +1,7 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
+import { clearProviderCooldown } from '@/features/search/provider-budget';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -102,6 +103,7 @@ jest.mock('expo-router', () => ({
 // here. Without this it failed by accident in every test, which is not the same as
 // failing deliberately in one.
 const mockSearchProvider = jest.fn();
+const mockSearchCast = jest.fn();
 
 jest.mock('@/lib/tmdb-adapter', () => {
   class MockAdapterError extends Error {
@@ -121,6 +123,7 @@ jest.mock('@/lib/tmdb-adapter', () => {
     // stale (2026-08-30). Stubbed to "nothing was written" so the screen tests stay about
     // the screen; the freshness rule itself is asserted in `use-enrichment.test.ts`.
     enrichTitle: () => Promise.resolve({ enriched: false }),
+    searchCast: (...args: unknown[]) => mockSearchCast(...args),
   };
 });
 
@@ -153,8 +156,13 @@ const film = {
 
 beforeEach(() => {
   issued = 0;
+  // The hourly cooldown is module state shared by both provider searches, so a rate-limit
+  // test must not leave the next test's wider search switched off.
+  clearProviderCooldown();
   mockSearchProvider.mockReset();
   mockSearchProvider.mockResolvedValue([]);
+  mockSearchCast.mockReset();
+  mockSearchCast.mockResolvedValue([]);
   mockRpc.mockReset();
   mockPush.mockReset();
   mockPrefs.clear();
@@ -486,7 +494,9 @@ describe('when the wider search cannot answer', () => {
 
     await waitFor(() =>
       expect(
-        view.getByText('Too many searches to look wider just now. These are from your catalogue only.'),
+        view.getByText(
+          /^Too many searches to look wider just now\. These are from your catalogue only\. Wider search is back at .+\.$/,
+        ),
       ).toBeTruthy(),
     );
   });
@@ -522,8 +532,8 @@ describe('when the wider search cannot answer', () => {
  * People in Search (founder addendum 2026-08-16 §2, unified by the external-beta
  * polish).
  *
- * The rules being asserted: filters are All | Movies | TV | People over **one
- * continuous list** — no People section heading, no separator; under All titles stay
+ * The rules being asserted: filters are All | Movies | TV | Cast | Users over **one
+ * continuous list** — no Users section heading, no separator; under All titles stay
  * dominant, person rows appear above them only for meaningful matches; a user row is
  * visually distinct from a title row (the row says its kind, not a heading); tap opens
  * the authorized profile.
@@ -561,20 +571,22 @@ describe('finding people', () => {
   };
 
   /**
-   * **People is a chip, not a Users chip.**
+   * **Cast and Users, in that order, and no People** (founder, 2026-09-13).
    *
-   * "Users" stays gone, because the founder's word for accounts is People everywhere
-   * the app speaks of them. The chip narrows the one list to member rows alone.
+   * With performers searchable, "People" would name two different things. Cast is
+   * people credited on films and shows; Users is people with a Bingd account.
    */
-  it('offers the three title filters and People, and no Users tab', async () => {
+  it('offers All, Movies, TV, Cast and Users, in that order, and no People chip', async () => {
     withPeople([]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    for (const label of ['All', 'Movies', 'TV', 'People']) {
-      expect(view.getByText(label)).toBeTruthy();
-    }
-    expect(view.queryByText('Users')).toBeNull();
+    const labels = ['All', 'Movies', 'TV', 'Cast', 'Users'];
+    const chips = labels.map((label) => view.getByText(label));
+    // Tree order is render order, which is the order the row draws them in.
+    const all = view.getAllByText(/^(All|Movies|TV|Cast|Users)$/);
+    expect(all).toEqual(chips);
+    expect(view.queryByText('People')).toBeNull();
   });
 
   it('interleaves people above the titles in one list, with no section heading', async () => {
@@ -753,25 +765,25 @@ describe('finding people', () => {
   });
 
   /**
-   * **The People chip lifts the gate and hides the titles.**
+   * **The Users chip lifts the gate and hides the titles.**
    *
-   * Choosing People is the statement of intent `meaningfulMatch` exists to infer from
+   * Choosing Users is the statement of intent `meaningfulMatch` exists to infer from
    * a plain query, so the middle-of-the-handle match the gate keeps out of All is shown
    * here — and the title list is simply absent rather than "filtered to nothing".
    */
-  it('People shows every name match and no titles', async () => {
+  it('Users shows every name match and no titles', async () => {
     withPeople([deanna]);
     const view = await search('ann');
     // Under All this match is gated out (asserted above) and the titles show.
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    await fireEvent.press(view.getByText('People'));
+    await fireEvent.press(view.getByText('Users'));
 
     await waitFor(() => expect(view.getByLabelText('Deanna Troi, @deanna')).toBeTruthy());
     expect(view.queryByLabelText(FILM_ROW)).toBeNull();
   });
 
-  it('People shows everybody at once, with no See all', async () => {
+  it('Users shows everybody at once, with no See all', async () => {
     const many = Array.from({ length: 5 }, (_, index) => ({
       id: `user-${index}`,
       username: `anna${index}`,
@@ -783,7 +795,7 @@ describe('finding people', () => {
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText('Anna 0, @anna0')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('People'));
+    await fireEvent.press(view.getByText('Users'));
 
     await waitFor(() => expect(view.getByLabelText('Anna 4, @anna4')).toBeTruthy());
     expect(view.queryByText(/^See all/)).toBeNull();
@@ -838,17 +850,145 @@ describe('finding people', () => {
     expect(hasSearchField(tree)).toBe(true);
   });
 
-  it('People says who it could not find, in its own words', async () => {
+  it('Users says who it could not find, in its own words', async () => {
     withPeople([]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    await fireEvent.press(view.getByText('People'));
+    await fireEvent.press(view.getByText('Users'));
 
     await waitFor(() => expect(view.getByText('Nobody by that name')).toBeTruthy());
     // Not the title empty state: a person search that found nobody is not a
     // catalogue miss.
     expect(view.queryByText('Nothing matches that')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **Cast search** (founder, 2026-09-13): search an actor, open them, browse what they
+ * have been in.
+ *
+ * The rules: Cast is its own list of performers from TMDB; a row carries a portrait, a
+ * name and what they are known for; opening one goes to the person page by TMDB id; and
+ * nothing is spent on it unless the Cast chip is chosen — nor on a title search that no
+ * row under Cast or Users could draw.
+ */
+describe('Cast search', () => {
+  const settle = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    });
+  };
+
+  const leo = {
+    id: 6193,
+    name: 'Leonardo DiCaprio',
+    profilePath: '/leo.jpg',
+    knownFor: ['Inception', 'Titanic', 'The Revenant'],
+  };
+
+  const chooseCast = async (term: string) => {
+    const view = await search(term);
+    await waitFor(() => expect(view.getByText('Cast')).toBeTruthy());
+    await fireEvent.press(view.getByText('Cast'));
+    return view;
+  };
+
+  it('lists performers with what they are known for, and opens their filmography', async () => {
+    mockSearchCast.mockResolvedValue([leo]);
+    const view = await chooseCast('leonardo dicaprio');
+    await settle();
+
+    const row = await waitFor(() =>
+      view.getByLabelText('Leonardo DiCaprio, known for Inception, Titanic, The Revenant'),
+    );
+    expect(view.getByText('Inception · Titanic · The Revenant')).toBeTruthy();
+    // Performers only: the title rows the same query found locally are not in this list.
+    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
+
+    await fireEvent.press(row);
+    expect(mockPush).toHaveBeenCalledWith('/person/6193');
+  });
+
+  it('sends one normalised query, however it was capitalised or spaced', async () => {
+    const view = await chooseCast('Leonardo  DiCaprio ');
+    await settle();
+
+    await waitFor(() => expect(mockSearchCast).toHaveBeenCalled());
+    expect(mockSearchCast.mock.calls.map(([query]) => query)).toEqual(['leonardo dicaprio']);
+    expect(view.getByText('Nobody in the cast by that name')).toBeTruthy();
+  });
+
+  it('spends nothing on Cast unless the Cast chip is chosen', async () => {
+    const view = await search('leonardo');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    await settle();
+
+    expect(mockSearchCast).not.toHaveBeenCalled();
+  });
+
+  it('spends no title provider request while narrowed to Cast or Users', async () => {
+    const view = await search('le');
+    await waitFor(() => expect(view.getByText('Users')).toBeTruthy());
+    await fireEvent.press(view.getByText('Users'));
+    await fireEvent.changeText(view.getByLabelText('Search'), 'leonardo');
+    await settle();
+
+    await fireEvent.press(view.getByText('Cast'));
+    await fireEvent.changeText(view.getByLabelText('Search'), 'kate winslet');
+    await settle();
+
+    const asked = mockSearchProvider.mock.calls.map(([query]) => query);
+    expect(asked).not.toContain('leonardo');
+    expect(asked).not.toContain('kate winslet');
+    // …and Cast, which is chosen, did ask.
+    expect(mockSearchCast).toHaveBeenCalledWith('kate winslet');
+  });
+
+  it('says when Cast search comes back once the hour is spent', async () => {
+    const AdapterError = jest.requireMock('@/lib/tmdb-adapter').AdapterError;
+    mockSearchCast.mockRejectedValue(new AdapterError('BG429', 'too many'));
+    const view = await chooseCast('leonardo');
+    await settle();
+
+    await waitFor(() => expect(view.getByText('Too many searches')).toBeTruthy());
+    expect(
+      view.getByText(/^Cast search is back at .+\. Titles already in bingd\. still show under All\.$/),
+    ).toBeTruthy();
+  });
+
+  it('holds every provider search once the server has refused this hour', async () => {
+    // One budget: a refusal on Cast is a refusal for the title search too, so neither
+    // asks again before the hour turns — each such request is guaranteed to be refused.
+    const AdapterError = jest.requireMock('@/lib/tmdb-adapter').AdapterError;
+    mockSearchCast.mockRejectedValue(new AdapterError('BG429', 'too many'));
+    const view = await chooseCast('leonardo');
+    await settle();
+    await waitFor(() => expect(view.getByText('Too many searches')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('All'));
+    await fireEvent.changeText(view.getByLabelText('Search'), 'inception');
+    await settle();
+
+    expect(mockSearchProvider.mock.calls.map(([query]) => query)).not.toContain('inception');
+    // Local titles still show, and the list says why it is only those.
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    expect(view.getByText(/^Too many searches to look wider just now\./)).toBeTruthy();
+  });
+
+  it('offers a retry when the Cast search fails for any other reason', async () => {
+    const AdapterError = jest.requireMock('@/lib/tmdb-adapter').AdapterError;
+    mockSearchCast.mockRejectedValueOnce(new AdapterError('BG502', 'upstream'));
+    const view = await chooseCast('leonardo');
+    await settle();
+
+    await waitFor(() => expect(view.getByText('Could not search cast')).toBeTruthy());
+    mockSearchCast.mockResolvedValue([leo]);
+    await fireEvent.press(view.getByText('Try again'));
+
+    await waitFor(() => expect(view.getByText('Leonardo DiCaprio')).toBeTruthy());
   });
 });
 

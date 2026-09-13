@@ -17,6 +17,7 @@ import type {
   TmdbMovieDetail,
   TmdbPersonCreditEntry,
   TmdbPersonDetail,
+  TmdbPersonSearchResult,
   TmdbReleaseDates,
   TmdbSearchResult,
   TmdbSeasonDetail,
@@ -538,12 +539,21 @@ export type PersonCreditEntry = {
   role: string | null;
   /** Which list it came from, so the client can say "Acting" versus "Directing". */
   as: 'cast' | 'crew';
+  /**
+   * Every crew job they held on this title, or null for none.
+   *
+   * Present on a cast-won entry too, which is the point of it: one title is one entry
+   * (an older client keys its rows on the title), so somebody who directed *and* starred
+   * in a film is a cast entry — and without this the Crew half of their page would
+   * silently omit the film they directed.
+   */
+  crewRole: string | null;
   /** The provider's own relevance signal, and the only ordering this list has. */
   popularity: number;
 };
 
 /**
- * How many credits are kept for one person.
+ * How many credits are kept for one person, per half.
  *
  * A prolific character actor has several hundred, most of them a single episode of
  * something nobody is looking for. Writing all of them through `tmdb_upsert_titles`
@@ -551,12 +561,41 @@ export type PersonCreditEntry = {
  * appear in search, join the refresh queue, and carry a retention obligation — to
  * render a list nobody scrolls to the bottom of.
  *
- * Forty is two screens of "See more" past the twelve the page opens with, and it is
- * enough that the Movies and TV filters both have something in them for anyone whose
- * career spans both. The count TMDB actually had travels alongside as `credit_total`,
- * so the page can say what it is not showing rather than implying this is everything.
+ * **Per half, since Cast search (2026-09-13).** It was forty across cast and crew
+ * together, and the cap was applied after the merge — so an actor with a busy producing
+ * career could have their *acting* list cut short by producer credits, on the page Cast
+ * search now sends people to so they can see what that actor has been in. Sixty acting
+ * credits is five screens of "See more", past any filmography a reader works through by
+ * hand; twenty crew-only credits keep a director's page useful without letting that
+ * half crowd out the other. The counts TMDB actually had travel alongside, so the page
+ * can say what it is not showing.
  */
-const MAX_CREDITS = 40;
+const MAX_CAST_CREDITS = 60;
+const MAX_CREW_CREDITS = 20;
+
+/** How many distinct crew jobs one title's `crewRole` names before it stops. */
+const MAX_CREW_JOBS = 3;
+
+/**
+ * An appearance as oneself on a talk show, a news programme, an awards broadcast or a
+ * documentary — which TMDB files as a cast credit, and which is not what a list
+ * labelled Cast promises.
+ *
+ * DiCaprio's combined cast credits are a long tail of `Self` on late-night television,
+ * and at TV popularity those rank above most of his films. Two conditions, both
+ * required: the character must be the person themselves, **and** the title must be of a
+ * kind where that means a non-performance — Documentary, News, Reality, Talk, or no
+ * genre at all, which is how TMDB files a ceremony. A scripted cameo as yourself (Bill
+ * Murray in *Zombieland*) keeps its credit, because a comedy is a performance.
+ */
+const SELF_APPEARANCE = /^\s*(self|himself|herself|themselves|themself)\b/i;
+const NON_PERFORMANCE_GENRES = new Set([99, 10763, 10764, 10767]);
+
+function isSelfAppearance(entry: TmdbPersonCreditEntry): boolean {
+  if (!entry.character || !SELF_APPEARANCE.test(entry.character)) return false;
+  const genres = entry.genre_ids ?? [];
+  return genres.length === 0 || genres.some((id) => NON_PERFORMANCE_GENRES.has(id));
+}
 
 /**
  * A person's combined credits into catalogue rows, most relevant first.
@@ -581,26 +620,44 @@ const MAX_CREDITS = 40;
  * WHAT IS DROPPED. Anything `fromSearchResult` refuses — a credit with no title, or
  * with a media_type that is neither movie nor tv. TMDB does send `media_type` on
  * combined credits, and unlike /recommendations there is no sensible kind to assume
- * for a list that deliberately mixes both, so a missing one drops the row.
+ * for a list that deliberately mixes both, so a missing one drops the row. And an
+ * appearance as oneself on a talk show or a ceremony — see `isSelfAppearance`.
+ *
+ * CAPS. Applied to each half separately, after the merge, keeping the most popular of
+ * each — see `MAX_CAST_CREDITS`. What survives is returned in one list in popularity
+ * order, one entry per title, which is the shape every client already reads.
  */
 export function personCredits(
   detail: TmdbPersonDetail,
   genreNames: Map<number, string>,
-): { credits: PersonCreditEntry[]; total: number } {
+): { credits: PersonCreditEntry[]; total: number; castTotal: number; crewTotal: number } {
   const cast = detail.combined_credits?.cast ?? [];
   const crew = detail.combined_credits?.crew ?? [];
 
   const best = new Map<string, PersonCreditEntry>();
+  // Every distinct crew job per title, whichever half wins the title.
+  const jobs = new Map<string, string[]>();
 
   const consider = (entry: TmdbPersonCreditEntry, as: 'cast' | 'crew') => {
+    if (as === 'cast' && isSelfAppearance(entry)) return;
+
     const row = fromSearchResult(entry, genreNames);
     if (!row) return;
 
     const key = `${row.kind}:${row.tmdb_id}`;
+    const role = textOrNull(as === 'cast' ? entry.character : (entry.job ?? entry.department));
+
+    if (as === 'crew' && role) {
+      const held = jobs.get(key) ?? [];
+      if (!held.includes(role) && held.length < MAX_CREW_JOBS) held.push(role);
+      jobs.set(key, held);
+    }
+
     const candidate: PersonCreditEntry = {
       row,
-      role: textOrNull(as === 'cast' ? entry.character : (entry.job ?? entry.department)),
+      role,
       as,
+      crewRole: null,
       popularity: entry.popularity ?? 0,
     };
 
@@ -620,9 +677,93 @@ export function personCredits(
   for (const entry of cast) consider(entry, 'cast');
   for (const entry of crew) consider(entry, 'crew');
 
-  const ordered = [...best.values()].sort((a, b) => b.popularity - a.popularity);
+  const ordered = [...best.entries()]
+    .map(([key, entry]) => {
+      const held = jobs.get(key);
+      const crewRole = held?.length ? held.join(', ') : null;
+      // A crew-won title names every job, not whichever one TMDB listed as most popular.
+      return entry.as === 'crew'
+        ? { ...entry, role: crewRole ?? entry.role, crewRole: crewRole ?? entry.role }
+        : { ...entry, crewRole };
+    })
+    .sort((a, b) => b.popularity - a.popularity);
 
-  return { credits: ordered.slice(0, MAX_CREDITS), total: ordered.length };
+  const castOnly = ordered.filter((entry) => entry.as === 'cast');
+  const crewOnly = ordered.filter((entry) => entry.as === 'crew');
+  const kept = new Set([
+    ...castOnly.slice(0, MAX_CAST_CREDITS),
+    ...crewOnly.slice(0, MAX_CREW_CREDITS),
+  ]);
+
+  return {
+    credits: ordered.filter((entry) => kept.has(entry)),
+    total: ordered.length,
+    castTotal: castOnly.length,
+    // Titles with any crew job, including the ones an acting credit won — the same set
+    // the Crew half of the page draws from.
+    crewTotal: ordered.filter((entry) => entry.crewRole !== null).length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cast search
+// ---------------------------------------------------------------------------
+
+/** One performer, as a Cast search result row draws them. */
+export type CastSearchResult = {
+  /** TMDB's person id — what `/person/{id}` routes on and `person_cache` is keyed by. */
+  id: number;
+  name: string;
+  profile_path: string | null;
+  /** Up to three titles TMDB says they are known for, to tell two namesakes apart. */
+  known_for: string[];
+};
+
+const MAX_KNOWN_FOR = 3;
+
+/**
+ * /search/person into Cast rows: performers only, in TMDB's own order.
+ *
+ * **Performers only**, by `known_for_department === 'Acting'`. The control is labelled
+ * Cast, so a cinematographer who shares a name with an actor is not an answer to it —
+ * and TMDB's department is the provider's own statement of what somebody is known for,
+ * which is the question a result row has to answer. A director who acts now and again
+ * is still reachable from any title they appear in, through the cast strip.
+ *
+ * **Adult results are dropped** even though the request already asks TMDB not to send
+ * them, because the flag on the row is the thing that is actually true.
+ *
+ * Nothing here is written anywhere. A search result is a pointer to a person page, and
+ * the page's own `person` action is what caches a filmography.
+ */
+export function castSearchResults(
+  results: readonly TmdbPersonSearchResult[],
+  limit: number,
+): CastSearchResult[] {
+  const out: CastSearchResult[] = [];
+  const seen = new Set<number>();
+
+  for (const result of results) {
+    if (!Number.isSafeInteger(result.id) || result.id <= 0) continue;
+    if (result.adult === true) continue;
+    if (result.known_for_department !== 'Acting') continue;
+    const name = textOrNull(result.name);
+    if (!name) continue;
+    if (seen.has(result.id)) continue;
+    seen.add(result.id);
+
+    const knownFor: string[] = [];
+    for (const title of result.known_for ?? []) {
+      const label = textOrNull(title.title ?? title.name);
+      if (label && !knownFor.includes(label)) knownFor.push(label);
+      if (knownFor.length >= MAX_KNOWN_FOR) break;
+    }
+
+    out.push({ id: result.id, name, profile_path: result.profile_path ?? null, known_for: knownFor });
+    if (out.length >= limit) break;
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------

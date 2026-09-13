@@ -1,4 +1,4 @@
-import { queryKeys } from './query';
+import { createQueryClient, PROVIDER_SEARCH_CACHE_MS, queryKeys } from './query';
 
 /**
  * Cache keys, which are only interesting when they collide.
@@ -36,5 +36,26 @@ describe('keys that are shared on purpose', () => {
     // The catalogue is the same for everyone, so a sign-out need not discard it.
     expect(queryKeys.search('heat')).toEqual(queryKeys.search('heat'));
     expect(queryKeys.seasons('series-1')).toEqual(queryKeys.seasons('series-1'));
+  });
+});
+
+/**
+ * A provider search answer is held for half an hour after the reader types past it, or
+ * backspacing to it spends a second TMDB request on an answer the device already had.
+ */
+describe('provider search cache lifetime', () => {
+  it('keeps title and Cast provider answers in memory for half an hour', () => {
+    const client = createQueryClient();
+
+    for (const key of [queryKeys.providerSearch('dune'), queryKeys.castSearch('leonardo')]) {
+      expect(client.getQueryDefaults(key).gcTime).toBe(PROVIDER_SEARCH_CACHE_MS);
+    }
+    expect(PROVIDER_SEARCH_CACHE_MS).toBe(30 * 60_000);
+    // The cheap local pass keeps the ordinary lifetime.
+    expect(client.getQueryDefaults(queryKeys.search('dune')).gcTime).toBeUndefined();
+  });
+
+  it('keeps Cast answers apart from title answers for the same words', () => {
+    expect(queryKeys.castSearch('dune')).not.toEqual(queryKeys.providerSearch('dune'));
   });
 });
