@@ -135,6 +135,25 @@ export type MyStanding = {
  * and unlike the Reviews tab, nothing here *looks* like the reader's own write failing to
  * persist, which is what made the missing invalidation there a bug rather than a latency.
  */
+/**
+ * Keeps the board that is on screen while the next metric or timeframe loads (founder physical
+ * QA, 2026-09-14).
+ *
+ * Without it a metric switch is a new query key with no data, `isPending` goes true, the
+ * rows are swapped for a skeleton and swapped back a moment later — the board visibly jumps,
+ * and a reader scrolled down a long board is thrown back up when the content collapses. With
+ * it the previous rows stay until the answer arrives and are replaced in place; a metric
+ * already visited this minute is served from cache and never waits at all.
+ *
+ * **Only for the same reader.** The previous result is kept when the previous query belonged
+ * to this viewer and discarded otherwise, so a second account signed in on one device can
+ * never be shown the first account's board — Match is on those rows.
+ */
+const keepSameViewersBoard =
+  (viewerId: string) =>
+  <T,>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) =>
+    previousQuery?.queryKey[1] === viewerId ? previous : undefined;
+
 export function useLeaderboard(
   viewerId: string,
   metric: LeaderboardMetric,
@@ -145,6 +164,7 @@ export function useLeaderboard(
     queryKey: ['leaderboard', viewerId, metric, timeframe],
     enabled: enabled && Boolean(viewerId),
     staleTime: 60_000,
+    placeholderData: keepSameViewersBoard(viewerId),
     queryFn: async (): Promise<LeaderboardEntry[]> => {
       const { data, error } = await supabase.rpc('leaderboard', {
         p_metric: metric,
@@ -208,6 +228,10 @@ export function useMyStanding(
     queryKey: ['leaderboard-standing', viewerId, metric, timeframe],
     enabled: enabled && Boolean(viewerId),
     staleTime: 60_000,
+    // Deliberately **no** placeholder here (independent review 82). The board and the
+    // standing resolve independently, so a kept standing could be drawn under a board that
+    // has already switched metric — the wrong count with the right unit. The pinned row is
+    // below the list, so its briefly absent is a row-content difference, not a jump.
     queryFn: async (): Promise<MyStanding> => {
       const { data, error } = await supabase.rpc('my_leaderboard_standing', {
         p_metric: metric,

@@ -1215,9 +1215,8 @@ export default function RecommendationsScreen() {
  * Two personalised walls and two community ones. `Medium` here is `'movies' | 'tv'` and
  * Collection's is `'movies' | 'tv_seasons'`, because the units genuinely differ: TMDB
  * answers "similar" about a *show* and never about one of its seasons, so the
- * personalised wall holds series. That is also why the label reads "TV shows" and
- * Collection's reads "TV" — one accurate word each, rather than one shared table forcing
- * both to say the same slightly-wrong thing.
+ * personalised wall holds series. (Its label read "TV shows" for that reason until 2026-09-14,
+ * when all four entries were renamed to say which list they are; see `FOR_YOU_MODES`.)
  *
  * **The two television entries hold different units, and only one of them says so.**
  * Nothing in this product has ever rated a whole series — `rankable_category` maps
@@ -1234,9 +1233,22 @@ export default function RecommendationsScreen() {
  */
 export type ForYouMode = Medium | 'topMovies' | 'topTv';
 
+/**
+ * **Recommended Movies · Recommended TV · Top Rated Movies · Top Rated TV** (founder
+ * physical QA, 2026-09-14).
+ *
+ * The personalised pair read `Movies` and `TV shows`, which stopped being unambiguous once
+ * `Top Rated Movies` sat beneath `Movies`: both are movies, and only one label said what kind
+ * of list it was. Every entry now names its list, and the words that differ — Recommended,
+ * Top Rated — are the ones a reader is choosing between. The tab and screen are still For
+ * You. The ids, and everything keyed on them, are unchanged: this is words, not logic.
+ *
+ * A dropdown rather than a horizontal row, so nothing needs to scroll; `MediumSelector` lets
+ * the trigger's label wrap rather than push its chevron off a narrow screen.
+ */
 const FOR_YOU_MODES: readonly MediumSelectorOption<ForYouMode>[] = [
-  { id: 'movies', label: 'Movies' },
-  { id: 'tv', label: 'TV shows' },
+  { id: 'movies', label: 'Recommended Movies' },
+  { id: 'tv', label: 'Recommended TV' },
   { id: 'topMovies', label: 'Top Rated Movies' },
   { id: 'topTv', label: 'Top Rated TV' },
 ];

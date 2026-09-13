@@ -4,9 +4,11 @@ import { join } from 'node:path';
 /**
  * **A comparison is between two titles, never between two numbers** (founder, 2026-09-13).
  *
- * The same pass that put the bingd. community score on a board of its own — Top Titles —
- * asked for a regression check that the number does not travel into the ranking flow on the
- * strength of now being everywhere else. The mechanic's value is an unanchored preference:
+ * The pass that put the bingd. community score on a Leaderboard board of its own — Top
+ * Titles, removed again on 2026-09-14 so the Leaderboard is people competing and nothing
+ * else — asked for a regression check that the number does not travel into the ranking
+ * flow. The rule outlived the board: the score is still on the title page and on For You's
+ * Top Rated walls, and the mechanic's value is still an unanchored preference:
  * "which of these two did you like more" answered with a 9.1 beside one of them is
  * answered by the 9.1. `RankingSheet.tsx` already states the rule for the reader's own
  * placements ("the opponent's position is never shown"); this makes it a property the suite
@@ -41,9 +43,6 @@ const FORBIDDEN = [
   /use-top-rated/,
   /useTopRated/,
   /['"]top_rated_titles['"]/,
-  /use-top-titles/,
-  /useTopTitles/,
-  /TopTitlesView/,
   /ScoresSection/,
   /communityScore/,
 ];

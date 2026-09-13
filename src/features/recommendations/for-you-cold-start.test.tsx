@@ -296,7 +296,7 @@ describe('a stale request for People', () => {
     mockParams = { show: 'people' };
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Showing Recommended Movies');
     expect(view.getByLabelText(/^Inception/)).toBeTruthy();
     // Not consumed: this screen has no claim on it, and clearing a parameter it does not
     // act on would swallow a navigation somebody else may still be resolving.
@@ -306,7 +306,7 @@ describe('a stale request for People', () => {
   it('opens on Movies when nobody asked for anything, as it always has', async () => {
     const view = await open();
 
-    expect(showing(view)).toBe('Showing Movies');
+    expect(showing(view)).toBe('Showing Recommended Movies');
     expect(mockSetParams).not.toHaveBeenCalled();
   });
 });

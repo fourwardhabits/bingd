@@ -128,7 +128,12 @@ export function MediumSelector<T extends string = Medium>({
               {labelFor(value, table, labels).toUpperCase()}
             </Text>
           ) : (
-            <Text variant="title1">{labelFor(value, table, labels)}</Text>
+            // `flexShrink` so a long label (For You's `Recommended Movies`, at a large text
+            // size, on a narrow phone) wraps inside the row instead of pushing the chevron
+            // off the screen. A label that fits is laid out exactly as before.
+            <Text variant="title1" style={styles.title}>
+              {labelFor(value, table, labels)}
+            </Text>
           )}
           <Ionicons
             name="chevron-down"
@@ -196,6 +201,7 @@ const styles = StyleSheet.create({
   // already padded, where the title-sized one is measuring from the screen edge.
   buttonSection: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  title: { flexShrink: 1 },
   scrim: {
     flex: 1,
     justifyContent: 'flex-end',
