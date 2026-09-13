@@ -209,7 +209,7 @@ Deno.test('a busy crew career cannot crowd acting credits out of the cap', () =>
   );
 
   assertEquals(credits.filter((entry) => entry.as === 'cast').length, 10);
-  assertEquals(credits.filter((entry) => entry.as === 'crew').length, 20);
+  assertEquals(credits.filter((entry) => entry.as === 'crew').length, 30);
   assertEquals(crewTotal, 100);
 });
 
@@ -255,25 +255,50 @@ Deno.test('an acting credit has no crew role when they held no crew job', () => 
   assertEquals(crewTotal, 0);
 });
 
-Deno.test('appearing as oneself on a talk show or a ceremony is not a cast credit', () => {
+Deno.test('appearing as oneself on a talk show or a ceremony is flagged, not dropped', () => {
+  // Flagged rather than dropped, because the payload reaches clients that predate the
+  // Cast/Crew split and those must keep rendering what they rendered before.
   const { credits, castTotal } = personCredits(
     person({
       cast: [
         // Late-night television: Talk genre.
-        { ...credit(10, { media_type: 'tv', name: 'Late Show', character: 'Self' }), title: undefined, genre_ids: [10767] },
+        { ...credit(10, { media_type: 'tv', name: 'Late Show', character: 'Self', popularity: 99 }), title: undefined, genre_ids: [10767] },
+        // A guest spot TMDB names no character for, on a talk show.
+        { ...credit(12, { media_type: 'tv', name: 'Tonight', popularity: 97 }), title: undefined, character: undefined, genre_ids: [10767] },
         // An awards broadcast, which TMDB files with no genre at all.
-        { ...credit(11, { character: 'Himself - Nominee' }), genre_ids: [] },
-        // A documentary about the industry.
-        { ...credit(12, { character: 'Herself (archive footage)' }), genre_ids: [99] },
+        { ...credit(11, { media_type: 'tv', name: 'The Oscars', character: 'Himself - Nominee', popularity: 98 }), title: undefined, genre_ids: [] },
         // A real part.
-        credit(13, { character: 'Jack Dawson' }),
+        credit(13, { character: 'Jack Dawson', popularity: 1 }),
       ],
     }),
     GENRES,
   );
 
-  assertEquals(credits.map((entry) => entry.row.tmdb_id), [13]);
+  assertEquals(credits.map((entry) => [entry.row.tmdb_id, entry.self]), [[10, true], [11, true], [12, true], [13, false]]);
+  assertEquals(credits.every((entry) => entry.as === 'cast'), true);
+  // The Cast half's count is performances.
   assertEquals(castTotal, 1);
+});
+
+Deno.test('a documentary or concert film as oneself is a performance credit', () => {
+  // Free Solo is what Alex Honnold is in. Only television self-appearances are flagged.
+  const { credits, castTotal } = personCredits(
+    person({ cast: [{ ...credit(30, { character: 'Self' }), genre_ids: [99] }, { ...credit(31, { character: 'Himself' }), genre_ids: [99, 10402] }] }),
+    GENRES,
+  );
+
+  assertEquals(credits.map((entry) => entry.self), [false, false]);
+  assertEquals(castTotal, 2);
+});
+
+Deno.test('an unnamed part in a scripted series is still a performance', () => {
+  // No character name is a talk-show pattern only on a talk show.
+  const { credits } = personCredits(
+    person({ cast: [{ ...credit(40, { media_type: 'tv', name: 'ER' }), title: undefined, character: undefined, genre_ids: [18] }] }),
+    GENRES,
+  );
+
+  assertEquals(credits[0].self, false);
 });
 
 Deno.test('a scripted cameo as oneself keeps its credit', () => {
@@ -284,6 +309,72 @@ Deno.test('a scripted cameo as oneself keeps its credit', () => {
   );
 
   assertEquals(credits.map((entry) => entry.row.tmdb_id).sort(), [20, 21]);
+  assertEquals(credits.some((entry) => entry.self), false);
+});
+
+Deno.test('a talk-show tail cannot use the acting slots', () => {
+  const { credits } = personCredits(
+    person({
+      cast: [
+        ...Array.from({ length: 50 }, (_, index) => ({
+          ...credit(500 + index, { media_type: 'tv', name: `Show ${index}`, character: 'Self', popularity: 900 }),
+          title: undefined,
+          genre_ids: [10767],
+        })),
+        ...Array.from({ length: 60 }, (_, index) => credit(1 + index, { character: 'Part', popularity: 1 })),
+      ],
+    }),
+    GENRES,
+  );
+
+  assertEquals(credits.filter((entry) => entry.self).length, 10);
+  assertEquals(credits.filter((entry) => !entry.self).length, 60);
+});
+
+Deno.test('a film they starred in and directed survives in Crew even past the acting cap', () => {
+  const { credits } = personCredits(
+    person({
+      cast: [
+        ...Array.from({ length: 60 }, (_, index) => credit(1 + index, { character: 'Lead', popularity: 100 })),
+        credit(777, { character: 'Walt Kowalski', popularity: 1 }),
+      ],
+      crew: [credit(777, { job: 'Director', popularity: 1 })],
+    }),
+    GENRES,
+  );
+
+  const film = credits.find((entry) => entry.row.tmdb_id === 777);
+  assertEquals(film?.crewRole, 'Director');
+  assertEquals(credits.length, 61);
+});
+
+Deno.test('directing and writing are kept ahead of a long producing tail', () => {
+  const { credits, crewTotal } = personCredits(
+    person({
+      crew: [
+        ...Array.from({ length: 100 }, (_, index) => credit(1000 + index, { job: 'Executive Producer', popularity: 500 })),
+        credit(1, { job: 'Director', popularity: 1 }),
+        credit(2, { job: 'Screenplay', popularity: 1 }),
+      ],
+    }),
+    GENRES,
+  );
+
+  const ids = credits.map((entry) => entry.row.tmdb_id);
+  assert(ids.includes(1));
+  assert(ids.includes(2));
+  assertEquals(credits.length, 30);
+  assertEquals(crewTotal, 102);
+});
+
+Deno.test('an empty crew job falls back to the department', () => {
+  const { credits } = personCredits(
+    person({ crew: [{ ...credit(1), job: '', department: 'Directing' } as never] }),
+    GENRES,
+  );
+
+  assertEquals(credits[0].role, 'Directing');
+  assertEquals(credits[0].crewRole, 'Directing');
 });
 
 // ---------------------------------------------------------------------------

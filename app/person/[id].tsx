@@ -143,11 +143,20 @@ export default function PersonScreen() {
    * crew jobs as `crewRole`, which is what keeps that film on the Crew side.
    */
   const credits = detail?.credits ?? [];
-  const castCredits = credits.filter((credit) => credit.as === 'cast');
+  // Appearances as themselves on talk shows and ceremonies are not parts. They are the Cast
+  // half only for somebody who has nothing else there — a presenter, a reality-TV name —
+  // whose page would otherwise say they had done nothing at all.
+  const performances = credits.filter((credit) => credit.as === 'cast' && !credit.self);
+  const castCredits = performances.length
+    ? performances
+    : credits.filter((credit) => credit.as === 'cast');
   const crewCredits = credits.filter((credit) => credit.crewRole !== null);
   const hasCast = castCredits.length > 0;
   const hasCrew = crewCredits.length > 0;
-  const shownRole: Role = role ?? (hasCast || !hasCrew ? 'cast' : 'crew');
+  // A chosen half is honoured only while it still has something in it: a refresh behind
+  // the reader can empty one, and with the tabs then hidden there would be no way back.
+  const chosen = role === 'cast' ? hasCast : role === 'crew' ? hasCrew : false;
+  const shownRole: Role = chosen && role ? role : hasCast || !hasCrew ? 'cast' : 'crew';
   const roleCredits = shownRole === 'cast' ? castCredits : crewCredits;
 
   const counts = {
@@ -159,10 +168,16 @@ export default function PersonScreen() {
   const visible = filtered.slice(0, shown);
 
   // How many of this half TMDB had. A row cached before the halves were counted only knows
-  // the combined figure, which is honest to show only when there is one half.
-  const roleTotal =
-    (shownRole === 'cast' ? detail?.castTotal : detail?.crewTotal) ??
-    (hasCast && hasCrew ? null : (detail?.creditTotal ?? null));
+  // the combined figure, which is honest to show only when there is one half — and then
+  // only as "credits", because it may count work of the other kind the old cap dropped.
+  const halfTotal = shownRole === 'cast' ? detail?.castTotal : detail?.crewTotal;
+  const roleTotal = halfTotal ?? (hasCast && hasCrew ? null : (detail?.creditTotal ?? null));
+  const totalNoun =
+    halfTotal === null || halfTotal === undefined
+      ? 'credits'
+      : shownRole === 'cast'
+        ? 'acting credits'
+        : 'crew credits';
 
   // Offered only where both halves have something in them. A director with no
   // television is not asked to choose between Movies and TV — a filter with one
@@ -369,14 +384,12 @@ export default function PersonScreen() {
             ) : null}
 
             {/* What is not being shown, said rather than implied. The adapter keeps
-                the most popular sixty acting and twenty crew credits; somebody with three
+                the most popular sixty acting and thirty crew credits; somebody with three
                 hundred should not be presented as somebody with sixty. */}
             {roleTotal !== null && roleTotal > roleCredits.length ? (
               <View style={styles.more}>
                 <Text variant="caption" tone="tertiary">
-                  {`Showing ${roleCredits.length} of ${roleTotal} ${
-                    shownRole === 'cast' ? 'acting' : 'crew'
-                  } credits TMDB lists.`}
+                  {`Showing ${roleCredits.length} of ${roleTotal} ${totalNoun} TMDB lists.`}
                 </Text>
               </View>
             ) : null}

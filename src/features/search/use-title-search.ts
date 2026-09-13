@@ -248,9 +248,11 @@ export function useTitleSearch(
   });
 
   /** The server refused this hour, whether this query was the one refused or not. */
+  // Not while this query's own answer is already held: a cached provider answer is still
+  // shown during the cooldown, and calling that list "your catalogue only" would be false.
   const rateLimited =
     wide &&
-    (cooldownUntil !== null ||
+    ((cooldownUntil !== null && provider.data === undefined) ||
       (provider.error instanceof AdapterError && provider.error.isRateLimit));
 
   const merged = useMemo(() => {
@@ -326,7 +328,11 @@ export function useTitleSearch(
       void result.refetch();
       // A person pressing Try again is allowed to ask even inside the cooldown — see
       // `clearProviderCooldown` for the case only they can know about.
+      // Only for the query on screen. Inside the debounce the provider key still names a
+      // prefix the reader has typed past, and asking about it would be a charged request
+      // for an answer nobody will see.
       if (!wide || providerQuery.length < MIN_QUERY_LENGTH) return;
+      if (providerQuery !== providerQueryOf(query)) return;
       clearProviderCooldown();
       void provider.refetch();
     },

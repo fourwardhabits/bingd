@@ -619,8 +619,9 @@ async function handlePerson(db: Db, personId: number, userId: string) {
       kind: credit.row.kind,
       role: credit.role,
       as: credit.as,
-      // Additive. A client that predates the Cast/Crew split reads none of these three.
+      // Additive. A client that predates the Cast/Crew split reads none of these four.
       crew_role: credit.crewRole,
+      self: credit.self,
     })),
     credit_total: total,
     cast_total: castTotal,

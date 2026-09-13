@@ -548,6 +548,13 @@ export type PersonCreditEntry = {
    * silently omit the film they directed.
    */
   crewRole: string | null;
+  /**
+   * An appearance as themselves on a talk show, a news or reality programme, or a
+   * broadcast ceremony — see `isSelfAppearance`. Still a cast entry, so a client that
+   * predates the flag renders exactly what it rendered before; a current one leaves it
+   * out of the Cast half unless it is all the person has.
+   */
+  self: boolean;
   /** The provider's own relevance signal, and the only ordering this list has. */
   popularity: number;
 };
@@ -564,38 +571,61 @@ export type PersonCreditEntry = {
  * **Per half, since Cast search (2026-09-13).** It was forty across cast and crew
  * together, and the cap was applied after the merge — so an actor with a busy producing
  * career could have their *acting* list cut short by producer credits, on the page Cast
- * search now sends people to so they can see what that actor has been in. Sixty acting
- * credits is five screens of "See more", past any filmography a reader works through by
- * hand; twenty crew-only credits keep a director's page useful without letting that
- * half crowd out the other. The counts TMDB actually had travel alongside, so the page
- * can say what it is not showing.
+ * search now sends people to so they can see what that actor has been in.
+ *
+ * - Sixty acting credits: five screens of "See more", past any filmography a reader
+ *   works through by hand.
+ * - Thirty titles with crew work, counted over *every* title with a crew job — including
+ *   one an acting credit won — and chosen directing and writing first, so a producer's
+ *   long tail cannot push out the films somebody directed.
+ * - Ten self-appearances, on their own, so a talk-show tail cannot use acting slots.
+ *
+ * A title kept by any half is kept. The counts TMDB actually had travel alongside, so the
+ * page can say what it is not showing.
  */
 const MAX_CAST_CREDITS = 60;
-const MAX_CREW_CREDITS = 20;
+const MAX_CREW_CREDITS = 30;
+const MAX_SELF_CREDITS = 10;
 
 /** How many distinct crew jobs one title's `crewRole` names before it stops. */
 const MAX_CREW_JOBS = 3;
 
+/** The crew jobs that are authorship, which a crew half keeps ahead of the rest. */
+const AUTHORSHIP = /\b(director|writer|screenplay|creator|story|novel|author)\b/i;
+
 /**
- * An appearance as oneself on a talk show, a news programme, an awards broadcast or a
- * documentary — which TMDB files as a cast credit, and which is not what a list
- * labelled Cast promises.
+ * An appearance as oneself on a talk show, a news or reality programme, or an awards
+ * broadcast — which TMDB files as a cast credit, and which is not what a list labelled
+ * Cast promises.
  *
  * DiCaprio's combined cast credits are a long tail of `Self` on late-night television,
- * and at TV popularity those rank above most of his films. Two conditions, both
- * required: the character must be the person themselves, **and** the title must be of a
- * kind where that means a non-performance — Documentary, News, Reality, Talk, or no
- * genre at all, which is how TMDB files a ceremony. A scripted cameo as yourself (Bill
- * Murray in *Zombieland*) keeps its credit, because a comedy is a performance.
+ * and at TV popularity those rank above most of his films. **Television only**, and three
+ * conditions, all required: a series; the character is the person themselves, or is not
+ * named at all (TMDB leaves it empty on most talk-show guest spots — measured on staging,
+ * `The Tonight Show with Jay Leno` topped four of five actors' lists that way); and the
+ * show is News, Reality, Talk or Documentary — or has no genre at all, which is how TMDB
+ * files a ceremony. Deliberately narrow:
+ *
+ * - A documentary or concert *film* keeps its credit. *Free Solo* is what Alex Honnold is
+ *   in, and *Stop Making Sense* is what David Byrne is in.
+ * - A scripted cameo as yourself keeps its credit, because a comedy is a performance.
+ *
+ * Flagged, never dropped: see `PersonCreditEntry.self`.
  */
 const SELF_APPEARANCE = /^\s*(self|himself|herself|themselves|themself)\b/i;
-const NON_PERFORMANCE_GENRES = new Set([99, 10763, 10764, 10767]);
+const NON_PERFORMANCE_TV_GENRES = new Set([99, 10763, 10764, 10767]);
 
 function isSelfAppearance(entry: TmdbPersonCreditEntry): boolean {
-  if (!entry.character || !SELF_APPEARANCE.test(entry.character)) return false;
+  if (entry.media_type !== 'tv') return false;
+  const character = textOrNull(entry.character);
+  if (character && !SELF_APPEARANCE.test(character)) return false;
   const genres = entry.genre_ids ?? [];
-  return genres.length === 0 || genres.some((id) => NON_PERFORMANCE_GENRES.has(id));
+  return genres.length === 0 || genres.some((id) => NON_PERFORMANCE_TV_GENRES.has(id));
 }
+
+/** Which credit a title is shown under when TMDB lists it more than once. */
+const precedence = (entry: { as: 'cast' | 'crew'; self: boolean }) =>
+  entry.as === 'crew' ? 0 : entry.self ? 1 : 2;
 
 /**
  * A person's combined credits into catalogue rows, most relevant first.
@@ -613,19 +643,20 @@ function isSelfAppearance(entry: TmdbPersonCreditEntry): boolean {
  * a two-role part appears twice. The upsert would then hit the same row twice in one
  * statement, which Postgres refuses outright ("ON CONFLICT DO UPDATE command cannot
  * affect row a second time"), so this is a correctness requirement rather than
- * tidiness. The **cast** credit wins a collision, because appearing in something is
- * what a viewer recognises somebody for; among two cast credits the more popular
- * entry wins, which for a series is the season with the most reach.
+ * tidiness. A **performance** wins a collision, then a self-appearance, then crew work,
+ * because appearing in something is what a viewer recognises somebody for; among two
+ * credits of the same standing the more popular entry wins, which for a series is the
+ * season with the most reach.
  *
  * WHAT IS DROPPED. Anything `fromSearchResult` refuses — a credit with no title, or
  * with a media_type that is neither movie nor tv. TMDB does send `media_type` on
  * combined credits, and unlike /recommendations there is no sensible kind to assume
- * for a list that deliberately mixes both, so a missing one drops the row. And an
- * appearance as oneself on a talk show or a ceremony — see `isSelfAppearance`.
+ * for a list that deliberately mixes both, so a missing one drops the row. Nothing else:
+ * a self-appearance is flagged, not dropped.
  *
- * CAPS. Applied to each half separately, after the merge, keeping the most popular of
- * each — see `MAX_CAST_CREDITS`. What survives is returned in one list in popularity
- * order, one entry per title, which is the shape every client already reads.
+ * CAPS. Applied to each half separately, after the merge — see `MAX_CAST_CREDITS`. What
+ * survives is returned in one list in popularity order, one entry per title, which is
+ * the shape every client already reads.
  */
 export function personCredits(
   detail: TmdbPersonDetail,
@@ -635,17 +666,20 @@ export function personCredits(
   const crew = detail.combined_credits?.crew ?? [];
 
   const best = new Map<string, PersonCreditEntry>();
-  // Every distinct crew job per title, whichever half wins the title.
+  // Every distinct crew job per title, whichever credit wins the title.
   const jobs = new Map<string, string[]>();
 
   const consider = (entry: TmdbPersonCreditEntry, as: 'cast' | 'crew') => {
-    if (as === 'cast' && isSelfAppearance(entry)) return;
-
     const row = fromSearchResult(entry, genreNames);
     if (!row) return;
 
     const key = `${row.kind}:${row.tmdb_id}`;
-    const role = textOrNull(as === 'cast' ? entry.character : (entry.job ?? entry.department));
+    // `textOrNull` on each side of the fallback: TMDB sends `""` for a job it does not
+    // have, and `??` alone would keep the empty string and never reach the department.
+    const role =
+      as === 'cast'
+        ? textOrNull(entry.character)
+        : (textOrNull(entry.job) ?? textOrNull(entry.department));
 
     if (as === 'crew' && role) {
       const held = jobs.get(key) ?? [];
@@ -658,6 +692,7 @@ export function personCredits(
       role,
       as,
       crewRole: null,
+      self: as === 'cast' && isSelfAppearance(entry),
       popularity: entry.popularity ?? 0,
     };
 
@@ -667,11 +702,13 @@ export function personCredits(
       return;
     }
 
-    // Cast beats crew outright; within one kind of credit, the more visible entry
-    // wins. Without the second clause a series' least-watched season would decide
-    // both the ordering and the role shown for the whole show.
-    if (held.as === 'crew' && as === 'cast') best.set(key, candidate);
-    else if (held.as === as && candidate.popularity > held.popularity) best.set(key, candidate);
+    // A performance beats a self-appearance beats crew work; within one standing, the
+    // more visible entry wins. Without the second clause a series' least-watched season
+    // would decide both the ordering and the role shown for the whole show.
+    const rank = precedence(candidate) - precedence(held);
+    if (rank > 0 || (rank === 0 && candidate.popularity > held.popularity)) {
+      best.set(key, candidate);
+    }
   };
 
   for (const entry of cast) consider(entry, 'cast');
@@ -688,20 +725,29 @@ export function personCredits(
     })
     .sort((a, b) => b.popularity - a.popularity);
 
-  const castOnly = ordered.filter((entry) => entry.as === 'cast');
-  const crewOnly = ordered.filter((entry) => entry.as === 'crew');
+  const performances = ordered.filter((entry) => entry.as === 'cast' && !entry.self);
+  const appearances = ordered.filter((entry) => entry.self);
+  const crewWork = ordered.filter((entry) => entry.crewRole !== null);
+  // Authorship first, then popularity: `sort` is stable, so within each group the
+  // popularity order above survives.
+  const crewKept = [...crewWork]
+    .sort((a, b) => Number(AUTHORSHIP.test(b.crewRole ?? '')) - Number(AUTHORSHIP.test(a.crewRole ?? '')))
+    .slice(0, MAX_CREW_CREDITS);
+
   const kept = new Set([
-    ...castOnly.slice(0, MAX_CAST_CREDITS),
-    ...crewOnly.slice(0, MAX_CREW_CREDITS),
+    ...performances.slice(0, MAX_CAST_CREDITS),
+    ...appearances.slice(0, MAX_SELF_CREDITS),
+    ...crewKept,
   ]);
 
   return {
     credits: ordered.filter((entry) => kept.has(entry)),
     total: ordered.length,
-    castTotal: castOnly.length,
+    // Performances only: the number the Cast half's caption states.
+    castTotal: performances.length,
     // Titles with any crew job, including the ones an acting credit won — the same set
     // the Crew half of the page draws from.
-    crewTotal: ordered.filter((entry) => entry.crewRole !== null).length,
+    crewTotal: crewWork.length,
   };
 }
 

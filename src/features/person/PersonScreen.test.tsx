@@ -225,7 +225,7 @@ describe('a person as a discovery surface', () => {
     // has only the combined total, which is the acting total when there is no crew half.
     const view = await open();
 
-    expect(view.getByText('Showing 3 of 97 acting credits TMDB lists.')).toBeTruthy();
+    expect(view.getByText('Showing 3 of 97 credits TMDB lists.')).toBeTruthy();
   });
 
   it('credits TMDB for the metadata', async () => {
@@ -348,6 +348,64 @@ describe('cast and crew', () => {
     expect(view.getByText('Killers (2023)')).toBeTruthy();
     expect(view.getByText('Director')).toBeTruthy();
     expect(view.queryByRole('tab', { name: 'Cast' })).toBeNull();
+  });
+
+  it('leaves talk-show appearances out of the Cast list', async () => {
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [
+            { id: 'film-1', kind: 'movie', role: 'Cobb', as: 'cast', crew_role: null, self: false },
+            { id: 'series-1', kind: 'series', role: 'Self', as: 'cast', crew_role: null, self: true },
+          ],
+          cast_total: 1,
+          crew_total: 0,
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.queryByText('Growing Pains (1985)')).toBeNull();
+  });
+
+  it('still shows appearances for somebody who has nothing else to show', async () => {
+    // A presenter's page would otherwise say they had done nothing at all.
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [{ id: 'series-1', kind: 'series', role: 'Self - Host', as: 'cast', crew_role: null, self: true }],
+          cast_total: 0,
+          crew_total: 0,
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Growing Pains (1985)')).toBeTruthy();
+  });
+
+  it('treats a series credited as Self on a row cached before the flag existed as an appearance', async () => {
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [
+            { id: 'film-1', kind: 'movie', role: 'Cobb', as: 'cast' },
+            { id: 'series-1', kind: 'series', role: 'Himself', as: 'cast' },
+          ],
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.queryByText('Growing Pains (1985)')).toBeNull();
   });
 
   it('still names the job on a crew credit cached before crew roles were recorded', async () => {

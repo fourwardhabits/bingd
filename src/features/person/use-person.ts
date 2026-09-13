@@ -23,7 +23,22 @@ export type PersonCredit = {
    * in the Crew half of their page. Null throughout on a row cached before 2026-09-13.
    */
   crewRole: string | null;
+  /**
+   * An appearance as themselves on a talk show, a news or reality programme or a
+   * ceremony. Left out of the Cast half unless it is all the person has.
+   */
+  self: boolean;
 };
+
+/**
+ * A row cached before the adapter flagged self-appearances says nothing either way, so
+ * for those the same rule is applied to what the row does carry: a series credit whose
+ * character is the person themselves, or is not named at all. The genre the adapter also
+ * checks is not in the payload, so a scripted series with a missing character name is
+ * caught too — the right side to err on for the seven days such a row can live, because
+ * the Cast half falls back to these when there is nothing else.
+ */
+const LEGACY_SELF = /^\s*(self|himself|herself|themselves|themself)\b/i;
 
 export type PersonDetail = {
   /** TMDB's person id, as a string, because that is what the route carries. */
@@ -93,6 +108,7 @@ type CachedPayload = {
     role: string | null;
     as: 'cast' | 'crew';
     crew_role?: string | null;
+    self?: boolean;
   }[];
   credit_total?: number;
   cast_total?: number;
@@ -251,6 +267,12 @@ export function usePerson(personId: string | null) {
             as: credit.as,
             // A crew credit cached before `crew_role` existed still names its job.
             crewRole: credit.crew_role ?? (credit.as === 'crew' ? credit.role : null),
+            self:
+              typeof credit.self === 'boolean'
+                ? credit.self
+                : credit.as === 'cast' &&
+                  credit.kind === 'series' &&
+                  (!credit.role || LEGACY_SELF.test(credit.role)),
           };
         })
         .filter((credit): credit is PersonCredit => credit !== null);

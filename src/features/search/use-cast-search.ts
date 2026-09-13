@@ -58,9 +58,11 @@ export function useCastSearch(input: string, enabled: boolean) {
     },
   });
 
+  // An answer already held for this name is still an answer during the cooldown.
+  const held = query.data !== undefined && !query.isPlaceholderData;
   const rateLimited =
     enabled &&
-    (cooldownUntil !== null ||
+    ((cooldownUntil !== null && !held) ||
       (query.error instanceof AdapterError && query.error.isRateLimit));
 
   return {

@@ -397,6 +397,7 @@ describe('useTitleSearch reaching past the local catalogue', () => {
 
   it('asks nothing more of the provider this hour once it has refused, and says until when', async () => {
     mockSearchProvider.mockRejectedValue(new AdapterError('BG429', 'slow down'));
+    const before = Date.now();
     const { result, rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
       ({ q }) => useTitleSearch(q),
       { initialProps: { q: 'dune' } },
@@ -414,7 +415,11 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     expect(result.current.providerRateLimited).toBe(true);
     expect(result.current.providerFailed).toBe(true);
     const hour = 60 * 60_000;
-    expect(result.current.providerAvailableAt).toBe(Math.ceil((Date.now() + 1) / hour) * hour);
+    // The top of the hour after the refusal, bounded on both sides rather than recomputed
+    // now, so a run that crosses an hour boundary cannot fail it.
+    const nextHour = (at: number) => Math.ceil((at + 1) / hour) * hour;
+    expect(result.current.providerAvailableAt).toBeGreaterThanOrEqual(nextHour(before));
+    expect(result.current.providerAvailableAt).toBeLessThanOrEqual(nextHour(Date.now()));
   });
 
   it('calls a successful empty lookup exhaustive', async () => {

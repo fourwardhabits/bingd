@@ -848,7 +848,9 @@ function Results({
                 : 'Try a shorter search.'
         }
         action={
-          providerFailed && !rateLimited ? { label: 'Try again', onPress: onRetry } : undefined
+          // Rate limited included: the list footer has always offered it there, and the empty
+          // page is the one place a reader stuck in the cooldown has nothing else to press.
+          providerFailed ? { label: 'Try again', onPress: onRetry } : undefined
         }
       />
     );
@@ -1162,7 +1164,10 @@ function CastResults({
           title="Too many searches"
           body={`Cast search is back at ${
             search.availableAt ? cooldownClock(search.availableAt) : 'the top of the hour'
-          }. Titles already in bingd. still show under All.`}
+          }. Titles in your catalogue still show under All.`}
+          // Offered anyway: the device cannot know about a different account's hour, and
+          // a person asking once is not the app asking on every keystroke.
+          action={{ label: 'Try again', onPress: search.retry }}
         />
       );
     }
@@ -1204,6 +1209,16 @@ function CastResults({
                   search.availableAt ? cooldownClock(search.availableAt) : 'the top of the hour'
                 }.`}
               </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Search cast again"
+                onPress={search.retry}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
             </View>
           ) : search.failed ? (
             <View style={styles.status}>

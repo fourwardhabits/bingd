@@ -149,7 +149,8 @@ type GenreList = { genres: { id: number; name: string }[] };
  * this function generated was two lists that had not changed in years.
  *
  * Checked the day it was written against every genre name staging's catalogue holds
- * (36 names across movies and series, all present here, none missing). An id shared by
+ * (27 distinct names, across 36 movie and series pairings — all present here, none
+ * missing). An id shared by
  * both lists — Animation, Comedy, Crime, Documentary, Drama, Family, Mystery, Western —
  * has the same name in both, which is what lets them be one map.
  *

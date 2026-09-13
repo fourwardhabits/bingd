@@ -917,8 +917,8 @@ describe('Cast search', () => {
     await settle();
 
     await waitFor(() => expect(mockSearchCast).toHaveBeenCalled());
+    await waitFor(() => expect(view.getByText('Nobody in the cast by that name')).toBeTruthy());
     expect(mockSearchCast.mock.calls.map(([query]) => query)).toEqual(['leonardo dicaprio']);
-    expect(view.getByText('Nobody in the cast by that name')).toBeTruthy();
   });
 
   it('spends nothing on Cast unless the Cast chip is chosen', async () => {
@@ -955,8 +955,10 @@ describe('Cast search', () => {
 
     await waitFor(() => expect(view.getByText('Too many searches')).toBeTruthy());
     expect(
-      view.getByText(/^Cast search is back at .+\. Titles already in bingd\. still show under All\.$/),
+      view.getByText(/^Cast search is back at .+\. Titles in your catalogue still show under All\.$/),
     ).toBeTruthy();
+    // A person may still ask: the device cannot know about another account's hour.
+    expect(view.getByText('Try again')).toBeTruthy();
   });
 
   it('holds every provider search once the server has refused this hour', async () => {
