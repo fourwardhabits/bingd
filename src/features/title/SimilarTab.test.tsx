@@ -322,7 +322,7 @@ describe('Similar, on a film', () => {
      * omit them would pass an assertion about the head and say nothing about the rest.
      */
     withFacet(['cand-1']);
-    tableRows.media_cache.push(
+    tableRows.media_cache!.push(
       {
         media_item_id: 'film-1',
         facet: 'credits',
@@ -1097,7 +1097,7 @@ describe('the order the provider gave', () => {
 
     expect(firstSlate.filter((name) => secondSlate.includes(name))).toEqual([]);
     for (const slate of [firstSlate, secondSlate]) {
-      expect(slate.some((name) => name.startsWith('Candidate Crowd Pleaser'))).toBe(false);
+      expect(slate.some((name) => (name ?? '').startsWith('Candidate Crowd Pleaser'))).toBe(false);
     }
   });
 
