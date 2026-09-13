@@ -15,6 +15,7 @@ import { note, rememberRoute, tally } from '@/lib/flight-recorder';
 import { withGrace } from '@/lib/grace';
 import { avatarUri } from '@/lib/images';
 import { identifyForMonitoring } from '@/lib/monitoring';
+import { clearProviderCooldown } from '@/features/search/provider-budget';
 import { queryKeys } from '@/lib/query';
 import { onLocalSignOut, startSessionRefresh, supabase } from '@/lib/supabase';
 
@@ -172,7 +173,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // across a sign-out would show one user another user's content on a shared
       // device, which no amount of correct RLS prevents once it is already in
       // memory.
-      if (!next) queryClient.clear();
+      if (!next) {
+        queryClient.clear();
+        // The provider cooldown is per account; the next one to sign in has its own hour.
+        clearProviderCooldown();
+      }
     });
 
     /**
@@ -190,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       setSessionLoaded(true);
       queryClient.clear();
+      clearProviderCooldown();
     });
 
     return () => {

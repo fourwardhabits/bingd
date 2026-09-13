@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { AdapterError } from '@/lib/tmdb-adapter';
 
+import { clearProviderCooldown } from './provider-budget';
 import { useDebounced, useSeasons, useTitleSearch, yearOf } from './use-title-search';
 
 const mockRpc = jest.fn();
@@ -109,6 +110,9 @@ jest.mock('@tanstack/react-query', () => {
 });
 
 beforeEach(() => {
+  // Module state shared by both provider searches; a rate-limit test must not switch the
+  // provider off for every test after it.
+  clearProviderCooldown();
   mockRpc.mockReset();
   mockRpc.mockResolvedValue({ data: [], error: null });
   mockRead = { columns: '', filters: {}, order: [] };
@@ -344,6 +348,78 @@ describe('useTitleSearch reaching past the local catalogue', () => {
 
     await waitFor(() => expect(result.current.providerFailed).toBe(true));
     expect(result.current.providerExhausted).toBe(false);
+  });
+
+  /**
+   * The power-logger's budget (2026-09-13). Each of these used to be a charged request
+   * that bought nothing, and the fixes are asserted as counts of what was actually sent.
+   */
+  it('spends one request on a title typed at speed, not one per keystroke', async () => {
+    const { rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
+      ({ q }) => useTitleSearch(q),
+      { initialProps: { q: '' } },
+    );
+
+    for (const prefix of ['i', 'in', 'inc', 'ince', 'incep', 'incept', 'incepti', 'inceptio', 'inception']) {
+      await rerender({ q: prefix });
+      await wait(120);
+    }
+    await wait(1000);
+
+    expect(mockSearchProvider.mock.calls).toEqual([['inception', 20]]);
+  });
+
+  it('does not re-spend on a query that differs only in case or spacing', async () => {
+    const { rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
+      ({ q }) => useTitleSearch(q),
+      { initialProps: { q: 'Network' } },
+    );
+    await wait(1000);
+
+    await rerender({ q: 'network ' });
+    await wait(1000);
+    await rerender({ q: 'NETWORK' });
+    await wait(1000);
+
+    expect(mockSearchProvider.mock.calls).toEqual([['network', 20]]);
+  });
+
+  it('spends nothing on the provider when the screen draws no titles', async () => {
+    const { result } = await renderHook(() => useTitleSearch('leonardo', { wide: false }));
+    await wait(1000);
+
+    // The local pass still runs: it is a table read, and switching back to All uses it.
+    expect(mockRpc).toHaveBeenCalled();
+    expect(mockSearchProvider).not.toHaveBeenCalled();
+    expect(result.current.providerFailed).toBe(false);
+    expect(result.current.providerRateLimited).toBe(false);
+  });
+
+  it('asks nothing more of the provider this hour once it has refused, and says until when', async () => {
+    mockSearchProvider.mockRejectedValue(new AdapterError('BG429', 'slow down'));
+    const before = Date.now();
+    const { result, rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
+      ({ q }) => useTitleSearch(q),
+      { initialProps: { q: 'dune' } },
+    );
+    await waitFor(() => expect(result.current.providerRateLimited).toBe(true));
+    expect(mockSearchProvider).toHaveBeenCalledTimes(1);
+
+    // Every request before the hour turns is guaranteed a refusal, so none is made.
+    await rerender({ q: 'arrival' });
+    await wait(1000);
+    await rerender({ q: 'sicario' });
+    await wait(1000);
+
+    expect(mockSearchProvider).toHaveBeenCalledTimes(1);
+    expect(result.current.providerRateLimited).toBe(true);
+    expect(result.current.providerFailed).toBe(true);
+    const hour = 60 * 60_000;
+    // The top of the hour after the refusal, bounded on both sides rather than recomputed
+    // now, so a run that crosses an hour boundary cannot fail it.
+    const nextHour = (at: number) => Math.ceil((at + 1) / hour) * hour;
+    expect(result.current.providerAvailableAt).toBeGreaterThanOrEqual(nextHour(before));
+    expect(result.current.providerAvailableAt).toBeLessThanOrEqual(nextHour(Date.now()));
   });
 
   it('calls a successful empty lookup exhaustive', async () => {

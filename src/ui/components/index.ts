@@ -12,6 +12,7 @@ export {
   type ChipProps,
 } from './BucketChip';
 export { Button } from './Button';
+export { CastRow, type CastRowProps } from './CastRow';
 export { CastStrip, type CastMember } from './CastStrip';
 export { ClampedText, collapse, MARKER, type ClampedTextProps } from './ClampedText';
 export {

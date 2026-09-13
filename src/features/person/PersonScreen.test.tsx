@@ -220,8 +220,9 @@ describe('a person as a discovery surface', () => {
   });
 
   it('says what it is not showing rather than implying this is everything', async () => {
-    // The adapter keeps the forty most popular credits. Somebody with ninety-seven
-    // should not be presented as somebody with three.
+    // The adapter keeps the most popular credits. Somebody with ninety-seven should not
+    // be presented as somebody with three. A row cached before the halves were counted
+    // has only the combined total, which is the acting total when there is no crew half.
     const view = await open();
 
     expect(view.getByText('Showing 3 of 97 credits TMDB lists.')).toBeTruthy();
@@ -265,6 +266,162 @@ describe('filtering a filmography', () => {
 
     expect(view.queryByRole('tab', { name: 'Movies' })).toBeNull();
     expect(view.queryByRole('tab', { name: 'TV' })).toBeNull();
+  });
+});
+
+/**
+ * **Cast is what they acted in; Crew is the other half** (2026-09-13).
+ *
+ * Cast search sends people here to see what an actor has been in, so a directing or
+ * producing credit must never be drawn as though it were a part.
+ */
+describe('cast and crew', () => {
+  const both = {
+    ...cached,
+    payload: {
+      ...cached.payload,
+      credits: [
+        { id: 'film-1', kind: 'movie', role: 'Cobb', as: 'cast', crew_role: null },
+        // Acted in and produced: in both halves, under a different label in each.
+        { id: 'film-2', kind: 'movie', role: 'Jack Dawson', as: 'cast', crew_role: 'Producer' },
+        // Behind the camera only.
+        { id: 'film-3', kind: 'movie', role: 'Director', as: 'crew', crew_role: 'Director' },
+      ],
+      credit_total: 3,
+      cast_total: 41,
+      crew_total: 12,
+    },
+  };
+
+  beforeEach(() => {
+    tableRows.person_cache = [both];
+    tableRows.media_items = [
+      ...items,
+      { id: 'film-3', kind: 'movie', title: 'Killers', release_date: '2023-10-20', poster_path: null },
+    ];
+  });
+
+  it('opens on what they acted in, with no crew credit drawn as a part', async () => {
+    const view = await open();
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.getByText('Titanic (1997)')).toBeTruthy();
+    expect(view.getByText('Jack Dawson')).toBeTruthy();
+    expect(view.queryByText('Killers (2023)')).toBeNull();
+    expect(view.queryByText('Director')).toBeNull();
+    expect(view.queryByText('Producer')).toBeNull();
+    expect(view.getByText('Showing 2 of 41 acting credits TMDB lists.')).toBeTruthy();
+  });
+
+  it('keeps the work behind the camera under Crew, including a film they also acted in', async () => {
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Crew' }));
+
+    await waitFor(() => expect(view.getByText('Killers (2023)')).toBeTruthy());
+    expect(view.getByText('Director')).toBeTruthy();
+    expect(view.getByText('Titanic (1997)')).toBeTruthy();
+    expect(view.getByText('Producer')).toBeTruthy();
+    // Not a crew credit, and not a character on this side.
+    expect(view.queryByText('Inception (2010)')).toBeNull();
+    expect(view.queryByText('Jack Dawson')).toBeNull();
+    expect(view.getByText('Showing 2 of 12 crew credits TMDB lists.')).toBeTruthy();
+  });
+
+  it('offers no Cast and Crew choice to somebody with only acting credits', async () => {
+    tableRows.person_cache = [cached];
+    const view = await open();
+
+    expect(view.queryByRole('tab', { name: 'Cast' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'Crew' })).toBeNull();
+  });
+
+  it('opens on Crew for somebody with no acting credits at all', async () => {
+    tableRows.person_cache = [
+      {
+        ...both,
+        payload: { ...both.payload, credits: [both.payload.credits[2]], cast_total: 0, crew_total: 1 },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Killers (2023)')).toBeTruthy();
+    expect(view.getByText('Director')).toBeTruthy();
+    expect(view.queryByRole('tab', { name: 'Cast' })).toBeNull();
+  });
+
+  it('leaves talk-show appearances out of the Cast list', async () => {
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [
+            { id: 'film-1', kind: 'movie', role: 'Cobb', as: 'cast', crew_role: null, self: false },
+            { id: 'series-1', kind: 'series', role: 'Self', as: 'cast', crew_role: null, self: true },
+          ],
+          cast_total: 1,
+          crew_total: 0,
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.queryByText('Growing Pains (1985)')).toBeNull();
+  });
+
+  it('still shows appearances for somebody who has nothing else to show', async () => {
+    // A presenter's page would otherwise say they had done nothing at all.
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [{ id: 'series-1', kind: 'series', role: 'Self - Host', as: 'cast', crew_role: null, self: true }],
+          cast_total: 0,
+          crew_total: 0,
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Growing Pains (1985)')).toBeTruthy();
+  });
+
+  it('treats a series credited as Self on a row cached before the flag existed as an appearance', async () => {
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [
+            { id: 'film-1', kind: 'movie', role: 'Cobb', as: 'cast' },
+            { id: 'series-1', kind: 'series', role: 'Himself', as: 'cast' },
+          ],
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+    expect(view.queryByText('Growing Pains (1985)')).toBeNull();
+  });
+
+  it('still names the job on a crew credit cached before crew roles were recorded', async () => {
+    tableRows.person_cache = [
+      {
+        ...cached,
+        payload: {
+          ...cached.payload,
+          credits: [{ id: 'film-3', kind: 'movie', role: 'Director', as: 'crew' }],
+        },
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Killers (2023)')).toBeTruthy();
+    expect(view.getByText('Director')).toBeTruthy();
   });
 });
 

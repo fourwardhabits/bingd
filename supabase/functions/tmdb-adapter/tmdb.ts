@@ -132,21 +132,104 @@ async function request<T>(
 //
 // Search results carry genre_ids and detail responses carry full genre objects,
 // so the two paths would otherwise disagree about what a film's genres are. The
-// two lists are about forty rows that change perhaps yearly, so they are fetched
-// once per isolate and kept. A cold start pays for it; nothing else does.
+// two lists are about forty rows that change perhaps yearly.
 // ---------------------------------------------------------------------------
 
 type GenreList = { genres: { id: number; name: string }[] };
 
+/**
+ * TMDB's movie and TV genre lists, merged, as the provider publishes them in English.
+ *
+ * **Shipped with the function rather than fetched per isolate** (2026-09-13). The lists
+ * used to be fetched once per isolate and kept, on the theory that a cold start was rare.
+ * Measured on staging it was the ordinary case: eight consecutive searches from one
+ * account each cost **three** charged requests — the search plus both lists — because
+ * almost every invocation landed on an isolate that had never fetched them. The hourly
+ * ceiling of 120 was therefore about forty searches, and a third of the provider traffic
+ * this function generated was two lists that had not changed in years.
+ *
+ * Checked the day it was written against every genre name staging's catalogue holds
+ * (27 distinct names, across 36 movie and series pairings — all present here, none
+ * missing). An id shared by
+ * both lists — Animation, Comedy, Crime, Documentary, Drama, Family, Mystery, Western —
+ * has the same name in both, which is what lets them be one map.
+ *
+ * **Still correct if TMDB adds a genre.** `genreNames` is given the ids a response
+ * actually carries, and one this table does not know sends it to the provider for the
+ * live lists, charged exactly as before. The table is a shortcut for the known case,
+ * never a claim that the provider cannot change.
+ */
+const KNOWN_GENRES: ReadonlyMap<number, string> = new Map([
+  // Movie list.
+  [28, 'Action'],
+  [12, 'Adventure'],
+  [16, 'Animation'],
+  [35, 'Comedy'],
+  [80, 'Crime'],
+  [99, 'Documentary'],
+  [18, 'Drama'],
+  [10751, 'Family'],
+  [14, 'Fantasy'],
+  [36, 'History'],
+  [27, 'Horror'],
+  [10402, 'Music'],
+  [9648, 'Mystery'],
+  [10749, 'Romance'],
+  [878, 'Science Fiction'],
+  [10770, 'TV Movie'],
+  [53, 'Thriller'],
+  [10752, 'War'],
+  [37, 'Western'],
+  // TV list, less the ids it shares with the movie list.
+  [10759, 'Action & Adventure'],
+  [10762, 'Kids'],
+  [10763, 'News'],
+  [10764, 'Reality'],
+  [10765, 'Sci-Fi & Fantasy'],
+  [10766, 'Soap'],
+  [10767, 'Talk'],
+  [10768, 'War & Politics'],
+]);
+
+/** Exported for the test that pins it. Nothing else should read the table directly. */
+export const knownGenres = KNOWN_GENRES;
+
+/** The live lists, once this isolate has had a reason to fetch them. */
 let genreCache: Map<number, string> | null = null;
 
-export async function genreNames(charge?: Charge): Promise<Map<number, string>> {
-  // Charged only when it actually fetches, which is what threading the charger all
-  // the way down buys: nothing upstream has to predict whether this isolate is warm.
-  // A predicted count was the first fix and it was still wrong, because it counted
-  // logical requests rather than attempts.
+/** Every genre id a page of search-shaped results mentions. */
+export function genreIdsOf(entries: readonly { genre_ids?: number[] }[]): number[] {
+  return entries.flatMap((entry) => entry.genre_ids ?? []);
+}
+
+/**
+ * The genre id → name map for a response.
+ *
+ * `ids` is what the response actually carries. When every one of them is in the shipped
+ * table this costs nothing — no request and no charge — which is every response TMDB
+ * has sent since the table was written. When one is not, or when no ids are given at
+ * all (the service-role trending job, which is uncharged and so doubles as a nightly
+ * drift check), the live lists are fetched as they always were.
+ */
+export async function genreNames(
+  charge?: Charge,
+  ids?: Iterable<number>,
+): Promise<Map<number, string>> {
   if (genreCache) return genreCache;
 
+  if (ids) {
+    let known = true;
+    for (const id of ids) {
+      if (!KNOWN_GENRES.has(id)) {
+        known = false;
+        break;
+      }
+    }
+    if (known) return KNOWN_GENRES as Map<number, string>;
+  }
+
+  // Charged only when it actually fetches, which is what threading the charger all
+  // the way down buys: nothing upstream has to predict whether this isolate is warm.
   const [movie, tv] = await Promise.all([
     request<GenreList>('/genre/movie/list', {}, charge),
     request<GenreList>('/genre/tv/list', {}, charge),
@@ -154,6 +237,15 @@ export async function genreNames(charge?: Charge): Promise<Map<number, string>> 
 
   const map = new Map<number, string>();
   for (const genre of [...movie.genres, ...tv.genres]) map.set(genre.id, genre.name);
+
+  // Said out loud in the function log, because the table only stays true if somebody
+  // notices the day it stops being.
+  for (const [id, name] of map) {
+    if (KNOWN_GENRES.get(id) !== name) {
+      console.warn(`tmdb-adapter genre table drift: ${id} is "${name}" at TMDB`);
+    }
+  }
+
   genreCache = map;
   return map;
 }
@@ -459,6 +551,30 @@ export type TmdbPersonDetail = {
 
 export function personDetail(id: number, charge?: Charge): Promise<TmdbPersonDetail> {
   return request(`/person/${id}`, { append_to_response: 'combined_credits' }, charge);
+}
+
+/**
+ * One result of /search/person, as far as Cast search reads it.
+ *
+ * `known_for` is TMDB's own two-or-three most recognisable titles for the person,
+ * search-shaped, and it arrives on the same response — so a result row can say *which*
+ * Chris this is without a second request.
+ */
+export type TmdbPersonSearchResult = {
+  id: number;
+  name?: string | null;
+  adult?: boolean;
+  profile_path?: string | null;
+  known_for_department?: string | null;
+  popularity?: number;
+  known_for?: { media_type?: string; title?: string | null; name?: string | null }[];
+};
+
+export function searchPeople(
+  query: string,
+  charge?: Charge,
+): Promise<{ results: TmdbPersonSearchResult[] }> {
+  return request('/search/person', { query, include_adult: 'false', page: '1' }, charge);
 }
 
 // ---------------------------------------------------------------------------

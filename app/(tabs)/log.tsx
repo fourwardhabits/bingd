@@ -14,6 +14,8 @@ import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
+import { cooldownClock } from '@/features/search/provider-budget';
+import { useCastSearch, type CastSearchResult } from '@/features/search/use-cast-search';
 import {
   seriesChildState,
   seriesSecondaryLine,
@@ -28,11 +30,12 @@ import {
 } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
 import { track } from '@/lib/analytics';
-import { posterUri } from '@/lib/images';
+import { posterUri, profileUri } from '@/lib/images';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  CastRow,
   HeaderBoundary,
   Chip,
   EmptyState,
@@ -51,21 +54,29 @@ import {
  * All first, because the filter is a narrowing of a search the user has already made
  * and the unnarrowed state is the one they arrive in.
  *
- * **One list, four chips.** The founder's contract for this page is: query → one
- * continuous list → chips narrow it. There is no "People" heading and no "Movies"
- * heading — sectioning People while leaving titles unsectioned was the inconsistency
- * this replaced. Each chip is the same surface narrowed: Movies and TV filter the
- * title results, People shows every member match with the relevance gate lifted —
- * choosing People *is* the statement of intent the gate exists to infer. All keeps
- * the existing order of each source: people above titles, each in its own relevance
- * order. A row says what kind of thing it is (round avatar and @handle for a person,
- * poster and metadata for a title) rather than a heading saying it for a block.
+ * **One list, five chips.** The founder's contract for this page is: query → one
+ * continuous list → chips narrow it. There is no "Users" heading and no "Movies"
+ * heading — sectioning accounts while leaving titles unsectioned was the inconsistency
+ * this replaced. Movies and TV filter the title results; Users shows every member
+ * match with the relevance gate lifted — choosing Users *is* the statement of intent
+ * the gate exists to infer. All keeps the existing order of each source: accounts above
+ * titles, each in its own relevance order. A row says what kind of thing it is (round
+ * avatar and @handle for an account, poster and metadata for a title) rather than a
+ * heading saying it for a block.
+ *
+ * **Cast and Users, not People** (founder, 2026-09-13). With performers searchable, one
+ * word for both would be ambiguous: Cast is people TMDB credits on films and shows, and
+ * Users is people with a Bingd account. Cast is the one chip that is not a narrowing of
+ * the All list — performers appear nowhere else on this page — because every Cast search
+ * spends a provider request, and doing that on every query to fill rows under All would
+ * double what an ordinary title search costs.
  */
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV' },
-  { id: 'people', label: 'People' },
+  { id: 'cast', label: 'Cast' },
+  { id: 'users', label: 'Users' },
 ] as const;
 
 /**
@@ -202,14 +213,20 @@ export default function LogScreen() {
     providerSearching,
     providerExhausted,
     providerRateLimited,
+    providerAvailableAt,
     providerFailed,
-  } = useTitleSearch(input);
+  } = useTitleSearch(input, {
+    // No title rows are drawn under Users or Cast, so no provider request is spent on them.
+    wide: filter !== 'users' && filter !== 'cast',
+  });
+
+  const cast = useCastSearch(input, filter === 'cast');
 
   const filtered = useMemo(() => {
     if (filter === 'all') return results;
-    // People is not a narrowing of titles — the list holds member rows alone, so the
-    // title results are simply absent rather than "filtered to nothing".
-    if (filter === 'people') return [];
+    // Users and Cast are not narrowings of titles — each list holds its own rows alone,
+    // so the title results are simply absent rather than "filtered to nothing".
+    if (filter === 'users' || filter === 'cast') return [];
     return results.filter((result) =>
       filter === 'movies' ? result.kind === 'movie' : result.kind !== 'movie',
     );
@@ -248,9 +265,9 @@ export default function LogScreen() {
   );
 
   // Members are not titles, so a Movies or TV narrowing has nothing to say about them.
-  // The People chip shows them alone: every match the server returned, no relevance
+  // The Users chip shows them alone: every match the server returned, no relevance
   // gate and no preview cap — the chip press is the intent the gate would be guessing.
-  const peopleMode = filter === 'people';
+  const peopleMode = filter === 'users';
   const membersApply = filter === 'all';
   const shownUsers = peopleMode
     ? userResults
@@ -341,6 +358,16 @@ export default function LogScreen() {
   const openTitle = (result: SearchResult) => {
     commitSelection(result.title);
     router.push(`/title/${result.id}`);
+  };
+
+  /**
+   * A performer opens their person page — the same route a face in a cast strip opens,
+   * keyed by TMDB's person id — which is where their filmography is fetched and cached.
+   * The name is remembered, because it is what the reader was looking for.
+   */
+  const openCast = (person: CastSearchResult) => {
+    commitSelection(person.name);
+    router.push(`/person/${person.id}`);
   };
 
   const openLog = (result: SearchResult) => {
@@ -459,10 +486,21 @@ export default function LogScreen() {
       </View>
       <HeaderBoundary />
 
-      {/* Hidden while idle. A filter over nothing is three buttons that do
-          nothing, and the recent searches below are not filterable by kind. */}
+      {/* Hidden while idle. A filter over nothing is five buttons that do
+          nothing, and the recent searches below are not filterable by kind.
+
+          A horizontal scroller rather than a row, as the cast strip is: five chips fit
+          a 360pt phone at the default text size and do not at the larger accessibility
+          sizes, where a fixed row would clip the last one off the screen. `handled` so a
+          chip tapped with the keyboard up is a chip pressed, not a keyboard dismissed. */}
       {idle ? null : (
-        <View style={styles.filters}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          style={styles.filterScroller}
+          contentContainerStyle={styles.filters}
+        >
           {FILTERS.map((option) => (
             <Chip
               key={option.id}
@@ -471,41 +509,46 @@ export default function LogScreen() {
               onPress={() => setFilter(option.id)}
             />
           ))}
-        </View>
+        </ScrollView>
       )}
 
-      <Results
-        idle={idle}
-        peopleOnly={peopleMode}
-        users={shownUsers}
-        usersLoading={users.isPending && !idle}
-        usersError={users.isError}
-        morePeopleCount={morePeopleCount}
-        onSeeAllMembers={() => setAllMembers(true)}
-        relationshipLabel={relationshipLabel}
-        onOpenUser={openUser}
-        loading={isPending && !idle}
-        error={isError}
-        stale={isPlaceholderData}
-        results={filtered}
-        filtered={filter !== 'all' && results.length > 0 && filtered.length === 0}
-        recent={recent}
-        onClearRecent={clear}
-        onPickRecent={setInput}
-        searchingWider={providerSearching}
-        exhausted={providerExhausted}
-        rateLimited={providerRateLimited}
-        providerFailed={providerFailed}
-        onRetry={retry}
-        onOpenTitle={openTitle}
-        onOpenLog={openLog}
-        saved={saved}
-        scores={scores}
-        watched={watchedIds}
-        seriesState={seriesState}
-        watchlistBusy={watchlistBusy}
-        onToggleWatchlist={toggleWatchlist}
-      />
+      {!idle && filter === 'cast' ? (
+        <CastResults search={cast} onOpen={openCast} />
+      ) : (
+        <Results
+          idle={idle}
+          peopleOnly={peopleMode}
+          users={shownUsers}
+          usersLoading={users.isPending && !idle}
+          usersError={users.isError}
+          morePeopleCount={morePeopleCount}
+          onSeeAllMembers={() => setAllMembers(true)}
+          relationshipLabel={relationshipLabel}
+          onOpenUser={openUser}
+          loading={isPending && !idle}
+          error={isError}
+          stale={isPlaceholderData}
+          results={filtered}
+          filtered={filter !== 'all' && results.length > 0 && filtered.length === 0}
+          recent={recent}
+          onClearRecent={clear}
+          onPickRecent={setInput}
+          searchingWider={providerSearching}
+          exhausted={providerExhausted}
+          rateLimited={providerRateLimited}
+          availableAt={providerAvailableAt}
+          providerFailed={providerFailed}
+          onRetry={retry}
+          onOpenTitle={openTitle}
+          onOpenLog={openLog}
+          saved={saved}
+          scores={scores}
+          watched={watchedIds}
+          seriesState={seriesState}
+          watchlistBusy={watchlistBusy}
+          onToggleWatchlist={toggleWatchlist}
+        />
+      )}
 
       <SeasonPicker
         series={series}
@@ -603,6 +646,7 @@ function Results({
   searchingWider,
   exhausted,
   rateLimited,
+  availableAt,
   providerFailed,
   onRetry,
   onOpenTitle,
@@ -634,6 +678,8 @@ function Results({
   searchingWider: boolean;
   exhausted: boolean;
   rateLimited: boolean;
+  /** When wider search comes back, while rate limited. */
+  availableAt: number | null;
   providerFailed: boolean;
   onRetry: () => void;
   onOpenTitle: (result: SearchResult) => void;
@@ -789,7 +835,9 @@ function Results({
         }
         body={
           rateLimited
-            ? 'Give it a minute and try again.'
+            ? // Not "give it a minute": the budget is per clock hour, so the honest
+              // answer can be most of an hour away, and it is a time the app knows.
+              widerSearchReturns(availableAt)
             : providerFailed
               ? // Not "nothing matches". The catalogue was searched and the
                 // wider lookup broke, so the app does not actually know whether
@@ -800,7 +848,9 @@ function Results({
                 : 'Try a shorter search.'
         }
         action={
-          providerFailed && !rateLimited ? { label: 'Try again', onPress: onRetry } : undefined
+          // Rate limited included: the list footer has always offered it there, and the empty
+          // page is the one place a reader stuck in the cooldown has nothing else to press.
+          providerFailed ? { label: 'Try again', onPress: onRetry } : undefined
         }
       />
     );
@@ -877,7 +927,7 @@ function Results({
             <View style={styles.status}>
               <Text variant="footnote" tone="secondary">
                 {rateLimited
-                  ? 'Too many searches to look wider just now. These are from your catalogue only.'
+                  ? `Too many searches to look wider just now. These are from your catalogue only. ${widerSearchReturns(availableAt)}`
                   : 'The wider search did not answer, so this may not be everything.'}
               </Text>
               <Pressable
@@ -1077,6 +1127,135 @@ function Results({
 }
 
 /**
+ * When a rate-limited provider search comes back, as a sentence.
+ *
+ * The time when the app knows it — always, once the refusal has been seen — and the
+ * plain fact otherwise, rather than a guess dressed as a number.
+ */
+function widerSearchReturns(availableAt: number | null) {
+  return availableAt
+    ? `Wider search is back at ${cooldownClock(availableAt)}.`
+    : 'Wider search is back within the hour.';
+}
+
+/**
+ * The Cast chip: performers TMDB knows by the name being typed.
+ *
+ * Its own list rather than rows threaded into `Results`, because nothing on it overlaps:
+ * no titles, no accounts, no local pass and no member gate. The states are the same set
+ * the title search distinguishes — still settling, rate limited with a time, failed with a
+ * retry, answered with nobody — and each says which it is. Titles already in Bingd are one
+ * chip away under All, which is what the rate-limited copy points to.
+ */
+function CastResults({
+  search,
+  onOpen,
+}: {
+  search: ReturnType<typeof useCastSearch>;
+  onOpen: (person: CastSearchResult) => void;
+}) {
+  const { results } = search;
+
+  if (!results.length) {
+    if (search.rateLimited) {
+      return (
+        <EmptyState
+          kind="nothingMatches"
+          title="Too many searches"
+          body={`Cast search is back at ${
+            search.availableAt ? cooldownClock(search.availableAt) : 'the top of the hour'
+          }. Titles in your catalogue still show under All.`}
+          // Offered anyway: the device cannot know about a different account's hour, and
+          // a person asking once is not the app asking on every keystroke.
+          action={{ label: 'Try again', onPress: search.retry }}
+        />
+      );
+    }
+    if (search.failed) {
+      return (
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not search cast"
+          body="The cast search did not answer. Check your connection and try again."
+          action={{ label: 'Try again', onPress: search.retry }}
+        />
+      );
+    }
+    if (search.answered) {
+      return (
+        <EmptyState
+          kind="nothingMatches"
+          title="Nobody in the cast by that name"
+          body="Try their full name, as it appears in the credits."
+        />
+      );
+    }
+    return <SkeletonRow count={6} />;
+  }
+
+  return (
+    <View style={styles.list}>
+      <FlashList
+        data={results}
+        keyExtractor={(person) => `cast:${person.id}`}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={styles.results}
+        ListFooterComponent={
+          search.rateLimited ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="secondary">
+                {`Too many searches to look again just now. Cast search is back at ${
+                  search.availableAt ? cooldownClock(search.availableAt) : 'the top of the hour'
+                }.`}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Search cast again"
+                onPress={search.retry}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
+          ) : search.failed ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="secondary">
+                The cast search did not answer, so these are from your last search.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Search cast again"
+                onPress={search.retry}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
+        renderItem={({ item }) => (
+          // The previous name's performers stay legible while the next one settles,
+          // dimmed like stale title rows, rather than blinking to a skeleton per keystroke.
+          <View style={search.stale || search.searching ? styles.stale : undefined}>
+            <CastRow
+              name={item.name}
+              portraitUri={profileUri(item.profilePath)}
+              knownFor={item.knownFor}
+              onPress={() => onOpen(item)}
+            />
+          </View>
+        )}
+      />
+    </View>
+  );
+}
+
+/**
  * A row in the one list. Three kinds, one surface: the discriminant is what
  * `getItemType` hands FlashList for recycling and what `renderItem` switches on.
  */
@@ -1103,6 +1282,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[2],
   },
+  // Its own height only. A horizontal ScrollView in a column otherwise grows to fill the
+  // screen and pushes the results below the fold.
+  filterScroller: { flexGrow: 0 },
   filters: {
     flexDirection: 'row',
     gap: theme.space[2],

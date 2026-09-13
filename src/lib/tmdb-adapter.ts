@@ -144,6 +144,44 @@ export async function searchProvider(query: string, limit = 10) {
 }
 
 /**
+ * One performer, as a Cast search row draws them.
+ *
+ * `id` is TMDB's person id — there is no Bingd person (20260817000500) — and it is what
+ * `/person/{id}` routes on, so a result opens the same page a face in a cast strip opens.
+ */
+export type CastSearchResult = {
+  id: number;
+  name: string;
+  profilePath: string | null;
+  /** Up to three titles TMDB says they are known for, to tell namesakes apart. */
+  knownFor: string[];
+};
+
+/**
+ * Performers TMDB knows by a name. The Cast filter on Search.
+ *
+ * **Performers only**: the adapter keeps people TMDB lists as known for Acting, because
+ * the control is labelled Cast. **Read-only**: nothing is written to the catalogue or to
+ * `person_cache` — opening a result is what caches their filmography. One provider
+ * request per call, charged to the reader's hourly ceiling.
+ */
+export async function searchCast(query: string, limit = 20): Promise<CastSearchResult[]> {
+  const data = await invoke<{
+    results?: { id: number; name: string; profile_path: string | null; known_for?: string[] }[];
+  }>({
+    action: 'search-people',
+    query,
+    limit,
+  });
+  return (data.results ?? []).map((person) => ({
+    id: person.id,
+    name: person.name,
+    profilePath: person.profile_path ?? null,
+    knownFor: person.known_for ?? [],
+  }));
+}
+
+/**
  * One episode of a season, as the Episodes tab renders it.
  *
  * Informational metadata and nothing else. An episode is not a `media_items` row, is

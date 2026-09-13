@@ -1,7 +1,7 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Ten actions, split by who may call them:
+ * Eleven actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
@@ -23,6 +23,9 @@
  *                              `similar` facet. The candidate source behind For You.
  *   person    signed-in user   Caches one person and the titles TMDB credits them
  *                              on, writing those titles into the catalogue first.
+ *   search-people
+ *             signed-in user   Performers TMDB knows by a name, for Cast search.
+ *                              Reads nothing into the catalogue and writes nothing.
  *   trending  service_role     Refreshes the four provider_list_cache lists. The
  *                              client reads that table directly; this only fills it.
  *   enrich    service_role     Drains tmdb_enrich_due. The Wikidata seed has ids
@@ -59,6 +62,7 @@ import {
   type Db,
 } from './store.ts';
 import {
+  castSearchResults,
   creditsFacet,
   videosFacet,
   episodesOf,
@@ -178,14 +182,15 @@ async function handleSearch(db: Db, query: string, limit: number, userId: string
   // returns here, because nothing is spent — it used to be charged before this line.
   if (trimmed.length < 2) return json({ results: [] });
 
-  // Charged per outbound attempt rather than per call: the search, both genre lists
-  // if this isolate is cold, and every retry of any of them.
+  // Charged per outbound attempt rather than per call: the search, the genre lists if
+  // a result names a genre the shipped table does not know, and every retry of either.
   const charge = chargeTo(db, userId);
 
-  const [{ results }, genres] = await Promise.all([
-    tmdb.searchMulti(trimmed, charge),
-    tmdb.genreNames(charge),
-  ]);
+  // In sequence rather than beside the genre lists, because which genres it needs is
+  // only known once the results are. One request for a search, not three — see
+  // `KNOWN_GENRES` in tmdb.ts for the measurement that made that the fix.
+  const { results } = await tmdb.searchMulti(trimmed, charge);
+  const genres = await tmdb.genreNames(charge, tmdb.genreIdsOf(results));
 
   const rows = normalizeList(results, genres, limit);
   return json({ results: await searchResultsFor(db, await storeInOrder(db, rows)) });
@@ -355,7 +360,7 @@ async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
 
   const charge = chargeTo(db, userId);
   const { results } = await tmdb.recommendations(kind, tmdbId, charge);
-  const genres = await tmdb.genreNames(charge);
+  const genres = await tmdb.genreNames(charge, tmdb.genreIdsOf(results));
   // `kind` as the fallback: /recommendations sends no `media_type` whatsoever, so
   // without it every row would be dropped and the facet would cache an empty list.
   const ids = await storeInOrder(db, normalizeList(results, genres, SIMILAR_SIZE, kind));
@@ -586,9 +591,15 @@ async function handlePerson(db: Db, personId: number, userId: string) {
 
   const charge = chargeTo(db, userId);
   const detail = await tmdb.personDetail(personId, charge);
-  const genres = await tmdb.genreNames(charge);
+  const genres = await tmdb.genreNames(
+    charge,
+    tmdb.genreIdsOf([
+      ...(detail.combined_credits?.cast ?? []),
+      ...(detail.combined_credits?.crew ?? []),
+    ]),
+  );
 
-  const { credits, total } = personCredits(detail, genres);
+  const { credits, total, castTotal, crewTotal } = personCredits(detail, genres);
 
   // Paired by key rather than by index. `storeInOrder` filters out rows that failed
   // to store, so its output is shorter than its input exactly when something went
@@ -608,11 +619,41 @@ async function handlePerson(db: Db, personId: number, userId: string) {
       kind: credit.row.kind,
       role: credit.role,
       as: credit.as,
+      // Additive. A client that predates the Cast/Crew split reads none of these four.
+      crew_role: credit.crewRole,
+      self: credit.self,
     })),
     credit_total: total,
+    cast_total: castTotal,
+    crew_total: crewTotal,
   });
 
   return { id: personId, written: rows.length, total };
+}
+
+// ---------------------------------------------------------------------------
+// search-people
+// ---------------------------------------------------------------------------
+
+/**
+ * Performers TMDB knows by a name, for the Cast filter on Search.
+ *
+ * **Read-only and stored nowhere**, like `watch-providers`. A result is a pointer to a
+ * person page, and it is the page's own `person` action that caches a filmography and
+ * writes the credited titles into the catalogue — so searching for somebody costs no
+ * write, and tapping them costs what tapping a face in a cast strip always cost.
+ *
+ * **A user action, and charged**: one request, against the same hourly ceiling every
+ * other screen-triggered fetch observes. The query is the only caller-controlled part of
+ * the outbound URL, and it travels as a query parameter TMDB treats as text.
+ */
+async function handleSearchPeople(db: Db, query: string, limit: number, userId: string) {
+  const trimmed = query.trim();
+  // The same floor `search` applies, and for the same reason: nothing is spent below it.
+  if (trimmed.length < 2) return json({ results: [] });
+
+  const { results } = await tmdb.searchPeople(trimmed, chargeTo(db, userId));
+  return json({ results: castSearchResults(results, limit) });
 }
 
 // ---------------------------------------------------------------------------
@@ -744,6 +785,13 @@ Deno.serve(async (req) => {
         const result = await handleSimilar(db, id, caller.id);
         if (result.reason === 'not_found') return fail('BG404', 'No such title', 404);
         return json(result);
+      }
+
+      // Cast search. A user action and charged, and read-only like `watch-providers`.
+      case 'search-people': {
+        if (caller.kind !== 'user') return fail('BG403', 'search-people is a user action', 403);
+        const limit = clamp(body.limit, 20, 1, 20);
+        return await handleSearchPeople(db, String(body.query ?? ''), limit, caller.id);
       }
 
       // A user action, like detail and similar: somebody tapped a face, and no

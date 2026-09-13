@@ -32,6 +32,12 @@ import {
 import { theme } from '@/ui/tokens';
 
 type Filter = 'all' | 'movie' | 'series';
+type Role = 'cast' | 'crew';
+
+const ROLE_TABS = [
+  { id: 'cast' as const, label: 'Cast' },
+  { id: 'crew' as const, label: 'Crew' },
+];
 
 /**
  * A person, reached by tapping a face in a cast strip.
@@ -94,6 +100,8 @@ export default function PersonScreen() {
   };
 
   const [filter, setFilter] = useState<Filter>('all');
+  // Null until the reader chooses, so the page opens on whichever half they have work in.
+  const [role, setRole] = useState<Role | null>(null);
   const [shown, setShown] = useState(PAGE);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -122,14 +130,54 @@ export default function PersonScreen() {
     [rankedMovies.data],
   );
 
+  /**
+   * **Cast and Crew are two lists, never one** (2026-09-13).
+   *
+   * Cast search sends somebody here to see what an actor has been in, and the page used to
+   * answer with one list that mixed "Cobb" and "Executive Producer" — so a control labelled
+   * Cast led to directing and producing credits presented as though they were parts. Now the
+   * page opens on what they acted in, and the work behind the camera is the other half,
+   * offered only when there is some.
+   *
+   * A title they both acted in and directed is in both halves: an acting credit carries its
+   * crew jobs as `crewRole`, which is what keeps that film on the Crew side.
+   */
   const credits = detail?.credits ?? [];
+  // Appearances as themselves on talk shows and ceremonies are not parts. They are the Cast
+  // half only for somebody who has nothing else there — a presenter, a reality-TV name —
+  // whose page would otherwise say they had done nothing at all.
+  const performances = credits.filter((credit) => credit.as === 'cast' && !credit.self);
+  const castCredits = performances.length
+    ? performances
+    : credits.filter((credit) => credit.as === 'cast');
+  const crewCredits = credits.filter((credit) => credit.crewRole !== null);
+  const hasCast = castCredits.length > 0;
+  const hasCrew = crewCredits.length > 0;
+  // A chosen half is honoured only while it still has something in it: a refresh behind
+  // the reader can empty one, and with the tabs then hidden there would be no way back.
+  const chosen = role === 'cast' ? hasCast : role === 'crew' ? hasCrew : false;
+  const shownRole: Role = chosen && role ? role : hasCast || !hasCrew ? 'cast' : 'crew';
+  const roleCredits = shownRole === 'cast' ? castCredits : crewCredits;
+
   const counts = {
-    movie: credits.filter((credit) => credit.kind === 'movie').length,
-    series: credits.filter((credit) => credit.kind === 'series').length,
+    movie: roleCredits.filter((credit) => credit.kind === 'movie').length,
+    series: roleCredits.filter((credit) => credit.kind === 'series').length,
   };
   const filtered =
-    filter === 'all' ? credits : credits.filter((credit) => credit.kind === filter);
+    filter === 'all' ? roleCredits : roleCredits.filter((credit) => credit.kind === filter);
   const visible = filtered.slice(0, shown);
+
+  // How many of this half TMDB had. A row cached before the halves were counted only knows
+  // the combined figure, which is honest to show only when there is one half — and then
+  // only as "credits", because it may count work of the other kind the old cap dropped.
+  const halfTotal = shownRole === 'cast' ? detail?.castTotal : detail?.crewTotal;
+  const roleTotal = halfTotal ?? (hasCast && hasCrew ? null : (detail?.creditTotal ?? null));
+  const totalNoun =
+    halfTotal === null || halfTotal === undefined
+      ? 'credits'
+      : shownRole === 'cast'
+        ? 'acting credits'
+        : 'crew credits';
 
   // Offered only where both halves have something in them. A director with no
   // television is not asked to choose between Movies and TV — a filter with one
@@ -255,6 +303,23 @@ export default function PersonScreen() {
               title="Known for"
             />
 
+            {hasCast && hasCrew ? (
+              <View style={styles.tabs}>
+                <SegmentedTabs
+                  options={ROLE_TABS}
+                  value={shownRole}
+                  onChange={(next) => {
+                    setRole(next);
+                    // A different list: its first page, unfiltered. A Movies filter kept
+                    // across the switch could narrow the other half to nothing and read
+                    // as a person with no work there.
+                    setFilter('all');
+                    setShown(PAGE);
+                  }}
+                />
+              </View>
+            ) : null}
+
             {filterable ? (
               <View style={styles.tabs}>
                 <SegmentedTabs
@@ -279,7 +344,9 @@ export default function PersonScreen() {
                   title={credit.title}
                   year={credit.year}
                   posterUri={posterUri(credit.posterPath)}
-                  secondary={credit.role}
+                  // Their character on the Cast side and their jobs on the Crew side, so
+                  // a film they did both on never shows "Director" under Cast.
+                  secondary={shownRole === 'cast' ? credit.role : credit.crewRole}
                   tertiary={stateLabel(credit, { saved, ranked, watched: watched.data })}
                   onPress={() => router.push(`/title/${credit.mediaItemId}`)}
                   trailing={
@@ -317,12 +384,12 @@ export default function PersonScreen() {
             ) : null}
 
             {/* What is not being shown, said rather than implied. The adapter keeps
-                the forty most popular credits; somebody with three hundred should not
-                be presented as somebody with forty. */}
-            {detail.creditTotal > credits.length ? (
+                the most popular sixty acting and thirty crew credits; somebody with three
+                hundred should not be presented as somebody with sixty. */}
+            {roleTotal !== null && roleTotal > roleCredits.length ? (
               <View style={styles.more}>
                 <Text variant="caption" tone="tertiary">
-                  Showing {credits.length} of {detail.creditTotal} credits TMDB lists.
+                  {`Showing ${roleCredits.length} of ${roleTotal} ${totalNoun} TMDB lists.`}
                 </Text>
               </View>
             ) : null}

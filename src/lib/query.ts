@@ -49,6 +49,9 @@ export const queryKeys = {
   // request against a shared quota. Sharing a key would let an invalidation of the cheap
   // pass silently re-spend the expensive one.
   providerSearch: (query: string) => ['search', 'provider', query] as const,
+  // Cast search, which also spends a provider request and is keyed on the same normalised
+  // query for the same reason. Its own branch so it can never be mistaken for title rows.
+  castSearch: (query: string) => ['search', 'cast', query] as const,
   seasons: (seriesId: string) => ['seasons', seriesId] as const,
   profile: (username: string) => ['profile', username] as const,
   // The four counts the own-profile header draws. Named here rather than left inline in
@@ -99,8 +102,23 @@ export function startQueryFocusTracking() {
   return () => subscription.remove();
 }
 
-export const createQueryClient = () =>
-  new QueryClient({
+/**
+ * How long a provider search answer is kept, fresh and in memory: half an hour.
+ *
+ * Both halves matter. `staleTime` alone is not enough on Search, because every earlier
+ * query loses its last observer the moment the reader types past it, and an unobserved
+ * entry is garbage-collected after `gcTime` — five minutes by default. So backspacing to a
+ * title searched ten minutes ago was a fresh charged TMDB request for an answer the device
+ * had already held (2026-09-13).
+ *
+ * `gcTime` is set here, as defaults for the two provider keys, rather than on the hooks: a
+ * per-query value would override the test client's `gcTime: 0` and leave half-hour timers
+ * holding every screen suite open after its last test.
+ */
+export const PROVIDER_SEARCH_CACHE_MS = 30 * 60_000;
+
+export const createQueryClient = () => {
+  const client = new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: 60_000,
@@ -117,3 +135,11 @@ export const createQueryClient = () =>
       },
     },
   });
+
+  for (const key of [queryKeys.providerSearch(''), queryKeys.castSearch('')]) {
+    // The two-segment prefix, so every query under it inherits the default.
+    client.setQueryDefaults(key.slice(0, 2), { gcTime: PROVIDER_SEARCH_CACHE_MS });
+  }
+
+  return client;
+};
