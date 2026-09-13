@@ -25,7 +25,7 @@ watched, the dates they watched them, their ratings — turned into the three ta
 and their watchlist.
 
 It is **optional and always available**. It is not a step in onboarding; the first-run
-flow mentions in one sentence that it exists, and the importer itself lives at
+flow points at it once, in a small card after *Your First Five* (§6d), and the importer itself lives at
 **Settings ▸ Import from Letterboxd** and can be run at any time.
 
 ### Where the onboarding mention sits, and why it is a sentence
@@ -48,8 +48,8 @@ It would, on three counts that are facts about this codebase rather than caution
    social half of onboarding optional in the first place, and `TasteOnboarding.test.tsx`
    asserts the absence of competing buttons.
 
-So the mention is one line on the **payoff** — after the five are placed, not during the
-run, where an earlier pass had put it. Skipping it is carrying on.
+So the mention sits on the **payoff**, after the five are placed and below them, as a small
+card with no action (§6d). Skipping it is carrying on.
 
 > **Open decision.** A true two-action moment needs the flow guard to admit one route out
 > of the onboarding group. That is a change to the machine that stranded people twice
@@ -371,6 +371,65 @@ A real import, through the actual pg_cron tick rather than a hand-driven worker:
 
 ---
 
+## 6d. Physical preview QA, 2026-09-12: what it found and what changed
+
+The founder imported a real 24-film archive on the iOS preview (staging, email code) and
+completed onboarding. Seven findings. Each was assigned to the branch that owns the code.
+
+| Finding | Verdict | Owner | Change |
+|---|---|---|---|
+| Onboarding score sheet rises and vanishes | **Expected, not a regression.** Build 12 (`89a1d8c`) runs identical onboarding code: #133 removed the per-title reveal and #136 made the sheet finish presenting before it dismisses. What rose was the empty handoff frame. | `fix/onboarding-score-confirmation` (off main) | Founder decision: no sheet for an outright placement, the comparison sheet leaves on its last pair, and the picker shows "*title* landed at *score*" until the next pick. No Done tap. |
+| Imported titles show initials until opened | **Real defect.** 14 of 24 were provider-tier stubs: the search result's `poster_path` was discarded. | `feat/letterboxd-import` | `catalogueItem` keeps what the search returned; `_import_enrich_nudge` enriches poster-less imported titles in bounded batches (`20260917001400`). |
+| Profile "Movies: 5" beside ~25 watched films | **Real defect** against the locked semantics below. | `feat/letterboxd-import` | `profile_title_counts` (`20260917001600`). |
+| Importer copy reads like pipeline docs; summary ends on Done | **Real defect.** | `feat/letterboxd-import` | Copy rewrite; *Rank imported movies* opens Collection ▸ Movies ▸ Unranked. |
+| First Five sentence not noticed | **Real defect** (visual). | `feat/letterboxd-import` | A small card after the five: *Use Letterboxd? Import your history anytime from Settings.* Still no route, no modal. |
+| Unranked prompt "Not now" | **Real defect** (label). Pre-dates the importer (#38). | `fix/unranked-prompt-dismiss` (off main) | *Dismiss*; behaviour unchanged. |
+| Invite button says "Inviting…" behind the share sheet | **Real defect.** Main code (#27, reused in onboarding by #131). | `fix/invite-share-label` (off main) | *Invite friends* while the sheet is open, *Opening…* only while the link is minted, a synchronous tap guard. Minting writes no attribution. |
+
+Added in the same pass: **lifecycle notifications** (`20260917001500`), because the importer
+tells people they may close the app and nothing then told them how it went.
+
+### Profile counts (locked, founder 2026-09-12)
+
+Profile **Movies / TV = the watched collection**, imports included; a title both ranked and
+imported counts once; a title logged here and not ranked counts. Ranking surfaces are
+unchanged and still read `rankings`: Top Ranked, scores, leaderboards (imported rows
+excluded by `source <> 'imported'`), streaks, feed, community score, Taste Match (the public
+profile keeps the ranked counts for that line). The profile's Movies/TV drill-down still
+lists what is ranked, so the number can be larger than the list; that is a known follow-up,
+not a bug in the count.
+
+### Awards and goals
+
+Audited, no change needed. The thirteen collection tracks count `user_media` including
+imports and are evaluated once in `_import_settle`, silently; `rating-rascal` reads
+`rankings` and ignores imports. Goals count genuine Diary dates, as the goal contract says.
+
+### Notifications
+
+`import_started` (job leaves `pending` for `matching`), `import_completed` (done), and
+`import_failed` (failed after starting; an abandoned half-sent job says nothing). One
+trigger on the job's own transitions, two partial unique indexes (one start per job, one
+outcome per job shared by completed and failed). Exempt from the import's notification
+silence and from preferences: operational, like `follow_request` and `invite_welcome`. They
+push, and the tap opens `/settings/import?job=<id>`, which rebuilds that job's screen from the
+server; a job the account cannot read opens the importer.
+
+### Poster hydration, bounded
+
+At most 25 titles a tick, once per title (`fetched_at` later than the import), only for three
+hours after the import, guarded like the provider nudge. Provider matches need none of it now;
+the nudge covers local matches onto poster-less rows. Runtime, genres and certification still
+arrive only from a detail call (title page, or the nudge for poster-less rows).
+
+### Deploying 6d
+
+Migrations `20260917001400`–`20260917001600`, then
+`supabase functions deploy letterboxd-import tmdb-adapter push-sender --project-ref <ref>`.
+All three functions changed; push-sender without the deploy sends no import pushes.
+
+---
+
 ## 6c. Deploying it, and turning it off
 
 **The importer is the only feature here with a worker, and a worker has to be started.**
@@ -401,7 +460,7 @@ It earns that status because the worker spends provider requests and writes
 `letterboxd_matches`, which every account shares — so a bad drain is expensive and
 contagious rather than merely slow.
 
-The cost while it is off is that anybody mid-import sits on "Matching your films", which is
+The cost while it is off is that anybody mid-import sits on "Importing your Letterboxd history", which is
 the same thing an absent job costs. The 24-hour dead letter is paused with it, so jobs
 stranded during the outage settle as `failed` shortly after it comes back rather than while
 it is down.
