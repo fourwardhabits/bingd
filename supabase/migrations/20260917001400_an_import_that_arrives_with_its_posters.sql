@@ -52,9 +52,10 @@
 --
 --   * **Guarded, all of it.** No base URL, no vault key or no `pg_net`, and it does
 --     nothing. And the whole body sits inside one exception handler, not only the post: the
---     tick is one statement, so a selection that raised (a statement timeout, say) would
---     otherwise roll back the drain and the sweep beside it, settles and notifications
---     included (independent review).
+--     tick is one statement, so a selection that raised an ordinary error would otherwise
+--     roll back the drain and the sweep beside it, settles and notifications included
+--     (independent review). A cancel (`statement_timeout`) is not an error `when others`
+--     catches, and it ends the whole cron statement whatever this does.
 --
 --   * **In no fixed order.** A detail call that fails leaves `fetched_at` alone, so ordering
 --     by recency would hand the same failing ids to every tick for three hours and starve
@@ -162,7 +163,7 @@ begin
 exception when others then
   -- Anything at all, the selection included: the next tick tries again, and this must never
   -- roll back the drain and the sweep it runs beside.
-  return jsonb_build_object('status', 'failed');
+  return jsonb_build_object('status', 'failed', 'error', left(sqlerrm, 200));
 end;
 $$;
 

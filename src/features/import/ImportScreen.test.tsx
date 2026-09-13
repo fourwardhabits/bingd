@@ -15,6 +15,10 @@ import { ImportScreen } from './ImportScreen';
  * hand-made preview object that could drift from what the reader produces.
  */
 
+/** Job ids as the server issues them: a link's id must look like one to be read. */
+const JOB = '11111111-2222-4333-8444-555555555555';
+const GONE = '99999999-8888-4777-8666-555555555555';
+
 const mockBack = jest.fn();
 const mockDismissTo = jest.fn();
 const mockReplace = jest.fn();
@@ -632,12 +636,12 @@ describe('opened for a named import', () => {
 
   it('shows a still-running import, and asks about that job rather than the latest one', async () => {
     mockRpcResults = { import_status: job('matching') };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() =>
       expect(screen.getByText('Importing your Letterboxd history')).toBeTruthy(),
     );
-    expect(mockRpc).toHaveBeenCalledWith('import_status', { p_job_id: 'job-7' });
+    expect(mockRpc).toHaveBeenCalledWith('import_status', { p_job_id: JOB });
     expect(mockFrom).not.toHaveBeenCalledWith('import_jobs');
   });
 
@@ -647,7 +651,7 @@ describe('opened for a named import', () => {
     mockRpcResults = {
       import_status: job('done', { counts: { applied: 19, watched: 19, watchlist: 2 } }),
     };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
     expect(screen.getByLabelText('19 Added as watched')).toBeTruthy();
@@ -656,7 +660,7 @@ describe('opened for a named import', () => {
 
   it('shows a failed import as a failure, with a way to try again', async () => {
     mockRpcResults = { import_status: job('failed') };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() =>
       expect(screen.getByText('We couldn’t finish your Letterboxd import')).toBeTruthy(),
@@ -665,24 +669,44 @@ describe('opened for a named import', () => {
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
   });
 
-  it('says it lost track, rather than offering a new import, when the job cannot be read', async () => {
+  it('says it could not check, rather than offering a new import, when the job cannot be read', async () => {
     // A notification tapped on a bad connection. The import is fine; the importer's intro
     // would invite a second one.
     mockRpcErrors = { import_status: { message: 'network' } };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
-    await waitFor(() => expect(screen.getByText('We lost track of that import')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('We couldn’t check your import')).toBeTruthy());
     expect(screen.queryByText('Choose Letterboxd ZIP')).toBeNull();
+    // Not a claim that it is still running: a finished job reads the same way offline.
+    expect(screen.queryByText(/still running/)).toBeNull();
+
+    mockRpcErrors = {};
+    mockRpcResults = {
+      import_status: {
+        status: 'done',
+        counts: { watched: 3 },
+        completed_at: '2026-01-01T00:00:00.000Z',
+      },
+    };
+    await fireEvent.press(screen.getByText('Try again'));
+    await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
+  });
+
+  it('opens the importer for a link that carries no job id', async () => {
+    const screen = await renderWithProviders(
+      <ImportScreen surface="settings" jobId="not-a-job" />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalledWith('import_status', { p_job_id: 'not-a-job' });
   });
 
   it('opens the importer when the job is gone', async () => {
     mockRpcResults = { import_status: null };
-    const screen = await renderWithProviders(
-      <ImportScreen surface="settings" jobId="job-gone" />,
-    );
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={GONE} />);
 
     await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('import_status', { p_job_id: 'job-gone' }),
+      expect(mockRpc).toHaveBeenCalledWith('import_status', { p_job_id: GONE }),
     );
     expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy();
     expect(screen.getByText('Choose Letterboxd ZIP')).toBeTruthy();
@@ -718,7 +742,7 @@ describe('the way on', () => {
         completed_at: '2026-01-01T00:00:00.000Z',
       },
     };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() => expect(screen.getByText('Rank imported movies')).toBeTruthy());
     expect(screen.getByText('Done')).toBeTruthy();
@@ -733,7 +757,7 @@ describe('the way on', () => {
 
   it('lets somebody leave a running import without stopping it', async () => {
     mockRpcResults = { import_status: { status: 'applying', counts: {}, completed_at: null } };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() => expect(screen.getByText('Leave it running')).toBeTruthy());
     expect(screen.getByText(/Your import will keep running/)).toBeTruthy();
@@ -748,7 +772,7 @@ describe('the way on', () => {
   it('lands on Settings when a notification opened it with nothing underneath', async () => {
     mockCanGoBack = false;
     mockRpcResults = { import_status: { status: 'matching', counts: {}, completed_at: null } };
-    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId="job-7" />);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
     await waitFor(() => expect(screen.getByText('Leave it running')).toBeTruthy());
     await fireEvent.press(screen.getByText('Leave it running'));
@@ -801,7 +825,7 @@ describe('the words', () => {
     async (phase) => {
       arrangements[phase]!();
       const screen = await renderWithProviders(
-        <ImportScreen surface="settings" jobId={phase === 'entry' ? null : 'job-7'} />,
+        <ImportScreen surface="settings" jobId={phase === 'entry' ? null : JOB} />,
       );
       // The phase's own headline first, so the absences are read off the right screen.
       await waitFor(() => expect(screen.getByText(headlines[phase]!)).toBeTruthy());

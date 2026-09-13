@@ -60,7 +60,7 @@ export function ImportScreen({
   jobId?: string | null;
 }) {
   const router = useRouter();
-  const { state, pick, start, reset, watchRunning } = useImport(surface, jobId);
+  const { state, pick, start, reset, watchRunning, recheck } = useImport(surface, jobId);
   const [howTo, setHowTo] = useState(false);
 
   /**
@@ -79,6 +79,7 @@ export function ImportScreen({
           onStart={(preview) => void start(preview)}
           onReset={reset}
           onWatch={watchRunning}
+          onRecheck={recheck}
           onHowTo={() => setHowTo(true)}
           onLeave={leave}
           onRank={() => router.dismissTo(unrankedMovies())}
@@ -98,6 +99,7 @@ function Body({
   onHowTo,
   onLeave,
   onRank,
+  onRecheck,
 }: {
   state: ImportPhase;
   onPick: () => void;
@@ -107,6 +109,7 @@ function Body({
   onHowTo: () => void;
   onLeave: () => void;
   onRank: () => void;
+  onRecheck: () => void;
 }) {
   switch (state.phase) {
     case 'idle':
@@ -170,8 +173,18 @@ function Body({
       return (
         <Failed
           failure={state.failure}
-          onRetry={state.preview ? () => onStart(state.preview!) : onPick}
-          retryLabel={state.preview ? 'Try again' : 'Choose Letterboxd ZIP'}
+          onRetry={
+            state.failure.kind === 'unchecked'
+              ? onRecheck
+              : state.preview
+                ? () => onStart(state.preview!)
+                : onPick
+          }
+          retryLabel={
+            state.failure.kind === 'unchecked' || state.preview
+              ? 'Try again'
+              : 'Choose Letterboxd ZIP'
+          }
           onHowTo={onHowTo}
           onReset={onReset}
           onWatch={onWatch}
@@ -181,7 +194,7 @@ function Body({
 }
 
 /**
- * The three steps, said as Letterboxd labels them. The file distinction is the part people
+ * The four steps, from Letterboxd's Settings to this screen. The file distinction is the part people
  * get wrong: the export is a ZIP, and a folder or a single CSV will be refused.
  */
 const STEPS = [
@@ -434,6 +447,14 @@ function explain(failure: ImportFailure): {
       title: 'An import is already running',
       detail:
         'This file wasn’t sent. Your earlier import is still running, even with the app closed, and bingd. runs one import at a time. Come back when it’s done to import this file.',
+      showHowTo: false,
+    };
+  }
+
+  if (failure.kind === 'unchecked') {
+    return {
+      title: 'We couldn’t check your import',
+      detail: 'Check your connection and try again.',
       showHowTo: false,
     };
   }

@@ -136,6 +136,12 @@ export type ImportFailure =
       readonly status?: ImportJobStatus;
     }
   /**
+   * A notification named a job and the read of it failed: a bad connection, not an
+   * answer. Nothing is known about the job, so the screen says it could not check and
+   * offers to ask again, rather than guessing that the import is still running.
+   */
+  | { readonly kind: 'unchecked' }
+  /**
    * The import is running and this client has lost sight of it.
    *
    * Not a failed import — the work carries on either way. It is the screen admitting it
@@ -221,6 +227,8 @@ async function readJob(jobId: string): Promise<ImportJobStatus | null> {
  * (independent review). `import_status` answers a job this account cannot see with no row
  * and no error, which is the one answer that means gone.
  */
+const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | 'unreadable'> {
   try {
     const { data, error } = await supabase
@@ -316,6 +324,8 @@ const phaseForEnded = (status: ImportJobStatus): ImportPhase =>
 export function useImport(surface: ImportSurface, jobId?: string | null) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
+  /** Bumped by `recheck`, so the restore effect asks about the named job again. */
+  const [checks, setChecks] = useState(0);
   const jobRef = useRef<string | null>(null);
   /**
    * Guards every `setState` after an await. A person who backs out of the importer mid-read
@@ -355,13 +365,15 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     let cancelled = false;
 
     void (async () => {
-      if (jobId) {
+      // A link that does not carry a job id at all (hand-typed, or truncated) names nothing,
+      // so it opens the importer rather than a read that can only fail.
+      if (jobId && JOB_ID.test(jobId)) {
         const named = await readNamedJob(jobId);
         if (cancelled || !alive.current) return;
         if (named === 'unreadable') {
           setState((current) =>
             current.phase === 'idle'
-              ? { phase: 'failed', failure: { kind: 'unknown' } }
+              ? { phase: 'failed', failure: { kind: 'unchecked' } }
               : current,
           );
           return;
@@ -408,7 +420,7 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [jobId, queryClient]);
+  }, [jobId, queryClient, checks]);
 
   const settle = useCallback((next: ImportPhase) => {
     if (alive.current) setState(next);
@@ -791,5 +803,15 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     });
   }, []);
 
-  return { state, pick, start, reset, watchRunning } as const;
+  /** Ask about the named job again, after a read that failed. */
+  const recheck = useCallback(() => {
+    setState((current) =>
+      current.phase === 'failed' && current.failure.kind === 'unchecked'
+        ? { phase: 'idle' }
+        : current,
+    );
+    setChecks((n) => n + 1);
+  }, []);
+
+  return { state, pick, start, reset, watchRunning, recheck } as const;
 }
