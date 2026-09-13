@@ -1,5 +1,8 @@
 # Letterboxd importer — physical QA
 
+> **Superseded for the next pass by [preview-qa-round-2.md](preview-qa-round-2.md)**, which
+> carries the fixes from the 2026-09-12 physical QA. This page is the record of the first round.
+
 **Lane:** preview. **Backend:** staging `fjxhcbowoxuzulwirzyr`. **Never production.**
 
 The preview app installs *beside* the shipped one: plum icon, `app.bingd.preview`,
