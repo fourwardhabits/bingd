@@ -57,11 +57,11 @@ import { theme } from '@/ui/tokens';
 const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
 
 const STEPS = [
-  'Open letterboxd.com in a browser and sign in — the export lives on the website.',
-  'Go to Settings, then the Data tab.',
-  'Choose Export Your Data. Letterboxd builds a .zip of your account.',
-  'It downloads when it is ready. A large account can take a minute, and Letterboxd may send you a link by email instead.',
-  'Save the .zip somewhere your phone can reach — Files, Downloads or Drive all work.',
+  'Open letterboxd.com in a browser and sign in. The export is on the website, not in the app.',
+  'Go to Settings, then Data.',
+  'Choose Export your data. Letterboxd makes a ZIP of your account.',
+  'Download the ZIP. A big account can take a minute, and Letterboxd may email you a link instead.',
+  'Save it somewhere your phone can reach, like Files, Downloads, or Drive.',
 ] as const;
 
 export function HowToExportSheet({
@@ -81,7 +81,7 @@ export function HowToExportSheet({
   return (
     <Sheet visible={visible} onClose={onClose} label="How to export from Letterboxd">
       <View style={styles.body}>
-        <Text variant="headline">Getting your export</Text>
+        <Text variant="headline">Getting your Letterboxd file</Text>
 
         <View style={styles.steps}>
           {STEPS.map((step, index) => (
@@ -107,8 +107,8 @@ export function HowToExportSheet({
             color={theme.text.tertiary}
           />
           <Text variant="footnote" tone="tertiary" style={styles.noteText}>
-            Choose the .zip file itself. If your computer unzipped it for you, use the
-            original download rather than the folder.
+            Choose the ZIP file itself. If your computer unzipped it, use the original
+            download, not the folder.
           </Text>
         </View>
 

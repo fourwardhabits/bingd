@@ -57,5 +57,12 @@ export type TabRoute = (typeof TAB_ROUTES)[keyof typeof TAB_ROUTES];
 export const peopleDiscovery = (from: 'onboarding' | 'sparse_feed') =>
   ({ pathname: TAB_ROUTES.feed, params: { show: 'people', from } }) as const;
 
+/**
+ * Collection, opened on Movies and Unranked: where "Rank imported movies" leads from the end
+ * of a Letterboxd import. `CollectionScreen` applies it and clears it.
+ */
+export const unrankedMovies = () =>
+  ({ pathname: TAB_ROUTES.collection, params: { show: 'unranked' } }) as const;
+
 /** Somewhere a screen can send a person: a tab, or the one tab state that has a name. */
 export type Destination = TabRoute | ReturnType<typeof peopleDiscovery>;

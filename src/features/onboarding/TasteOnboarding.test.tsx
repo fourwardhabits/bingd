@@ -939,9 +939,25 @@ describe('Your First Five', () => {
   it('mentions the Letterboxd import once the five are placed', async () => {
     const view = await arrive();
 
-    expect(view.getByText(/Already on Letterboxd/)).toBeTruthy();
+    expect(view.getByText('Use Letterboxd?')).toBeTruthy();
+    expect(view.getByText('Import your history anytime from Settings.')).toBeTruthy();
     // Still no fork: it names Settings and offers no way out of the flow.
-    expect(view.queryByRole('button', { name: /Letterboxd/ })).toBeNull();
+    expect(view.queryByRole('button', { name: /Letterboxd|Settings/ })).toBeNull();
+  });
+
+  /**
+   * **Below the five, not above them** (physical QA, 2026-09-12). The first version was a
+   * footnote under the intro that the founder never noticed; the card sits after the list
+   * so it registers without standing between somebody and their own ranking.
+   */
+  it('puts the Letterboxd card after the fifth row', async () => {
+    const view = await arrive();
+    await waitFor(() => expect(view.getByText('Fifth')).toBeTruthy());
+
+    const order = view
+      .getAllByText(/^(First|Fifth|Use Letterboxd\?)$/)
+      .map((n) => n.props.children);
+    expect(order).toEqual(['First', 'Fifth', 'Use Letterboxd?']);
   });
 
   it('says what the five bought without explaining the algorithm again', async () => {

@@ -34,9 +34,11 @@
  * makes the completion count a deliberate undercount.
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import { File } from 'expo-file-system';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { invalidateAfterImport } from '@/features/collection/invalidate';
 import { track, type ImportSelectOutcome, type ImportSurface } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 
@@ -263,7 +265,27 @@ const completedRecently = (completedAt: string | null): boolean => {
   return Number.isFinite(at) && Date.now() - at < RECENT_COMPLETION_MS;
 };
 
-export function useImport(surface: ImportSurface) {
+/**
+ * Where a job that has already ended belongs on this screen.
+ *
+ * **A failed job is a failure, not a summary.** The restore used to test only
+ * `completedAt`, which a dead-lettered job has too, so an import that failed while
+ * somebody was away reopened under "Your Letterboxd history is in" with its empty counts.
+ * That was invisible until a notification started sending people to exactly that job.
+ */
+const phaseForEnded = (status: ImportJobStatus): ImportPhase =>
+  status.status === 'failed'
+    ? { phase: 'failed', failure: { kind: 'server' } }
+    : { phase: 'done', status };
+
+/**
+ * @param jobId The job a notification named (`/settings/import?job=<id>`), when the screen
+ *   was opened for one. That job is shown however long ago it ended, because somebody asked
+ *   for it by name; a job id this account cannot read (deleted, or not theirs) opens the
+ *   importer, which is the safe place for a tap on something that is gone.
+ */
+export function useImport(surface: ImportSurface, jobId?: string | null) {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
   const jobRef = useRef<string | null>(null);
   /**
@@ -304,6 +326,23 @@ export function useImport(surface: ImportSurface) {
     let cancelled = false;
 
     void (async () => {
+      if (jobId) {
+        const named = await readJob(jobId);
+        if (cancelled || !alive.current) return;
+        // Not found reads the same as a failed read here: the importer, not an error. A
+        // `pending` job was never handed over, so it has nothing to show either.
+        if (named === null || named.status === 'pending') return;
+        jobRef.current = jobId;
+        setState((current) =>
+          current.phase === 'idle'
+            ? named.completedAt !== null
+              ? phaseForEnded(named)
+              : { phase: 'working', status: named }
+            : current,
+        );
+        return;
+      }
+
       const live = await findLiveJob();
       if (cancelled || !alive.current || live === null) return;
       if (live.status.status === 'pending') return;
@@ -317,7 +356,7 @@ export function useImport(surface: ImportSurface) {
       setState((current) =>
         current.phase === 'idle'
           ? finished
-            ? { phase: 'done', status: live.status }
+            ? phaseForEnded(live.status)
             : { phase: 'working', status: live.status }
           : current,
       );
@@ -326,7 +365,7 @@ export function useImport(surface: ImportSurface) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [jobId]);
 
   const settle = useCallback((next: ImportPhase) => {
     if (alive.current) setState(next);
@@ -649,11 +688,16 @@ export function useImport(surface: ImportSurface) {
               (status.counts.stragglers ?? 0),
           },
         });
+        // The history just arrived on the server. Collection, the profile's counts and the
+        // awards shelf are all holding what was there before it.
+        invalidateAfterImport(queryClient);
         settle({ phase: 'done', status });
         return;
       }
 
       if (status.status === 'failed') {
+        // Part of it may have landed before the job failed. See the failure copy.
+        invalidateAfterImport(queryClient);
         settle({ phase: 'failed', failure: { kind: 'server' } });
         return;
       }
@@ -671,7 +715,7 @@ export function useImport(surface: ImportSurface) {
     // `state.phase` and nothing else — the effect reads only that and `jobRef`, so this is
     // exhaustive as well as deliberate. Depending on the polled `status` would tear down and
     // rebuild the loop on every tick, stacking a fresh timer each time.
-  }, [state.phase, settle]);
+  }, [state.phase, settle, queryClient]);
 
   const openedRef = useRef(false);
   useEffect(() => {

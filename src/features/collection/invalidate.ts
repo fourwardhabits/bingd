@@ -49,6 +49,10 @@ export function invalidateAfterCollectionChange(
   // still reading "In watchlist".
   invalidate(queryKeys.collection(userId));
 
+  // The profile's Movies and TV count the watched collection since 20260917001600, so a
+  // log or an unlog moves them as surely as a ranking does.
+  invalidate(queryKeys.profileStats(userId));
+
   // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
   // date-ordered read with a key of its own. Same reason as the line above: the trigger
   // in `20260815040000` takes a title off the watchlist the moment it is logged or
@@ -227,6 +231,31 @@ export function invalidateAfterCollectionChange(
  * page also refreshes the title, Recommendations also refreshes its slate — because
  * folding those in would make every bookmark press refetch surfaces it cannot change.
  */
+/**
+ * Everything a finished Letterboxd import can have changed, for whoever is signed in.
+ *
+ * An import writes a whole history at once on the server, with no client write for any of
+ * it to hang an invalidation on, so the screen that sees the job end is what tells the
+ * cache. Keyed by prefix rather than by account because the importer does not hold the
+ * account id, and every one of these is per-account data the next read re-fetches.
+ *
+ * Rankings are not here: an import writes none.
+ */
+export function invalidateAfterImport(queryClient: QueryClient) {
+  for (const prefix of [
+    'collection',
+    'profile-stats',
+    'profile',
+    'profile-watchlist',
+    'watched',
+    'goals',
+    'awards',
+    'notifications',
+  ]) {
+    void queryClient.invalidateQueries({ queryKey: [prefix] });
+  }
+}
+
 export function invalidateAfterWatchlistChange(queryClient: QueryClient, userId: string) {
   void queryClient.invalidateQueries({
     queryKey: [...queryKeys.collection(userId), 'watchlist'],
