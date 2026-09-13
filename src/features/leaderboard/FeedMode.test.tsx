@@ -584,18 +584,45 @@ describe('switching metrics keeps the board still', () => {
     });
   });
 
-  it('spins for a real pull on the board, and stops when it is answered', async () => {
+  it('spins for a real pull on the board, until both reads are answered', async () => {
+    /**
+     * Review 82b: the first version only waited for `false`, which the old
+     * `isRefetching` binding would also have reached. So both re-reads are parked
+     * independently and the spinner is observed at each step: on at the pull, still on with
+     * one answer in, off only when the second arrives.
+     */
     mockBoard['titles|month'] = [entry()];
     const view = await open();
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
+    const releases: Record<string, () => void> = {};
+    const base = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name !== 'leaderboard' && name !== 'my_leaderboard_standing') return base(name, args);
+      return new Promise((resolve) => {
+        releases[name] = () => resolve(base(name, args));
+      });
+    });
+
     const control = () => view.getByTestId('feed-scroll').props.refreshControl;
     await act(async () => {
       control().props.onRefresh();
     });
+    expect(control().props.refreshing).toBe(true);
+    await waitFor(() => expect(Object.keys(releases).sort()).toEqual(['leaderboard', 'my_leaderboard_standing']));
+
+    await act(async () => {
+      releases.leaderboard!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(control().props.refreshing).toBe(true);
+
+    await act(async () => {
+      releases.my_leaderboard_standing!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     await waitFor(() => expect(control().props.refreshing).toBe(false));
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'leaderboard').length).toBeGreaterThan(1);
   });
 
   it('never pins a standing beside the previous metric’s rows', async () => {
