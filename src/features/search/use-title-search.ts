@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { queryKeys } from '@/lib/query';
 import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
-import { AdapterError, searchProvider } from '@/lib/tmdb-adapter';
+import {
+  AdapterError,
+  searchProviderWithPeople,
+  type AdapterSearchResult,
+  type CastSearchResult,
+} from '@/lib/tmdb-adapter';
 
 import {
   clearProviderCooldown,
@@ -60,6 +65,9 @@ const DEBOUNCE_MS = 180;
  * founder call: the quota it protects is shared by every account.
  */
 export const PROVIDER_DEBOUNCE_MS = 800;
+
+/** One stable empty list, so a screen memoising on it does not recompute every render. */
+const NO_PEOPLE: CastSearchResult[] = [];
 
 /** Below this every query matches half the catalogue and none of it is useful. */
 const MIN_QUERY_LENGTH = 2;
@@ -239,13 +247,24 @@ export function useTitleSearch(
     retry: false,
     queryFn: async () => {
       try {
-        return await searchProvider(providerQuery, PROVIDER_RESULTS);
+        const answer = await searchProviderWithPeople(providerQuery, PROVIDER_RESULTS);
+        // Tolerates a bare title list, which is what a stubbed adapter hands back.
+        return Array.isArray(answer)
+          ? { titles: answer as AdapterSearchResult[], people: [] as CastSearchResult[] }
+          : answer;
       } catch (cause) {
         if (cause instanceof AdapterError && cause.isRateLimit) noteProviderRateLimited();
         throw cause;
       }
     },
   });
+
+  // The latest provider answer, held across the keystrokes before the next one lands.
+  // Adjusted during render rather than in an effect, which is React's pattern for state
+  // derived from a changing input: no extra commit, and no frame showing the old value.
+  const [held, setHeld] = useState(provider.data);
+  if (provider.data && provider.data !== held) setHeld(provider.data);
+  const heldPeople = held?.people ?? NO_PEOPLE;
 
   /** The server refused this hour, whether this query was the one refused or not. */
   // Not while this query's own answer is already held: a cached provider answer is still
@@ -256,7 +275,7 @@ export function useTitleSearch(
       (provider.error instanceof AdapterError && provider.error.isRateLimit));
 
   const merged = useMemo(() => {
-    const remote = provider.data ?? [];
+    const remote = provider.data?.titles ?? [];
 
     /**
      * Stale local rows are dropped the moment the provider *settles* on this query.
@@ -282,7 +301,7 @@ export function useTitleSearch(
     const providerSettled =
       providerEnabled && !provider.isFetching && (provider.isFetched || provider.isError);
     const local = result.isPlaceholderData && providerSettled ? [] : result.data ?? [];
-    if (!remote.length) return local;
+    if (!remote.length) return { rows: local, localCount: local.length };
 
     // Local ordering wins, because search_titles ranks exact and prefix matches
     // deliberately (20260814040000 §3) and TMDB's relevance does not know what the
@@ -293,10 +312,13 @@ export function useTitleSearch(
     const remoteById = new Map(remote.map((row) => [row.id, row]));
     const seen = new Set(local.map((row) => row.id));
 
-    return [
-      ...local.map((row) => remoteById.get(row.id) ?? row),
-      ...remote.filter((row) => !seen.has(row.id)),
-    ];
+    return {
+      rows: [
+        ...local.map((row) => remoteById.get(row.id) ?? row),
+        ...remote.filter((row) => !seen.has(row.id)),
+      ],
+      localCount: local.length,
+    };
   }, [
     result.data,
     result.isPlaceholderData,
@@ -311,7 +333,22 @@ export function useTitleSearch(
     ...result,
     /** True while the user has typed too little to search, which is not an empty result. */
     idle: !enabled,
-    results: merged,
+    results: merged.rows,
+    /**
+     * How many of `results` came from the local pass: always the first ones, since
+     * provider-only titles are appended after them.
+     *
+     * The All page lets at most this many titles lead its Cast and Users sections. A
+     * provider title arrives a second or more after a section may already be drawn, and
+     * counting it into the lead would push that section down under a reader's thumb.
+     */
+    localResultCount: merged.localCount,
+    /**
+     * Whether the local pass has answered at all, for any query this session, or failed.
+     * Until it has, the All page draws no sections: local titles inserted above an account
+     * section that was already on screen would move it just as a provider title would.
+     */
+    localAnswered: result.data !== undefined || result.isError,
     /**
      * Retries **both** passes, which is what "Try again" has to mean.
      *
@@ -340,6 +377,18 @@ export function useTitleSearch(
      *  already on screen and must not be replaced by its spinner or its failure. */
     providerSearching: provider.isFetching,
     providerRateLimited: rateLimited,
+    /**
+     * The performers the provider named, for the Cast section under All.
+     *
+     * **The last answer's, until the next one lands.** The provider key lags the field by
+     * its debounce, and dropping the performers on every keystroke made the Cast section
+     * vanish and come back a second later while somebody refined a name, moving the rows
+     * below it each time (independent review). They are safe to hold because they are
+     * never shown ungated: `all-sections.ts` checks each against the query on screen, so
+     * "leonardo dicaprio" narrowed to "leonardo" keeps DiCaprio, and a different search
+     * entirely matches nobody and shows no section.
+     */
+    providerPeople: wide ? heldPeople : NO_PEOPLE,
     /** When wider search comes back, while it is rate limited; otherwise null. The next
      *  top of the hour, which is when the server's per-account window resets. */
     providerAvailableAt: rateLimited ? cooldownUntil : null,

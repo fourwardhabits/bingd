@@ -62,8 +62,7 @@ jest.mock('@/lib/supabase', () => ({
         gt: () => chain,
         single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: rows(), error: null }),
+        then: (resolve: (value: unknown) => unknown) => resolve({ data: rows(), error: null }),
       };
       return chain;
     },
@@ -119,6 +118,9 @@ jest.mock('@/lib/tmdb-adapter', () => {
   return {
     AdapterError: MockAdapterError,
     searchProvider: (...args: unknown[]) => mockSearchProvider(...args),
+    // The hook asks for titles and performers together; a bare title list from the stub is
+    // read as titles with no performers.
+    searchProviderWithPeople: (...args: unknown[]) => mockSearchProvider(...args),
     // The season picker may ask for a series to be re-read when its season list has gone
     // stale (2026-08-30). Stubbed to "nothing was written" so the screen tests stay about
     // the screen; the freshness rule itself is asserted in `use-enrichment.test.ts`.
@@ -327,7 +329,9 @@ describe('before anything is typed', () => {
     mockPrefs.set('user-1.search.recent', ['breaking bad']);
     const view = await renderWithProviders(<LogScreen />);
 
-    await waitFor(() => expect(view.getByLabelText('Search again for breaking bad')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('Search again for breaking bad')).toBeTruthy(),
+    );
     await fireEvent.press(view.getByLabelText('Search again for breaking bad'));
 
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
@@ -477,7 +481,9 @@ describe('when the wider search cannot answer', () => {
     await settle();
 
     await waitFor(() =>
-      expect(view.getByText('The wider search did not answer, so this may not be everything.')).toBeTruthy(),
+      expect(
+        view.getByText('The wider search did not answer, so this may not be everything.'),
+      ).toBeTruthy(),
     );
     // The local rows are still there and still usable — the message is a footer, not a
     // replacement for the answer the app does have.
@@ -589,31 +595,85 @@ describe('finding people', () => {
     expect(view.queryByText('People')).toBeNull();
   });
 
-  it('interleaves people above the titles in one list, with no section heading', async () => {
-    withPeople([anna]);
-    const view = await search('anna');
-    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+  /** Render order of the rows and section headers that matter, by accessible name. */
+  const order = (view: Awaited<ReturnType<typeof search>>, pattern: RegExp) =>
+    view.getAllByLabelText(pattern).map((node) => node.props.accessibilityLabel as string);
 
+  /**
+   * **Under All, accounts are a section, not rows mixed into the titles** (founder,
+   * 2026-09-13). Titles lead; a meaningful account match follows under a Users header.
+   */
+  it('shows a partial account match as a Users section after the titles', async () => {
+    // The account answer is held back until the titles are on screen. FlashList recycles
+    // cells, so a section that rendered first keeps its early position in the host tree
+    // even after rows are inserted above it; on a device the layout is by data order.
+    // The order rule itself is asserted directly in `all-sections.test.ts`.
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [series, film], error: null });
+      if (fn === 'search_users') {
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ data: [anna], error: null }), 600),
+        );
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
+    const view = await search('ann');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
-    // Titles are still there and still the body of the list.
-    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
-    // No "People" heading — the row's own shape is what says it is a person.
-    // (`SectionHeader` exposes its title as the accessible name; the chip does not.)
-    expect(view.queryByLabelText('People')).toBeNull();
+
+    // The titles, unheaded as they always were, then the Users section below them.
+    expect(
+      order(view, /^(Titles|Users|Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/),
+    ).toEqual([SERIES_ROW, FILM_ROW, 'Users', 'Anna Rivers, @anna']);
+    // A restrained section header, announced as a header.
+    expect(view.getByLabelText('Users').props.accessibilityRole).toBe('header');
   });
 
-  it('orders the one list people first, titles after', async () => {
-    withPeople([anna]);
+  it('keeps an exact handle below the leading titles, never above rows already drawn', async () => {
+    // Inserting a section above titles a reader may be about to tap moves them under
+    // their thumb. Only an `@` query leads with Users.
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [series, film], error: null });
+      if (fn === 'search_users') {
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ data: [anna], error: null }), 600),
+        );
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
     const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+
+    expect(order(view, /^(Users|Anna Rivers, @anna|Inception, 2010)/)).toEqual([
+      FILM_ROW,
+      'Users',
+      'Anna Rivers, @anna',
+    ]);
+  });
+
+  it('leads with Users for an @ query, with the titles below under their own header', async () => {
+    withPeople([anna]);
+    const view = await search('@anna');
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    // Tree order is render order: the person row precedes every title row.
-    const labels = view
-      .getAllByLabelText(/^(Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/)
-      .map((node) => node.props.accessibilityLabel as string);
-    expect(labels[0]).toBe('Anna Rivers, @anna');
-    expect(labels).toContain(FILM_ROW);
+    expect(order(view, /^(Titles|Users|Anna Rivers, @anna|Inception, 2010)/)).toEqual([
+      'Users',
+      'Anna Rivers, @anna',
+      'Titles',
+      FILM_ROW,
+    ]);
+  });
+
+  it('leaves an ordinary title search exactly as it was, with no section headers', async () => {
+    withPeople([]);
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    expect(view.queryByLabelText('Titles')).toBeNull();
+    expect(view.queryByLabelText('Users')).toBeNull();
+    expect(view.queryByLabelText('Cast')).toBeNull();
   });
 
   it('keeps a middle-of-the-handle match out of a plain query', async () => {
@@ -653,12 +713,10 @@ describe('finding people', () => {
   });
 
   /**
-   * See all is a display cap, not a route and not a second request.
-   *
-   * Everything it reveals is already in hand, so it cannot fail, cannot spend a round
-   * trip, and cannot land somebody on a screen with its own empty state.
+   * **See all selects the Users chip**, where every account already is. It replaced
+   * "See all N people", which widened the list in place.
    */
-  it('previews three members and reveals the rest in place', async () => {
+  it('previews three accounts, and See all selects Users', async () => {
     const many = Array.from({ length: 5 }, (_, index) => ({
       id: `user-${index}`,
       username: `anna${index}`,
@@ -670,24 +728,22 @@ describe('finding people', () => {
     const view = await search('anna');
 
     await waitFor(() => expect(view.getByLabelText('Anna 0, @anna0')).toBeTruthy());
-    expect(view.queryByLabelText('Anna 4, @anna4')).toBeNull();
+    expect(view.getByLabelText('Anna 2, @anna2')).toBeTruthy();
+    expect(view.queryByLabelText('Anna 3, @anna3')).toBeNull();
 
-    // The row names the total it reveals — with no section header to carry a "See
-    // all" action, the expansion is a row of the list itself.
-    await fireEvent.press(view.getByLabelText('See all 5 people'));
+    await fireEvent.press(view.getByLabelText('See all users'));
 
     await waitFor(() => expect(view.getByLabelText('Anna 4, @anna4')).toBeTruthy());
+    // The Users chip is now the selected one, and the titles are gone with it.
+    expect(view.getByRole('button', { name: 'Users' }).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
     // No second round trip: the query already asked for the server's ceiling.
     const calls = mockRpc.mock.calls.filter(([fn]: [string]) => fn === 'search_users');
-    expect(calls.every(([, args]: [string, { p_limit: number }]) => args.p_limit === 30)).toBe(true);
-  });
-
-  it('offers no See all when the preview already holds everybody', async () => {
-    withPeople([anna]);
-    const view = await search('anna');
-
-    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
-    expect(view.queryByText(/^See all/)).toBeNull();
+    expect(calls.every(([, args]: [string, { p_limit: number }]) => args.p_limit === 30)).toBe(
+      true,
+    );
   });
 
   it('says nothing about members when nobody matched', async () => {
@@ -712,7 +768,9 @@ describe('finding people', () => {
     withPeople([{ ...anna, visibility: 'private' }]);
     const view = await search('anna');
 
-    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna, Private')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('Anna Rivers, @anna, Private')).toBeTruthy(),
+    );
   });
 
   it('prefers the relationship to the word Private, where there is one', async () => {
@@ -724,11 +782,16 @@ describe('finding people', () => {
     );
     const view = await search('anna');
 
-    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna, Following')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('Anna Rivers, @anna, Following')).toBeTruthy(),
+    );
   });
 
   it('says nothing extra on a public account with no relationship', async () => {
-    withPeople([anna], [{ user_id: 'user-anna', following: null, followed_by: null, blocked: false }]);
+    withPeople(
+      [anna],
+      [{ user_id: 'user-anna', following: null, followed_by: null, blocked: false }],
+    );
     const view = await search('anna');
 
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
@@ -741,14 +804,19 @@ describe('finding people', () => {
     );
     const view = await search('anna');
 
-    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna, Following')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('Anna Rivers, @anna, Following')).toBeTruthy(),
+    );
     // A Follow button in a search result is one mis-tap from a relationship the user
     // did not mean to start, and the other person is notified either way.
     expect(view.queryByText('Follow')).toBeNull();
   });
 
   it('says nothing where there is no relationship yet', async () => {
-    withPeople([anna], [{ user_id: 'user-anna', following: null, followed_by: null, blocked: false }]);
+    withPeople(
+      [anna],
+      [{ user_id: 'user-anna', following: null, followed_by: null, blocked: false }],
+    );
     const view = await search('anna');
 
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
@@ -887,6 +955,7 @@ describe('Cast search', () => {
     name: 'Leonardo DiCaprio',
     profilePath: '/leo.jpg',
     knownFor: ['Inception', 'Titanic', 'The Revenant'],
+    popularity: 7.8,
   };
 
   const chooseCast = async (term: string) => {
@@ -929,6 +998,125 @@ describe('Cast search', () => {
     expect(mockSearchCast).not.toHaveBeenCalled();
   });
 
+  /**
+   * **Under All, the performers a query plainly means are a Cast section** (founder,
+   * 2026-09-13), built from the performers the title search's own provider answer named,
+   * so it costs no request of its own.
+   */
+  const LEO_ROW = 'Leonardo DiCaprio, known for Inception, Titanic, The Revenant';
+  const castOrder = (view: Awaited<ReturnType<typeof search>>) =>
+    view
+      .getAllByLabelText(
+        /^(Titles|Cast|Leonardo DiCaprio, known for|Inception, 2010|Breaking Bad, 2008)/,
+      )
+      .map((node) => node.props.accessibilityLabel as string);
+
+  it('shows a performer’s whole name as a Cast section on the first screen, at no extra request', async () => {
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    const view = await search('leonardo dicaprio');
+    await settle();
+
+    await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
+    // Below the two leading titles, never inserted above rows already drawn.
+    expect(castOrder(view)).toEqual([SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
+    expect(view.getByLabelText('Cast').props.accessibilityRole).toBe('header');
+    expect(mockSearchCast).not.toHaveBeenCalled();
+  });
+
+  it('shows a partial performer match as a Cast section after the titles', async () => {
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    const view = await search('leo');
+    await settle();
+
+    await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
+    expect(castOrder(view)).toEqual([SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
+  });
+
+  it('leaves a weak performer match off All entirely', async () => {
+    mockSearchProvider.mockResolvedValue({
+      titles: [],
+      people: [{ id: 1, name: 'Aggy Dune', profilePath: null, knownFor: [], popularity: 0.4 }],
+    });
+    const view = await search('dune');
+    await settle();
+    // The provider did answer with that person, so an absent section is the gate's doing.
+    await waitFor(() => expect(mockSearchProvider).toHaveBeenCalledWith('dune', 20));
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    expect(view.queryByLabelText('Cast')).toBeNull();
+    expect(view.queryByLabelText(/^Aggy Dune/)).toBeNull();
+  });
+
+  it('opens a performer from All on their filmography', async () => {
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    const view = await search('leonardo dicaprio');
+    await settle();
+    const row = await waitFor(() => view.getByLabelText(LEO_ROW));
+
+    await fireEvent.press(row);
+
+    expect(mockPush).toHaveBeenCalledWith('/person/6193');
+  });
+
+  it('See all on the Cast section selects Cast', async () => {
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    mockSearchCast.mockResolvedValue([leo]);
+    const view = await search('leonardo dicaprio');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText('See all cast')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('See all cast'));
+    await settle();
+
+    expect(view.getByRole('button', { name: 'Cast' }).props.accessibilityState).toMatchObject({
+      selected: true,
+    });
+    await waitFor(() => expect(mockSearchCast).toHaveBeenCalledWith('leonardo dicaprio'));
+    // The Cast chip's own list, not the section: no Titles header, no title rows.
+    expect(view.queryByLabelText('Titles')).toBeNull();
+    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
+  });
+
+  it('names each See all for what it opens when Cast and Users are both on the page', async () => {
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [series, film], error: null });
+      if (fn === 'search_users') {
+        return Promise.resolve({
+          data: [
+            {
+              id: 'u-leo',
+              username: 'leonardo',
+              display_name: 'Leo Fan',
+              avatar_path: null,
+              visibility: 'public',
+            },
+          ],
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
+    const view = await search('leonardo');
+    await settle();
+
+    await waitFor(() => expect(view.getByLabelText('See all cast')).toBeTruthy());
+    expect(view.getByLabelText('See all users')).toBeTruthy();
+  });
+
+  it('draws no sections under Movies, which is titles only', async () => {
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    const view = await search('leonardo dicaprio');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Movies'));
+
+    await waitFor(() => expect(view.queryByLabelText(LEO_ROW)).toBeNull());
+    expect(view.queryByLabelText('Cast')).toBeNull();
+    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+  });
+
   it('spends no title provider request while narrowed to Cast or Users', async () => {
     const view = await search('le');
     await waitFor(() => expect(view.getByText('Users')).toBeTruthy());
@@ -955,7 +1143,9 @@ describe('Cast search', () => {
 
     await waitFor(() => expect(view.getByText('Too many searches')).toBeTruthy());
     expect(
-      view.getByText(/^Cast search is back at .+\. Titles in your catalogue still show under All\.$/),
+      view.getByText(
+        /^Cast search is back at .+\. Titles in your catalogue still show under All\.$/,
+      ),
     ).toBeTruthy();
     // A person may still ask: the device cannot know about another account's hour.
     expect(view.getByText('Try again')).toBeTruthy();
@@ -1186,9 +1376,9 @@ describe('saving from a search result', () => {
     // the next one.
     settle({ data: { status: 'ok' }, error: null });
     await waitFor(() =>
-      expect(
-        view.getByLabelText(bookmark('Inception')).props.accessibilityState.disabled,
-      ).toBe(false),
+      expect(view.getByLabelText(bookmark('Inception')).props.accessibilityState.disabled).toBe(
+        false,
+      ),
     );
     expect(callsTo('set_watchlist')).toHaveLength(1);
   });

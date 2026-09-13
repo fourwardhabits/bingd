@@ -128,7 +128,7 @@ export function meaningfulMatch(user: UserResult, query: string): boolean {
 const FROM = 'áàâäãåāąăæçćčđďðéèêëēęěğíìîïīıłľñńňóòôöõøōőœřšśşßťțþúùûüūůűýÿžźż';
 const TO = 'aaaaaaaaaacccdddeeeeeeegiiiiiillnnnooooooooorsssstttuuuuuuuyyzzz';
 
-function fold(value: string): string {
+export function fold(value: string): string {
   const lower = value.normalize('NFC').toLowerCase();
   let out = '';
   for (const character of lower) {

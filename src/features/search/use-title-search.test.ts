@@ -14,6 +14,9 @@ const mockSearchProvider = jest.fn();
 // `instanceof` to tell a rate limit apart from an ordinary failure.
 jest.mock('@/lib/tmdb-adapter', () => ({
   searchProvider: (...args: unknown[]) => mockSearchProvider(...args),
+  // The hook asks for titles and performers together; a bare title list from the stub is
+  // read as titles with no performers.
+  searchProviderWithPeople: (...args: unknown[]) => mockSearchProvider(...args),
   AdapterError: class AdapterError extends Error {
     code: string;
     constructor(code: string, message: string) {
@@ -360,7 +363,17 @@ describe('useTitleSearch reaching past the local catalogue', () => {
       { initialProps: { q: '' } },
     );
 
-    for (const prefix of ['i', 'in', 'inc', 'ince', 'incep', 'incept', 'incepti', 'inceptio', 'inception']) {
+    for (const prefix of [
+      'i',
+      'in',
+      'inc',
+      'ince',
+      'incep',
+      'incept',
+      'incepti',
+      'inceptio',
+      'inception',
+    ]) {
       await rerender({ q: prefix });
       await wait(120);
     }
@@ -398,10 +411,10 @@ describe('useTitleSearch reaching past the local catalogue', () => {
   it('asks nothing more of the provider this hour once it has refused, and says until when', async () => {
     mockSearchProvider.mockRejectedValue(new AdapterError('BG429', 'slow down'));
     const before = Date.now();
-    const { result, rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
-      ({ q }) => useTitleSearch(q),
-      { initialProps: { q: 'dune' } },
-    );
+    const { result, rerender } = await renderHook<
+      ReturnType<typeof useTitleSearch>,
+      { q: string }
+    >(({ q }) => useTitleSearch(q), { initialProps: { q: 'dune' } });
     await waitFor(() => expect(result.current.providerRateLimited).toBe(true));
     expect(mockSearchProvider).toHaveBeenCalledTimes(1);
 
@@ -420,6 +433,65 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     const nextHour = (at: number) => Math.ceil((at + 1) / hour) * hour;
     expect(result.current.providerAvailableAt).toBeGreaterThanOrEqual(nextHour(before));
     expect(result.current.providerAvailableAt).toBeLessThanOrEqual(nextHour(Date.now()));
+  });
+
+  it('hands on the performers the same provider answer named, without a second request', async () => {
+    const leo = {
+      id: 6193,
+      name: 'Leonardo DiCaprio',
+      profilePath: null,
+      knownFor: [],
+      popularity: 7.8,
+    };
+    mockSearchProvider.mockResolvedValue({
+      titles: [remoteRow('r1', 'Titanic')],
+      people: [leo],
+    });
+
+    const { result } = await renderHook(() => useTitleSearch('leonardo dicaprio'));
+    await settle();
+
+    await waitFor(() => expect(result.current.providerPeople).toEqual([leo]));
+    expect(result.current.results.map((row) => row.id)).toEqual(['r1']);
+    expect(mockSearchProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds the last performers while a refined query is still on its way', async () => {
+    // Dropping them on every keystroke made the Cast section vanish and return a second
+    // later, moving the rows below it. The screen re-checks each against the new query.
+    const leo = {
+      id: 6193,
+      name: 'Leonardo DiCaprio',
+      profilePath: null,
+      knownFor: [],
+      popularity: 7.8,
+    };
+    mockSearchProvider.mockResolvedValueOnce({ titles: [], people: [leo] });
+    const { result, rerender } = await renderHook<
+      ReturnType<typeof useTitleSearch>,
+      { q: string }
+    >(({ q }) => useTitleSearch(q), { initialProps: { q: 'leonardo dicaprio' } });
+    await waitFor(() => expect(result.current.providerPeople).toEqual([leo]));
+
+    // The next answer never arrives inside this test.
+    mockSearchProvider.mockImplementation(() => new Promise(() => {}));
+    await rerender({ q: 'leonardo' });
+    await wait(1000);
+
+    expect(mockSearchProvider).toHaveBeenLastCalledWith('leonardo', 20);
+    expect(result.current.providerPeople).toEqual([leo]);
+  });
+
+  it('hands on no performers where the screen draws no titles', async () => {
+    mockSearchProvider.mockResolvedValue({
+      titles: [],
+      people: [{ id: 1, name: 'A', profilePath: null, knownFor: [], popularity: 9 }],
+    });
+
+    const { result } = await renderHook(() => useTitleSearch('leonardo', { wide: false }));
+    await settle();
+
+    expect(result.current.providerPeople).toEqual([]);
   });
 
   it('calls a successful empty lookup exhaustive', async () => {
