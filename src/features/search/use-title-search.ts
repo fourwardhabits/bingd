@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { queryKeys } from '@/lib/query';
 import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
-import { AdapterError, searchProvider } from '@/lib/tmdb-adapter';
+import {
+  AdapterError,
+  searchProviderWithPeople,
+  type AdapterSearchResult,
+  type CastSearchResult,
+} from '@/lib/tmdb-adapter';
 
 import {
   clearProviderCooldown,
@@ -60,6 +65,9 @@ const DEBOUNCE_MS = 180;
  * founder call: the quota it protects is shared by every account.
  */
 export const PROVIDER_DEBOUNCE_MS = 800;
+
+/** One stable empty list, so a screen memoising on it does not recompute every render. */
+const NO_PEOPLE: CastSearchResult[] = [];
 
 /** Below this every query matches half the catalogue and none of it is useful. */
 const MIN_QUERY_LENGTH = 2;
@@ -239,7 +247,11 @@ export function useTitleSearch(
     retry: false,
     queryFn: async () => {
       try {
-        return await searchProvider(providerQuery, PROVIDER_RESULTS);
+        const answer = await searchProviderWithPeople(providerQuery, PROVIDER_RESULTS);
+        // Tolerates a bare title list, which is what a stubbed adapter hands back.
+        return Array.isArray(answer)
+          ? { titles: answer as AdapterSearchResult[], people: [] as CastSearchResult[] }
+          : answer;
       } catch (cause) {
         if (cause instanceof AdapterError && cause.isRateLimit) noteProviderRateLimited();
         throw cause;
@@ -256,7 +268,7 @@ export function useTitleSearch(
       (provider.error instanceof AdapterError && provider.error.isRateLimit));
 
   const merged = useMemo(() => {
-    const remote = provider.data ?? [];
+    const remote = provider.data?.titles ?? [];
 
     /**
      * Stale local rows are dropped the moment the provider *settles* on this query.
@@ -340,6 +352,15 @@ export function useTitleSearch(
      *  already on screen and must not be replaced by its spinner or its failure. */
     providerSearching: provider.isFetching,
     providerRateLimited: rateLimited,
+    /**
+     * The performers the same provider answer named, for the Cast section under All.
+     *
+     * Only for the query on screen: the provider key lags the field by its debounce, and
+     * an earlier query's performers under a later query's titles would be a wrong answer
+     * rather than an early one. Ungated here; `all-sections.ts` decides who is shown.
+     */
+    providerPeople:
+      wide && providerQuery === providerQueryOf(query) ? (provider.data?.people ?? NO_PEOPLE) : NO_PEOPLE,
     /** When wider search comes back, while it is rate limited; otherwise null. The next
      *  top of the hour, which is when the server's per-account window resets. */
     providerAvailableAt: rateLimited ? cooldownUntil : null,

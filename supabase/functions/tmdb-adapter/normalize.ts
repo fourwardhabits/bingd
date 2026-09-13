@@ -765,6 +765,12 @@ export type CastSearchResult = {
   profile_path: string | null;
   /** Up to three titles TMDB says they are known for, to tell two namesakes apart. */
   known_for: string[];
+  /**
+   * TMDB's popularity for the person, or null. Carried so the All tab can leave out an
+   * obscure namesake: within people it is comparable, and it is never compared with a
+   * title's score or an account's.
+   */
+  popularity: number | null;
 };
 
 const MAX_KNOWN_FOR = 3;
@@ -807,7 +813,16 @@ export function castSearchResults(
       if (knownFor.length >= MAX_KNOWN_FOR) break;
     }
 
-    out.push({ id: result.id, name, profile_path: result.profile_path ?? null, known_for: knownFor });
+    out.push({
+      id: result.id,
+      name,
+      profile_path: result.profile_path ?? null,
+      known_for: knownFor,
+      popularity:
+        typeof result.popularity === 'number' && Number.isFinite(result.popularity)
+          ? result.popularity
+          : null,
+    });
     if (out.length >= limit) break;
   }
 

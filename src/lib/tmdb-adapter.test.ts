@@ -1,5 +1,10 @@
 import { ANIME_GENRE } from './media-metadata';
-import { searchCast, searchProvider, type AdapterSearchResult } from './tmdb-adapter';
+import {
+  searchCast,
+  searchProvider,
+  searchProviderWithPeople,
+  type AdapterSearchResult,
+} from './tmdb-adapter';
 
 /**
  * The provider search boundary, and the one thing it is allowed to change about a row.
@@ -87,7 +92,9 @@ describe('searchProvider normalises the genres it hands back', () => {
   it('leaves a non-anime animated title as Animation', async () => {
     // The row that would be swept in by widening the predicate to all Animation.
     provide([{ ...ANIME_ROW, id: 'up', title: 'Up', genres: ['Animation', 'Family'] }]);
-    catalogue([{ id: 'up', kind: 'movie', genres: ['Animation', 'Family'], original_language: 'en' }]);
+    catalogue([
+      { id: 'up', kind: 'movie', genres: ['Animation', 'Family'], original_language: 'en' },
+    ]);
 
     const [row] = await expectRows(searchProvider('up'));
 
@@ -96,7 +103,9 @@ describe('searchProvider normalises the genres it hands back', () => {
 
   it('leaves Japanese live action alone', async () => {
     provide([{ ...ANIME_ROW, id: 'ran', title: 'Ran', genres: ['Drama', 'History'] }]);
-    catalogue([{ id: 'ran', kind: 'movie', genres: ['Drama', 'History'], original_language: 'ja' }]);
+    catalogue([
+      { id: 'ran', kind: 'movie', genres: ['Drama', 'History'], original_language: 'ja' },
+    ]);
 
     const [row] = await expectRows(searchProvider('ran'));
 
@@ -143,7 +152,13 @@ describe('searchCast', () => {
     mockInvoke.mockResolvedValue({
       data: {
         results: [
-          { id: 6193, name: 'Leonardo DiCaprio', profile_path: '/leo.jpg', known_for: ['Inception'] },
+          {
+            id: 6193,
+            name: 'Leonardo DiCaprio',
+            profile_path: '/leo.jpg',
+            known_for: ['Inception'],
+            popularity: 7.8,
+          },
           { id: 42, name: 'Leonardo Nam', profile_path: null },
         ],
       },
@@ -156,8 +171,14 @@ describe('searchCast', () => {
       body: { action: 'search-people', query: 'leonardo', limit: 20 },
     });
     expect(people).toEqual([
-      { id: 6193, name: 'Leonardo DiCaprio', profilePath: '/leo.jpg', knownFor: ['Inception'] },
-      { id: 42, name: 'Leonardo Nam', profilePath: null, knownFor: [] },
+      {
+        id: 6193,
+        name: 'Leonardo DiCaprio',
+        profilePath: '/leo.jpg',
+        knownFor: ['Inception'],
+        popularity: 7.8,
+      },
+      { id: 42, name: 'Leonardo Nam', profilePath: null, knownFor: [], popularity: null },
     ]);
     expect(mockIn).not.toHaveBeenCalled();
   });
@@ -166,5 +187,53 @@ describe('searchCast', () => {
     mockInvoke.mockResolvedValue({ data: {}, error: null });
 
     expect(await searchCast('zzzz')).toEqual([]);
+  });
+});
+
+/**
+ * The performers a title search's own provider answer named, for the Cast section under
+ * All. No second request: they arrive on the same `search` reply.
+ */
+describe('searchProviderWithPeople', () => {
+  it('hands back the titles and the performers from one search', async () => {
+    mockInvoke.mockResolvedValue({
+      data: {
+        results: [ANIME_ROW],
+        people: [
+          {
+            id: 6193,
+            name: 'Leonardo DiCaprio',
+            profile_path: '/leo.jpg',
+            known_for: ['Titanic'],
+            popularity: 7.8,
+          },
+        ],
+      },
+      error: null,
+    });
+    catalogue([]);
+
+    const { titles, people } = await searchProviderWithPeople('leonardo', 20);
+
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(mockInvoke).toHaveBeenCalledWith('tmdb-adapter', {
+      body: { action: 'search', query: 'leonardo', limit: 20 },
+    });
+    expect(titles.map((row) => row.id)).toEqual([ANIME_ROW.id]);
+    expect(people).toEqual([
+      {
+        id: 6193,
+        name: 'Leonardo DiCaprio',
+        profilePath: '/leo.jpg',
+        knownFor: ['Titanic'],
+        popularity: 7.8,
+      },
+    ]);
+  });
+
+  it('reads an adapter that predates people as a search with none', async () => {
+    provide([]);
+
+    expect(await searchProviderWithPeople('zzzz')).toEqual({ titles: [], people: [] });
   });
 });

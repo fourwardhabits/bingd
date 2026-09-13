@@ -404,6 +404,7 @@ Deno.test('Cast search keeps performers, in TMDB order, with what they are known
         name: 'Leonardo DiCaprio',
         known_for_department: 'Acting',
         profile_path: '/leo.jpg',
+        popularity: 12.5,
         known_for: [
           { media_type: 'movie', title: 'Inception' },
           { media_type: 'movie', title: 'Titanic' },
@@ -424,8 +425,10 @@ Deno.test('Cast search keeps performers, in TMDB order, with what they are known
       name: 'Leonardo DiCaprio',
       profile_path: '/leo.jpg',
       known_for: ['Inception', 'Titanic', 'Growing Pains'],
+      popularity: 12.5,
     },
-    { id: 42, name: 'Leonardo Nam', profile_path: null, known_for: [] },
+    // No popularity from the provider is null, never zero: absent is not unpopular.
+    { id: 42, name: 'Leonardo Nam', profile_path: null, known_for: [], popularity: null },
   ]);
 });
 

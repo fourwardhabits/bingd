@@ -135,13 +135,48 @@ async function withProductGenres(rows: AdapterSearchResult[]): Promise<AdapterSe
  * Genres come back as **product** genres — see {@link withProductGenres}.
  */
 export async function searchProvider(query: string, limit = 10) {
-  const data = await invoke<{ results: AdapterSearchResult[] }>({
+  return (await searchProviderWithPeople(query, limit)).titles;
+}
+
+/**
+ * The same search, with the performers the provider named alongside the titles.
+ *
+ * **No extra request.** TMDB's multi-search answers with titles and people together, and the
+ * adapter now hands the people back instead of discarding them, so the Cast section under
+ * All costs nothing beyond the title search it rides on. `people` is empty from an adapter
+ * that predates it.
+ */
+export async function searchProviderWithPeople(
+  query: string,
+  limit = 10,
+): Promise<{ titles: AdapterSearchResult[]; people: CastSearchResult[] }> {
+  const data = await invoke<{ results?: AdapterSearchResult[]; people?: RawCastPerson[] }>({
     action: 'search',
     query,
     limit,
   });
-  return withProductGenres(data.results ?? []);
+  return {
+    titles: await withProductGenres(data.results ?? []),
+    people: (data.people ?? []).map(castPersonOf),
+  };
 }
+
+/** A performer as the adapter sends one, from either search. */
+type RawCastPerson = {
+  id: number;
+  name: string;
+  profile_path: string | null;
+  known_for?: string[];
+  popularity?: number | null;
+};
+
+const castPersonOf = (person: RawCastPerson): CastSearchResult => ({
+  id: person.id,
+  name: person.name,
+  profilePath: person.profile_path ?? null,
+  knownFor: person.known_for ?? [],
+  popularity: typeof person.popularity === 'number' ? person.popularity : null,
+});
 
 /**
  * One performer, as a Cast search row draws them.
@@ -155,6 +190,11 @@ export type CastSearchResult = {
   profilePath: string | null;
   /** Up to three titles TMDB says they are known for, to tell namesakes apart. */
   knownFor: string[];
+  /**
+   * TMDB's person popularity, or null. Compared only with another person's, to keep an
+   * obscure namesake out of the All tab; never with a title's or an account's relevance.
+   */
+  popularity: number | null;
 };
 
 /**
@@ -166,19 +206,12 @@ export type CastSearchResult = {
  * request per call, charged to the reader's hourly ceiling.
  */
 export async function searchCast(query: string, limit = 20): Promise<CastSearchResult[]> {
-  const data = await invoke<{
-    results?: { id: number; name: string; profile_path: string | null; known_for?: string[] }[];
-  }>({
+  const data = await invoke<{ results?: RawCastPerson[] }>({
     action: 'search-people',
     query,
     limit,
   });
-  return (data.results ?? []).map((person) => ({
-    id: person.id,
-    name: person.name,
-    profilePath: person.profile_path ?? null,
-    knownFor: person.known_for ?? [],
-  }));
+  return (data.results ?? []).map(castPersonOf);
 }
 
 /**

@@ -14,6 +14,7 @@ import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
+import { allRows, type AllRow, type AllSection } from '@/features/search/all-sections';
 import { cooldownClock } from '@/features/search/provider-budget';
 import { useCastSearch, type CastSearchResult } from '@/features/search/use-cast-search';
 import {
@@ -23,11 +24,7 @@ import {
 } from '@/features/search/series-state';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
-import {
-  meaningfulMatch,
-  useUserSearch,
-  type UserResult,
-} from '@/features/search/use-user-search';
+import { useUserSearch, type UserResult } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
 import { track } from '@/lib/analytics';
 import { posterUri, profileUri } from '@/lib/images';
@@ -54,22 +51,21 @@ import {
  * All first, because the filter is a narrowing of a search the user has already made
  * and the unnarrowed state is the one they arrive in.
  *
- * **One list, five chips.** The founder's contract for this page is: query → one
- * continuous list → chips narrow it. There is no "Users" heading and no "Movies"
- * heading — sectioning accounts while leaving titles unsectioned was the inconsistency
- * this replaced. Movies and TV filter the title results; Users shows every member
- * match with the relevance gate lifted — choosing Users *is* the statement of intent
- * the gate exists to infer. All keeps the existing order of each source: accounts above
- * titles, each in its own relevance order. A row says what kind of thing it is (round
- * avatar and @handle for an account, poster and metadata for a title) rather than a
- * heading saying it for a block.
+ * **Five chips, and All shows every kind** (founder, 2026-09-13). Movies and TV filter
+ * the title results. Cast and Users show one kind alone, in full. All leads with titles
+ * and adds the performers and accounts a query plainly means as compact sections with a
+ * See all, so discovering that an actor or a friend is searchable does not depend on
+ * already knowing which chip to press. The rows still say what they are (poster for a
+ * title, round portrait for a person) and restrained section headers name the groups.
+ * See `all-sections.ts` for who qualifies and in what order.
  *
- * **Cast and Users, not People** (founder, 2026-09-13). With performers searchable, one
- * word for both would be ambiguous: Cast is people TMDB credits on films and shows, and
- * Users is people with a Bingd account. Cast is the one chip that is not a narrowing of
- * the All list — performers appear nowhere else on this page — because every Cast search
- * spends a provider request, and doing that on every query to fill rows under All would
- * double what an ordinary title search costs.
+ * **No result counts on the chips**, deliberately: a count per chip would mean running
+ * every search for every kind on every keystroke, and the Cast count would cost a
+ * provider request each time. The Cast section under All rides free on the title search.
+ *
+ * **Cast and Users, not People.** With performers searchable, one word for both would be
+ * ambiguous: Cast is people TMDB credits on films and shows, and Users is people with a
+ * Bingd account.
  */
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -78,15 +74,6 @@ const FILTERS = [
   { id: 'cast', label: 'Cast' },
   { id: 'users', label: 'Users' },
 ] as const;
-
-/**
- * How many members show before See all.
- *
- * Three, because Bingd is a film and television app first and a page of strangers above
- * a page of films is the wrong answer to "spiderman" (founder addendum, 2026-08-16).
- * See all lifts it to the server's own ceiling rather than routing anywhere.
- */
-const MEMBER_PREVIEW = 3;
 
 type Filter = (typeof FILTERS)[number]['id'];
 
@@ -103,9 +90,6 @@ export default function LogScreen() {
   const profile = useCurrentProfile();
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  // Reset by every new query below: See all is about the results on screen, and keeping
-  // it open across searches would silently widen the next one.
-  const [allMembers, setAllMembers] = useState(false);
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
@@ -149,7 +133,6 @@ export default function LogScreen() {
     useCallback(() => {
       setInput('');
       setFilter('all');
-      setAllMembers(false);
       setSeries(null);
       field.current?.focus();
     }, []),
@@ -215,6 +198,7 @@ export default function LogScreen() {
     providerRateLimited,
     providerAvailableAt,
     providerFailed,
+    providerPeople,
   } = useTitleSearch(input, {
     // No title rows are drawn under Users or Cast, so no provider request is spent on them.
     wide: filter !== 'users' && filter !== 'cast',
@@ -243,45 +227,47 @@ export default function LogScreen() {
   );
 
   /**
-   * Which members appear, and how many.
+   * **What the page lists, per chip** (founder, 2026-09-13).
    *
-   * Titles stay dominant, which the founder asked for and which the gate enforces:
-   * `meaningfulMatch` keeps the person rows to people whose handle or name the query
-   * actually *starts*, because `search_users` matches substrings and without it typing
-   * "the" would put three strangers above a page of films.
+   * - **All** is grouped: titles lead and stay dominant, and the performers and accounts
+   *   the query plainly means follow as their own sections, three each, each with a See
+   *   all that selects its chip. Nobody has to already know that Cast and Users exist to
+   *   find Leonardo DiCaprio or a friend. Who qualifies, and in what order the sections
+   *   fall, is `all-sections.ts`: every type is gated on its own relevance and never
+   *   scored against another.
+   * - **Movies and TV** are title-only narrowings.
+   * - **Users** is every account the server returned, no gate and no cap: the chip press
+   *   is the intent the gate would be guessing.
+   * - **Cast** is its own screen state (`CastResults`).
    *
-   * **See all lifts the display cap, not the gate**, and it is deliberately not a route.
-   * Everything it reveals is already in hand — the query asked for the server's ceiling
-   * — so the expansion cannot fail, cannot spend a round trip, and cannot land somebody
-   * on a screen with its own empty state.
-   *
-   * A query opening with `@` passes the gate outright (`memberQuery`): somebody typing
-   * a handle sigil is naming a person, and the gate exists for queries that were plainly
-   * about a title.
+   * The Cast section under All rides on the title search's own provider answer, so it
+   * costs no request of its own. It replaced "See all N people", which widened the list
+   * in place; See all now goes where the whole list already is.
    */
-  const matchedMembers = useMemo(
-    () => userResults.filter((user) => meaningfulMatch(user, input)),
-    [userResults, input],
-  );
-
-  // Members are not titles, so a Movies or TV narrowing has nothing to say about them.
-  // The Users chip shows them alone: every match the server returned, no relevance
-  // gate and no preview cap — the chip press is the intent the gate would be guessing.
   const peopleMode = filter === 'users';
-  const membersApply = filter === 'all';
-  const shownUsers = peopleMode
-    ? userResults
-    : membersApply
-      ? allMembers
-        ? matchedMembers
-        : matchedMembers.slice(0, MEMBER_PREVIEW)
-      : [];
-  // How many people the See-all row promises — the *total* matched, because the row
-  // names what pressing it reveals, not what is currently hidden. Zero means no row.
-  const morePeopleCount =
-    membersApply && !allMembers && matchedMembers.length > MEMBER_PREVIEW
-      ? matchedMembers.length
-      : 0;
+  const page = useMemo(() => {
+    if (filter === 'all') {
+      return allRows({
+        query: input,
+        titles: results,
+        people: providerPeople,
+        users: userResults,
+      });
+    }
+    if (filter === 'users') {
+      return {
+        rows: userResults.map((user) => ({ type: 'user' as const, user })),
+        cast: [],
+        users: userResults,
+      };
+    }
+    return {
+      rows: filtered.map((result) => ({ type: 'title' as const, result })),
+      cast: [],
+      users: [],
+    };
+  }, [filter, input, results, providerPeople, userResults, filtered]);
+  const shownUsers = page.users;
 
   /**
    * History is written on commitment, never on typing.
@@ -468,14 +454,8 @@ export default function LogScreen() {
           // a chip. "@handle" rather than "a member" so the sigil is discoverable.
           placeholder="A film, a series, or @someone"
           value={input}
-          onChangeText={(next) => {
-            setInput(next);
-            setAllMembers(false);
-          }}
-          onClear={() => {
-            setInput('');
-            setAllMembers(false);
-          }}
+          onChangeText={setInput}
+          onClear={() => setInput('')}
           autoFocus
           autoCorrect={false}
           autoCapitalize="none"
@@ -521,8 +501,10 @@ export default function LogScreen() {
           users={shownUsers}
           usersLoading={users.isPending && !idle}
           usersError={users.isError}
-          morePeopleCount={morePeopleCount}
-          onSeeAllMembers={() => setAllMembers(true)}
+          cast={page.cast}
+          rows={page.rows}
+          onSeeAll={setFilter}
+          onOpenCast={openCast}
           relationshipLabel={relationshipLabel}
           onOpenUser={openUser}
           loading={isPending && !idle}
@@ -631,8 +613,10 @@ function Results({
   users,
   usersLoading,
   usersError,
-  morePeopleCount,
-  onSeeAllMembers,
+  cast,
+  rows,
+  onSeeAll,
+  onOpenCast,
   relationshipLabel,
   onOpenUser,
   loading,
@@ -660,11 +644,17 @@ function Results({
 }: {
   idle: boolean;
   peopleOnly: boolean;
+  /** The accounts on the page: the Users section under All, or every match under Users. */
   users: UserResult[];
   usersLoading: boolean;
   usersError: boolean;
-  morePeopleCount: number;
-  onSeeAllMembers: () => void;
+  /** The performers in the Cast section under All. Empty on every other chip. */
+  cast: CastSearchResult[];
+  /** The page, in order: see `allRows`. */
+  rows: AllRow[];
+  /** A section's See all: selects that section's chip. */
+  onSeeAll: (section: AllSection) => void;
+  onOpenCast: (person: CastSearchResult) => void;
   relationshipLabel: (user: UserResult) => string | null;
   onOpenUser: (user: UserResult) => void;
   loading: boolean;
@@ -777,11 +767,15 @@ function Results({
     );
   }
 
+  // Accounts and performers already on the page. Either keeps the list up when the titles
+  // failed or came back empty: they are rows the reader can act on.
+  const others = users.length + cast.length;
+
   // A title error owns the page only when there is nothing else on it. With people
   // in hand the list stays — dropping rows the reader can act on because a *different*
   // query failed is the review-61 finding — and the failure becomes a footer below
   // them, in the same place the wider-search failure already reports.
-  if (!peopleOnly && error && users.length === 0) {
+  if (!peopleOnly && error && others === 0) {
     return (
       <EmptyState
         kind="couldNotLoad"
@@ -792,9 +786,9 @@ function Results({
     );
   }
 
-  if (!peopleOnly && loading && users.length === 0) return <SkeletonRow count={6} />;
+  if (!peopleOnly && loading && others === 0) return <SkeletonRow count={6} />;
 
-  if (!peopleOnly && results.length === 0 && users.length === 0) {
+  if (!peopleOnly && results.length === 0 && others === 0) {
     // Nobody matched either, and the member read is still in flight. Saying "nothing
     // matches that" now would be a claim about a question still being asked.
     if (usersLoading) return <SkeletonRow count={6} />;
@@ -855,24 +849,6 @@ function Results({
       />
     );
   }
-
-  /**
-   * One continuous list — the founder's contract, stated structurally: query → one
-   * list → chips narrow it. People first, in the server's own order, then titles in
-   * theirs — the smallest deterministic merge, and the order the old sectioned layout
-   * already produced. No heading introduces either kind; the rows themselves say what
-   * they are (round avatar and @handle against poster and metadata), which is what
-   * keeps a profile from ever being misread as an entry in the title ranking. The gate
-   * in `meaningfulMatch` is what keeps person rows out entirely when the query was
-   * plainly about a title; an `@` query lifts that gate rather than reordering.
-   */
-  const rows: ResultRow[] = [
-    ...users.map((user) => ({ type: 'person' as const, user })),
-    // Not a route. Everything the See-all row reveals is already in hand, so the
-    // expansion cannot fail and cannot land anybody on a second empty state.
-    ...(morePeopleCount > 0 ? [{ type: 'more-people' as const, count: morePeopleCount }] : []),
-    ...results.map((result) => ({ type: 'title' as const, result })),
-  ];
 
   // Somebody matched and the titles failed or came back empty. The list plainly has
   // people in it, so what happened to the titles is a footer under them rather than a
@@ -944,17 +920,35 @@ function Results({
           ) : null
         }
         keyExtractor={(item) =>
-          item.type === 'person'
-            ? `person:${item.user.id}`
+          item.type === 'user'
+            ? `user:${item.user.id}`
             : item.type === 'title'
               ? `title:${item.result.id}`
-              : 'more-people'
+              : item.type === 'cast'
+                ? `cast:${item.person.id}`
+                : `header:${item.section}`
         }
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.results}
         renderItem={({ item }) => {
-          if (item.type === 'person') {
+          if (item.type === 'header') {
+            // The design system's one section header: maroon label, compact, no card. The
+            // See all on Cast and Users selects that chip, which is where the whole list
+            // already is; Titles has none, because All is already the whole title list.
+            const section = SECTION_HEADERS[item.section];
+            return item.section === 'cast' || item.section === 'users' ? (
+              <SectionHeader
+                title={section.title}
+                actionLabel="See all"
+                actionAccessibilityLabel={section.seeAll}
+                onPressAction={() => onSeeAll(item.section as AllSection)}
+              />
+            ) : (
+              <SectionHeader title={section.title} />
+            );
+          }
+          if (item.type === 'user') {
             return (
               <UserRow
                 name={item.user.name}
@@ -965,18 +959,14 @@ function Results({
               />
             );
           }
-          if (item.type === 'more-people') {
+          if (item.type === 'cast') {
             return (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`See all ${item.count} people`}
-                onPress={onSeeAllMembers}
-                style={({ pressed }) => [styles.seeAllRow, pressed && styles.pressed]}
-              >
-                <Text variant="callout" tone="action">
-                  See all {item.count} people
-                </Text>
-              </Pressable>
+              <CastRow
+                name={item.person.name}
+                portraitUri={profileUri(item.person.profilePath)}
+                knownFor={item.person.knownFor}
+                onPress={() => onOpenCast(item.person)}
+              />
             );
           }
           const title = item.result;
@@ -1256,13 +1246,17 @@ function CastResults({
 }
 
 /**
- * A row in the one list. Three kinds, one surface: the discriminant is what
- * `getItemType` hands FlashList for recycling and what `renderItem` switches on.
+ * What each section header says, and what its See all says to a screen reader.
+ *
+ * Two See alls can be on one page, so each is named for what it opens: "See all" twice
+ * is two controls a screen reader cannot tell apart.
  */
-type ResultRow =
-  | { type: 'person'; user: UserResult }
-  | { type: 'more-people'; count: number }
-  | { type: 'title'; result: SearchResult };
+const SECTION_HEADERS = {
+  titles: { title: 'Titles', seeAll: '' },
+  'more-titles': { title: 'More titles', seeAll: '' },
+  cast: { title: 'Cast', seeAll: 'See all cast' },
+  users: { title: 'Users', seeAll: 'See all users' },
+} as const;
 
 const styles = StyleSheet.create({
   /**
@@ -1294,13 +1288,6 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[2],
   },
   list: { flex: 1 },
-  // Row-shaped like its neighbours, so the expansion reads as part of the list
-  // rather than as a control floating between two kinds of row.
-  seeAllRow: {
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-    paddingHorizontal: theme.layout.gutter,
-  },
   status: { padding: theme.layout.gutter, gap: theme.space[2], alignItems: 'flex-start' },
   stale: { opacity: 0.6 },
   idle: { paddingTop: theme.space[2], paddingBottom: theme.space[8] },

@@ -193,8 +193,29 @@ async function handleSearch(db: Db, query: string, limit: number, userId: string
   const genres = await tmdb.genreNames(charge, tmdb.genreIdsOf(results));
 
   const rows = normalizeList(results, genres, limit);
-  return json({ results: await searchResultsFor(db, await storeInOrder(db, rows)) });
+  return json({
+    results: await searchResultsFor(db, await storeInOrder(db, rows)),
+    /**
+     * The performers the same response named, for the Cast section under All.
+     *
+     * **Free.** /search/multi already returns people beside titles, and they used to be
+     * dropped here — so surfacing Leonardo DiCaprio on a search for his name costs no
+     * request beyond the title search that was being made anyway, and the per-account
+     * ceiling is unchanged. The Cast chip's own `search-people` is the deeper list.
+     *
+     * In TMDB's order, performers only, nothing written anywhere — the same rules
+     * `search-people` applies, through the same function. Additive: a client that
+     * predates it reads `results` and nothing else.
+     */
+    people: castSearchResults(
+      results.filter((result) => result.media_type === 'person') as tmdb.TmdbPersonSearchResult[],
+      MAX_SEARCH_PEOPLE,
+    ),
+  });
 }
+
+/** How many performers a title search hands back. The client shows at most three. */
+const MAX_SEARCH_PEOPLE = 5;
 
 /**
  * Search-shaped results into title rows, deduplicated and capped.

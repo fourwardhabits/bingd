@@ -6,6 +6,11 @@ import { Text } from './Text';
 export type SectionHeaderProps = {
   title: string;
   actionLabel?: string;
+  /**
+   * What a screen reader calls the action, when the visible label alone is ambiguous.
+   * Two "See all"s on one page are two controls nobody can tell apart by ear.
+   */
+  actionAccessibilityLabel?: string;
   onPressAction?: () => void;
   /**
    * Print the title exactly as given instead of upper-casing it.
@@ -37,6 +42,7 @@ export type SectionHeaderProps = {
 export function SectionHeader({
   title,
   actionLabel,
+  actionAccessibilityLabel,
   onPressAction,
   exactCase = false,
 }: SectionHeaderProps) {
@@ -57,6 +63,7 @@ export function SectionHeader({
         // visible changes — the label sits where it sat (design-system.md §10).
         <Pressable
           accessibilityRole="button"
+          accessibilityLabel={actionAccessibilityLabel}
           onPress={onPressAction}
           hitSlop={theme.space[2]}
           style={styles.action}
