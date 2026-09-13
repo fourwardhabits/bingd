@@ -1,141 +1,104 @@
 # Sending the welcome email on a schedule
 
-**Status: DESIGNED, WRITTEN, AND NOT ENABLED.** Nothing in this directory runs. There is
-no workflow trigger, no cron entry, no deployed function, and the migration that would
-create the ledger is deliberately **not** in `supabase/migrations/`, so no `db push` can
-pick it up by accident.
-
-Turning it on is five deliberate steps and they are listed at the bottom.
+**Status: WRITTEN, TESTED, NOT ENABLED.** The SQL is not applied to any project, the
+workflow has no schedule, `welcome.delivery_enabled` would be `false` and
+`welcome.start_after` would be 2099. Turning it on is the numbered procedure at the bottom,
+and its last step is a separate decision from every other step.
 
 ---
 
-## What it would do
+## What it does
 
-About 36 hours after somebody creates a bingd. account, send them the founder's note
-once, and never again.
-
-36 rather than immediately, because the note says *"you will find rough edges"* and
-*"bingd. gets much better once one person you already talk about films with is on it"*.
-Both sentences need the reader to have used the thing. An instant welcome arrives while
-they are still in onboarding and reads as a system message; a week later it reads as an
-apology for silence. A day and a half means it lands the evening after the evening they
-signed up, which is when somebody who liked it has ranked a few more things and somebody
-who did not has already stopped.
-
----
-
-## Why a GitHub Action and not an Edge Function
-
-The obvious shape in this stack is `pg_cron` calling a Supabase Edge Function, next to
-`push-sender`. It is the wrong choice here, for a reason this repository has already paid
-for once:
-
-> **Nothing in the release path deploys `supabase/functions/`.** The TMDB adapter drifted
-> thirteen days behind its source and nulled every `episode_count` before anybody noticed,
-> because a merged commit and a deployed function are separate events and only one of them
-> is visible in git.
-
-A welcome email that silently runs a fortnight-old template has exactly that failure
-shape, and it is worse here: the email is the product's only direct line to a new user,
-and a stale one is sent to people who cannot be un-sent to.
-
-`.github/workflows/trending-refresh.yml` is the pattern to copy instead. It is a scheduled
-Action that runs a Node script from the repository against production, it has been running
-nightly since 2026-09-01, and what it runs is always exactly what is on `main`. The
-template travels with the code.
-
-The other two options and why not:
-
-| | why not |
-|---|---|
-| **Resend Automations** with contacts synced from Supabase | It means continuously exporting every user's email address to a third party. The privacy policy names exactly who receives what, and an email vendor holding the user list is not on that list. It would need a policy edit first, and a policy edit is a document. |
-| **A Postgres trigger on signup** | The send would sit inside the transaction that creates the account. A Resend outage would then fail signups. |
-
----
+About 36 hours after somebody creates a bingd. account, it sends them the founder's note
+once, and never again. 36 hours, because the note assumes the reader has used the app: an
+instant welcome lands during onboarding and reads as a system message. Accounts older than
+a week are never selected, so a paused job does not send stale welcomes when resumed.
 
 ## The pieces
 
 ```
-.github/workflows/welcome-email.yml     NOT WRITTEN. The trigger. See step 5.
 emails/welcome/automation/
-  20260916000100_welcome_email.sql      the ledger and the two switches. NOT APPLIED.
-  send-welcome.mjs                      the worker. Runs, refuses, exits 0.
-emails/welcome/build.mjs                renders the template the worker sends
+  welcome_email.sql      the ledger, the suppression list, the switches, three functions
+  send-welcome.mjs       the worker: claim, send, record
+.github/workflows/welcome-email.yml   manual only; no schedule
+supabase/tests/welcome-email.test.mjs            the SQL against every migration, and the
+                                                 worker end to end over it
+supabase/tests/concurrency/races/welcome-email.mjs   two connections, real PostgreSQL
+emails/welcome/email.test.mjs                    the message itself
 ```
 
----
+A GitHub Action rather than an Edge Function because **nothing in the release path deploys
+`supabase/functions/`**: the TMDB adapter once ran thirteen days behind its source. What an
+Action runs is always what is on `main`, template included.
 
-## Exactly once
+## Where the guarantees live
 
-Three mechanisms, because no one of them is enough on its own.
+In SQL, not in the worker. The worker never selects a person: it asks
+`welcome_email_claim` who it owns and sends to exactly those rows.
 
-**1. The ledger claims before it sends.** `welcome_emails` has `user_id` as its primary
-key, and the worker's first act for each recipient is
+| function | who can call it | what it does |
+|---|---|---|
+| `welcome_email_preview(limit, canary_user, canary_email)` | service role | who a claim would take right now, taking nobody. Handles only, no addresses. The dry run. |
+| `welcome_email_claim(limit, canary_user, canary_email)` | service role | the switch, the window, eligibility, suppression, the claim and the retry, in that order |
+| `welcome_email_record(user, attempt, outcome, resend_id, reason)` | service role | `claimed` → `sent` or `failed`, for exactly that attempt |
 
-```sql
-insert into welcome_emails (user_id, status) values ($1, 'claimed')
-on conflict (user_id) do nothing
-returning user_id
-```
+### Eligibility
 
-No row back means somebody else has it, so this run skips it. A primary key is
-**at-most-once, not at-least-once**: it guarantees a second send cannot start, and it
-guarantees nothing about the first one finishing. That is the right way round here. The
-failure it forecloses is mailing somebody twice, which cannot be undone; the failure it
-permits is mailing them zero times, which the retry below fixes.
+Selected only when **all** hold:
 
-**2. Resend's idempotency key covers the retry.** Every send carries
-`Idempotency-Key: welcome-v1-<user_id>`, so a claim that was made, sent, and lost its
-reply can be retried without a second message arriving. This is what makes step 1 safe to
-combine with step 3.
+- `welcome.delivery_enabled` is `true` (read before anything is written)
+- the profile was created at or after `welcome.start_after`
+- and at least `welcome.delay_hours` (36) and less than `welcome.max_age_hours` (168) ago
+- the profile is `active` (not suspended)
+- the auth user has an address, **confirmed**, and is not banned, soft-deleted or anonymous
+- there is no row for the account in `welcome_emails`, whatever its status
 
-**3. Retries are bounded and visible.** A send that fails leaves the row at
-`status = 'failed'` with `attempts` incremented and the reason recorded. A later run picks
-up `failed` rows with `attempts < 3`. After three the row stays failed and is never
-touched again, which is a thing to look at rather than a thing to keep hammering.
+At most `welcome.max_per_run` (25) per run, whatever the caller asks for.
+
+### Exactly once
+
+1. **The claim is a primary-key insert.** `welcome_emails.user_id` is the key; the claim is
+   `insert ... on conflict do nothing` and returns only rows it inserted. A second run, or
+   an overlapping one, gets nobody. A primary key is at-most-once: it stops a second send
+   starting, which is the failure that cannot be undone.
+2. **Resend deduplicates the retry.** Every send carries
+   `Idempotency-Key: welcome-v1-<user_id>`, identical on every attempt.
+3. **Retries are bounded and inside Resend's window.** A `failed` row is retried at most to
+   three attempts, and only within 20 hours of its first claim, because Resend holds a key
+   for 24. The retry is a compare-and-set on `status = 'failed'`, so two runs cannot retry
+   the same row.
+4. **An unrecorded send is never retried.** If Resend accepted a message and the record
+   call then failed, the row stays `claimed`, which is never picked up again. The run
+   exits non-zero and says `NOT RECORDED`. Look at it; do not re-run it away.
 
 ### The cases that are not a send
 
 | situation | what happens |
 |---|---|
-| Account deleted before the send | `user_id references profiles(id) on delete cascade`, so the ledger row goes with it. The selection query joins `profiles`, so a deleted account is never selected in the first place. |
-| Account deleted after the send | The row cascades away. Nothing tries to re-send, because the account is gone from the selection too. |
-| No email address on the account | `status = 'no_address'`, claimed and never retried. Sign in with Apple can withhold one, and a row that retries forever on a fact that will not change is noise that trains you to ignore the table. |
-| Address hard-bounces | Resend records it. The ledger says `sent`, which is true: it was sent. Bounce handling is a webhook and is not built. See **Not built** below. |
-| The reader unsubscribes | They were sent one email and there is no second one. The unsubscribe matters for the next email, whatever it turns out to be, which is why the link is in this one. |
+| delivery off, or the cutoff still 2099 | nothing is claimed and nothing is written: hold, do not drop |
+| account created before activation | never in the window, so never selected. **This is why switching it on cannot mail the existing beta population.** |
+| unconfirmed, banned, soft-deleted, anonymous, suspended, no address | held: nothing written, so fixing it later still allows a welcome |
+| account deleted before or after the send | `delete from auth.users` cascades through `profiles` to the ledger row |
+| address on `email_suppressions` | recorded as `suppressed`, never sent, never reconsidered |
+| a person excluded by hand | a pre-inserted row of any status; see below |
+| copy not approved, or no postal address | the worker refuses the run before claiming anybody |
+| `dist/` older than `copy.json` | the worker refuses the run before claiming anybody |
 
----
+## Somebody asked not to be emailed
 
-## The two switches, and the order they are read in
+The Unsubscribe link and the `List-Unsubscribe` header both open an email to
+`suraj@bingd.app` with the subject `Unsubscribe`. Act on it with one statement in the SQL
+editor of the project concerned:
 
-**`welcome.delivery_enabled`** in `app_config`, default **`false`**.
+```sql
+insert into email_suppressions (email, reason) values (lower('person@example.com'), 'unsubscribed')
+on conflict (email) do nothing;
+```
 
-Read once at the top of the worker, **before anything is claimed**. Disabled means the run
-exits having touched nothing, so every eligible account is still eligible when it is
-turned back on. This is the emergency stop: flip one row and the next run is inert, with
-no deploy and no workflow edit.
+**Not Resend's suppression list.** That list is account-wide and the same account sends
+every sign-in code: suppressing somebody there stops them signing in.
 
-> This is written the way it is because of what happened to `push.delivery_enabled`. That
-> flag existed for two weeks and **was never actually read** by the code it was supposed to
-> gate. The fix (PR #119) established the rule this follows: gate at claim time, and
-> **hold rather than drop** — a disabled run must not consume the thing it declined to do.
-
-**`welcome.start_after`** in `app_config`, a timestamptz, default **`'2099-01-01'`**.
-
-Only accounts created at or after it are selected. Two jobs:
-
-- **It is why turning the job on cannot mail the existing user base.** Every account that
-  exists today was created before any plausible value, so the first run with a real date
-  in it selects only people who signed up after that moment.
-- It is the second switch. Setting it back to 2099 stops future selection without
-  touching the first flag.
-
-The default is 2099 rather than null so that a misconfigured run selects nobody rather
-than everybody. A null would have meant "no lower bound".
-
-### Excluding somebody by hand
-
-Pre-claim them. The primary key does the rest:
+To keep an account out by handle instead:
 
 ```sql
 insert into welcome_emails (user_id, status)
@@ -143,69 +106,113 @@ select id, 'excluded' from profiles where username = 'someone'
 on conflict (user_id) do nothing;
 ```
 
-The worker skips any user with a row, whatever the status says, so `'excluded'` needs no
-special handling in the code. It is a word for the person reading the table later.
+## Compliance, simply
+
+The note asks the reader to invite somebody and to try a feature, so it is treated as
+commercial email and carries: the sender (`bingd. is made by Suraj Kandukuri.`), a
+**physical mailing address** (`footer.postalAddress`, a founder input, and the worker
+refuses the cohort while it is null), and a visible **unsubscribe** plus a
+`List-Unsubscribe` header.
+
+The unsubscribe is a `mailto:` for v1. Gmail's and Yahoo's one-click requirement applies to
+bulk senders; this is nowhere near that. There is no `List-Unsubscribe-Post` header, because
+RFC 8058 one-click requires HTTPS and pairing it with a mailto is invalid. Build an HTTPS
+endpoint before volume, and the header turns on in `envelope.mjs` by itself.
+
+**Not built:** a Resend webhook for bounces and complaints. At this volume the Resend
+dashboard is where to look.
 
 ---
 
-## Compliance, in the simplest form that is actually correct
+## The canary: proving exactly-once without switching anything on
 
-This message carries an ask to invite a friend and an ask to try a feature. Under
-CAN-SPAM's **primary purpose** test that is enough promotional content for a reasonable
-recipient to read the message as commercial, however warmly it is written. Arguing that a
-founder's note is transactional is a position somebody would have to defend, and the cost
-of not having to is two lines in a footer.
+Needs: the SQL applied to the project (step 3 below), a test account in that project
+whose email you control and have signed in with, its user id, and a Resend key.
 
-So it is treated as **lifecycle/commercial**, and it carries:
+```bash
+# Keys into the child process only, never onto disk. Staging shown; production is abheeqyjzekiowkztfxv.
+export SUPABASE_URL=https://fjxhcbowoxuzulwirzyr.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=...   # npx supabase projects api-keys --project-ref <ref> -o json
+export RESEND_API_KEY=re_...           # the welcome key, not the Supabase one
+export WELCOME_FROM="Suraj from bingd. <suraj@auth.bingd.app>"   # until bingd.app is verified
 
-- a **physical mailing address**. There is no company, so this is a personal address or a
-  PO box. It is `footer.postalAddress` in `copy.json`, it is `null`, and the build prints
-  a warning rather than inventing one. **Founder input required.**
-- a **visible unsubscribe**, plus `List-Unsubscribe` and `List-Unsubscribe-Post` headers
-  so Gmail and Apple Mail show their own one-tap control.
+W=emails/welcome/automation/send-welcome.mjs
+ID=<test account user id>; EMAIL=<its confirmed address>
 
-**The unsubscribe is a `mailto:` today, and that is a deliberate v1.** A one-click HTTPS
-endpoint is what Gmail and Yahoo require of *bulk* senders, which begins at 5,000 messages
-a day to a single provider. This is nowhere near that, and `mailto:` unsubscribe is
-honoured by Gmail's interface. What it costs is that somebody has to act on the mail that
-arrives. Build the HTTPS endpoint before volume, not before launch.
+node $W --dry-run --canary $ID --canary-email $EMAIL   # expect: would claim 1
+node $W --canary $ID --canary-email $EMAIL             # expect: claimed 1, sent 1, exit 0
+node $W --canary $ID --canary-email $EMAIL             # expect: claimed 0, sent 0, exit 0
+node $W --dry-run                                      # expect: delivery_enabled false; nobody else touched
+```
 
-**Not built, and worth knowing:** there is no Resend webhook, so bounces and complaints
-are not recorded anywhere and no suppression list is maintained. At this volume the Resend
-dashboard is the suppression list. At any real volume it is not, and a complaint rate
-nobody is measuring is how a sending domain gets quietly throttled. `auth.bingd.app` also
-sends every sign-in code, so its reputation is load-bearing for people being able to log
-in at all.
+Then, in the SQL editor:
 
-> **Consider a separate subdomain for anything that is not authentication.** If a welcome
-> email ever earns spam complaints on `auth.bingd.app`, the collateral damage is sign-in
-> codes going to spam, which looks to a user exactly like the app being broken.
+```sql
+select status, attempts, canary, resend_id, sent_at from welcome_emails;   -- exactly one row: sent, 1, true
+```
 
-SPF, DKIM and DMARC are Resend's own records on `auth.bingd.app`, which reports `verified`.
-Whatever domain the real send uses has to be verified the same way, and that is DNS.
+A canary ignores `delivery_enabled` and the signup window, and nothing else. It claims
+nobody unless the id and the confirmed address belong to the same account, which is
+checked inside SQL before any write. The same sequence runs in CI on every pull request
+(`supabase/tests/welcome-email.test.mjs`, "canary on the real draft copy").
 
 ---
 
 ## Turning it on
 
-Five steps, in this order. Steps 1 and 2 are the founder's and nobody else's.
+In order. **Steps 1 and 2 are the founder's.** Step 5 is a separate decision from all of
+the others.
 
-1. **Settle the envelope.** Add `bingd.app` to Resend and verify its DNS, decide the From
-   address, and confirm the Reply-To mailbox actually receives. Put the postal address in
-   `copy.json`.
-2. **Approve the copy.** Rewrite the note, send yourself a test, read it on a phone in
-   both light and dark, tap all three buttons on a phone that has bingd. installed.
-3. **Apply the migration.** Move `20260916000100_welcome_email.sql` into
-   `supabase/migrations/`, review it, and push it to staging first. It creates the ledger
-   and inserts both switches at their safe defaults, so applying it changes no behaviour.
-4. **Create the secrets.** `RESEND_API_KEY` as a new key, not the one named `Supabase`,
-   and `SUPABASE_SERVICE_ROLE_KEY`. Run the worker by hand with `--dry-run` against
-   production and read the list of who it would have mailed.
-5. **Add the workflow, then the switches.** Write `.github/workflows/welcome-email.yml`
-   with `workflow_dispatch` only. Run it by hand. Watch the ledger. Then, and only then,
-   add `schedule:` and set `welcome.start_after` to now and `welcome.delivery_enabled`
-   to true.
+1. **The envelope.**
+   - Add `bingd.app` to Resend and create the DNS records it lists in Cloudflare: the
+     `resend._domainkey` TXT (DKIM), and the `send` MX and TXT (return path). None of them
+     touch the root MX, so Cloudflare Email Routing keeps receiving. Leave Resend
+     receiving **off**.
+   - Add `_dmarc.bingd.app` TXT `v=DMARC1; p=none; rua=mailto:suraj@bingd.app`.
+   - Create a Resend API key with sending access restricted to `bingd.app`, named for this
+     email. Store it as the GitHub secret `RESEND_API_KEY_WELCOME`.
+   - Sign in with Apple private-relay addresses only deliver mail from registered domains.
+     In Apple Developer → Certificates, Identifiers & Profiles → Services → Sign in with
+     Apple for Email Communication, register `bingd.app` and `suraj@bingd.app`.
+2. **The copy.** Rewrite the note, set `footer.postalAddress`, check the P.S. title, set
+   `note.status` to `"APPROVED"`, run `node emails/welcome/build.mjs` and the tests, and send
+   yourself a test at two inboxes. Read both on a phone in light and dark mode, reply from
+   the one that is not the forwarding Gmail, and tap every link with and without the app.
+3. **The SQL.** Move it into the migrations under a fresh timestamp newer than every file
+   there, keeping the name the test support module looks for:
 
-**Do step 5's two switches last and separately.** The workflow existing is not the same
-decision as the workflow being allowed to send, and keeping them apart is what makes the
-first real run something you chose rather than something that happened.
+   ```bash
+   ls supabase/migrations | tail -1                      # pick a later timestamp
+   git mv emails/welcome/automation/welcome_email.sql \
+     supabase/migrations/<timestamp>_a_welcome_note_sent_once.sql
+   npm run test:db && npm run test:race                  # both suites follow the file
+   npx supabase@latest db push --project-ref fjxhcbowoxuzulwirzyr --skip-vault --dry-run --yes
+   npx supabase@latest db push --project-ref fjxhcbowoxuzulwirzyr --skip-vault --yes
+   ```
+
+   Run the canary on staging. Then the same two pushes with `--project-ref
+   abheeqyjzekiowkztfxv`, and the canary on production with a founder test account.
+   Applying the SQL changes no behaviour: every switch lands at "send nothing".
+4. **The workflow.** Merge it (it has no schedule), then run it by hand: `target:
+   production`, `mode: dry-run`. It should say `delivery_enabled false` and list nobody,
+   because the cutoff is still 2099.
+5. **Switch it on.** In the production SQL editor, in this order:
+
+   ```sql
+   update app_config set value = to_jsonb(now()::text) where key = 'welcome.start_after';
+   update app_config set value = 'true'::jsonb        where key = 'welcome.delivery_enabled';
+   ```
+
+   Then commit the `schedule:` block that is commented out in
+   `.github/workflows/welcome-email.yml`. From that moment, only accounts created after the
+   `start_after` you just wrote are ever eligible. The first real send is about 36 hours
+   later, to the first person who signed up after activation.
+
+**The emergency stop** is one statement, with no deploy:
+
+```sql
+update app_config set value = 'false'::jsonb where key = 'welcome.delivery_enabled';
+```
+
+A disabled run claims nobody, so everybody eligible is still eligible when it is turned
+back on, within the one-week window.

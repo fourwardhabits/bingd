@@ -1,0 +1,94 @@
+name: Welcome email
+
+# The founder's welcome note, sent once per new account about 36 hours after signup.
+#
+# ---------------------------------------------------------------------------
+# NOT SCHEDULED, AND THAT IS THE CURRENT STATE ON PURPOSE
+# ---------------------------------------------------------------------------
+#
+# This workflow only runs when somebody presses Run workflow. There is no `schedule:`
+# below, and even a manual `send` mails nobody until all of these are true:
+#
+#   1. emails/welcome/automation/welcome_email.sql is applied to the target project
+#      (without it every RPC is a 404 and the worker stops).
+#   2. copy.json has note.status APPROVED and a footer.postalAddress (the worker refuses
+#      the cohort otherwise, before it claims anybody).
+#   3. welcome.delivery_enabled is true AND welcome.start_after is a real date, in that
+#      project's app_config (the claim returns nobody otherwise, inside SQL).
+#
+# Turning on the schedule is step 5 of emails/welcome/automation/README.md "Turning it
+# on", and it is a separate commit from everything else, so the first scheduled run is a
+# decision somebody made rather than a side effect of a merge.
+#
+#   schedule:
+#     - cron: '23 * * * *'   # hourly, off the hour
+#
+# Why a GitHub Action rather than an Edge Function: nothing in the release path deploys
+# supabase/functions/, and a welcome email running a fortnight-old template is that
+# failure. What this runs is always what is on main. See the README.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which backend
+        type: choice
+        required: true
+        default: nonprod
+        options: [nonprod, production]
+      mode:
+        description: dry-run claims nobody and sends nothing
+        type: choice
+        required: true
+        default: dry-run
+        options: [dry-run, send]
+      canary_user:
+        description: Canary only. The test account's user id. Leave empty for the cohort.
+        type: string
+        required: false
+      canary_email:
+        description: Canary only. That account's exact confirmed address.
+        type: string
+        required: false
+
+# Two runs never overlap. The claim is safe under overlap anyway (see the race suite);
+# this keeps the logs readable.
+concurrency:
+  group: welcome-email-${{ github.event.inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    name: ${{ github.event.inputs.mode }} on ${{ github.event.inputs.target }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The message as a reader receives it. A link or an instruction that no longer
+      # matches the app stops the run before a single claim.
+      - run: node --test emails/welcome/email.test.mjs
+
+      - name: Run the worker
+        env:
+          SUPABASE_URL: ${{ github.event.inputs.target == 'production' && secrets.SUPABASE_URL_PRODUCTION || secrets.SUPABASE_URL_NONPROD }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ github.event.inputs.target == 'production' && secrets.SUPABASE_SERVICE_ROLE_KEY_PRODUCTION || secrets.SUPABASE_SERVICE_ROLE_KEY_NONPROD }}
+          # A key of its own, sending access restricted to bingd.app. Never the key named
+          # Supabase, which relays every sign-in code.
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY_WELCOME }}
+          MODE: ${{ github.event.inputs.mode }}
+          CANARY_USER: ${{ github.event.inputs.canary_user }}
+          CANARY_EMAIL: ${{ github.event.inputs.canary_email }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$MODE" = "dry-run" ]; then args+=(--dry-run); fi
+          if [ -n "$CANARY_USER" ] || [ -n "$CANARY_EMAIL" ]; then
+            args+=(--canary "$CANARY_USER" --canary-email "$CANARY_EMAIL")
+          fi
+          node emails/welcome/automation/send-welcome.mjs "${args[@]}"
