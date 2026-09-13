@@ -627,7 +627,15 @@ export default function TasteOnboardingScreen() {
              * onboarding — leaving the ranking is not the same as leaving the flow, and
              * the social half still has something to offer somebody who declined this one.
              */}
-            <Button label="Not now" kind="tertiary" onPress={skip} />
+            <Button
+              label="Not now"
+              kind="tertiary"
+              onPress={skip}
+              // Shown as unavailable while a placement is on its way, rather than taking the
+              // tap and doing nothing. The wait is bounded by the request deadline.
+              disabled={step.kind !== 'picking'}
+              disabledReason="Finishing your last ranking."
+            />
             {/* This screen has no header and Settings is unreachable from it, so for the
                 wrong account signed in on this phone it would otherwise be a locked room.
                 See `UseDifferentAccountButton`. */}
@@ -955,7 +963,6 @@ function PlacedLine({ placement }: { placement: LastPlaced }) {
       accessible
       accessibilityRole="text"
       accessibilityLabel={sentence}
-      accessibilityLiveRegion="polite"
       testID="onboarding-placed-line"
     >
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
