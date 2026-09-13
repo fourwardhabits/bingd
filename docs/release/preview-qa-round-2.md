@@ -12,7 +12,14 @@ Android `8e8731a2…`), so this is an OTA, not a binary.
 the preview OTA. The OTA calls `profile_title_counts`; the migration's poster nudge calls the
 new `tmdb-adapter`.
 
-Update ids: _filled in at publish._
+**Published 2026-09-13** from integration `0a4fb05` (preview branch):
+
+| platform | runtime | update group | update id |
+|---|---|---|---|
+| iOS | `aa3056e7…` | `fce0e8e6-5b8c-4ef7-a498-91972cda93d8` | `01a09ba8-91b2-79ba-8db4-97e54ba7e2e8` |
+| Android | `8e8731a2…` | `d74f4bc6-ea54-4fca-9bda-7ec4a215cf04` | `01a09ba8-91b2-79ae-a4cf-a348aecabb2e` |
+
+Staging was brought up first: the three functions deployed, then migrations `20260917001400`–`001600` applied.
 
 ---
 
