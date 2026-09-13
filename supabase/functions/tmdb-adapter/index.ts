@@ -802,7 +802,12 @@ Deno.serve(async (req) => {
           action,
           attempted: due.length,
           ...result,
-          remaining: action === 'enrich' ? await countEnrichmentBacklog(db) : undefined,
+          // Not for a named batch: the import nudge calls this every minute, and an exact
+          // count over the whole poster-less catalogue each time is a scan nobody reads.
+          remaining:
+            action === 'enrich' && body.ids === undefined
+              ? await countEnrichmentBacklog(db)
+              : undefined,
           // Present only for the walk, and only while there is more of it. `due.length <
           // limit` is the end: a short page cannot be followed by a full one over a set
           // ordered by a key nothing renumbers.

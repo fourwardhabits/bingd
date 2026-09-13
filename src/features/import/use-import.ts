@@ -57,7 +57,8 @@ import type { StagingRow } from './payload';
  * exhaustive rather than accidentally correct.
  */
 export type ImportJobStatus = {
-  readonly status: 'pending' | 'parsing' | 'matching' | 'preview' | 'applying' | 'done' | 'failed';
+  readonly status:
+    'pending' | 'parsing' | 'matching' | 'preview' | 'applying' | 'done' | 'failed';
   readonly counts: ImportCounts;
   readonly completedAt: string | null;
 };
@@ -156,7 +157,11 @@ export type ImportPhase =
     }
   | { readonly phase: 'working'; readonly status: ImportJobStatus }
   | { readonly phase: 'done'; readonly status: ImportJobStatus }
-  | { readonly phase: 'failed'; readonly failure: ImportFailure; readonly preview?: ArchivePreview };
+  | {
+      readonly phase: 'failed';
+      readonly failure: ImportFailure;
+      readonly preview?: ArchivePreview;
+    };
 
 /** How often the job is asked about while somebody is watching. */
 const POLL_MS = 2_000;
@@ -197,11 +202,35 @@ const asStatus = (row: JobRow): ImportJobStatus => ({
  */
 async function readJob(jobId: string): Promise<ImportJobStatus | null> {
   try {
-    const { data, error } = await supabase.rpc('import_status', { p_job_id: jobId }).maybeSingle();
+    const { data, error } = await supabase
+      .rpc('import_status', { p_job_id: jobId })
+      .maybeSingle();
     if (error || data === null) return null;
     return asStatus(data as JobRow);
   } catch {
     return null;
+  }
+}
+
+/**
+ * One named job, telling "there is no such job" apart from "could not ask".
+ *
+ * `readJob` folds both into null because its poll treats either as "ask again". A
+ * notification tap cannot: a job that is gone opens the importer, but a read that failed on a
+ * bad connection must not, or somebody whose import is fine is invited to start another
+ * (independent review). `import_status` answers a job this account cannot see with no row
+ * and no error, which is the one answer that means gone.
+ */
+async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | 'unreadable'> {
+  try {
+    const { data, error } = await supabase
+      .rpc('import_status', { p_job_id: jobId })
+      .maybeSingle();
+    if (error) return 'unreadable';
+    if (data === null) return 'gone';
+    return asStatus(data as JobRow);
+  } catch {
+    return 'unreadable';
   }
 }
 
@@ -327,12 +356,25 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
 
     void (async () => {
       if (jobId) {
-        const named = await readJob(jobId);
+        const named = await readNamedJob(jobId);
         if (cancelled || !alive.current) return;
-        // Not found reads the same as a failed read here: the importer, not an error. A
-        // `pending` job was never handed over, so it has nothing to show either.
-        if (named === null || named.status === 'pending') return;
+        if (named === 'unreadable') {
+          setState((current) =>
+            current.phase === 'idle'
+              ? { phase: 'failed', failure: { kind: 'unknown' } }
+              : current,
+          );
+          return;
+        }
+        // Gone opens the importer. A `pending` job was never handed over, so it has nothing
+        // to show either.
+        if (named === 'gone' || named.status === 'pending') return;
         jobRef.current = jobId;
+        // **Ended while nobody was watching.** The poll is what normally tells the cache, and
+        // a notification tap arrives with no poll behind it: without this, "Rank imported
+        // movies" lands on a Collection tab still holding what was there before the import
+        // (independent review).
+        if (named.completedAt !== null) invalidateAfterImport(queryClient);
         setState((current) =>
           current.phase === 'idle'
             ? named.completedAt !== null
@@ -353,6 +395,7 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
       if (finished && !completedRecently(live.status.completedAt)) return;
 
       jobRef.current = live.id;
+      if (finished) invalidateAfterImport(queryClient);
       setState((current) =>
         current.phase === 'idle'
           ? finished
@@ -365,7 +408,7 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+  }, [jobId, queryClient]);
 
   const settle = useCallback((next: ImportPhase) => {
     if (alive.current) setState(next);
@@ -429,7 +472,10 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     }
 
     if (!result.ok) {
-      track({ name: 'import_archive_selected', props: { outcome: failureOutcome(result.reason) } });
+      track({
+        name: 'import_archive_selected',
+        props: { outcome: failureOutcome(result.reason) },
+      });
       settle({ phase: 'failed', failure: { kind: 'archive', reason: result.reason } });
       return;
     }
@@ -735,10 +781,13 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
    */
   const watchRunning = useCallback(() => {
     setState((current) => {
-      if (current.phase !== 'failed' || current.failure.kind !== 'already_running') return current;
+      if (current.phase !== 'failed' || current.failure.kind !== 'already_running')
+        return current;
       const status = current.failure.status;
       if (status === undefined) return current;
-      return status.status === 'done' ? { phase: 'done', status } : { phase: 'working', status };
+      return status.status === 'done'
+        ? { phase: 'done', status }
+        : { phase: 'working', status };
     });
   }, []);
 

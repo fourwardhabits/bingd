@@ -8,8 +8,7 @@ import { createTestDb } from './harness.mjs';
  *
  * Locked product decision (2026-09-12): those two numbers are the watched collection,
  * imported history included, and not the ranked count. These tests say it as sentences about
- * an account, and the last suite says what did *not* change: every ranking surface still
- * sees rankings only.
+ * an account: what counts, who may count it, and what is not watched yet.
  */
 
 let t;
@@ -68,7 +67,9 @@ describe('what Movies counts', () => {
 
     assert.deepEqual(await counts(ana, ana), { movies: 4, tv: 0 });
     // The ranked count, which Taste Match and every ranking surface read, did not move.
-    const { rows } = await t.sql(`select count(*)::int as n from rankings where user_id = $1`, [ana]);
+    const { rows } = await t.sql(`select count(*)::int as n from rankings where user_id = $1`, [
+      ana,
+    ]);
     assert.equal(rows[0].n, 1);
   });
 
@@ -128,25 +129,31 @@ describe('who may count it', () => {
   });
 
   it('is not callable signed out', async () => {
-    const error = await t.asAnon(() => t.errorFrom(`select * from profile_title_counts($1)`, [owner]));
+    const error = await t.asAnon(() =>
+      t.errorFrom(`select * from profile_title_counts($1)`, [owner]),
+    );
     assert.ok(error);
   });
 });
 
-describe('what did not change', () => {
-  it('leaves an imported film out of the rankings every ranking surface reads', async () => {
-    const eve = await t.createUser({ username: 'counts_eve' });
-    const film = await movie('Only Imported');
-    await importWatched(eve, film);
-
-    assert.deepEqual(await counts(eve, eve), { movies: 1, tv: 0 });
-    const { rows } = await t.sql(`select count(*)::int as n from rankings where user_id = $1`, [eve]);
-    assert.equal(rows[0].n, 0, 'Top Ranked, scores, streaks, community score and Taste Match read this');
-
-    const { rows: board } = await t.sql(
-      `select count(*)::int as n from user_media where user_id = $1 and source <> 'imported'`,
-      [eve],
+/**
+ * What still counts only rankings is covered where it runs: `import-pipeline.test.mjs`
+ * ("counts for nothing on either leaderboard", "writes no rankings and no scores") drives
+ * the real leaderboard and ranking functions over a real import. This suite is the count.
+ */
+describe('what is not watched yet', () => {
+  it('leaves a season still being watched out of TV, and counts it once it is finished', async () => {
+    const fay = await t.createUser({ username: 'counts_fay' });
+    const series = await t.createSeries(`Half Watched ${seq}`, seq++);
+    const season = await t.createSeason(series, 1, 'Season 1');
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, source, progress)
+       values ($1, $2, 'in_app', 'watching')`,
+      [fay, season],
     );
-    assert.equal(board[0].n, 0, 'and the leaderboard excludes source = imported');
+    assert.deepEqual(await counts(fay, fay), { movies: 0, tv: 0 });
+
+    await t.sql(`update user_media set progress = 'completed' where user_id = $1`, [fay]);
+    assert.deepEqual(await counts(fay, fay), { movies: 0, tv: 1 });
   });
 });

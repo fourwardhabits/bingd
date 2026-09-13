@@ -42,7 +42,6 @@ async function watchedCounts(userId: string): Promise<{ movies: number; tv: numb
   return { movies: row?.movies ?? 0, tv: row?.tv ?? 0 };
 }
 
-
 /**
  * Somebody else's profile, by username.
  *
@@ -102,7 +101,12 @@ export function usePublicProfile(username: string | null) {
           .select('*', { count: 'exact', head: true })
           .eq('user_id', id)
           .eq('category', 'tv_seasons'),
-        watchedCounts(id),
+        /**
+         * Degrades to the ranked counts rather than failing the profile (independent review).
+         * The header is somebody else's whole profile; a count that could not be read is not a
+         * reason to show "Could not load this profile" over a person who loaded fine.
+         */
+        watchedCounts(id).catch(() => null),
       ]);
 
       return {
@@ -116,8 +120,8 @@ export function usePublicProfile(username: string | null) {
         following: following.count ?? 0,
         rankedMovies: movies.count ?? 0,
         rankedSeasons: seasons.count ?? 0,
-        watchedMovies: watched.movies,
-        watchedSeasons: watched.tv,
+        watchedMovies: watched?.movies ?? movies.count ?? 0,
+        watchedSeasons: watched?.tv ?? seasons.count ?? 0,
       };
     },
   });
@@ -180,13 +184,15 @@ export function useProfileNotes(userId: string | null) {
       if (mediaError) throw mediaError;
 
       const byId = new Map(
-        ((media ?? []) as unknown as {
-          id: string;
-          kind: ProfileNote['kind'];
-          title: string;
-          poster_path: string | null;
-          parent: { title: string } | { title: string }[] | null;
-        }[]).map((item) => [item.id, item]),
+        (
+          (media ?? []) as unknown as {
+            id: string;
+            kind: ProfileNote['kind'];
+            title: string;
+            poster_path: string | null;
+            parent: { title: string } | { title: string }[] | null;
+          }[]
+        ).map((item) => [item.id, item]),
       );
 
       return notes
@@ -293,17 +299,19 @@ export function useProfileWatchlist(userId: string | null, limit = PROFILE_WATCH
         .limit(limit);
       if (error) throw error;
 
-      return ((data ?? []) as unknown as {
-        media_item_id: string;
-        media_items: {
-          kind: ProfileWatchlistEntry['kind'];
-          title: string;
-          season_number: number | null;
-          release_date: string | null;
-          poster_path: string | null;
-          parent: { title: string } | { title: string }[] | null;
-        } | null;
-      }[])
+      return (
+        (data ?? []) as unknown as {
+          media_item_id: string;
+          media_items: {
+            kind: ProfileWatchlistEntry['kind'];
+            title: string;
+            season_number: number | null;
+            release_date: string | null;
+            poster_path: string | null;
+            parent: { title: string } | { title: string }[] | null;
+          } | null;
+        }[]
+      )
         .map((row) => {
           const item = row.media_items;
           // A watchlist row whose catalogue row has gone is not a poster. The foreign key
@@ -418,7 +426,13 @@ export function useProfileIdentity(username: string | null) {
       // A set-returning function comes back as an array; nobody by that handle, or an
       // account this viewer may not find, is an empty one.
       const row = (Array.isArray(data) ? data[0] : data) as
-        | { id: string; username: string; display_name: string | null; avatar_path: string | null; visibility: 'public' | 'private' }
+        | {
+            id: string;
+            username: string;
+            display_name: string | null;
+            avatar_path: string | null;
+            visibility: 'public' | 'private';
+          }
         | undefined;
       if (!row) return null;
 
@@ -432,4 +446,3 @@ export function useProfileIdentity(username: string | null) {
     },
   });
 }
-
