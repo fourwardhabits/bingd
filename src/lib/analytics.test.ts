@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirty canonical names and nothing else', () => {
+  it('is the thirty-one canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -99,9 +99,12 @@ describe('the event vocabulary', () => {
     // lost somebody. Its companion `onboarding_motivations` went on 2026-09-09 with the
     // two value screens it reported on: the flow no longer asks why anybody downloaded
     // the app, so nothing emits it and a name nothing emits is a name the spec must not
-    // carry.
+    // carry. `comparison_info_opened` arrived 2026-09-11 with the comparison memory
+    // aids, and is the only number that can say whether a season needs the recall sheet
+    // more than a film does.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
+        'comparison_info_opened',
         'follow_activity_opened',
         'follow_created',
         'for_you_slate_shown',

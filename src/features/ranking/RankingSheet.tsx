@@ -213,6 +213,15 @@ export function RankingSheet({
 /** A dismissing sheet answers nothing. */
 const noopClose = () => {};
 
+/**
+ * The ranking's two kinds, in the analytics vocabulary's two words.
+ *
+ * `MediaKind` says `tv_season` where every other part of this app says `season`, so the
+ * translation has to happen somewhere. It happens here, once, because three events now
+ * need it and three copies of one conditional is three places for it to drift.
+ */
+const mediaKindOf = (kind: 'movie' | 'season') => (kind === 'season' ? 'tv_season' : 'movie');
+
 function Session({
   subject,
   onClose,
@@ -392,7 +401,7 @@ function Session({
         track({
           name: 'ranking_started',
           props: {
-            media_kind: subject.kind === 'season' ? 'tv_season' : 'movie',
+            media_kind: mediaKindOf(subject.kind),
             surface,
             mode: subject.mode ?? 'start',
           },
@@ -879,7 +888,13 @@ function Comparison({
   onSkip,
   onClose,
 }: {
-  subject: { id: string; title: string; posterUri?: string | null };
+  /**
+   * `kind` is here for the Details affordance under the card, which says a different
+   * true sentence for a film and for a season, and for the event that fires when it is
+   * pressed. It is on `RankingSubject` already; this only stops the type dropping it on
+   * the way through.
+   */
+  subject: { id: string; title: string; posterUri?: string | null; kind: 'movie' | 'season' };
   pivotId: string;
   skipped: boolean;
   busy: boolean;
@@ -917,11 +932,19 @@ function Comparison({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('media_items')
-        .select('id, title, poster_path')
+        // `kind` joins the three columns this card has always read. The Details
+        // affordance under it describes a different sheet for a film and for a season,
+        // and this is one more column on a request that was being made anyway.
+        .select('id, kind, title, poster_path')
         .eq('id', pivotId)
         .single();
       if (error) throw error;
-      return data as { id: string; title: string; poster_path: string | null };
+      return data as {
+        id: string;
+        kind: 'movie' | 'season' | null;
+        title: string;
+        poster_path: string | null;
+      };
     },
   });
 
@@ -948,6 +971,15 @@ function Comparison({
   // Both cards wait for it, not just the pivot's. Leaving the subject tappable meant a user
   // could answer a comparison whose other side was still an ellipsis.
   const waiting = busy || !pivot;
+  /**
+   * The opponent's kind, narrowed to the two a ranking can hold.
+   *
+   * `media_items.kind` also carries `series`, which is a grouping rather than a rankable
+   * unit (PRD §10) and can never be a pivot — and while the row is still in flight there
+   * is no kind at all. Both collapse to `movie`, which is what the card said for every
+   * title before this and is only ever read while it is unpressable.
+   */
+  const pivotKind = pivot?.kind === 'season' ? 'season' : 'movie';
 
   return (
     <View style={styles.comparison}>
@@ -959,10 +991,17 @@ function Comparison({
       <View style={styles.cards}>
         <Card
           title={subject.title}
+          kind={subject.kind}
           posterUri={subject.posterUri ?? null}
           disabled={waiting}
           onPress={() => onPick(subject.id)}
-          onRecall={() => setRecalling(subject.id)}
+          onRecall={() => {
+            track({
+              name: 'comparison_info_opened',
+              props: { media_kind: mediaKindOf(subject.kind), surface },
+            });
+            setRecalling(subject.id);
+          }}
         />
         {/* Beli's device (beli-252). It turns two pictures side by side into a
             question, and it costs one 32pt circle. */}
@@ -973,10 +1012,32 @@ function Comparison({
         </View>
         <Card
           title={pivot?.title ?? '…'}
+          /**
+           * Null until the row lands, and that is the point rather than an oversight.
+           * `pivotKind` has to collapse an unresolved row to *something*, and whichever
+           * it collapsed to would be a hint asserting a film's contents over a season
+           * for as long as the read takes. A control with no hint reads its label and
+           * stops, which is honest; the hint arrives with the row.
+           */
+          kind={pivot ? pivotKind : null}
           posterUri={posterUri(pivot?.poster_path, 'card')}
           disabled={waiting}
           onPress={() => pivot && onPick(pivot.id)}
-          onRecall={() => pivot && setRecalling(pivot.id)}
+          /**
+           * The event fires inside the same guard the navigation does, and not beside
+           * it. Details is not `disabled` while the opponent loads — it is a quiet
+           * caption under a poster and dimming it would say the sheet was unavailable
+           * rather than unready — so the press is real and does nothing, and an event
+           * for a sheet that did not open would be a lie about a sheet nobody saw.
+           */
+          onRecall={() => {
+            if (!pivot) return;
+            track({
+              name: 'comparison_info_opened',
+              props: { media_kind: mediaKindOf(pivotKind), surface },
+            });
+            setRecalling(pivot.id);
+          }}
         />
       </View>
 
@@ -1143,12 +1204,42 @@ function Comparison({
       </View>
 
       {/**
-       * Mounted only while open, like every other sheet in the app, and *inside* the
+       * Presented only while open, like every other sheet in the app, and *inside* the
        * comparison rather than beside it — so the session, the pivot and the answers
        * already given are all still standing behind it. Dismissing returns to the exact
        * same pair because nothing about the pair was ever unmounted.
+       *
+       * ---------------------------------------------------------------------------
+       * **Keyed, so every open is a new sheet.**
+       *
+       * Presented is not the same as mounted: the component sits here unconditionally
+       * and draws nothing while `recalling` is null, so there is a `<Modal>` only when
+       * there is a title. Returning null unmounts its *children*, so everything they
+       * hold — an expanded synopsis, an opened episode synopsis — resets on its own and
+       * always did. What does not reset is the sheet component's **own** state, because
+       * React keeps the instance: `showAllEpisodes`.
+       *
+       * So without this, a reader who opened a twenty-one episode season, pressed *Show
+       * all 21 episodes*, closed it and pressed Details on the other card would get that
+       * card's season already expanded to its full length — a decision they made about a
+       * different show, applied to this one.
+       *
+       * A `key` rather than an effect that resets the flag, for the reason `Session`
+       * above is keyed: it is one line, it cannot be forgotten when the next piece of
+       * state is added here, and "a different title is a different sheet" is the actual
+       * rule rather than a consequence of one.
+       *
+       * **Not a second presentation.** `recalling` only ever goes id to null to id —
+       * one card's sheet covers the screen, so the other card cannot be pressed while it
+       * is open — so the key never changes with a `<Modal>` mounted, and no commit both
+       * unmounts one and mounts another. The `<Modal>` operation is the same one that
+       * happened before this: an unmount, on close.
        */}
-      <TitleRecallSheet mediaItemId={recalling} onClose={() => setRecalling(null)} />
+      <TitleRecallSheet
+        key={recalling ?? 'closed'}
+        mediaItemId={recalling}
+        onClose={() => setRecalling(null)}
+      />
     </View>
   );
 }
@@ -1172,12 +1263,18 @@ function TopBar({ onClose }: { onClose: () => void }) {
 
 function Card({
   title,
+  kind,
   posterUri,
   disabled,
   onPress,
   onRecall,
 }: {
   title: string;
+  /**
+   * What the Details sheet under this card will actually contain, or null while the
+   * card does not know yet. Null buys silence rather than a guess — see the hint below.
+   */
+  kind: 'movie' | 'season' | null;
   posterUri?: string | null;
   disabled: boolean;
   onPress: () => void;
@@ -1277,7 +1374,23 @@ function Card({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Details about ${title}`}
-        accessibilityHint="Shows the year, the runtime, the cast, and what it is about."
+        /**
+         * **The hint describes the sheet that opens, and there are two of them.**
+         *
+         * One sentence served both kinds and named the film's contents: the year, the
+         * runtime, the cast. A season's sheet has no runtime, and since the memory-aid
+         * pass it has no cast line either — what it has is the episodes, which are the
+         * whole reason somebody opens it on a season. A hint promising three things that
+         * are not there, and omitting the one that is, is worse than no hint, and it is
+         * the only description of this control a screen reader ever gets.
+         */
+        accessibilityHint={
+          kind === null
+            ? undefined
+            : kind === 'season'
+              ? 'Shows the year, the episodes in it, and what it is about.'
+              : 'Shows the year, the runtime, the cast, and what it is about.'
+        }
         hitSlop={theme.layout.minTapTarget / 2}
         onPress={onRecall}
         style={({ pressed }) => [styles.recall, pressed && styles.pressed]}

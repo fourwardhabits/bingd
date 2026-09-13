@@ -299,8 +299,11 @@ describe('the comparison', () => {
     expect(words.filter((word) => /#|\bno\.|\d/.test(word))).toEqual([]);
 
     // And the position is not merely unrendered: it is never read, which is what makes
-    // showing it by accident impossible.
-    expect(mockSelect).toHaveBeenCalledWith('id, title, poster_path');
+    // showing it by accident impossible. Pinned as the whole column list rather than as
+    // an absence, so a column added here is a decision somebody makes on purpose —
+    // `kind` was added 2026-09-11 for the Details hint under the card, which says a
+    // different true sentence for a film and for a season.
+    expect(mockSelect).toHaveBeenCalledWith('id, kind, title, poster_path');
   });
 
   it('caches the opponent under a key of its own', async () => {
@@ -526,7 +529,10 @@ describe('the comparison', () => {
 
       const columns = mockSelect.mock.calls.map(([value]) => value as string);
       expect(columns.some((value) => value.includes('overview'))).toBe(true);
-      expect(columns).toContain('id, title, poster_path');
+      expect(columns).toContain('id, kind, title, poster_path');
+      // The card's read stays the short one. The recall sheet's is the long one, and the
+      // proof the two have not collapsed is that both shapes were asked for.
+      expect(columns).not.toContain('id, title, poster_path');
     });
   });
 
@@ -2266,5 +2272,74 @@ describe('a Too tough whose reply was lost', () => {
     await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
     expect(sheet.queryByRole('button', { name: 'Try again' })).toBeNull();
     expect(completions()).toHaveLength(0);
+  });
+});
+
+/**
+ * **`comparison_info_opened`, which is the whole measurement behind the memory aids.**
+ *
+ * The claim the 2026-09-11 pass is built on is that a season needs the recall sheet far
+ * more than a film does — a poster with a number on it is the same poster in every season
+ * of a show — and this event is the only thing that can test it. An event with the wrong
+ * `media_kind` would answer the question backwards, so the kind is asserted per side
+ * rather than per screen.
+ */
+describe('when the recall sheet is opened from a comparison', () => {
+  const events = (name: string) =>
+    mockTrack.mock.calls.filter(([event]) => (event as { name: string }).name === name);
+
+  it('reports the subject’s own kind and the surface it was ranked from', async () => {
+    answering(comparison());
+    const sheet = await openSheet({ subject: { ...subject, kind: 'season' } });
+    await sheet.ready('Film P');
+
+    await fireEvent.press(sheet.getByLabelText('Details about Film A'));
+
+    expect(events('comparison_info_opened')).toHaveLength(1);
+    expect(events('comparison_info_opened')[0][0]).toEqual({
+      name: 'comparison_info_opened',
+      // `tv_season`, not `season`: the analytics vocabulary is its own, and the
+      // translation is the one thing `mediaKindOf` exists to keep in one place.
+      props: { media_kind: 'tv_season', surface: 'search' },
+    });
+  });
+
+  it('reports the opponent’s kind, which is read off its own row', async () => {
+    // The subject is a film and the opponent is not. A per-screen kind would report the
+    // subject's for both and the comparison of the two rates would be meaningless.
+    mockPivotRead.mockResolvedValue({
+      data: { id: 'film-p', kind: 'season', title: 'Film P', poster_path: null },
+      error: null,
+    });
+    answering(comparison());
+    const sheet = await openSheet();
+    await sheet.ready('Film P');
+
+    await fireEvent.press(sheet.getByLabelText('Details about Film P'));
+
+    expect(events('comparison_info_opened')[0][0]).toEqual({
+      name: 'comparison_info_opened',
+      props: { media_kind: 'tv_season', surface: 'search' },
+    });
+  });
+
+  it('emits nothing for a press that opens nothing', async () => {
+    /**
+     * Details is deliberately not `disabled` while the opponent's row is in flight — it
+     * is a quiet caption under a poster, and dimming it would say the sheet was
+     * unavailable rather than unready — so the press is real and does nothing. An event
+     * for a sheet nobody saw is a lie in the one series that has to be trustworthy, and
+     * the guard that prevents it is one line that a refactor can invert.
+     */
+    mockPivotRead.mockReturnValue(new Promise(() => {}));
+    answering(comparison());
+    const sheet = await openSheet();
+    await waitFor(() => expect(sheet.getByLabelText('Details about …')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByLabelText('Details about …'));
+
+    expect(events('comparison_info_opened')).toHaveLength(0);
+    // And with no kind to be honest about, the control makes no claim about the sheet.
+    expect(sheet.getByLabelText('Details about …').props.accessibilityHint).toBeUndefined();
   });
 });
