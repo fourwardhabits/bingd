@@ -220,6 +220,10 @@ const KIND_FOR: Record<Medium, 'movie' | 'series'> = { movies: 'movie', tv: 'ser
  * same wall on every visit. The day list is the same kind of evidence (TMDB trending,
  * identical for everybody) and turns over faster, so it widens that pool without
  * pretending to be taste: a wall drawn from these alone is still `popularityOnly`.
+ *
+ * **Only for a TV wall with no anchor.** The second list is read after the anchors resolve
+ * and only when none has a list; an anchored reader keeps the week list alone, so the day
+ * list can never pad a taste-led wall with popularity (review of 2026-09-13, M2).
  * Films are unchanged — their walls are anchored for anybody past First Five.
  */
 const TRENDING_FOR: Record<Medium, readonly string[]> = {
@@ -480,6 +484,9 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
  * promise about row order and a re-fetch that returned the same rows differently
  * ordered must not look like a change.
  */
+const idsOf = (titles: readonly { mediaItemId: string }[]) =>
+  titles.map((title) => title.mediaItemId);
+
 const setFingerprint = (ids: Iterable<string>): string => {
   let total = 0;
   let count = 0;
@@ -538,6 +545,34 @@ export const MAX_PAGES = 5;
 
 /** How many liked titles the cached-list read covers before selection. See the queryFn. */
 const CACHED_READ_LIMIT = 100;
+
+/**
+ * This launch's selection, per wall, so a refetch cannot re-draw it (review of 2026-09-13).
+ *
+ * `selectAnchors` weights titles whose lists are cached, and the cache moves on its own:
+ * this launch's fills land, another reader fills a title, a facet expires. The query key
+ * cannot carry that state, so without a memo a refetch after the thirty-minute stale time
+ * — or any invalidation — would re-draw from a different cached set and could spend
+ * another round of fills on titles the first draw never chose. Keyed on everything the
+ * selection is a function of *except* the cache: the reader, the seed, the medium, the
+ * filters and the liked band itself. A new launch has a new seed; a changed band is a
+ * new key; nothing else can move it.
+ */
+const selections = new Map<string, readonly string[]>();
+const SELECTION_KEYS = 16;
+
+function rememberSelection(key: string, draw: () => readonly string[]): readonly string[] {
+  const hit = selections.get(key);
+  if (hit) return hit;
+  const ids = draw();
+  selections.set(key, ids);
+  while (selections.size > SELECTION_KEYS) {
+    const oldest = selections.keys().next();
+    if (oldest.done) break;
+    selections.delete(oldest.value);
+  }
+  return ids;
+}
 
 export function useForYou(
   userId: string,
@@ -778,18 +813,43 @@ export function useForYou(
        * **Which lists the liked band already has, before choosing** (2026-09-13).
        *
        * One read for the top of the band, so `selectAnchors` can take breadth from facets
-       * that cost nothing upstream. Bounded so the `in` filter stays a short URL; a liked
-       * title below the bound can still be drawn, it just gets no cached preference.
+       * that cost nothing upstream. Bounded so one `in` filter stays a modest URL (about
+       * 3.7 KB at the bound); a liked title below the bound can still be drawn, it just gets
+       * no cached preference.
        */
-      let lists = await cachedSimilar(
-        liked.slice(0, CACHED_READ_LIMIT).map((anchor) => anchor.mediaItemId),
+      const readIds = liked.slice(0, CACHED_READ_LIMIT).map((anchor) => anchor.mediaItemId);
+      let lists = await cachedSimilar(readIds);
+      const selectionKey = [
+        userId,
+        anchorSeed,
+        medium,
+        JSON.stringify(filters ?? emptyFilters()),
+        liked.map((anchor) => `${anchor.mediaItemId}:${anchor.score}`).join(','),
+      ].join('|');
+      // An empty cached list is a title TMDB has nothing for: known, but no breadth.
+      const cachedWithBreadth = new Set(
+        [...lists].filter(([, list]) => list.length > 0).map(([id]) => id),
       );
-      const anchorSeeds = selectAnchors(liked, {
-        seed: anchorSeed,
-        budget: ANCHOR_BUDGET,
-        // An empty cached list is a title TMDB has nothing for: known, but no breadth.
-        cached: new Set([...lists].filter(([, ids]) => ids.length > 0).map(([id]) => id)),
-      });
+      const chosenIds = new Set(
+        rememberSelection(selectionKey, () =>
+          idsOf(
+            selectAnchors(liked, {
+              seed: anchorSeed,
+              budget: ANCHOR_BUDGET,
+              cached: cachedWithBreadth,
+            }),
+          ),
+        ),
+      );
+      const anchorSeeds = liked.filter((anchor) => chosenIds.has(anchor.mediaItemId));
+
+      // A chosen title below the read bound may still have a cached list; read it rather
+      // than spending a fill slot and an edge call to be told so (review m2).
+      const read = new Set(readIds);
+      const unread = anchorSeeds
+        .map((anchor) => anchor.mediaItemId)
+        .filter((id) => !read.has(id));
+      if (unread.length > 0) lists = new Map([...lists, ...(await cachedSimilar(unread))]);
 
       // Fill what is missing, best-ranked first, then read those once more. At most
       // `MAX_FILLS_PER_SLATE` — six, the old whole limit — however large the budget, and
@@ -825,8 +885,13 @@ export function useForYou(
 
       const anchorsUsed = anchors.filter((anchor) => anchor.similarIds.length > 0).length;
 
+      // The day list only when nothing about this reader anchors the TV wall — see
+      // `TRENDING_FOR`. An anchored reader's wall is taste-led, and more trending titles
+      // competing for its slots would be popularity padding, which the fix may not add.
+      const trendingLists =
+        medium === 'tv' && anchorsUsed > 0 ? TRENDING_FOR.tv.slice(0, 1) : TRENDING_FOR[medium];
       const fallback = [
-        ...new Set((await Promise.all(TRENDING_FOR[medium].map(trendingFallback))).flat()),
+        ...new Set((await Promise.all(trendingLists.map(trendingFallback))).flat()),
       ];
       /**
        * The third source: titles the people this reader follows put in their top band.
@@ -951,7 +1016,7 @@ export function useForYou(
           size: 0,
           repeat_count: 0,
           liked_titles: likedCount,
-          anchors: anchorsUsed ?? 0,
+          anchors_used: anchorsUsed ?? 0,
           pool_size: poolSize ?? 0,
         },
       });
@@ -980,10 +1045,10 @@ export function useForYou(
           repeat_count: ids.filter((id) => (exposureAtLaunch?.get(id) ?? 0) > 0).length,
           // Whether rotation has anything to rotate, and what it produced (2026-09-13):
           // three counts, no ids. `liked_titles` is the band anchors are drawn from,
-          // `anchors` how many of the drawn ones had a TMDB list, `pool_size` how many
+          // `anchors_used` how many of the drawn ones had a TMDB list, `pool_size` how many
           // candidates survived eligibility.
           liked_titles: likedCount,
-          anchors: anchorsUsed ?? 0,
+          anchors_used: anchorsUsed ?? 0,
           pool_size: poolSize ?? 0,
         },
       });

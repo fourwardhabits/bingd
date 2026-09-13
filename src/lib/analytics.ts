@@ -624,7 +624,7 @@ export type AnalyticsEvent =
          */
         liked_titles: number;
         /** How many of this launch's anchors had a TMDB list to contribute. At most eight. */
-        anchors: number;
+        anchors_used: number;
         /** How many candidates survived eligibility — the universe the wall is drawn from. */
         pool_size: number;
       };
@@ -880,6 +880,21 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
    * own. This one is added because the Similar events below are unreadable without it.
    */
   'medium',
+  /**
+   * `for_you_slate_shown`'s counts (2026-09-13, the For You repetition fix).
+   *
+   * **`size` and `repeat_count` were declared on the event and never allowed, so neither
+   * has reached the wire since it shipped** — the note above names it. They are added now
+   * because the repetition fix is evaluated on exactly that ratio after outreach, and the
+   * three new counts beside them are meaningless without it. All five are integers about
+   * a wall: how big it is, how much of it was already seen, the liked band it drew from,
+   * how many anchors had a list, and how many candidates survived. Never an id or a title.
+   */
+  'size',
+  'repeat_count',
+  'liked_titles',
+  'anchors_used',
+  'pool_size',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

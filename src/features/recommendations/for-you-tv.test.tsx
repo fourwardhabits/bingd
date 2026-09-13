@@ -25,10 +25,20 @@ import { useForYou } from './use-for-you';
 jest.mock('@/lib/analytics', () => ({ track: () => {} }));
 
 const mockCacheSimilar = jest.fn();
+/** When set, a fill writes the facet the way the adapter does: `liked-N` → `[rec-N]`. */
+let mockFillWrites = false;
 jest.mock('@/lib/tmdb-adapter', () => ({
   AdapterError: class AdapterError extends Error {},
   cacheSimilar: (id: string) => {
     mockCacheSimilar(id);
+    if (mockFillWrites) {
+      (mockTables.media_cache ??= []).push({
+        media_item_id: id,
+        facet: 'similar',
+        payload: { ids: [id.replace('liked-', 'rec-')] },
+        expires_at: '2999-01-01T00:00:00Z',
+      });
+    }
     return Promise.resolve();
   },
 }));
@@ -125,6 +135,7 @@ beforeEach(() => {
   mockRpcResults = {};
   mockSimilarAsks.length = 0;
   mockCacheSimilar.mockReset();
+  mockFillWrites = false;
   resetRecommendationSession(1);
   resetImpressions();
 });
@@ -188,6 +199,38 @@ describe('the TV wall', () => {
     expect(wallIds(result.current.data?.items)).toEqual(['show-both', 'show-day', 'show-week']);
     // Trending is trending: no anchor, no followee, and the wall says so.
     expect(result.current.data).toMatchObject({ anchorsUsed: 0, popularityOnly: true });
+  });
+
+  it('does not pad an anchored TV wall with the day list', async () => {
+    // The day list is for a reader with nothing to anchor on. Once a liked show resolves,
+    // more trending titles competing for its wall would be popularity padding (review M2).
+    const liked = seasonOf('season-liked', 'show-liked');
+    mockTables.media_items = [
+      show('show-liked'),
+      liked,
+      show('show-rec', 'Crime'),
+      show('show-week', 'Comedy'),
+      show('show-day', 'Comedy'),
+    ];
+    mockTables.rankings = [
+      { user_id: 'user-1', media_item_id: 'season-liked', bucket: 'loved', position: 1, category: 'tv_seasons', created_at: '2026-09-01T00:00:00Z', media_items: embedded(liked) },
+    ];
+    mockTables.user_media = [
+      { user_id: 'user-1', media_item_id: 'season-liked', bucket: 'loved', watched_on: null, created_at: '2026-09-01T00:00:00Z', media_items: embedded(liked) },
+    ];
+    mockTables.media_cache = [
+      { media_item_id: 'show-liked', facet: 'similar', payload: { ids: ['show-rec'] }, expires_at: '2999-01-01T00:00:00Z' },
+    ];
+    mockTables.provider_list_cache = [
+      list('trending.series.week', ['show-week']),
+      list('trending.series.day', ['show-day']),
+    ];
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'tv'));
+
+    await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+    expect(result.current.data?.anchorsUsed).toBe(1);
+    expect(wallIds(result.current.data?.items)).toEqual(['show-rec', 'show-week']);
   });
 
   it('leaves the Movies wall on the week list alone', async () => {
@@ -266,6 +309,52 @@ describe('selected anchors inside one launch', () => {
     expect(result.current.data!.scored).toBe(scored);
     expect(mockSimilarAsks).toHaveLength(reads);
     expect(result.current.isPending).toBe(false);
+  });
+
+  it('keeps the selection when a refetch finds the cache has moved underneath it', async () => {
+    // Review m1. Selection weights titles whose lists are cached, and the cache moves on
+    // its own: this launch's fills land, and other readers fill titles this launch never
+    // chose. Four of twelve lists cached at first; every fill writes its facet; then every
+    // remaining list appears before the refetch, which changes every weight in the draw.
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      seedLikedAccount();
+      mockTables.media_cache = mockTables.media_cache!.slice(0, 4);
+      mockFillWrites = true;
+      mockCacheSimilar.mockReset();
+      resetRecommendationSession(seed);
+
+      const { result, unmount } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+      await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+      const first = result.current.data!.scored;
+      const behind = anchorsBehind(first);
+      const fills = mockCacheSimilar.mock.calls.length;
+      for (let index = 0; index < 12; index += 1) {
+        const id = `liked-${index}`;
+        if (mockTables.media_cache!.some((row) => row.media_item_id === id)) continue;
+        mockTables.media_cache!.push({
+          media_item_id: id,
+          facet: 'similar',
+          payload: { ids: [`rec-${index}`] },
+          expires_at: '2999-01-01T00:00:00Z',
+        });
+      }
+
+      // The refetch really runs the queryFn — it reads the cached lists again — and React
+      // Query's structural sharing may then hand back the same data if nothing moved.
+      const reads = mockSimilarAsks.length;
+      await act(async () => {
+        result.current.refetch();
+      });
+      await waitFor(() => expect(mockSimilarAsks.length).toBeGreaterThan(reads));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(anchorsBehind(result.current.data!.scored)).toEqual(behind);
+      // Every chosen list landed on the first run, so the refetch asked for nothing.
+      expect(mockCacheSimilar.mock.calls.length).toBe(fills);
+      await unmount();
+    }
   });
 
   it('draws different long-tail anchors on a different launch, keeping the top two', async () => {

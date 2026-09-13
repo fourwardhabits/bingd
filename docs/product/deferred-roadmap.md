@@ -2402,7 +2402,7 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 ### 59a. A return from the background is the same wall
 
-**What it is.** The arrangement seed, the anchor seed and the durable exposure are all read once per process (`staleTime: Infinity`), and no foreground handler touches For You. Returning to a still-alive app shows the identical wall, and `noteImpressions`' per-process guard means that repeat is never written — so neither `recommendation_impressions` nor `for_you_slate_shown` can see it.
+**What it is.** The arrangement and anchor seeds are module state set once per process, the durable exposure is read once per process (`staleTime: Infinity`), and no foreground handler touches For You. Returning to a still-alive app shows the identical wall, and `noteImpressions`' per-process guard means that repeat is never written — so neither `recommendation_impressions` nor `for_you_slate_shown` can see it.
 
 **Why it is deferred.** Advancing the arrangement on foreground must not recreate the render → record → re-derive loop `use-exposure.ts` documents, and it changes what a session means for every exposure rule. The founder accepted the current continuity for this tranche.
 
@@ -2414,7 +2414,7 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 **Why it is deferred.** It rewrites guarantees `rank.test.ts` asserts on purpose ("no draw promotes a title from outside the pool"), and it needs a relevance floor so tiering cannot promote the weak tail. Coverage-aware anchors change the universe per launch, which blunts this before any engine change.
 
-**Revisit when.** `for_you_slate_shown` `repeat_count / size` stays high for readers whose `liked_titles` is above six.
+**Revisit when.** `for_you_slate_shown` `repeat_count / size` stays high for readers whose `liked_titles` is above eight.
 
 ### 59c. `foryou.impression_window_hours` is still 72
 

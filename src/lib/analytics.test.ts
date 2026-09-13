@@ -226,6 +226,32 @@ describe('the privacy boundary', () => {
 
     expect(propertiesOf()).toMatchObject({ medium: 'tv' });
   });
+
+  it('lets For You’s repetition counts reach the wire, which they never had', () => {
+    // The independent review of the 2026-09-13 repetition fix: its three new counts were
+    // declared on the type and dropped by `sanitize`, exactly like `size` and
+    // `repeat_count` before them. A mocked `track` in the hook suite cannot see that.
+    track({
+      name: 'for_you_slate_shown',
+      props: {
+        medium: 'movies',
+        size: 20,
+        repeat_count: 3,
+        liked_titles: 27,
+        anchors_used: 8,
+        pool_size: 130,
+      },
+    });
+
+    expect(propertiesOf()).toMatchObject({
+      medium: 'movies',
+      size: 20,
+      repeat_count: 3,
+      liked_titles: 27,
+      anchors_used: 8,
+      pool_size: 130,
+    });
+  });
 });
 
 describe('ranking_completed', () => {

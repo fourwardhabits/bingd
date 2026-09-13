@@ -110,7 +110,7 @@ describe('an empty For You wall, as telemetry', () => {
     expect(result.current.data?.items).toEqual([]);
     await waitFor(() =>
       expect(slateShown()).toEqual([
-        { medium: 'movies', size: 0, repeat_count: 0, liked_titles: 0, anchors: 0, pool_size: 0 },
+        { medium: 'movies', size: 0, repeat_count: 0, liked_titles: 0, anchors_used: 0, pool_size: 0 },
       ]),
     );
   });
@@ -129,7 +129,7 @@ describe('an empty For You wall, as telemetry', () => {
       size: 2,
       repeat_count: 0,
       liked_titles: 0,
-      anchors: 0,
+      anchors_used: 0,
       pool_size: 2,
     });
   });

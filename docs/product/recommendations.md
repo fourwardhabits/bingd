@@ -297,9 +297,10 @@ rotating anchors and the TV correctness fixes. The exposure-engine work is defer
 7. **At most six upstream fills per slate** (`MAX_FILLS_PER_SLATE` = the old whole limit),
    strongest first. An anchor past the cap with no cached list contributes nothing that
    launch.
-8. `anchorSeed` (`session-seed.ts`) is fixed per process and is part of the query key. A
-   **cold launch** draws a new selection; a render, refetch, Refresh or return from the
-   background does not. It is separate from the arrangement seed so pull-to-refresh cannot
+8. `anchorSeed` (`session-seed.ts`) is fixed per process and is part of the query key, and
+   the selection is memoised per launch and wall (`use-for-you.ts` `selections`), so the
+   cache moving under a refetch cannot re-draw it. A **cold launch** draws a new selection;
+   a render, refetch, Refresh or return from the background does not. It is separate from the arrangement seed so pull-to-refresh cannot
    change the key and flash the wall.
 
 Candidate generation is otherwise unchanged: each anchor's own TMDB `/recommendations`
@@ -337,7 +338,8 @@ the first six become anchors; every meaningful liked genre is represented on eve
 candidate membership changes between launches; the first wall's mean score stays within 5%
 of the old first-six wall; the wall stays anchor-led; nothing outside the sources can enter;
 a cached list is drawn at least 1.5× as often as an uncached neighbour. `for-you-tv.test.tsx`
-pins, through the real hook, that selection is stable across render, refetch and Refresh,
+pins, through the real hook, that selection is stable across render, refetch (with the
+cache having moved under it) and Refresh,
 changes across launches, and never makes more than six upstream fills. Every one of those
 was mutation-checked: removing the coverage step, the cached preference, the fill cap or the
 launch seed each fails a test.
@@ -349,12 +351,14 @@ launch seed each fails a test.
 - **A show already met is not recommended.** `user_media` holds seasons and the TV wall
   holds series, so a show with a logged or ranked season came back as unseen unless it was
   an anchor. The exclusion now includes every such show (`seriesAlreadyMet`).
-- **The day list beside the week list.** A reader with no season ranked had one
-  twenty-title list. The TV fallback now also reads `trending.series.day`; a wall drawn
-  from it alone is still `popularityOnly` and says "Popular right now".
+- **The day list beside the week list, for an unanchored TV wall only.** A reader with no
+  season ranked had one twenty-title list. When no TV anchor has a list, the fallback also
+  reads `trending.series.day`; a wall drawn from it is still `popularityOnly` and says
+  "Popular right now". An anchored TV wall keeps the week list alone, so the day list never
+  pads a taste-led wall.
 
 ### 10.5 Telemetry
 
-`for_you_slate_shown` gains `liked_titles`, `anchors` and `pool_size` — three counts, no
+`for_you_slate_shown` gains `liked_titles`, `anchors_used` and `pool_size` — three counts, no
 ids — so whether rotation had anything to rotate, and the pool it produced, can be read
 after outreach beside `repeat_count`.
