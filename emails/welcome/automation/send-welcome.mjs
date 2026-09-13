@@ -1,314 +1,322 @@
 #!/usr/bin/env node
 /**
- * The scheduled welcome-email worker. NOT ENABLED, and it will tell you so.
+ * The welcome-email worker. NOT ENABLED: nothing schedules it, and no database has its
+ * functions until `welcome_email.sql` is applied.
  *
  *   node emails/welcome/automation/send-welcome.mjs --dry-run
+ *   node emails/welcome/automation/send-welcome.mjs --dry-run --canary <user-id> --canary-email <address>
+ *   node emails/welcome/automation/send-welcome.mjs --canary <user-id> --canary-email <address>
  *   node emails/welcome/automation/send-welcome.mjs
  *
- * Nothing schedules this. There is no workflow file and no cron entry, the migration
- * beside it has not been applied, and `welcome.delivery_enabled` does not exist yet — so
- * a real run today exits at the first gate having read one config row and written
- * nothing. See README.md.
+ * Environment: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and for anything but a dry run
+ * RESEND_API_KEY. WELCOME_FROM and WELCOME_REPLY_TO override the envelope in
+ * `../envelope.mjs` and are normally left unset.
  *
  * ---------------------------------------------------------------------------
- * THE ORDER OF THE GATES IS THE DESIGN
+ * WHERE THE GUARANTEES LIVE
  * ---------------------------------------------------------------------------
  *
- *   1. Is delivery enabled? If not, stop. **Before claiming anything**, so a disabled
- *      run leaves every eligible account still eligible. Hold, do not drop.
- *   2. Who is eligible? Created at or after `welcome.start_after`, at least
- *      `welcome.delay_hours` ago, has no ledger row.
- *   3. Claim, one at a time, with `on conflict do nothing`. No row back, no send.
- *   4. Send with an idempotency key, so a retry of a claim cannot duplicate.
- *   5. Record the outcome.
+ * Not here. Every rule that decides who gets mailed is in SQL, in `welcome_email.sql`,
+ * where it is tested against every real migration and against a real PostgreSQL with two
+ * connections racing:
  *
- * Step 1 before step 3 is the whole point. A worker that claims first and then checks
- * whether it is allowed to send has consumed the people it declined to mail, and turning
- * the flag back on reaches nobody.
+ *   welcome_email_preview   who a claim would take, taking nobody. The dry run.
+ *   welcome_email_claim     the switch, the signup window, the eligibility rules, the
+ *                           suppression list, the exactly-once claim and the bounded retry.
+ *   welcome_email_record    the outcome, for exactly the attempt that was claimed.
+ *
+ * This file asks the database who it owns, sends each of them one request with an
+ * idempotency key, and records what Resend said. A bug here can fail to send. It cannot
+ * choose a second recipient, because it never chooses anybody.
+ *
+ * ---------------------------------------------------------------------------
+ * THE CANARY
+ * ---------------------------------------------------------------------------
+ *
+ * `--canary <user-id> --canary-email <address>` runs the real claim, the real send and
+ * the real record for exactly one account, and only if that account's confirmed address
+ * is exactly the address given. Both halves are checked inside SQL, before any claim. It
+ * ignores `welcome.delivery_enabled` and the signup window and nothing else, which is
+ * what lets it prove the automation on a founder test account without switching the
+ * automation on for anybody.
+ *
+ * Run it twice. The first run sends one message and records it; the second finds the
+ * ledger row and sends nothing. That is the proof.
  */
 
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, '..', 'dist');
+import {
+  DEFAULT_FROM,
+  DEFAULT_REPLY_TO,
+  TEMPLATE_VERSION,
+  greetingFor,
+  isAddress,
+  loadTemplate,
+  personalise,
+  resendPayload,
+  sendViaResend,
+  unsubscribeFor,
+} from '../envelope.mjs';
 
-const DRY = process.argv.includes('--dry-run');
+const welcomeRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const url = process.env.SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const resendKey = process.env.RESEND_API_KEY;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The key Resend deduplicates on: one per person per template version. */
+export const idempotencyKeyFor = (userId) => `welcome-${TEMPLATE_VERSION}-${userId}`;
+
+const parseArgs = (argv) => {
+  const known = new Set(['--dry-run', '--canary', '--canary-email', '--limit']);
+  for (const arg of argv) {
+    if (arg.startsWith('--') && !known.has(arg)) throw new Error(`unknown argument ${arg}`);
+  }
+  const value = (name) => {
+    const at = argv.indexOf(name);
+    return at > -1 && argv[at + 1] && !argv[at + 1].startsWith('--') ? argv[at + 1] : null;
+  };
+  return {
+    dryRun: argv.includes('--dry-run'),
+    canary: argv.includes('--canary') || argv.includes('--canary-email'),
+    canaryUser: value('--canary'),
+    canaryEmail: value('--canary-email'),
+    limit: value('--limit'),
+  };
+};
+
+/** Line endings normalised, as in build.mjs: a Windows checkout and CI must agree. */
+const sha256 = (text) => createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex');
 
 /**
- * The envelope. Every one of these is a founder decision that has not been made, and the
- * worker refuses rather than guessing at any of them.
+ * Proof that `dist/` was rendered from the `copy.json` on disk. Without it, a copy edit
+ * nobody rebuilt would send the previous words while every review read the new ones.
+ */
+const assertFreshBuild = async (root) => {
+  const [manifest, copy, targets] = await Promise.all([
+    readFile(join(root, 'dist', 'manifest.json'), 'utf8').then(JSON.parse),
+    readFile(join(root, 'copy.json'), 'utf8'),
+    readFile(join(root, 'targets.json'), 'utf8'),
+  ]);
+  if (manifest.copy !== sha256(copy) || manifest.targets !== sha256(targets)) {
+    throw new Error('dist/ is stale: copy.json or targets.json changed since the last build. Run node emails/welcome/build.mjs');
+  }
+};
+
+/**
+ * One run. Returns a summary whose `code` is the process exit code.
  *
- * `FROM` cannot be `@bingd.app` until that domain is added to Resend: the only verified
- * domain today is `auth.bingd.app`. `REPLY_TO` is the reason this email exists and is
- * useless pointing at a mailbox nobody opens.
+ * Everything the outside world supplies is a parameter, so
+ * `supabase/tests/welcome-email.test.mjs` runs this exact function against the real SQL
+ * with a recorded Resend.
  */
-const FROM = process.env.WELCOME_FROM ?? null;
-const REPLY_TO = process.env.WELCOME_REPLY_TO ?? null;
-const UNSUBSCRIBE = process.env.WELCOME_UNSUBSCRIBE ?? null;
+export async function run({
+  argv = [],
+  env = {},
+  fetch: fetchImpl = fetch,
+  log = console.log,
+  root = welcomeRoot,
+  pauseMs = 600,
+} = {}) {
+  const summary = { mode: null, claimed: 0, sent: 0, failed: 0, unrecorded: 0, code: 0 };
+  const stop = (message, code = 0) => {
+    log(`\n  ${code === 0 ? 'Not sending' : 'Refusing'}: ${message}\n`);
+    return { ...summary, code, reason: message };
+  };
 
-/**
- * Whether the auth.users email lookup exists yet. It does not. See the branch that
- * reads it, which is where the consequence of pretending otherwise is written out.
- */
-const LOOKUP_IMPLEMENTED = false;
+  let args;
+  try {
+    args = parseArgs(argv);
+  } catch (error) {
+    return stop(error.message, 2);
+  }
 
-const stop = (reason) => {
-  console.log(`\n  Not sending: ${reason}\n`);
-  process.exit(0);
-};
+  const { canary } = args;
+  summary.mode = `${args.dryRun ? 'dry-run' : 'send'}${canary ? ' canary' : ''}`;
 
-if (!url || !serviceKey) stop('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.');
-if (!DRY && !resendKey) stop('RESEND_API_KEY is not set.');
-if (!DRY && (!FROM || !REPLY_TO || !UNSUBSCRIBE)) {
-  stop(
-    'WELCOME_FROM, WELCOME_REPLY_TO and WELCOME_UNSUBSCRIBE must all be set. ' +
-      'None of them has a safe default: the From address needs a verified domain, the ' +
-      'Reply-To needs a mailbox somebody reads, and an unsubscribe that goes nowhere is ' +
-      'worse than none.',
-  );
-}
+  if (canary && !(UUID.test(args.canaryUser ?? '') && isAddress(args.canaryEmail ?? ''))) {
+    return stop("a canary needs both --canary <account uuid> and --canary-email <that account's address>.", 2);
+  }
 
-const rest = (path, init = {}) =>
-  fetch(`${url}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-  });
+  const url = env.SUPABASE_URL;
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return stop('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set.', 2);
 
-// ---------------------------------------------------------------------------
-// Gate 1 — is delivery enabled at all
-// ---------------------------------------------------------------------------
+  const limit = args.limit === null ? null : Number(args.limit);
+  if (limit !== null && !(Number.isInteger(limit) && limit >= 0)) return stop(`--limit ${args.limit} is not a count.`, 2);
 
-const config = async (key, fallback) => {
-  const response = await rest(`app_config?key=eq.${key}&select=value`);
-  if (!response.ok) return fallback;
-  const rows = await response.json();
-  return rows.length ? rows[0].value : fallback;
-};
+  const rpc = async (name, body) => {
+    const response = await fetchImpl(new URL(`/rest/v1/rpc/${name}`, url), {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(`${name} answered ${response.status}: ${JSON.stringify(payload).slice(0, 300)}`);
+    }
+    return payload;
+  };
 
-/**
- * Default `false`, and it matters that the default is here as well as in the migration.
- * A missing row must read as off. The opposite mistake — a missing row reading as on —
- * turns a failed migration into a send.
- */
-const enabled = await config('welcome.delivery_enabled', false);
-if (enabled !== true) {
-  stop(
-    'welcome.delivery_enabled is not true. Nothing was claimed, so everybody eligible ' +
-      'now is still eligible when it is turned on.',
-  );
-}
+  const scope = {
+    p_limit: canary ? 1 : limit,
+    p_canary_user: canary ? args.canaryUser : null,
+    p_canary_email: canary ? args.canaryEmail.toLowerCase() : null,
+  };
 
-const startAfter = await config('welcome.start_after', '2099-01-01T00:00:00Z');
-const delayHours = await config('welcome.delay_hours', 36);
-const maxPerRun = await config('welcome.max_per_run', 25);
+  // -------------------------------------------------------------------------
+  // Dry run: the preview, which claims nobody and needs no Resend key.
+  // -------------------------------------------------------------------------
 
-const cutoff = new Date(Date.now() - Number(delayHours) * 3600_000).toISOString();
+  if (args.dryRun) {
+    let preview;
+    try {
+      preview = await rpc('welcome_email_preview', scope);
+    } catch (error) {
+      return stop(`${error.message}. A 404 means welcome_email.sql is not applied to this project.`, 1);
+    }
+    const ignored = canary ? '   (a canary ignores this)' : '';
+    log('');
+    log(`  delivery_enabled  ${preview.delivery_enabled}${ignored}`);
+    log(`  start_after       ${preview.start_after}${ignored}`);
+    log(`  window            ${preview.delay_hours}h to ${preview.max_age_hours}h after signup, at most ${preview.max_per_run} per run`);
+    log(`  would claim       ${preview.candidates.length}`);
+    for (const c of preview.candidates) {
+      log(`    ${c.suppressed ? 'suppressed ' : '           '}@${c.username}  signed up ${c.signed_up_at}`);
+    }
+    log('\n  DRY RUN. Nothing was claimed and nothing was sent.\n');
+    return { ...summary, wouldClaim: preview.candidates.length, preview };
+  }
 
-// ---------------------------------------------------------------------------
-// Gate 2 — who is eligible
-//
-// Deliberately two reads rather than one clever join. PostgREST can express "not in a
-// subquery" only awkwardly, and a wrong `not.in` silently selects *more* people, which
-// is the single worst direction for a bug in this file to point.
-// ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // A real run. Everything that can refuse, refuses before a claim.
+  // -------------------------------------------------------------------------
 
-const claimedResponse = await rest('welcome_emails?select=user_id');
-if (!claimedResponse.ok) {
-  stop(
-    `welcome_emails could not be read (${claimedResponse.status}). The migration in this ` +
-      'directory has probably not been applied. Without the ledger there is no ' +
-      'idempotency, so this refuses to send rather than sending blind.',
-  );
-}
-const already = new Set((await claimedResponse.json()).map((r) => r.user_id));
+  const resendKey = env.RESEND_API_KEY;
+  if (!resendKey) return stop('RESEND_API_KEY is not set.', 2);
 
-const candidatesResponse = await rest(
-  `profiles?select=id,username,display_name,created_at` +
-    `&created_at=gte.${encodeURIComponent(startAfter)}` +
-    `&created_at=lte.${encodeURIComponent(cutoff)}` +
-    `&status=eq.active` +
-    `&order=created_at.asc&limit=${Number(maxPerRun) * 4}`,
-);
-if (!candidatesResponse.ok) stop(`profiles could not be read (${candidatesResponse.status}).`);
+  const from = env.WELCOME_FROM || DEFAULT_FROM;
+  const replyTo = env.WELCOME_REPLY_TO || DEFAULT_REPLY_TO;
+  if (!isAddress(from) || !isAddress(replyTo)) return stop(`From "${from}" or Reply-To "${replyTo}" is not an address.`, 2);
 
-const candidates = (await candidatesResponse.json())
-  .filter((row) => !already.has(row.id))
-  .slice(0, Number(maxPerRun));
+  let template;
+  try {
+    await assertFreshBuild(root);
+    template = await loadTemplate(root);
+  } catch (error) {
+    return stop(error.message, 1);
+  }
+  const { copy } = template;
 
-console.log(`\n  eligible: ${candidates.length}  (start_after ${startAfter}, delay ${delayHours}h)`);
+  /**
+   * The founder's approval gate, for the cohort. A canary goes to a test inbox and may
+   * carry a draft note and a placeholder address; nobody else's email may.
+   */
+  const ready = Boolean(copy.footer?.postalAddress) && copy.note?.status === 'APPROVED';
+  if (!canary && !copy.footer?.postalAddress) {
+    return stop('footer.postalAddress in copy.json is null. A commercial email needs a physical mailing address.', 1);
+  }
+  if (!canary && copy.note?.status !== 'APPROVED') {
+    return stop(`note.status in copy.json is "${copy.note?.status}". The founder approves the copy by setting it to "APPROVED".`, 1);
+  }
+  if (canary && !ready) {
+    log('  ! canary: the copy is a draft or has no postal address. Allowed for a test inbox, refused for the cohort.');
+  }
 
-if (candidates.length === 0) stop('nobody is eligible.');
-
-// ---------------------------------------------------------------------------
-// The template
-// ---------------------------------------------------------------------------
-
-const copy = JSON.parse(await readFile(join(here, '..', 'copy.json'), 'utf8'));
-const htmlTemplate = await readFile(join(dist, 'welcome.html'), 'utf8');
-const textTemplate = await readFile(join(dist, 'welcome.txt'), 'utf8');
-
-if (!copy.footer.postalAddress && !DRY) {
-  stop(
-    'footer.postalAddress is null. A commercial email needs a physical mailing address, ' +
-      'and this one asks the reader to invite a friend, which is enough to be one.',
-  );
-}
-
-/**
- * `Hi <name>,` when the display name's first word looks like a name, `Hi,` otherwise.
- *
- * It never falls back to the handle. `Hi saisurajkan,` is worse than no name at all: it
- * is the exact tell that nobody wrote this, in an email whose entire claim is that
- * somebody did.
- */
-const greeting = (displayName) => {
-  const first = String(displayName ?? '').trim().split(/\s+/)[0] ?? '';
-  return /^[\p{L}][\p{L}'’-]{1,23}$/u.test(first) ? `Hi ${first},` : 'Hi,';
-};
-
-// ---------------------------------------------------------------------------
-// Gates 3 to 5 — claim, send, record
-// ---------------------------------------------------------------------------
-
-let sent = 0;
-let skipped = 0;
-let failed = 0;
-
-for (const person of candidates) {
-  // The address lives on auth.users, which PostgREST does not expose. The real worker
-  // reads it through a SECURITY DEFINER function returning exactly (id, email) for a set
-  // of ids and nothing else, so the service role never carries a general read over the
-  // auth schema. That function is step 3 in README.md and is not written yet.
-  const address = null;
-
-  if (DRY) {
-    console.log(`  would mail  ${person.username.padEnd(20)} ${greeting(person.display_name)}`);
-    continue;
+  let owned;
+  try {
+    owned = await rpc('welcome_email_claim', scope);
+  } catch (error) {
+    return stop(`${error.message}. Nothing was claimed.`, 1);
   }
 
   /**
-   * **Hold, do not drop** — and this is the branch that got it wrong.
-   *
-   * It used to write a `no_address` row here. The eligibility read excludes anybody who
-   * has a row **at all**, whatever the status says, so while the address lookup above is
-   * an unimplemented `null` that write would have permanently marked every eligible
-   * account as having no address and none of them would ever be mailed. One run, with
-   * the flag on before the lookup existed, and the entire cohort is silently burned.
-   *
-   * That is the exact failure the gate-before-claim ordering exists to prevent, arriving
-   * one step later. So a missing lookup stops the run rather than consuming anybody, and
-   * a genuinely address-less account is only recorded once there is a lookup that could
-   * have found one.
+   * The SQL already confines a canary to one account. This is a second lock on the same
+   * door: if anybody else came back, send to nobody.
    */
-  if (!LOOKUP_IMPLEMENTED) {
-    console.log('\n  Stopping: the email lookup is not implemented, so nothing can be sent.');
-    console.log('  Nothing was recorded. Everybody eligible now is still eligible.\n');
-    process.exit(0);
+  if (
+    canary &&
+    owned.some((row) => row.recipient_id !== args.canaryUser || row.recipient_email !== args.canaryEmail.toLowerCase())
+  ) {
+    return stop('the claim returned an account other than the canary. Nothing was sent. Read welcome_emails before running again.', 1);
   }
 
-  if (!address) {
-    await rest('welcome_emails', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=ignore-duplicates' },
-      body: JSON.stringify({ user_id: person.id, status: 'no_address' }),
-    });
-    skipped += 1;
-    continue;
+  summary.claimed = owned.length;
+  log(`\n  ${summary.mode}: claimed ${owned.length}`);
+
+  const unsubscribeUrl = unsubscribeFor(replyTo);
+
+  for (const [index, person] of owned.entries()) {
+    if (index > 0 && pauseMs > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
+
+    const values = { greeting: greetingFor(person.display_name), handle: person.username, unsubscribeUrl };
+
+    let outcome;
+    try {
+      outcome = await sendViaResend({
+        fetch: fetchImpl,
+        apiKey: resendKey,
+        idempotencyKey: idempotencyKeyFor(person.recipient_id),
+        payload: resendPayload({
+          from,
+          replyTo,
+          to: person.recipient_email,
+          subject: copy.subject.chosen,
+          html: personalise(template.html, values),
+          text: personalise(template.text, values),
+          unsubscribeUrl,
+        }),
+      });
+    } catch (error) {
+      outcome = { ok: false, status: 0, id: null, body: { error: error.message } };
+    }
+
+    let recorded = false;
+    try {
+      recorded = await rpc(
+        'welcome_email_record',
+        outcome.ok
+          ? { p_user: person.recipient_id, p_attempt: person.attempt, p_outcome: 'sent', p_resend_id: outcome.id }
+          : {
+              p_user: person.recipient_id,
+              p_attempt: person.attempt,
+              p_outcome: 'failed',
+              p_reason: `${outcome.status} ${JSON.stringify(outcome.body ?? {})}`,
+            },
+      );
+    } catch (error) {
+      log(`  ! could not record @${person.username}: ${error.message}`);
+    }
+
+    if (outcome.ok) summary.sent += 1;
+    else summary.failed += 1;
+
+    /**
+     * Unrecorded means the row is still `claimed`, and a claimed row is never retried,
+     * because it could be a message that went out. That is the at-most-once side of the
+     * trade, and it is reported rather than silent.
+     */
+    if (recorded !== true) summary.unrecorded += 1;
+
+    log(
+      `  ${outcome.ok ? 'sent  ' : 'FAILED'} @${person.username} attempt ${person.attempt}` +
+        (outcome.ok ? ` resend ${outcome.id}` : ` status ${outcome.status}`) +
+        (recorded === true ? '' : '  NOT RECORDED: stays claimed, never retried'),
+    );
   }
 
-  // 3. Claim. `resolution=ignore-duplicates` is PostgREST's `on conflict do nothing`;
-  //    `return=representation` is what tells us whether we got it.
-  const claim = await rest('welcome_emails', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
-    body: JSON.stringify({ user_id: person.id, status: 'claimed' }),
-  });
-  const claimed = claim.ok ? await claim.json() : [];
-  if (claimed.length === 0) {
-    skipped += 1;
-    continue;
-  }
-
-  // 4. Send. The idempotency key is per user and per template version, so a retry of
-  //    this claim cannot become a second message, and a genuinely new template later
-  //    would not be blocked by an old key.
-  const html = htmlTemplate
-    .split('{{greeting}}')
-    .join(greeting(person.display_name))
-    .split('{{handle}}')
-    .join(person.username)
-    .split('{{unsubscribeUrl}}')
-    .join(UNSUBSCRIBE);
-
-  const text = textTemplate
-    .split('{{greeting}}')
-    .join(greeting(person.display_name))
-    .split('{{handle}}')
-    .join(person.username)
-    .split('{{unsubscribeUrl}}')
-    .join(UNSUBSCRIBE);
-
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendKey}`,
-      'Content-Type': 'application/json',
-      'Idempotency-Key': `welcome-v1-${person.id}`,
-    },
-    body: JSON.stringify({
-      from: FROM,
-      to: [address],
-      reply_to: REPLY_TO,
-      subject: copy.subject.chosen,
-      html,
-      text,
-      headers: {
-        // What gives Gmail and Apple Mail their own one-tap unsubscribe control. Without
-        // it the footer link is the only route, and a reader who cannot find that uses
-        // the spam button instead, which costs the sending domain rather than the list.
-        'List-Unsubscribe': `<${UNSUBSCRIBE}>`,
-
-        /**
-         * **Only with an HTTPS endpoint.** RFC 8058 one-click is defined over HTTPS
-         * POST; pairing this header with a `mailto:` is invalid, and an invalid pair is
-         * worse than a plain `List-Unsubscribe` because a receiver may discard both
-         * rather than fall back. So it is conditional on what the value actually is,
-         * which means turning the endpoint on is the only edit required later.
-         */
-        ...(UNSUBSCRIBE.startsWith('https://')
-          ? { 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
-          : {}),
-      },
-    }),
-  });
-
-  // 5. Record.
-  const body = await response.json().catch(() => null);
-  await rest(`welcome_emails?user_id=eq.${person.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(
-      response.ok
-        ? { status: 'sent', resend_id: body?.id, sent_at: new Date().toISOString() }
-        : {
-            status: 'failed',
-            failed_reason: `${response.status} ${JSON.stringify(body ?? {}).slice(0, 300)}`,
-          },
-    ),
-  });
-
-  if (response.ok) sent += 1;
-  else failed += 1;
+  log(`\n  sent ${summary.sent}  failed ${summary.failed}  unrecorded ${summary.unrecorded}\n`);
+  summary.code = summary.failed > 0 || summary.unrecorded > 0 ? 1 : 0;
+  return summary;
 }
 
-console.log(`\n  sent ${sent}  skipped ${skipped}  failed ${failed}\n`);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = await run({ argv: process.argv.slice(2), env: process.env });
+  process.exit(result.code);
+}
