@@ -74,9 +74,10 @@
 -- functions, which run as the owner. It discloses nothing either of them does not already
 -- return in `min_ratings`, but a floor is not a product surface of its own.
 --
--- The operator values are clamped rather than trusted: a percentile outside [0, 1] would
--- make `percentile_disc` raise and take both walls down with it, and a floor below 1 would
--- admit unrated rows.
+-- The operator values are shape-tested and clamped rather than trusted: a row that is not a
+-- JSON number is treated as absent, a percentile outside [0, 1] would make `percentile_disc`
+-- raise and take both walls down with it, a floor below 1 would admit unrated rows, and a
+-- fractional or enormous floor must not raise in the integer cast.
 --
 -- The two superseded rows are deleted rather than left behind. A tuning row that nothing
 -- reads is a knob somebody will turn and watch do nothing.
@@ -101,19 +102,32 @@ security definer
 set search_path = public
 as $$
 declare
-  v_pct   numeric;
-  v_floor integer;
-  v_k     integer;
+  v_pct       numeric;
+  v_floor_raw numeric;
+  v_floor     integer;
+  v_k         integer;
 begin
   -- `select ... into` from a subquery that can return no row leaves the variable null, and
   -- the coalesce afterwards is what applies the default. Written this way on purpose: the
   -- `coalesce` inside a `from app_config where key = ...` form is never evaluated when the
   -- row is absent (config-defaults.test.mjs exists to police that shape).
-  v_pct := (select (value)::numeric from app_config where key = 'discovery.support_percentile');
+  --
+  -- **Shape-tested before the cast, and that is the point of this function being shared**
+  -- (independent review 81). Two surfaces now stand on these two rows, so a row that raised
+  -- would take Top Rated and the onboarding picker down together. A jsonb string ("0.9"),
+  -- an object, a boolean or null casts to numeric with an error, not a null — so anything
+  -- that is not a JSON number is treated as absent and the default applies. A JSON number
+  -- cannot be NaN or infinite, so what survives the type test is a finite value, and the
+  -- clamps below finish the job: a percentile into [0, 1], and a minimum floored to a whole
+  -- count and held in [1, 1000000] *before* the integer cast, so neither 2.5 nor 1e12 can
+  -- raise on the way in.
+  v_pct := (select case when jsonb_typeof(value) = 'number' then (value)::numeric end
+              from app_config where key = 'discovery.support_percentile');
   v_pct := least(greatest(coalesce(v_pct, 0.9), 0), 1);
 
-  v_floor := (select (value)::integer from app_config where key = 'discovery.support_min_ratings');
-  v_floor := greatest(coalesce(v_floor, 3), 1);
+  v_floor_raw := (select case when jsonb_typeof(value) = 'number' then (value)::numeric end
+                    from app_config where key = 'discovery.support_min_ratings');
+  v_floor := least(greatest(floor(coalesce(v_floor_raw, 3)), 1), 1000000)::integer;
 
   select percentile_disc(v_pct) within group (order by rated.n)
     into v_k

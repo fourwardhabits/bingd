@@ -546,6 +546,49 @@ describe('the shared support floor', () => {
     });
   });
 
+  it('treats a malformed config row as absent, so neither wall can be taken down by one', async () => {
+    /**
+     * Independent review 81 (P1). Two surfaces stand on these rows now, and a row that
+     * raised inside the floor would fail Top Rated and the onboarding picker together.
+     * `(value)::numeric` on a jsonb string or object raises rather than returning null, so
+     * each shape is written in turn and both callers must still answer — on the documented
+     * defaults, or on a clamp, never with an exception.
+     */
+    await own(async (db) => {
+      const who = await db.createUser({ username: 'malformed' });
+      const film = await ownMovie(db, 'Malformed Config');
+      await db.actAs(who);
+      await ownRank(db, film, 'loved');
+
+      const cases = [
+        // [percentile row, min row, expected floor]
+        [`'"0.9"'`, `'"3"'`, 3], // strings: absent, so the defaults
+        [`'{"p": 0.9}'`, `'[3]'`, 3], // object and array: absent
+        [`'true'`, `'null'`, 3], // boolean and JSON null: absent
+        [`'0.9'`, `'2.5'`, 2], // a fractional minimum is floored to a whole count
+        [`'0.9'`, `'1000000000000'`, 1000000], // an enormous minimum is clamped before the cast
+      ];
+
+      for (const [pct, min, expected] of cases) {
+        await db.sql(`update app_config set value = ${pct}::jsonb where key = 'discovery.support_percentile'`);
+        await db.sql(`update app_config set value = ${min}::jsonb where key = 'discovery.support_min_ratings'`);
+
+        assert.equal(await floorOf(db, 'movie'), expected, `percentile ${pct}, minimum ${min}`);
+        assert.equal(
+          await db.errorFrom(`select * from top_rated_titles('movies', 5, null, null, null)`),
+          null,
+          `top_rated_titles must answer with percentile ${pct}, minimum ${min}`,
+        );
+        await db.actAs(who);
+        assert.equal(
+          await db.errorFrom(`select * from starter_movies(5)`),
+          null,
+          `starter_movies must answer with percentile ${pct}, minimum ${min}`,
+        );
+      }
+    });
+  });
+
   it('is internal: no client role can call it directly', async () => {
     await own(async (db) => {
       const who = await db.createUser({ username: 'floorcaller' });
