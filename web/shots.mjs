@@ -105,23 +105,31 @@ const COMMENT_MASKS = [
 
 const SHOTS = [
   {
-    // The ranked list from Your First Five on an iPhone (2026-09-12): rank, poster, title,
-    // score. Cropped to the four ranked rows, which leaves out the onboarding heading, the
-    // Letterboxd sentence under it, and the buttons.
+    // Your First Five on an iPhone (2026-09-12), the whole screen (founder, 2026-09-14:
+    // the earlier crop to four rows hid too much). Only the iPhone status bar goes, the
+    // way every other shot loses its host phone's chrome; the onboarding progress bar
+    // under it is the app's and stays.
+    //
+    // One sentence is painted out, not cropped: "Already on Letterboxd? You can bring
+    // your whole history across whenever you like, from Settings." This preview-build
+    // capture predates the importer reaching the shipped app, and a landing page must not
+    // advertise a feature the App Store build does not have. Painted with the screen's
+    // own ground, so the gap reads as spacing. Remove the `paint` when the importer ships.
     source: 'IMG_0756.PNG',
     name: 'shot-ranked',
     width: 640,
-    crop: [0, 680, 828, 810],
-    alt: 'A ranked bingd. list of four movies, each numbered by where it landed and carrying its score out of ten',
+    crop: [0, 80, 828, 1712],
+    paint: [{ box: [20, 562, 790, 92], rgb: [251, 248, 244] }],
+    alt: 'The bingd. Your First Five screen: four movies ranked in order, each with its score out of ten',
   },
   {
-    // The score a ranking ends on. Cropped to the score and the title: this capture also
-    // carries a placement line the shipped app no longer draws, which is below the crop.
+    // The score a ranking ends on, the whole screen: the title page behind the sheet, the
+    // score, the title and the sheet's actions, with the host phone's bars removed like
+    // every other Android capture.
     source: 'Screenshot_20260831_094054_bingd.jpg',
     name: 'shot-score',
     width: 640,
-    crop: [0, 1110, 1080, 600],
-    alt: 'The score a ranking lands on, 9.1, above the title Harry Potter and the Goblet of Fire',
+    alt: 'The score a bingd. ranking lands on, 9.1 for Harry Potter and the Goblet of Fire, in the sheet shown after ranking',
   },
   {
     source: 'Screenshot_20260831_094209_bingd.jpg',
@@ -202,6 +210,21 @@ for (const shot of SHOTS.filter((s) => !only || only.includes(s.name))) {
       })),
     );
     image = sharp(await sharp(file).composite(patches).toBuffer());
+  }
+
+  if (shot.paint) {
+    // Solid rectangles in the screen's own ground colour, over something that must not be
+    // shown at all (not merely made illegible, which is what `masks` is for).
+    const fills = await Promise.all(
+      shot.paint.map(async ({ box: [left, top, width, height], rgb: [r, g, b] }) => ({
+        input: await sharp({ create: { width, height, channels: 3, background: { r, g, b } } })
+          .png()
+          .toBuffer(),
+        left,
+        top,
+      })),
+    );
+    image = sharp(await image.composite(fills).toBuffer());
   }
 
   // The whole frame minus the host phone's status and navigation bars, unless the shot
