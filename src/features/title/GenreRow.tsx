@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { theme } from '@/ui/tokens';
 import { Chip, Sheet, Text } from '@/ui/components';
@@ -204,13 +204,23 @@ export function GenreRow({ genres }: GenreRowProps) {
           worth preserving between openings. */}
       {open ? (
         <Sheet visible onClose={() => setOpen(false)} label="All genres">
+          {/* **In the sheet gutter** (founder, physical QA, 2026-09-14: "Genres" and the
+              first chip of each line sat against the screen edge). `Sheet` gives its
+              content no horizontal padding by design, so the content brings the gutter,
+              as the Details and Awards sheets do. The body scrolls inside the panel's
+              height cap (shrink, no grow), and each chip is capped at the content width,
+              so a long genre at a large text size wraps instead of leaving the screen. */}
           <View style={styles.sheet}>
-            <Text variant="title2">Genres</Text>
-            <View style={styles.sheetChips}>
-              {genres.map((genre) => (
-                <Chip key={genre} label={genre} />
-              ))}
-            </View>
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody}>
+              <Text variant="title2">Genres</Text>
+              <View style={styles.sheetChips} testID="genre-sheet-chips">
+                {genres.map((genre) => (
+                  <View key={genre} style={styles.sheetChip}>
+                    <Chip label={genre} />
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           </View>
         </Sheet>
       ) : null}
@@ -258,6 +268,15 @@ const styles = StyleSheet.create({
   },
   marker: { minWidth: theme.space[4] },
   markerControl: { minHeight: theme.layout.control.chipHeight, justifyContent: 'center' },
-  sheet: { gap: theme.space[4], paddingBottom: theme.space[4] },
+  // The Details sheet's shape (`TitleRecallSheet`): top spacing under the handle, a
+  // gutter-padded body, and a scroll view that shrinks inside `Sheet`'s 90% cap.
+  sheet: { paddingTop: theme.space[2], flexShrink: 1 },
+  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+  sheetBody: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[4],
+    gap: theme.space[4],
+  },
   sheetChips: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
+  sheetChip: { maxWidth: '100%' },
 });

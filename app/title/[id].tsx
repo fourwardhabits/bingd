@@ -933,7 +933,9 @@ export default function TitleScreen() {
       : [
           {
             id: 'reviews' as const,
-            label: reviewCount.data ? `Reviews ${reviewCount.data}` : 'Reviews',
+            // `Reviews (2)`: a bare `Reviews 1` read as one word and a stray digit (founder,
+            // physical QA, 2026-09-14). Zero still renders `Reviews`, never `Reviews (0)`.
+            label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
           },
         ]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
