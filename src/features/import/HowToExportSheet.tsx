@@ -126,7 +126,13 @@ export function HowToExportSheet({
 const styles = StyleSheet.create({
   sheet: { paddingTop: theme.space[2], flexShrink: 1 },
   scroll: { flexGrow: 0, flexShrink: 1 },
-  body: { padding: theme.layout.gutter, gap: theme.space[4] },
+  // The wrapper's `space[2]` is the gap under the handle (design-system.md, Layout
+  // invariants), so the body pads the sides and the bottom only.
+  body: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.layout.gutter,
+    gap: theme.space[4],
+  },
   steps: { gap: theme.space[3] },
   step: { flexDirection: 'row', gap: theme.space[3] },
   // A fixed width so the numbers form a column and the text a straight left edge.
