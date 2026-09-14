@@ -40,6 +40,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { invalidateAfterImport } from '@/features/collection/invalidate';
 import { track, type ImportSelectOutcome, type ImportSurface } from '@/lib/analytics';
+import { withGrace } from '@/lib/grace';
 import { supabase } from '@/lib/supabase';
 
 import { DEFAULT_LIMITS } from './archive';
@@ -139,6 +140,9 @@ export type ImportFailure =
    * A notification named a job and the read of it failed: a bad connection, not an
    * answer. Nothing is known about the job, so the screen says it could not check and
    * offers to ask again, rather than guessing that the import is still running.
+   *
+   * Also the answer to an `import_ready` whose reply was lost (independent review 83b): the
+   * hand-off may have committed, so it is not reported as a failure. See `unconfirmed`.
    */
   | { readonly kind: 'unchecked' }
   /**
@@ -190,6 +194,64 @@ const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const failureOutcome = (reason: ReadFailure['reason']): ImportSelectOutcome => reason;
 
+/**
+ * How long one importer request may hold the screen before it is treated as lost.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE CLIENT'S OWN DEADLINE IS NOT ENOUGH HERE (independent review 83b)
+ *
+ * `requestWithDeadline` in `lib/supabase.ts` aborts the `fetch` after
+ * `REQUEST_DEADLINE_MS` (10s), and PostgREST turns that abort into an answered `{ error }`
+ * with `status: 0`. But the clock starts when `fetch` is called, and `@supabase/supabase-js`
+ * awaits `auth.getSession()` *before* calling it (`fetchWithAuth`): a session read or
+ * refresh that never settles sits outside that deadline entirely. The `uploading` screen has
+ * no buttons, deliberately, and on the onboarding step that made an unbounded wait a room
+ * with no door.
+ *
+ * So every await in this file is bounded here as well, with the codebase's `withGrace`. The
+ * budget is two request deadlines, so it can only ever fire on something the fetch deadline
+ * did not already answer: a stall in front of the network, not a slow network. Written as a
+ * number rather than imported, because every test of this file mocks `@/lib/supabase`
+ * whole and an imported constant would be `undefined` there.
+ *
+ * The work is not cancelled at the deadline — `withGrace` never cancels — so a request that
+ * lands late still lands. That is exactly why a lost `import_ready` is reported as unknown
+ * rather than failed: see `start`.
+ */
+export const IMPORT_STEP_DEADLINE_MS = 20_000;
+
+/** What a bounded wait answers with when the request did not settle, or rejected. */
+const STALLED = Symbol('stalled');
+
+const bounded = <T>(work: PromiseLike<T>): Promise<T | typeof STALLED> =>
+  withGrace(Promise.resolve(work), IMPORT_STEP_DEADLINE_MS, STALLED);
+
+/** The upload loop's way of saying a request never answered. */
+class StepStalled extends Error {
+  override readonly name = 'StepStalled';
+}
+
+/**
+ * A request that was sent and whose answer never came back, so nobody knows whether the
+ * server acted on it: a bounded wait that ran out, or PostgREST's `status: 0` for a `fetch`
+ * that aborted or failed. A real refusal from the database always has a status.
+ */
+const answerLost = (outcome: { error: unknown; status?: number } | typeof STALLED): boolean =>
+  outcome === STALLED || (outcome.error !== null && outcome.status === 0);
+
+/**
+ * An RPC in the upload sequence: its answer, or a throw the sequence's `catch` classifies.
+ *
+ * A stall throws `StepStalled`; an answered error throws the error itself, so a `22023` from
+ * `import_stage` keeps its code and its existing meaning.
+ */
+async function stepOrThrow<R extends { error: unknown }>(work: PromiseLike<R>): Promise<R> {
+  const outcome = await bounded(work);
+  if (outcome === STALLED) throw new StepStalled();
+  if (outcome.error) throw outcome.error;
+  return outcome;
+}
+
 type JobRow = { status: string; counts: ImportCounts | null; completed_at: string | null };
 
 const asStatus = (row: JobRow): ImportJobStatus => ({
@@ -208,9 +270,11 @@ const asStatus = (row: JobRow): ImportJobStatus => ({
  */
 async function readJob(jobId: string): Promise<ImportJobStatus | null> {
   try {
-    const { data, error } = await supabase
-      .rpc('import_status', { p_job_id: jobId })
-      .maybeSingle();
+    const answer = await bounded(
+      supabase.rpc('import_status', { p_job_id: jobId }).maybeSingle(),
+    );
+    if (answer === STALLED) return null;
+    const { data, error } = answer;
     if (error || data === null) return null;
     return asStatus(data as JobRow);
   } catch {
@@ -231,9 +295,11 @@ const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | 'unreadable'> {
   try {
-    const { data, error } = await supabase
-      .rpc('import_status', { p_job_id: jobId })
-      .maybeSingle();
+    const answer = await bounded(
+      supabase.rpc('import_status', { p_job_id: jobId }).maybeSingle(),
+    );
+    if (answer === STALLED) return 'unreadable';
+    const { data, error } = answer;
     if (error) return 'unreadable';
     if (data === null) return 'gone';
     return asStatus(data as JobRow);
@@ -262,21 +328,25 @@ async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | '
  */
 async function findLiveJob(): Promise<{ id: string; status: ImportJobStatus } | null> {
   try {
-    const { data, error } = await supabase
-      .from('import_jobs')
-      .select('id, status, counts, completed_at')
-      // **Not `.is('completed_at', null)`, which is what this asked for and is why the
-      // promise above was only half true.** `_import_settle` writes `status = 'done'` and
-      // `completed_at = now()` in one statement, so a finished job never has a null
-      // `completed_at` — the filter excluded precisely the case somebody comes back for.
-      // Close the app on "Matching your films", reopen after it finishes, and you landed
-      // on the intro with the summary, the applied count and the unresolved count gone for
-      // good. Independent review; the test that claimed to cover it passed only because
-      // the mocked query builder treated `.is()` as an identity.
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const answer = await bounded(
+      supabase
+        .from('import_jobs')
+        .select('id, status, counts, completed_at')
+        // **Not `.is('completed_at', null)`, which is what this asked for and is why the
+        // promise above was only half true.** `_import_settle` writes `status = 'done'` and
+        // `completed_at = now()` in one statement, so a finished job never has a null
+        // `completed_at` — the filter excluded precisely the case somebody comes back for.
+        // Close the app on "Matching your films", reopen after it finishes, and you landed
+        // on the intro with the summary, the applied count and the unresolved count gone for
+        // good. Independent review; the test that claimed to cover it passed only because
+        // the mocked query builder treated `.is()` as an identity.
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    );
 
+    if (answer === STALLED) return null;
+    const { data, error } = answer;
     if (error || data === null) return null;
     const row = data as JobRow & { id: string };
     return { id: row.id, status: asStatus(row) };
@@ -351,6 +421,16 @@ export function useImport(
    * on a bad one is the moment its failure merges two archives.
    */
   const abandoned = useRef<string | null>(null);
+  /**
+   * A job whose `import_ready` was sent and never answered, so the server may or may not
+   * have it (independent review 83b).
+   *
+   * Held so that *Try again* on "We couldn't check your import" asks about **this** job by
+   * id rather than guessing: running shows it running, a job still `pending` (the hand-off
+   * never landed) reopens the importer, where `import_create` adopts it and a re-sent page is
+   * free. Nothing about it is discarded on the way.
+   */
+  const unconfirmed = useRef<string | null>(null);
 
   useEffect(() => {
     alive.current = true;
@@ -371,10 +451,13 @@ export function useImport(
     let cancelled = false;
 
     void (async () => {
+      // The job whose hand-off went unanswered, when a recheck is about that one, outranks
+      // the link the screen was opened with. See `unconfirmed`.
+      const target = unconfirmed.current ?? jobId;
       // A link that does not carry a job id at all (hand-typed, or truncated) names nothing,
       // so it opens the importer rather than a read that can only fail.
-      if (jobId && JOB_ID.test(jobId)) {
-        const named = await readNamedJob(jobId);
+      if (target && JOB_ID.test(target)) {
+        const named = await readNamedJob(target);
         if (cancelled || !alive.current) return;
         if (named === 'unreadable') {
           setState((current) =>
@@ -387,7 +470,7 @@ export function useImport(
         // Gone opens the importer. A `pending` job was never handed over, so it has nothing
         // to show either.
         if (named === 'gone' || named.status === 'pending') return;
-        jobRef.current = jobId;
+        jobRef.current = target;
         // **Ended while nobody was watching.** The poll is what normally tells the cache, and
         // a notification tap arrives with no poll behind it: without this, "Rank imported
         // movies" lands on a Collection tab still holding what was there before the import
@@ -550,6 +633,7 @@ export function useImport(
   const reset = useCallback(() => {
     const jobId = jobRef.current;
     jobRef.current = null;
+    unconfirmed.current = null;
     settle({ phase: 'idle' });
 
     if (jobId === null) return;
@@ -613,16 +697,17 @@ export function useImport(
          * the one that also clears the debt.
          */
         if (abandoned.current !== null) {
-          const { error: discardError } = await supabase.rpc('import_discard', {
-            p_job_id: abandoned.current,
-          });
-          if (discardError) throw discardError;
+          await stepOrThrow(supabase.rpc('import_discard', { p_job_id: abandoned.current }));
           abandoned.current = null;
         }
 
-        const { data: jobId, error: createError } = await supabase.rpc('import_create');
-        if (createError || typeof jobId !== 'string') throw createError ?? new Error('no job');
+        // Every request below is bounded (`IMPORT_STEP_DEADLINE_MS`): a stall throws, and
+        // the `catch` turns it into the refusal that offers Try again, so the buttonless
+        // `uploading` screen always ends.
+        const { data: jobId } = await stepOrThrow(supabase.rpc('import_create'));
+        if (typeof jobId !== 'string') throw new Error('no job');
         jobRef.current = jobId;
+        unconfirmed.current = null;
 
         // **Ask what we were given before staging onto it.** `import_create` adopts any open
         // job, including one the worker is already draining — and `import_stage` refuses a
@@ -655,16 +740,33 @@ export function useImport(
         });
 
         for (const [index, page] of pages.entries()) {
-          const { error } = await supabase.rpc('import_stage', {
-            p_job_id: jobId,
-            p_rows: page as StagingRow[],
-          });
-          if (error) throw error;
+          // A lost page is safe to report as a failed upload: `import_rows_once` makes a page
+          // that did land free to send again.
+          await stepOrThrow(
+            supabase.rpc('import_stage', { p_job_id: jobId, p_rows: page as StagingRow[] }),
+          );
           settle({ phase: 'uploading', preview, sent: index + 1, total: pages.length });
         }
 
-        const { error: readyError } = await supabase.rpc('import_ready', { p_job_id: jobId });
-        if (readyError) throw readyError;
+        /**
+         * **The hand-off, and the one request whose lost answer is not a failure**
+         * (independent review 83b).
+         *
+         * If `import_ready` committed and its reply was lost, the job is already the worker's.
+         * Calling that "didn't finish sending" would be false, and the retry it offers would
+         * meet `already_running` for the person's own archive. So an unanswered hand-off (a
+         * stall, or a `fetch` that aborted with no status) says what is true, that we could
+         * not check, and its Try again asks about this job by id (`unconfirmed`). Nothing is
+         * discarded on the way. A real refusal from the database still reads as a failed
+         * upload, as before.
+         */
+        const ready = await bounded(supabase.rpc('import_ready', { p_job_id: jobId }));
+        if (answerLost(ready)) {
+          unconfirmed.current = jobId;
+          settle({ phase: 'failed', failure: { kind: 'unchecked' } });
+          return;
+        }
+        if (ready !== STALLED && ready.error) throw ready.error;
       } catch (error) {
         // `22023` from `import_stage` is "this import is no longer accepting rows" — the
         // worker claimed the job between the status read above and this page. Rare, but it

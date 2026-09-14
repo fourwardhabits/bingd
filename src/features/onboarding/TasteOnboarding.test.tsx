@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
+import { clearCelebrations, hasCelebrations } from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
 
 import { resetRankingOutcome } from './pick-five';
@@ -170,7 +171,22 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (...args: unknown[]) => mockRpc(...args),
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
-      const rows = () => mockTableRows[table] ?? [];
+      const rows = () => {
+        /**
+         * The award ledger, as the ranking's own snapshot-then-diff sees it when a
+         * placement earns something: empty when the sheet opens, holding the award when it
+         * asks again after the placement. Counted by read rather than written by
+         * `rank_start`, because the snapshot and the opener run in the same commit and
+         * their order is not what this file is about.
+         */
+        if (table === 'award_unlocks' && mockAwardOnPlacement) {
+          mockLedgerReads += 1;
+          return mockLedgerReads > 1
+            ? [{ award_key: 'lol-mode', tier_key: 'giggle', earned_at: '2026-09-13T00:00:00Z' }]
+            : [];
+        }
+        return mockTableRows[table] ?? [];
+      };
       Object.assign(chain, {
         select: () => chain,
         eq: () => chain,
@@ -199,8 +215,10 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+const mockPush = jest.fn();
+
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ replace: mockReplace, push: jest.fn() }),
+  useRouter: () => ({ replace: mockReplace, push: mockPush }),
   Stack: { Screen: () => null },
 }));
 
@@ -279,8 +297,15 @@ const starterGrid = (ids: string[]) => {
 };
 
 let mockStarterIds: string[] = [];
+/** Whether a placement writes an award to the ledger, as the database trigger would. */
+let mockAwardOnPlacement = false;
+let mockLedgerReads = 0;
 
 beforeEach(() => {
+  mockAwardOnPlacement = false;
+  mockLedgerReads = 0;
+  mockPush.mockReset();
+  clearCelebrations();
   // Dismissals acknowledge themselves unless a test says otherwise, which is what a
   // device does. Reset both halves so a held one cannot leak into the next case.
   issued = 0;
@@ -907,6 +932,38 @@ describe('one turn of the loop', () => {
     expect(view.queryByLabelText('Search for a movie')).toBeNull();
 
     releaseReadsOf('rankings');
+  });
+
+  /**
+   * **An award earned in the run is kept for the end of onboarding, not shown or lost on
+   * the way** (independent review 83b).
+   *
+   * The ranking detects it and enqueues it, as everywhere else. Nothing on the payoff may
+   * drain that queue: `/awards/celebrate` is outside the onboarding group and would be
+   * replaced straight back, and the payoff is not the end of the flow. The notification
+   * step drains it once the flow is over (`FlowEnds.test.tsx`).
+   */
+  it('keeps an award earned on the fifth queued through Your First Five and its Continue', async () => {
+    alreadyRanked(4);
+    mockAwardOnPlacement = true;
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+
+    await chooseBucket(view);
+
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    // Detected by the real ranking sheet and waiting in the queue.
+    await waitFor(() => expect(hasCelebrations()).toBe(true));
+
+    await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
+    expect(mockPush).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: '/awards/celebrate' }),
+    );
+    expect(hasCelebrations()).toBe(true);
   });
 
   /** Five rankings, and exactly five: one `rank_start` per movie and no repeats. */

@@ -1,6 +1,11 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import {
+  clearCelebrations,
+  enqueueCelebrations,
+  hasCelebrations,
+} from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
 
 import { hydrateStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
@@ -49,8 +54,10 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+const mockPush = jest.fn();
+
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ replace: mockReplace, push: jest.fn() }),
+  useRouter: () => ({ replace: mockReplace, push: mockPush }),
   Stack: { Screen: () => null },
 }));
 
@@ -83,6 +90,8 @@ jest.mock('./NotificationStep', () => ({
 
 beforeEach(() => {
   mockReplace.mockReset();
+  mockPush.mockReset();
+  clearCelebrations();
   mockTrack.mockReset();
   mockPrefs.clear();
   for (const key of Object.keys(mockCounts)) delete mockCounts[key];
@@ -171,6 +180,49 @@ describe('where the app opens', () => {
     },
     30000,
   );
+});
+
+/**
+ * **What the ranking run earned is celebrated here, once, after the flow has ended**
+ * (independent review 83b).
+ *
+ * Onboarding's rankings enqueue awards and streaks like any other ranking, but pass
+ * `onPlaced`, so the Reveal's Done that normally drains the queue never appears. Before
+ * this, nothing drained it and the celebration was lost with the process. The payoff and
+ * the Letterboxd step are pinned as not draining it in their own files.
+ */
+describe('celebrating what the run earned', () => {
+  it('opens the celebration once, after the navigation that ends the flow', async () => {
+    mockCounts.follows = 1;
+    enqueueCelebrations([
+      { kind: 'award', awardKey: 'lol-mode', tierKey: 'giggle' },
+      { kind: 'streak', weeks: 1 },
+    ]);
+    await finish();
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/awards/celebrate',
+      params: { awards: 'lol-mode:giggle', streak: '1' },
+    });
+    // Navigate first, then hand off — `closeAndCelebrate`'s order — and only once the
+    // finished stage is published, so the router lets the celebration route stand.
+    expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed);
+    expect(mockReplace.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPush.mock.invocationCallOrder[0]!,
+    );
+    expect(stageInMemory('user-1')).toBe('done');
+    // Drained, so nothing can show it a second time.
+    expect(hasCelebrations()).toBe(false);
+  });
+
+  it('opens nothing when the run earned nothing', async () => {
+    mockCounts.follows = 1;
+    await finish();
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
 });
 
 describe('ending the flow', () => {

@@ -2,6 +2,11 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 import { strToU8, zipSync } from 'fflate';
 import { BackHandler } from 'react-native';
 
+import {
+  clearCelebrations,
+  enqueueCelebrations,
+  hasCelebrations,
+} from '@/features/awards/celebration-queue';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { flowProgress, FLOW_STEPS } from './OnboardingHeader';
@@ -38,6 +43,23 @@ let mockRpcResults: Record<string, unknown> = {};
 let mockRpcErrors: Record<string, unknown> = {};
 /** RPC names whose call never settles, to stand inside a state. */
 let mockRpcHangs = new Set<string>();
+/**
+ * RPC names answered the way the production fetch deadline answers them: late, with
+ * PostgREST's shape for an aborted `fetch` (`status: 0`, an abort message, no code).
+ */
+let mockRpcAborts = new Set<string>();
+
+/**
+ * The importer's step deadline, scaled down so a test can wait it out in real time.
+ * Everything else about `withGrace` is the real helper.
+ */
+jest.mock('@/lib/grace', () => {
+  const actual = jest.requireActual('@/lib/grace');
+  return {
+    withGrace: <T, F>(work: Promise<T>, graceMs: number, fallback: F) =>
+      actual.withGrace(work, Math.min(graceMs, 40), fallback),
+  };
+});
 
 /** What the picker answers with. `null` means the person cancelled. */
 let mockPicked: Uint8Array | null = null;
@@ -69,6 +91,18 @@ jest.mock('@/lib/supabase', () => ({
       if (mockRpcHangs.has(name)) {
         const never = new Promise(() => {});
         return Object.assign(never, { maybeSingle: () => never });
+      }
+      if (mockRpcAborts.has(name)) {
+        const aborted = {
+          data: null,
+          error: {
+            message: 'AbortError: The request did not answer within 10000ms.',
+            code: '',
+          },
+          status: 0,
+        };
+        const late = new Promise((resolve) => setTimeout(() => resolve(aborted), 10));
+        return Object.assign(late, { maybeSingle: () => late });
       }
       const error = mockRpcErrors[name] ?? null;
       const data = error ? null : mockAnswer(name);
@@ -146,6 +180,8 @@ beforeEach(() => {
   mockRpcResults = {};
   mockRpcErrors = {};
   mockRpcHangs = new Set();
+  mockRpcAborts = new Set();
+  clearCelebrations();
   mockPicked = null;
   mockLiveJob = { data: null, error: null };
   resetOnboardingStages();
@@ -219,6 +255,21 @@ describe('Not now', () => {
       },
     ]);
     expect(called()).toEqual([]);
+  });
+
+  /**
+   * An award earned in the ranking run waits for the end of onboarding, where the
+   * notification step drains it (`FlowEnds.test.tsx`). This step is not the end, and the
+   * celebration route would be replaced straight back from here.
+   */
+  it('leaves an award from the ranking run queued for the end of onboarding', async () => {
+    enqueueCelebrations([{ kind: 'award', awardKey: 'lol-mode', tierKey: 'giggle' }]);
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
+    expect(hasCelebrations()).toBe(true);
   });
 
   it('is still there after the picker is cancelled, with the import still offered', async () => {
@@ -333,7 +384,35 @@ describe('importing from the step', () => {
     expect(called()).not.toContain('import_discard');
   });
 
-  it('offers no way out mid-upload, which is the one moment leaving would stop something', async () => {
+  /**
+   * **The upload screen has no buttons, so every wait behind it must end** (independent
+   * review 83b, which found the earlier version of this test pinning a dead end).
+   *
+   * Two shapes of a lost request, both of which now land on the importer's own refusal
+   * with Not now beside Try again: the production fetch deadline, which PostgREST answers
+   * as `status: 0` with an abort message, and a stall in front of the network that no
+   * fetch deadline sees, which `IMPORT_STEP_DEADLINE_MS` bounds.
+   */
+  it('turns a page the fetch deadline aborted into a refusal with Not now', async () => {
+    mockPicked = exportZip();
+    serverAccepts();
+    mockRpcAborts = new Set(['import_stage']);
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Import from Letterboxd' }));
+    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import 2 films'));
+
+    await waitFor(() => expect(view.getByText(/didn.+t finish sending/)).toBeTruthy());
+    expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
+    expect(stepEvents()[0]?.props).toEqual({ step: 'letterboxd', outcome: 'skipped' });
+    expect(called()).not.toContain('import_discard');
+  });
+
+  it('turns a page that never answers at all into the same refusal, once the step deadline passes', async () => {
     mockPicked = exportZip();
     serverAccepts();
     mockRpcHangs = new Set(['import_stage']);
@@ -343,9 +422,39 @@ describe('importing from the step', () => {
     await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
     await fireEvent.press(view.getByText('Import 2 films'));
 
-    await waitFor(() => expect(view.getByText(/Keep bingd\. open/)).toBeTruthy());
-    expect(view.queryByRole('button', { name: 'Not now' })).toBeNull();
-    expect(view.queryByRole('button', { name: 'Continue' })).toBeNull();
+    await waitFor(() => expect(view.getByText(/didn.+t finish sending/)).toBeTruthy());
+    expect(called()).not.toContain('import_ready');
+    expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
+  });
+
+  /**
+   * **A hand-off whose answer was lost is not a failure.** `import_ready` may have
+   * committed, so the step says it could not check, keeps the job, and offers Continue (an
+   * import may well be running) and Try again, which asks about that job by id.
+   */
+  it('says it could not check a hand-off that never answered, and finds the job on Try again', async () => {
+    mockPicked = exportZip();
+    serverAccepts();
+    mockRpcHangs = new Set(['import_ready']);
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Import from Letterboxd' }));
+    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import 2 films'));
+
+    await waitFor(() => expect(view.getByText('We couldn’t check your import')).toBeTruthy());
+    expect(view.queryByText(/didn.+t finish sending/)).toBeNull();
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+    expect(called()).not.toContain('import_discard');
+
+    await fireEvent.press(view.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() =>
+      expect(view.getByText('Your Letterboxd import is on its way')).toBeTruthy(),
+    );
+    expect(mockRpc).toHaveBeenLastCalledWith('import_status', { p_job_id: JOB });
+    expect(called()).not.toContain('import_discard');
   });
 
   it('shows the result with Continue when the import finishes while the step is open', async () => {
