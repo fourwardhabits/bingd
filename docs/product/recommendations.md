@@ -417,14 +417,17 @@ its marginal value needs an adapter change and a deploy. Not added.
 ### 11.2 The selection (`selection.ts`, `FOR_YOU_SELECTION`)
 
 1. **Qualified pool.** Candidates scoring ≥ 0.80 × the score at rank 20 (the first page's
-   frontier), clamped to 60–160. When fewer unseen titles remain than the wall being drawn
-   needs, the pool extends in score order — never below 0.60 × the frontier.
+   frontier), clamped to 60–160. When fewer than 60 of them remain unseen, the pool extends
+   in score order — never below 0.60 × the frontier. The trigger is a constant: growing the
+   wall by pages, or dismissing a title, never changes the pool, and τ is taken from the
+   unextended pool, so what the reader already scrolled past never moves.
 2. **Score-weighted sampling without replacement.** Key = `score / τ − exposure + Gumbel(seed,
    id)`, τ = 0.15 × the pool's score spread. On a realistic pool the best title leads ~22% of
    fresh walls, the tenth <1%.
 3. **Exposure decays** from `last_shown_at`: `3 × log2(1 + count) × 0.5^(age / 96 h)`, plus 12
    when shown within the last **18 hours**, plus 24 for a title **on screen when Refresh was
-   pressed** (always drawn last). Finite for every title — nothing is blacklisted.
+   pressed** (always drawn last; a return after hours away does not add it). Finite for every
+   title — nothing is blacklisted.
 4. **Light diversity per page**: 0.4 per title beyond four of one primary genre, 0.25 per
    repeat of a lead anchor; hard ceilings unchanged (four per anchor, two per franchise). No
    genre quotas — a horror reader still gets a horror wall.
@@ -454,7 +457,8 @@ the 60 ms test bound on desktop.
   — 3.5 half-lives. `recommendation_exposure()` and `foryou.impression_window_hours` (72) are
   **unchanged**: clients that cannot take this update run the old tier engine, which would
   repeat *more* over a longer window (independent review). Until the migration reaches a
-  backend, V2 falls back to the 72-hour reader.
+  backend, V2 falls back to the 72-hour reader — on a missing function only; a transient
+  failure is retried.
 
 ### 11.4 Before and after (real production profiles, movies wall, medians)
 
