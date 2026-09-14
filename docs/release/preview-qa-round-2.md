@@ -45,6 +45,12 @@ preview app (a push is expected on staging; the notification inbox has the rows 
 | 6 | Look below the five | A card after the five: *Already use Letterboxd?* / *Import your watch history anytime from* / **Settings → Import from Letterboxd**. Easy to spot, but not competing with the list. **No button, no way out of the flow.** |
 | 7 | On People, tap *Invite friends*, then cancel the share sheet | The button never says *Inviting…* (a flash of *Opening…* before the sheet is fine). Fast double tap opens one sheet. After cancel it works again. |
 
+> **Row 6 describes this round-2 update only.** The founder's Round 3 decision (2026-09-13)
+> removes the card and replaces it with an optional *Already use Letterboxd?* step after
+> *Your First Five*'s Continue (`feat/letterboxd-onboarding-step`,
+> `docs/product/letterboxd-import.md` §1). A build carrying that branch shows no card under
+> the five; its checks are items 8–10 of that doc's physical checklist.
+
 ## 2. Importer copy and flow
 
 | # | Do this | Expect |

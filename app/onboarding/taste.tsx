@@ -399,15 +399,25 @@ export default function TasteOnboardingScreen() {
     // Recorded where it is known. The notification step reports it at the end and must
     // not have to re-derive it from a query that may not have answered.
     void setRankingOutcome(profile.id, 'completed');
-    advance('people');
-    router.replace('/onboarding/people');
+    // Into the optional Letterboxd step, which follows the payoff rather than sitting on it
+    // (founder, 2026-09-13). See `app/onboarding/letterboxd.tsx`.
+    advance('letterboxd');
+    router.replace('/onboarding/letterboxd');
   };
 
+  /**
+   * Not now on the picker, which **still offers Letterboxd** before People.
+   *
+   * Somebody who could not think of five movies to rank on the spot may well be somebody
+   * with years of history in another app, and for them the import is the better way to
+   * start rather than a detour. The step costs one tap to pass, and the ranking outcome is
+   * recorded here either way.
+   */
   const skip = () => {
     track({ name: 'onboarding_step_completed', props: { step: 'pick', outcome: 'skipped' } });
     void setRankingOutcome(profile.id, 'skipped');
-    advance('people');
-    router.replace('/onboarding/people');
+    advance('letterboxd');
+    router.replace('/onboarding/letterboxd');
   };
 
   const films = results.filter(
@@ -587,9 +597,10 @@ export default function TasteOnboardingScreen() {
              * and somebody who cannot think of five movies they have seen must not be held
              * here forever. That is a stranding this codebase has already paid for once.
              *
-             * Quiet and tertiary, and it skips to the People step rather than out of
-             * onboarding — leaving the ranking is not the same as leaving the flow, and
-             * the social half still has something to offer somebody who declined this one.
+             * Quiet and tertiary, and it skips to the rest of the flow (the optional
+             * Letterboxd step, then People) rather than out of onboarding — leaving the
+             * ranking is not the same as leaving the flow, and what follows still has
+             * something to offer somebody who declined this one.
              */}
             <Button label="Not now" kind="tertiary" onPress={skip} />
             {/* This screen has no header and Settings is unreachable from it, so for the
@@ -991,37 +1002,10 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
           </View>
         ))}
 
-        {/* ---------------------------------------------------------------
-            **The import, pointed at once, after the five and below them.**
-
-            Physical QA (2026-09-12): the first version was a tertiary footnote under the
-            intro, and the founder did not remember seeing it. So it is now its own small
-            card with a question for a heading, placed after the list so it never competes
-            with the payoff above it.
-
-            Still words that go nowhere, for the three reasons that have not changed: a
-            route pushed from inside this flow is replaced straight back by `nextRoute`,
-            the importer's help sheet would be a Modal inside a Modal (the 2026-09-10
-            freeze), and this screen deliberately has one action. A button here needs the
-            flow guard to admit one route, which is its own change with its own review
-            (`docs/product/letterboxd-import.md`).
-            --------------------------------------------------------------- */}
-        {/* Locked for this release (founder, 2026-09-13): informational only. It says the
-            import exists, what it brings, and exactly where it lives; the location is its
-            own line so it scans. No button, because the flow guard would replace a route
-            pushed from here. Read as one sentence, with the arrow spoken as words. */}
-        <View
-          style={styles.letterboxd}
-          accessible
-          accessibilityRole="text"
-          accessibilityLabel="Already use Letterboxd? Import your watch history anytime from Settings, then Import from Letterboxd."
-        >
-          <Text variant="headline">Already use Letterboxd?</Text>
-          <Text variant="subhead" tone="secondary">
-            Import your watch history anytime from
-          </Text>
-          <Text variant="callout">Settings → Import from Letterboxd</Text>
-        </View>
+        {/* No Letterboxd card here any more (founder, preview QA Round 3, 2026-09-13). The
+            passive pointer went unnoticed, so the question is now its own optional step,
+            which Continue opens: `app/onboarding/letterboxd.tsx`. The payoff keeps its one
+            action and nothing beneath the five competes with them. */}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -1059,14 +1043,6 @@ const styles = StyleSheet.create({
   status: { padding: theme.layout.gutter, gap: theme.space[3] },
   results: { paddingBottom: theme.space[8] },
   payoff: { paddingBottom: theme.space[6] },
-  letterboxd: {
-    marginHorizontal: theme.layout.gutter,
-    marginTop: theme.space[4],
-    padding: theme.space[4],
-    gap: theme.space[1],
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.surface.raised,
-  },
   rankRow: {
     flexDirection: 'row',
     alignItems: 'center',

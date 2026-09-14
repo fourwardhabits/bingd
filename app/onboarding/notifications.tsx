@@ -1,9 +1,13 @@
 import { Stack, useRouter } from 'expo-router';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { NotificationStep } from '@/features/onboarding/NotificationStep';
-import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
+import {
+  useAdvanceStage,
+  useOnboardingStage,
+} from '@/features/onboarding/use-onboarding-stage';
 import { rankingOutcome } from '@/features/onboarding/pick-five';
 import { useCompleteTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { track } from '@/lib/analytics';
@@ -57,11 +61,29 @@ export default function NotificationsStepScreen() {
   const profile = useCurrentProfile();
   const advance = useAdvanceStage(profile.id);
   const complete = useCompleteTasteOnboarding(profile.id);
-
+  /** Drains what the ranking run earned, at the very end. See the end of `finish`. */
+  const celebrate = useCelebrationHandoff();
 
   // A second press must not race a second navigation. A ref, because nothing renders from
   // it: the button stays live because the checks are quick.
   const departing = useRef(false);
+
+  /**
+   * **This screen owns the exit from a finished flow, so it also owns the stray visit.**
+   *
+   * `nextRoute` leaves this screen alone once the stage is `done`, so the router's replace
+   * cannot land behind `finish`'s own navigation (see the `group === 'onboarding'` note in
+   * `session.tsx`). The cost of that is a link opening this screen on a flow that already
+   * ended, which the router used to send on. It is sent on here instead, to the Feed as the
+   * router did. `departing` is what tells the two apart: `finish` sets it before it writes
+   * `done`, so its own write never triggers this.
+   */
+  const stage = useOnboardingStage(profile.id);
+  useEffect(() => {
+    if (stage !== 'done' || departing.current) return;
+    departing.current = true;
+    router.replace(TAB_ROUTES.feed);
+  }, [stage, router]);
 
   /**
    * One approved outgoing follow is enough, so the query asks for one.
@@ -145,6 +167,29 @@ export default function NotificationsStepScreen() {
     advance('done');
     void complete({ outcome });
     router.replace(destination);
+
+    /**
+     * **What the ranking run earned, celebrated now that the flow is over** (independent
+     * review 83b).
+     *
+     * The five rankings go through `RankingSheet`, which detects a new award or streak and
+     * enqueues it (`celebration-queue.ts`). Onboarding passes `onPlaced`, and whatever the
+     * comparison sheet shows before it goes away, no exit in the ranking run drains that
+     * queue the way an ordinary ranking's Done does (`closeAndCelebrate`). Nothing in the
+     * flow drained it, and the queue is process-local, so an award earned on film three was
+     * simply lost. It cannot be drained earlier either: `/awards/celebrate` is outside the
+     * onboarding group, so `nextRoute` would replace it straight back to the step while the
+     * stage is unfinished.
+     *
+     * So it drains here, once, and in `closeAndCelebrate`'s order: the navigation that ends
+     * the flow first, then the hand-off. Both are queued in expo-router's routing queue and
+     * dispatched in that order by one effect. **Nothing else joins that queue in between**:
+     * `nextRoute` returns null for this screen once the stage is `done` (see `session.tsx`),
+     * so the router's own effect, which runs in the same commit, adds no replace behind the
+     * push. Nothing on this screen is a sheet, so it never presents over one. An empty queue
+     * does nothing.
+     */
+    celebrate();
   };
 
   return (

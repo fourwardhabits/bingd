@@ -48,20 +48,77 @@ import {
  * The ZIP is read on the phone (`read-archive.ts`) and never uploaded. What crosses the
  * wire is the normalised rows `payload.ts` builds: film names, years, ratings, dates, and
  * the Letterboxd links that identify each film and diary entry. Reviews, comments, likes
- * and lists are never opened (`archive.ts`). The sentence is short; it is not allowed to
- * be shorter than that.
+ * and lists are never opened (`archive.ts`). On Settings the sentence is short and is not
+ * allowed to be shorter than that. The onboarding question carries the founder's shorter
+ * line instead (2026-09-14), which is true of the same implementation: the ZIP stays on the
+ * phone and only what the import needs is read.
+ *
+ * ---------------------------------------------------------------------------
+ * AND THE SAME SCREEN, AS A STEP OF ONBOARDING (2026-09-13)
+ *
+ * `onboarding` runs this exact machine inside the first-run flow
+ * (`app/onboarding/letterboxd.tsx`), because the flow guard replaces any route pushed out
+ * of the onboarding group, so the importer has to be drawn where the person already is.
+ * Three things differ and nothing else does:
+ *
+ *   - **The opening asks a question** (*Already use Letterboxd?*) with *Import from
+ *     Letterboxd* and *Not now*, instead of Settings' instructions page.
+ *   - **Every state short of an accepted import offers Not now**, except the upload
+ *     itself, which is the one moment leaving would stop something.
+ *   - **Once `import_ready` has succeeded the step lets go.** It says the import carries on
+ *     in the background and that we will say when it is done, and offers *Continue*. It
+ *     does not wait for the result, and neither leaving nor unmounting touches the job:
+ *     `onLeave` is navigation only, and `reset` (the one path to `import_discard`) is not
+ *     reachable from any exit.
+ *
+ * Settings passes no `onboarding` and draws exactly what it drew before.
  */
+export type ImportOnboarding = {
+  /** The flow's chrome, drawn above the importer in place of a navigation header. */
+  readonly header: React.ReactNode;
+  /**
+   * Leave the step, carrying on to the rest of the flow.
+   *
+   * `continued` when an import is, or may be, with the server; `skipped` only when the
+   * importer knows nothing is running (see `step` in `ImportScreen`). Called synchronously
+   * from a press, with nothing awaited first.
+   */
+  readonly onLeave: (outcome: 'continued' | 'skipped') => void;
+};
+
 export function ImportScreen({
   surface,
   jobId,
+  onboarding,
 }: {
   surface: ImportSurface;
   /** The job a notification named. See `useImport`. */
   jobId?: string | null;
+  /** Run as the optional onboarding step. See the header. */
+  onboarding?: ImportOnboarding;
 }) {
   const router = useRouter();
-  const { state, pick, start, reset, watchRunning, recheck } = useImport(surface, jobId);
+  const { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } = useImport(
+    surface,
+    jobId,
+    { countOpenOnRequest: onboarding !== undefined },
+  );
   const [howTo, setHowTo] = useState(false);
+
+  /**
+   * The step's exits, with the outcome made honest at the one place both buttons meet.
+   *
+   * *Not now* is a skip only when the importer **knows** nothing is running. Pressed before
+   * the open-job lookup has answered, or after a hand-off whose answer was lost, an import
+   * may well be on the server, and reporting that as a skip would undercount the imports
+   * the step started. Those leaves report `continued`, the step's other existing outcome,
+   * rather than a new word.
+   */
+  const step: ImportOnboarding | undefined = onboarding && {
+    header: onboarding.header,
+    onLeave: (outcome) =>
+      onboarding.onLeave(outcome === 'skipped' && mayBeRunning() ? 'continued' : outcome),
+  };
 
   /**
    * Out of the importer without touching the job. The server carries on either way; this
@@ -70,21 +127,73 @@ export function ImportScreen({
    */
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
 
+  /**
+   * **The question uses the flow's gutters and type, with its actions where the content ends**
+   * (founder, physical preview QA, 2026-09-14, twice).
+   *
+   * The first pass copied People's scaffold exactly, footer and all. People and *Your First
+   * Five* have enough content to fill a phone, so their bottom-pinned footer sits under it.
+   * This question is two lines, so the same pinned footer opened a large blank band between
+   * the words and the buttons, which is the "giant empty area" the founder met on the way
+   * back from *Choose a different file* (and would have met on the way in). The intro keeps
+   * People's values; the actions follow it in the same scroll body instead of being pinned.
+   *
+   * **The bottom inset is the importer's in both modes.** With nothing pinned at the bottom,
+   * the scroll body is the last thing on the screen, so the screen owns the safe-area
+   * padding under it (design-system.md, "The bottom edge belongs to whatever is at the
+   * bottom").
+   */
+  const asking = step !== undefined && state.phase === 'idle';
+
   return (
     <Screen includeBottomInset>
-      <ScrollView contentContainerStyle={styles.page}>
-        <Body
-          state={state}
-          onPick={() => void pick()}
-          onStart={(preview) => void start(preview)}
-          onReset={reset}
-          onWatch={watchRunning}
-          onRecheck={recheck}
-          onHowTo={() => setHowTo(true)}
-          onLeave={leave}
-          onRank={() => router.dismissTo(unrankedMovies())}
+      {onboarding?.header}
+      {asking ? (
+        <OnboardingQuestion
+          onPick={() => {
+            opened();
+            void pick();
+          }}
+          onHowTo={() => {
+            opened();
+            setHowTo(true);
+          }}
+          onSkip={() => step.onLeave('skipped')}
         />
-      </ScrollView>
+      ) : (
+        /**
+         * **Keyed by phase, so a new state starts at the top.** One scroll view used to carry
+         * every phase, and a scroll view can keep its offset when its content shrinks: scrolled
+         * down a preview, then *Choose a different file*, and the shorter intro was drawn
+         * scrolled past its own end, a blank page until the next drag. A phase change is a new
+         * page, so it gets a new scroll view; progress inside a phase (upload parts, polling)
+         * keeps the same one.
+         */
+        <ScrollView key={state.phase} contentContainerStyle={styles.page}>
+          <Body
+            state={state}
+            onPick={() => {
+              // A no-op unless this is the onboarding step, where the count waits for a tap.
+              opened();
+              void pick();
+            }}
+            onStart={(preview) => void start(preview)}
+            onReset={reset}
+            onWatch={watchRunning}
+            onRecheck={recheck}
+            onHowTo={() => {
+              opened();
+              setHowTo(true);
+            }}
+            onLeave={leave}
+            onRank={() => router.dismissTo(unrankedMovies())}
+            onboarding={step}
+          />
+        </ScrollView>
+      )}
+      {/* The only sheet this screen has, so there is nothing to serialise it against. On
+          the onboarding step the screen is a plain stack route rather than a presented
+          one, so this is not a Modal inside anything either. */}
       <HowToExportSheet visible={howTo} onClose={() => setHowTo(false)} surface={surface} />
     </Screen>
   );
@@ -100,6 +209,7 @@ function Body({
   onLeave,
   onRank,
   onRecheck,
+  onboarding,
 }: {
   state: ImportPhase;
   onPick: () => void;
@@ -110,13 +220,30 @@ function Body({
   onLeave: () => void;
   onRank: () => void;
   onRecheck: () => void;
+  onboarding?: ImportOnboarding;
 }) {
+  /**
+   * The onboarding step's way on, per state. Undefined on Settings, which renders nothing
+   * where these are placed.
+   */
+  const skip = onboarding ? () => onboarding.onLeave('skipped') : undefined;
+  const carryOn = onboarding ? () => onboarding.onLeave('continued') : undefined;
+
   switch (state.phase) {
     case 'idle':
+      // The onboarding step draws its question outside this page (`OnboardingQuestion`).
       return <Intro onPick={onPick} onHowTo={onHowTo} />;
 
     case 'reading':
-      return <Waiting title="Opening your file" detail="It stays on your phone." />;
+      return (
+        <Waiting
+          title="Opening your file"
+          detail="It stays on your phone."
+          // Nothing has been sent, so leaving costs nothing, and a picker that never calls
+          // back must not be the end of somebody's onboarding.
+          action={skip ? <Button label="Not now" kind="secondary" onPress={skip} /> : undefined}
+        />
+      );
 
     case 'previewing':
       return (
@@ -124,6 +251,7 @@ function Body({
           preview={state.preview}
           onStart={() => onStart(state.preview)}
           onReset={onReset}
+          exit={skip ? <Button label="Not now" kind="secondary" onPress={skip} /> : undefined}
         />
       );
 
@@ -135,8 +263,8 @@ function Body({
             state.total > 1
               ? // `Math.min`, because after the last page `sent === total` and the screen
                 // stays up for the whole `import_ready` round trip.
-                `Keep bingd. open while we send your history. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
-              : 'Keep bingd. open while we send your history.'
+                `Keep bingd open while we send your history. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
+              : 'Keep bingd open while we send your history.'
           }
         />
       );
@@ -150,6 +278,22 @@ function Body({
       // No duration is promised. The one measured import (24 films, staging, 2026-09-12)
       // took two minutes end to end, which is one data point and not a claim about a
       // library of thousands.
+      if (carryOn) {
+        // **The onboarding step's hand-off, and the reason it can end here.** Everything the
+        // server needs is on the server, so the flow does not wait for 100%: it says the
+        // import carries on and that we will say when it is done (the lifecycle
+        // notifications, which the next steps do not interfere with), and lets somebody
+        // carry on. The poll keeps running while this is on screen, so a quick import
+        // still arrives as its summary; Continue unmounts it and leaves the job alone.
+        return (
+          <Waiting
+            title="Your Letterboxd import is on its way"
+            detail="It keeps running in the background, even if you close bingd. We’ll let you know when it’s done."
+            note="You can check on it anytime in Settings, under Import from Letterboxd."
+            action={<Button label="Continue" onPress={carryOn} />}
+          />
+        );
+      }
       return (
         <Waiting
           title="Importing your Letterboxd history"
@@ -166,12 +310,25 @@ function Body({
           onRank={onRank}
           onDone={onLeave}
           onReset={onReset}
+          onContinue={carryOn}
         />
       );
 
     case 'failed':
       return (
         <Failed
+          exit={
+            // **Named for what is true of the job.** Where an import is running (or this
+            // screen merely lost sight of one) nothing is being declined, so the way on is
+            // Continue; where nothing reached the server, or the server gave up, Not now.
+            skip && carryOn ? (
+              leavesAJobRunning(state.failure) ? (
+                <Button label="Continue" kind="secondary" onPress={carryOn} />
+              ) : (
+                <Button label="Not now" kind="secondary" onPress={skip} />
+              )
+            ) : undefined
+          }
           failure={state.failure}
           onRetry={
             state.failure.kind === 'unchecked'
@@ -198,10 +355,10 @@ function Body({
  * get wrong: the export is a ZIP, and a folder or a single CSV will be refused.
  */
 const STEPS = [
-  'On Letterboxd.com, go to Settings, then Data.',
-  'Generate your export.',
-  'Download the ZIP.',
-  'Come back to bingd. and choose it here.',
+  'On Letterboxd.com, go to Settings → Import & Export.',
+  'Choose Export your data to generate your export.',
+  'Download the ZIP when it’s ready.',
+  'Come back to bingd and choose it here.',
 ] as const;
 
 function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void }) {
@@ -209,7 +366,7 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
     <View style={styles.block}>
       <Text variant="display">Bring your Letterboxd history</Text>
       <Text variant="body" tone="secondary">
-        Import the movies you’ve watched, your ratings, Diary dates, and Watchlist. Your bingd.
+        Import the movies you’ve watched, your ratings, diary dates, and watchlist. Your bingd
         rankings stay yours.
       </Text>
 
@@ -227,18 +384,7 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
         ))}
       </View>
 
-      <View style={styles.privacy}>
-        <Ionicons
-          name="lock-closed-outline"
-          size={theme.layout.icon.sm}
-          color={theme.text.tertiary}
-        />
-        <Text variant="footnote" tone="tertiary" style={styles.privacyText}>
-          Your ZIP stays on your phone. bingd. only gets what it needs: film names, years,
-          ratings, dates, and Letterboxd links. We never open your reviews, comments, likes, or
-          lists.
-        </Text>
-      </View>
+      <Privacy />
 
       <View style={styles.actions}>
         <Button label="Choose Letterboxd ZIP" onPress={onPick} />
@@ -248,14 +394,92 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
   );
 }
 
+/** The privacy promise. See the header for why it may not be any shorter. */
+function Privacy() {
+  return (
+    <View style={styles.privacy}>
+      <Ionicons
+        name="lock-closed-outline"
+        size={theme.layout.icon.sm}
+        color={theme.text.tertiary}
+      />
+      <Text variant="footnote" tone="tertiary" style={styles.privacyText}>
+        Your ZIP stays on your phone. bingd only gets what it needs: film names, years, ratings,
+        dates, and Letterboxd links. We never open your reviews, comments, likes, or lists.
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * The onboarding step's opening: a question, and two answers of equal standing.
+ *
+ * **Import from Letterboxd goes straight to the picker.** On this screen most readers are
+ * deciding whether this applies to them at all, so the instructions are one tap away under
+ * *Need help getting the file?* rather than the first thing on the page. Somebody without
+ * the file who opens the picker anyway cancels it and lands back here, with both answers
+ * still on screen.
+ *
+ * **Not now is secondary, not tertiary.** The import is never required, and a way on that
+ * reads as fine print makes the step feel like a gate.
+ *
+ * The privacy line is true of the implementation: the ZIP is read on the phone
+ * (`read-archive.ts`) and never uploaded, and only the entries the import needs are
+ * opened (`archive.ts`).
+ */
+function OnboardingQuestion({
+  onPick,
+  onHowTo,
+  onSkip,
+}: {
+  onPick: () => void;
+  onHowTo: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <ScrollView contentContainerStyle={onboardingStyles.body}>
+      <View style={onboardingStyles.intro}>
+        <Text variant="title1">Already use Letterboxd?</Text>
+        <Text variant="body" tone="secondary">
+          Bring over what you’ve watched, your ratings, diary dates, and watchlist. Imported
+          titles start unranked, so your bingd rankings stay yours.
+        </Text>
+      </View>
+      <View style={onboardingStyles.actions}>
+        <Button label="Import from Letterboxd" onPress={onPick} />
+        <Button label="Not now" kind="secondary" onPress={onSkip} />
+        <Button label="Need help getting the file?" kind="tertiary" onPress={onHowTo} />
+        <Text variant="footnote" tone="tertiary" style={styles.centred}>
+          Your ZIP stays on your phone. bingd only reads the information needed for your import.
+        </Text>
+      </View>
+    </ScrollView>
+  );
+}
+
+/**
+ * Whether a failure leaves an import running on the server.
+ *
+ * `already_running` and `unknown` both do by definition, and `unchecked` is a job a
+ * notification named whose read failed. The rest are refusals before anything was handed
+ * over (`archive`, `unreadable`, `upload`) or a job the worker gave up on (`server`).
+ */
+const leavesAJobRunning = (failure: ImportFailure): boolean =>
+  failure.kind === 'already_running' ||
+  failure.kind === 'unknown' ||
+  failure.kind === 'unchecked';
+
 function Preview({
   preview,
   onStart,
   onReset,
+  exit,
 }: {
   preview: ArchivePreview;
   onStart: () => void;
   onReset: () => void;
+  /** The onboarding step's Not now. */
+  exit?: React.ReactNode;
 }) {
   const { counts } = preview.normalised;
 
@@ -269,7 +493,7 @@ function Preview({
       <View style={styles.card}>
         <Stat label="Watched films" value={counts.watched} />
         <Stat label="Ratings" value={counts.rated} />
-        <Stat label="On your Watchlist" value={counts.watchlist} />
+        <Stat label="On your watchlist" value={counts.watchlist} />
         <Stat label="Diary entries" value={counts.watches} />
       </View>
 
@@ -292,6 +516,7 @@ function Preview({
 
       <View style={styles.actions}>
         <Button label={importLabel(counts.watched + counts.watchlist)} onPress={onStart} />
+        {exit}
         <Button label="Choose a different file" kind="tertiary" onPress={onReset} />
       </View>
     </View>
@@ -306,11 +531,19 @@ function Summary({
   onRank,
   onDone,
   onReset,
+  onContinue,
 }: {
   counts: ImportCounts;
   onRank: () => void;
   onDone: () => void;
   onReset: () => void;
+  /**
+   * The onboarding step's way on, which replaces all three actions below. *Rank imported
+   * movies* opens Collection, which the flow guard would send straight back; *Done* is
+   * Settings' back; and *Import another file* is a second import in the middle of a flow
+   * that has just finished its first.
+   */
+  onContinue?: () => void;
 }) {
   // **`stragglers` counts here too.** `_import_settle` reports rows still `pending` or
   // `matched` at settle as their own bucket; to the reader they are films that did not
@@ -338,8 +571,8 @@ function Summary({
         <Count value={added} label="Added as watched" />
         {/* Rows of zero are left out: a zero invites the reader to wonder what went wrong.
             "Added as watched" always shows, because it is the number the next step is about. */}
-        {alreadyHere > 0 ? <Count value={alreadyHere} label="Already in bingd." /> : null}
-        {watchlisted > 0 ? <Count value={watchlisted} label="Added to your Watchlist" /> : null}
+        {alreadyHere > 0 ? <Count value={alreadyHere} label="Already in bingd" /> : null}
+        {watchlisted > 0 ? <Count value={watchlisted} label="Added to your watchlist" /> : null}
         {diary > 0 ? (
           <Count
             value={diary}
@@ -361,19 +594,25 @@ function Summary({
       {added > 0 ? (
         <Text variant="body" tone="secondary">
           Imported movies start unranked. Rank them whenever you want. A ranking you make in
-          bingd. always wins.
+          bingd always wins.
         </Text>
       ) : null}
 
-      <View style={styles.actions}>
-        {/* The next useful thing, first: the films that just arrived are waiting on
-            Collection's Unranked tab. Only when there are some to rank. */}
-        {added > 0 ? <Button label="Rank imported movies" onPress={onRank} /> : null}
-        <Button label="Done" kind={added > 0 ? 'secondary' : 'primary'} onPress={onDone} />
-        {/* A finished import is restored for a day, and a notification can open it at any
-            time, so this screen is reachable without having just used it. */}
-        <Button label="Import another file" kind="tertiary" onPress={onReset} />
-      </View>
+      {onContinue ? (
+        <View style={styles.actions}>
+          <Button label="Continue" onPress={onContinue} />
+        </View>
+      ) : (
+        <View style={styles.actions}>
+          {/* The next useful thing, first: the films that just arrived are waiting on
+              Collection's Unranked tab. Only when there are some to rank. */}
+          {added > 0 ? <Button label="Rank imported movies" onPress={onRank} /> : null}
+          <Button label="Done" kind={added > 0 ? 'secondary' : 'primary'} onPress={onDone} />
+          {/* A finished import is restored for a day, and a notification can open it at any
+              time, so this screen is reachable without having just used it. */}
+          <Button label="Import another file" kind="tertiary" onPress={onReset} />
+        </View>
+      )}
     </View>
   );
 }
@@ -391,6 +630,7 @@ function Failed({
   onHowTo,
   onReset,
   onWatch,
+  exit,
 }: {
   failure: ImportFailure;
   onRetry: () => void;
@@ -398,6 +638,8 @@ function Failed({
   onHowTo: () => void;
   onReset: () => void;
   onWatch: () => void;
+  /** The onboarding step's way on. */
+  exit?: React.ReactNode;
 }) {
   const { title, detail, showHowTo } = explain(failure);
 
@@ -413,6 +655,7 @@ function Failed({
       <View style={styles.actions}>
         {retryable ? <Button label={retryLabel} onPress={onRetry} /> : null}
         {watchable ? <Button label="See the import that’s running" onPress={onWatch} /> : null}
+        {exit}
         {showHowTo ? (
           <Button label="Need help getting the file?" kind="tertiary" onPress={onHowTo} />
         ) : null}
@@ -446,7 +689,7 @@ function explain(failure: ImportFailure): {
     return {
       title: 'An import is already running',
       detail:
-        'This file wasn’t sent. Your earlier import is still running, even with the app closed, and bingd. runs one import at a time. Come back when it’s done to import this file.',
+        'This file wasn’t sent. Your earlier import is still running, even with the app closed, and bingd runs one import at a time. Come back when it’s done to import this file.',
       showHowTo: false,
     };
   }
@@ -525,7 +768,7 @@ function explain(failure: ImportFailure): {
       return {
         title: 'That file is too big',
         detail:
-          'It’s much larger than any Letterboxd export, so bingd. won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
+          'It’s much larger than any Letterboxd export, so bingd won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
         showHowTo: true,
       };
     case 'unexpected':
@@ -542,7 +785,7 @@ function explain(failure: ImportFailure): {
       return {
         title: 'That library is bigger than we can take',
         detail:
-          'bingd. imports up to about ten thousand films, and this file is well past that. Nothing was sent. Let us know from Settings. We’d like to hear from you.',
+          'bingd imports up to about ten thousand films, and this file is well past that. Nothing was sent. Let us know from Settings. We’d like to hear from you.',
         showHowTo: false,
       };
   }
@@ -602,6 +845,28 @@ function Count({ value, label }: { value: number; label: string }) {
     </View>
   );
 }
+
+/**
+ * The first-run flow's page, restated from `app/onboarding/people.tsx` (and the matching
+ * intro in `app/onboarding/taste.tsx`), so this step lines up with the steps on either side
+ * of it. Kept in step with those by hand: the flow has no shared layout
+ * component, and making one would mean rewriting two shipped screens for this one.
+ */
+const onboardingStyles = StyleSheet.create({
+  body: { paddingBottom: theme.space[6] },
+  intro: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[4],
+    gap: theme.space[2],
+  },
+  // The question's actions: the flow's gutter and its action spacing (People's footer
+  // gap), placed after the words rather than pinned. `intro`'s bottom padding is the seam.
+  actions: {
+    paddingHorizontal: theme.layout.gutter,
+    gap: theme.space[2],
+  },
+});
 
 const styles = StyleSheet.create({
   page: { padding: theme.layout.gutter, paddingBottom: theme.space[10] },

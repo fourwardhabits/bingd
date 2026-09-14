@@ -641,7 +641,7 @@ Deno.test('the import pushes say the same thing the import screens do, and never
 
   const failed = contentFor(importJob('import_failed'))!;
   assertEquals(failed.title, 'We couldn’t finish your Letterboxd import');
-  assertEquals(failed.body, 'Open bingd. to see what happened and try again.');
+  assertEquals(failed.body, 'Open bingd to see what happened and try again.');
 
   for (const content of [started, failed, contentFor(importJob('import_completed'))!]) {
     assert(!/match|process|payload|row|—/i.test(`${content.title} ${content.body}`), content.body);

@@ -57,7 +57,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
 | `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` — either may be **absent**, see below |
-| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09) | the account | `step`, `variant`, `outcome` |
+| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09; `step: 'letterboxd'` added 2026-09-13) | the account | `step`, `variant`, `outcome` |
 
 ### Core loop
 
@@ -288,7 +288,7 @@ push exists. §10b carries the measurement plan it belongs to. Deliberately no
 
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
-| `import_opened` | the importer screen mounted, once per mount | the importer | `surface` |
+| `import_opened` | `settings`: the importer screen mounted, once per mount. `onboarding` (2026-09-13): *Import from Letterboxd* or *Need help getting the file?* was first pressed on the optional step, once per visit | the importer | `surface` |
 | `import_instructions_opened` | the "how to export" sheet's link to Letterboxd was tapped | the importer | `surface` |
 | `import_archive_selected` | a picked file was read, or refused, or the picker was dismissed | the importer | `outcome` |
 | `import_started` | the preview was accepted and the first page was sent | the importer | `films`, `viewings` |
@@ -299,10 +299,20 @@ A funnel with somebody else's app in the middle of it. The step between
 letterboxd.com and in a mail client, so those two events are the only measurement of
 whether the hand-off works at all.
 
-`surface` is `settings` or `onboarding`. The import is optional (Contract V3 §9) and
-onboarding only mentions it in a sentence, so the split is what says whether that
-sentence earns its place — without it, a discoverability problem and a completion
-problem look the same.
+`surface` is `settings` or `onboarding`. The import is optional (Contract V3 §9), so the
+split is what says whether the onboarding entry earns its place — without it, a
+discoverability problem and a completion problem look the same.
+
+**On `onboarding` it counts a tap, not a view** (2026-09-13). The passive sentence on the
+payoff went unnoticed in physical QA, so onboarding now has an optional step of its own,
+*Already use Letterboxd?*, between *Your First Five* and People. Everybody past the ranking
+run is shown it, so counting its mount would make `import_opened` the step's impressions
+and the two surfaces incomparable. The step's exposure and its answer are
+`onboarding_step_completed` with `step: 'letterboxd'`: `outcome: 'skipped'` is *Not now*
+when the importer **knows** no import is running for the account; `continued` is every other
+way off the step — an import handed to the server, one already running, or a leave while
+that is not yet known (the open-job lookup had not answered, or a hand-off's reply was
+lost). A leave that might have left an import running is never counted as a skip.
 
 `import_archive_selected` is the one to watch. Its failure outcomes — `not_a_zip`,
 `not_letterboxd`, `damaged`, `empty` — are the difference between "people drop off

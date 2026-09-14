@@ -62,8 +62,19 @@ import { BrandLockup } from '@/ui/components';
  *
  * The line is shorter and therefore moves further per screen, which is the truth: the
  * flow really is shorter.
+ *
+ * `letterboxd` (2026-09-13) is the optional import step after the payoff. It is counted
+ * because it is drawn: a line that stood still on a screen with the header on it would
+ * read as the flow having paused.
  */
-export const FLOW_STEPS = ['profile', 'rank', 'payoff', 'people', 'notifications'] as const;
+export const FLOW_STEPS = [
+  'profile',
+  'rank',
+  'payoff',
+  'letterboxd',
+  'people',
+  'notifications',
+] as const;
 
 export type FlowStep = (typeof FLOW_STEPS)[number];
 

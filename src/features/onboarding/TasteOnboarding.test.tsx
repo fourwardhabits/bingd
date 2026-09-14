@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
+import { clearCelebrations, hasCelebrations } from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
 
 import { resetRankingOutcome } from './pick-five';
@@ -170,7 +171,22 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (...args: unknown[]) => mockRpc(...args),
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
-      const rows = () => mockTableRows[table] ?? [];
+      const rows = () => {
+        /**
+         * The award ledger, as the ranking's own snapshot-then-diff sees it when a
+         * placement earns something: empty when the sheet opens, holding the award when it
+         * asks again after the placement. Counted by read rather than written by
+         * `rank_start`, because the snapshot and the opener run in the same commit and
+         * their order is not what this file is about.
+         */
+        if (table === 'award_unlocks' && mockAwardOnPlacement) {
+          mockLedgerReads += 1;
+          return mockLedgerReads > 1
+            ? [{ award_key: 'lol-mode', tier_key: 'giggle', earned_at: '2026-09-13T00:00:00Z' }]
+            : [];
+        }
+        return mockTableRows[table] ?? [];
+      };
       Object.assign(chain, {
         select: () => chain,
         eq: () => chain,
@@ -199,8 +215,10 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+const mockPush = jest.fn();
+
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ replace: mockReplace, push: jest.fn() }),
+  useRouter: () => ({ replace: mockReplace, push: mockPush }),
   Stack: { Screen: () => null },
 }));
 
@@ -279,8 +297,15 @@ const starterGrid = (ids: string[]) => {
 };
 
 let mockStarterIds: string[] = [];
+/** Whether a placement writes an award to the ledger, as the database trigger would. */
+let mockAwardOnPlacement = false;
+let mockLedgerReads = 0;
 
 beforeEach(() => {
+  mockAwardOnPlacement = false;
+  mockLedgerReads = 0;
+  mockPush.mockReset();
+  clearCelebrations();
   // Dismissals acknowledge themselves unless a test says otherwise, which is what a
   // device does. Reset both halves so a held one cannot leak into the next case.
   issued = 0;
@@ -826,6 +851,38 @@ describe('one turn of the loop', () => {
     releaseReadsOf('rankings');
   });
 
+  /**
+   * **An award earned in the run is kept for the end of onboarding, not shown or lost on
+   * the way** (independent review 83b).
+   *
+   * The ranking detects it and enqueues it, as everywhere else. Nothing on the payoff may
+   * drain that queue: `/awards/celebrate` is outside the onboarding group and would be
+   * replaced straight back, and the payoff is not the end of the flow. The notification
+   * step drains it once the flow is over (`FlowEnds.test.tsx`).
+   */
+  it('keeps an award earned on the fifth queued through Your First Five and its Continue', async () => {
+    alreadyRanked(4);
+    mockAwardOnPlacement = true;
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+
+    await chooseBucket(view);
+
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    // Detected by the real ranking sheet and waiting in the queue.
+    await waitFor(() => expect(hasCelebrations()).toBe(true));
+
+    await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
+    expect(mockPush).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: '/awards/celebrate' }),
+    );
+    expect(hasCelebrations()).toBe(true);
+  });
+
   /** Five rankings, and exactly five: one `rank_start` per movie and no repeats. */
   it('writes one ranking per movie', async () => {
     alreadyRanked(4);
@@ -928,45 +985,19 @@ describe('Your First Five', () => {
   });
 
   /**
-   * **After the five, and not during them.** The Letterboxd pointer sat on the first
-   * ranking screen in an earlier pass, which is before First Five rather than after it.
-   * It is one sentence and not a button on purpose: the flow guard replaces any route
-   * pushed out of the onboarding group, and a sheet here would be one Modal inside
-   * another. Both halves are asserted, because moving it back would pass a test that
-   * only looked for the words.
+   * **The passive Letterboxd card is gone** (founder, preview QA Round 3, 2026-09-13). The
+   * founder finished onboarding without noticing it, so the question became its own
+   * optional step after this one (`LetterboxdStep.test.tsx`). Nothing about Letterboxd or
+   * Settings may come back onto the payoff, where it would compete with the five.
    */
-  it('mentions the Letterboxd import once the five are placed', async () => {
-    const view = await arrive();
-
-    // What it is, what it brings, and exactly where it lives (founder lock, 2026-09-13). The
-    // card is one accessible element, so its lines are queried as hidden text and the
-    // sentence a screen reader hears is asserted as its label.
-    const hidden = { includeHiddenElements: true };
-    expect(view.getByText('Already use Letterboxd?', hidden)).toBeTruthy();
-    expect(view.getByText('Import your watch history anytime from', hidden)).toBeTruthy();
-    expect(view.getByText('Settings → Import from Letterboxd', hidden)).toBeTruthy();
-    expect(
-      view.getByLabelText(
-        'Already use Letterboxd? Import your watch history anytime from Settings, then Import from Letterboxd.',
-      ),
-    ).toBeTruthy();
-    // Still no fork: it names Settings and offers no way out of the flow.
-    expect(view.queryByRole('button', { name: /Letterboxd|Settings/ })).toBeNull();
-  });
-
-  /**
-   * **Below the five, not above them** (physical QA, 2026-09-12). The first version was a
-   * footnote under the intro that the founder never noticed; the card sits after the list
-   * so it registers without standing between somebody and their own ranking.
-   */
-  it('puts the Letterboxd card after the fifth row', async () => {
+  it('carries no Letterboxd card, because the question has a step of its own', async () => {
     const view = await arrive();
     await waitFor(() => expect(view.getByText('Fifth')).toBeTruthy());
 
-    const order = view
-      .getAllByText(/^(First|Fifth|Already use Letterboxd\?)$/, { includeHiddenElements: true })
-      .map((n) => n.props.children);
-    expect(order).toEqual(['First', 'Fifth', 'Already use Letterboxd?']);
+    const hidden = { includeHiddenElements: true };
+    expect(view.queryByText(/Letterboxd/, hidden)).toBeNull();
+    expect(view.queryByText(/Settings/, hidden)).toBeNull();
+    expect(view.queryByRole('button', { name: /Letterboxd|Settings/ })).toBeNull();
   });
 
   it('says what the five bought without explaining the algorithm again', async () => {
@@ -1001,11 +1032,13 @@ describe('Your First Five', () => {
     );
   });
 
-  it('continues into the People step rather than into the app', async () => {
+  it('continues into the optional Letterboxd step rather than into the app', async () => {
     const view = await arrive();
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
 
-    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
+    // The step after the payoff, and the stage that says so on a relaunch.
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
+    await waitFor(() => expect(mockPrefs.get('user-1.onboarding.stage')).toBe('letterboxd'));
   });
 });
 
@@ -1021,9 +1054,10 @@ describe('the way out', () => {
     const view = await open();
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
-    // Into the social step, not out of onboarding: declining the ranking is not declining
-    // the flow, and the People step still has something to offer.
-    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
+    // Into the rest of the flow, not out of onboarding: declining the ranking is not
+    // declining the flow. The Letterboxd step comes first, because somebody who cannot
+    // think of five on the spot may have years of history in another app.
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/letterboxd');
   });
 
   it('records that the ranking run was left, so the completion says so', async () => {

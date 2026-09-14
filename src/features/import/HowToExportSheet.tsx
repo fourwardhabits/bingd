@@ -1,5 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Linking, StyleSheet, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 
 import { track } from '@/lib/analytics';
 import type { ImportSurface } from '@/lib/analytics';
@@ -35,9 +34,16 @@ import { theme } from '@/ui/tokens';
  *   - nothing official conditions it on a subscription.
  *
  * That is enough to stop hedging the tab. It is **not** enough to claim the live UI was
- * read, so two things stay soft on purpose: the possibility of an emailed link on a large
- * account, and the mobile app, which is simply not mentioned — the export is a website URL
- * and sending somebody hunting for it in the app is a dead end our copy would have caused.
+ * read, and the mobile app is simply not mentioned — the export is a website URL and sending
+ * somebody hunting for it in the app is a dead end our copy would have caused.
+ *
+ * **Re-checked 2026-09-14, and the tab has a new name.** Letterboxd's own pages are still a
+ * 403 to a scripted fetch. Two independent current guides (listy.is and achriom.com, both
+ * mid-2026) agree the export now lives under **Settings → Import & Export**, behind a control
+ * labelled **Export your data**; the older name for that tab is *Data*, which is still the
+ * path `LETTERBOXD_EXPORT` opens. The copy uses the current names. Whether the ZIP downloads
+ * at once or arrives by email differs between those sources, so step 3 says *when it's
+ * ready*, which is true of both.
  *
  * The "Pro is required" claim recurs in secondary sources and is contradicted by the
  * founder's own free-account export, so it appears nowhere.
@@ -56,12 +62,14 @@ import { theme } from '@/ui/tokens';
  */
 const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
 
-const STEPS = [
-  'Open letterboxd.com in a browser and sign in. The export is on the website, not in the app.',
-  'Go to Settings, then Data.',
-  'Choose Export your data. Letterboxd makes a ZIP of your account.',
-  'Download the ZIP. A big account can take a minute, and Letterboxd may email you a link instead.',
-  'Save it somewhere your phone can reach, like Files, Downloads, or Drive.',
+/**
+ * The four steps (founder, 2026-09-14), in the tab names the header records as current.
+ */
+export const HOW_TO_STEPS = [
+  'Open Letterboxd.com and go to Settings → Import & Export.',
+  'Choose Export your data to generate your export.',
+  'Download the ZIP when it’s ready.',
+  'Come back to bingd and choose that ZIP.',
 ] as const;
 
 export function HowToExportSheet({
@@ -80,60 +88,53 @@ export function HowToExportSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose} label="How to export from Letterboxd">
-      <View style={styles.body}>
-        <Text variant="headline">Getting your Letterboxd file</Text>
+      {/**
+       * **The sheet's own layout, the way the Details sheet draws it** (founder, physical
+       * preview QA, 2026-09-14: the first version ran edge to edge). `Sheet` supplies the
+       * panel, the handle and the safe-area padding under the last child, and no horizontal
+       * padding, so the content brings the gutter. The steps scroll inside the panel's 90%
+       * cap (shrink, no grow) and the two actions stay below them, so the largest text sizes
+       * cannot push Done off the sheet. Same shape as `TitleRecallSheet`.
+       */}
+      <View style={styles.sheet}>
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
+          <Text variant="headline">Getting your Letterboxd file</Text>
 
-        <View style={styles.steps}>
-          {STEPS.map((step, index) => (
-            <View key={step} style={styles.step}>
-              <Text variant="subhead" tone="action" style={styles.number}>
-                {index + 1}
-              </Text>
-              <Text variant="body" tone="secondary" style={styles.stepText}>
-                {step}
-              </Text>
-            </View>
-          ))}
+          <View style={styles.steps}>
+            {HOW_TO_STEPS.map((step, index) => (
+              <View key={step} style={styles.step}>
+                <Text variant="subhead" tone="action" style={styles.number}>
+                  {index + 1}
+                </Text>
+                <Text variant="body" tone="secondary" style={styles.stepText}>
+                  {step}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+
+        <View style={styles.foot}>
+          <Button label="Open Letterboxd’s export page" onPress={open} />
+          <Button label="Done" kind="secondary" onPress={onClose} />
         </View>
-
-        {/* **The one instruction that is ours rather than Letterboxd's**, and the one people
-            get wrong: a desktop browser will happily unzip the archive on download, and a
-            folder cannot be handed to a file picker. Said plainly and given its own place,
-            because it is the difference between this working and a confusing refusal. */}
-        <View style={styles.note}>
-          <Ionicons
-            name="information-circle-outline"
-            size={theme.layout.icon.sm}
-            color={theme.text.tertiary}
-          />
-          <Text variant="footnote" tone="tertiary" style={styles.noteText}>
-            Choose the ZIP file itself. If your computer unzipped it, use the original
-            download, not the folder.
-          </Text>
-        </View>
-
-        <Button label="Open Letterboxd’s export page" kind="secondary" onPress={open} />
-        <Button label="Done" kind="tertiary" onPress={onClose} />
       </View>
     </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { gap: theme.space[4], paddingBottom: theme.space[2] },
+  sheet: { paddingTop: theme.space[2], flexShrink: 1 },
+  scroll: { flexGrow: 0, flexShrink: 1 },
+  body: { padding: theme.layout.gutter, gap: theme.space[4] },
   steps: { gap: theme.space[3] },
   step: { flexDirection: 'row', gap: theme.space[3] },
-  // A fixed width so the numbers form a column and the text a straight left edge, rather
-  // than each step hanging from wherever its own digit ended.
+  // A fixed width so the numbers form a column and the text a straight left edge.
   number: { width: theme.space[4], textAlign: 'right' },
   stepText: { flex: 1 },
-  note: {
-    flexDirection: 'row',
+  foot: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
     gap: theme.space[2],
-    alignItems: 'flex-start',
-    backgroundColor: theme.surface.raised,
-    borderRadius: theme.radius.card,
-    padding: theme.space[3],
   },
-  noteText: { flex: 1 },
 });

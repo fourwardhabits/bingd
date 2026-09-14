@@ -91,7 +91,7 @@ describe('nextRoute', () => {
       expect(decide({ status: 'onboarding', stage: undefined })).toBe('/(auth)/create-profile');
     });
 
-    it.each(['taste', 'people', 'notifications', 'done'] as const)(
+    it.each(['taste', 'letterboxd', 'people', 'notifications', 'done'] as const)(
       'refuses to let a %s stage into the flow while there is no profile',
       (stage) => {
         // **The invariant.** Ranking writes need an account row and the age gate belongs
@@ -168,6 +168,31 @@ describe('nextRoute', () => {
     });
 
     /**
+     * **The optional Letterboxd step (2026-09-13) is a stage like the others.** A relaunch
+     * while an import runs has to come back to it, because that is where the running
+     * import is shown with its Continue.
+     */
+    it('returns somebody to the Letterboxd step, even though taste says they are done', () => {
+      expect(decide({ stage: 'letterboxd', tasteNeeded: false })).toBe('/onboarding/letterboxd');
+    });
+
+    it('leaves them on the Letterboxd step once they are there', () => {
+      expect(
+        decide({ group: 'onboarding', screen: 'letterboxd', stage: 'letterboxd' }),
+      ).toBeNull();
+    });
+
+    /**
+     * The lost-stage fallback still resumes at People. It guards the social half; an
+     * optional step passed over in that degraded case costs nothing.
+     */
+    it('resumes a lost stage after five rankings at People, not at the Letterboxd step', () => {
+      expect(decide({ stage: null, tasteNeeded: true, tasteRanked: 5 })).toBe(
+        '/onboarding/people',
+      );
+    });
+
+    /**
      * **And this is the half of that rule that was too strong.**
      *
      * It used to be `return null` for the whole group, which protected a running flow and
@@ -184,6 +209,32 @@ describe('nextRoute', () => {
       expect(decide({ group: 'onboarding', screen: 'people', stage: 'done' })).toBe(
         '/(tabs)/feed',
       );
+    });
+
+    /**
+     * **Except on the screen that ended it** (independent review, 2026-09-13). `finish`
+     * writes `done` and queues its own replace and the celebration push in one handler, and
+     * expo-router dispatches the queue from an effect that runs after this routing effect
+     * in the same commit. A replace answered here would be dispatched last, overruling For
+     * You with the Feed and replacing the celebration away. The screen sends a stray visit
+     * on by itself (`FlowEnds.test.tsx`).
+     */
+    it('leaves the notification step alone once the flow is done, because it owns the exit', () => {
+      expect(
+        decide({ group: 'onboarding', screen: 'notifications', stage: 'done' }),
+      ).toBeNull();
+    });
+
+    it.each(['taste', 'letterboxd', 'people'])(
+      'still takes a finished flow out of the %s step',
+      (screen) => {
+        expect(decide({ group: 'onboarding', screen, stage: 'done' })).toBe('/(tabs)/feed');
+      },
+    );
+
+    it('still opens the app on a relaunch after the flow is done', () => {
+      expect(decide({ group: undefined, stage: 'done' })).toBe('/(tabs)/feed');
+      expect(decide({ group: '(tabs)', screen: 'for-you', stage: 'done' })).toBeNull();
     });
   });
 
@@ -384,5 +435,31 @@ describe('nextRoute', () => {
     ];
 
     for (const { input } of cases) expect(decide(input)).toBeNull();
+  });
+
+  /**
+   * **An import notification tapped before onboarding is finished** (2026-09-13).
+   *
+   * The lifecycle pushes open `/settings/import?job=<id>`, and `usePush` acts on a tap once
+   * and clears it. While the flow is unfinished that route is outside the onboarding group,
+   * so routing sends the reader back to their step — and the step is a fixed point, so the
+   * tap costs one `replace` and cannot become a loop. Pinned for every unfinished stage,
+   * because the Letterboxd step is where somebody is most likely to have just started one.
+   */
+  describe('an import notification tapped mid-flow', () => {
+    it.each([
+      ['letterboxd', '/onboarding/letterboxd'],
+      ['people', '/onboarding/people'],
+      ['notifications', '/onboarding/notifications'],
+    ] as const)('sends a %s stage back to its step, once', (stage, route) => {
+      expect(decide({ group: 'settings', screen: 'import', stage })).toBe(route);
+      // And the step it lands on answers nothing, so nothing moves again.
+      const [, , screen] = route.split('/');
+      expect(decide({ group: 'onboarding', screen, stage })).toBeNull();
+    });
+
+    it('opens the import itself once the flow is done', () => {
+      expect(decide({ group: 'settings', screen: 'import', stage: 'done' })).toBeNull();
+    });
   });
 });

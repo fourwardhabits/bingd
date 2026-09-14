@@ -27,6 +27,8 @@ const mockRpc = jest.fn();
 const mockFrom = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 let mockRpcErrors: Record<string, unknown> = {};
+/** RPCs whose error is a lost answer (an aborted fetch) rather than a server refusal. */
+let mockRpcLost = new Set<string>();
 
 /** What the picker will answer with. `null` means the person cancelled. */
 let mockPicked: Uint8Array | null = null;
@@ -84,6 +86,8 @@ jest.mock('@/lib/supabase', () => ({
       const result = {
         data,
         error,
+        // PostgREST's `status: 0` is a request whose answer never came back.
+        ...(error && mockRpcLost.has(name) ? { status: 0 } : {}),
         // `import_status` is read with `.maybeSingle()`.
         maybeSingle: () => Promise.resolve({ data, error }),
       };
@@ -173,6 +177,7 @@ beforeEach(() => {
   mockTrack.mockClear();
   mockRpcResults = {};
   mockRpcErrors = {};
+  mockRpcLost = new Set();
   mockPicked = null;
   mockPickThrows = false;
   mockPickedSize = undefined;
@@ -207,6 +212,33 @@ describe('before a file is chosen', () => {
 });
 
 describe('choosing an export', () => {
+  /**
+   * **Choose a different file starts a fresh page** (founder, physical preview QA,
+   * 2026-09-14). One scroll view used to carry every phase, so an offset from the preview
+   * could survive into the shorter intro and draw it scrolled past its own end. The scroll
+   * body is keyed by phase: coming back is a new scroll view, not the preview's.
+   */
+  it('returns from the preview on a new scroll body, not the preview’s', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Ready to import')).toBeTruthy());
+
+    type HostNode = { props: Record<string, unknown>; parent: HostNode | null };
+    const scrollAbove = (text: string) => {
+      let node = (screen.getByText(text) as unknown as HostNode).parent;
+      while (node && node.props?.contentContainerStyle === undefined) node = node.parent;
+      return node;
+    };
+    const previewScroll = scrollAbove('Ready to import');
+    expect(previewScroll).toBeTruthy();
+
+    await fireEvent.press(screen.getByText('Choose a different file'));
+    await waitFor(() => expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy());
+
+    expect(scrollAbove('Bring your Letterboxd history')).not.toBe(previewScroll);
+  });
+
   it('previews the counts and sends nothing yet', async () => {
     mockPicked = exportZip(TWO_FILMS);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
@@ -336,6 +368,46 @@ describe('uploading', () => {
     expect(screen.getByText(/Nothing gets sent twice/)).toBeTruthy();
     expect(screen.getByText('Try again')).toBeTruthy();
   });
+
+  it('treats a page whose answer was lost as a failed upload, which is safe to resend', async () => {
+    // The production fetch deadline aborts a stalled request, and PostgREST answers that as
+    // `status: 0`. A page is idempotent, so saying it did not finish is true enough.
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = { import_create: 'job-1' };
+    mockRpcErrors = { import_stage: { message: 'AbortError: timed out', code: '' } };
+    mockRpcLost = new Set(['import_stage']);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText(/didn.+t finish sending/)).toBeTruthy());
+  });
+
+  /**
+   * **A lost hand-off is not a failed one** (independent review 83b). `import_ready` may
+   * have committed before its reply was lost, so the screen says it could not check rather
+   * than inviting a resend that would meet the person's own running import.
+   */
+  it('says it could not check when the hand-off answer was lost, and discards nothing', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = {
+      import_create: '11111111-2222-4333-8444-555555555555',
+      import_status: { status: 'pending', counts: null, completed_at: null },
+    };
+    mockRpcErrors = { import_ready: { message: 'AbortError: timed out', code: '' } };
+    mockRpcLost = new Set(['import_ready']);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('We couldn’t check your import')).toBeTruthy());
+    expect(screen.queryByText(/didn.+t finish sending/)).toBeNull();
+    expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_discard');
+  });
 });
 
 describe('when it is over', () => {
@@ -414,13 +486,13 @@ describe('when it is over', () => {
 
     await waitFor(() => expect(screen.getByText('Added as watched')).toBeTruthy());
     expect(screen.getByLabelText('1 Added as watched')).toBeTruthy();
-    expect(screen.getByLabelText('2 Already in bingd.')).toBeTruthy();
+    expect(screen.getByLabelText('2 Already in bingd')).toBeTruthy();
     // Named as diary entries, because it is the one number that is not a count of films.
     expect(screen.getByLabelText('3 Diary entries saved')).toBeTruthy();
     // And the rule that explains why an import never overwrites a ranking.
     expect(screen.getByText(/start unranked/)).toBeTruthy();
     // A zero is left out rather than drawn.
-    expect(screen.queryByText('Added to your Watchlist')).toBeNull();
+    expect(screen.queryByText('Added to your watchlist')).toBeNull();
   });
 
   it('does not claim a history arrived when nothing did', async () => {
@@ -655,7 +727,7 @@ describe('opened for a named import', () => {
 
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
     expect(screen.getByLabelText('19 Added as watched')).toBeTruthy();
-    expect(screen.getByLabelText('2 Added to your Watchlist')).toBeTruthy();
+    expect(screen.getByLabelText('2 Added to your watchlist')).toBeTruthy();
   });
 
   it('shows a failed import as a failure, with a way to try again', async () => {
