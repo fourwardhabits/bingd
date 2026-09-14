@@ -426,14 +426,18 @@ export default function CollectionScreen() {
 
           The card said its piece down the left and put an X at the far right edge,
           so the two things a reader could do about it sat as far apart as the card
-          allowed and only one of them looked like a control. Rank and Not now are
+          allowed and only one of them looked like a control. Rank and Dismiss are
           now a pair, in the order the question asks them, using the same
           primary/secondary pairing the notifications screen uses for Approve and
           Decline — at the compact size that screen introduced.
 
-          One dismissal, not two: an X *and* a Not now would be the same act offered
-          twice. Dismissing hides this card only; the Unranked tab stands as long as
-          anything is unranked. */}
+          One dismissal, not two: an X *and* a Dismiss would be the same act offered
+          twice. It was labelled "Not now" until 2026-09-12; the label says what the
+          press does, and the behaviour is unchanged — `dismissNudge` records it, and
+          the card stays away until fourteen days have passed and something has been
+          ranked since (`shouldShowUnrankedNudge`). Dismissing
+          hides this card only; the Unranked tab stands as long as anything is
+          unranked. */}
       {active === 'watched' && showNudge ? (
         <View style={styles.nudge}>
           <Text variant="callout">You have unranked titles</Text>
@@ -444,7 +448,7 @@ export default function CollectionScreen() {
           <View style={styles.nudgeActions}>
             <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
             <Button
-              label="Not now"
+              label="Dismiss"
               kind="secondary"
               size="sm"
               onPress={() => {

@@ -678,7 +678,7 @@ recorded decision, not work. No existing major changed classification in this pa
 |---|---|
 | Ranking / Review / Private note named consistently | **None on risk.** One field and one visibility flag as before; no schema change, no migration, no row's visibility moved. **M1 stands exactly as it did** — see the note under it |
 | Profile section renamed Notes → Reviews; composer row names the state | Cosmetic. It is the same `public_notes` rows under a truthful heading |
-| Unranked reminder: Rank and Not now as a pair | Cosmetic |
+| Unranked reminder: Rank and Not now as a pair (the second button relabelled **Dismiss** 2026-09-12, behaviour unchanged) | Cosmetic |
 | Notifications read on sight; `Mark all read` removed | Behavioural, client-only. Recorded as **NR-2** |
 | `bingd.` written canonically across the app | Cosmetic. Rule now documented in `design-system.md` |
 | Feed historical visibility checked | **No change.** Already works — no cutoff exists. Recorded as **FEED-1** |
