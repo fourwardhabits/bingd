@@ -262,7 +262,8 @@ const rest = async (path) => {
   );
 
   // ---- trending -----------------------------------------------------------
-  const lists = await rest(`provider_list_cache?select=list_key,expires_at`);
+  // The four trending lists by name: the same table also holds `popular.people` (20260919000100).
+  const lists = await rest(`provider_list_cache?select=list_key,expires_at&list_key=like.trending.*`);
   report('the trending cache holds all four lists', (lists ?? []).length === 4, JSON.stringify(lists?.map((l) => l.list_key)));
 } catch (cause) {
   failed += 1;

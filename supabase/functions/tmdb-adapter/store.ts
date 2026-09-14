@@ -14,7 +14,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import type { SeasonRow, TitleRow } from './normalize.ts';
+import type { CastSearchResult, SeasonRow, TitleRow } from './normalize.ts';
 
 export type Db = SupabaseClient;
 
@@ -72,6 +72,23 @@ export async function putList(db: Db, listKey: string, ids: string[]) {
     p_payload: { ids },
   });
   if (error) throw new Error(`tmdb_put_list: ${error.message}`);
+}
+
+/** Replaces the popular-performer index whole. See 20260919000100. */
+export async function putPeopleIndex(db: Db, people: readonly CastSearchResult[]) {
+  const { error } = await db.rpc('tmdb_put_people_index', { p_payload: { people } });
+  if (error) throw new Error(`tmdb_put_people_index: ${error.message}`);
+}
+
+/** The popular-performer index row as stored, or null when there is none yet. */
+export async function readPeopleIndex(db: Db) {
+  const { data, error } = await db
+    .from('provider_list_cache')
+    .select('payload, fetched_at')
+    .eq('list_key', 'popular.people')
+    .maybeSingle();
+  if (error) throw new Error(`popular.people: ${error.message}`);
+  return data as { payload: unknown; fetched_at: string } | null;
 }
 
 /**

@@ -67,7 +67,8 @@ secrets are absent, which is what asking for it by hand should do.
 | `SUPABASE_SERVICE_ROLE_KEY_PRODUCTION` | |
 
 `trending` is a `service_role` action on `tmdb-adapter` — four provider requests and eighty
-upserts per call — so each target needs that project's own key. Nothing is printed but the
+upserts per call, plus fifty requests for the popular-performer index (`popular.people`,
+20260919000100) that Cast search ranks with — so each target needs that project's own key. Nothing is printed but the
 project ref and the environment name, neither of which is a secret.
 
 **The pairing is checked.** `refresh-trending.mjs` now takes `--target`, resolves the project
@@ -104,8 +105,9 @@ trending.movie.day: 20 titles
 trending.movie.week: 20 titles
 trending.series.day: 20 titles
 trending.series.week: 20 titles
+popular.people: 930 performers
 
-All four lists refreshed.
+Every list refreshed.
 ```
 
 ## 4. When it fails

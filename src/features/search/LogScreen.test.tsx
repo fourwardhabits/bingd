@@ -129,6 +129,32 @@ jest.mock('@/lib/tmdb-adapter', () => {
   };
 });
 
+/**
+ * **Which dataset the results list is showing**, as the screen names it to `useScrollReset`.
+ *
+ * The hook's own behaviour (a changed key scrolls to the top, an unchanged one does not) is
+ * `use-scroll-reset.test.ts`. What the screen owns is *when the key changes*, so the real
+ * hook runs and each render's key and list ref are recorded beside it.
+ */
+const mockListKeys: string[] = [];
+const mockListRefs: { current: unknown }[] = [];
+jest.mock('@/features/search/use-scroll-reset', () => {
+  const actual = jest.requireActual('@/features/search/use-scroll-reset');
+  return {
+    ...actual,
+    useScrollReset: (key: string) => {
+      const ref = actual.useScrollReset(key);
+      mockListKeys.push(key);
+      mockListRefs.push(ref);
+      return ref;
+    },
+  };
+});
+
+/** The distinct datasets the list has shown, in order: one entry per change of key. */
+const listKeyChanges = () =>
+  mockListKeys.filter((key, index) => index === 0 || mockListKeys[index - 1] !== key);
+
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
 }));
@@ -158,6 +184,8 @@ const film = {
 
 beforeEach(() => {
   issued = 0;
+  mockListKeys.length = 0;
+  mockListRefs.length = 0;
   // The hourly cooldown is module state shared by both provider searches, so a rate-limit
   // test must not leave the next test's wider search switched off.
   clearProviderCooldown();
@@ -588,9 +616,10 @@ describe('finding people', () => {
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
     const labels = ['All', 'Movies', 'TV', 'Cast', 'Users'];
-    const chips = labels.map((label) => view.getByText(label));
-    // Tree order is render order, which is the order the row draws them in.
-    const all = view.getAllByText(/^(All|Movies|TV|Cast|Users)$/);
+    const chips = labels.map((label) => view.getByRole('button', { name: label }));
+    // Tree order is render order, which is the order the row draws them in. By role, because
+    // the TV section header says TV too.
+    const all = view.getAllByRole('button', { name: /^(All|Movies|TV|Cast|Users)$/ });
     expect(all).toEqual(chips);
     expect(view.queryByText('People')).toBeNull();
   });
@@ -603,7 +632,7 @@ describe('finding people', () => {
    * **Under All, accounts are a section, not rows mixed into the titles** (founder,
    * 2026-09-13). Titles lead; a meaningful account match follows under a Users header.
    */
-  it('shows a partial account match as a Users section after the titles', async () => {
+  it('shows a partial account match as a Users section after the title sections', async () => {
     // The account answer is held back until the titles are on screen. FlashList recycles
     // cells, so a section that rendered first keeps its early position in the host tree
     // even after rows are inserted above it; on a device the layout is by data order.
@@ -621,15 +650,15 @@ describe('finding people', () => {
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
 
-    // The titles, unheaded as they always were, then the Users section below them.
+    // Movies, then TV, then the Users section below them.
     expect(
-      order(view, /^(Titles|Users|Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/),
-    ).toEqual([SERIES_ROW, FILM_ROW, 'Users', 'Anna Rivers, @anna']);
+      order(view, /^(Movies|TV|Users|Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/),
+    ).toEqual(['Movies', FILM_ROW, 'TV', SERIES_ROW, 'Users', 'Anna Rivers, @anna']);
     // A restrained section header, announced as a header.
     expect(view.getByLabelText('Users').props.accessibilityRole).toBe('header');
   });
 
-  it('keeps an exact handle below the leading titles, never above rows already drawn', async () => {
+  it('keeps an exact handle below the title sections, never above rows already drawn', async () => {
     // Inserting a section above titles a reader may be about to tap moves them under
     // their thumb. Only an `@` query leads with Users.
     mockRpc.mockImplementation((fn: string) => {
@@ -652,28 +681,32 @@ describe('finding people', () => {
     ]);
   });
 
-  it('leads with Users for an @ query, with the titles below under their own header', async () => {
+  it('leads with Users for an @ query, with the title sections below', async () => {
     withPeople([anna]);
     const view = await search('@anna');
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    expect(order(view, /^(Titles|Users|Anna Rivers, @anna|Inception, 2010)/)).toEqual([
+    expect(order(view, /^(Movies|Users|Anna Rivers, @anna|Inception, 2010)/)).toEqual([
       'Users',
       'Anna Rivers, @anna',
-      'Titles',
+      'Movies',
       FILM_ROW,
     ]);
   });
 
-  it('leaves an ordinary title search exactly as it was, with no section headers', async () => {
+  it('draws only the sections a title search has: Movies and TV, no Cast, no Users', async () => {
     withPeople([]);
     const view = await search('breaking');
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
 
-    expect(view.queryByLabelText('Titles')).toBeNull();
+    expect(view.getByLabelText('Movies').props.accessibilityRole).toBe('header');
+    expect(view.getByLabelText('TV').props.accessibilityRole).toBe('header');
     expect(view.queryByLabelText('Users')).toBeNull();
     expect(view.queryByLabelText('Cast')).toBeNull();
+    // Nothing of the old hybrid page.
+    expect(view.queryByLabelText('Titles')).toBeNull();
+    expect(view.queryByLabelText('More titles')).toBeNull();
   });
 
   it('keeps a middle-of-the-handle match out of a plain query', async () => {
@@ -982,6 +1015,9 @@ describe('more results', () => {
     );
     const view = await search('breaking');
     await settle();
+    // All is previews, and asks for no further page; Movies is the whole list.
+    expect(view.queryByLabelText('Show more results')).toBeNull();
+    await fireEvent.press(view.getByRole('button', { name: 'Movies' }));
 
     await waitFor(() => expect(view.getByLabelText('Show more results')).toBeTruthy());
     expect(mockSearchProvider.mock.calls.map(([, , pageNumber]) => pageNumber)).toEqual([1]);
@@ -998,6 +1034,7 @@ describe('more results', () => {
     pages(() => Promise.reject(new AdapterError('BG502', 'upstream')));
     const view = await search('breaking');
     await settle();
+    await fireEvent.press(view.getByRole('button', { name: 'Movies' }));
     await waitFor(() => expect(view.getByLabelText('Show more results')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('Show more results'));
@@ -1082,6 +1119,179 @@ describe('more results', () => {
 // ---------------------------------------------------------------------------
 
 /**
+ * **All is grouped, and every See all is a chip** (founder, 2026-09-14): Movies, TV, Cast and
+ * Users previews; See all selects that chip with the query kept; a list that becomes a
+ * different list starts at its top, and one that only grows does not move.
+ */
+describe('the grouped All page', () => {
+  const settle = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    });
+  };
+
+  const remote = (id: string, name: string, kind: 'movie' | 'series' = 'movie') => ({
+    id,
+    kind,
+    title: name,
+    release_date: '2012-01-01',
+    poster_path: null,
+    provenance: 'tmdb',
+    genres: [],
+    runtime_minutes: 120,
+  });
+
+  const films = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      remote(`f${index}`, `Breaking Film ${index + 1}`),
+    );
+
+  const lastKey = () => mockListKeys.at(-1);
+
+  it('offers See all on a section whose chip holds more, and it selects that chip with the query kept', async () => {
+    mockSearchProvider.mockResolvedValue({
+      titles: films(5),
+      people: [],
+      page: 1,
+      totalPages: 1,
+    });
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText('See all movies')).toBeTruthy());
+    // TV has one series and no further page: no See all where there is nothing more.
+    expect(view.getByLabelText('TV')).toBeTruthy();
+    expect(view.queryByLabelText('See all TV')).toBeNull();
+    // Three films in the preview, the local one first, not all six.
+    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+    expect(view.queryByLabelText('Breaking Film 2, 2012')).toBeTruthy();
+    expect(view.queryByLabelText('Breaking Film 3, 2012')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('See all movies'));
+
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: 'Movies' }).props.accessibilityState,
+      ).toMatchObject({
+        selected: true,
+      }),
+    );
+    expect(view.getByLabelText('Search').props.value).toBe('breaking');
+    await waitFor(() => expect(view.getByLabelText('Breaking Film 5, 2012')).toBeTruthy());
+    expect(view.queryByLabelText('Movies')).toBeNull();
+    expect(view.queryByLabelText(SERIES_ROW)).toBeNull();
+    // The Movies list is a different dataset, so it starts at its top.
+    expect(lastKey()).toBe('movies|breaking');
+  });
+
+  it('See all on TV selects TV', async () => {
+    mockSearchProvider.mockResolvedValue({
+      titles: [
+        remote('s1', 'Breaking Point', 'series'),
+        remote('s2', 'Breaking In', 'series'),
+        remote('s3', 'Breaking Ground', 'series'),
+      ],
+      people: [],
+      page: 1,
+      totalPages: 1,
+    });
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText('See all TV')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('See all TV'));
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'TV' }).props.accessibilityState).toMatchObject({
+        selected: true,
+      }),
+    );
+    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
+    expect(lastKey()).toBe('tv|breaking');
+  });
+
+  it('starts a switched chip and a new query at the top, and gives the list its ref', async () => {
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    // The list the key is for is really mounted and really scrollable.
+    expect(
+      typeof (mockListRefs.at(-1)?.current as { scrollToOffset?: unknown } | null)
+        ?.scrollToOffset,
+    ).toBe('function');
+
+    await fireEvent.press(view.getByRole('button', { name: 'TV' }));
+    await fireEvent.changeText(view.getByLabelText('Search'), 'Breaking  Bad');
+    await settle();
+    // Only case and spacing: the same search, so not a new list.
+    await fireEvent.changeText(view.getByLabelText('Search'), 'breaking bad');
+    await settle();
+
+    expect(listKeyChanges().slice(-3)).toEqual([
+      'all|breaking',
+      'tv|breaking',
+      'tv|breaking bad',
+    ]);
+  });
+
+  it('does not move the list when a further page is appended to it', async () => {
+    mockSearchProvider.mockImplementation(
+      (_query: string, _limit: number, pageNumber: number) =>
+        Promise.resolve(
+          pageNumber === 1
+            ? { titles: [remote('p1-a', 'Breaking Point')], people: [], page: 1, totalPages: 2 }
+            : { titles: [remote('p2-a', 'Breaking Away')], people: [], page: 2, totalPages: 2 },
+        ),
+    );
+    const view = await search('breaking');
+    await settle();
+    await fireEvent.press(view.getByRole('button', { name: 'Movies' }));
+    await waitFor(() => expect(view.getByLabelText('Show more results')).toBeTruthy());
+    const before = listKeyChanges();
+
+    await fireEvent.press(view.getByLabelText('Show more results'));
+    await waitFor(() => expect(view.getByLabelText('Breaking Away, 2012')).toBeTruthy());
+
+    expect(listKeyChanges()).toEqual(before);
+    expect(before.at(-1)).toBe('movies|breaking');
+  });
+
+  it('still leads Movies with the exact title, and lists it once', async () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({
+            data: [
+              { ...film, id: 'darko', title: 'Donnie Darko' },
+              { ...film, id: 'lookup', title: "Don't Look Up" },
+            ],
+            error: null,
+          })
+        : Promise.resolve({ data: [], error: null }),
+    );
+    mockSearchProvider.mockResolvedValue({
+      titles: [remote('lookup', "Don't Look Up"), remote('don-2006', 'Don')],
+      people: [],
+      page: 1,
+      totalPages: 3,
+    });
+    const view = await search('don');
+    await settle();
+
+    await waitFor(() =>
+      expect(order(view, /^(Movies|Don, 2012|Donnie Darko|Don't Look Up)/).slice(0, 2)).toEqual(
+        ['Movies', 'Don, 2012'],
+      ),
+    );
+    expect(view.getAllByLabelText(/^Don't Look Up/)).toHaveLength(1);
+  });
+
+  /** Render order of labelled nodes. */
+  const order = (view: Awaited<ReturnType<typeof search>>, pattern: RegExp) =>
+    view.getAllByLabelText(pattern).map((node) => node.props.accessibilityLabel as string);
+});
+
+// ---------------------------------------------------------------------------
+
+/**
  * **Cast search** (founder, 2026-09-13): search an actor, open them, browse what they
  * have been in.
  *
@@ -1154,9 +1364,17 @@ describe('Cast search', () => {
   const castOrder = (view: Awaited<ReturnType<typeof search>>) =>
     view
       .getAllByLabelText(
-        /^(Titles|Cast|Leonardo DiCaprio, known for|Inception, 2010|Breaking Bad, 2008)/,
+        /^(Movies|TV|Cast|Leonardo DiCaprio, known for|Inception, 2010|Breaking Bad, 2008)/,
       )
       .map((node) => node.props.accessibilityLabel as string);
+  /** A performer TMDB also returned whom the All gate leaves off the preview. */
+  const namesake = {
+    id: 42,
+    name: 'Leonardo Nam',
+    profilePath: null,
+    knownFor: [],
+    popularity: null,
+  };
 
   it('shows a performer’s whole name as a Cast section on the first screen, at no extra request', async () => {
     mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
@@ -1164,19 +1382,21 @@ describe('Cast search', () => {
     await settle();
 
     await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
-    // Below the two leading titles, never inserted above rows already drawn.
-    expect(castOrder(view)).toEqual([SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
+    // Below the title sections, never inserted above rows already drawn.
+    expect(castOrder(view)).toEqual(['Movies', FILM_ROW, 'TV', SERIES_ROW, 'Cast', LEO_ROW]);
     expect(view.getByLabelText('Cast').props.accessibilityRole).toBe('header');
     expect(mockSearchCast).not.toHaveBeenCalled();
   });
 
-  it('shows a partial performer match as a Cast section after the titles', async () => {
+  it('shows a partial performer match as a Cast section after the title sections', async () => {
     mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
     const view = await search('leo');
     await settle();
 
     await waitFor(() => expect(view.getByLabelText(LEO_ROW)).toBeTruthy());
-    expect(castOrder(view)).toEqual([SERIES_ROW, FILM_ROW, 'Cast', LEO_ROW]);
+    expect(castOrder(view)).toEqual(['Movies', FILM_ROW, 'TV', SERIES_ROW, 'Cast', LEO_ROW]);
+    // One performer, and nobody else TMDB named: nothing more for See all to open.
+    expect(view.queryByLabelText('See all cast')).toBeNull();
   });
 
   it('leaves a weak performer match off All entirely', async () => {
@@ -1206,7 +1426,7 @@ describe('Cast search', () => {
   });
 
   it('See all on the Cast section selects Cast', async () => {
-    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo, namesake] });
     mockSearchCast.mockResolvedValue([leo]);
     const view = await search('leonardo dicaprio');
     await settle();
@@ -1225,7 +1445,7 @@ describe('Cast search', () => {
   });
 
   it('names each See all for what it opens when Cast and Users are both on the page', async () => {
-    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo] });
+    mockSearchProvider.mockResolvedValue({ titles: [], people: [leo, namesake] });
     mockRpc.mockImplementation((fn: string) => {
       if (fn === 'search_titles') return Promise.resolve({ data: [series, film], error: null });
       if (fn === 'search_users') {
@@ -1235,6 +1455,14 @@ describe('Cast search', () => {
               id: 'u-leo',
               username: 'leonardo',
               display_name: 'Leo Fan',
+              avatar_path: null,
+              visibility: 'public',
+            },
+            // Returned by the server, left off the preview by the account gate.
+            {
+              id: 'u-other',
+              username: 'bernardo',
+              display_name: 'Bernardo',
               avatar_path: null,
               visibility: 'public',
             },

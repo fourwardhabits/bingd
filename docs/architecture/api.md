@@ -537,7 +537,13 @@ recommendations, and caching that fact is what stops every slate rebuild asking 
 `media_items` rather than asking the adapter for it. That is the same split the facet cache
 already uses, and it keeps a screen's read off the provider quota entirely. It is
 `service_role` because it spends four provider requests and eighty upserts per call on a
-schedule — not because the result is private.
+schedule — not because the result is private. The same call also reads fifty pages of TMDB's
+`/person/popular` into `popular.people` (20260919000100): 1,000 people, performers kept, which
+`search` and `search-people` merge by name into a Cast answer. On 2026-09-14, "leo" did not
+return Leonardo DiCaprio in /search/person's first 200 results, because TMDB ranks names
+*equal* to the query above names that *start* with it. So the index is how a short name finds
+the star, and every search still costs one provider request. Cast rows are ranked by
+`rankCast`: the name gates, popularity orders.
 
 **A search result is already a catalogue row by the time the client sees it.** The adapter
 upserts before it answers and returns Bingd uuids, so there is no import step, no "add this

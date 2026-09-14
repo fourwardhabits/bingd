@@ -167,7 +167,8 @@ describe('the expiry comes from configuration', () => {
    * deliberately: the failure this guards against is a later migration writing the
    * whole value instead of merging into it, and a subset assertion would not see it.
    * The cost is that every migration adding a TTL updates this fixture — which is
-   * the point. `reviews` and `person` were added by 20260817000500.
+   * the point. `reviews` and `person` were added by 20260817000500, `popular_people` by
+   * 20260919000100.
    */
   it('leaves the existing facet TTLs alone', async () => {
     const t = await createTestDb();
@@ -180,6 +181,7 @@ describe('the expiry comes from configuration', () => {
         credits: 720,
         keywords: 720,
         person: 168,
+        popular_people: 48,
         reviews: 24,
         similar: 168,
         trending: 6,
@@ -298,6 +300,91 @@ describe('who can reach it', () => {
         ),
       );
       assert.ok(error, 'a direct insert must be refused');
+    } finally {
+      await t.close();
+    }
+  });
+});
+
+/**
+ * The popular performers row (20260919000100): what Cast search merges into TMDB's first
+ * page when a short name buries the person being typed toward.
+ */
+describe('tmdb_put_people_index', () => {
+  const people = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: i + 1,
+      name: `Performer ${i + 1}`,
+      profile_path: null,
+      known_for: [],
+      popularity: 10 - i,
+    }));
+
+  const putPeople = (t, payload) =>
+    t.sql(`select tmdb_put_people_index($1::jsonb) as expires_at`, [JSON.stringify(payload)]);
+
+  it('replaces the row whole, with its own 48-hour expiry', async () => {
+    const t = await createTestDb();
+    try {
+      await putPeople(t, { people: people(5) });
+      const { rows } = await putPeople(t, { people: people(2) });
+
+      const row = await listRow(t, 'popular.people');
+      assert.deepEqual(row.payload.people, people(2), 'a shorter list leaves no tail behind');
+      const { rows: check } = await t.sql(
+        `select extract(epoch from ($1::timestamptz - fetched_at)) / 3600 as ttl
+           from provider_list_cache where list_key = 'popular.people'`,
+        [rows[0].expires_at],
+      );
+      assert.equal(Number(check[0].ttl), 48);
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('refuses a payload that is not a people array', async () => {
+    const t = await createTestDb();
+    try {
+      for (const payload of ['{}', '{"people": "nope"}', '{"ids": []}', '[]']) {
+        const error = await t.errorFrom(`select tmdb_put_people_index($1::jsonb)`, [payload]);
+        assert.equal(error?.code, '22023', `payload ${payload} should be refused`);
+      }
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('keeps ids out of the people row, and people out of nothing else', async () => {
+    const t = await createTestDb();
+    try {
+      // tmdb_put_list accepts any known key. Under this one an ids payload would be an
+      // index every search reads as empty, so the table refuses it.
+      const error = await t.errorFrom(`select tmdb_put_list('popular.people', '{"ids":[]}'::jsonb)`);
+      assert.equal(error?.code, '23514');
+
+      // The trending keys are untouched by the new shape rule.
+      await putList(t, 'trending.movie.day', ids(2));
+      assert.deepEqual((await listRow(t, 'trending.movie.day')).payload.ids, ids(2));
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('is readable signed out and not writable by a client', async () => {
+    const t = await createTestDb();
+    try {
+      await putPeople(t, { people: people(1) });
+      const rows = await t.asAnon(async () => {
+        const { rows } = await t.sql(`select list_key from provider_list_cache`);
+        return rows;
+      });
+      assert.deepEqual(rows, [{ list_key: 'popular.people' }]);
+
+      const user = await t.createUser({ username: 'people_writer' });
+      const error = await t.asUser(user, () =>
+        t.errorFrom(`select tmdb_put_people_index('{"people":[]}'::jsonb)`),
+      );
+      assert.equal(error?.code, '42501');
     } finally {
       await t.close();
     }
