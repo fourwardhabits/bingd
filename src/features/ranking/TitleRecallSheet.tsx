@@ -273,7 +273,9 @@ export function TitleRecallSheet({ mediaItemId, onClose }: TitleRecallSheetProps
    * absent when there is no `Creator` credit, and `director` is never its fallback.
    */
   const maker =
-    row?.kind === 'movie' ? (credits.data?.director ?? null) : (credits.data?.showrunner ?? null);
+    row?.kind === 'movie'
+      ? (credits.data?.director ?? null)
+      : (credits.data?.showrunner ?? null);
   const cast = (credits.data?.cast ?? []).slice(0, CAST_NAMES);
   const backdrop = row?.kind === 'movie' ? backdropUri(row.backdrop_path, 'card') : null;
 
@@ -325,7 +327,7 @@ export function TitleRecallSheet({ mediaItemId, onClose }: TitleRecallSheetProps
            * Sheet caps itself at 90% of the screen, so this scrolls only when the
            * content is genuinely taller than that.
            */
-          <ScrollView contentContainerStyle={styles.body}>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
             <View style={styles.head}>
               <Poster uri={posterUri(row.poster_path, 'card')} title={name ?? ''} size="sm" />
               <View style={styles.headText}>
@@ -457,17 +459,17 @@ export function TitleRecallSheet({ mediaItemId, onClose }: TitleRecallSheetProps
             ) : null}
 
             {/**
-              * Nothing at all is a real outcome for a seed row that was never enriched,
-              * and an empty sheet reads as broken. Every section above has to be absent
-              * for this to be true, which is why the list is long.
-              *
-              * **Both pending flags are in it, and one of them was missing.** The
-              * reasoning behind `episodesPending` — that saying the wrong thing for a
-              * frame is worse than saying nothing for a frame — is exactly as true of
-              * the credits: a film with no overview and no backdrop but an ordinary cast
-              * would otherwise render this sentence until `media_cache` answered, and
-              * then replace it with the cast line.
-              */}
+             * Nothing at all is a real outcome for a seed row that was never enriched,
+             * and an empty sheet reads as broken. Every section above has to be absent
+             * for this to be true, which is why the list is long.
+             *
+             * **Both pending flags are in it, and one of them was missing.** The
+             * reasoning behind `episodesPending` — that saying the wrong thing for a
+             * frame is worse than saying nothing for a frame — is exactly as true of
+             * the credits: a film with no overview and no backdrop but an ordinary cast
+             * would otherwise render this sentence until `media_cache` answered, and
+             * then replace it with the cast line.
+             */}
             {!maker &&
             !row.overview &&
             !showsCast &&
@@ -494,7 +496,22 @@ export function TitleRecallSheet({ mediaItemId, onClose }: TitleRecallSheetProps
 }
 
 const styles = StyleSheet.create({
-  sheet: { paddingTop: theme.space[2] },
+  /**
+   * **The body shrinks, so Back to ranking cannot be pushed off the sheet** (founder,
+   * physical iOS preview, 2026-09-14).
+   *
+   * `Sheet` caps its panel at `maxHeight: '90%'` and sizes it to its content. A flex child
+   * in React Native does not shrink unless told to, so once an expanded synopsis (or a
+   * season's full episode list) made the body taller than the cap, the ScrollView kept its
+   * whole measured height and the footer below it was laid out past the panel's clipped
+   * edge: nothing scrolled, because the ScrollView believed it was already showing
+   * everything. The rule and the fix are the ones `AwardsSheet` and `CommentThread`
+   * already carry: shrink on this wrapper and on the ScrollView, no grow, so a short title
+   * still sizes the sheet to its content and a long one scrolls above a footer that stays
+   * put, with the sheet's own safe-area padding under it.
+   */
+  sheet: { paddingTop: theme.space[2], flexShrink: 1 },
+  scroll: { flexGrow: 0, flexShrink: 1 },
   state: { padding: theme.layout.gutter },
   body: {
     padding: theme.layout.gutter,

@@ -139,7 +139,8 @@ const episode = (number: number, over: Record<string, unknown> = {}) => ({
 const episodes = (count: number, over: Record<string, unknown> = {}) =>
   Array.from({ length: count }, (_, index) => episode(index + 1, over));
 
-type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] } | string | null;
+type Node =
+  { type?: string; props?: Record<string, unknown>; children?: unknown[] } | string | null;
 
 /**
  * Every loaded image URL in the tree.
@@ -348,9 +349,7 @@ describe('a season', () => {
     // printing them: a reader pressing Details to find out *which show this was* got a
     // poster and a season number. The parent has been selected since the sheet shipped
     // and was never passed to `compactName`.
-    await waitFor(() =>
-      expect(view.getByText('Wizards of Waverly Place, S1')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Wizards of Waverly Place, S1')).toBeTruthy());
     expect(view.queryByText('Season 1')).toBeNull();
   });
 
@@ -367,9 +366,7 @@ describe('a season', () => {
 
     const view = await open();
 
-    await waitFor(() =>
-      expect(view.getByText('Created by Todd J. Greenwald')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Created by Todd J. Greenwald')).toBeTruthy());
   });
 
   it('never passes an episode director off as the show’s creator', async () => {
@@ -557,9 +554,7 @@ describe('a row the provider never filled in', () => {
   });
 
   it('stays quiet while a season is still fetching its episodes', async () => {
-    mockRecallRead.mockResolvedValue(
-      seasonRow({ overview: null, poster_path: null }),
-    );
+    mockRecallRead.mockResolvedValue(seasonRow({ overview: null, poster_path: null }));
     mockCreditsRead.mockResolvedValue(credits({ cast: SIX_NAMES, crew: [] }));
     // A promise that never settles: the render under test is the one where the episodes
     // are on their way.
@@ -595,5 +590,131 @@ describe('a row the provider never filled in', () => {
             ?.marginHorizontal === -theme.layout.gutter,
       ),
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Back to ranking stays reachable
+// ---------------------------------------------------------------------------
+
+/**
+ * **However long the body gets, the way back is never pushed off the sheet** (founder,
+ * physical iOS preview, 2026-09-14: expanding a long synopsis moved Back to ranking below
+ * the sheet's edge and it could not be scrolled into view).
+ *
+ * Jest lays nothing out, so a height cannot be measured here. What caused the bug is
+ * structural, and so is what these assert, on every shape the body takes:
+ *
+ *   - the action sits outside the ScrollView, so it is never part of what scrolls away;
+ *   - the ScrollView and every view between it and the sheet panel can shrink, so a body
+ *     taller than the panel's `maxHeight` scrolls instead of pushing the footer out;
+ *   - the ScrollView does not grow, so a short title still sizes the sheet to its content;
+ *   - the panel keeps its bottom padding under the action.
+ */
+type HostNode = {
+  props: Record<string, unknown>;
+  parent: HostNode | null;
+};
+
+const ancestorsOf = (node: HostNode) => {
+  const out: HostNode[] = [];
+  for (let at = node.parent; at; at = at.parent) out.push(at);
+  return out;
+};
+
+/**
+ * @param inside Any element drawn in the sheet's body. The scroll container is found by
+ *   walking up from it to the node with a `contentContainerStyle`, which only a scroll view
+ *   has (the pattern `AwardsSheet.test.tsx` uses: v14 offers no query by type).
+ */
+const expectActionReachable = (
+  view: { getByText: (text: string) => unknown },
+  inside: unknown,
+) => {
+  const back = view.getByText('Back to ranking') as HostNode;
+
+  const scroll = ancestorsOf(inside as HostNode).find(
+    (node) => node.props?.contentContainerStyle !== undefined,
+  );
+  expect(scroll).toBeDefined();
+
+  // The action is not part of what scrolls.
+  expect(ancestorsOf(back)).not.toContain(scroll);
+
+  // The scroll view shrinks and does not grow.
+  expect(StyleSheet.flatten(scroll!.props.style as never)).toMatchObject({
+    flexGrow: 0,
+    flexShrink: 1,
+  });
+
+  // The panel: the nearest ancestor the body and the action share that carries the
+  // sheet's label.
+  const panel = ancestorsOf(scroll!).find(
+    (node) =>
+      typeof node.props?.accessibilityLabel === 'string' &&
+      (node.props.accessibilityLabel as string).startsWith('About ') &&
+      ancestorsOf(back).includes(node),
+  );
+  expect(panel).toBeDefined();
+
+  // Every styled view between the scroll view and the panel may shrink.
+  for (const between of ancestorsOf(scroll!)) {
+    if (between === panel) break;
+    if (!between.props?.style) continue;
+    expect(StyleSheet.flatten(between.props.style as never)).toMatchObject({ flexShrink: 1 });
+  }
+
+  // And the panel keeps its bottom padding under the action.
+  const panelStyle = StyleSheet.flatten(panel!.props.style as never) as {
+    paddingBottom?: number;
+  };
+  expect(panelStyle.paddingBottom ?? 0).toBeGreaterThanOrEqual(theme.space[4]);
+};
+
+describe('Back to ranking stays reachable', () => {
+  it('with a short synopsis, which looks as it did', async () => {
+    mockRecallRead.mockResolvedValue(movieRow({ overview: 'A heist, and a detective.' }));
+    const view = await open();
+
+    const synopsis = await waitFor(() => view.getByText('A heist, and a detective.'));
+    expectActionReachable(view, synopsis);
+  });
+
+  it('with a long synopsis still collapsed', async () => {
+    const view = await open();
+
+    const toggle = await waitFor(() => view.getByLabelText('Expand description'));
+    expectActionReachable(view, toggle);
+  });
+
+  it('with a long synopsis expanded', async () => {
+    const view = await open();
+    await fireEvent.press(await waitFor(() => view.getByLabelText('Expand description')));
+
+    const toggle = await waitFor(() => view.getByLabelText('Collapse description'));
+    expectActionReachable(view, toggle);
+  });
+
+  it('after expanding and collapsing again', async () => {
+    const view = await open();
+    await fireEvent.press(await waitFor(() => view.getByLabelText('Expand description')));
+    await fireEvent.press(await waitFor(() => view.getByLabelText('Collapse description')));
+
+    const toggle = await waitFor(() => view.getByLabelText('Expand description'));
+    expectActionReachable(view, toggle);
+  });
+
+  it('for a season, with its synopsis expanded and every episode shown', async () => {
+    mockRecallRead.mockResolvedValue(seasonRow());
+    mockEpisodes.mockResolvedValue(episodes(21));
+    const view = await open();
+
+    // The season's own synopsis is the first clamp; each episode row carries its own.
+    const [synopsis] = await waitFor(() => view.getAllByLabelText('Expand description'));
+    await fireEvent.press(synopsis!);
+    await fireEvent.press(await waitFor(() => view.getByLabelText('Show all 21 episodes')));
+
+    const last = await waitFor(() => view.getByText('21 · Episode title 21'));
+    expectActionReachable(view, last);
   });
 });
