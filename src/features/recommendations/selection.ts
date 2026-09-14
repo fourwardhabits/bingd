@@ -67,9 +67,11 @@ export const FOR_YOU_SELECTION = {
   minPool: 60,
   maxPool: 160,
   /**
-   * When fewer unseen qualified titles remain than the wall being drawn needs, the pool
-   * extends into the rest in score order — but never below this share of the frontier, so a
-   * tail whose relevance has fallen off is still never sampled.
+   * When fewer than `minPool` qualified titles remain unseen, the pool extends into the rest
+   * in score order — but never below this share of the frontier, so a tail whose relevance has
+   * fallen off is still never sampled. The trigger is a constant, never the number of pages
+   * asked for: growing the wall must not change the pool the visible prefix was drawn from
+   * (second review of V2, B1). A first cold wall has nothing seen and never extends.
    */
   extendRatio: 0.6,
   /**
@@ -91,7 +93,8 @@ export const FOR_YOU_SELECTION = {
   /**
    * On screen when Refresh was pressed: worse than anything merely seen earlier today, so a
    * Refresh never hands back the wall the reader just asked to replace — the old engine's
-   * `current` tier, kept (independent review of V2, M1).
+   * `current` tier, kept (independent review of V2, M1). The caller passes `current` only for
+   * a Refresh; a return after hours away relies on the decayed and recent penalties instead.
    */
   onScreenPenalty: 24,
   /** Four of one primary genre are free on a page; each one after that costs this much more. */
@@ -110,19 +113,20 @@ export function qualifiedPool(
   scored: readonly Scored[],
   config: SelectionConfig = FOR_YOU_SELECTION,
   /**
-   * How many of the wall's slots still need a title the reader has not recently seen, and
-   * which titles count as recently seen. Omitted, the pool is the plain quality neighbourhood.
+   * How many unseen titles the pool should hold, and which titles count as recently seen.
+   * Omitted, the pool is the plain quality neighbourhood.
    */
   shortfall?: { need: number; recent: (item: Scored) => boolean },
-): { pool: Scored[]; rest: Scored[] } {
+): { pool: Scored[]; rest: Scored[]; baseSize: number } {
   const byScore = [...scored].sort(
     (a, b) => b.explanation.total - a.explanation.total || a.mediaItemId.localeCompare(b.mediaItemId),
   );
-  if (byScore.length === 0) return { pool: [], rest: [] };
+  if (byScore.length === 0) return { pool: [], rest: [], baseSize: 0 };
 
   const frontier = byScore[Math.min(config.frontierRank, byScore.length) - 1]!.explanation.total;
   const qualified = byScore.filter((item) => item.explanation.total >= frontier * config.qualifyRatio).length;
   let size = Math.max(Math.min(config.minPool, byScore.length), Math.min(qualified, config.maxPool));
+  const baseSize = size;
 
   if (shortfall) {
     let unseen = byScore.slice(0, size).filter((item) => !shortfall.recent(item)).length;
@@ -135,7 +139,7 @@ export function qualifiedPool(
       size += 1;
     }
   }
-  return { pool: byScore.slice(0, size), rest: byScore.slice(size) };
+  return { pool: byScore.slice(0, size), rest: byScore.slice(size), baseSize };
 }
 
 /**
@@ -204,14 +208,19 @@ export function drawSlate(scored: readonly Scored[], input: DrawInput): Scored[]
   const penaltyOf = (item: Scored) =>
     exposurePenalty(input.durable?.get(item.mediaItemId), input.session?.get(item.mediaItemId), input.now, config) +
     (input.current?.has(item.mediaItemId) ? config.onScreenPenalty : 0);
-  const { pool, rest } = qualifiedPool(scored, config, {
-    need: limit,
-    recent: (item) => input.veto?.has(item.mediaItemId) === true || penaltyOf(item) >= config.recentPenalty,
+  // Neither the number of pages nor a veto may change the pool: the first would move the
+  // visible prefix as the wall grows, the second would rescale every title's odds on a
+  // dismissal. Only what the reader has genuinely seen extends it.
+  const { pool, rest, baseSize } = qualifiedPool(scored, config, {
+    need: config.minPool,
+    recent: (item) => penaltyOf(item) >= config.recentPenalty,
   });
   if (pool.length === 0) return [];
 
+  // τ from the unextended pool, so an extension adds competitors without rescaling the keys
+  // of the titles that were already there.
   const top = pool[0]!.explanation.total;
-  const bottom = pool[pool.length - 1]!.explanation.total;
+  const bottom = pool[Math.max(0, baseSize - 1)]!.explanation.total;
   const tau = Math.max(1e-6, config.temperature * Math.max(top - bottom, 0.02));
 
   /**

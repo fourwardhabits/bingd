@@ -9,8 +9,8 @@
 -- it needs impressions older than the three days `recommendation_exposure()` returns
 -- (`foryou.impression_window_hours` = 72). Measured on real production profiles
 -- (aggregates only, `docs/product/recommendations.md` §11), visits four days apart share
--- 14.3 / 8.0 / 5.8 / 3.8 of twenty titles with the 72-hour read and 9.0 / 4.3 / 3.0 / 2.3
--- with a fortnight's.
+-- 14.0 / 8.0 / 5.5 / 3.8 of twenty titles with the 72-hour read and 9.0 / 4.3 / 3.5 / 2.3
+-- with a fortnight's (First Five / ~20 / ~60 / 100+ ranked films).
 --
 -- **Raising the shared setting was the obvious change and it is the wrong one.** Clients
 -- that cannot take the V2 update -- the App Store build and the stranded Android runtimes --
@@ -57,9 +57,12 @@ as $$
      and i.shown_at > now() - make_interval(
            hours => least(
              case when coalesce(p_hours, 0) > 0 then p_hours else 72 end,
-             coalesce(
-               (select (value)::integer from app_config where key = 'foryou.exposure_max_window_hours'),
-               720
+             greatest(
+               1,
+               coalesce(
+                 (select (value)::integer from app_config where key = 'foryou.exposure_max_window_hours'),
+                 720
+               )
              )
            )
          )

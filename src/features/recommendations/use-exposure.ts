@@ -7,6 +7,12 @@ import type { ExposureEntry } from './selection';
 /** How far back V2 asks the server to remember: 3.5 half-lives of the 96-hour decay. */
 export const EXPOSURE_WINDOW_HOURS = 336;
 
+/** PostgREST's "no such function" (schema cache) and Postgres's undefined_function. */
+export const isMissingFunction = (error: { code?: string | null; message?: string | null }) =>
+  error.code === 'PGRST202' ||
+  error.code === '42883' ||
+  /could not find the function/i.test(error.message ?? '');
+
 /**
  * What previous sessions have already put in front of this reader.
  *
@@ -65,7 +71,10 @@ export function useRecommendationExposure(userId: string) {
       let { data, error } = await supabase.rpc('recommendation_exposure_within', {
         p_hours: EXPOSURE_WINDOW_HOURS,
       });
-      if (error) ({ data, error } = await supabase.rpc('recommendation_exposure'));
+      // Only a backend without the function falls back. A transient failure throws, so the
+      // query's retry runs rather than pinning this whole process to a 72-hour memory
+      // (second review of V2, m1).
+      if (error && isMissingFunction(error)) ({ data, error } = await supabase.rpc('recommendation_exposure'));
       if (error) throw error;
 
       const entries = new Map<string, ExposureEntry>();

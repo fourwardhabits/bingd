@@ -627,7 +627,11 @@ export function useForYou(
     startedAt: arrangementStart,
     shownAt,
     current: onScreenAtStart,
+    reason: arrangementReason,
   } = arrangement;
+  // The wall on screen when Refresh was pressed is drawn last. After a return from hours away
+  // it is merely something seen earlier, which the decayed exposure already says.
+  const refreshedAway = arrangementReason === 'refresh' ? onScreenAtStart : undefined;
   // Once per process: a return to the app after a meaningful absence is a new session
   // (`session-seed.ts` `noteAppState`). Idempotent, so every wall may ask.
   useEffect(() => {
@@ -792,7 +796,7 @@ export function useForYou(
           now: arrangementStart,
           durable: exposure.data,
           session: shownAt,
-          current: onScreenAtStart,
+          current: refreshedAway,
           veto: dismissed.data,
         });
         return {
@@ -815,7 +819,7 @@ export function useForYou(
           items,
         };
       },
-      [drawSeed, arrangementStart, shownAt, onScreenAtStart, dismissed.data, exposure.data, pages],
+      [drawSeed, arrangementStart, shownAt, refreshedAway, dismissed.data, exposure.data, pages],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(

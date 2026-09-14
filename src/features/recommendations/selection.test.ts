@@ -97,7 +97,7 @@ describe('the qualified pool', () => {
   });
 
   it('is empty for an empty slate, and the draw is then empty too', () => {
-    expect(qualifiedPool([])).toEqual({ pool: [], rest: [] });
+    expect(qualifiedPool([])).toEqual({ pool: [], rest: [], baseSize: 0 });
     expect(draw([], 1)).toEqual([]);
   });
 });
@@ -415,5 +415,62 @@ describe('the pool extension and the veto, pinned exactly', () => {
       );
     }
     void HOUR_MS;
+  });
+});
+
+describe('growing the wall never moves what the reader already scrolled past', () => {
+  const HOUR_MS = 3_600_000;
+  const linear = () =>
+    pool(200).map((item, index) => ({ ...item, explanation: { ...item.explanation, total: 1 - index * 0.005 } }));
+
+  it('keeps every page’s prefix from one page to five on a cold wall', () => {
+    // Second review of V2, B1: the pool was sized by pages × pageSize, so page 4 extended it
+    // and reshuffled pages 1–3.
+    const scored = linear();
+    for (let seed = 1; seed <= 25; seed += 1) {
+      let previous = draw(scored, seed, { pages: 1 });
+      for (let pages = 2; pages <= 5; pages += 1) {
+        const grown = draw(scored, seed, { pages });
+        expect(ids(grown.slice(0, previous.length))).toEqual(ids(previous));
+        previous = grown;
+      }
+    }
+  });
+
+  it('keeps the prefix after Refreshes have drained the pool', () => {
+    const scored = linear();
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const session = new Map<string, number>();
+      let now = NOW;
+      let current = new Set<string>();
+      for (let press = 0; press < 3; press += 1) {
+        const wall = draw(scored, seed * 10 + press, { now, session, current });
+        for (const id of ids(wall)) session.set(id, now);
+        current = new Set(ids(wall));
+        now += 5 * 60_000;
+      }
+      const input = { now, session, current };
+      let previous = draw(scored, seed, { ...input, pages: 1 });
+      for (let pages = 2; pages <= 5; pages += 1) {
+        const grown = draw(scored, seed, { ...input, pages });
+        expect(ids(grown.slice(0, previous.length))).toEqual(ids(previous));
+        previous = grown;
+      }
+    }
+    void HOUR_MS;
+  });
+
+  it('keeps the wall identical when a dismissal lands while the pool is extended', () => {
+    const scored = linear();
+    const session = new Map<string, number>();
+    const wall0 = draw(scored, 1, { now: NOW });
+    for (const id of ids(wall0)) session.set(id, NOW);
+    const wall1 = draw(scored, 2, { now: NOW + 60_000, session, current: new Set(ids(wall0)) });
+    for (const id of ids(wall1)) session.set(id, NOW + 60_000);
+    const input = { now: NOW + 120_000, session, current: new Set(ids(wall1)) };
+    const wall = draw(scored, 3, input);
+    const onWall = new Set(ids(wall));
+    const offWall = scored.find((item) => !onWall.has(item.mediaItemId) && !session.has(item.mediaItemId))!;
+    expect(ids(draw(scored, 3, { ...input, veto: new Set([offWall.mediaItemId]) }))).toEqual(ids(wall));
   });
 });

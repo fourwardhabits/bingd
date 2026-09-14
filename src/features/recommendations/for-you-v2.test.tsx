@@ -31,6 +31,8 @@ let mockRpcResults: Record<string, unknown> = {};
 let mockExposureReads = 0;
 /** RPCs the backend does not have yet: they answer the way PostgREST does. */
 const mockRefused = new Set<string>();
+/** RPCs that fail the way a dropped connection does. */
+const mockFailing = new Set<string>();
 /** Names of every RPC called, in order. */
 const mockCalls: string[] = [];
 /** An RPC whose answer waits for the test to release it. */
@@ -45,6 +47,9 @@ jest.mock('@/lib/supabase', () => ({
         return held.promise.then(() => ({ data: mockRpcResults[name] ?? null, error: null }));
       }
       if (name === 'recommendation_exposure_within' || name === 'recommendation_exposure') mockExposureReads += 1;
+      if (mockFailing.has(name)) {
+        return Promise.resolve({ data: null, error: { code: '08006', message: 'connection failure' } });
+      }
       if (mockRefused.has(name)) {
         return Promise.resolve({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } });
       }
@@ -111,6 +116,7 @@ beforeEach(() => {
   mockRpcResults = {};
   mockExposureReads = 0;
   mockRefused.clear();
+  mockFailing.clear();
   mockCalls.length = 0;
   mockHeld = null;
   resetRecommendationSession(1234);
@@ -255,5 +261,54 @@ describe('recording what was seen', () => {
       await promise;
     });
     await waitFor(() => expect(mockCalls).toContain('note_recommendations_shown'));
+  });
+});
+
+describe('when the windowed reader fails', () => {
+  it('does not fall back to the 72-hour reader for a transient failure', async () => {
+    // Second review of V2, m1: only a missing function falls back; anything else is retried.
+    const { isMissingFunction } = jest.requireActual('./use-exposure') as typeof import('./use-exposure');
+    expect(isMissingFunction({ code: 'PGRST202', message: 'Could not find the function' })).toBe(true);
+    expect(isMissingFunction({ code: '42883', message: 'function does not exist' })).toBe(true);
+    expect(isMissingFunction({ code: '08006', message: 'connection failure' })).toBe(false);
+    expect(isMissingFunction({ code: '57014', message: 'canceling statement due to statement timeout' })).toBe(false);
+  });
+});
+
+describe('a transient failure of the windowed reader', () => {
+  it('is retried, not answered by the 72-hour reader', async () => {
+    mockFailing.add('recommendation_exposure_within');
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(20));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(mockCalls).toContain('recommendation_exposure_within');
+    expect(mockCalls).not.toContain('recommendation_exposure');
+  });
+});
+
+describe('a return after most of a day away', () => {
+  it('lets titles last seen long ago compete again, rather than pinning them to the back', async () => {
+    // Second review of V2, m3: the on-screen tier is for a Refresh. After twenty hours away the
+    // old wall is only something seen earlier — the decay's business, not a veto.
+    mockTables.media_items = (mockTables.media_items ?? []).slice(0, 30);
+    mockTables.provider_list_cache = [
+      { list_key: 'trending.movie.week', payload: { ids: mockTables.media_items.map((row) => row.id) } },
+    ];
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(20));
+    const first = idsOf(result.current.data!.items);
+    const t0 = Date.now();
+
+    await act(async () => {
+      noteAppState('background', t0);
+      noteAppState('active', t0 + 20 * 3_600_000);
+    });
+    const resumed = idsOf(result.current.data!.items);
+    expect(resumed).toHaveLength(20);
+    // Thirty titles, twenty seen twenty hours ago: some of the strongest seen ones must be able
+    // to lead again instead of all ten unseen titles filling the front.
+    expect(resumed.slice(0, 10).some((id) => first.includes(id))).toBe(true);
   });
 });
