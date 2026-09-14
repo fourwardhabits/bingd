@@ -42,16 +42,22 @@
 -- claim the same row and spend two attempts on one search.
 --
 -- ===========================================================================
--- 3. A DEFINITE "NOT FOUND" WAS ASKED THREE TIMES
+-- 3. A DEFINITE "NOT FOUND" WAS ASKED THREE TIMES, AND A RATE LIMIT COULD USE UP A TITLE
 --
 -- A null resolve kept the row retryable until its third attempt, so a film TMDB has never
 -- heard of cost three searches — 879 provider calls for a 2,500-title archive where 492
 -- found something. "Transient failure" and "the provider answered and had nothing" are
 -- different facts. `_import_provider_resolve` takes `p_final`: the Edge Function passes
--- true when TMDB answered with no confident match, and the row settles at once. A thrown
--- request never reaches resolve at all, so it is retried when its lease lapses. The default
--- is false, so the function version already deployed keeps its old, slower semantics until
--- it is redeployed — this migration is safe to apply first.
+-- true only when TMDB answered with no results at all, and the row settles at once; a
+-- non-empty answer that was not confident keeps the retry ladder. A thrown request never
+-- reaches resolve, so it is retried when its lease lapses. The default is false, so the
+-- function version already deployed keeps its old, slower semantics until it is redeployed
+-- — this migration is safe to apply first.
+--
+-- `_import_provider_release` hands back claims TMDB was never asked about (the invocation
+-- stopped at a 429) and claims refused with 429, refunding the attempt. Independent review
+-- 83a found that without it three rate-limited invocations settled a findable film as
+-- unmatched without one request for it.
 --
 -- ===========================================================================
 -- 4. THE CADENCE
@@ -59,13 +65,17 @@
 -- One slice per job per minute put a floor of about a minute under a twenty-four-film import
 -- and about twenty-eight minutes under 2,500 films whose work takes five seconds.
 --
---   * The drain runs every ten seconds (pg_cron >= 1.5 schedules in seconds; staging and
---     production run 1.6). Where it cannot, the installer falls back to once a minute and
---     says so.
+--   * The drain runs every ten seconds (pg_cron >= 1.5 schedules in seconds; staging runs
+--     1.6.4). Where it cannot, the installer falls back to once a minute and says so.
 --   * Each tick works its claimed jobs round-robin, slice by slice, until the work is done
 --     or a time budget (`import.tick_budget_ms`, default 2 seconds) is spent. Bounded, so a
 --     tick's transaction and its collection locks stay short; round-robin, so a small import
 --     is not queued behind a large one. More jobs are claimed per tick for the same reason.
+--     The budget is checked between passes, so it bounds work, not lock waits: a slice
+--     waiting on `_lock_media` behind somebody's ranking waits as long as that ranking does,
+--     exactly as a single slice always has.
+--   * One provider invocation at a time: the nudge is not posted while any row is leased,
+--     so TMDB traffic stays at one invocation's eight-wide concurrency.
 --   * The sweep and the poster nudge move to their own once-a-minute job. The nudge posts a
 --     poster batch per call; running it every ten seconds would re-ask for titles whose
 --     enrichment is still in flight.
@@ -167,6 +177,49 @@ revoke execute on function _import_provider_claim(integer) from public, anon, au
 grant execute on function _import_provider_claim(integer) to service_role;
 
 
+-- ---------------------------------------------------------------------------
+-- Handing back what was never asked (independent review 83a, BLOCKER)
+--
+-- The attempt is spent at claim time, and the Edge Function claims a batch and then works
+-- through it eight at a time. When TMDB answers 429 it stops — correctly — and the rest of
+-- the batch was never requested at all. Before this, those rows kept their spent attempt,
+-- so three rate-limited invocations settled a film TMDB would have found as unmatched,
+-- without a single request for it. Pre-existing, and made more reachable by a faster drain.
+--
+-- So the function hands back every claim it did not get an answer for through no fault of
+-- the title: never dispatched, or refused with 429. The attempt is refunded and the lease
+-- cleared, so the next invocation offers it again as if this one had not happened. A request
+-- that was dispatched and failed any other way keeps its spent attempt, which is what bounds
+-- a title that genuinely breaks the provider.
+-- ---------------------------------------------------------------------------
+
+create or replace function _import_provider_release(p_row_ids uuid[])
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_released integer;
+begin
+  update import_rows
+     set provider_attempts = greatest(provider_attempts - 1, 0),
+         provider_claimed_at = null
+   where id = any(coalesce(p_row_ids, '{}'))
+     and status = 'needs_provider'
+     and provider_claimed_at is not null;
+  get diagnostics v_released = row_count;
+  return v_released;
+end;
+$$;
+
+comment on function _import_provider_release(uuid[]) is
+  'Hands leased provider rows back unasked: refunds the attempt their claim spent and clears the lease. For claims the Edge Function never dispatched or that TMDB refused with 429 -- a rate limit must not use up a title''s attempts. Only rows still waiting and still leased. service_role only.';
+
+revoke execute on function _import_provider_release(uuid[]) from public, anon, authenticated;
+grant execute on function _import_provider_release(uuid[]) to service_role;
+
+
 -- A new signature, so the old one goes first. PostgREST resolves by argument name, so the
 -- deployed Edge Function's two-argument call reaches this one through the default.
 drop function if exists _import_provider_resolve(uuid, uuid);
@@ -218,8 +271,9 @@ begin
     end if;
 
   else
-    -- `p_final`: the provider answered and had nothing confident. Asking again would send the
-    -- same query and get the same answer. Without it, the old ladder: retryable until the
+    -- `p_final`: the provider answered with no results at all. Asking again would send the
+    -- same query and get the same answer. (A non-empty answer that was not confident keeps the
+    -- retry ladder; independent review 83a.) Without it, the old ladder: retryable until the
     -- third attempt, which is what a caller that cannot tell the two apart still gets.
     update import_rows
        set status = case when p_final or provider_attempts >= 3 then 'unmatched' else 'needs_provider' end,
@@ -464,8 +518,11 @@ begin
   end if;
 
   -- ---------------------------------------------------------------------------
-  -- The provider nudge: only for rows nobody has in hand, so a ten-second tick does not start
-  -- an invocation that would find everything already leased.
+  -- The provider nudge: only for rows nobody has in hand, and **only while no invocation is**
+  -- (independent review 83a). One invocation at a time is what bounds TMDB traffic to its
+  -- own eight-wide concurrency; without it, a ten-second tick beside a slow invocation, or two
+  -- drains at once, would each start another. A crashed invocation holds its leases for two
+  -- minutes and the nudge waits that out, which is slower and never wrong.
   -- ---------------------------------------------------------------------------
   select count(*) into v_posted
     from import_rows r join import_jobs j on j.id = r.job_id
@@ -474,7 +531,11 @@ begin
      and (r.provider_claimed_at is null or r.provider_claimed_at < now() - interval '2 minutes')
      and j.completed_at is null;
 
-  if v_posted > 0 and v_provider then
+  if v_posted > 0 and v_provider
+     and not exists (select 1 from import_rows
+                      where status = 'needs_provider'
+                        and provider_claimed_at > now() - interval '2 minutes')
+  then
     select value #>> '{}' into v_url from app_config where key = 'functions.base_url';
     begin
       select decrypted_secret into v_key
