@@ -313,7 +313,7 @@ function importContent(job: PushJob): PushContent | null {
     case 'import_failed':
       return {
         title: 'We couldn’t finish your Letterboxd import',
-        body: 'Open bingd. to see what happened and try again.',
+        body: 'Open bingd to see what happened and try again.',
         data: data(),
       };
     default:

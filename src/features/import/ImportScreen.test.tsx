@@ -212,6 +212,33 @@ describe('before a file is chosen', () => {
 });
 
 describe('choosing an export', () => {
+  /**
+   * **Choose a different file starts a fresh page** (founder, physical preview QA,
+   * 2026-09-14). One scroll view used to carry every phase, so an offset from the preview
+   * could survive into the shorter intro and draw it scrolled past its own end. The scroll
+   * body is keyed by phase: coming back is a new scroll view, not the preview's.
+   */
+  it('returns from the preview on a new scroll body, not the preview’s', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Ready to import')).toBeTruthy());
+
+    type HostNode = { props: Record<string, unknown>; parent: HostNode | null };
+    const scrollAbove = (text: string) => {
+      let node = (screen.getByText(text) as unknown as HostNode).parent;
+      while (node && node.props?.contentContainerStyle === undefined) node = node.parent;
+      return node;
+    };
+    const previewScroll = scrollAbove('Ready to import');
+    expect(previewScroll).toBeTruthy();
+
+    await fireEvent.press(screen.getByText('Choose a different file'));
+    await waitFor(() => expect(screen.getByText('Bring your Letterboxd history')).toBeTruthy());
+
+    expect(scrollAbove('Bring your Letterboxd history')).not.toBe(previewScroll);
+  });
+
   it('previews the counts and sends nothing yet', async () => {
     mockPicked = exportZip(TWO_FILMS);
     const screen = await renderWithProviders(<ImportScreen surface="settings" />);
@@ -459,13 +486,13 @@ describe('when it is over', () => {
 
     await waitFor(() => expect(screen.getByText('Added as watched')).toBeTruthy());
     expect(screen.getByLabelText('1 Added as watched')).toBeTruthy();
-    expect(screen.getByLabelText('2 Already in bingd.')).toBeTruthy();
+    expect(screen.getByLabelText('2 Already in bingd')).toBeTruthy();
     // Named as diary entries, because it is the one number that is not a count of films.
     expect(screen.getByLabelText('3 Diary entries saved')).toBeTruthy();
     // And the rule that explains why an import never overwrites a ranking.
     expect(screen.getByText(/start unranked/)).toBeTruthy();
     // A zero is left out rather than drawn.
-    expect(screen.queryByText('Added to your Watchlist')).toBeNull();
+    expect(screen.queryByText('Added to your watchlist')).toBeNull();
   });
 
   it('does not claim a history arrived when nothing did', async () => {
@@ -700,7 +727,7 @@ describe('opened for a named import', () => {
 
     await waitFor(() => expect(screen.getByText('Your Letterboxd history is in')).toBeTruthy());
     expect(screen.getByLabelText('19 Added as watched')).toBeTruthy();
-    expect(screen.getByLabelText('2 Added to your Watchlist')).toBeTruthy();
+    expect(screen.getByLabelText('2 Added to your watchlist')).toBeTruthy();
   });
 
   it('shows a failed import as a failure, with a way to try again', async () => {

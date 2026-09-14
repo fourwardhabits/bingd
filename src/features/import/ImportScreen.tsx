@@ -128,20 +128,25 @@ export function ImportScreen({
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
 
   /**
-   * **The question uses the flow's own page, not the importer's** (founder, physical preview
-   * QA, 2026-09-14: the step "feels unlike the surrounding onboarding screens").
+   * **The question uses the flow's gutters and type, with its actions where the content ends**
+   * (founder, physical preview QA, 2026-09-14, twice).
    *
-   * The screens either side of it, *Your First Five* and People, draw one scaffold: the
-   * default `Screen`, the flow header, a scrolling intro in the gutter under `title1`, and a
-   * hairline-topped footer that holds the actions. The question now draws exactly that, with
-   * the same values (`onboardingStyles` below restates People's), so moving from First Five
-   * to this step to People changes the words and not the page. Every onboarding phase also
-   * takes the flow's `Screen` rather than the importer's bottom inset. Settings is untouched.
+   * The first pass copied People's scaffold exactly, footer and all. People and *Your First
+   * Five* have enough content to fill a phone, so their bottom-pinned footer sits under it.
+   * This question is two lines, so the same pinned footer opened a large blank band between
+   * the words and the buttons, which is the "giant empty area" the founder met on the way
+   * back from *Choose a different file* (and would have met on the way in). The intro keeps
+   * People's values; the actions follow it in the same scroll body instead of being pinned.
+   *
+   * **The bottom inset is the importer's in both modes.** With nothing pinned at the bottom,
+   * the scroll body is the last thing on the screen, so the screen owns the safe-area
+   * padding under it (design-system.md, "The bottom edge belongs to whatever is at the
+   * bottom").
    */
   const asking = step !== undefined && state.phase === 'idle';
 
   return (
-    <Screen includeBottomInset={!onboarding}>
+    <Screen includeBottomInset>
       {onboarding?.header}
       {asking ? (
         <OnboardingQuestion
@@ -156,7 +161,15 @@ export function ImportScreen({
           onSkip={() => step.onLeave('skipped')}
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.page}>
+        /**
+         * **Keyed by phase, so a new state starts at the top.** One scroll view used to carry
+         * every phase, and a scroll view can keep its offset when its content shrinks: scrolled
+         * down a preview, then *Choose a different file*, and the shorter intro was drawn
+         * scrolled past its own end, a blank page until the next drag. A phase change is a new
+         * page, so it gets a new scroll view; progress inside a phase (upload parts, polling)
+         * keeps the same one.
+         */
+        <ScrollView key={state.phase} contentContainerStyle={styles.page}>
           <Body
             state={state}
             onPick={() => {
@@ -250,8 +263,8 @@ function Body({
             state.total > 1
               ? // `Math.min`, because after the last page `sent === total` and the screen
                 // stays up for the whole `import_ready` round trip.
-                `Keep bingd. open while we send your history. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
-              : 'Keep bingd. open while we send your history.'
+                `Keep bingd open while we send your history. Part ${Math.min(state.sent + 1, state.total)} of ${state.total}.`
+              : 'Keep bingd open while we send your history.'
           }
         />
       );
@@ -342,10 +355,10 @@ function Body({
  * get wrong: the export is a ZIP, and a folder or a single CSV will be refused.
  */
 const STEPS = [
-  'On Letterboxd.com, go to Settings, then Data.',
-  'Generate your export.',
-  'Download the ZIP.',
-  'Come back to bingd. and choose it here.',
+  'On Letterboxd.com, go to Settings → Import & Export.',
+  'Choose Export your data to generate your export.',
+  'Download the ZIP when it’s ready.',
+  'Come back to bingd and choose it here.',
 ] as const;
 
 function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void }) {
@@ -353,7 +366,7 @@ function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void })
     <View style={styles.block}>
       <Text variant="display">Bring your Letterboxd history</Text>
       <Text variant="body" tone="secondary">
-        Import the movies you’ve watched, your ratings, Diary dates, and Watchlist. Your bingd.
+        Import the movies you’ve watched, your ratings, diary dates, and watchlist. Your bingd
         rankings stay yours.
       </Text>
 
@@ -391,9 +404,8 @@ function Privacy() {
         color={theme.text.tertiary}
       />
       <Text variant="footnote" tone="tertiary" style={styles.privacyText}>
-        Your ZIP stays on your phone. bingd. only gets what it needs: film names, years,
-        ratings, dates, and Letterboxd links. We never open your reviews, comments, likes, or
-        lists.
+        Your ZIP stays on your phone. bingd only gets what it needs: film names, years, ratings,
+        dates, and Letterboxd links. We never open your reviews, comments, likes, or lists.
       </Text>
     </View>
   );
@@ -425,18 +437,15 @@ function OnboardingQuestion({
   onSkip: () => void;
 }) {
   return (
-    <>
-      <ScrollView contentContainerStyle={onboardingStyles.body}>
-        <View style={onboardingStyles.intro}>
-          <Text variant="title1">Already use Letterboxd?</Text>
-          <Text variant="body" tone="secondary">
-            Bring over what you’ve watched, your ratings, Diary dates, and Watchlist. Imported
-            titles start unranked, so your bingd rankings stay yours.
-          </Text>
-        </View>
-      </ScrollView>
-
-      <View style={onboardingStyles.footer}>
+    <ScrollView contentContainerStyle={onboardingStyles.body}>
+      <View style={onboardingStyles.intro}>
+        <Text variant="title1">Already use Letterboxd?</Text>
+        <Text variant="body" tone="secondary">
+          Bring over what you’ve watched, your ratings, diary dates, and watchlist. Imported
+          titles start unranked, so your bingd rankings stay yours.
+        </Text>
+      </View>
+      <View style={onboardingStyles.actions}>
         <Button label="Import from Letterboxd" onPress={onPick} />
         <Button label="Not now" kind="secondary" onPress={onSkip} />
         <Button label="Need help getting the file?" kind="tertiary" onPress={onHowTo} />
@@ -444,7 +453,7 @@ function OnboardingQuestion({
           Your ZIP stays on your phone. bingd only reads the information needed for your import.
         </Text>
       </View>
-    </>
+    </ScrollView>
   );
 }
 
@@ -484,7 +493,7 @@ function Preview({
       <View style={styles.card}>
         <Stat label="Watched films" value={counts.watched} />
         <Stat label="Ratings" value={counts.rated} />
-        <Stat label="On your Watchlist" value={counts.watchlist} />
+        <Stat label="On your watchlist" value={counts.watchlist} />
         <Stat label="Diary entries" value={counts.watches} />
       </View>
 
@@ -562,8 +571,8 @@ function Summary({
         <Count value={added} label="Added as watched" />
         {/* Rows of zero are left out: a zero invites the reader to wonder what went wrong.
             "Added as watched" always shows, because it is the number the next step is about. */}
-        {alreadyHere > 0 ? <Count value={alreadyHere} label="Already in bingd." /> : null}
-        {watchlisted > 0 ? <Count value={watchlisted} label="Added to your Watchlist" /> : null}
+        {alreadyHere > 0 ? <Count value={alreadyHere} label="Already in bingd" /> : null}
+        {watchlisted > 0 ? <Count value={watchlisted} label="Added to your watchlist" /> : null}
         {diary > 0 ? (
           <Count
             value={diary}
@@ -585,7 +594,7 @@ function Summary({
       {added > 0 ? (
         <Text variant="body" tone="secondary">
           Imported movies start unranked. Rank them whenever you want. A ranking you make in
-          bingd. always wins.
+          bingd always wins.
         </Text>
       ) : null}
 
@@ -680,7 +689,7 @@ function explain(failure: ImportFailure): {
     return {
       title: 'An import is already running',
       detail:
-        'This file wasn’t sent. Your earlier import is still running, even with the app closed, and bingd. runs one import at a time. Come back when it’s done to import this file.',
+        'This file wasn’t sent. Your earlier import is still running, even with the app closed, and bingd runs one import at a time. Come back when it’s done to import this file.',
       showHowTo: false,
     };
   }
@@ -759,7 +768,7 @@ function explain(failure: ImportFailure): {
       return {
         title: 'That file is too big',
         detail:
-          'It’s much larger than any Letterboxd export, so bingd. won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
+          'It’s much larger than any Letterboxd export, so bingd won’t open it. Check you picked the right file. If it really is your export, let us know from Settings.',
         showHowTo: true,
       };
     case 'unexpected':
@@ -776,7 +785,7 @@ function explain(failure: ImportFailure): {
       return {
         title: 'That library is bigger than we can take',
         detail:
-          'bingd. imports up to about ten thousand films, and this file is well past that. Nothing was sent. Let us know from Settings. We’d like to hear from you.',
+          'bingd imports up to about ten thousand films, and this file is well past that. Nothing was sent. Let us know from Settings. We’d like to hear from you.',
         showHowTo: false,
       };
   }
@@ -839,8 +848,8 @@ function Count({ value, label }: { value: number; label: string }) {
 
 /**
  * The first-run flow's page, restated from `app/onboarding/people.tsx` (and the matching
- * intro and footer in `app/onboarding/taste.tsx`), so this step lines up with the steps on
- * either side of it. Kept in step with those by hand: the flow has no shared layout
+ * intro in `app/onboarding/taste.tsx`), so this step lines up with the steps on either side
+ * of it. Kept in step with those by hand: the flow has no shared layout
  * component, and making one would mean rewriting two shipped screens for this one.
  */
 const onboardingStyles = StyleSheet.create({
@@ -851,12 +860,11 @@ const onboardingStyles = StyleSheet.create({
     paddingBottom: theme.space[4],
     gap: theme.space[2],
   },
-  footer: {
+  // The question's actions: the flow's gutter and its action spacing (People's footer
+  // gap), placed after the words rather than pinned. `intro`'s bottom padding is the seam.
+  actions: {
     paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[3],
     gap: theme.space[2],
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.border.hairline,
   },
 });
 

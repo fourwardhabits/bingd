@@ -218,7 +218,7 @@ describe('the question', () => {
     // The founder's copy, 2026-09-14.
     expect(
       view.getByText(
-        'Bring over what you’ve watched, your ratings, Diary dates, and Watchlist. Imported titles start unranked, so your bingd rankings stay yours.',
+        'Bring over what you’ve watched, your ratings, diary dates, and watchlist. Imported titles start unranked, so your bingd rankings stay yours.',
       ),
     ).toBeTruthy();
     expect(view.getByRole('button', { name: 'Import from Letterboxd' })).toBeTruthy();
@@ -241,7 +241,15 @@ describe('the question', () => {
    * out: the headline and body sit in the scrolling intro, and the footer holds the three
    * actions in the founder's order with the privacy line last, outside what scrolls.
    */
-  it('draws the same page as First Five and People', async () => {
+  /**
+   * **The flow's gutters and type, with the actions right after the words** (founder,
+   * physical preview QA, 2026-09-14, twice). The intro keeps People's values. The actions are
+   * **not** pinned in a footer: this question is two lines, and a pinned footer under two
+   * lines is the large blank band the founder met coming back from *Choose a different file*.
+   * So the actions and the privacy line share the intro's scroll body, in the founder's
+   * order, in the flow's gutter, and nothing between them stretches.
+   */
+  it('draws the flow’s page, with the actions following the words', async () => {
     const view = await open();
 
     const headline = view.getByText('Already use Letterboxd?');
@@ -253,28 +261,60 @@ describe('the question', () => {
       gap: theme.space[2],
     });
 
-    const importButton = view.getByRole('button', { name: 'Import from Letterboxd' });
-    const footer = importButton.parent!;
-    expect(StyleSheet.flatten(footer.props.style)).toMatchObject({
+    const actions = view.getByRole('button', { name: 'Import from Letterboxd' }).parent!;
+    const actionStyle = StyleSheet.flatten(actions.props.style);
+    expect(actionStyle).toMatchObject({
       paddingHorizontal: theme.layout.gutter,
-      paddingVertical: theme.space[3],
       gap: theme.space[2],
-      borderTopWidth: StyleSheet.hairlineWidth,
     });
+    // No spacer and no stretch: nothing here grows to fill the screen.
+    expect(actionStyle.flex).toBeUndefined();
+    expect(actionStyle.flexGrow).toBeUndefined();
+    expect(actionStyle.marginTop).toBeUndefined();
 
     for (const name of ['Import from Letterboxd', 'Not now', 'Need help getting the file?']) {
-      expect(view.getByRole('button', { name }).parent).toBe(footer);
+      expect(view.getByRole('button', { name }).parent).toBe(actions);
     }
     expect(
       view.getByText(
         'Your ZIP stays on your phone. bingd only reads the information needed for your import.',
       ).parent,
-    ).toBe(footer);
+    ).toBe(actions);
 
-    // Nothing in the footer scrolls: no ancestor of it carries a content container.
-    for (let at = footer.parent; at; at = at.parent) {
-      expect(at.props?.contentContainerStyle).toBeUndefined();
-    }
+    // The words and the actions are siblings in one scroll body, words first.
+    expect(actions.parent).toBe(intro.parent);
+    const siblings = actions.parent!.children as unknown[];
+    expect(siblings.indexOf(intro)).toBeLessThan(siblings.indexOf(actions));
+    const scroll = intro.parent!.parent!;
+    expect(scroll.props.contentContainerStyle).toBeDefined();
+    expect(StyleSheet.flatten(scroll.props.contentContainerStyle).flexGrow).toBeUndefined();
+  });
+
+  /**
+   * **Coming back looks exactly like arriving** (founder, 2026-09-14: *Choose a different
+   * file* returned to this question with a giant blank area). The same tree, the same styles,
+   * whether the reader got here fresh or from the preview.
+   */
+  it('returns from Choose a different file to the same page it opened on', async () => {
+    const fresh = await open();
+    const outline = (view: typeof fresh) => {
+      const headline = view.getByText('Already use Letterboxd?');
+      const actions = view.getByRole('button', { name: 'Import from Letterboxd' }).parent!;
+      return JSON.stringify({
+        intro: StyleSheet.flatten(headline.parent!.props.style),
+        actions: StyleSheet.flatten(actions.props.style),
+        body: StyleSheet.flatten(headline.parent!.parent!.parent!.props.contentContainerStyle),
+      });
+    };
+    const before = outline(fresh);
+
+    mockPicked = exportZip();
+    await fireEvent.press(fresh.getByRole('button', { name: 'Import from Letterboxd' }));
+    await waitFor(() => expect(fresh.getByText('Ready to import')).toBeTruthy());
+    await fireEvent.press(fresh.getByRole('button', { name: 'Choose a different file' }));
+
+    await waitFor(() => expect(fresh.getByText('Already use Letterboxd?')).toBeTruthy());
+    expect(outline(fresh)).toBe(before);
   });
 
   it('does not count the importer as opened just because the step was shown', async () => {
@@ -597,12 +637,16 @@ describe('importing from the step', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
     await waitFor(() => expect(view.getByText('Getting your Letterboxd file')).toBeTruthy());
-    // The founder's help copy, one paragraph, pointing at the page the button opens.
-    expect(
-      view.getByText(
-        'On Letterboxd.com, go to Settings → Data → Export Your Data. Generate your export, download the ZIP when it’s ready, then come back to bingd and choose that ZIP.',
-      ),
-    ).toBeTruthy();
+    // The founder's four steps, numbered, in Letterboxd's current tab names.
+    for (const step of [
+      'Open Letterboxd.com and go to Settings → Import & Export.',
+      'Choose Export your data to generate your export.',
+      'Download the ZIP when it’s ready.',
+      'Come back to bingd and choose that ZIP.',
+    ]) {
+      expect(view.getByText(step)).toBeTruthy();
+    }
+    expect(view.getByRole('button', { name: 'Open Letterboxd’s export page' })).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
     await waitFor(() => expect(view.queryByText('Getting your Letterboxd file')).toBeNull());
