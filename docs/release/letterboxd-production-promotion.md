@@ -194,8 +194,10 @@ without `ids` behaves as before and reports `remaining`.
 
 ### 3. Schema
 
-1. `npx supabase db push --project-ref abheeqyjzekiowkztfxv --include-all --dry-run` — the list
-   must be exactly the 17 Letterboxd files and nothing else.
+1. `npx supabase db push --project-ref abheeqyjzekiowkztfxv --include-all --dry-run`. The list
+   must be exactly the 17 `20260917…` Letterboxd files and nothing else. Search's
+   `20260919000100` is already applied on production (2026-09-14), so it must **not** appear; if
+   it does, production's state is not what §0 records, so stop and re-read §0.
 2. Same command without `--dry-run`, in a quiet window.
 3. If a file fails part-way: stop. Do not re-run the push (files are not idempotent); inspect
    which statements applied, finish that file by hand, then continue.

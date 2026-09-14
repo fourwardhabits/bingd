@@ -612,6 +612,18 @@ describe('when a read behind this screen fails', () => {
     expect(retryUnder(view, 'Could not load your counts')).toBeTruthy();
   });
 
+  it('falls back to the ranked counts when only the watched counts cannot be read', async () => {
+    // A bundle ahead of its backend (no `profile_title_counts` yet) keeps the whole row.
+    mockFailing.add('profile_title_counts');
+    mockTables.rankings = [rankedRow('film-1', 1), rankedRow('film-2', 2)];
+
+    const view = await open();
+
+    await waitFor(async () => expect(await stat(view, 'Movies')).toBe('2'));
+    expect(view.queryByText('Could not load your counts')).toBeNull();
+    expect(view.getByLabelText(/^Followers: /)).toBeTruthy();
+  });
+
   it('re-issues the counts read on Try again, and shows what comes back', async () => {
     mockFailing.add('rankings');
     mockTables.rankings = [rankedRow('film-1', 1)];
