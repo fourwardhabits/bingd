@@ -430,6 +430,69 @@ All three functions changed; push-sender without the deploy sends no import push
 
 ---
 
+## 6e. The 2,500-title scale gate, 2026-09-13 (Round 3)
+
+The founder imported 24 films and it "took a while". A target user has ~2,500. "The parser
+accepts N rows" proves nothing, so the whole server pipeline was driven at 24 / 250 / 1,000 /
+2,500 titles against a **real PostgreSQL 17 with every migration** —
+`node supabase/tests/perf/import-scale.mjs --all` — through the real `import_stage` /
+`import_ready` RPCs as the user, the real worker, and the real provider claim/resolve pair,
+with TMDB replaced by a deterministic oracle (60% local match, 12% shared-cache hit, 18%
+provider-found, 5% unknown, 5% ambiguous; 40% with diary viewings, a 10% watchlist, 5%
+already logged in the app).
+
+### What it found
+
+| | before `20260917001700` | after |
+|---|---|---|
+| 2,500 titles (2,750 rows): ticks | 27 | 14 |
+| modelled wall clock | ~28 min (one tick a minute) | ~3 min (ten-second ticks) |
+| database compute, whole import | 4.8 s | 5.5 s |
+| slowest single tick | 0.47 s | 2.1 s (budget 2 s) |
+| provider requests | 879 | 621 (492 found, 129 definite misses) |
+| 24 titles: ticks / modelled | 4 / ~4 min | 2 / ~20 s |
+| **provider-findable films that arrived after the job passed the grace** | **29–36 of 91** | 91 of 91 |
+| **a job settling with a last-attempt provider answer in flight** | **settled; found films lost** | held; 125 of 125 arrived |
+
+The work itself was never the problem — about 1–2 ms of compute per row. The schedule was,
+and it hid two ways a large import **lost films**, which were release blockers:
+
+1. **The provider grace was counted from `created_at`.** Staging, matching and applying spent
+   it, so a big archive settled at minute thirty with everything the provider had not reached
+   reported unmatched. Now counted from the provider's own activity (`provider_touched_at`).
+2. **A claim carried no lease.** A third-attempt lookup in flight did not hold its job, the
+   job settled, and the answer landed on a finished job. Claims now lease the row for two
+   minutes; a leased row holds its job; a resolve for a finished job is a no-op.
+
+And two costs: a definite "TMDB has nothing" was searched three times (now `p_final`, once),
+and one slice a minute put a ~minute floor under a 24-film import (now a ten-second drain
+that works its jobs round-robin inside `import.tick_budget_ms`, with the sweep and poster
+nudge on a separate once-a-minute job and cron history pruned to seven days).
+
+### Survival, all at 600 titles, all passing after the fix
+
+`killedMidTick` (worker cancelled mid-slice six times), `twoWorkers` (two drains the whole
+way), `transientProvider` (a third of lookups throw), `providerOutlivesGrace`,
+`settleVsInflight`, `settleVsInflightFinalAttempt`, `providerSilentPastGrace` (a provider that
+never answers still ends in a summary after the grace, not a hang), `reimport`. Every run
+asserts: job `done`, no duplicate `user_media` / `imported_watches` / `watchlist`, every
+placeable viewing recorded once, native rows kept native, `import_started` exactly once, one
+terminal notification, no feed activity, no live staging rows after settle. Re-importing the
+same archive changes nothing.
+
+Pinned permanently at small sizes in `supabase/tests/import-keeps-up.test.mjs` and race W3
+in `supabase/tests/concurrency/races/import-worker.mjs`.
+
+### Deploying 6e
+
+Apply `20260917001700` **before** deploying `letterboxd-import`: the migration keeps the old
+two-argument resolve working through a default, and the new function sends `p_final`, which
+the old signature does not have. The migration reschedules a running one-minute drain onto
+ten seconds by itself; `schedule_import_drain()` installs both jobs on a fresh project and
+falls back to once a minute where pg_cron cannot schedule in seconds.
+
+---
+
 ## 6c. Deploying it, and turning it off
 
 **The importer is the only feature here with a worker, and a worker has to be started.**

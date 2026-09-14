@@ -171,15 +171,25 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
           // A confident result that could not be written is our problem, not the film
           // being unknown, and the two used to be the same number.
           if (chosen && !mediaItemId) unwritable += 1;
+          /**
+           * **`p_final` when TMDB answered and had nothing confident** (20260917001700).
+           *
+           * The same query would get the same answer, so the row settles now instead of being
+           * searched twice more — a film TMDB has never heard of used to cost three requests.
+           * A confident result that could not be written is not final: that is our failure
+           * and worth another attempt. A thrown request never reaches this line at all; its
+           * lease lapses and the row is offered again.
+           */
           await db.rpc('_import_provider_resolve', {
             p_row_id: claim.row_id,
             p_media_item_id: mediaItemId,
+            p_final: !chosen,
           });
           if (mediaItemId) matched += 1;
         } catch (cause) {
           // The attempt is already spent by the claim. Leaving the row alone is the whole
-          // of the retry: it stays `needs_provider` until its third attempt, and settles
-          // as unmatched after that.
+          // of the retry: its lease lapses after two minutes and it is offered again, which is
+          // also the backoff a rate-limited provider needs, until its third attempt.
           failed += 1;
           /**
            * **A classification, not the message.**
