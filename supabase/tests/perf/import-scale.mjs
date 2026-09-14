@@ -263,12 +263,12 @@ async function upload(db, user, titles) {
 // The provider tier, with TMDB replaced by an oracle
 // ---------------------------------------------------------------------------
 
-function providerOracle(titles, { transient = 0, seed = 11 } = {}) {
+function providerOracle(titles, { transient = 0, seed = 11, limitAfter = null } = {}) {
   let finalSupported = null;
   const byName = new Map(titles.map((t) => [t.name, t]));
   const r = rng(seed);
   let tmdb = 5_000_000;
-  const stats = { invocations: 0, claimed: 0, found: 0, empty: 0, failed: 0 };
+  const stats = { invocations: 0, claimed: 0, found: 0, empty: 0, failed: 0, released: 0 };
 
   /** One Edge Function invocation: claim a batch, resolve each. Returns rows claimed. */
   async function invoke(db, batch = 50) {
@@ -280,7 +280,18 @@ function providerOracle(titles, { transient = 0, seed = 11 } = {}) {
       finalSupported = n > 0;
     }
     const claims = await db.rows(`select * from _import_provider_claim($1)`, [batch]);
+    let sent = 0;
     for (const c of claims) {
+      // A 429 after `limitAfter` requests: the Edge Function stops and hands the rest back.
+      if (limitAfter !== null && sent >= limitAfter) {
+        const rest = claims.slice(sent).map((x) => x.row_id);
+        const [{ n }] = await db.rows(`select _import_provider_release($1::uuid[]) as n`, [
+          rest,
+        ]);
+        stats.released += n;
+        break;
+      }
+      sent += 1;
       stats.claimed += 1;
       if (r() < transient) {
         // A thrown fetch: the attempt is spent by the claim and the row is left alone.
@@ -795,6 +806,33 @@ const SCENARIOS = {
       ticks: run.ticks,
       modelledMinutes: Math.round((run.ticks * run.cadenceSeconds) / 60),
       counts: job.counts,
+    };
+  },
+
+  /** Every invocation is rate-limited after eight requests. Nothing is lost to it. */
+  async rateLimitedProvider({ db, user, titles }) {
+    const up = await upload(db, user, titles);
+    const provider = providerOracle(titles, { limitAfter: 8 });
+    const run = await drain(db, up.jobId, provider);
+    const expected = titles.filter((t) => t.kind === 'provider').length;
+    const [got] = await db.rows(
+      `select (select count(*) from user_media um join media_items mi on mi.id = um.media_item_id
+                where um.user_id = $1 and mi.provenance = 'tmdb')
+            + (select count(*) from watchlist w join media_items mi on mi.id = w.media_item_id
+                where w.user_id = $1 and mi.provenance = 'tmdb') as n`,
+      [user],
+    );
+    assert.equal(
+      Number(got.n),
+      expected,
+      `every provider-findable film arrived (${got.n} of ${expected})`,
+    );
+    await verify(db, user, up.jobId, titles);
+    return {
+      ticks: run.ticks,
+      released: provider.stats.released,
+      expected,
+      arrived: Number(got.n),
     };
   },
 

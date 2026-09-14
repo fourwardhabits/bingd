@@ -153,9 +153,20 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
   const empty: number[] = [];
   const unconfident: number[] = [];
   let unwritable = 0;
+  /**
+   * **Claims to hand back unasked** (independent review 83a).
+   *
+   * The claim spent each row's attempt. A row this invocation never sent — because it stopped
+   * at a 429 — or that TMDB refused with 429 did nothing wrong, and three rate-limited
+   * invocations used to settle it as unmatched without one request for it. Released at the
+   * end: the attempt is refunded and the lease cleared.
+   */
+  const unasked: string[] = [];
+  let dispatched = 0;
 
   for (let i = 0; i < claims.length; i += CONCURRENCY) {
     const slice = claims.slice(i, i + CONCURRENCY) as Claim[];
+    dispatched = i + slice.length;
 
     await Promise.all(
       slice.map(async (claim) => {
@@ -172,18 +183,18 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
           // being unknown, and the two used to be the same number.
           if (chosen && !mediaItemId) unwritable += 1;
           /**
-           * **`p_final` when TMDB answered and had nothing confident** (20260917001700).
+           * **`p_final` only when TMDB answered with no results at all** (20260917001700).
            *
            * The same query would get the same answer, so the row settles now instead of being
            * searched twice more — a film TMDB has never heard of used to cost three requests.
-           * A confident result that could not be written is not final: that is our failure
-           * and worth another attempt. A thrown request never reaches this line at all; its
-           * lease lapses and the row is offered again.
+           * A non-empty answer that was not confident keeps the retry ladder (review 83a), and
+           * so does a confident result that could not be written: that is our failure. A
+           * thrown request never reaches this line; its lease lapses and it is offered again.
            */
           await db.rpc('_import_provider_resolve', {
             p_row_id: claim.row_id,
             p_media_item_id: mediaItemId,
-            p_final: !chosen,
+            p_final: !chosen && results.length === 0,
           });
           if (mediaItemId) matched += 1;
         } catch (cause) {
@@ -218,7 +229,10 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
           const status = /^(?:Error: )?provider (\d{3})$/.exec(text)?.[1];
           const limited = /^(?:Error: )?provider rate limited$/.test(text);
           reasons.add(limited ? 'rate_limited' : status ? `provider_${status}` : 'transport');
-          if (limited) rateLimited = true;
+          if (limited) {
+            rateLimited = true;
+            unasked.push(claim.row_id);
+          }
         }
       }),
     );
@@ -228,11 +242,19 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     if (rateLimited) break;
   }
 
+  for (const claim of (claims as Claim[]).slice(dispatched)) unasked.push(claim.row_id);
+  let released = 0;
+  if (unasked.length > 0) {
+    const { data } = await db.rpc('_import_provider_release', { p_row_ids: unasked });
+    released = typeof data === 'number' ? data : 0;
+  }
+
   return {
     claimed: claims.length,
     matched,
     failed,
     rateLimited,
+    released,
     reasons: [...reasons],
     // Counts, not titles: this answer travels to a cron tick and a runbook, never to a person.
     noResults: empty.length,

@@ -480,6 +480,15 @@ placeable viewing recorded once, native rows kept native, `import_started` exact
 terminal notification, no feed activity, no live staging rows after settle. Re-importing the
 same archive changes nothing.
 
+`rateLimitedProvider` was added after independent review 83a found a pre-existing hole: an
+invocation stopped by a 429 left the rest of its claimed batch with spent attempts, so three
+rate-limited invocations settled findable films as unmatched without one request for them.
+`_import_provider_release` now refunds claims never dispatched or refused with 429 (651
+handed back, 116 of 116 arrived). The same review narrowed `p_final` to an empty TMDB answer
+(a non-empty unconfident one keeps the retry ladder) and serialised provider invocations: the
+drain does not nudge while any row is leased, so TMDB traffic is one invocation's eight-wide
+concurrency. The tick budget bounds work, not lock waits — documented, not changed.
+
 Pinned permanently at small sizes in `supabase/tests/import-keeps-up.test.mjs` and race W3
 in `supabase/tests/concurrency/races/import-worker.mjs`.
 

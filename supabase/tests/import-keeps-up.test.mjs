@@ -184,6 +184,43 @@ describe('a provider claim is a lease', () => {
     );
   });
 
+  it('refunds a claim the provider was never asked about, so a rate limit cannot use a title up', async () => {
+    // Independent review 83a: an invocation that stops at a 429 leaves the rest of its batch
+    // claimed. Three of those used to settle a findable film unmatched without one request.
+    await stageArchive(ona, unknownTitles(1));
+    await t.sql(`select _import_match_batch(id, 100) from import_jobs`);
+
+    for (let i = 0; i < 5; i += 1) {
+      const { rows: claims } = await t.sql(`select * from _import_provider_claim(50)`);
+      assert.equal(claims.length, 1, `offered again after release ${i}`);
+      const { rows } = await t.sql(`select _import_provider_release($1::uuid[]) as n`, [
+        [claims[0].row_id],
+      ]);
+      assert.equal(rows[0].n, 1);
+    }
+    const { rows } = await t.sql(
+      `select status, provider_attempts, provider_claimed_at from import_rows`,
+    );
+    assert.equal(rows[0].status, 'needs_provider');
+    assert.equal(rows[0].provider_attempts, 0, 'five rate-limited invocations cost it nothing');
+    assert.equal(rows[0].provider_claimed_at, null);
+  });
+
+  it('releases only rows still leased and still waiting', async () => {
+    await stageArchive(ona, unknownTitles(1));
+    await t.sql(`select _import_match_batch(id, 100) from import_jobs`);
+    const { rows: claims } = await t.sql(`select * from _import_provider_claim(50)`);
+    await t.sql(`select _import_provider_resolve($1, null, true)`, [claims[0].row_id]);
+
+    const { rows } = await t.sql(`select _import_provider_release($1::uuid[]) as n`, [
+      [claims[0].row_id],
+    ]);
+    assert.equal(rows[0].n, 0, 'an answered row is not handed back');
+    const { rows: row } = await t.sql(`select status, provider_attempts from import_rows`);
+    assert.equal(row[0].status, 'unmatched');
+    assert.equal(row[0].provider_attempts, 1);
+  });
+
   it("takes every job's titles in turn", async () => {
     const pia = await t.createUser({ username: `keeps_pia_${seq}` });
     const big = await stageArchive(ona, unknownTitles(6));
@@ -269,6 +306,42 @@ describe('a job and the provider it waits for', () => {
     const end = await statusOf(jobId);
     assert.equal(end.status, 'done', 'a silent provider still ends in a summary');
     assert.equal(end.counts.unmatched, 1);
+  });
+
+  it('starts no second provider invocation while one is in flight', async () => {
+    // One invocation at a time is what bounds TMDB traffic (review 83a). PGlite has no `net`
+    // schema, so the nudge is observed through a recorder installed for this test.
+    await t.sql(`create schema if not exists net`);
+    await t.sql(`create table if not exists net.keeps_posts (id serial, body jsonb)`);
+    await t.sql(
+      `create or replace function net.http_post(url text, body jsonb default '{}', params jsonb default '{}',
+         headers jsonb default '{}', timeout_milliseconds integer default 5000)
+       returns bigint language sql as $f$ insert into net.keeps_posts (body) values (body) returning id::bigint $f$`,
+    );
+    try {
+      const jobId = await stageArchive(ren, unknownTitles(3));
+      await matchOut(jobId);
+      await t.sql(`delete from net.keeps_posts`);
+
+      await t.sql(`select _drain_import_jobs() as r`);
+      assert.equal(
+        (await t.sql(`select count(*)::int as n from net.keeps_posts`)).rows[0].n,
+        1,
+      );
+
+      // An invocation takes one row and is still working on it.
+      await t.sql(`select * from _import_provider_claim(1)`);
+      await t.sql(`delete from net.keeps_posts`);
+      await t.sql(`select _drain_import_jobs() as r`);
+      assert.equal(
+        (await t.sql(`select count(*)::int as n from net.keeps_posts`)).rows[0].n,
+        0,
+        'two rows are unasked, but an invocation is in flight',
+      );
+    } finally {
+      await t.sql(`drop function if exists net.http_post(text, jsonb, jsonb, jsonb, integer)`);
+      await t.sql(`drop table if exists net.keeps_posts`);
+    }
   });
 
   it('starts the grace when the job starts applying, for a provider that never claims at all', async () => {
