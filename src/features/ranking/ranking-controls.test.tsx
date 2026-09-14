@@ -24,6 +24,7 @@ const mockRpc = jest.fn();
 const mockPivotRead = jest.fn();
 const mockRecallRead = jest.fn();
 const mockCreditsRead = jest.fn();
+const mockEpisodes = jest.fn();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -42,6 +43,12 @@ jest.mock('@/lib/supabase', () => ({
     }),
   },
   startSessionRefresh: () => () => {},
+}));
+
+// `useSeasonEpisodes`' fallback fetch, reached only through the recall sheet on a
+// season. Every other test in this file compares films and never touches it.
+jest.mock('@/lib/tmdb-adapter', () => ({
+  fetchSeasonEpisodes: () => mockEpisodes(),
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -99,7 +106,7 @@ beforeEach(() => {
   mockRpc.mockReset();
   mockPivotRead.mockReset();
   mockPivotRead.mockResolvedValue({
-    data: { id: 'film-p', title: 'Film P', poster_path: null },
+    data: { id: 'film-p', kind: 'movie', title: 'Film P', poster_path: null },
     error: null,
   });
   mockRecallRead.mockReset();
@@ -114,12 +121,15 @@ beforeEach(() => {
       episode_count: null,
       overview: 'A courier misplaces a briefcase.',
       poster_path: null,
+      backdrop_path: null,
       genres: ['Thriller'],
       certification: 'R',
       parent: null,
     },
     error: null,
   });
+  mockEpisodes.mockReset();
+  mockEpisodes.mockResolvedValue([]);
   mockCreditsRead.mockReset();
   mockCreditsRead.mockResolvedValue({
     data: {
@@ -421,4 +431,142 @@ describe('finishing the log after a ranking', () => {
     await sheet.findByLabelText(REVEAL);
     expect(sheet.queryByRole('button', { name: 'Rank another' })).toBeNull();
   });
+});
+
+/**
+ * **What the Details affordance promises, and that the promise survives a second open.**
+ *
+ * Last in the file on purpose. These are the only tests here that press more than twice,
+ * and a press-heavy test that goes wrong takes the renders after it with it — so there is
+ * nothing after it to take.
+ */
+describe('details, as an affordance', () => {
+  const seasonSubject = {
+    id: 'season-a',
+    title: 'Wizards of Waverly Place, S1',
+    bucket: 'loved' as const,
+    posterUri: null,
+    kind: 'season' as const,
+  };
+
+  it('describes the sheet each card actually opens, one card at a time', async () => {
+    // A season subject against a film opponent, which is an ordinary pair: the ranking
+    // compares within a category and the *opponent's* kind comes off its own row.
+    answering(comparison);
+    const sheet = await openSheet({ subject: seasonSubject });
+    await sheet.ready('Film P');
+
+    // One sentence served both kinds and named the film's contents. A season's sheet has
+    // no runtime and, since the memory-aid pass, no cast line either — what it has is the
+    // episodes, which are the reason anybody opens it on a season. This hint is the only
+    // description of the control a screen reader ever gets.
+    expect(
+      sheet.getByLabelText('Details about Wizards of Waverly Place, S1').props
+        .accessibilityHint,
+    ).toBe('Shows the year, the episodes in it, and what it is about.');
+    expect(sheet.getByLabelText('Details about Film P').props.accessibilityHint).toBe(
+      'Shows the year, the runtime, the cast, and what it is about.',
+    );
+  });
+
+  it('answers nothing and cancels nothing while it is open', async () => {
+    answering(comparison);
+    const sheet = await openSheet();
+    await sheet.ready('Film P');
+
+    await fireEvent.press(sheet.getByLabelText('Details about Film P'));
+    await waitFor(() => expect(sheet.getByText('Back to ranking')).toBeTruthy());
+
+    // The session behind the sheet is untouched: no judgement filed on a title the
+    // reader was still trying to place, and no cancellation of the session they are in
+    // the middle of. The comparison is still there to come back to.
+    expect(callsTo('rank_answer')).toHaveLength(0);
+    expect(callsTo('rank_skip')).toHaveLength(0);
+    expect(callsTo('rank_back')).toHaveLength(0);
+    expect(callsTo('rank_cancel')).toHaveLength(0);
+    expect(sheet.onClose).not.toHaveBeenCalled();
+  });
+
+  it('opens collapsed the second time rather than in the state it was left', async () => {
+    /**
+     * **What actually leaks, which is narrower than it first looks.**
+     *
+     * The sheet is mounted unconditionally and draws nothing while nothing is being
+     * recalled. Returning null unmounts its *children*, so an expanded synopsis resets
+     * on its own and always did — the first version of this test asserted that and
+     * passed with the `key` removed, which is a test asserting nothing.
+     *
+     * What survives a close is the sheet component's **own** state, because React keeps
+     * the instance: `showAllEpisodes`. So a reader who opens a long season, presses
+     * *Show all*, closes it and opens the other card gets that card's season already
+     * expanded to full length — a decision about a different show applied to this one.
+     *
+     * Four presses and no element pressed twice, which is the shape that does not poison
+     * the renders after it.
+     */
+    mockRecallRead.mockResolvedValue({
+      data: {
+        id: 'season-p',
+        kind: 'season',
+        title: 'Season 1',
+        season_number: 1,
+        release_date: '2007-10-12',
+        runtime_minutes: 22,
+        episode_count: 8,
+        overview: null,
+        poster_path: null,
+        backdrop_path: null,
+        genres: null,
+        original_language: 'en',
+        certification: null,
+        parent: { title: 'A Show', genres: null, original_language: 'en', certification: null },
+      },
+      error: null,
+    });
+    mockEpisodes.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => ({
+        episode_number: index + 1,
+        title: `Episode title ${index + 1}`,
+        air_date: null,
+        runtime_minutes: null,
+        still_path: null,
+        overview: null,
+      })),
+    );
+
+    answering(comparison);
+    const sheet = await openSheet();
+    await sheet.ready('Film P');
+
+    await fireEvent.press(sheet.getByLabelText('Details about Film P'));
+    /**
+     * **The longest wait in this file, and it needs to say so.**
+     *
+     * Four sequential round trips stand between the press and this control: the
+     * opponent's card row, the recall row, the credits facet, and the episode list. At
+     * the file-wide five seconds it passes alone every time and failed once inside a
+     * full parallel run where this suite took 161 seconds rather than its usual thirty —
+     * which is the contention class `jest.setup.js` already describes, met by the test
+     * that happens to have the deepest chain.
+     *
+     * Raised here rather than globally: every other wait in this file is one hop, and a
+     * budget raised for all of them would hide a real stall somewhere else. The test
+     * timeout goes with it, because a `waitFor` cannot outlive the test holding it.
+     */
+    const showAll = await waitFor(() => sheet.getByLabelText('Show all 8 episodes'), {
+      timeout: 20000,
+    });
+    await fireEvent.press(showAll);
+    await waitFor(() => expect(sheet.getByText('8 · Episode title 8')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Back to ranking' }));
+    await fireEvent.press(sheet.getByLabelText('Details about Film A'));
+
+    // Six again, and the offer back. This is a different sheet, not the same one
+    // re-shown with a decision still in it.
+    await waitFor(() => expect(sheet.getByLabelText('Show all 8 episodes')).toBeTruthy(), {
+      timeout: 20000,
+    });
+    expect(sheet.queryByText('8 · Episode title 8')).toBeNull();
+  }, 45000);
 });
