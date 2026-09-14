@@ -512,6 +512,40 @@ describe('claim_push_batch', () => {
     assert.equal(row.state, 'claimed');
   });
 
+  /**
+   * **The award push names the award and opens it** (20260920000200; founder, physical QA,
+   * 2026-09-14). The job carries the award, the tier and the names the row was written
+   * with, so the sender can say "You earned Seedling 🎉" and the tap can open that award's
+   * celebration. 20260830000100 had dropped `award_name`; this is the claim putting it back.
+   */
+  it('carries which award and tier a congratulations is about, and nothing for other types', async () => {
+    await register(reader, TOKEN(35), 'ios');
+    const { rows } = await t.sql(
+      `insert into notifications (recipient_id, type, payload)
+       values ($1, 'award_earned', jsonb_build_object(
+         'award', 'queue-dragon', 'tier', 'seedling',
+         'award_name', 'Queue Dragon', 'tier_label', 'Seedling'))
+       returning id`,
+      [reader],
+    );
+    const congrats = rows[0].id;
+    const follow = await notify(reader, 'follow');
+
+    const jobs = await claim();
+    const award = jobs.find((job) => job.notification_id === congrats);
+    const other = jobs.find((job) => job.notification_id === follow);
+
+    assert.ok(award, 'the congratulations was claimed');
+    assert.equal(award.award_key, 'queue-dragon');
+    assert.equal(award.award_tier, 'seedling');
+    assert.equal(award.award_name, 'Queue Dragon');
+    assert.equal(award.tier_label, 'Seedling');
+
+    assert.ok(other, 'the follow was claimed');
+    assert.equal(other.award_key, null);
+    assert.equal(other.award_tier, null);
+  });
+
   it('still reaps a job whose actor has genuinely gone', async () => {
     // The other half of the same predicate, so restoring the escape cannot be mistaken
     // for removing the check. An actor that no longer resolves is a job with nothing to

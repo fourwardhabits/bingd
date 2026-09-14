@@ -1,4 +1,4 @@
-import { hrefForPush, PUSH_FALLBACK_HREF, ROUTED_KINDS } from './routing';
+import { hrefFor, hrefForPush, PUSH_FALLBACK_HREF, ROUTED_KINDS, targetFor } from './routing';
 
 /**
  * Where a tapped push lands.
@@ -68,11 +68,72 @@ describe('a live payload', () => {
     );
   });
 
-  it('opens the Awards sheet for an award', () => {
+  it('opens the Awards sheet for an award the payload does not name', () => {
+    // A sender from before 20260920000200, or a row that lost its keys.
     expect(hrefForPush(payload({ kind: 'award_earned' }))).toEqual({
       pathname: '/profile',
       params: { awards: '1' },
     });
+  });
+});
+
+/**
+ * **An award push opens that award** (founder, physical QA, 2026-09-14).
+ *
+ * The inbox row opened the celebration and the lock-screen push opened the Awards list.
+ * `useLastNotificationResponse` hands cold, background and foreground taps to the same
+ * `hrefForPush`, so these cover all three entrances; the last test pins the push to the
+ * inbox row's own resolution rather than to a copy of its answer.
+ */
+describe('an award push', () => {
+  const award = (over: Record<string, unknown> = {}) =>
+    payload({
+      kind: 'award_earned',
+      actorUsername: null,
+      mediaItemId: null,
+      awardKey: 'queue-dragon',
+      awardTier: 'seedling',
+      ...over,
+    });
+
+  it('opens the celebration for the award and tier it names', () => {
+    expect(hrefForPush(award())).toEqual({
+      pathname: '/awards/celebrate',
+      params: { awards: 'queue-dragon:seedling' },
+    });
+  });
+
+  it('lands exactly where the inbox row for the same award lands', () => {
+    const row = {
+      id: 'n1',
+      kind: 'award_earned',
+      type: 'award_earned',
+      actorUsername: null,
+      mediaItemId: null,
+      subjectType: null,
+      subjectId: null,
+      award: { key: 'queue-dragon', tierKey: 'seedling' },
+    } as unknown as Parameters<typeof targetFor>[0];
+
+    expect(hrefForPush(award())).toEqual(hrefFor(targetFor(row)));
+  });
+
+  it('falls back to the Awards list when the tier is missing', () => {
+    expect(hrefForPush(award({ awardTier: null }))).toEqual({
+      pathname: '/profile',
+      params: { awards: '1' },
+    });
+  });
+
+  it('refuses award fields that are not strings', () => {
+    expect(hrefForPush(award({ awardKey: { key: 'queue-dragon' } }))).toEqual({
+      pathname: '/profile',
+      params: { awards: '1' },
+    });
+  });
+
+  it('does not let award fields steer any other kind', () => {
+    expect(hrefForPush(award({ kind: 'follow', actorUsername: 'suraj' }))).toBe('/u/suraj');
   });
 });
 

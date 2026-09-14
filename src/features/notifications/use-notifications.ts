@@ -78,9 +78,10 @@ export type NotificationKind =
    * you" was the incidental half of it — two rows for one act is the redundancy PRD §15
    * refuses.
    *
-   * **Not to be confused with `invite_activated` above.** That is the analytics
-   * milestone at the tenth ranking, a different number from the invite bar, and is unchanged; this is the social event at
-   * acceptance. Two moments, two rows, and neither stands in for the other.
+   * **Not to be confused with `invite_activated` above.** That is the activation
+   * milestone at the fifth ranking; this is the social event at acceptance. Since
+   * 20260920000100 an inviter holds one or the other for a given person, never both: this
+   * row when acceptance filed it, `invite_activated` only when it did not.
    *
    * Filed only when the invitee's follow was auto-approved. A **private** inviter still
    * gets `follow_request`, because that row carries Approve and Decline and is the only
@@ -596,10 +597,11 @@ export function verbFor(
      * The same sentence as `invite_activated`, deliberately, because it is the same
      * fact — and this is the row that says it at the moment it becomes true.
      *
-     * The two are not duplicates in an inbox: acceptance files this one and only this
-     * one; activation files the other, later, and only if the invitee ranks five titles.
-     * An inviter can see both over a fortnight, describing two different milestones of
-     * the same person, which is what the invite funnel actually has to say.
+     * **Never both for one person** (20260920000100). Since the activation bar became the
+     * completed First Five, activation lands minutes after acceptance, and the founder's
+     * inbox showed this sentence twice. Activation now files `invite_activated` only for an
+     * inviter the acceptance did not already tell, so the server files one of the two.
+     * Nothing here hides a second row: a duplicate is fixed where it is written.
      */
     case 'invite_joined':
       return 'joined bingd from your invite';
