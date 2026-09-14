@@ -42,6 +42,20 @@ async function watchedCounts(userId: string): Promise<{ movies: number; tv: numb
   return { movies: row?.movies ?? 0, tv: row?.tv ?? 0 };
 }
 
+/** The ranked counts, for when `watchedCounts` cannot be read. */
+async function rankedCounts(userId: string): Promise<{ movies: number; tv: number }> {
+  const count = (category: 'movies' | 'tv_seasons') =>
+    supabase
+      .from('rankings')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('category', category);
+  const [movies, seasons] = await Promise.all([count('movies'), count('tv_seasons')]);
+  if (movies.error) throw movies.error;
+  if (seasons.error) throw seasons.error;
+  return { movies: movies.count ?? 0, tv: seasons.count ?? 0 };
+}
+
 /**
  * Somebody else's profile, by username.
  *
@@ -373,7 +387,13 @@ export function useProfileStats(userId: string) {
           .select('*', { count: 'exact', head: true })
           .eq('follower_id', userId)
           .eq('state', 'approved'),
-        watchedCounts(userId),
+        /**
+         * Degrades to the ranked counts, as the public profile does (independent review,
+         * 2026-09-14). A bundle that reaches a backend without `profile_title_counts` must not
+         * fail Followers and Following with it; the ranked counts are what this row showed
+         * before the watched collection existed.
+         */
+        watchedCounts(userId).catch(() => rankedCounts(userId)),
       ]);
 
       if (followers.error) throw followers.error;
