@@ -68,6 +68,10 @@ on:
       - 'supabase/migrations/**'
       - 'supabase/tests/concurrency/**'
       - 'supabase/tests/harness.mjs'
+      # The welcome email's SQL is not a migration until the automation is switched on,
+      # and its race suite applies it from where it lives.
+      - 'emails/welcome/automation/**'
+      - 'supabase/tests/welcome-email-support.mjs'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/db-races.yml'
@@ -77,6 +81,10 @@ on:
       - 'supabase/migrations/**'
       - 'supabase/tests/concurrency/**'
       - 'supabase/tests/harness.mjs'
+      # The welcome email's SQL is not a migration until the automation is switched on,
+      # and its race suite applies it from where it lives.
+      - 'emails/welcome/automation/**'
+      - 'supabase/tests/welcome-email-support.mjs'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/db-races.yml'

@@ -54,6 +54,12 @@ jobs:
       # and required to go red.
       - run: npm run test:web:mutants
 
+      # The welcome email, as a reader receives it: the committed render matches its copy,
+      # every link is on a path the app claims, every in-app instruction names a label the
+      # app still renders, and the test send cannot read a user list. Run with node
+      # directly because a package.json script moves the native fingerprint.
+      - run: node --test emails/welcome/email.test.mjs
+
       # The release lanes. Cheap, static, and in the *pull request* gate deliberately:
       # what it protects is every change to eas.json and config/backends.cjs, and those
       # arrive on ordinary pull requests rather than on release branches. Independent
