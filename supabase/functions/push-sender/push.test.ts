@@ -81,8 +81,8 @@ Deno.test('the congratulations is the one actorless push, and names the award', 
       actor_name: null,
       award_key: 'queue-dragon',
       award_tier: 'seedling',
-      award_name: 'Queue Dragon',
-      tier_label: 'Seedling',
+      award_family: 'Queue Dragon',
+      award_tier_label: 'Seedling',
     }),
   );
   assert(content, 'award_earned produced no push');
@@ -106,8 +106,8 @@ Deno.test('a metal tier is named by its family, as the inbox row names it', () =
       actor_name: null,
       award_key: 'movie-muncher',
       award_tier: 'bronze',
-      award_name: 'Movie Muncher',
-      tier_label: 'Bronze',
+      award_family: 'Movie Muncher',
+      award_tier_label: 'Bronze',
     }),
   );
   assertEquals(content?.title, 'You earned Movie Muncher 🎉');
@@ -122,8 +122,8 @@ Deno.test('an award the sender does not know says its name, never its key', () =
       actor_name: null,
       award_key: 'a-track-added-later',
       award_tier: 'first',
-      award_name: 'Later Award',
-      tier_label: 'First',
+      award_family: 'Later Award',
+      award_tier_label: 'First',
     }),
   );
   assertEquals(content?.title, 'You earned Later Award 🎉');
@@ -131,6 +131,77 @@ Deno.test('an award the sender does not know says its name, never its key', () =
   assert(!content?.title.includes('a-track-added-later'));
   // Still routable: the app opens the celebration, which draws what it can.
   assertEquals(content?.data.awardKey, 'a-track-added-later');
+});
+
+Deno.test('a tier the sender does not know keeps the fallback the inbox row uses', () => {
+  // A tier added to a known named track after this sender shipped: its own label, as
+  // `awardAnnouncement` would say, not the family name.
+  const named = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_key: 'queue-dragon',
+      award_tier: 'queue-emperor',
+      award_family: 'Queue Dragon',
+      award_tier_label: 'Queue Emperor',
+    }),
+  );
+  assertEquals(named?.title, 'You earned Queue Emperor 🎉');
+  assertEquals(named?.body, 'See it in your bingd Awards');
+
+  // A metal track is titled by its family whatever the tier is called.
+  const metal = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_key: 'movie-muncher',
+      award_tier: 'platinum',
+      award_family: 'Movie Muncher',
+      award_tier_label: 'Platinum',
+    }),
+  );
+  assertEquals(metal?.title, 'You earned Movie Muncher 🎉');
+});
+
+Deno.test('an award tap payload carries exactly seven fields', () => {
+  // The five-field whitelist below, plus the award and the tier and nothing else: no
+  // names, no threshold, no counts.
+  const content = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_key: 'queue-dragon',
+      award_tier: 'seedling',
+      award_family: 'Queue Dragon',
+      award_tier_label: 'Seedling',
+    }),
+  );
+  assertEquals(Object.keys(content!.data).sort(), [
+    'actorUsername',
+    'awardKey',
+    'awardTier',
+    'feedEventId',
+    'kind',
+    'mediaItemId',
+    'notificationId',
+  ]);
+});
+
+Deno.test('the family name the old claim key held is never read as the title', () => {
+  // `award_name` is what the pre-20260920000200 sender read, and it holds the family.
+  // This sender ignores it, so a stray one cannot turn Seedling into "Queue Dragon".
+  const content = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_name: 'Queue Dragon',
+    }),
+  );
+  assertEquals(content?.title, 'You earned a new Award 🎉');
 });
 
 Deno.test('an award job from a database mid-deploy still says something honest', () => {
@@ -280,13 +351,17 @@ Deno.test('no excerpt falls back to the metadata sentence, never an empty quote'
 
 Deno.test("a season carries its show's name, because its own is Season 2", () => {
   assertEquals(
-    subjectName(job({ media_kind: 'season', media_title: 'Season 2', series_title: 'Severance' })),
+    subjectName(
+      job({ media_kind: 'season', media_title: 'Season 2', series_title: 'Severance' }),
+    ),
     'Severance, S2',
   );
   // TMDB names a limited series' single season after the show, and "Chernobyl,
   // Chernobyl" is what naive joining produces.
   assertEquals(
-    subjectName(job({ media_kind: 'season', media_title: 'Chernobyl', series_title: 'Chernobyl' })),
+    subjectName(
+      job({ media_kind: 'season', media_title: 'Chernobyl', series_title: 'Chernobyl' }),
+    ),
     'Chernobyl',
   );
   // A movie is never joined to anything.
@@ -569,27 +644,33 @@ Deno.test('every token dead is settled rather than retried, and all are revoked'
  * The in-app row is the notification and it is already on both devices. A missed buzz on a
  * second phone is the better failure.
  */
-Deno.test('a partial success is not retried, so the device that got it is not buzzed twice', () => {
-  const { results } = summarise(
-    [addressed('n1', 'a'), addressed('n1', 'b')],
-    from([ok, rateLimited]),
-  );
+Deno.test(
+  'a partial success is not retried, so the device that got it is not buzzed twice',
+  () => {
+    const { results } = summarise(
+      [addressed('n1', 'a'), addressed('n1', 'b')],
+      from([ok, rateLimited]),
+    );
 
-  assertEquals(results.length, 1);
-  assertEquals(results[0].delivered, true);
-  // Still recorded, so a half-failing send is diagnosable rather than silent.
-  assertEquals(results[0].error, 'slow down');
-});
+    assertEquals(results.length, 1);
+    assertEquals(results[0].delivered, true);
+    // Still recorded, so a half-failing send is diagnosable rather than silent.
+    assertEquals(results[0].error, 'slow down');
+  },
+);
 
-Deno.test('one device dead beside one that worked is delivered, and the dead one revoked', () => {
-  const { results, deadTokens } = summarise(
-    [addressed('n1', 'a'), addressed('n1', 'b')],
-    from([ok, gone]),
-  );
+Deno.test(
+  'one device dead beside one that worked is delivered, and the dead one revoked',
+  () => {
+    const { results, deadTokens } = summarise(
+      [addressed('n1', 'a'), addressed('n1', 'b')],
+      from([ok, gone]),
+    );
 
-  assertEquals(results[0].delivered, true);
-  assertEquals(deadTokens, ['b']);
-});
+    assertEquals(results[0].delivered, true);
+    assertEquals(deadTokens, ['b']);
+  },
+);
 
 Deno.test('two notifications in one batch are settled independently', () => {
   const { results } = summarise(
@@ -679,49 +760,61 @@ const importJob = (type: string, overrides: Partial<PushJob> = {}) =>
     ...overrides,
   });
 
-Deno.test('an import push has no actor and still goes out, carrying the job it is about', () => {
-  for (const type of ['import_started', 'import_completed', 'import_failed']) {
-    const content = contentFor(importJob(type));
-    assert(content, `${type} produced no push`);
-    assertEquals(content.data.kind, type);
-    assertEquals(content.data.importJobId, '22222222-2222-2222-2222-222222222222');
-    assertEquals(content.data.actorUsername, null);
-    assertEquals(content.data.mediaItemId, null);
-  }
-});
+Deno.test(
+  'an import push has no actor and still goes out, carrying the job it is about',
+  () => {
+    for (const type of ['import_started', 'import_completed', 'import_failed']) {
+      const content = contentFor(importJob(type));
+      assert(content, `${type} produced no push`);
+      assertEquals(content.data.kind, type);
+      assertEquals(content.data.importJobId, '22222222-2222-2222-2222-222222222222');
+      assertEquals(content.data.actorUsername, null);
+      assertEquals(content.data.mediaItemId, null);
+    }
+  },
+);
 
-Deno.test('the import pushes say the same thing the import screens do, and never "matching"', () => {
-  const started = contentFor(importJob('import_started'))!;
-  assertEquals(started.title, 'Letterboxd import started');
-  assertEquals(
-    started.body,
-    'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
-  );
+Deno.test(
+  'the import pushes say the same thing the import screens do, and never "matching"',
+  () => {
+    const started = contentFor(importJob('import_started'))!;
+    assertEquals(started.title, 'Letterboxd import started');
+    assertEquals(
+      started.body,
+      'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
+    );
 
-  const failed = contentFor(importJob('import_failed'))!;
-  assertEquals(failed.title, 'We couldn’t finish your Letterboxd import');
-  assertEquals(failed.body, 'Open bingd to see what happened and try again.');
+    const failed = contentFor(importJob('import_failed'))!;
+    assertEquals(failed.title, 'We couldn’t finish your Letterboxd import');
+    assertEquals(failed.body, 'Open bingd to see what happened and try again.');
 
-  for (const content of [started, failed, contentFor(importJob('import_completed'))!]) {
-    assert(!/match|process|payload|row|—/i.test(`${content.title} ${content.body}`), content.body);
-  }
-});
+    for (const content of [started, failed, contentFor(importJob('import_completed'))!]) {
+      assert(
+        !/match|process|payload|row|—/i.test(`${content.title} ${content.body}`),
+        content.body,
+      );
+    }
+  },
+);
 
-Deno.test('the completion quotes the films added, and says something true when there are none', () => {
-  const many = contentFor(importJob('import_completed', { import_counts: { watched: 19 } }))!;
-  assertEquals(many.title, 'Your Letterboxd history is ready');
-  assertEquals(many.body, '19 movies added as watched. Ready to rank.');
+Deno.test(
+  'the completion quotes the films added, and says something true when there are none',
+  () => {
+    const many = contentFor(importJob('import_completed', { import_counts: { watched: 19 } }))!;
+    assertEquals(many.title, 'Your Letterboxd history is ready');
+    assertEquals(many.body, '19 movies added as watched. Ready to rank.');
 
-  const one = contentFor(importJob('import_completed', { import_counts: { watched: 1 } }))!;
-  assertEquals(one.body, '1 movie added as watched. Ready to rank.');
+    const one = contentFor(importJob('import_completed', { import_counts: { watched: 1 } }))!;
+    assertEquals(one.body, '1 movie added as watched. Ready to rank.');
 
-  const none = contentFor(importJob('import_completed', { import_counts: { watched: 0 } }))!;
-  assertEquals(none.body, 'Your Letterboxd history is now in bingd.');
+    const none = contentFor(importJob('import_completed', { import_counts: { watched: 0 } }))!;
+    assertEquals(none.body, 'Your Letterboxd history is now in bingd.');
 
-  // A database from before the claim carried counts.
-  const unknown = contentFor(importJob('import_completed', { import_counts: undefined }))!;
-  assertEquals(unknown.body, 'Your Letterboxd history is now in bingd.');
-});
+    // A database from before the claim carried counts.
+    const unknown = contentFor(importJob('import_completed', { import_counts: undefined }))!;
+    assertEquals(unknown.body, 'Your Letterboxd history is now in bingd.');
+  },
+);
 
 Deno.test('no other push grows an import job id', () => {
   const follow = contentFor(job({ type: 'follow' }))!;

@@ -50,9 +50,14 @@
 -- **Race and retry.** Activation is once per invitee from the guarded UPDATE below,
 -- unchanged. `redeem_invite` commits the attribution and its `invite_joined` in one
 -- transaction before any ranking can activate it, and both writers take `_lock_pair`
--- for this pair, so the existence check reads a committed answer. Both types map to the
--- `invites` preference category, so a silenced `invite_joined` means a silenced
--- `invite_activated` too, never a first notice arriving at activation instead.
+-- for this pair, so the existence check reads a committed answer.
+--
+-- **The check is on the row, not on the acceptance.** Both types map to the `invites`
+-- preference category, so an inviter with invites off at both moments gets neither. An
+-- inviter who had invites off at acceptance (so no `invite_joined` was filed) and turned
+-- them back on before the fifth ranking gets `invite_activated` then, as their one
+-- notice. So does an inviter whose `invite_joined` a block removed and who unblocked
+-- before activation. Both are still one row, which is the contract.
 --
 -- **Existing rows are left alone.** Applied migrations do not rewrite anybody's inbox.
 --

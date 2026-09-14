@@ -516,7 +516,7 @@ describe('claim_push_batch', () => {
    * **The award push names the award and opens it** (20260920000200; founder, physical QA,
    * 2026-09-14). The job carries the award, the tier and the names the row was written
    * with, so the sender can say "You earned Seedling 🎉" and the tap can open that award's
-   * celebration. 20260830000100 had dropped `award_name`; this is the claim putting it back.
+   * celebration.
    */
   it('carries which award and tier a congratulations is about, and nothing for other types', async () => {
     await register(reader, TOKEN(35), 'ios');
@@ -538,8 +538,12 @@ describe('claim_push_batch', () => {
     assert.ok(award, 'the congratulations was claimed');
     assert.equal(award.award_key, 'queue-dragon');
     assert.equal(award.award_tier, 'seedling');
-    assert.equal(award.award_name, 'Queue Dragon');
-    assert.equal(award.tier_label, 'Seedling');
+    assert.equal(award.award_family, 'Queue Dragon');
+    assert.equal(award.award_tier_label, 'Seedling');
+    // Never under `award_name`: the sender deployed before 20260920000200 reads that key as
+    // the earned title, and it holds the family, so it would say "You earned Queue Dragon"
+    // for Seedling. Under new names an old sender says what it says today.
+    assert.equal('award_name' in award, false);
 
     assert.ok(other, 'the follow was claimed');
     assert.equal(other.award_key, null);

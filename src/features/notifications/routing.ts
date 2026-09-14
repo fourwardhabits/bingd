@@ -448,6 +448,12 @@ export const PUSH_FALLBACK_HREF = '/settings/notifications' as Href;
 const readString = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
 
+/** An award or tier key from a push: a lowercase kebab-case slug, or nothing. */
+const awardSlug = (value: unknown): string | null => {
+  const text = readString(value);
+  return text && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(text) ? text : null;
+};
+
 /**
  * Where a tapped push leads. Always somewhere.
  *
@@ -476,8 +482,10 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
   // The same translation for an import: the sender names the job, the resolver reads a
   // subject. Only an import kind sends it, and only an import kind reads it.
   const jobId = readString(payload.importJobId);
-  const awardKey = readString(payload.awardKey);
-  const awardTier = readString(payload.awardTier);
+  // Keys are kebab-case slugs (`queue-dragon`, `seedling`). Anything else is refused here
+  // rather than joined into `award:tier`, where a `,` or `:` would add or split a page.
+  const awardKey = awardSlug(payload.awardKey);
+  const awardTier = awardSlug(payload.awardTier);
 
   const target = targetFor({
     kind: kind as NotificationKind,
