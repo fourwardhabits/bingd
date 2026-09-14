@@ -1795,11 +1795,16 @@ describe('the release mode', () => {
     assert.match(front, /src="\/page\.mjs"/, 'nothing wires the buttons up');
     assert.match(front, /id="bingd-config"/, 'the buttons have no distribution to read');
 
+    // 2026-09-13: the hero carries the Movies and TV collections, the ranking section a
+    // ranked list and the score it lands on, and the friends section the Feed beside a
+    // comment thread. The compare sheet left the page.
     for (const name of [
-      'shot-compare',
       'shot-movies',
       'shot-tv',
+      'shot-ranked',
+      'shot-score',
       'shot-feed',
+      'shot-comments',
       'shot-foryou',
       'shot-watchlist',
     ]) {

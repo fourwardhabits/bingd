@@ -89,7 +89,47 @@ const FEED_MASKS = [
   [90, 1846, 56, 56], // row 3 actor avatar
 ];
 
+/**
+ * The Witcher comments thread. Every display name and avatar is blurred, the founder's
+ * included, for the same reason as the Feed: a comment is somebody's words, and the page
+ * shows the conversation, not who had it.
+ */
+const COMMENT_MASKS = [
+  [175, 372, 168, 58], // "Abisola" in the ranked row
+  [80, 464, 62, 68], // actor avatar over the poster
+  [38, 677, 92, 92], // first commenter's photo
+  [155, 684, 318, 50], // first commenter's name
+  [100, 1011, 94, 94], // reply avatar
+  [218, 1016, 150, 56], // reply name
+];
+
 const SHOTS = [
+  {
+    // The ranked list from Your First Five on an iPhone (2026-09-12): rank, poster, title,
+    // score. Cropped to the four ranked rows, which leaves out the onboarding heading, the
+    // Letterboxd sentence under it, and the buttons.
+    source: 'IMG_0756.PNG',
+    name: 'shot-ranked',
+    width: 640,
+    crop: [0, 680, 828, 810],
+    alt: 'A ranked bingd. list of four movies, each numbered by where it landed and carrying its score out of ten',
+  },
+  {
+    // The score a ranking ends on. Cropped to the score and the title: this capture also
+    // carries a placement line the shipped app no longer draws, which is below the crop.
+    source: 'Screenshot_20260831_094054_bingd.jpg',
+    name: 'shot-score',
+    width: 640,
+    crop: [0, 1110, 1080, 600],
+    alt: 'The score a ranking lands on, 9.1, above the title Harry Potter and the Goblet of Fire',
+  },
+  {
+    source: 'Screenshot_20260831_094209_bingd.jpg',
+    name: 'shot-comments',
+    width: 640,
+    masks: COMMENT_MASKS,
+    alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
+  },
   {
     source: 'Screenshot_20260831_094018_bingd.jpg',
     name: 'shot-compare',
@@ -133,7 +173,10 @@ await mkdir(out, { recursive: true });
 
 const manifest = [];
 
-for (const shot of SHOTS) {
+/** `--only shot-a,shot-b` regenerates just those, leaving every committed shot untouched. */
+const only = flag('--only', null)?.split(',');
+
+for (const shot of SHOTS.filter((s) => !only || only.includes(s.name))) {
   const file = join(raw, shot.source);
   try {
     await access(file);
@@ -161,13 +204,16 @@ for (const shot of SHOTS) {
     image = sharp(await sharp(file).composite(patches).toBuffer());
   }
 
-  // The whole frame minus the host phone's status and navigation bars.
-  const box = {
-    left: 0,
-    top: Math.round(h * TOP),
-    width: w,
-    height: h - Math.round(h * TOP) - Math.round(h * BOTTOM),
-  };
+  // The whole frame minus the host phone's status and navigation bars, unless the shot
+  // names its own crop.
+  const box = shot.crop
+    ? { left: shot.crop[0], top: shot.crop[1], width: shot.crop[2], height: shot.crop[3] }
+    : {
+        left: 0,
+        top: Math.round(h * TOP),
+        width: w,
+        height: h - Math.round(h * TOP) - Math.round(h * BOTTOM),
+      };
 
   const buffer = await image
     .extract(box)
