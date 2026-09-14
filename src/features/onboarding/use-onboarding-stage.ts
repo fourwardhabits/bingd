@@ -84,14 +84,27 @@ const STAGE_PREF = 'onboarding.stage';
  * in this list, so a device that got as far as `answers` before updating reads as having
  * no stage and is placed by the taste rule, which is the same answer it would have got
  * from a cleared Keychain.
+ *
+ * ---------------------------------------------------------------------------
+ * **`letterboxd` ARRIVED 2026-09-13** (founder, preview QA Round 3)
+ *
+ * The optional *Already use Letterboxd?* step, between the ranking run and People
+ * (`app/onboarding/letterboxd.tsx`). A stage of its own rather than a card on the payoff,
+ * because the importer it hosts outlives a relaunch: somebody who closes the app with an
+ * import running must come back to that step, which only a stored stage can say.
+ *
+ * The same `hydrateStage` rule covers a rollback. A build that predates this step reads a
+ * stored `letterboxd` as no stage and places the account by the taste rule, which at five
+ * rankings resumes on People: one optional step skipped, nothing stranded.
  */
-export const STAGE_ORDER = ['taste', 'people', 'notifications', 'done'] as const;
+export const STAGE_ORDER = ['taste', 'letterboxd', 'people', 'notifications', 'done'] as const;
 
 export type OnboardingStage = (typeof STAGE_ORDER)[number];
 
 /** Where each stage is drawn. `done` has no route: the flow ends by opening the app. */
 export const STAGE_ROUTES: Record<Exclude<OnboardingStage, 'done'>, string> = {
   taste: '/onboarding/taste',
+  letterboxd: '/onboarding/letterboxd',
   people: '/onboarding/people',
   notifications: '/onboarding/notifications',
 };

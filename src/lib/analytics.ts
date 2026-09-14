@@ -105,6 +105,12 @@ export type OnboardingStep =
    */
   | 'pick'
   | 'payoff'
+  /**
+   * The optional *Already use Letterboxd?* step (2026-09-13). `continued` is leaving with
+   * an import handed to the server or already running; `skipped` is *Not now*, from any
+   * state short of that.
+   */
+  | 'letterboxd'
   | 'people'
   | 'notifications';
 
@@ -676,6 +682,12 @@ export type AnalyticsEvent =
    * skippable**, which means the honest question is not "how many finished" but "how many
    * of the people who found it finished" — and without a first step that has an entry
    * point on it, a low completion rate and a discoverability problem look identical.
+   *
+   * **On `onboarding` it is a tap, not a view** (2026-09-13). The onboarding step is shown
+   * to everybody who finishes the ranking run, so counting its mount would make this the
+   * step's impressions and the two surfaces incomparable. It fires when somebody presses
+   * *Import from Letterboxd* or asks how to get the file; the step's own exposure is
+   * `onboarding_step_completed` with `step: 'letterboxd'`.
    */
   | { name: 'import_opened'; props: { surface: ImportSurface } }
   /**
@@ -736,9 +748,10 @@ export type SupportTopicName = 'feedback' | 'problem';
  * Where somebody reached the importer from.
  *
  * Two words, and the second one is the reason this property exists: Contract V3 §9 makes
- * the import optional, so the onboarding mention is a *discoverability* treatment rather
- * than a step, and the only way to tell whether it earns its place is to know which of the
- * two doors people came through.
+ * the import optional, so the onboarding entry is a *discoverability* treatment, and the
+ * only way to tell whether it earns its place is to know which of the two doors people
+ * came through. Since 2026-09-13 that door is an optional step of its own after *Your
+ * First Five* (`app/onboarding/letterboxd.tsx`) rather than a sentence on the payoff.
  */
 export type ImportSurface = 'settings' | 'onboarding';
 

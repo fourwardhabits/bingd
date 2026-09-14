@@ -320,8 +320,14 @@ const phaseForEnded = (status: ImportJobStatus): ImportPhase =>
  *   was opened for one. That job is shown however long ago it ended, because somebody asked
  *   for it by name; a job id this account cannot read (deleted, or not theirs) opens the
  *   importer, which is the safe place for a tap on something that is gone.
+ * @param options.countOpenOnRequest Leave `import_opened` to the caller's `opened()`
+ *   rather than counting the mount. The onboarding step's; see `opened` below.
  */
-export function useImport(surface: ImportSurface, jobId?: string | null) {
+export function useImport(
+  surface: ImportSurface,
+  jobId?: string | null,
+  options?: { readonly countOpenOnRequest?: boolean },
+) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<ImportPhase>({ phase: 'idle' });
   /** Bumped by `recheck`, so the restore effect asks about the named job again. */
@@ -775,12 +781,24 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     // rebuild the loop on every tick, stacking a fresh timer each time.
   }, [state.phase, settle, queryClient]);
 
+  /**
+   * `import_opened`, once per mount of this hook.
+   *
+   * On open by default. `countOpenOnRequest` hands the moment to the caller instead: the
+   * onboarding step mounts this hook for everybody who reaches it (it has to, so a running
+   * import is found on a relaunch), and counting that mount would turn the funnel's
+   * denominator into the step's impressions. See `import_opened` in `lib/analytics.ts`.
+   */
   const openedRef = useRef(false);
-  useEffect(() => {
+  const opened = useCallback(() => {
     if (openedRef.current) return;
     openedRef.current = true;
     track({ name: 'import_opened', props: { surface } });
   }, [surface]);
+  const countOpenOnRequest = options?.countOpenOnRequest === true;
+  useEffect(() => {
+    if (!countOpenOnRequest) opened();
+  }, [countOpenOnRequest, opened]);
 
   /**
    * Switch to watching the import that is already running.
@@ -813,5 +831,5 @@ export function useImport(surface: ImportSurface, jobId?: string | null) {
     setChecks((n) => n + 1);
   }, []);
 
-  return { state, pick, start, reset, watchRunning, recheck } as const;
+  return { state, pick, start, reset, watchRunning, recheck, opened } as const;
 }

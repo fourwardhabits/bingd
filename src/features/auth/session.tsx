@@ -483,6 +483,11 @@ export function nextRoute({
      * somebody may have already seen is a far smaller cost than repeating the run, and far
      * smaller than the alternative failure this replaces, which was skipping the social
      * half in silence.
+     *
+     * **People, and not the optional Letterboxd step that now sits before it**
+     * (2026-09-13). This branch is the degraded case — the stage was lost — and what it
+     * guards is the social half. Passing over an optional step there costs nothing, the
+     * importer stays in Settings, and a running import is untouched either way.
      */
     if (stage === null && (tasteRanked ?? 0) >= FIRST_FIVE) return STAGE_ROUTES.people;
 

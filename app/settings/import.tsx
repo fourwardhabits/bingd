@@ -6,8 +6,8 @@ import { ImportScreen } from '@/features/import/ImportScreen';
  * Import from Letterboxd.
  *
  * The permanent home of the importer. Contract V3 §9 makes it optional and available at
- * any time rather than a step in first-run, so Settings is where it lives and onboarding
- * only points at it.
+ * any time, so Settings is where it lives. Onboarding offers it once, as an optional step
+ * that draws this same screen in place (`app/onboarding/letterboxd.tsx`, 2026-09-13).
  *
  * `ImportScreen` renders its own `Screen`; this route exists to own the header and the
  * surface name the analytics funnel is split by.

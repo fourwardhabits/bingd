@@ -282,6 +282,21 @@ describe('ranking_completed', () => {
     expect(propertiesOf()).toMatchObject({ problem: 'not_the_app' });
   });
 
+  /**
+   * The optional Letterboxd step (2026-09-13). `step` is a value rather than a key, so the
+   * allowlist would not drop a new one; this pins that both halves of the step's answer
+   * reach the vendor under the keys the funnel is built on.
+   */
+  it('carries the Letterboxd step and its outcome through the allowlist', () => {
+    for (const outcome of ['continued', 'skipped'] as const) {
+      mockCapture.mockClear();
+      track({ name: 'onboarding_step_completed', props: { step: 'letterboxd', outcome } });
+
+      expect(mockCapture).toHaveBeenCalledWith('onboarding_step_completed', expect.anything());
+      expect(propertiesOf()).toMatchObject({ step: 'letterboxd', outcome });
+    }
+  });
+
   it('carries a start with the same mode vocabulary as the completion', () => {
     mockCapture.mockClear();
     track({
