@@ -32,7 +32,7 @@
  * suspended actor produced no job at all.
  */
 
-import { AWARD_COPY } from './award-copy.ts';
+import { AWARD_COPY, AWARD_TRACK_NAMES } from './award-copy.ts';
 
 /** One job as `claim_push_batch` returns it. */
 export type PushJob = {
@@ -76,14 +76,18 @@ export type PushJob = {
    */
   award_name?: string | null;
   /**
-   * The earned award and tier, and the tier's own name, for `award_earned` jobs only
-   * (20260920000200). The key and tier look the words up in `award-copy.ts` and ride in
-   * the tap payload so the app opens that award's celebration. Absent from a database
-   * that predates it.
+   * The earned award and tier, and the two names the row was written with, for
+   * `award_earned` jobs only (20260920000200). The key and tier look the words up in
+   * `award-copy.ts` and ride in the tap payload so the app opens that award's celebration.
+   * `award_family` is the track's name ("Queue Dragon") and `award_tier_label` the tier's
+   * ("Seedling"); they are the fallback for a key this sender does not know. Absent from a
+   * database that predates it. (Not `award_name` above, which only a pre-20260830000100
+   * claim ever sent.)
    */
   award_key?: string | null;
   award_tier?: string | null;
-  tier_label?: string | null;
+  award_family?: string | null;
+  award_tier_label?: string | null;
   /**
    * The Letterboxd import a lifecycle push is about, and the completed job's summary
    * (20260917001500). Absent from a database that predates it; null for every other type.
@@ -350,10 +354,10 @@ function importContent(job: PushJob): PushContent | null {
  * The achievement is about the recipient's own collection, on their own lock screen, which
  * is the same class of fact as the award's name.
  *
- * **A key the table does not know** (a track added server-side after this sender was
- * deployed, or a database that predates 20260920000200) falls back the way
- * `awardAnnouncement` does: the name the row was written with, never a key, and no
- * threshold sentence rather than a guessed one.
+ * **A key the table does not know** falls back in `awardAnnouncement`'s own order, never
+ * to a key, and with no threshold sentence rather than a guessed one: a new tier of a known
+ * track is its tier label (or the family, on a metal track); an unknown track is the family
+ * name the row was written with; a database that predates 20260920000200 says "a new Award".
  *
  * **The tap opens that award.** `awardKey` and `awardTier` ride in the payload so the app
  * resolves the same celebration its inbox row opens; without them it opens the Awards list.
@@ -362,8 +366,16 @@ function awardContent(job: PushJob): PushContent {
   const key = job.award_key?.trim() || null;
   const tier = job.award_tier?.trim() || null;
   const known = key && tier ? (AWARD_COPY[`${key}:${tier}`] ?? null) : null;
+  const track = key ? (AWARD_TRACK_NAMES[key] ?? null) : null;
+  const family = job.award_family?.trim() || null;
+  const tierLabel = job.award_tier_label?.trim() || null;
   const name =
-    known?.title ?? (job.award_name?.trim() || job.tier_label?.trim() || 'a new Award');
+    known?.title ??
+    (track
+      ? track.metalTiers
+        ? track.displayName
+        : (tierLabel ?? track.displayName)
+      : (family ?? tierLabel ?? 'a new Award'));
 
   return {
     title: `You earned ${name} 🎉`,

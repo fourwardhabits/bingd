@@ -132,6 +132,20 @@ describe('an award push', () => {
     });
   });
 
+  it('refuses award fields that are not slugs, so a payload cannot add or split a page', () => {
+    for (const over of [
+      { awardKey: 'queue-dragon,movie-muncher' },
+      { awardTier: 'seedling:gold' },
+      { awardKey: 'Queue Dragon' },
+      { awardTier: '../seedling' },
+    ]) {
+      expect(hrefForPush(award(over))).toEqual({
+        pathname: '/profile',
+        params: { awards: '1' },
+      });
+    }
+  });
+
   it('does not let award fields steer any other kind', () => {
     expect(hrefForPush(award({ kind: 'follow', actorUsername: 'suraj' }))).toBe('/u/suraj');
   });

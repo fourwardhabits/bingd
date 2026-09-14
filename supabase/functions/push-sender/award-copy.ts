@@ -1,7 +1,6 @@
-// GENERATED from src/features/awards/announcement.ts (awardAnnouncement over every tier of
-// every track in tracks.ts). Do not edit by hand: run
+// GENERATED from src/features/awards/announcement.ts and tracks.ts. Do not edit by hand:
 //   UPDATE_AWARD_PUSH_COPY=1 npx jest src/features/awards/award-push-copy.test.ts
-// and award-push-copy.test.ts fails whenever this file and the app disagree.
+// award-push-copy.test.ts fails whenever this file and the app disagree.
 
 /** What an earned tier is called, and what was done to earn it, keyed `award:tier`. */
 export const AWARD_COPY: Readonly<
@@ -67,4 +66,30 @@ export const AWARD_COPY: Readonly<
   "mutual-mania:hello": { title: "Hello", achievement: "Followed 5 people who follow you back" },
   "mutual-mania:inner-circle": { title: "Inner Circle", achievement: "Followed 25 people who follow you back" },
   "mutual-mania:main-character": { title: "Main Character", achievement: "Followed 100 people who follow you back" },
+};
+
+/** Each track’s name, and whether its tiers are metals (titled by the track). */
+export const AWARD_TRACK_NAMES: Readonly<
+  Record<string, { readonly displayName: string; readonly metalTiers: boolean }>
+> = {
+  "movie-muncher": { displayName: "Movie Muncher", metalTiers: true },
+  "season-snacker": { displayName: "Season Snacker", metalTiers: true },
+  "invite-instigator": { displayName: "Invite Instigator", metalTiers: true },
+  "queue-dragon": { displayName: "Queue Dragon", metalTiers: false },
+  "rating-rascal": { displayName: "Rating Rascal", metalTiers: false },
+  "comment-gremlin": { displayName: "Comment Gremlin", metalTiers: false },
+  "hype-courier": { displayName: "Hype Courier", metalTiers: false },
+  "scream-snack": { displayName: "Scream Snack", metalTiers: false },
+  "lol-mode": { displayName: "LOL Mode", metalTiers: false },
+  "softie-hours": { displayName: "Softie Hours", metalTiers: false },
+  "space-brain": { displayName: "Space Brain", metalTiers: false },
+  "boom-club": { displayName: "Boom Club", metalTiers: false },
+  "toon-bloom": { displayName: "Toon Bloom", metalTiers: false },
+  "truth-worm": { displayName: "Truth Worm", metalTiers: false },
+  "passport-mode": { displayName: "Passport Mode", metalTiers: false },
+  "time-hopper": { displayName: "Time Hopper", metalTiers: false },
+  "genre-gremlin": { displayName: "Genre Gremlin", metalTiers: false },
+  "two-screen-life": { displayName: "Two-Screen Life", metalTiers: false },
+  "heart-magnet": { displayName: "Heart Magnet", metalTiers: false },
+  "mutual-mania": { displayName: "Mutual Mania", metalTiers: false },
 };

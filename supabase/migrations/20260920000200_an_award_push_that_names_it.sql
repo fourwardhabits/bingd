@@ -26,7 +26,8 @@
 --
 -- `claim_push_batch` returns four more keys, for `award_earned` jobs only, read from
 -- the notification's own payload (which has carried all four since 20260828000100):
--- `award_key`, `award_tier`, `award_name`, `tier_label`. Nothing else in the claim
+-- `award_key`, `award_tier`, `award_family` (the payload's `award_name`) and
+-- `award_tier_label` (its `tier_label`). Nothing else in the claim
 -- moves: rebuilt in full from its newest definition (20260917001500), with the two
 -- additions below as the only change, because a create-or-replace assembled from an
 -- ancestor is exactly how the name was lost the first time.
@@ -34,9 +35,15 @@
 -- The sender composes the words from the award's canonical copy (push-sender
 -- `award-copy.ts`, generated from the app's `awardAnnouncement` and checked against it
 -- in Jest), and puts the key and tier in the tap payload so the app opens the same
--- celebration the inbox row does. A sender that predates this ignores the new keys; a
--- database that predates it gives the new sender no key, and it says what it said
--- before and opens the Awards list.
+-- celebration the inbox row does.
+--
+-- **The names are deliberately not called `award_name`.** That is the key the deployed
+-- sender (push-sender v4) already reads, and it holds the track's *family* name: an old
+-- sender handed it would say "You earned Queue Dragon" for Seedling, the family-name
+-- mistake 2026-08-29 removed from the inbox (independent review, 2026-09-14). Under new
+-- names an old sender ignores all four and says what it says today, so this migration and
+-- the sender deploy are safe in either order. A database that predates this gives the new
+-- sender no key, and it says "You earned a new Award" and opens the Awards list.
 --
 -- Delivery is unchanged: one `award_earned` notification per (recipient, award, tier)
 -- by its unique index, one outbox row per notification, the same lease and ceilings.
@@ -115,11 +122,12 @@ begin
         'import_job_id',   j.import_job_id,
         'import_counts',   j.import_counts,
         -- 20260920000200. Which award and tier an award_earned push is about, and the
-        -- names its row was written with. Null for every other type.
-        'award_key',       j.award_key,
-        'award_tier',      j.award_tier,
-        'award_name',      j.award_name,
-        'tier_label',      j.tier_label,
+        -- names its row was written with. Null for every other type. Not `award_name`:
+        -- see the header.
+        'award_key',        j.award_key,
+        'award_tier',       j.award_tier,
+        'award_family',     j.award_family,
+        'award_tier_label', j.award_tier_label,
         'tokens',          j.tokens
       )
       order by j.created_at
@@ -146,8 +154,8 @@ begin
            -- sender does not know.
            case when n.type = 'award_earned' then n.payload ->> 'award' end      as award_key,
            case when n.type = 'award_earned' then n.payload ->> 'tier' end       as award_tier,
-           case when n.type = 'award_earned' then n.payload ->> 'award_name' end as award_name,
-           case when n.type = 'award_earned' then n.payload ->> 'tier_label' end as tier_label,
+           case when n.type = 'award_earned' then n.payload ->> 'award_name' end as award_family,
+           case when n.type = 'award_earned' then n.payload ->> 'tier_label' end as award_tier_label,
            -- Comment jobs only, and `mention` is deliberately not one of them.
            -- See the header: a mention push says who and where, never what.
            case when n.type = 'comment' then (
@@ -211,4 +219,4 @@ end;
 $$;
 
 comment on function claim_push_batch(integer) is
-  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_name / tier_label for award_earned since 20260920000200 (award_name had been lost by the 20260830000100 rebuild). A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
+  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
