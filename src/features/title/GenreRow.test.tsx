@@ -1,4 +1,5 @@
 import { act, fireEvent, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -244,5 +245,96 @@ describe('the measuring pass and the event it is handed', () => {
     // and the row is whole. With the deferred read, this render threw.
     expect(shown()).toEqual(['Crime', 'Drama', 'Comedy']);
     expect(marker()).toBeNull();
+  });
+});
+
+describe('the full list', () => {
+  const openSheet = async (genres: string[]) => {
+    await renderWithProviders(<GenreRow genres={genres} />);
+    await layout(360, () => 70);
+    await fireEvent.press(screen.getByLabelText(`${genres[0]}. See all genres`));
+    return screen.getByLabelText('All genres');
+  };
+
+  type HostNode = { props: Record<string, unknown>; parent: HostNode | null };
+
+  /**
+   * **The sheet's content sits in the gutter** (founder, physical QA, 2026-09-14: "Genres"
+   * and the chips were flush against the left edge). `Sheet` pads nothing horizontally, so
+   * the heading and the chips must share a body that does.
+   */
+  it('puts the heading and every chip inside the sheet gutter, under the handle', async () => {
+    await openSheet(['Anime', 'Action & Adventure', 'Comedy', 'Sci-Fi']);
+
+    // The nearest ancestor that pads horizontally, as a style or a content container.
+    const padded = (node: HostNode) => {
+      for (let at: HostNode | null = node.parent; at; at = at.parent) {
+        for (const key of ['style', 'contentContainerStyle']) {
+          const style = StyleSheet.flatten(at.props?.[key] as never) as {
+            paddingHorizontal?: number;
+          };
+          if (style?.paddingHorizontal !== undefined) return { at, style };
+        }
+      }
+      return null;
+    };
+    const heading = padded(screen.getByText('Genres') as unknown as HostNode);
+    const chips = padded(screen.getByTestId('genre-sheet-chips') as unknown as HostNode);
+    expect(heading?.style.paddingHorizontal).toBe(theme.layout.gutter);
+    // One body for both, so the chips cannot drift off the heading's edge.
+    expect(chips?.at).toBe(heading?.at);
+
+    // Top spacing below the handle, from the wrapper the body scrolls inside.
+    let at: HostNode | null = heading!.at.parent;
+    let wrapperPaddingTop: number | undefined;
+    for (; at; at = at.parent) {
+      const style = StyleSheet.flatten(at.props?.style as never) as { paddingTop?: number };
+      if (style?.paddingTop !== undefined) {
+        wrapperPaddingTop = style.paddingTop;
+        break;
+      }
+    }
+    expect(wrapperPaddingTop).toBe(theme.space[2]);
+  });
+
+  it('wraps several chips with the canonical gaps', async () => {
+    await openSheet(['Anime', 'Action & Adventure', 'Comedy', 'Sci-Fi', 'Drama', 'Mystery']);
+
+    const chips = screen.getByTestId('genre-sheet-chips');
+    expect(StyleSheet.flatten(chips.props.style)).toMatchObject({
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: theme.space[2],
+    });
+    expect(screen.getAllByText('Mystery').length).toBeGreaterThan(0);
+  });
+
+  it('caps a long genre at the content width, so it wraps rather than leaving the screen', async () => {
+    const long = 'Documentary About Very Long Genre Names That Keep Going';
+    await openSheet(['Anime', long]);
+
+    const label = screen.getAllByText(long).at(-1) as unknown as HostNode;
+    let at: HostNode | null = label.parent;
+    let capped = false;
+    for (; at; at = at.parent) {
+      const style = StyleSheet.flatten(at.props?.style as never) as { maxWidth?: unknown };
+      if (style?.maxWidth === '100%') {
+        capped = true;
+        break;
+      }
+    }
+    expect(capped).toBe(true);
+  });
+
+  it('scrolls inside the sheet at large text sizes instead of growing past it', async () => {
+    await openSheet(['Anime', 'Comedy']);
+
+    let at = (screen.getByText('Genres') as unknown as HostNode).parent;
+    while (at && at.props?.contentContainerStyle === undefined) at = at.parent;
+    expect(at).toBeTruthy();
+    expect(StyleSheet.flatten(at!.props.style as never)).toMatchObject({
+      flexGrow: 0,
+      flexShrink: 1,
+    });
   });
 });

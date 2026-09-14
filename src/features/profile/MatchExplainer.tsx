@@ -117,7 +117,15 @@ export function MatchLine({ line, onPress }: { line: TasteMatchLine; onPress: ()
 }
 
 const styles = StyleSheet.create({
-  body: { gap: theme.space[5], paddingBottom: theme.space[2] },
+  // In the sheet gutter, with the top spacing other sheets leave under the handle.
+  // `Sheet` gives its content no horizontal padding; the content brings it (founder,
+  // physical QA, 2026-09-14, found on the genres sheet; same omission here).
+  body: {
+    gap: theme.space[5],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
+    paddingBottom: theme.space[2],
+  },
   section: { gap: theme.space[1] },
   heading: { letterSpacing: 0.6 },
   pressed: { opacity: 0.6 },

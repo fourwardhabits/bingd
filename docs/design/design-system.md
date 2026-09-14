@@ -228,6 +228,32 @@ Android draws edge to edge from SDK 57. The tab bar is sized by the navigator to
 
 Screens outside the navigator pass `includeBottomInset` and get `max(insets.bottom, 16)`. Scroll views set their own bottom padding in `contentContainerStyle`, which is the right place for it, because it scrolls.
 
+### Layout invariants: canonical, 2026-09-14
+
+Physical QA on 2026-09-14 found two layout defects. Neither was a wrong number. In the first, the genres sheet put "Genres" and its chips against the screen edge, because `Sheet` pads nothing sideways and that sheet's content did not pad itself. In the second, the Letterboxd import page showed a large empty band above its buttons after *Choose a different file*: the buttons were pinned to the bottom under two lines of text, and the page reused a scroll view whose offset could outlive the content it had scrolled. Every rule below is one that some screen had already broken.
+
+**Six layers, each with its own edge.** A reviewer should be able to name which one any element belongs to.
+
+| Layer | Horizontal edge | Vertical rule |
+|---|---|---|
+| **Sheet container**, the `Sheet` panel itself | Edge to edge. `Sheet` has no horizontal padding, by design | Caps itself at 90% of the screen and pads its bottom by `max(insets.bottom, space[4])` |
+| **Sheet content**: headings, prose, chips, forms, lists of text | `theme.layout.gutter` (16), applied once by the content's own wrapper | `space[2]` below the handle before the first line |
+| **Page content** on a `Screen` | `theme.layout.gutter`, applied once | Seams per *Screen rhythm* above |
+| **Media**: posters, backdrops, hero images, horizontal shelves | May run edge to edge. A shelf's first item still starts at the gutter, through `contentContainerStyle` | Not applicable |
+| **Fixed footers**: actions pinned under a scroll body | `theme.layout.gutter` | Keep the bottom safe area. In a sheet, `Sheet` supplies it. On a page, `Screen includeBottomInset` does |
+| **Scroll body** | Pads through `contentContainerStyle`, not the scroll view's `style` | The final item can be scrolled fully into view above any footer and the safe area |
+
+The rules that follow from the table:
+
+1. **One owner per gutter.** `Sheet` stays unpadded, because nearly every sheet already pads its own content and padding the panel would double it (checked across every `Sheet` caller on 2026-09-14). A new sheet's content wrapper sets `paddingHorizontal: theme.layout.gutter`. `TitleRecallSheet`, `AwardsSheet` and `TasteBucketSheet` show the pattern.
+2. **A sheet that can outgrow its cap scrolls inside it.** Use a wrapper with `flexShrink: 1`, a `ScrollView` with `style={{ flexGrow: 0, flexShrink: 1 }}`, and any footer outside the scroll view as a sibling. A footer inside a fixed-height sibling gets clipped; a scroll view that grows pushes the footer off the panel.
+3. **No giant spacers.** Content flows from the top. Do not use `flex: 1` or `justifyContent: 'space-between'` to pin actions under a short block of text: on a tall phone the gap between them becomes most of the screen. Pin a footer only under a body that can actually fill the space, such as a list or a long form.
+4. **No stale offsets on a state switch.** When one screen swaps whole phases in place (choose, preview, import, summary), key the scroll view by the phase, so each phase starts at the top of a fresh body. A scroll view can keep its offset when its content shrinks, and what then shows is an empty region below content the user cannot see.
+5. **Use the shared primitives.** `Screen` for the safe area, `Sheet` for modals, and `theme.layout.gutter` and the `space` scale for every inset. Do not use device checks, platform-specific magic numbers or measured-height hacks to make one phone look right.
+6. **Chips and labels wrap.** A wrapping chip group uses `flexDirection: 'row', flexWrap: 'wrap', gap: space[2]`, and each chip is capped at `maxWidth: '100%'`, so a long label at a large accessibility text size wraps instead of running off the panel.
+
+Tests hold these rules where they were broken: `GenreRow.test.tsx` (sheet inset, wrapping, long labels, shrinking scroll), `MatchExplainer.test.tsx` (sheet inset), `HowToExportSheet.test.tsx` (inset, footer outside the scroll, bottom padding), and `ImportScreen.test.tsx` with `LetterboxdStep.test.tsx` (a fresh scroll body per phase, and the same page on return). A new sheet or phase-switching screen should add the equivalent assertion.
+
 ---
 
 ## 6. Radius, elevation, motion
@@ -357,6 +383,8 @@ The comparison target does **not** show its current position or score — founde
 ### Sheet
 
 Radius 20 top corners, `surface.raised`, `e2`, drag handle, no dimmed backdrop below 40% — a warm light ground behind a heavy scrim turns muddy rather than dark. Sheets are the primary modal pattern; full-screen modals are reserved for onboarding and the reveal.
+
+The panel is edge to edge and its content brings the gutter. See *Layout invariants* in §5 for the container, content, footer and scroll rules.
 
 ### Empty state
 
