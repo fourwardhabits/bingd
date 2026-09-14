@@ -23,6 +23,7 @@ import {
   type SeriesChildState,
 } from '@/features/search/series-state';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
+import { useScrollGatedEnd } from '@/features/search/use-scroll-gated-end';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { useUserSearch, type UserResult } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
@@ -201,6 +202,10 @@ export default function LogScreen() {
     providerPeople,
     localResultCount,
     localAnswered,
+    loadingMorePages,
+    morePagesFailed,
+    morePagesRateLimited,
+    loadMorePages,
   } = useTitleSearch(input, {
     // No title rows are drawn under Users or Cast, so no provider request is spent on them.
     wide: filter !== 'users' && filter !== 'cast',
@@ -531,6 +536,11 @@ export default function LogScreen() {
           onClearRecent={clear}
           onPickRecent={setInput}
           searchingWider={providerSearching}
+          loadingMore={loadingMorePages}
+          moreFailed={morePagesFailed}
+          moreRateLimited={morePagesRateLimited}
+          // Titles only: Users is one server answer, not pages.
+          onEndOfList={peopleMode ? undefined : loadMorePages}
           exhausted={providerExhausted}
           rateLimited={providerRateLimited}
           availableAt={providerAvailableAt}
@@ -656,6 +666,10 @@ function Results({
   seriesState,
   watchlistBusy,
   onToggleWatchlist,
+  loadingMore,
+  moreFailed,
+  moreRateLimited,
+  onEndOfList,
 }: {
   idle: boolean;
   peopleOnly: boolean;
@@ -699,8 +713,19 @@ function Results({
   /** The id of the title whose watchlist write is in flight, or null. */
   watchlistBusy: string | null;
   onToggleWatchlist: (result: SearchResult) => void;
+  /** A further page of provider titles is on its way. */
+  loadingMore: boolean;
+  /** A further page failed. `onRetry` asks for it again. */
+  moreFailed: boolean;
+  /** …because this hour's provider budget is spent. */
+  moreRateLimited: boolean;
+  /** Asks for the next page of titles; returns whether it asked. Absent where there are none. */
+  onEndOfList?: () => boolean;
   onOpenLog: (result: SearchResult) => void;
 }) {
+  // Declared before the early returns below, as every hook must be.
+  const { onScrollBeginDrag, onEndReached } = useScrollGatedEnd(onEndOfList);
+
   if (idle) {
     return (
       <ScrollView
@@ -905,6 +930,30 @@ function Results({
                 Looking further afield…
               </Text>
             </View>
+          ) : !peopleOnly && loadingMore ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="tertiary">
+                Loading more…
+              </Text>
+            </View>
+          ) : !peopleOnly && moreFailed ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="secondary">
+                {moreRateLimited
+                  ? 'Too many searches to load more just now. Wider search is back within the hour.'
+                  : 'More results did not load.'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Load more results again"
+                onPress={onRetry}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
           ) : !peopleOnly && providerFailed ? (
             /**
              * A partial list has to say it is partial.
@@ -948,6 +997,10 @@ function Results({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.results}
+        // A further page only for a reader who is scrolling: see `useScrollGatedEnd`.
+        onScrollBeginDrag={onScrollBeginDrag}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.5}
         renderItem={({ item }) => {
           if (item.type === 'header') {
             // The design system's one section header: maroon label, compact, no card. The

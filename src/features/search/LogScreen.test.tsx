@@ -1040,7 +1040,7 @@ describe('Cast search', () => {
     const view = await search('dune');
     await settle();
     // The provider did answer with that person, so an absent section is the gate's doing.
-    await waitFor(() => expect(mockSearchProvider).toHaveBeenCalledWith('dune', 20));
+    await waitFor(() => expect(mockSearchProvider).toHaveBeenCalledWith('dune', 20, 1));
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
     expect(view.queryByLabelText('Cast')).toBeNull();

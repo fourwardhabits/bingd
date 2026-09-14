@@ -420,15 +420,40 @@ export type TmdbSeasonDetail = {
   episodes?: unknown[];
 };
 
+/**
+ * One page of a TMDB search, with the provider's own pagination.
+ *
+ * `total_pages` is TMDB's figure and is what says whether a next page exists. TMDB serves
+ * at most page 500 and twenty results a page, so the adapter caps how deep a reader can
+ * go well before that (see `MAX_SEARCH_PAGE` in index.ts).
+ */
+export type TmdbSearchPage<T> = {
+  results: T[];
+  page?: number;
+  total_pages?: number;
+  total_results?: number;
+};
+
 export function searchMulti(
   query: string,
   charge?: Charge,
-): Promise<{ results: TmdbSearchResult[] }> {
+  page = 1,
+): Promise<TmdbSearchPage<TmdbSearchResult>> {
   return request(
     '/search/multi',
-    { query, include_adult: 'false', page: '1' },
+    { query, include_adult: 'false', page: String(page) },
     charge,
   );
+}
+
+/** The single-kind searches: films only, or series only. Search-shaped results, no `media_type`. */
+export function searchKind(
+  kind: 'movie' | 'tv',
+  query: string,
+  charge?: Charge,
+  page = 1,
+): Promise<TmdbSearchPage<TmdbSearchResult>> {
+  return request(`/search/${kind}`, { query, include_adult: 'false', page: String(page) }, charge);
 }
 
 /**

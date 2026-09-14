@@ -5,6 +5,7 @@
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
+ *                              One page per call, exact titles first.
  *   detail    signed-in user   Fills one title in: runtime, overview, artwork,
  *                              seasons, credits, trailers, certification. For a
  *                              season it also returns that season's episodes, off
@@ -63,6 +64,9 @@ import {
 } from './store.ts';
 import {
   castSearchResults,
+  exactTitleFirst,
+  titleKey,
+  wantsExactRecovery,
   creditsFacet,
   videosFacet,
   episodesOf,
@@ -175,12 +179,18 @@ const chargeTo = (db: Db, userId: string) => () => noteRequest(db, userId);
 // search
 // ---------------------------------------------------------------------------
 
-async function handleSearch(db: Db, query: string, limit: number, userId: string) {
+async function handleSearch(
+  db: Db,
+  query: string,
+  limit: number,
+  userId: string,
+  page = 1,
+) {
   const trimmed = query.trim();
   // The same floor useTitleSearch applies. Below it every query matches half of
   // TMDB and spends a provider request to do it. Nothing is charged for a query that
   // returns here, because nothing is spent — it used to be charged before this line.
-  if (trimmed.length < 2) return json({ results: [] });
+  if (trimmed.length < 2) return json({ results: [], page: 1, total_pages: 1 });
 
   // Charged per outbound attempt rather than per call: the search, the genre lists if
   // a result names a genre the shipped table does not know, and every retry of either.
@@ -189,12 +199,55 @@ async function handleSearch(db: Db, query: string, limit: number, userId: string
   // In sequence rather than beside the genre lists, because which genres it needs is
   // only known once the results are. One request for a search, not three — see
   // `KNOWN_GENRES` in tmdb.ts for the measurement that made that the fix.
-  const { results } = await tmdb.searchMulti(trimmed, charge);
-  const genres = await tmdb.genreNames(charge, tmdb.genreIdsOf(results));
+  //
+  // **One page per call** (2026-09-14). Page 1 is what a search asks for; a later page is
+  // asked for only when the reader scrolls to the end of the list. TMDB's own
+  // `total_pages` says whether one exists, capped at `MAX_SEARCH_PAGE`.
+  const answer = await tmdb.searchMulti(trimmed, charge, page);
+  const totalPages = Math.min(Math.max(answer.total_pages ?? 1, 1), MAX_SEARCH_PAGE);
 
-  const rows = normalizeList(results, genres, limit);
+  let rows = normalizeList(answer.results, await tmdb.genreNames(charge, tmdb.genreIdsOf(answer.results)), limit);
+
+  /**
+   * **The exact title, recovered with at most one more request, on page 1 only.**
+   *
+   * Measured on staging: "Don" put *Don* (2006) at position 47 of /search/multi, page 3,
+   * behind a page of *Don Juan* and *Don't …*; /search/movie put it at position 16 of page
+   * 1. So when page 1 has no exact title and the query is a whole word those other titles
+   * are built from (`wantsExactRecovery`), one /search/movie page is read and **only its
+   * exact matches** are kept. Nothing else from it is added, so the list is the same list
+   * with the missing title found, not a second search mixed in.
+   *
+   * Films only: the TV endpoint did not have the exact series on page 1 either ("Don" TV is
+   * on page 3), so a second extra request there would buy nothing measured.
+   */
+  let recovered = 0;
+  if (page === 1 && wantsExactRecovery(trimmed, rows, answer.total_pages ?? 1)) {
+    const movies = await tmdb.searchKind('movie', trimmed, charge, 1);
+    const key = titleKey(trimmed);
+    const exact = movies.results.filter((result) => titleKey(result.title) === key);
+    if (exact.length) {
+      const known = new Set(rows.map((row) => `${row.kind}:${row.tmdb_id}`));
+      const extra = normalizeList(
+        exact,
+        await tmdb.genreNames(charge, tmdb.genreIdsOf(exact)),
+        MAX_RECOVERED,
+        'movie',
+      ).filter((row) => !known.has(`${row.kind}:${row.tmdb_id}`));
+      recovered = extra.length;
+      rows = [...extra, ...rows];
+    }
+  }
+
+  // Exact names first, TMDB's order otherwise — see `exactTitleFirst`.
+  rows = exactTitleFirst(rows, trimmed);
+
   return json({
     results: await searchResultsFor(db, await storeInOrder(db, rows)),
+    page,
+    total_pages: totalPages,
+    /** How many exact titles the recovery request added. Zero when it was not made. */
+    recovered,
     /**
      * The performers the same response named, for the Cast section under All.
      *
@@ -207,15 +260,30 @@ async function handleSearch(db: Db, query: string, limit: number, userId: string
      * `search-people` applies, through the same function. Additive: a client that
      * predates it reads `results` and nothing else.
      */
-    people: castSearchResults(
-      results.filter((result) => result.media_type === 'person') as tmdb.TmdbPersonSearchResult[],
-      MAX_SEARCH_PEOPLE,
-    ),
+    // Page 1 only: the Cast section under All is built once, from the first answer.
+    people:
+      page === 1
+        ? castSearchResults(
+            answer.results.filter((result) => result.media_type === 'person') as tmdb.TmdbPersonSearchResult[],
+            MAX_SEARCH_PEOPLE,
+          )
+        : [],
   });
 }
 
 /** How many performers a title search hands back. The client shows at most three. */
 const MAX_SEARCH_PEOPLE = 5;
+
+/**
+ * The deepest search page a reader can scroll to: ten pages, two hundred results.
+ *
+ * Every page is a charged request a reader asked for by reaching the end of the list, so
+ * this is a bound on a runaway, not a budget anybody spends. Past it the list ends.
+ */
+const MAX_SEARCH_PAGE = 10;
+
+/** At most this many exact titles are added by the recovery request. */
+const MAX_RECOVERED = 5;
 
 /**
  * Search-shaped results into title rows, deduplicated and capped.
@@ -743,7 +811,14 @@ Deno.serve(async (req) => {
         // here, which billed a query too short to spend anything and under-billed one
         // that spent three. Both directions found by independent review.
         const limit = clamp(body.limit, 10, 1, 20);
-        return await handleSearch(db, query, limit, caller.id);
+        // A page past the cap is an empty answer, uncharged, rather than the last page's
+        // answer under the wrong number: a client that dedupes across pages would cope, a
+        // client that counts rows would not.
+        const page = clamp(body.page, 1, 1, Number.MAX_SAFE_INTEGER);
+        if (page > MAX_SEARCH_PAGE) {
+          return json({ results: [], people: [], page, total_pages: MAX_SEARCH_PAGE, recovered: 0 });
+        }
+        return await handleSearch(db, query, limit, caller.id, page);
       }
 
       case 'detail': {

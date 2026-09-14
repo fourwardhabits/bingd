@@ -234,6 +234,6 @@ describe('searchProviderWithPeople', () => {
   it('reads an adapter that predates people as a search with none', async () => {
     provide([]);
 
-    expect(await searchProviderWithPeople('zzzz')).toEqual({ titles: [], people: [] });
+    expect(await searchProviderWithPeople('zzzz')).toEqual({ titles: [], people: [], page: 1, totalPages: 1 });
   });
 });

@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
 import { queryKeys } from '@/lib/query';
@@ -9,7 +9,10 @@ import {
   searchProviderWithPeople,
   type AdapterSearchResult,
   type CastSearchResult,
+  type ProviderSearchPage,
 } from '@/lib/tmdb-adapter';
+
+import { titleKey } from './all-sections';
 
 import {
   clearProviderCooldown,
@@ -65,6 +68,46 @@ const DEBOUNCE_MS = 180;
  * founder call: the quota it protects is shared by every account.
  */
 export const PROVIDER_DEBOUNCE_MS = 800;
+
+/** Exact titles first, everything else in its given order. See the merge in `useTitleSearch`. */
+function exactFirst<T extends { title: string }>(rows: T[], query: string): T[] {
+  const key = titleKey(query);
+  if (!key) return rows;
+  const exact = rows.filter((row) => titleKey(row.title) === key);
+  if (!exact.length) return rows;
+  return [...exact, ...rows.filter((row) => titleKey(row.title) !== key)];
+}
+
+/** The later pages of a search, reduced to what the merge and the screen read. */
+function combinePages(pages: UseQueryResult<ProviderSearchPage>[]) {
+  const last = pages[pages.length - 1];
+  return {
+    data: pages.map((page) => page.data),
+    fetching: pages.some((page) => page.isFetching),
+    error: pages.find((page) => page.error)?.error ?? null,
+    failedPages: pages.filter((page) => page.isError).map((page) => page.refetch),
+    lastSettled: last === undefined || (last.isSuccess && !last.isFetching),
+  };
+}
+
+/** One provider page, with a refusal noted against this hour's budget. */
+async function providerPage(query: string, page: number): Promise<ProviderSearchPage> {
+  try {
+    const answer = await searchProviderWithPeople(query, PROVIDER_RESULTS, page);
+    // Tolerates a bare title list, which is what a stubbed adapter hands back.
+    return Array.isArray(answer)
+      ? {
+          titles: answer as AdapterSearchResult[],
+          people: [] as CastSearchResult[],
+          page,
+          totalPages: 1,
+        }
+      : answer;
+  } catch (cause) {
+    if (cause instanceof AdapterError && cause.isRateLimit) noteProviderRateLimited();
+    throw cause;
+  }
+}
 
 /** One stable empty list, so a screen memoising on it does not recompute every render. */
 const NO_PEOPLE: CastSearchResult[] = [];
@@ -237,7 +280,7 @@ export function useTitleSearch(
     providerQuery.length >= MIN_QUERY_LENGTH;
 
   const provider = useQuery({
-    queryKey: queryKeys.providerSearch(providerQuery),
+    queryKey: queryKeys.providerSearch(providerQuery, 1),
     enabled: providerEnabled,
     // Longer than the local pass. This one wrote rows to get its answer, and asking
     // again inside half an hour would rewrite the same rows to be told the same thing.
@@ -245,19 +288,49 @@ export function useTitleSearch(
     // A provider failure is not worth three attempts: the local results are already on
     // screen, and the ceiling in api.md §9 counts every try.
     retry: false,
-    queryFn: async () => {
-      try {
-        const answer = await searchProviderWithPeople(providerQuery, PROVIDER_RESULTS);
-        // Tolerates a bare title list, which is what a stubbed adapter hands back.
-        return Array.isArray(answer)
-          ? { titles: answer as AdapterSearchResult[], people: [] as CastSearchResult[] }
-          : answer;
-      } catch (cause) {
-        if (cause instanceof AdapterError && cause.isRateLimit) noteProviderRateLimited();
-        throw cause;
-      }
-    },
+    queryFn: () => providerPage(providerQuery, 1),
   });
+
+  /**
+   * **Later pages, one at a time, only when asked for** (2026-09-14).
+   *
+   * The search used to end at TMDB's first page, so a title on page 3 could not be reached
+   * by scrolling at all. Page 1 is still the only request a search makes; each further
+   * page is requested by the screen when a reader who is scrolling reaches the end of the
+   * list (`loadMorePages`), never on typing and never several at once.
+   *
+   * Each page is its own cached entry, keyed by the normalised query and the page, with
+   * the same half-hour life as page 1, so backspacing to a query reuses every page already
+   * read for it. The count of pages asked for belongs to one query: typing anything else
+   * starts again from page 1.
+   */
+  const [morePages, setMorePages] = useState({ query: '', count: 0 });
+  // A different query starts from page 1, and coming back to this one does too: its later
+  // pages stay cached, and the reader's next scroll to the end reads them from there.
+  if (morePages.query !== providerQuery && morePages.count !== 0) {
+    setMorePages({ query: providerQuery, count: 0 });
+  }
+  const extraCount = morePages.query === providerQuery ? morePages.count : 0;
+  const totalPages = provider.data?.totalPages ?? 1;
+  const extra = useQueries({
+    queries: Array.from({ length: extraCount }, (_, index) => {
+      const page = index + 2;
+      return {
+        queryKey: queryKeys.providerSearch(providerQuery, page),
+        enabled: providerEnabled && provider.data !== undefined && page <= totalPages,
+        staleTime: PROVIDER_CACHE_MS,
+        retry: false,
+        queryFn: () => providerPage(providerQuery, page),
+      };
+    }),
+    // A module-level function, so its identity is stable and React Query can keep the
+    // combined result between renders instead of rebuilding it every time.
+    combine: combinePages,
+  });
+  const nextPage = extraCount + 2;
+  const hasMorePages = provider.data !== undefined && nextPage <= totalPages;
+  const canLoadMore =
+    providerEnabled && hasMorePages && !provider.isFetching && extra.lastSettled && !extra.error;
 
   // The latest provider answer, held across the keystrokes before the next one lands.
   // Adjusted during render rather than in an effect, which is React's pattern for state
@@ -276,6 +349,7 @@ export function useTitleSearch(
 
   const merged = useMemo(() => {
     const remote = provider.data?.titles ?? [];
+    const later = extra.data.flatMap((page) => page?.titles ?? []);
 
     /**
      * Stale local rows are dropped the moment the provider *settles* on this query.
@@ -301,7 +375,7 @@ export function useTitleSearch(
     const providerSettled =
       providerEnabled && !provider.isFetching && (provider.isFetched || provider.isError);
     const local = result.isPlaceholderData && providerSettled ? [] : result.data ?? [];
-    if (!remote.length) return { rows: local, localCount: local.length };
+    if (!remote.length) return { rows: exactFirst(local, query), localCount: local.length };
 
     // Local ordering wins, because search_titles ranks exact and prefix matches
     // deliberately (20260814040000 §3) and TMDB's relevance does not know what the
@@ -312,14 +386,36 @@ export function useTitleSearch(
     const remoteById = new Map(remote.map((row) => [row.id, row]));
     const seen = new Set(local.map((row) => row.id));
 
-    return {
-      rows: [
+    /**
+     * **An exact title leads, then everything in its usual order** (2026-09-14).
+     *
+     * Applied to the first page only: the local rows and page 1 arrive before anything is
+     * appended, so moving an exact title to the top happens as that answer lands and never
+     * reorders rows a later page added beneath them. Only rows whose words are exactly the
+     * query's move ("Don", not "Don't Look Up" or "Don 2"); the rest keep local order, then
+     * TMDB's. Several exact titles keep that same order among themselves, year on the row.
+     */
+    const firstPage = exactFirst(
+      [
         ...local.map((row) => remoteById.get(row.id) ?? row),
         ...remote.filter((row) => !seen.has(row.id)),
       ],
-      localCount: local.length,
-    };
+      query,
+    );
+
+    // Later pages are appended as they come, less anything already on the page: TMDB's
+    // pages overlap, and the exact title page 1 recovered is on its page 3 as well.
+    const shown = new Set(firstPage.map((row) => row.id));
+    const appended = later.filter((row) => {
+      if (shown.has(row.id)) return false;
+      shown.add(row.id);
+      return true;
+    });
+
+    return { rows: [...firstPage, ...appended], localCount: local.length };
   }, [
+    query,
+    extra.data,
     result.data,
     result.isPlaceholderData,
     provider.data,
@@ -372,6 +468,24 @@ export function useTitleSearch(
       if (providerQuery !== providerQueryOf(query)) return;
       clearProviderCooldown();
       void provider.refetch();
+      for (const refetch of extra.failedPages) void refetch();
+    },
+    /** Whether TMDB has another page for this query, within the adapter's cap. */
+    hasMorePages,
+    /** A later page is on its way. */
+    loadingMorePages: extra.fetching,
+    /** A later page failed; `retry` asks for it again. */
+    morePagesFailed: extra.error !== null,
+    /** The later page was refused by this hour's budget, rather than failing some other way. */
+    morePagesRateLimited: extra.error instanceof AdapterError && extra.error.isRateLimit,
+    /**
+     * Asks for the next page, if there is one and nothing is already on its way. Returns
+     * whether it asked. The screen calls this only when a reader scrolling reaches the end.
+     */
+    loadMorePages: () => {
+      if (!canLoadMore) return false;
+      setMorePages({ query: providerQuery, count: extraCount + 1 });
+      return true;
     },
     /** The provider pass is supplementary, so it reports separately: local results are
      *  already on screen and must not be replaced by its spinner or its failure. */

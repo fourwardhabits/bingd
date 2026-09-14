@@ -67,6 +67,14 @@ const SEPARATORS = /[\s.,:;!?'"‘’“”()[\]{}\-–—_&/\\|+*#~`^<>=]+/;
 
 const words = (value: string) => fold(value).split(SEPARATORS).filter(Boolean);
 
+/**
+ * A title reduced to its words: folded, lowercase, punctuation dropped, words kept apart.
+ *
+ * The client half of the adapter's `titleKey`, and deliberately no fuzzier: "Don't" is
+ * `don t`, not `don`, and "Don 2" is not "Don".
+ */
+export const titleKey = (value: string) => words(value).join(' ');
+
 /** Letters and digits only: "Nyong'o" and "nyongo", "O'Brien" and "obrien", agree. */
 const squashed = (value: string) => words(value).join('');
 

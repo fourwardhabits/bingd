@@ -149,17 +149,36 @@ export async function searchProvider(query: string, limit = 10) {
 export async function searchProviderWithPeople(
   query: string,
   limit = 10,
-): Promise<{ titles: AdapterSearchResult[]; people: CastSearchResult[] }> {
-  const data = await invoke<{ results?: AdapterSearchResult[]; people?: RawCastPerson[] }>({
+  page = 1,
+): Promise<ProviderSearchPage> {
+  const data = await invoke<{
+    results?: AdapterSearchResult[];
+    people?: RawCastPerson[];
+    page?: number;
+    total_pages?: number;
+  }>({
     action: 'search',
     query,
     limit,
+    // Sent only past the first page, so a page-1 request is byte-for-byte what it was.
+    ...(page > 1 ? { page } : {}),
   });
   return {
     titles: await withProductGenres(data.results ?? []),
     people: (data.people ?? []).map(castPersonOf),
+    page: typeof data.page === 'number' ? data.page : page,
+    // An adapter that predates pagination sends no count: one page, as it always was.
+    totalPages: typeof data.total_pages === 'number' ? data.total_pages : 1,
   };
 }
+
+/** One page of provider search results, with the provider's own page count. */
+export type ProviderSearchPage = {
+  titles: AdapterSearchResult[];
+  people: CastSearchResult[];
+  page: number;
+  totalPages: number;
+};
 
 /** A performer as the adapter sends one, from either search. */
 type RawCastPerson = {
