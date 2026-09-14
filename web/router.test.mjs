@@ -1775,6 +1775,33 @@ describe('the release mode', () => {
   });
 
   /**
+   * A page's title is the words in the browser tab and on every link preview, and the
+   * brand rules apply there as much as in the body: no em dash, and the name is bingd.
+   * The founder saw "bingd. — rank the movies and TV you watch" in a tab on 2026-09-14;
+   * Privacy and Terms carried "— Bingd" as well. Every built page is checked, so a new
+   * page cannot bring either back.
+   */
+  it('keeps em dashes and a capitalised Bingd out of every tab and link-preview title', () => {
+    const pages = readdirSync(dist, { recursive: true })
+      .map(String)
+      .filter((file) => file.endsWith('.html'));
+    assert.ok(pages.length >= 9, `only ${pages.length} pages were built`);
+
+    for (const page of pages) {
+      const html = readFileSync(join(dist, page), 'utf8');
+      const titles = [
+        ...html.matchAll(/<title>([^<]*)<\/title>/g),
+        ...html.matchAll(/<meta (?:property|name)="(?:og|twitter):title" content="([^"]*)"/g),
+      ].map((m) => m[1]);
+      assert.ok(titles.length > 0, `${page} has no title`);
+      for (const title of titles) {
+        assert.doesNotMatch(title, /—|&mdash;|&#8212;/, `${page}: an em dash in "${title}"`);
+        assert.doesNotMatch(title, /\bBingd\b/, `${page}: "${title}" spells the name Bingd`);
+      }
+    }
+  });
+
+  /**
    * The front page has to be able to answer "how do I get it", which is what it could
    * not do at all until 2026-09-10: it was a headline, one paragraph claiming a closed
    * test, and a footer. The founder followed TestFlight's developer-website link onto it

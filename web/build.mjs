@@ -1802,7 +1802,7 @@ ${TERMS_DRAFT_NOTICE}
 const DOCUMENTS = [
   {
     dir: 'privacy',
-    title: 'Privacy — Bingd',
+    title: 'bingd. Privacy',
     heading: 'Privacy',
     // The "Bingd is in closed testing" half of this stamp went on 2026-09-10 with the
     // rest of that claim: a privacy policy that describes the product as invite-only
@@ -1813,7 +1813,7 @@ const DOCUMENTS = [
   },
   {
     dir: 'terms',
-    title: 'Terms of Use — Bingd',
+    title: 'bingd. Terms of Use',
     heading: 'Terms of Use',
     stamp: `Last updated ${TERMS_DATE}.${
       TERMS_STATUS === 'draft' ? ' Draft &mdash; not yet reviewed by a lawyer.' : ''
@@ -1840,7 +1840,7 @@ const DOCUMENTS = [
   },
   {
     dir: 'account-deletion',
-    title: 'Deleting your Bingd account',
+    title: 'Deleting your bingd. account',
     heading: 'Deleting your account',
     stamp: `Last updated ${DOCUMENT_DATE}.`,
     body: DELETION_BODY,
@@ -2359,7 +2359,7 @@ await writeFile(
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>bingd. &mdash; rank the movies and TV you watch</title>
+    <title>bingd. Rank the movies and TV you watch</title>
     <!-- No robots meta, and no X-Robots-Tag on / either. This page is the install page
          and the address published on the App Store listing, in the privacy policy, in
          the Terms and in TestFlight's developer-website field; a launch page that asks
@@ -2371,7 +2371,7 @@ await writeFile(
 
     <meta property="og:site_name" content="bingd." />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="bingd. &mdash; rank the movies and TV you watch" />
+    <meta property="og:title" content="bingd. Rank the movies and TV you watch" />
     <meta property="og:description" content="Quick head-to-head comparisons instead of star ratings. Build a ranked collection, see what your friends are watching, and find your next binge." />
     <meta property="og:image" content="${ORIGIN}/social-card.png" />
     <meta property="og:image:width" content="1200" />
@@ -2379,7 +2379,7 @@ await writeFile(
     <meta property="og:image:alt" content="The bingd. wordmark" />
     <meta property="og:url" content="${ORIGIN}/" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="bingd. &mdash; rank the movies and TV you watch" />
+    <meta name="twitter:title" content="bingd. Rank the movies and TV you watch" />
     <meta name="twitter:description" content="Quick head-to-head comparisons instead of star ratings. Build a ranked collection, see what your friends are watching, and find your next binge." />
     <meta name="twitter:image" content="${ORIGIN}/social-card.png" />
 
