@@ -491,6 +491,12 @@ grant execute on function welcome_email_preview(integer, uuid, text) to service_
 --      suppressed, moves back to `claimed` with a compare-and-set on its status. Two runs
 --      retrying the same row serialise on the row lock and the second finds it `claimed`.
 --
+-- Both loops take per-account invite locks as they go, so both visit accounts in one total
+-- order: candidates by (created_at, id), retries by (first_claimed_at, user_id). Rows
+-- claimed in one run share first_claimed_at, and without the user_id tie-breaker two
+-- overlapping retry runs could take two accounts' locks in opposite orders and deadlock
+-- (independent review 82e).
+--
 -- The 20 hours is Resend's half of the guarantee. The worker sends with
 -- `Idempotency-Key: welcome-v1-<user_id>` and Resend honours a key for 24 hours, so a
 -- retry inside that window of a request that did go through returns the original
@@ -588,7 +594,7 @@ begin
        and _welcome_email_can_receive(w.user_id)
        and _welcome_email_invite_usable(w.user_id)
        and not exists (select 1 from email_suppressions s where s.email = lower(u.email))
-     order by w.first_claimed_at
+     order by w.first_claimed_at, w.user_id
      limit greatest(0, v_limit - v_taken)
   loop
     v_token := _welcome_email_ensure_invite_token(v_row.rid);
