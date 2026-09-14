@@ -1824,7 +1824,9 @@ describe('the release mode', () => {
 
     // 2026-09-13: the hero carries the Movies and TV collections, the ranking section a
     // ranked list and the score it lands on, and the friends section the Feed beside a
-    // comment thread. The compare sheet left the page.
+    // comment thread. The compare sheet left the page. 2026-09-14: the last section shows
+    // the Recommended Movies wall beside the Group Picks sheet, in place of For you and
+    // Watchlist.
     for (const name of [
       'shot-movies',
       'shot-tv',
@@ -1832,8 +1834,8 @@ describe('the release mode', () => {
       'shot-score',
       'shot-feed',
       'shot-comments',
-      'shot-foryou',
-      'shot-watchlist',
+      'shot-recommended',
+      'shot-grouppicks',
     ]) {
       assert.match(front, new RegExp(`/${name}\\.webp`), `the front page lost ${name}`);
       assert.ok(
