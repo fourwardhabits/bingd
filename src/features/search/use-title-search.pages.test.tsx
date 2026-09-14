@@ -323,6 +323,34 @@ describe('later pages', () => {
     expect(calls()).toEqual(['don#1', 'don#2', 'don 2#1']);
   });
 
+  it('retries a failed later page without asking for page 1 again', async () => {
+    let failPage2 = true;
+    mockProvider.mockImplementation((query: string, _limit: number, pageNumber: number) => {
+      if (pageNumber === 1) return Promise.resolve(page(DON_PAGE_ONE, 1, 3));
+      if (failPage2) return Promise.reject(new AdapterError('BG502', 'upstream'));
+      return Promise.resolve(page(DON_PAGE_TWO, 2, 3));
+    });
+    const { result } = await mount('don');
+    await settle();
+    await waitFor(() => expect(result.current.hasMorePages).toBe(true));
+
+    await act(async () => {
+      result.current.loadMorePages();
+    });
+    await waitFor(() => expect(result.current.morePagesFailed).toBe(true));
+
+    failPage2 = false;
+    await act(async () => {
+      result.current.retryMorePages();
+    });
+    await waitFor(() =>
+      expect(result.current.results.some((row) => row.id === 'dead-dont-die')).toBe(true),
+    );
+
+    expect(result.current.morePagesFailed).toBe(false);
+    expect(calls()).toEqual(['don#1', 'don#2', 'don#2']);
+  });
+
   it('reports a refused page as rate limited, and asks for no more', async () => {
     mockProvider.mockImplementation((query: string, _limit: number, pageNumber: number) =>
       pageNumber === 1
@@ -366,13 +394,15 @@ describe('later pages', () => {
 });
 
 describe('the end of the list, for a reader who is scrolling', () => {
-  it('counts only after a drag, and once per drag', async () => {
-    const onEnd = jest.fn(() => true);
-    const { result } = await renderHook(() => useScrollGatedEnd(onEnd));
+  const mountGate = (onEnd: () => boolean, rowCount = 10) =>
+    renderHook<ReturnType<typeof useScrollGatedEnd>, { rows: number }>(
+      ({ rows }) => useScrollGatedEnd(onEnd, rows),
+      { initialProps: { rows: rowCount } },
+    );
 
-    // A short list reports its end with nobody touching it.
-    await act(async () => result.current.onEndReached());
-    expect(onEnd).not.toHaveBeenCalled();
+  it('asks once per drag at the end, and never with nobody touching the list', async () => {
+    const onEnd = jest.fn(() => true);
+    const { result } = await mountGate(onEnd);
 
     await act(async () => result.current.onScrollBeginDrag());
     await act(async () => result.current.onEndReached());
@@ -384,10 +414,27 @@ describe('the end of the list, for a reader who is scrolling', () => {
     expect(onEnd).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the gesture when nothing was asked, so the same drag can ask once a page lands, and no more', async () => {
+  it('remembers an end reported on first paint, and spends it on the first drag', async () => {
+    // FlashList reports the end of a short list once, before anybody touches it, and then
+    // stays latched. Without this the reader's drag would never load page 2.
+    const onEnd = jest.fn(() => true);
+    const { result } = await mountGate(onEnd, 3);
+
+    await act(async () => result.current.onEndReached());
+    expect(onEnd).not.toHaveBeenCalled();
+
+    await act(async () => result.current.onScrollBeginDrag());
+    expect(onEnd).toHaveBeenCalledTimes(1);
+
+    // Spent: another drag with no new end report asks for nothing.
+    await act(async () => result.current.onScrollBeginDrag());
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an end that could not be acted on, so the same drag can ask once a page lands', async () => {
     let ready = false;
     const onEnd = jest.fn(() => ready);
-    const { result } = await renderHook(() => useScrollGatedEnd(onEnd));
+    const { result } = await mountGate(onEnd);
 
     await act(async () => result.current.onScrollBeginDrag());
     await act(async () => result.current.onEndReached());
@@ -396,7 +443,23 @@ describe('the end of the list, for a reader who is scrolling', () => {
     await act(async () => result.current.onEndReached());
 
     // Refused, then asked; after asking, the gesture is spent until the next drag.
-    expect(onEnd).toHaveBeenCalledTimes(2);
     expect(onEnd.mock.results.map((entry) => entry.value)).toEqual([false, true]);
+  });
+
+  it('forgets a remembered end once the list has grown, so a drag back at the top spends nothing', async () => {
+    let ready = false;
+    const onEnd = jest.fn(() => ready);
+    const { result, rerender } = await mountGate(onEnd, 10);
+
+    await act(async () => result.current.onScrollBeginDrag());
+    await act(async () => result.current.onEndReached());
+    expect(onEnd).toHaveBeenCalledTimes(1);
+
+    // The page that was on its way lands.
+    ready = true;
+    await rerender({ rows: 22 });
+    await act(async () => result.current.onScrollBeginDrag());
+
+    expect(onEnd).toHaveBeenCalledTimes(1);
   });
 });

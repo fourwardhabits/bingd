@@ -1281,3 +1281,12 @@ Deno.test('recovery is not spent where it cannot help', () => {
   // Blank.
   assertEquals(wantsExactRecovery('  ', DON_PAGE_ONE, 500), false);
 });
+
+Deno.test('a query of nothing but filler words never spends the recovery request', () => {
+  // "the" on the way to "the office": every page-1 title contains it, none is named it.
+  const rows = [{ title: 'The Office' }, { title: 'The Bear' }, { title: 'Of Mice and Men' }];
+  assertEquals(wantsExactRecovery('the', rows, 500), false);
+  assertEquals(wantsExactRecovery('Of the', rows, 500), false);
+  // A real word beside a filler word still qualifies: "The Don".
+  assertEquals(wantsExactRecovery('The Don', [{ title: 'The Last Don' }], 131), true);
+});

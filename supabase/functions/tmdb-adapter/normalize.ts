@@ -1037,7 +1037,7 @@ export function watchAvailability(
 export function titleKey(value: string | null | undefined): string {
   return String(value ?? '')
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
@@ -1074,7 +1074,19 @@ export function exactTitleFirst<T extends { title: string }>(rows: readonly T[],
  *    from ("Don" inside *Don Juan*, *Don't Look Up*). A half-typed word ("incepti") matches
  *    no whole word and does not qualify, so an unfinished query never spends the extra
  *    request.
+ * 4. **Not only filler words.** "the", "a", "of" on the way to a longer title contain
+ *    nothing a title could be named; a query made of nothing else never qualifies.
+ *
+ * The client caches page 1 for half an hour, so whatever qualifies spends its extra request
+ * once per reader per query, not once per keystroke.
  */
+/** Words that name nothing on their own, in the languages most titles here are searched in. */
+const FILLER_WORDS = new Set([
+  'a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'is', 'it', 'of', 'on', 'or', 'the', 'to',
+  'with', 'my', 'me', 'we', 'you', 'la', 'le', 'les', 'el', 'los', 'las', 'de', 'der', 'die',
+  'das', 'un', 'une',
+]);
+
 export function wantsExactRecovery(
   query: string,
   rows: readonly { title: string }[],
@@ -1082,8 +1094,9 @@ export function wantsExactRecovery(
 ): boolean {
   const key = titleKey(query);
   if (!key || totalPages <= 1) return false;
-  if (rows.some((row) => titleKey(row.title) === key)) return false;
   const words = key.split(' ');
+  if (words.every((word) => FILLER_WORDS.has(word))) return false;
+  if (rows.some((row) => titleKey(row.title) === key)) return false;
   return rows.some((row) => {
     const titleWords = new Set(titleKey(row.title).split(' '));
     return words.every((word) => titleWords.has(word));

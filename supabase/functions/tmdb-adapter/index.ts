@@ -223,19 +223,30 @@ async function handleSearch(
    */
   let recovered = 0;
   if (page === 1 && wantsExactRecovery(trimmed, rows, answer.total_pages ?? 1)) {
-    const movies = await tmdb.searchKind('movie', trimmed, charge, 1);
-    const key = titleKey(trimmed);
-    const exact = movies.results.filter((result) => titleKey(result.title) === key);
-    if (exact.length) {
-      const known = new Set(rows.map((row) => `${row.kind}:${row.tmdb_id}`));
-      const extra = normalizeList(
-        exact,
-        await tmdb.genreNames(charge, tmdb.genreIdsOf(exact)),
-        MAX_RECOVERED,
-        'movie',
-      ).filter((row) => !known.has(`${row.kind}:${row.tmdb_id}`));
-      recovered = extra.length;
-      rows = [...extra, ...rows];
+    // **Best effort, and never at page 1's expense** (independent review). Page 1 has
+    // already been paid for and answered; a recovery that is refused by the hourly ceiling,
+    // times out or fails any other way leaves that answer exactly as it was. One attempt,
+    // three seconds: a slow provider costs a search that much and no more.
+    try {
+      const movies = await tmdb.searchKind('movie', trimmed, charge, 1, {
+        retries: 0,
+        timeoutMs: RECOVERY_TIMEOUT_MS,
+      });
+      const key = titleKey(trimmed);
+      const exact = movies.results.filter((result) => titleKey(result.title) === key);
+      if (exact.length) {
+        const known = new Set(rows.map((row) => `${row.kind}:${row.tmdb_id}`));
+        const extra = normalizeList(
+          exact,
+          await tmdb.genreNames(charge, tmdb.genreIdsOf(exact)),
+          MAX_RECOVERED,
+          'movie',
+        ).filter((row) => !known.has(`${row.kind}:${row.tmdb_id}`));
+        recovered = extra.length;
+        rows = [...extra, ...rows];
+      }
+    } catch (cause) {
+      console.warn('tmdb-adapter exact-title recovery skipped', (cause as Error).message);
     }
   }
 
@@ -284,6 +295,9 @@ const MAX_SEARCH_PAGE = 10;
 
 /** At most this many exact titles are added by the recovery request. */
 const MAX_RECOVERED = 5;
+
+/** How long the best-effort recovery request may take before page 1 is answered without it. */
+const RECOVERY_TIMEOUT_MS = 3_000;
 
 /**
  * Search-shaped results into title rows, deduplicated and capped.

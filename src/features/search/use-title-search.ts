@@ -349,7 +349,11 @@ export function useTitleSearch(
 
   const merged = useMemo(() => {
     const remote = provider.data?.titles ?? [];
-    const later = extra.data.flatMap((page) => page?.titles ?? []);
+    // Only while the provider key names the query on screen. In the debounce window after a
+    // keystroke it still names the previous query, and that query's later pages under this
+    // query's rows would be a wrong answer rather than an early one.
+    const later =
+      providerQuery === providerQueryOf(query) ? extra.data.flatMap((page) => page?.titles ?? []) : [];
 
     /**
      * Stale local rows are dropped the moment the provider *settles* on this query.
@@ -415,6 +419,7 @@ export function useTitleSearch(
     return { rows: [...firstPage, ...appended], localCount: local.length };
   }, [
     query,
+    providerQuery,
     extra.data,
     result.data,
     result.isPlaceholderData,
@@ -468,6 +473,17 @@ export function useTitleSearch(
       if (providerQuery !== providerQueryOf(query)) return;
       clearProviderCooldown();
       void provider.refetch();
+    },
+    /**
+     * Asks again for a later page that failed, and for nothing else (independent review).
+     *
+     * `retry` refetches page 1, which for a later page's failure would spend a request on an
+     * answer already on screen, possibly reorder it, and inside a cooldown walk straight into
+     * a refusal that then described the whole list as "your catalogue only".
+     */
+    retryMorePages: () => {
+      if (!extra.failedPages.length) return;
+      clearProviderCooldown();
       for (const refetch of extra.failedPages) void refetch();
     },
     /** Whether TMDB has another page for this query, within the adapter's cap. */
@@ -478,6 +494,9 @@ export function useTitleSearch(
     morePagesFailed: extra.error !== null,
     /** The later page was refused by this hour's budget, rather than failing some other way. */
     morePagesRateLimited: extra.error instanceof AdapterError && extra.error.isRateLimit,
+    /** When a refused later page can be asked for again: the top of the next hour. */
+    morePagesAvailableAt:
+      extra.error instanceof AdapterError && extra.error.isRateLimit ? providerCooldownUntil() : null,
     /**
      * Asks for the next page, if there is one and nothing is already on its way. Returns
      * whether it asked. The screen calls this only when a reader scrolling reaches the end.

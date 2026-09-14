@@ -935,6 +935,124 @@ describe('finding people', () => {
 // ---------------------------------------------------------------------------
 
 /**
+ * **More results past TMDB's first page** (2026-09-14): a quiet link at the end of the
+ * titles, and a retry that asks again for the page that failed and nothing else.
+ */
+describe('more results', () => {
+  const AdapterError = jest.requireMock('@/lib/tmdb-adapter').AdapterError;
+
+  const settle = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    });
+  };
+
+  const remote = (id: string, name: string, kind: 'movie' | 'series' = 'movie') => ({
+    id,
+    kind,
+    title: name,
+    release_date: '2012-01-01',
+    poster_path: null,
+    provenance: 'tmdb',
+    genres: [],
+    runtime_minutes: 120,
+  });
+
+  const pages = (second: () => Promise<unknown>) =>
+    mockSearchProvider.mockImplementation(
+      (_query: string, _limit: number, pageNumber: number) =>
+        pageNumber === 1
+          ? Promise.resolve({
+              titles: [remote('p1-a', 'Breaking Point')],
+              people: [],
+              page: 1,
+              totalPages: 2,
+            })
+          : second(),
+    );
+
+  it('offers more results at the end of the titles, and loads the next page when asked', async () => {
+    pages(() =>
+      Promise.resolve({
+        titles: [remote('p2-a', 'Breaking Away')],
+        people: [],
+        page: 2,
+        totalPages: 2,
+      }),
+    );
+    const view = await search('breaking');
+    await settle();
+
+    await waitFor(() => expect(view.getByLabelText('Show more results')).toBeTruthy());
+    expect(mockSearchProvider.mock.calls.map(([, , pageNumber]) => pageNumber)).toEqual([1]);
+
+    await fireEvent.press(view.getByLabelText('Show more results'));
+
+    await waitFor(() => expect(view.getByLabelText('Breaking Away, 2012')).toBeTruthy());
+    expect(mockSearchProvider.mock.calls.map(([, , pageNumber]) => pageNumber)).toEqual([1, 2]);
+    // The provider has no page 3, so the link is gone.
+    expect(view.queryByLabelText('Show more results')).toBeNull();
+  });
+
+  it('retries only the page that failed', async () => {
+    pages(() => Promise.reject(new AdapterError('BG502', 'upstream')));
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText('Show more results')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Show more results'));
+    await waitFor(() => expect(view.getByText('More results did not load.')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Load more results again'));
+    await settle();
+
+    // Page 1 was never asked for again.
+    expect(mockSearchProvider.mock.calls.map(([, , pageNumber]) => pageNumber)).toEqual([
+      1, 2, 2,
+    ]);
+  });
+
+  it('offers to search further when a filter hides every row of the first page', async () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({ data: [series], error: null })
+        : Promise.resolve({ data: [], error: null }),
+    );
+    // Page 1 holds a series and no films; page 2 has one.
+    mockSearchProvider.mockImplementation(
+      (_query: string, _limit: number, pageNumber: number) =>
+        Promise.resolve(
+          pageNumber === 1
+            ? {
+                titles: [remote('p1-show', 'Breaking Point', 'series')],
+                people: [],
+                page: 1,
+                totalPages: 2,
+              }
+            : {
+                titles: [remote('p2-film', 'Breaking Away')],
+                people: [],
+                page: 2,
+                totalPages: 2,
+              },
+        ),
+    );
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Movies'));
+    await waitFor(() => expect(view.getByText('Nothing in this filter')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Search further'));
+
+    await waitFor(() => expect(view.getByLabelText('Breaking Away, 2012')).toBeTruthy());
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
  * **Cast search** (founder, 2026-09-13): search an actor, open them, browse what they
  * have been in.
  *
