@@ -2016,7 +2016,28 @@ const LANDING_STYLES = `
 
       /* ------------------------------------------------------------------- hero */
 
-      .hero { padding: 2.25rem 0 3.25rem; }
+      /* padding-block, not the shorthand: the hero is also a .wrap, and a zero side padding
+         here took away its gutter, so the heading met the edge of a phone. */
+      .hero { padding-block: 2.25rem 3.25rem; }
+
+      /* The heading is two sentences and reads as exactly two lines: "Rank what you watch."
+         and "See where it really lands." Each is its own block, and from 30rem up neither
+         may break. At the heading's full 3.4rem the second line is about 580px, which is
+         wider than half the page, so the hero does not go side by side at the usual 56rem:
+         it stays one column until 64rem, where the copy gets a 37rem column and the phones
+         the rest. Below 30rem, on a narrow phone, the lines may wrap rather than overflow
+         or shrink. */
+      .hero h1 .line { display: block; }
+      @media (min-width: 30rem) {
+        .hero h1 .line { white-space: nowrap; }
+      }
+      @media (min-width: 56rem) {
+        .hero .split { grid-template-columns: minmax(0, 1fr); }
+      }
+      @media (min-width: 64rem) {
+        .hero .split { grid-template-columns: minmax(37rem, 1fr) minmax(0, 1fr); gap: 3rem; }
+      }
+
       .hero .lede {
         margin-top: 1rem;
         font-size: clamp(1.0625rem, 2.6vw, 1.1875rem);
@@ -2406,7 +2427,7 @@ await writeFile(
       <section class="hero wrap" id="get">
         <div class="split">
           <div class="split-copy">
-            <h1>Rank what you watch.<br />See where it really lands.</h1>
+            <h1><span class="line">Rank what you watch.</span> <span class="line">See where it really lands.</span></h1>
             <p class="lede">
               No stars. Pick which of two movies or shows you liked more, and bingd.
               works out the score. Then see where your friends put theirs.
