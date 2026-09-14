@@ -326,7 +326,9 @@ async function readNamedJob(jobId: string): Promise<ImportJobStatus | 'gone' | '
  * costs somebody one screen; crashing the screen that was about to offer it costs them the
  * importer.
  */
-async function findLiveJob(): Promise<{ id: string; status: ImportJobStatus } | null> {
+async function findLiveJob(): Promise<
+  { id: string; status: ImportJobStatus } | null | 'unreadable'
+> {
   try {
     const answer = await bounded(
       supabase
@@ -345,13 +347,16 @@ async function findLiveJob(): Promise<{ id: string; status: ImportJobStatus } | 
         .maybeSingle(),
     );
 
-    if (answer === STALLED) return null;
+    // `unreadable` rather than null, so "no import" and "could not ask" stay apart: the
+    // onboarding step reports leaving as a skip only when it knows nothing is running.
+    if (answer === STALLED) return 'unreadable';
     const { data, error } = answer;
-    if (error || data === null) return null;
+    if (error) return 'unreadable';
+    if (data === null) return null;
     const row = data as JobRow & { id: string };
     return { id: row.id, status: asStatus(row) };
   } catch {
-    return null;
+    return 'unreadable';
   }
 }
 
@@ -431,6 +436,15 @@ export function useImport(
    * free. Nothing about it is discarded on the way.
    */
   const unconfirmed = useRef<string | null>(null);
+  /**
+   * Whether this hook **knows** no import is running for the account.
+   *
+   * False until a read has said so, and false again the moment anything may have been
+   * handed over, including a hand-off whose answer was lost. It is what lets the onboarding
+   * step report *Not now* honestly: leaving is a skip only when nothing is running; leaving
+   * before the lookup answered, or with an import that may be on the server, is not.
+   */
+  const nothingRunning = useRef(false);
 
   useEffect(() => {
     alive.current = true;
@@ -469,7 +483,11 @@ export function useImport(
         }
         // Gone opens the importer. A `pending` job was never handed over, so it has nothing
         // to show either.
-        if (named === 'gone' || named.status === 'pending') return;
+        if (named === 'gone' || named.status === 'pending') {
+          nothingRunning.current = true;
+          return;
+        }
+        nothingRunning.current = named.completedAt !== null;
         jobRef.current = target;
         // **Ended while nobody was watching.** The poll is what normally tells the cache, and
         // a notification tap arrives with no poll behind it: without this, "Rank imported
@@ -487,10 +505,14 @@ export function useImport(
       }
 
       const live = await findLiveJob();
-      if (cancelled || !alive.current || live === null) return;
-      if (live.status.status === 'pending') return;
+      if (cancelled || !alive.current || live === 'unreadable') return;
+      if (live === null || live.status.status === 'pending') {
+        nothingRunning.current = true;
+        return;
+      }
 
       const finished = live.status.completedAt !== null;
+      nothingRunning.current = finished;
       // A job that finished long ago is history, not news. Picking it up would mean opening
       // the importer onto last month's summary every time.
       if (finished && !completedRecently(live.status.completedAt)) return;
@@ -682,6 +704,8 @@ export function useImport(
 
       const pages = preview.pages;
       settle({ phase: 'uploading', preview, sent: 0, total: pages.length });
+      // Something is about to be on the server, and until it is settled nobody knows what.
+      nothingRunning.current = false;
 
       try {
         /**
@@ -772,6 +796,9 @@ export function useImport(
         // worker claimed the job between the status read above and this page. Rare, but it
         // is the same dead end, and it must not be reported as a connection problem.
         const refused = (error as { code?: string } | null)?.code === '22023';
+        // A failed upload leaves a `pending` job that was never handed to the worker, so
+        // nothing is running; a refusal means somebody else's import is.
+        nothingRunning.current = !refused;
         settle(
           refused
             ? { phase: 'failed', failure: { kind: 'already_running' } }
@@ -841,6 +868,7 @@ export function useImport(
       blind = 0;
 
       if (status.status === 'done') {
+        nothingRunning.current = true;
         track({
           name: 'import_completed',
           props: {
@@ -862,6 +890,7 @@ export function useImport(
       }
 
       if (status.status === 'failed') {
+        nothingRunning.current = true;
         // Part of it may have landed before the job failed. See the failure copy.
         invalidateAfterImport(queryClient);
         settle({ phase: 'failed', failure: { kind: 'server' } });
@@ -925,6 +954,7 @@ export function useImport(
 
   /** Ask about the named job again, after a read that failed. */
   const recheck = useCallback(() => {
+    nothingRunning.current = false;
     setState((current) =>
       current.phase === 'failed' && current.failure.kind === 'unchecked'
         ? { phase: 'idle' }
@@ -933,5 +963,8 @@ export function useImport(
     setChecks((n) => n + 1);
   }, []);
 
-  return { state, pick, start, reset, watchRunning, recheck, opened } as const;
+  /** Whether an import may be running for this account. See `nothingRunning`. */
+  const mayBeRunning = useCallback(() => !nothingRunning.current, []);
+
+  return { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } as const;
 }
