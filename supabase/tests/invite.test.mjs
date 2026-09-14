@@ -64,6 +64,20 @@ const attribution = async (invitee) => {
   return rows[0] ?? null;
 };
 
+/**
+ * Every row telling `recipient` that somebody joined from their invite. Since 20260920000100
+ * that is one row per invitee: the acceptance's `invite_joined`, or `invite_activated` for an
+ * inviter the acceptance did not tell.
+ */
+const joinNotices = async (recipient) => {
+  const { rows } = await t.sql(
+    `select type, actor_id, subject_type, subject_id from notifications
+      where recipient_id = $1 and type in ('invite_joined', 'invite_activated')`,
+    [recipient],
+  );
+  return rows;
+};
+
 const inbox = async (recipient) => {
   const { rows } = await t.sql(
     `select type, actor_id, subject_type, subject_id from notifications
@@ -760,10 +774,13 @@ describe('activation', () => {
   });
 
   it('files exactly one notification, and no more as ranking continues', async () => {
-    const rows = await inbox(
+    // One arrival, one notice (20260920000100): the acceptance already filed
+    // `invite_joined`, so activation adds no `invite_activated` beside it.
+    const rows = await joinNotices(
       (await t.sql(`select id from profiles where username = 'act_inviter'`)).rows[0].id,
     );
     assert.equal(rows.length, 1);
+    assert.equal(rows[0].type, 'invite_joined');
     assert.equal(rows[0].subject_type, 'profile');
 
     const invitee = (await t.sql(`select id from profiles where username = 'act_invitee'`)).rows[0]
@@ -775,7 +792,7 @@ describe('activation', () => {
     await rankTitles(invitee, 3, 5);
     assert.equal(
       (
-        await inbox(
+        await joinNotices(
           (await t.sql(`select id from profiles where username = 'act_inviter'`)).rows[0].id,
         )
       ).length,
@@ -832,7 +849,8 @@ describe('activation', () => {
 
     await rankTitles(invitee, 1, 4007);
     assert.ok((await attribution(invitee)).activated_at);
-    assert.equal((await inbox(inviter)).length, 1);
+    // The acceptance's `invite_joined` is the one notice; activation adds none.
+    assert.equal((await joinNotices(inviter)).length, 1);
   });
 
   it('records the activation and files no notification when the inviter has gone', async () => {

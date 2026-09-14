@@ -79,25 +79,84 @@ Deno.test('the congratulations is the one actorless push, and names the award', 
       type: 'award_earned',
       actor_username: null,
       actor_name: null,
-      award_name: 'Movie Muncher',
+      award_key: 'queue-dragon',
+      award_tier: 'seedling',
+      award_name: 'Queue Dragon',
+      tier_label: 'Seedling',
     }),
   );
   assert(content, 'award_earned produced no push');
-  assertEquals(content.title, 'bingd. Awards');
-  assertEquals(content.body, 'You earned Movie Muncher');
-  // The tap payload keeps the five-field whitelist, honestly null where an award
-  // has no person and no title; `kind` alone routes to the reader's own Awards.
+  // The founder's copy (physical QA, 2026-09-14): the tier earned, then what it took.
+  assertEquals(content.title, 'You earned Seedling 🎉');
+  assertEquals(content.body, 'Kept 25 titles on your watchlist');
   assertEquals(content.data.kind, 'award_earned');
   assertEquals(content.data.actorUsername, null);
   assertEquals(content.data.mediaItemId, null);
   assertEquals(content.data.feedEventId, null);
+  // The award and tier, so the tap opens this celebration and not the Awards list.
+  assertEquals(content.data.awardKey, 'queue-dragon');
+  assertEquals(content.data.awardTier, 'seedling');
+});
+
+Deno.test('a metal tier is named by its family, as the inbox row names it', () => {
+  const content = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_key: 'movie-muncher',
+      award_tier: 'bronze',
+      award_name: 'Movie Muncher',
+      tier_label: 'Bronze',
+    }),
+  );
+  assertEquals(content?.title, 'You earned Movie Muncher 🎉');
+  assertEquals(content?.body, 'Watched 50 movies');
+});
+
+Deno.test('an award the sender does not know says its name, never its key', () => {
+  const content = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_key: 'a-track-added-later',
+      award_tier: 'first',
+      award_name: 'Later Award',
+      tier_label: 'First',
+    }),
+  );
+  assertEquals(content?.title, 'You earned Later Award 🎉');
+  assertEquals(content?.body, 'See it in your bingd Awards');
+  assert(!content?.title.includes('a-track-added-later'));
+  // Still routable: the app opens the celebration, which draws what it can.
+  assertEquals(content?.data.awardKey, 'a-track-added-later');
 });
 
 Deno.test('an award job from a database mid-deploy still says something honest', () => {
+  // A claim that predates 20260920000200: no key, no tier, no names.
   const content = contentFor(
     job({ type: 'award_earned', actor_username: null, actor_name: null }),
   );
-  assertEquals(content?.body, 'You earned a new Award');
+  assertEquals(content?.title, 'You earned a new Award 🎉');
+  assertEquals(content?.body, 'See it in your bingd Awards');
+  // Nothing to open but the list.
+  assertEquals(content?.data.awardKey, undefined);
+  assertEquals(content?.data.awardTier, undefined);
+});
+
+Deno.test('award copy uses the plain-text brand', () => {
+  for (const overrides of [
+    { award_key: 'queue-dragon', award_tier: 'seedling' },
+    { award_key: 'invite-instigator', award_tier: 'bronze' },
+    {},
+  ]) {
+    const content = contentFor(
+      job({ type: 'award_earned', actor_username: null, actor_name: null, ...overrides }),
+    );
+    assert(content);
+    assert(!/bingd\.(?!\w)/.test(`${content.title} ${content.body}`), content.body);
+  }
 });
 
 Deno.test('names the title where there is one', () => {

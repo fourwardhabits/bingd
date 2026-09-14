@@ -26,7 +26,7 @@ import { call, fire, inbox, newOp, raceContext } from './_shared.mjs';
  * committing between the read and the insert must not leave an attribution behind.
  *
  * **R3. Activation happens once.** Two devices finishing the fifth ranking together
- * produce one `activated_at`, one `invite_activated` row, and **one** `activated: true`
+ * produce one `activated_at`, one join notice for the inviter, and **one** `activated: true`
  * answer — the third is what the client emits its analytics event from, so two of them
  * is a growth number reported twice for one person.
  *
@@ -596,8 +596,12 @@ export default function suite() {
       }
 
       assert.ok((await attribution(invitee)).activated_at);
+      // One arrival, one notice (20260920000100): the redemption's `invite_joined` is the
+      // inviter's one row, and neither racing activation may add `invite_activated` beside it.
       assert.equal(
-        (await inbox(ctx.db, inviter, invitee)).filter((n) => n.type === 'invite_activated').length,
+        (await inbox(ctx.db, inviter, invitee)).filter(
+          (n) => n.type === 'invite_joined' || n.type === 'invite_activated',
+        ).length,
         1,
         'R3: one notification',
       );
@@ -671,7 +675,9 @@ export default function suite() {
 
       assert.ok((await attribution(invitee)).activated_at);
       assert.equal(
-        (await inbox(ctx.db, inviter, invitee)).filter((n) => n.type === 'invite_activated').length,
+        (await inbox(ctx.db, inviter, invitee)).filter(
+          (n) => n.type === 'invite_joined' || n.type === 'invite_activated',
+        ).length,
         1,
       );
     });
