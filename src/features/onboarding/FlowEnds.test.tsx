@@ -1,5 +1,7 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { useEffect } from 'react';
 
+import { nextRoute } from '@/features/auth/session';
 import { renderWithProviders } from '@/test-utils/render';
 import {
   clearCelebrations,
@@ -8,7 +10,13 @@ import {
 } from '@/features/awards/celebration-queue';
 import { TAB_ROUTES } from '@/lib/routes';
 
-import { hydrateStage, resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
+import {
+  advanceStage,
+  hydrateStage,
+  resetOnboardingStages,
+  stageInMemory,
+  useOnboardingStage,
+} from './use-onboarding-stage';
 import { resetRankingOutcome } from './pick-five';
 import { resetTasteIntent } from './use-taste-onboarding';
 
@@ -55,9 +63,20 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 const mockPush = jest.fn();
+/** Every navigation asked for, by the screen or the router harness, in the order asked. */
+const mockNavigation: string[] = [];
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ replace: mockReplace, push: mockPush }),
+  useRouter: () => ({
+    replace: (href: unknown) => {
+      mockNavigation.push(`replace ${String(href)}`);
+      mockReplace(href);
+    },
+    push: (href: { pathname?: string }) => {
+      mockNavigation.push(`push ${href.pathname ?? String(href)}`);
+      mockPush(href);
+    },
+  }),
   Stack: { Screen: () => null },
 }));
 
@@ -91,6 +110,7 @@ jest.mock('./NotificationStep', () => ({
 beforeEach(() => {
   mockReplace.mockReset();
   mockPush.mockReset();
+  mockNavigation.length = 0;
   clearCelebrations();
   mockTrack.mockReset();
   mockPrefs.clear();
@@ -191,6 +211,75 @@ describe('where the app opens', () => {
  * this, nothing drained it and the celebration was lost with the process. The payoff and
  * the Letterboxd step are pinned as not draining it in their own files.
  */
+/**
+ * **The router's own decision, mounted beside the screen that ends the flow** (independent
+ * review, 2026-09-13).
+ *
+ * expo-router queues `replace` and `push` and dispatches the queue from an effect in the
+ * `NavigationContainer`; `useAuthRouting` lives below it in `app/_layout.tsx`, so in the
+ * commit after `finish` its effect runs first and anything it asks for joins the queue
+ * *behind* `finish`'s replace and celebration push. This harness is that effect — the real
+ * `nextRoute` over the real stage subscription, for a router sitting on
+ * `onboarding/notifications` — writing into the same ordered log as the screen. What a
+ * device still has to show is the modal presenting cleanly over the replace animation; the
+ * order of what is dispatched is settled here.
+ */
+function RouterDecision() {
+  const stage = useOnboardingStage('user-1');
+  useEffect(() => {
+    const destination = nextRoute({
+      status: 'ready',
+      group: 'onboarding',
+      screen: 'notifications',
+      tasteNeeded: false,
+      tastePending: false,
+      stage,
+      tasteRanked: 5,
+    });
+    if (destination) mockNavigation.push(`replace ${destination}`);
+  }, [stage]);
+  return null;
+}
+
+describe('the router does not overrule the exit', () => {
+  const finishWithRouter = async () => {
+    const view = await renderWithProviders(
+      <>
+        <NotificationsScreen />
+        <RouterDecision />
+      </>,
+    );
+    await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('finish the step'));
+    return view;
+  };
+
+  it('lands a no-follow account on For You, with the celebration last and nothing after it', async () => {
+    mockCounts.follows = 0;
+    enqueueCelebrations([{ kind: 'award', awardKey: 'lol-mode', tierKey: 'giggle' }]);
+    await finishWithRouter();
+
+    await waitFor(() => expect(stageInMemory('user-1')).toBe('done'));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(mockNavigation).toEqual([`replace ${TAB_ROUTES.forYou}`, 'push /awards/celebrate']);
+  });
+
+  it('still sends on a link that opens this screen on a flow that already ended', async () => {
+    await advanceStage('user-1', 'done');
+    await renderWithProviders(
+      <>
+        <NotificationsScreen />
+        <RouterDecision />
+      </>,
+    );
+
+    await waitFor(() => expect(mockNavigation).toEqual([`replace ${TAB_ROUTES.feed}`]));
+    // Sent on, not finished a second time.
+    expect(eventsNamed('onboarding_completed')).toHaveLength(0);
+    expect(eventsNamed('onboarding_step_completed')).toHaveLength(0);
+  });
+});
+
 describe('celebrating what the run earned', () => {
   it('opens the celebration once, after the navigation that ends the flow', async () => {
     mockCounts.follows = 1;

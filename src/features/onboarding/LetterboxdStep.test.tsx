@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { strToU8, zipSync } from 'fflate';
 import { BackHandler } from 'react-native';
 
@@ -66,6 +66,9 @@ let mockPicked: Uint8Array | null = null;
 
 /** What the open-job lookup on `import_jobs` answers. */
 let mockLiveJob: { data: unknown; error: unknown } = { data: null, error: null };
+/** The lookup never answering, so nobody knows yet whether an import is running. */
+let mockLiveJobHangs = false;
+let mockLookupsAnswered = 0;
 
 jest.mock('expo-file-system', () => ({
   File: {
@@ -116,7 +119,13 @@ jest.mock('@/lib/supabase', () => ({
         is: () => builder,
         order: () => builder,
         limit: () => builder,
-        maybeSingle: () => Promise.resolve(mockLiveJob),
+        maybeSingle: () =>
+          mockLiveJobHangs
+            ? new Promise(() => {})
+            : Promise.resolve(mockLiveJob).then((answer) => {
+                mockLookupsAnswered += 1;
+                return answer;
+              }),
       };
       return builder;
     },
@@ -184,6 +193,8 @@ beforeEach(() => {
   clearCelebrations();
   mockPicked = null;
   mockLiveJob = { data: null, error: null };
+  mockLiveJobHangs = false;
+  mockLookupsAnswered = 0;
   resetOnboardingStages();
 });
 
@@ -191,6 +202,11 @@ beforeEach(() => {
 const open = async () => {
   const view = await renderWithProviders(<LetterboxdStepScreen />);
   await waitFor(() => expect(view.getByText('Already use Letterboxd?')).toBeTruthy());
+  if (!mockLiveJobHangs) {
+    await waitFor(() => expect(mockLookupsAnswered).toBeGreaterThan(0));
+    // The hook's own continuation after the answer.
+    await act(async () => {});
+  }
   return view;
 };
 
@@ -426,6 +442,41 @@ describe('importing from the step', () => {
     expect(called()).not.toContain('import_ready');
     expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
+  });
+
+  /**
+   * **A skip is only a skip when nothing is running** (independent review, 2026-09-13).
+   * Leaving before the open-job lookup has answered, or after a hand-off whose answer was
+   * lost, may leave an import on the server, so it reports `continued`, the step's other
+   * existing outcome.
+   */
+  it('does not call leaving a skip before it knows whether an import is running', async () => {
+    mockLiveJobHangs = true;
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/onboarding/people');
+    expect(stepEvents()[0]?.props).toEqual({ step: 'letterboxd', outcome: 'continued' });
+  });
+
+  it('does not call leaving a skip after a hand-off whose answer was lost', async () => {
+    mockPicked = exportZip();
+    serverAccepts();
+    mockRpcHangs = new Set(['import_ready']);
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Import from Letterboxd' }));
+    await waitFor(() => expect(view.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(view.getByText('Import 2 films'));
+    await waitFor(() => expect(view.getByText('We couldn’t check your import')).toBeTruthy());
+
+    // Start over is the importer's own; it returns to the question with Not now on it.
+    await fireEvent.press(view.getByRole('button', { name: 'Start over' }));
+    await waitFor(() => expect(view.getByText('Already use Letterboxd?')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(stepEvents()[0]?.props).toEqual({ step: 'letterboxd', outcome: 'continued' });
   });
 
   /**

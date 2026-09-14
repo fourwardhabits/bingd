@@ -398,14 +398,28 @@ export function nextRoute({
     if (stage && stage !== 'done') return null;
 
     /**
-     * **A finished flow, so this is a link into something that is over.**
+     * **A finished flow, so this is a link into something that is over — except on the
+     * screen that finished it, which owns its own exit** (independent review, 2026-09-13).
      *
-     * The exiting screen's choice of destination is not overruled by this: `finish` in
-     * `app/onboarding/notifications.tsx` resolves its destination *before* it writes
-     * `done`, so the write and the navigation are adjacent and synchronous and there is
-     * no commit in between for this to answer in.
+     * This note used to say the exiting screen could not be overruled, because `finish`
+     * writes `done` and navigates in one synchronous breath. That was wrong, and the
+     * reason is in expo-router rather than here: `router.replace` and `router.push` only
+     * *queue* an action (`global-state/routingQueue.js`), and the queue is dispatched by
+     * `useImperativeApiEmitter`'s effect in the `NavigationContainer`
+     * (`imperative-api.js`). `advance('done')` publishes to the stage subscription in the
+     * same tick, so the commit that follows re-runs `useAuthRouting`'s effect — which lives
+     * in `app/_layout.tsx`, a *descendant* of that container, so its effect runs first —
+     * with segments still `onboarding/notifications` and `stage: 'done'`. Its
+     * `replace('/(tabs)/feed')` joined the queue behind `finish`'s own replace and its
+     * celebration push, and was dispatched last: an account with no follow landed on the
+     * Feed instead of For You (a defect since #131), and the celebration was replaced away.
+     *
+     * So the notification screen is left alone here once the flow is done. It is the only
+     * screen that writes `done`, and it navigates itself in the same handler. A link that
+     * opens it on an already-finished flow is sent on by the screen itself
+     * (`app/onboarding/notifications.tsx`), so no finished account can stay there.
      */
-    if (stage === 'done') return '/(tabs)/feed';
+    if (stage === 'done') return screen === 'notifications' ? null : '/(tabs)/feed';
 
     // No stage at all, so the taste rule is the only remaining authority. Waiting on it
     // costs one count query, and guessing it costs somebody their place in the flow.

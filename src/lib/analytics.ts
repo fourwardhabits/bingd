@@ -106,9 +106,9 @@ export type OnboardingStep =
   | 'pick'
   | 'payoff'
   /**
-   * The optional *Already use Letterboxd?* step (2026-09-13). `continued` is leaving with
-   * an import handed to the server or already running; `skipped` is *Not now*, from any
-   * state short of that.
+   * The optional *Already use Letterboxd?* step (2026-09-13). `skipped` is *Not now* when
+   * the importer knows no import is running; `continued` is every other leave, including
+   * one where an import may be running but that is not yet known.
    */
   | 'letterboxd'
   | 'people'

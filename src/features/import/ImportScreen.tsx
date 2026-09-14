@@ -77,8 +77,9 @@ export type ImportOnboarding = {
   /**
    * Leave the step, carrying on to the rest of the flow.
    *
-   * `continued` when an import is with the server, or already was; `skipped` from anything
-   * short of that. Called synchronously from a press, with nothing awaited first.
+   * `continued` when an import is, or may be, with the server; `skipped` only when the
+   * importer knows nothing is running (see `step` in `ImportScreen`). Called synchronously
+   * from a press, with nothing awaited first.
    */
   readonly onLeave: (outcome: 'continued' | 'skipped') => void;
 };
@@ -95,12 +96,27 @@ export function ImportScreen({
   onboarding?: ImportOnboarding;
 }) {
   const router = useRouter();
-  const { state, pick, start, reset, watchRunning, recheck, opened } = useImport(
+  const { state, pick, start, reset, watchRunning, recheck, opened, mayBeRunning } = useImport(
     surface,
     jobId,
     { countOpenOnRequest: onboarding !== undefined },
   );
   const [howTo, setHowTo] = useState(false);
+
+  /**
+   * The step's exits, with the outcome made honest at the one place both buttons meet.
+   *
+   * *Not now* is a skip only when the importer **knows** nothing is running. Pressed before
+   * the open-job lookup has answered, or after a hand-off whose answer was lost, an import
+   * may well be on the server, and reporting that as a skip would undercount the imports
+   * the step started. Those leaves report `continued`, the step's other existing outcome,
+   * rather than a new word.
+   */
+  const step: ImportOnboarding | undefined = onboarding && {
+    header: onboarding.header,
+    onLeave: (outcome) =>
+      onboarding.onLeave(outcome === 'skipped' && mayBeRunning() ? 'continued' : outcome),
+  };
 
   /**
    * Out of the importer without touching the job. The server carries on either way; this
@@ -130,7 +146,7 @@ export function ImportScreen({
           }}
           onLeave={leave}
           onRank={() => router.dismissTo(unrankedMovies())}
-          onboarding={onboarding}
+          onboarding={step}
         />
       </ScrollView>
       {/* The only sheet this screen has, so there is nothing to serialise it against. On

@@ -43,9 +43,9 @@ replaced by a dedicated optional screen, `app/onboarding/letterboxd.tsx`:
 | Hand-off | Once `import_ready` succeeds the step says the import keeps running in the background and that we will let you know when it is done, and offers **Continue**. It does not wait for the result. |
 | Never required | *Not now* is offered on the opening, while a file is read, on the preview and on every refusal. Not during the upload itself, which is the one moment leaving would stop something. |
 | The job | Untouched by Continue, by *Not now*, by unmounting, by backgrounding or killing the app. `import_discard` is reachable only through the importer's own *Start over*, and the server refuses it for any job past `pending`. The lifecycle notifications stay authoritative. |
-| Relaunch | A stage of its own (`letterboxd` in `STAGE_ORDER`), so a relaunch returns to the step, where `findLiveJob` shows a running import with Continue rather than asking again. The lost-stage fallback still resumes at People. |
+| Relaunch | A stage of its own (`letterboxd` in `STAGE_ORDER`), so a relaunch **before Continue** returns to the step (after Continue the stage is already `people`), where `findLiveJob` shows a running import with Continue rather than asking again. The lost-stage fallback still resumes at People. |
 | A notification tap mid-flow | `/settings/import?job=` is outside the onboarding group, so `nextRoute` replaces it once with the current step, which is a fixed point: no loop (`routing.test.tsx`). After onboarding the link opens the job in Settings as before. |
-| Analytics | `onboarding_step_completed` with `step: 'letterboxd'`; `import_opened` with `surface: 'onboarding'` counts the first press, not the step being shown (`analytics.md`). |
+| Analytics | `onboarding_step_completed` with `step: 'letterboxd'` (`skipped` only when no import is known to be running, otherwise `continued`); `import_opened` with `surface: 'onboarding'` counts the first press, not the step being shown (`analytics.md`). |
 
 The three objections recorded below were answered rather than overruled: the importer is
 **drawn inside** the onboarding route instead of navigated to, so nothing is pushed past the
@@ -581,7 +581,8 @@ its last run succeeded (`import_drain_status()`), and 126/126 on the anon smoke.
 | 6 | **Leave the app mid-import, come back after it finishes** | The fix for review #4 is new and unproven on a device | The summary should be waiting, with *Import another file* on it |
 | 7 | **Airplane mode during the upload, then "Start over", then a different archive** | The fix for review #5 is new | The second archive must not arrive with the first's films |
 | 8 | **The Settings row and the onboarding step** | — | Row present under Account; *Already use Letterboxd?* appears after *Your First Five*'s Continue (and after the picker's *Not now*), never during the ranking, and nothing about Letterboxd remains on the payoff |
-| 9 | **Import from the onboarding step, then Continue, then kill the app** | The job outliving the step is a server fact | The import's notifications still arrive; after onboarding, Settings ▸ Import shows the job; a relaunch before People lands back on the step showing it running |
+| 9 | **Import from the onboarding step, then Continue, then kill the app** | The job outliving the step is a server fact | The import's notifications still arrive; the relaunch lands on **People** (Continue already moved the stage on), and after onboarding Settings ▸ Import shows the job |
+| 9b | **Import from the onboarding step, then kill the app on the hand-off screen, before Continue** | Same | The relaunch lands back on the Letterboxd step, showing the import running with Continue, not the question again |
 | 10 | **Tap an import notification before onboarding is finished** | Push taps cannot be simulated | One hop back to the current onboarding step, no flicker loop |
 
 ### What staging cannot show you

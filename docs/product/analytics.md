@@ -256,9 +256,11 @@ payoff went unnoticed in physical QA, so onboarding now has an optional step of 
 *Already use Letterboxd?*, between *Your First Five* and People. Everybody past the ranking
 run is shown it, so counting its mount would make `import_opened` the step's impressions
 and the two surfaces incomparable. The step's exposure and its answer are
-`onboarding_step_completed` with `step: 'letterboxd'`: `outcome: 'continued'` is leaving
-with an import handed to the server (or one already running), `skipped` is *Not now* from
-anything short of that.
+`onboarding_step_completed` with `step: 'letterboxd'`: `outcome: 'skipped'` is *Not now*
+when the importer **knows** no import is running for the account; `continued` is every other
+way off the step — an import handed to the server, one already running, or a leave while
+that is not yet known (the open-job lookup had not answered, or a hand-off's reply was
+lost). A leave that might have left an import running is never counted as a skip.
 
 `import_archive_selected` is the one to watch. Its failure outcomes — `not_a_zip`,
 `not_letterboxd`, `damaged`, `empty` — are the difference between "people drop off

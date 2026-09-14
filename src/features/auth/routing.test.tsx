@@ -210,6 +210,32 @@ describe('nextRoute', () => {
         '/(tabs)/feed',
       );
     });
+
+    /**
+     * **Except on the screen that ended it** (independent review, 2026-09-13). `finish`
+     * writes `done` and queues its own replace and the celebration push in one handler, and
+     * expo-router dispatches the queue from an effect that runs after this routing effect
+     * in the same commit. A replace answered here would be dispatched last, overruling For
+     * You with the Feed and replacing the celebration away. The screen sends a stray visit
+     * on by itself (`FlowEnds.test.tsx`).
+     */
+    it('leaves the notification step alone once the flow is done, because it owns the exit', () => {
+      expect(
+        decide({ group: 'onboarding', screen: 'notifications', stage: 'done' }),
+      ).toBeNull();
+    });
+
+    it.each(['taste', 'letterboxd', 'people'])(
+      'still takes a finished flow out of the %s step',
+      (screen) => {
+        expect(decide({ group: 'onboarding', screen, stage: 'done' })).toBe('/(tabs)/feed');
+      },
+    );
+
+    it('still opens the app on a relaunch after the flow is done', () => {
+      expect(decide({ group: undefined, stage: 'done' })).toBe('/(tabs)/feed');
+      expect(decide({ group: '(tabs)', screen: 'for-you', stage: 'done' })).toBeNull();
+    });
   });
 
   /**
