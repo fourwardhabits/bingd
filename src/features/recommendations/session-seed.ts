@@ -42,9 +42,12 @@ import { AppState, type AppStateStatus } from 'react-native';
  *
  * ## What moves it
  *
- * Only {@link refreshRecommendations}, from the Refresh control. Not a bookmark, not a
- * reaction, not a re-render, not a cache invalidation. That is the whole of rule A, and
- * it is enforced by there being no other *notifying* writer.
+ * {@link refreshRecommendations}, from the Refresh control, and — since For You V2
+ * (2026-09-13) — {@link noteAppState} when the reader returns after a meaningful absence.
+ * Not a bookmark, not a reaction, not a re-render, not a cache invalidation, not a few
+ * minutes in another app. Those two are the only *notifying* writers. The wall itself is
+ * drawn by `selection.ts`, which reads `shownAt` and `startedAt`; `current` and `seen`
+ * remain for the legacy `rank.ts` engine and its tests.
  *
  * {@link noteSlateOnScreen} is the one other writer and it is **deliberately silent**:
  * it parks what is currently rendered without telling anybody, so the exposure the
@@ -116,6 +119,14 @@ const EMPTY: Arrangement = {
  * as it was, and an evening's return does not show the same wall as the morning's.
  */
 export const SESSION_IDLE_MS = 60 * 60_000;
+
+/**
+ * A session this old renews on any real absence (five minutes or more), so a reader who
+ * dips in and out all day without ever leaving for an hour still meets a new wall by the
+ * evening (independent review of V2, minor 3).
+ */
+export const SESSION_MAX_AGE_MS = 6 * 60 * 60_000;
+export const SESSION_SHORT_ABSENCE_MS = 5 * 60_000;
 
 let arrangement: Arrangement = EMPTY;
 
@@ -218,6 +229,13 @@ export function refreshRecommendations(now: number = Date.now()) {
  */
 function advance(reason: 'refresh' | 'resume', now: number, shownAtTime: number) {
   const presented = [...onScreen.values()].flat();
+  /**
+   * Stamped once, then forgotten (independent review of V2, minor 2). `onScreen` keeps up to
+   * eight walls — the other medium, earlier filter combinations — and without this every
+   * Refresh re-stamped all of them at the current time, so a wall the reader left an hour
+   * ago never aged. A wall that is still mounted parks itself again on its next render.
+   */
+  onScreen.clear();
   const seen = new Map(arrangement.seen);
   const shownAt = new Map(arrangement.shownAt);
   for (const id of presented) {
@@ -255,7 +273,12 @@ export function noteAppState(state: AppStateStatus | string, now: number = Date.
   if (state !== 'active') return false;
   const away = backgroundedAt;
   backgroundedAt = null;
-  if (away == null || now - away < SESSION_IDLE_MS) return false;
+  if (away == null) return false;
+  const absence = now - away;
+  const meaningful =
+    absence >= SESSION_IDLE_MS ||
+    (absence >= SESSION_SHORT_ABSENCE_MS && now - arrangement.startedAt >= SESSION_MAX_AGE_MS);
+  if (!meaningful) return false;
   advance('resume', now, away);
   return true;
 }
@@ -263,17 +286,20 @@ export function noteAppState(state: AppStateStatus | string, now: number = Date.
 let lifecycleSubscribed = false;
 
 /**
- * Subscribe to the app's state once per process, from whichever For You wall mounts first.
- * Module-level rather than per screen, so a return to the app on another tab is still a
- * return when the reader later opens For You.
+ * Subscribe to the app's state once per process. Called when this module loads — the
+ * recommendations screen is part of the route tree, so that is app start — rather than when
+ * For You first mounts, so a reader who opens on the Feed and returns hours later still
+ * returns (independent review of V2, minor 3). Idempotent; `useForYou` calls it too.
  */
 export function ensureRecommendationLifecycle() {
   if (lifecycleSubscribed) return;
   lifecycleSubscribed = true;
-  AppState.addEventListener('change', (state) => {
+  AppState.addEventListener?.('change', (state) => {
     noteAppState(state);
   });
 }
+
+ensureRecommendationLifecycle();
 
 /** Test seam. Nothing in the app calls this. */
 export function setRecommendationSeed(next: number) {

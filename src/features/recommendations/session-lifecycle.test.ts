@@ -1,5 +1,7 @@
 import {
   SESSION_IDLE_MS,
+  SESSION_MAX_AGE_MS,
+  SESSION_SHORT_ABSENCE_MS,
   noteAppState,
   noteSlateOnScreen,
   recommendationArrangement,
@@ -91,5 +93,44 @@ describe('Refresh', () => {
     const { shownAt } = recommendationArrangement();
     expect(shownAt.get('a')).toBe(T0 + 100);
     expect(shownAt.get('b')).toBe(T0 + 200);
+  });
+});
+
+describe('what the review of V2 found', () => {
+  it('renews an old session on a short real absence, so a day of glances still moves on', () => {
+    resetRecommendationSession(9);
+    const started = recommendationArrangement().startedAt;
+    noteAppState('background', started + SESSION_MAX_AGE_MS);
+    expect(noteAppState('active', started + SESSION_MAX_AGE_MS + SESSION_SHORT_ABSENCE_MS - 1)).toBe(false);
+    noteAppState('background', started + SESSION_MAX_AGE_MS + 10 * 60_000);
+    expect(noteAppState('active', started + SESSION_MAX_AGE_MS + 10 * 60_000 + SESSION_SHORT_ABSENCE_MS)).toBe(true);
+  });
+
+  it('stamps a wall once, so a wall left long ago ages instead of being re-stamped', () => {
+    noteSlateOnScreen('user|tv|{}', ['old']);
+    refreshRecommendations(T0);
+    noteSlateOnScreen('user|movies|{}', ['new']);
+    refreshRecommendations(T0 + 3_600_000);
+    const { shownAt } = recommendationArrangement();
+    expect(shownAt.get('old')).toBe(T0);
+    expect(shownAt.get('new')).toBe(T0 + 3_600_000);
+  });
+});
+
+describe('the app-state subscription', () => {
+  it('is registered once, when the module loads', () => {
+    jest.isolateModules(() => {
+      const { AppState } = require('react-native');
+      const spy = jest.spyOn(AppState, 'addEventListener');
+      const changes = () => spy.mock.calls.filter((call) => call[0] === 'change').length;
+      const seed = require('./session-seed');
+      const atLoad = changes();
+      expect(atLoad).toBeGreaterThan(0);
+      seed.ensureRecommendationLifecycle();
+      seed.ensureRecommendationLifecycle();
+      // Idempotent: a wall mounting, or Fast Refresh re-running the hook, adds nothing.
+      expect(changes()).toBe(atLoad);
+      spy.mockRestore();
+    });
   });
 });

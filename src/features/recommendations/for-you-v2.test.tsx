@@ -29,11 +29,25 @@ type Row = Record<string, unknown>;
 let mockTables: Record<string, Row[]> = {};
 let mockRpcResults: Record<string, unknown> = {};
 let mockExposureReads = 0;
+/** RPCs the backend does not have yet: they answer the way PostgREST does. */
+const mockRefused = new Set<string>();
+/** Names of every RPC called, in order. */
+const mockCalls: string[] = [];
+/** An RPC whose answer waits for the test to release it. */
+let mockHeld: { name: string; release: () => void; promise: Promise<void> } | null = null;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string) => {
-      if (name === 'recommendation_exposure') mockExposureReads += 1;
+      mockCalls.push(name);
+      if (mockHeld?.name === name) {
+        const held = mockHeld;
+        return held.promise.then(() => ({ data: mockRpcResults[name] ?? null, error: null }));
+      }
+      if (name === 'recommendation_exposure_within' || name === 'recommendation_exposure') mockExposureReads += 1;
+      if (mockRefused.has(name)) {
+        return Promise.resolve({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } });
+      }
       return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
     },
     from: (table: string) => {
@@ -96,6 +110,9 @@ beforeEach(() => {
   mockTables = {};
   mockRpcResults = {};
   mockExposureReads = 0;
+  mockRefused.clear();
+  mockCalls.length = 0;
+  mockHeld = null;
   resetRecommendationSession(1234);
   resetImpressions();
   seedCatalogue();
@@ -155,7 +172,7 @@ describe('a For You session, as the reader lives it', () => {
   it('keeps titles the server says were shown within the day off a new launch’s wall', async () => {
     const shownAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
     const recent = Array.from({ length: 20 }, (_, index) => `film-${String(index).padStart(2, '0')}`);
-    mockRpcResults.recommendation_exposure = recent.map((id) => ({
+    mockRpcResults.recommendation_exposure_within = recent.map((id) => ({
       media_item_id: id,
       shown_count: 1,
       last_shown_at: shownAt,
@@ -167,5 +184,76 @@ describe('a For You session, as the reader lives it', () => {
       expect(result.current.data?.items).toHaveLength(20);
       expect(overlap(idsOf(result.current.data!.items), recent)).toBeLessThanOrEqual(2);
     });
+  });
+});
+
+describe('the durable exposure read', () => {
+  const recentRows = () => {
+    const shownAt = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    return Array.from({ length: 20 }, (_, index) => ({
+      media_item_id: `film-${String(index).padStart(2, '0')}`,
+      shown_count: 1,
+      last_shown_at: shownAt,
+    }));
+  };
+
+  it('falls back to the 72-hour reader on a backend that has not got the windowed one', async () => {
+    mockRefused.add('recommendation_exposure_within');
+    mockRpcResults.recommendation_exposure = recentRows();
+    const recent = recentRows().map((row) => row.media_item_id);
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+    await waitFor(() => {
+      expect(result.current.data?.items).toHaveLength(20);
+      expect(overlap(idsOf(result.current.data!.items), recent)).toBeLessThanOrEqual(2);
+    });
+    expect(mockExposureReads).toBe(2);
+  });
+
+  it('never hands back the wall on screen across Refreshes of a small pool', async () => {
+    // Forty trending titles and nothing else: the shape of a new account's TV wall.
+    // Consecutive Refreshes must keep producing a new wall (independent review of V2, M1).
+    mockTables.media_items = (mockTables.media_items ?? []).slice(0, 40);
+    mockTables.provider_list_cache = [
+      { list_key: 'trending.movie.week', payload: { ids: mockTables.media_items.map((row) => row.id) } },
+    ];
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(20));
+
+    let previous = idsOf(result.current.data!.items);
+    for (let press = 0; press < 5; press += 1) {
+      await act(async () => {
+        refreshRecommendations();
+      });
+      const next = idsOf(result.current.data!.items);
+      expect(next).toHaveLength(20);
+      expect(overlap(next, previous)).toBeLessThanOrEqual(4);
+      previous = next;
+    }
+  });
+});
+
+describe('recording what was seen', () => {
+  it('records no impression until the durable exposure has settled', async () => {
+    // Minor 4 of the review: a wall drawn before exposure arrives is redrawn a beat later, and
+    // recording the first would stamp twenty titles the reader barely saw.
+    let release = () => {};
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockHeld = { name: 'recommendation_exposure_within', release, promise };
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(20));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(mockCalls).not.toContain('note_recommendations_shown');
+
+    await act(async () => {
+      release();
+      await promise;
+    });
+    await waitFor(() => expect(mockCalls).toContain('note_recommendations_shown'));
   });
 });

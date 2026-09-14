@@ -2408,7 +2408,7 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 **Revisit when.** Physical QA or post-outreach reports still describe identical walls across same-day opens after anchor rotation ships.
 
-**Resolved.** A return after an hour away begins a new session (`session-seed.ts` `noteAppState`); a shorter absence keeps the wall. `recommendations.md` §11.3.
+**Resolved.** A return after an hour away (or five minutes, once a session is six hours old) begins a new session (`session-seed.ts` `noteAppState`); a shorter absence keeps the wall. `noteImpressions`' per-process guard still never re-records a title already sent by this process, and `last_shown_at` is hour-truncated — both acceptable at the decay's timescale. `recommendations.md` §11.3.
 
 ### 59b. Exposure tiers stop at the top sixty — **resolved 2026-09-13 (For You V2)**
 
@@ -2428,4 +2428,4 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 **Revisit when.** 59b is decided.
 
-**Status.** 59b is decided. Migration `20260918000100` sets the window to 336 hours; it needs a founder-authorised production apply, and V2's long-gap gain depends on it (`recommendations.md` §11.4).
+**Status.** 59b is decided, and the shared window **stays 72**: raising it would make clients that cannot take V2 repeat more (independent review). Migration `20260918000100` adds `recommendation_exposure_within(p_hours)` instead, which V2 calls with 336. It needs a founder-authorised production apply; V2's long-gap gain depends on it and falls back to the 72-hour reader until then (`recommendations.md` §11.3–11.4).

@@ -417,49 +417,67 @@ its marginal value needs an adapter change and a deploy. Not added.
 ### 11.2 The selection (`selection.ts`, `FOR_YOU_SELECTION`)
 
 1. **Qualified pool.** Candidates scoring ≥ 0.80 × the score at rank 20 (the first page's
-   frontier), clamped to 40–160. Replaces the fixed top 60.
+   frontier), clamped to 60–160. When fewer unseen titles remain than the wall being drawn
+   needs, the pool extends in score order — never below 0.60 × the frontier.
 2. **Score-weighted sampling without replacement.** Key = `score / τ − exposure + Gumbel(seed,
    id)`, τ = 0.15 × the pool's score spread. On a realistic pool the best title leads ~22% of
-   fresh walls, the tenth <1%; the first wall's mean score stays within 2% of strict order.
-3. **Exposure decays** from `last_shown_at`: `3 × log2(1 + count) × 0.5^(age / 96 h)`, plus
-   12 when shown within the last **18 hours**. Same-day walls do not repeat; a strong title
-   can return the next day; weeks-old exposure is nearly gone. Finite for every title.
+   fresh walls, the tenth <1%.
+3. **Exposure decays** from `last_shown_at`: `3 × log2(1 + count) × 0.5^(age / 96 h)`, plus 12
+   when shown within the last **18 hours**, plus 24 for a title **on screen when Refresh was
+   pressed** (always drawn last). Finite for every title — nothing is blacklisted.
 4. **Light diversity per page**: 0.4 per title beyond four of one primary genre, 0.25 per
    repeat of a lead anchor; hard ceilings unchanged (four per anchor, two per franchise). No
    genre quotas — a horror reader still gets a horror wall.
 5. **Beyond the pool** the wall continues only in strict score order.
+6. **Dismissals** are removed inside the draw, so the frontier and τ do not move: dismissing
+   one title replaces it and keeps ≥ 85% of the rest in place.
 
-Scores and explanations are untouched, so every "Because you loved X" is unchanged.
+Scores and explanations are untouched, so every "Because you loved X" is unchanged. Per-title
+metadata is computed once per draw; a five-page draw over a full 160-title pool is well under
+the 60 ms test bound on desktop.
 
-### 11.3 Sessions (`session-seed.ts`)
+### 11.3 Sessions and exposure memory
 
 - A **re-render** or a **return within an hour** changes nothing.
-- **Refresh** stamps what is on screen as shown now and draws a new arrangement.
-- A **return after an hour away** is a new session: new seed, and the wall that was on
-  screen stamped as shown when the reader left. The durable exposure is not re-read — every
-  wall this process drew is already stamped, and a re-read would redraw the wall twice.
-- A **cold launch** is a new session, as before, and reads the durable exposure once.
-- Anchors (§10) stay per process.
+- **Refresh** stamps what is on screen as shown now and draws a new arrangement; each wall is
+  stamped once, so walls left long ago age normally.
+- A **return after an hour away** — or after five minutes, once the session is six hours old
+  — is a new session: new seed, the wall that was on screen stamped as shown when the reader
+  left, and the screen back at its first page. The durable exposure is not re-read; every wall
+  this process drew is already stamped, and a re-read would redraw the wall twice.
+- A **cold launch** is a new session and reads the durable exposure once. Impressions are only
+  recorded once that read has settled, so a wall redrawn a beat after launch is not recorded
+  as seen.
+- The subscription to app state starts when the module loads, so a return via another tab
+  still counts. Anchors (§10) stay per process.
+- **Memory.** V2 reads `recommendation_exposure_within(336)` (`20260918000100`), a fortnight
+  — 3.5 half-lives. `recommendation_exposure()` and `foryou.impression_window_hours` (72) are
+  **unchanged**: clients that cannot take this update run the old tier engine, which would
+  repeat *more* over a longer window (independent review). Until the migration reaches a
+  backend, V2 falls back to the 72-hour reader.
 
 ### 11.4 Before and after (real production profiles, movies wall, medians)
 
-Relevance is the model's own score; "overlap" is titles shared by consecutive cold sessions.
-The fortnight window is migration `20260918000100`; the 72-hour columns are what V2 does
-before it is applied.
+Relevance is the model's own score; "overlap" is titles shared by consecutive cold sessions
+(of 20). Measured with the merged code, not a prototype.
 
-| visits | cohort | overlap: #145 | V2, 72 h window | V2, 336 h window | visible first-9 overlap: #145 → V2 (336 h) | mean first-20 score: #145 → V2 |
-|---|---|---|---|---|---|---|
-| 6 h apart | First Five / ~20 / ~60 / 100+ | 5.3 / 1.0 / 1.0 / 0.5 | — | 5.0 / 0 / 0 / 0 | 1.0 / 0.8 / 0.5 / 0.5 → 0 / 0 / 0 / 0 | 0.500 / 0.568 / 0.532 / 0.545 → 0.501 / 0.559 / 0.523 / 0.540 |
-| 24 h apart | same | 6.8 / 1.5 / 1.3 / 1.0 | 8.3 / 3.3 / 2.5 / 1.3 | 7.3 / 3.0 / 2.0 / 1.3 | 2.0 / 1.3 / 0.8 / 1.0 → 1.3 / 0.5 / 0.8 / 0.3 | same |
-| 96 h apart | same | 15.3 / 9.0 / 6.3 / 5.3 | 14.3 / 8.0 / 5.8 / 3.8 | 9.0 / 4.3 / 3.0 / 2.3 | 5.5 / 3.8 / 2.3 / 1.5 → 2.5 / 1.3 / 1.0 / 0.3 | same |
-| Refresh in-session | same | 6 / 2 / 2 / 3 | — | 4 / 0 / 0 / 0 | — | — |
+| visits | #145 | V2, 72 h read (before the migration) | V2, fortnight read |
+|---|---|---|---|
+| 6 h apart — First Five / ~20 / ~60 / 100+ | 5.3 / 1.0 / 1.0 / 0.5 | 5.5 / 0 / 0 / 0.3 | 5.5 / 0 / 0 / 0.3 |
+| 24 h apart | 6.8 / 1.5 / 1.3 / 1.0 | 7.8 / 3.0 / 2.0 / 1.3 | 7.0 / 2.5 / 2.0 / 1.0 |
+| 96 h apart | 15.3 / 9.0 / 6.3 / 5.3 | 14.0 / 8.0 / 5.5 / 3.8 | 9.0 / 4.3 / 3.5 / 2.3 |
+| visible first 9, 6 h apart | 1.0 / 0.8 / 0.5 / 0.5 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| visible first 9, 96 h apart | 5.5 / 3.8 / 2.3 / 1.5 | 4.8 / 2.3 / 2.0 / 1.8 | 2.3 / 1.0 / 0.8 / 0.3 |
+| Refresh inside a session | 6 / 2 / 2 / 3 | — | 4 / 0 / 0 / 0 |
+| unique titles after 5 sessions, 96 h apart | 30 / 45 / 63 / 66 | 35 / 51 / 69 / 74 | 44 / 57 / 76 / 77 |
+| mean first-20 score | 0.500 / 0.568 / 0.532 / 0.545 | 0.500 / 0.559 / 0.524 / 0.540 | same |
 
-Unique titles after 5 sessions 96 h apart: 30 / 45 / 63 / 66 → 44 / 57 / 76 / 78. Mean score
-across all five walls moves −1% to −3%. Next-day recurrence of a few titles is intended.
+Next-day recurrence of a few strong titles is intended (§11.2 step 3). Mean score across all
+five walls moves −0% to −3%.
 
 **Provider cost:** none added. Selection runs on the already-fetched pool; anchor fills keep
-§10's ≤ 6 per slate. The exposure read is still one per session, now over up to a fortnight of
-the reader's own rows.
+§10's ≤ 6 per slate. The exposure read is still one per session, over up to a fortnight of the
+reader's own rows.
 
 ### 11.5 What remains
 

@@ -238,3 +238,20 @@ describe('what the hook says a thin-taste wall is', () => {
     expect(result.current.data).toMatchObject({ lowData: true, popularityOnly: true });
   });
 });
+
+describe('repeat_count with the fortnight exposure', () => {
+  it('still counts only titles shown within the last 72 hours', async () => {
+    const hour = 3_600_000;
+    mockTables.provider_list_cache = [{ payload: { ids: ['pop-1', 'pop-2', 'pop-3'] } }];
+    mockTables.media_items = [candidate('pop-1', 'Drama'), candidate('pop-2', 'Comedy'), candidate('pop-3', 'Crime')];
+    mockRpcResults.recommendation_exposure_within = [
+      { media_item_id: 'pop-1', shown_count: 2, last_shown_at: new Date(Date.now() - 30 * hour).toISOString() },
+      { media_item_id: 'pop-2', shown_count: 1, last_shown_at: new Date(Date.now() - 200 * hour).toISOString() },
+    ];
+    const { result } = await render();
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
+    await waitFor(() => expect(slateShown()).toHaveLength(1));
+    expect(slateShown()[0]).toMatchObject({ size: 3, repeat_count: 1 });
+  });
+});

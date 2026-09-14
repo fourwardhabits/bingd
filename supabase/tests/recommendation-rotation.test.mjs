@@ -157,37 +157,14 @@ describe('the cooldown window, and why nothing is hidden for ever', () => {
 
   beforeEach(() => t.sql(`delete from recommendation_impressions`));
 
-  /** The configured window, read rather than assumed (it moved from 72 to 336 hours). */
-  const windowHours = async () =>
-    Number((await t.sql(`select value from app_config where key = 'foryou.impression_window_hours'`)).rows[0].value);
-
-  it('remembers a fortnight by default, so the client can decay rather than forget', async () => {
-    // 20260918000100. The client decays exposure by `last_shown_at`; a window that ended at
-    // three days made every visit four days apart look like a first visit.
-    assert.equal(await windowHours(), 336);
-  });
-
-  it('keeps an impression four days old, which the old three-day window forgot', async () => {
-    await shown(alice, [film]);
-    await t.sql(
-      `update recommendation_impressions set shown_at = shown_at - interval '96 hours'
-        where user_id = $1`,
-      [alice],
-    );
-    const rows = await exposure(alice);
-    assert.equal(rows.length, 1);
-    assert.ok(rows[0].last_shown_at, 'the client decays from this, so it must come back');
-  });
-
   it('drops an impression older than the window', async () => {
     await shown(alice, [film]);
     assert.equal((await exposure(alice)).length, 1);
 
-    const hours = (await windowHours()) + 8;
     await t.sql(
-      `update recommendation_impressions set shown_at = shown_at - make_interval(hours => $2)
+      `update recommendation_impressions set shown_at = shown_at - interval '80 hours'
         where user_id = $1`,
-      [alice, hours],
+      [alice],
     );
     assert.deepEqual(await exposure(alice), [], 'a strong candidate must be able to return');
   });
@@ -209,15 +186,12 @@ describe('the cooldown window, and why nothing is hidden for ever', () => {
         where user_id = $1`,
       [alice],
     );
-    const previous = await windowHours();
     await t.sql(`update app_config set value = '12'::jsonb where key = 'foryou.impression_window_hours'`);
     try {
       assert.deepEqual(await exposure(alice), []);
     } finally {
-      // Restore what was there, not a literal: the default is a migration's to decide.
       await t.sql(
-        `update app_config set value = to_jsonb($1::int) where key = 'foryou.impression_window_hours'`,
-        [previous],
+        `update app_config set value = '72'::jsonb where key = 'foryou.impression_window_hours'`,
       );
     }
   });
@@ -419,5 +393,78 @@ describe('social candidates', () => {
 
   it('tells an anonymous caller nothing', async () => {
     assert.ok(await t.asAnon(() => t.errorFrom(`select * from social_candidates(40)`)));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('a window the client can ask for (For You V2, 20260918000100)', () => {
+  let alice;
+  let bob;
+  let film;
+
+  before(async () => {
+    alice = await t.createUser({ username: 'rr_within_a' });
+    bob = await t.createUser({ username: 'rr_within_b' });
+    film = await t.createMovie('Remembered', seq++);
+  });
+
+  beforeEach(() => t.sql(`delete from recommendation_impressions`));
+
+  const within = (who, hours) =>
+    t.asUser(who, async () => {
+      const { rows } = await t.sql(`select * from recommendation_exposure_within($1)`, [hours]);
+      return rows;
+    });
+  const age = (who, hours) =>
+    t.sql(
+      `update recommendation_impressions set shown_at = shown_at - make_interval(hours => $2)
+        where user_id = $1`,
+      [who, hours],
+    );
+
+  it('keeps a four-day-old impression inside a fortnight, which the shared reader drops', async () => {
+    await shown(alice, [film]);
+    await age(alice, 96);
+
+    const rows = await within(alice, 336);
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].last_shown_at, 'the client decays from this');
+    assert.deepEqual(await exposure(alice), [], 'recommendation_exposure() is untouched: still 72 hours');
+  });
+
+  it('leaves the shared setting alone for clients that have not updated', async () => {
+    const { rows } = await t.sql(`select value from app_config where key = 'foryou.impression_window_hours'`);
+    assert.equal(Number(rows[0].value), 72);
+  });
+
+  it('honours a shorter ask, and treats a null or non-positive one as 72 hours', async () => {
+    await shown(alice, [film]);
+    await age(alice, 40);
+    assert.deepEqual(await within(alice, 24), []);
+    assert.equal((await within(alice, null)).length, 1);
+    assert.equal((await within(alice, 0)).length, 1);
+    await age(alice, 40);
+    assert.deepEqual(await within(alice, -5), []);
+  });
+
+  it('caps a long ask at the configured ceiling', async () => {
+    await shown(alice, [film]);
+    await age(alice, 800);
+    assert.deepEqual(await within(alice, 100000), [], 'thirty days is the most anybody may ask for');
+    await t.sql(`delete from recommendation_impressions`);
+    await shown(alice, [film]);
+    await age(alice, 700);
+    assert.equal((await within(alice, 100000)).length, 1, 'but everything inside it');
+  });
+
+  it('returns only the caller’s own impressions', async () => {
+    await shown(alice, [film]);
+    assert.deepEqual(await within(bob, 336), []);
+    assert.equal((await within(alice, 336)).length, 1);
+  });
+
+  it('tells an anonymous caller nothing', async () => {
+    assert.ok(await t.asAnon(() => t.errorFrom(`select * from recommendation_exposure_within(336)`)));
   });
 });

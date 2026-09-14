@@ -4,6 +4,9 @@ import { supabase } from '@/lib/supabase';
 
 import type { ExposureEntry } from './selection';
 
+/** How far back V2 asks the server to remember: 3.5 half-lives of the 96-hour decay. */
+export const EXPOSURE_WINDOW_HOURS = 336;
+
 /**
  * What previous sessions have already put in front of this reader.
  *
@@ -52,7 +55,17 @@ export function useRecommendationExposure(userId: string) {
     // rotation being slightly better.
     retry: 1,
     queryFn: async (): Promise<ReadonlyMap<string, ExposureEntry>> => {
-      const { data, error } = await supabase.rpc('recommendation_exposure');
+      /**
+       * A fortnight, from the reader V2 asks the window of (`20260918000100`). The shared
+       * `recommendation_exposure()` stays at 72 hours for clients that have not updated, whose
+       * tier engine would repeat more over a longer window. Until that migration reaches a
+       * backend the call is refused, and the 72-hour reader answers instead: V2 still works,
+       * with a shorter memory.
+       */
+      let { data, error } = await supabase.rpc('recommendation_exposure_within', {
+        p_hours: EXPOSURE_WINDOW_HOURS,
+      });
+      if (error) ({ data, error } = await supabase.rpc('recommendation_exposure'));
       if (error) throw error;
 
       const entries = new Map<string, ExposureEntry>();
@@ -65,12 +78,13 @@ export function useRecommendationExposure(userId: string) {
          * The count **and when**, since For You V2 (2026-09-13). The count alone could only
          * say "seen this window", which made a title shown an hour ago and one shown three
          * days ago equally stale — and forgot both at once when the window ran out. The
-         * last time is what `selection.ts` decays from. A row with no parseable time is
-         * treated as shown at the start of the window rather than now, the weaker claim.
+         * last time is what `selection.ts` decays from. A row with no parseable time or count
+         * — the SQL makes both impossible — counts once, at the epoch: present, and fully
+         * decayed, rather than a NaN that would silently drop the title from the pool.
          */
         const last = row.last_shown_at ? Date.parse(row.last_shown_at) : Number.NaN;
         entries.set(row.media_item_id, {
-          count: Math.max(1, row.shown_count),
+          count: Math.max(1, Number(row.shown_count) || 1),
           lastShownAt: Number.isFinite(last) ? last : 0,
         });
       }

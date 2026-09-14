@@ -160,7 +160,8 @@ describe('drawing the wall', () => {
 
   it('continues past the qualified pool only in strict score order', () => {
     const scored = pool(200);
-    const { pool: qualified, rest } = qualifiedPool(scored);
+    // The pool a five-page draw actually uses: extended while unseen titles are short.
+    const { pool: qualified, rest } = qualifiedPool(scored, FOR_YOU_SELECTION, { need: 100, recent: () => false });
     const wall = draw(scored, 3, { pages: 5 });
     const beyond = wall.filter((item) => !qualified.some((q) => q.mediaItemId === item.mediaItemId));
     const restOrder = ids(rest);
@@ -297,5 +298,122 @@ describe('explicit Refresh', () => {
     const refreshed = draw(scored, 101, { now: NOW + 5 * 60_000, session });
     expect(overlap(refreshed, first)).toBeLessThanOrEqual(2);
     expect(mean(refreshed)).toBeGreaterThanOrEqual(mean(strictTop(scored, 20)) * 0.85);
+  });
+});
+
+describe('what the review of V2 found', () => {
+  const HOUR_MS = 3_600_000;
+
+  it('never hands back the wall on screen across consecutive Refreshes, even on a steep pool', () => {
+    // M1: a steep profile clamped its pool at forty and ran out of unseen titles by the second
+    // Refresh. The on-screen tier and the pool extension keep every Refresh a new wall.
+    const steep = pool(200).map((item, index) => ({
+      ...item,
+      explanation: { ...item.explanation, total: 0.9 * 0.985 ** index },
+    }));
+    const session = new Map<string, number>();
+    let now = NOW;
+    let previous = draw(steep, 1, { now, session });
+    for (let press = 2; press <= 7; press += 1) {
+      for (const id of ids(previous)) session.set(id, now);
+      now += 5 * 60_000;
+      const next = draw(steep, press, { now, session, current: new Set(ids(previous)) });
+      expect(next).toHaveLength(20);
+      expect(overlap(next, previous)).toBeLessThanOrEqual(2);
+      previous = next;
+    }
+  });
+
+  it('extends the pool only as far as relevance allows', () => {
+    const scored = pool(200);
+    const byScore = strictTop(scored, 200);
+    const frontier = byScore[FOR_YOU_SELECTION.frontierRank - 1]!.explanation.total;
+    const everyone = qualifiedPool(scored, FOR_YOU_SELECTION, { need: 10_000, recent: () => true }).pool;
+    for (const item of everyone.slice(FOR_YOU_SELECTION.minPool)) {
+      expect(item.explanation.total).toBeGreaterThanOrEqual(frontier * FOR_YOU_SELECTION.extendRatio);
+    }
+    expect(everyone.length).toBeLessThanOrEqual(FOR_YOU_SELECTION.maxPool);
+  });
+
+  it('draws five pages from a full pool quickly enough for the JS thread', () => {
+    // M2. Desktop measured 145 ms before per-title metadata was hoisted out of the pick loop.
+    // A generous bound: it guards against the quadratic recomputation returning.
+    const flat = pool(400).map((item) => ({ ...item, explanation: { ...item.explanation, total: 0.5 } }));
+    draw(flat, 1, { pages: 5 });
+    const started = performance.now();
+    for (let seed = 2; seed <= 6; seed += 1) draw(flat, seed, { pages: 5 });
+    expect((performance.now() - started) / 5).toBeLessThan(60);
+  });
+
+  it('replaces a dismissed title without reshuffling the rest of the wall', () => {
+    // Minor 1. The veto is inside the draw, so the frontier and tau do not move.
+    const scored = pool();
+    let kept = 0;
+    let possible = 0;
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const wall = draw(scored, seed);
+      const dismissed = wall[seed % 20]!.mediaItemId;
+      const after = draw(scored, seed, { veto: new Set([dismissed]) });
+      expect(ids(after)).not.toContain(dismissed);
+      const before = ids(wall).filter((id) => id !== dismissed);
+      kept += before.filter((id) => ids(after).includes(id)).length;
+      possible += before.length;
+    }
+    expect(kept / possible).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('treats a title on screen now as staler than one seen hours ago', () => {
+    const onScreen = exposurePenalty(undefined, NOW, NOW) + FOR_YOU_SELECTION.onScreenPenalty;
+    const earlier = exposurePenalty(undefined, NOW - 10 * HOUR_MS, NOW);
+    expect(onScreen).toBeGreaterThan(earlier + 10);
+  });
+});
+
+describe('the pool extension and the veto, pinned exactly', () => {
+  const HOUR_MS = 3_600_000;
+
+  it('leaves the wall identical when the vetoed title was not on it', () => {
+    // The veto is inside the draw, so the frontier and τ are the whole scoring's. Vetoing the
+    // pool's lowest title — which moves τ if it is removed first — must not move the wall.
+    const scored = pool();
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const wall = draw(scored, seed);
+      const onWall = new Set(ids(wall));
+      const offWall = qualifiedPool(scored).pool.filter((item) => !onWall.has(item.mediaItemId));
+      const lowest = offWall[offWall.length - 1]!.mediaItemId;
+      expect(ids(draw(scored, seed, { veto: new Set([lowest]) }))).toEqual(ids(wall));
+    }
+  });
+
+  it('reaches unseen titles below the pool before re-showing the pool, while relevance allows', () => {
+    // A gentle gradient: the frontier ratio qualifies about sixty, the extension floor far more.
+    const gentle = pool(200).map((item, index) => ({
+      ...item,
+      explanation: { ...item.explanation, total: 0.9 - index * 0.004 },
+    }));
+    const base = qualifiedPool(gentle).pool.length;
+    const session = new Map<string, number>();
+    const seen = new Set<string>();
+    let now = NOW;
+    let current = new Set<string>();
+    for (let press = 1; press <= 6; press += 1) {
+      const wall = draw(gentle, press, { now, session, current });
+      for (const id of ids(wall)) {
+        seen.add(id);
+        session.set(id, now);
+      }
+      current = new Set(ids(wall));
+      now += 5 * 60_000;
+    }
+    // Six walls of twenty: without extension they could only ever cycle the base pool.
+    expect(base).toBeLessThan(120);
+    expect(seen.size).toBeGreaterThan(base);
+    const frontier = strictTop(gentle, 20)[19]!.explanation.total;
+    for (const id of seen) {
+      expect(gentle.find((item) => item.mediaItemId === id)!.explanation.total).toBeGreaterThanOrEqual(
+        frontier * FOR_YOU_SELECTION.extendRatio,
+      );
+    }
+    void HOUR_MS;
   });
 });

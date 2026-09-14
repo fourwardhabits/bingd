@@ -620,6 +620,14 @@ export function useForYou(
   // Which arrangement this session is showing, and what it has already shown. Not part
   // of the key — see `select`.
   const arrangement = useRecommendationArrangement();
+  // Read out once: the draw depends on these four fields of the arrangement and nothing else,
+  // and `current` read inside a memoised callback looks like a ref to the React Compiler.
+  const {
+    seed: drawSeed,
+    startedAt: arrangementStart,
+    shownAt,
+    current: onScreenAtStart,
+  } = arrangement;
   // Once per process: a return to the app after a meaningful absence is a new session
   // (`session-seed.ts` `noteAppState`). Idempotent, so every wall may ask.
   useEffect(() => {
@@ -772,21 +780,20 @@ export function useForYou(
      */
     select: useCallback(
       (scoring: ForYouScoring): ForYouSlate => {
-        // The veto first, so a dismissed title costs a wall slot to a neighbour
-        // rather than leaving a hole: the draw picks its twenty from a pool that no
-        // longer contains it.
-        const vetoed = dismissed.data?.size
-          ? scoring.scored.filter((item) => !dismissed.data.has(item.mediaItemId))
-          : scoring.scored;
-        const items = drawSlate(vetoed, {
+        // The veto goes into the draw rather than before it, so a dismissed title costs a
+        // wall slot to a neighbour without moving the quality frontier every other title's
+        // odds are measured against.
+        const items = drawSlate(scoring.scored, {
           pageSize: SLATE_SIZE,
           pages,
-          seed: arrangement.seed,
+          seed: drawSeed,
           // Ages are measured from the arrangement's start, never from the clock, so the
           // same arrangement is the same wall however much later it re-renders.
-          now: arrangement.startedAt,
+          now: arrangementStart,
           durable: exposure.data,
-          session: arrangement.shownAt,
+          session: shownAt,
+          current: onScreenAtStart,
+          veto: dismissed.data,
         });
         return {
           ...scoring,
@@ -808,7 +815,7 @@ export function useForYou(
           items,
         };
       },
-      [arrangement, dismissed.data, exposure.data, pages],
+      [drawSeed, arrangementStart, shownAt, onScreenAtStart, dismissed.data, exposure.data, pages],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(
@@ -1004,10 +1011,18 @@ export function useForYou(
    * and a different medium or a different filter set is a different (empty) wall.
    */
   const emptyReported = useRef<string | null>(null);
+  /**
+   * Whether the durable exposure has settled, either way (independent review of V2, minor 4).
+   * A wall drawn before it arrives is redrawn a beat later, so recording the first one would
+   * stamp twenty titles the reader barely saw — and V2's same-day suppression would then keep
+   * them off the next launch's wall.
+   */
+  const exposureSettled = !exposure.isPending;
   useEffect(() => {
     if (!items) return;
     const ids = items.map((item) => item.mediaItemId);
     noteSlateOnScreen(wallKey, ids);
+    if (!exposureSettled) return;
     /**
      * **An empty wall is a slate too** (2026-09-07), and the question "are
      * recommendation walls sometimes empty" had no number until it was one.
@@ -1056,7 +1071,12 @@ export function useForYou(
           size: ids.length,
           // How much of this wall the reader had already been shown. The number the
           // founder's "Jobs and Creed III again" becomes.
-          repeat_count: ids.filter((id) => (exposureAtLaunch?.get(id)?.count ?? 0) > 0).length,
+          // "Shown within the last 72 hours", as the series has always meant, although the
+          // exposure read now reaches a fortnight (minor 5). Measured from the arrangement's
+          // start so it is stable for the wall it describes.
+          repeat_count: ids.filter(
+            (id) => (exposureAtLaunch?.get(id)?.lastShownAt ?? 0) > arrangementStart - 72 * 3_600_000,
+          ).length,
           // Whether rotation has anything to rotate, and what it produced (2026-09-13):
           // three counts, no ids. `liked_titles` is the band anchors are drawn from,
           // `anchors_used` how many of the drawn ones had a TMDB list, `pool_size` how many
@@ -1067,7 +1087,7 @@ export function useForYou(
         },
       });
     });
-  }, [wallKey, items, medium, filters, exposureAtLaunch, likedCount, anchorsUsed, poolSize]);
+  }, [wallKey, items, medium, filters, exposureAtLaunch, exposureSettled, arrangementStart, likedCount, anchorsUsed, poolSize]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.
