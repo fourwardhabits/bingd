@@ -2211,14 +2211,14 @@ const SHOT = {
   ranked: {
     src: '/shot-ranked.webp',
     w: 640,
-    h: 626,
-    alt: 'A ranked bingd. list of four movies, each numbered by where it landed and carrying its score out of ten',
+    h: 1323,
+    alt: 'The bingd. Your First Five screen: four movies ranked in order, each with its score out of ten',
   },
   score: {
     src: '/shot-score.webp',
     w: 640,
-    h: 356,
-    alt: 'The score a ranking lands on, 9.1, above the title Harry Potter and the Goblet of Fire',
+    h: 1285,
+    alt: 'The score a bingd. ranking lands on, 9.1 for Harry Potter and the Goblet of Fire, in the sheet shown after ranking',
   },
   comments: {
     src: '/shot-comments.webp',
