@@ -672,6 +672,9 @@ describe('the guard is wired in, not merely present', () => {
     // `assert_can_write()` like every other write path, so a suspended account cannot
     // add rows to `recommendation_impressions`.
     'recommendation_exposure',
+    // Its For You V2 twin (20260918000100): the same own-rows aggregate with a caller-chosen,
+    // server-capped window. A read, so a suspended account may still see its own history.
+    'recommendation_exposure_within',
     'social_candidates',
 
     // 20260907000100. Group Picks, a pure read and security invoker: the caller's own
