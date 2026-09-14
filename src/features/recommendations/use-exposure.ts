@@ -2,7 +2,16 @@ import { useQuery } from '@tanstack/react-query';
 
 import { supabase } from '@/lib/supabase';
 
-import { EXPOSURE_TIERS } from './session-seed';
+import type { ExposureEntry } from './selection';
+
+/** How far back V2 asks the server to remember: 3.5 half-lives of the 96-hour decay. */
+export const EXPOSURE_WINDOW_HOURS = 336;
+
+/** PostgREST's "no such function" (schema cache) and Postgres's undefined_function. */
+export const isMissingFunction = (error: { code?: string | null; message?: string | null }) =>
+  error.code === 'PGRST202' ||
+  error.code === '42883' ||
+  /could not find the function/i.test(error.message ?? '');
 
 /**
  * What previous sessions have already put in front of this reader.
@@ -51,19 +60,44 @@ export function useRecommendationExposure(userId: string) {
     // waits on nothing, so a long back-off spent on it is a long back-off spent on the
     // rotation being slightly better.
     retry: 1,
-    queryFn: async (): Promise<ReadonlyMap<string, number>> => {
-      const { data, error } = await supabase.rpc('recommendation_exposure');
+    queryFn: async (): Promise<ReadonlyMap<string, ExposureEntry>> => {
+      /**
+       * A fortnight, from the reader V2 asks the window of (`20260918000100`). The shared
+       * `recommendation_exposure()` stays at 72 hours for clients that have not updated, whose
+       * tier engine would repeat more over a longer window. Until that migration reaches a
+       * backend the call is refused, and the 72-hour reader answers instead: V2 still works,
+       * with a shorter memory.
+       */
+      let { data, error } = await supabase.rpc('recommendation_exposure_within', {
+        p_hours: EXPOSURE_WINDOW_HOURS,
+      });
+      // Only a backend without the function falls back. A transient failure throws, so the
+      // query's retry runs rather than pinning this whole process to a 72-hour memory
+      // (second review of V2, m1).
+      if (error && isMissingFunction(error)) ({ data, error } = await supabase.rpc('recommendation_exposure'));
       if (error) throw error;
 
-      const counts = new Map<string, number>();
-      for (const row of (data ?? []) as { media_item_id: string; shown_count: number }[]) {
-        // Capped at the same tiers the session uses, so a title shown thirty times last
-        // week is not permanently pinned below one shown four. Past the cap everything is
-        // equally stale and score decides again, which is the rule `EXPOSURE_TIERS`
-        // exists to state — it must mean one thing across both halves of the penalty.
-        counts.set(row.media_item_id, Math.min(EXPOSURE_TIERS, row.shown_count));
+      const entries = new Map<string, ExposureEntry>();
+      for (const row of (data ?? []) as {
+        media_item_id: string;
+        shown_count: number;
+        last_shown_at: string | null;
+      }[]) {
+        /**
+         * The count **and when**, since For You V2 (2026-09-13). The count alone could only
+         * say "seen this window", which made a title shown an hour ago and one shown three
+         * days ago equally stale — and forgot both at once when the window ran out. The
+         * last time is what `selection.ts` decays from. A row with no parseable time or count
+         * — the SQL makes both impossible — counts once, at the epoch: present, and fully
+         * decayed, rather than a NaN that would silently drop the title from the pool.
+         */
+        const last = row.last_shown_at ? Date.parse(row.last_shown_at) : Number.NaN;
+        entries.set(row.media_item_id, {
+          count: Math.max(1, Number(row.shown_count) || 1),
+          lastShownAt: Number.isFinite(last) ? last : 0,
+        });
       }
-      return counts;
+      return entries;
     },
   });
 }

@@ -23,7 +23,10 @@ import {
 } from '@/features/recommendations/use-recommendation-requests';
 import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
-import { refreshRecommendations } from '@/features/recommendations/session-seed';
+import {
+  refreshRecommendations,
+  useRecommendationArrangement,
+} from '@/features/recommendations/session-seed';
 import { useDismissTitle } from '@/features/recommendations/use-dismissed';
 import {
   MAX_PAGES,
@@ -308,6 +311,15 @@ export default function RecommendationsScreen() {
     setPagesByMedium((current) => ({ ...current, [medium]: next }));
   const resetPages = () => setPagesByMedium({ movies: 1, tv: 1 });
   const slate = useForYou(profile.id, medium, filters, pages);
+  /**
+   * A return after a meaningful absence draws a new wall (For You V2); a reader who was four
+   * pages deep would otherwise land inside it with no sign it changed — the same reason
+   * `refreshSlate` resets the pages (independent review of V2, minor 3).
+   */
+  const { reason: arrangementReason, startedAt: arrangementStartedAt } = useRecommendationArrangement();
+  useEffect(() => {
+    if (arrangementReason === 'resume') resetPages();
+  }, [arrangementReason, arrangementStartedAt]);
   /**
    * The community's wall, and it is a different query rather than a mode of the slate.
    *

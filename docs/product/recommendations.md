@@ -362,3 +362,130 @@ launch seed each fails a test.
 `for_you_slate_shown` gains `liked_titles`, `anchors_used` and `pool_size` — three counts, no
 ids — so whether rotation had anything to rotate, and the pool it produced, can be read
 after outreach beside `repeat_count`.
+
+## 11. For You V2 — a quality neighbourhood, decaying exposure, and sessions (2026-09-13)
+
+The founder's physical pass on #145 found the broader anchors structurally better and the
+wall still too repetitive. This is the evaluation and the change it led to. Candidate
+generation (§10) and the scoring weights are unchanged.
+
+### 11.1 What the evaluation found (production rankings, read-only, aggregates only)
+
+**Cohort.** 31 raters, 596 rankings. Movie rankings per rater: twelve at exactly five (First
+Five), then 6–24, three at 52–59, one at 112. Seven raters met a 10-ranking floor for held-out
+evaluation on films; three on TV. **Every feature finding below is low-N and is treated as
+directional at best.**
+
+**Held-out ranking quality** (5-fold within each rater; pairs the rater separated by ≥ 1.0
+score; unwatched titles never used as negatives):
+
+| films, 7 raters, 1,319 pairs | pairwise accuracy | Δ vs current [95% bootstrap CI] | raters better / worse |
+|---|---|---|---|
+| current (anchor, genre, language, popularity) | 0.444 | — | — |
+| + release decade (w 0.06 / 0.12 / 0.18) | 0.405–0.411 | −0.033 to −0.039, CIs cross 0 | 1–2 / 4 |
+| + recency band | 0.419 | −0.024 [−0.061, +0.008] | 2 / 3 |
+| + genre-pair affinity | 0.448 | +0.005 [−0.043, +0.052] | 4 / 2 |
+| − popularity | 0.454 | +0.011 [−0.045, +0.068] | 4 / 3 |
+
+TV (3 raters) leaned the other way for era and genre pairs (+0.02 to +0.04), on too few raters
+to mean anything.
+
+**Decision: no feature was added.** Era/decade *lowered* film ordering for most raters, recency
+likewise, and nothing cleared its own noise. The simpler model stays.
+
+**The finding that did decide the design.** Among a rater's own watched films the content score
+orders loved-versus-disliked **worse than chance** (0.444), and membership of an anchor's TMDB
+list is *not* more likely for loved titles (held out: loved 15% in pool, not-loved 33%; lift
+0.46). TMDB recommendations predict what someone will watch, not what they will love. A
+computed #1 is therefore a neighbourhood, not a certainty — which is the founder's principle,
+now with data behind it.
+
+**Candidate recall.** 18% of held-out loved films are present in the product's candidate pool;
+29% when every liked title is an anchor. Consistent with §10's direction; no further change here.
+
+**Signals not represented** (audited against stored data): release era/recency, genre
+combinations, watchlist saves and dismissals are readable now; Match-weighted social evidence
+and impression → rank conversion need a definer RPC; cast/director/creator credits are only
+cached for opened titles (sparse on the candidate side); opens are not recorded; keywords are
+not stored.
+
+**TMDB `/similar` (Phase C).** Not measured, and the premise needed correcting: the Similar
+tab uses the same `similar` facet For You does, which is TMDB **`/recommendations`**. The adapter
+has no `/similar` action and no TMDB credential exists outside the Edge runtime, so measuring
+its marginal value needs an adapter change and a deploy. Not added.
+
+### 11.2 The selection (`selection.ts`, `FOR_YOU_SELECTION`)
+
+1. **Qualified pool.** Candidates scoring ≥ 0.80 × the score at rank 20 (the first page's
+   frontier), clamped to 60–160. When fewer than 60 of them remain unseen, the pool extends
+   in score order — never below 0.60 × the frontier. The trigger is a constant: growing the
+   wall by pages, or dismissing a title, never changes the pool, and τ is taken from the
+   unextended pool, so what the reader already scrolled past never moves.
+2. **Score-weighted sampling without replacement.** Key = `score / τ − exposure + Gumbel(seed,
+   id)`, τ = 0.15 × the pool's score spread. On a realistic pool the best title leads ~22% of
+   fresh walls, the tenth <1%.
+3. **Exposure decays** from `last_shown_at`: `3 × log2(1 + count) × 0.5^(age / 96 h)`, plus 12
+   when shown within the last **18 hours**, plus 24 for a title **on screen when Refresh was
+   pressed** (always drawn last; a return after hours away does not add it). Finite for every
+   title — nothing is blacklisted.
+4. **Light diversity per page**: 0.4 per title beyond four of one primary genre, 0.25 per
+   repeat of a lead anchor; hard ceilings unchanged (four per anchor, two per franchise). No
+   genre quotas — a horror reader still gets a horror wall.
+5. **Beyond the pool** the wall continues only in strict score order.
+6. **Dismissals** are removed inside the draw, so the frontier and τ do not move: dismissing
+   one title replaces it and keeps ≥ 85% of the rest in place.
+
+Scores and explanations are untouched, so every "Because you loved X" is unchanged. Per-title
+metadata is computed once per draw; a five-page draw over a full 160-title pool is well under
+the 60 ms test bound on desktop.
+
+### 11.3 Sessions and exposure memory
+
+- A **re-render** or a **return within an hour** changes nothing.
+- **Refresh** stamps what is on screen as shown now and draws a new arrangement; each wall is
+  stamped once, so walls left long ago age normally.
+- A **return after an hour away** — or after five minutes, once the session is six hours old
+  — is a new session: new seed, the wall that was on screen stamped as shown when the reader
+  left, and the screen back at its first page. The durable exposure is not re-read; every wall
+  this process drew is already stamped, and a re-read would redraw the wall twice.
+- A **cold launch** is a new session and reads the durable exposure once. Impressions are only
+  recorded once that read has settled, so a wall redrawn a beat after launch is not recorded
+  as seen.
+- The subscription to app state starts when the module loads, so a return via another tab
+  still counts. Anchors (§10) stay per process.
+- **Memory.** V2 reads `recommendation_exposure_within(336)` (`20260918000100`), a fortnight
+  — 3.5 half-lives. `recommendation_exposure()` and `foryou.impression_window_hours` (72) are
+  **unchanged**: clients that cannot take this update run the old tier engine, which would
+  repeat *more* over a longer window (independent review). Until the migration reaches a
+  backend, V2 falls back to the 72-hour reader — on a missing function only; a transient
+  failure is retried.
+
+### 11.4 Before and after (real production profiles, movies wall, medians)
+
+Relevance is the model's own score; "overlap" is titles shared by consecutive cold sessions
+(of 20). Measured with the merged code, not a prototype.
+
+| visits | #145 | V2, 72 h read (before the migration) | V2, fortnight read |
+|---|---|---|---|
+| 6 h apart — First Five / ~20 / ~60 / 100+ | 5.3 / 1.0 / 1.0 / 0.5 | 5.5 / 0 / 0 / 0.3 | 5.5 / 0 / 0 / 0.3 |
+| 24 h apart | 6.8 / 1.5 / 1.3 / 1.0 | 7.8 / 3.0 / 2.0 / 1.3 | 7.0 / 2.5 / 2.0 / 1.0 |
+| 96 h apart | 15.3 / 9.0 / 6.3 / 5.3 | 14.0 / 8.0 / 5.5 / 3.8 | 9.0 / 4.3 / 3.5 / 2.3 |
+| visible first 9, 6 h apart | 1.0 / 0.8 / 0.5 / 0.5 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| visible first 9, 96 h apart | 5.5 / 3.8 / 2.3 / 1.5 | 4.8 / 2.3 / 2.0 / 1.8 | 2.3 / 1.0 / 0.8 / 0.3 |
+| Refresh inside a session | 6 / 2 / 2 / 3 | — | 4 / 0 / 0 / 0 |
+| unique titles after 5 sessions, 96 h apart | 30 / 45 / 63 / 66 | 35 / 51 / 69 / 74 | 44 / 57 / 76 / 77 |
+| mean first-20 score | 0.500 / 0.568 / 0.532 / 0.545 | 0.500 / 0.559 / 0.524 / 0.540 | same |
+
+Next-day recurrence of a few strong titles is intended (§11.2 step 3). Mean score across all
+five walls moves −0% to −3%.
+
+**Provider cost:** none added. Selection runs on the already-fetched pool; anchor fills keep
+§10's ≤ 6 per slate. The exposure read is still one per session, over up to a fortnight of the
+reader's own rows.
+
+### 11.5 What remains
+
+- First Five walls are pool-limited (~85 eligible): selection cannot manufacture candidates,
+  and its 96-hour overlap stays the highest of any cohort.
+- Returning within an hour keeps the wall, by design.
+- Feature additions wait for a cohort large enough to evaluate them (§11.1).

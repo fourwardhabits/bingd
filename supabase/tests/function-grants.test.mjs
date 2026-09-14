@@ -398,6 +398,9 @@ const ALLOWED = {
   // viewer.
   'note_recommendations_shown(uuid[])': ['authenticated'],
   'recommendation_exposure()': ['authenticated'],
+  // Added 2026-09-13 (20260918000100), For You V2. The same reader with a caller-chosen
+  // window, capped server-side; still only the caller's own rows, still `auth.uid()` only.
+  'recommendation_exposure_within(integer)': ['authenticated'],
   'social_candidates(integer)': ['authenticated'],
 
   // Added 2026-09-03 (20260907000100). Group Picks. **Security invoker**, which is the

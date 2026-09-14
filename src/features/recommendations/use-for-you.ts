@@ -21,7 +21,6 @@ import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
 import {
   SLATE_SIZE,
-  diversifyPaged,
   scoreSlate,
   tasteFrom,
   type Anchor,
@@ -42,12 +41,14 @@ import {
 } from './anchors';
 import { noteImpressions } from './impressions';
 import {
+  ensureRecommendationLifecycle,
   noteSlateOnScreen,
   recommendationAnchorSeed,
   useRecommendationArrangement,
 } from './session-seed';
 import { useDismissedTitles } from './use-dismissed';
-import { mergeExposure, useRecommendationExposure } from './use-exposure';
+import { drawSlate } from './selection';
+import { useRecommendationExposure } from './use-exposure';
 
 /**
  * The data half of For You: anchors, candidates, and what to leave out.
@@ -539,7 +540,7 @@ export function rankingFingerprint(...lists: readonly (readonly RankedEntry[])[]
  * recycling the same five cards at the bottom").
  *
  * Reaching this ceiling is not the usual way the wall ends. The pool almost always runs
- * out first, and `diversifyPaged` returning short is what the screen actually reads.
+ * out first, and `drawSlate` returning short is what the screen actually reads.
  */
 export const MAX_PAGES = 5;
 
@@ -619,6 +620,23 @@ export function useForYou(
   // Which arrangement this session is showing, and what it has already shown. Not part
   // of the key — see `select`.
   const arrangement = useRecommendationArrangement();
+  // Read out once: the draw depends on these four fields of the arrangement and nothing else,
+  // and `current` read inside a memoised callback looks like a ref to the React Compiler.
+  const {
+    seed: drawSeed,
+    startedAt: arrangementStart,
+    shownAt,
+    current: onScreenAtStart,
+    reason: arrangementReason,
+  } = arrangement;
+  // The wall on screen when Refresh was pressed is drawn last. After a return from hours away
+  // it is merely something seen earlier, which the decayed exposure already says.
+  const refreshedAway = arrangementReason === 'refresh' ? onScreenAtStart : undefined;
+  // Once per process: a return to the app after a meaningful absence is a new session
+  // (`session-seed.ts` `noteAppState`). Idempotent, so every wall may ask.
+  useEffect(() => {
+    ensureRecommendationLifecycle();
+  }, []);
 
   /**
    * What *previous* sessions showed. Read once per process and never re-read.
@@ -633,6 +651,10 @@ export function useForYou(
    * skeleton — so a slow or failed exposure read costs the rotation and nothing else.
    */
   const exposure = useRecommendationExposure(userId);
+  // Still read once per process. A return after a meaningful absence does **not** re-read
+  // it: every wall this process drew is already in `arrangement.shownAt` (stamped on
+  // Refresh and on resume), and a re-read would land a beat after the new arrangement and
+  // redraw the wall a second time in front of the reader.
 
   const ranked = medium === 'movies' ? movies : seasons;
   // The filtered subset of *this* medium, which is what the founder asked the slate to
@@ -754,23 +776,28 @@ export function useForYou(
      * identical `items` array and the wall does not so much as re-key.
      *
      * **The arrangement carries the session's exposure as well as its seed, and it only
-     * ever changes inside `refreshRecommendations`.** That is what keeps this stable: the
-     * wall is parked as "on screen" by the effect below, but parking is silent, so
-     * nothing here re-derives until the reader actually presses Refresh. A live exposure
-     * read would have changed the wall on a navigation — and, worse, would have looped:
-     * new wall, parked, new exposure, new wall.
+     * ever changes on Refresh or on a return after a meaningful absence** (`noteAppState`).
+     * That is what keeps this stable: the wall is parked as "on screen" by the effect below,
+     * but parking is silent, so nothing here re-derives until one of those two happens. A
+     * live exposure read would have changed the wall on a navigation — and, worse, would
+     * have looped: new wall, parked, new exposure, new wall.
      */
     select: useCallback(
       (scoring: ForYouScoring): ForYouSlate => {
-        // The veto first, so a dismissed title costs a wall slot to a neighbour
-        // rather than leaving a hole: diversify picks its twenty from a pool that
-        // no longer contains it.
-        const vetoed = dismissed.data?.size
-          ? scoring.scored.filter((item) => !dismissed.data.has(item.mediaItemId))
-          : scoring.scored;
-        const items = diversifyPaged(vetoed, SLATE_SIZE, pages, arrangement.seed, {
-          current: arrangement.current,
-          seen: mergeExposure(exposure.data, arrangement.seen),
+        // The veto goes into the draw rather than before it, so a dismissed title costs a
+        // wall slot to a neighbour without moving the quality frontier every other title's
+        // odds are measured against.
+        const items = drawSlate(scoring.scored, {
+          pageSize: SLATE_SIZE,
+          pages,
+          seed: drawSeed,
+          // Ages are measured from the arrangement's start, never from the clock, so the
+          // same arrangement is the same wall however much later it re-renders.
+          now: arrangementStart,
+          durable: exposure.data,
+          session: shownAt,
+          current: refreshedAway,
+          veto: dismissed.data,
         });
         return {
           ...scoring,
@@ -783,18 +810,16 @@ export function useForYou(
             ? scoring.candidatePool.filter((item) => !dismissed.data.has(item.mediaItemId))
             : scoring.candidatePool,
           /**
-           * Pages rather than one growing `limit`, and the durable exposure folded in.
-           *
-           * `diversifyPaged` keeps the prefix fixed as the wall grows — see its header
-           * for why raising `limit` reshuffles what the reader has already read. The
-           * exposure handed to it is both halves at once: what this session has shown,
-           * and what previous ones did, merged by `Math.max` so a tier stays a staleness
-           * band rather than becoming a tally.
+           * For You V2 (`selection.ts`): a qualified pool relative to this reader's own
+           * quality frontier, score-weighted sampling without replacement, exposure that
+           * decays by age rather than expiring at a window's edge, and light per-page
+           * diversity. Pages are drawn in sequence, so the prefix never moves as the wall
+           * grows.
            */
           items,
         };
       },
-      [arrangement, dismissed.data, exposure.data, pages],
+      [drawSeed, arrangementStart, shownAt, refreshedAway, dismissed.data, exposure.data, pages],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(
@@ -990,10 +1015,18 @@ export function useForYou(
    * and a different medium or a different filter set is a different (empty) wall.
    */
   const emptyReported = useRef<string | null>(null);
+  /**
+   * Whether the durable exposure has settled, either way (independent review of V2, minor 4).
+   * A wall drawn before it arrives is redrawn a beat later, so recording the first one would
+   * stamp twenty titles the reader barely saw — and V2's same-day suppression would then keep
+   * them off the next launch's wall.
+   */
+  const exposureSettled = !exposure.isPending;
   useEffect(() => {
     if (!items) return;
     const ids = items.map((item) => item.mediaItemId);
     noteSlateOnScreen(wallKey, ids);
+    if (!exposureSettled) return;
     /**
      * **An empty wall is a slate too** (2026-09-07), and the question "are
      * recommendation walls sometimes empty" had no number until it was one.
@@ -1042,7 +1075,12 @@ export function useForYou(
           size: ids.length,
           // How much of this wall the reader had already been shown. The number the
           // founder's "Jobs and Creed III again" becomes.
-          repeat_count: ids.filter((id) => (exposureAtLaunch?.get(id) ?? 0) > 0).length,
+          // "Shown within the last 72 hours", as the series has always meant, although the
+          // exposure read now reaches a fortnight (minor 5). Measured from the arrangement's
+          // start so it is stable for the wall it describes.
+          repeat_count: ids.filter(
+            (id) => (exposureAtLaunch?.get(id)?.lastShownAt ?? 0) > arrangementStart - 72 * 3_600_000,
+          ).length,
           // Whether rotation has anything to rotate, and what it produced (2026-09-13):
           // three counts, no ids. `liked_titles` is the band anchors are drawn from,
           // `anchors_used` how many of the drawn ones had a TMDB list, `pool_size` how many
@@ -1053,7 +1091,7 @@ export function useForYou(
         },
       });
     });
-  }, [wallKey, items, medium, filters, exposureAtLaunch, likedCount, anchorsUsed, poolSize]);
+  }, [wallKey, items, medium, filters, exposureAtLaunch, exposureSettled, arrangementStart, likedCount, anchorsUsed, poolSize]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.

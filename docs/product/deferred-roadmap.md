@@ -2400,7 +2400,7 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 **Deferred 2026-09-13**, by founder direction. The repetition audit found four mechanisms; the bounded launch fix shipped coverage-aware rotating anchors (budget eight) and the TV source fixes (`recommendations.md` §10). These are the exposure-engine half, left for measurement.
 
-### 59a. A return from the background is the same wall
+### 59a. A return from the background is the same wall — **resolved 2026-09-13 (For You V2)**
 
 **What it is.** The arrangement and anchor seeds are module state set once per process, the durable exposure is read once per process (`staleTime: Infinity`), and no foreground handler touches For You. Returning to a still-alive app shows the identical wall, and `noteImpressions`' per-process guard means that repeat is never written — so neither `recommendation_impressions` nor `for_you_slate_shown` can see it.
 
@@ -2408,7 +2408,9 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 **Revisit when.** Physical QA or post-outreach reports still describe identical walls across same-day opens after anchor rotation ships.
 
-### 59b. Exposure tiers stop at the top sixty
+**Resolved.** A return after an hour away (or five minutes, once a session is six hours old) begins a new session (`session-seed.ts` `noteAppState`); a shorter absence keeps the wall. `noteImpressions`' per-process guard still never re-records a title already sent by this process, and `last_shown_at` is hour-truncated — both acceptable at the decay's timescale. `recommendations.md` §11.3.
+
+### 59b. Exposure tiers stop at the top sixty — **resolved 2026-09-13 (For You V2)**
 
 **What it is.** `explore` sorts by exposure tier only inside the top `3 × limit` by score and appends the rest in strict score order, so from about the fourth daily visit the wall is almost entirely previously shown titles while dozens of never-shown eligible candidates sit below the cut. The audit's scratch model measured 18–20 of 20 repeats with 38–47 unseen eligible titles left.
 
@@ -2416,10 +2418,14 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 
 **Revisit when.** `for_you_slate_shown` `repeat_count / size` stays high for readers whose `liked_titles` is above eight.
 
-### 59c. `foryou.impression_window_hours` is still 72
+**Resolved.** The wall is drawn from a qualified pool relative to the reader's own frontier, with exposure decaying across the whole pool (`selection.ts`). `recommendations.md` §11.2.
+
+### 59c. `foryou.impression_window_hours` is still 72 — **migration written 2026-09-13, production apply pending**
 
 **What it is.** A title shown three days ago counts as unseen. Visits more than 72 hours apart repeat ~13 of 20; daily visitors cycle every three days. Raising it is an `app_config` data write, not a migration — and on its own it only delays repetition by about two days without 59b.
 
 **Why it is deferred.** A production data write whose value depends on 59b.
 
 **Revisit when.** 59b is decided.
+
+**Status.** 59b is decided, and the shared window **stays 72**: raising it would make clients that cannot take V2 repeat more (independent review). Migration `20260918000100` adds `recommendation_exposure_within(p_hours)` instead, which V2 calls with 336. It needs a founder-authorised production apply; V2's long-gap gain depends on it and falls back to the 72-hour reader until then (`recommendations.md` §11.3–11.4).

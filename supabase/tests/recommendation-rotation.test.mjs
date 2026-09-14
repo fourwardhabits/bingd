@@ -395,3 +395,76 @@ describe('social candidates', () => {
     assert.ok(await t.asAnon(() => t.errorFrom(`select * from social_candidates(40)`)));
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('a window the client can ask for (For You V2, 20260918000100)', () => {
+  let alice;
+  let bob;
+  let film;
+
+  before(async () => {
+    alice = await t.createUser({ username: 'rr_within_a' });
+    bob = await t.createUser({ username: 'rr_within_b' });
+    film = await t.createMovie('Remembered', seq++);
+  });
+
+  beforeEach(() => t.sql(`delete from recommendation_impressions`));
+
+  const within = (who, hours) =>
+    t.asUser(who, async () => {
+      const { rows } = await t.sql(`select * from recommendation_exposure_within($1)`, [hours]);
+      return rows;
+    });
+  const age = (who, hours) =>
+    t.sql(
+      `update recommendation_impressions set shown_at = shown_at - make_interval(hours => $2)
+        where user_id = $1`,
+      [who, hours],
+    );
+
+  it('keeps a four-day-old impression inside a fortnight, which the shared reader drops', async () => {
+    await shown(alice, [film]);
+    await age(alice, 96);
+
+    const rows = await within(alice, 336);
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].last_shown_at, 'the client decays from this');
+    assert.deepEqual(await exposure(alice), [], 'recommendation_exposure() is untouched: still 72 hours');
+  });
+
+  it('leaves the shared setting alone for clients that have not updated', async () => {
+    const { rows } = await t.sql(`select value from app_config where key = 'foryou.impression_window_hours'`);
+    assert.equal(Number(rows[0].value), 72);
+  });
+
+  it('honours a shorter ask, and treats a null or non-positive one as 72 hours', async () => {
+    await shown(alice, [film]);
+    await age(alice, 40);
+    assert.deepEqual(await within(alice, 24), []);
+    assert.equal((await within(alice, null)).length, 1);
+    assert.equal((await within(alice, 0)).length, 1);
+    await age(alice, 40);
+    assert.deepEqual(await within(alice, -5), []);
+  });
+
+  it('caps a long ask at the configured ceiling', async () => {
+    await shown(alice, [film]);
+    await age(alice, 800);
+    assert.deepEqual(await within(alice, 100000), [], 'thirty days is the most anybody may ask for');
+    await t.sql(`delete from recommendation_impressions`);
+    await shown(alice, [film]);
+    await age(alice, 700);
+    assert.equal((await within(alice, 100000)).length, 1, 'but everything inside it');
+  });
+
+  it('returns only the caller’s own impressions', async () => {
+    await shown(alice, [film]);
+    assert.deepEqual(await within(bob, 336), []);
+    assert.equal((await within(alice, 336)).length, 1);
+  });
+
+  it('tells an anonymous caller nothing', async () => {
+    assert.ok(await t.asAnon(() => t.errorFrom(`select * from recommendation_exposure_within(336)`)));
+  });
+});
