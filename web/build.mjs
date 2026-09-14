@@ -2125,9 +2125,9 @@ const LANDING_STYLES = `
         .phone-pair .phone + .phone { display: none; }
         .phone-pair .phone { max-width: 16rem; }
 
-        /* Except where the second picture is the point: the score a ranking lands on, and
-           the conversation under a friend's ranking. Those pairs stack instead of
-           dropping their second half, one legible picture above the other. */
+        /* Except where the second picture is the point: the TV collection beside the Movies
+           one in the hero, the score a ranking lands on, and the conversation under a
+           friend's ranking. Those pairs stack instead of dropping their second half. */
         .phone-pair.stack-narrow { flex-direction: column; }
         .phone-pair.stack-narrow .phone + .phone { display: block; }
       }
@@ -2417,7 +2417,7 @@ ${installRow({ primary: true })}
             <p class="fineprint">${AVAILABILITY}</p>
           </div>
 
-          <div class="phone-pair">
+          <div class="phone-pair stack-narrow">
             ${shot('movies', { eager: true })}
             ${shot('tv', { eager: true })}
           </div>
