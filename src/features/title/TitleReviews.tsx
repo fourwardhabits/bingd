@@ -177,7 +177,7 @@ export function TitleReviews({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Report ${review.name}'s review`}
-                  accessibilityHint="Tells whoever runs bingd. about this review"
+                  accessibilityHint="Tells whoever runs bingd about this review"
                   onPress={() => setReporting(review.id)}
                   // Slop to the 44pt floor (`layout.minTapTarget`) around a 20pt
                   // glyph: the ellipsis stays visually quiet and the target does not.

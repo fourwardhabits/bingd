@@ -498,7 +498,7 @@ thing to get back.
 
 **The signup copy widened with the decision** (`app/(auth)/create-profile.tsx`): *"We use
 your birthday to confirm you are 13 or older. It may also help us personalise
-recommendations as bingd. improves. It is never shown to anyone."* The hedge is load-
+recommendations as bingd improves. It is never shown to anyone."* The hedge is load-
 bearing — nothing personalises anything from it today, and claiming otherwise would be
 the opposite error. What the line deliberately does **not** say is "we don't save it",
 which would be false.

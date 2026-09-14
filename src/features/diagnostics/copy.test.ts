@@ -83,8 +83,8 @@ beforeEach(() => {
 
 describe('copying without opening anything', () => {
   it('writes the report to the clipboard', () => {
-    expect(copyDiagnostics('bingd. diagnostics\nRELEASE\n  app 0.1.0')).toBe(true);
-    expect(setString).toHaveBeenCalledWith(expect.stringContaining('bingd. diagnostics'));
+    expect(copyDiagnostics('bingd diagnostics\nRELEASE\n  app 0.1.0')).toBe(true);
+    expect(setString).toHaveBeenCalledWith(expect.stringContaining('bingd diagnostics'));
   });
 
   it('refuses an empty report rather than clearing the clipboard', () => {

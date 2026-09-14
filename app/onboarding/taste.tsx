@@ -441,7 +441,7 @@ export default function TasteOnboardingScreen() {
             </Text>
             <Text variant="body" tone="secondary">
               {placed === 0
-                ? 'Rate it, and bingd. will ask you to compare. Five of these and your list is started.'
+                ? 'Rate it, and bingd will ask you to compare. Five of these and your list is started.'
                 : 'Each one gets compared against the ones before it.'}
             </Text>
             <Progress placed={placed} />
@@ -947,7 +947,7 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             Your First Five
           </Text>
           <Text variant="body" tone="secondary">
-            This is just the start. As you rank more, your favorites get clearer and bingd.
+            This is just the start. As you rank more, your favorites get clearer and bingd
             gets a better read on your taste.
           </Text>
         </View>

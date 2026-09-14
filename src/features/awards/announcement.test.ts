@@ -89,11 +89,11 @@ describe('what an earned award is called', () => {
   });
 
   it('takes its last resort from the caller, because the two sentences differ', () => {
-    // "You earned a new Award" in the inbox; "Abisola earned the bingd. Award" in the
+    // "You earned a new Award" in the inbox; "Abisola earned the bingd Award" in the
     // feed. Each is wrong in the other's clause.
     expect(awardAnnouncement({ key: 'unknown', tierKey: 'x' }).title).toBe('a new Award');
-    expect(awardAnnouncement({ key: 'unknown', tierKey: 'x' }, 'bingd. Award').title).toBe(
-      'bingd. Award',
+    expect(awardAnnouncement({ key: 'unknown', tierKey: 'x' }, 'bingd Award').title).toBe(
+      'bingd Award',
     );
   });
 });

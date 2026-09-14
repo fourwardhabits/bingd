@@ -10,7 +10,7 @@ All SQL is Postgres 15 as provided by Supabase.
 Three differences from the SQL sketched below, all deliberate:
 
 - **`pgcrypto` is not installed.** `gen_random_uuid()` has been core Postgres since 13, so the extension was dead weight.
-> **`actor_id` here and on `notifications` means the initiating bingd. *user***, and the foreign key to `profiles` is what makes that a fact rather than a convention. The word also has an obvious film meaning; cast and crew are catalogue metadata identified by a TMDB person id and are never either of these columns. PRD §23 states the distinction in full.
+> **`actor_id` here and on `notifications` means the initiating bingd *user***, and the foreign key to `profiles` is what makes that a fact rather than a convention. The word also has an obvious film meaning; cast and crew are catalogue metadata identified by a TMDB person id and are never either of these columns. PRD §23 states the distinction in full.
 
 > **The feed is ordered by `(causal_at desc, causal_step desc, id asc)`, not by `created_at`** — added `20260901000100` because one action produces several events and they were reading out of order, and **corrected to descending on `causal_step` by `20260902000100`**. `causal_step` is 0 for the act, 1 for the goal it completed and 2 upward for the awards it earned, so **a higher step is a later event**: those are written in the *same transaction*, so `created_at` ties to the microsecond and one key left the order to the plan.
 >

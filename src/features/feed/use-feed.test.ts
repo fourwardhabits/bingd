@@ -520,11 +520,11 @@ describe('an award in the feed (20260828000100)', () => {
     const item = await only();
     // No leading article: the sentence supplies one now ("earned the …"), and
     // `tailFor` drops its trailing "award" for a name that already says it — so this
-    // row reads "Abisola earned the bingd. Award" rather than stacking either word.
+    // row reads "Abisola earned the bingd Award" rather than stacking either word.
     // The inbox's own last resort is "a new Award", because its sentence is "You
     // earned …" — which is why `awardAnnouncement` takes the fallback rather than
     // choosing one for both surfaces.
-    expect(item.title).toBe('bingd. Award');
+    expect(item.title).toBe('bingd Award');
     expect(item.award?.achievement).toBeNull();
   });
 });

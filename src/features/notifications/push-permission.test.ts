@@ -165,7 +165,7 @@ describe('what the priming alert says', () => {
       expect(`${title} ${body}`).not.toMatch(/Know when/i);
       // And it no longer claims to be about what bingd. *can* do, which was the old
       // body's shape and reads as a feature list rather than as a permission.
-      expect(body).not.toMatch(/bingd\. can/i);
+      expect(body).not.toMatch(/bingd\.? can/i);
       jest.restoreAllMocks();
       mockPrefs = {};
     }

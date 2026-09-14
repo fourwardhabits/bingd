@@ -119,7 +119,7 @@ jest.mock('@/features/awards/ProfileAwards', () => {
   return {
     ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
       <View>
-        <Text>BINGD. AWARDS</Text>
+        <Text>bingd AWARDS</Text>
         <Pressable accessibilityRole="button" onPress={onSeeAll}>
           <Text>See all</Text>
         </Pressable>
@@ -711,7 +711,7 @@ describe('the shape of the page', () => {
       'Invite friends',
       // `SectionHeader` upper-cases, so both shelves are matched on what they render.
       'YOUR 2026',
-      'BINGD. AWARDS',
+      'bingd AWARDS',
       // Top ranked’s empty state, which is its only marker on an empty account.
       'Nothing ranked yet',
     ]);
@@ -750,7 +750,7 @@ describe('the shape of the page', () => {
       const view = await open();
 
       await waitFor(() => expect(view.getByText(/🔥 1 week streak/)).toBeTruthy());
-      const found = positions(view, ['YOUR 2026', '🔥', 'BINGD. AWARDS']);
+      const found = positions(view, ['YOUR 2026', '🔥', 'bingd AWARDS']);
       for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
       const order = found.map((piece) => piece.at);
       expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -897,21 +897,21 @@ describe('re-tapping the Profile tab', () => {
   it('closes the awards sheet', async () => {
     const view = await open();
     await fireEvent.press(view.getByText('See all'));
-    await waitFor(() => expect(view.getByLabelText('bingd. Awards')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('bingd Awards')).toBeTruthy());
 
     await act(async () => pressTab());
 
-    await waitFor(() => expect(view.queryByLabelText('bingd. Awards')).toBeNull());
+    await waitFor(() => expect(view.queryByLabelText('bingd Awards')).toBeNull());
   });
 
   it('leaves it open when the press arrives from another tab', async () => {
     const view = await open();
     await fireEvent.press(view.getByText('See all'));
-    await waitFor(() => expect(view.getByLabelText('bingd. Awards')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('bingd Awards')).toBeTruthy());
 
     mockNavigation.focused = false;
     await act(async () => pressTab());
 
-    expect(view.getByLabelText('bingd. Awards')).toBeTruthy();
+    expect(view.getByLabelText('bingd Awards')).toBeTruthy();
   });
 });

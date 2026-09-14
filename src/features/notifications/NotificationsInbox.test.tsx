@@ -405,7 +405,7 @@ describe('the row an acceptance files for the inviter', () => {
     mockNotifications.push(joined());
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('joined bingd. from your invite')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('joined bingd from your invite')).toBeTruthy());
     expect(view.getByText('Ada')).toBeTruthy();
     // Never the sentence it replaced.
     expect(view.queryByText(/started following you/)).toBeNull();
@@ -417,7 +417,7 @@ describe('the row an acceptance files for the inviter', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() =>
-      expect(view.getByLabelText(/Ada joined bingd\. from your invite/)).toBeTruthy(),
+      expect(view.getByLabelText(/Ada joined bingd from your invite/)).toBeTruthy(),
     );
   });
 

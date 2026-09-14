@@ -135,7 +135,7 @@ jest.mock('@/features/awards/ProfileAwards', () => {
   return {
     ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
       <View>
-        <Text>BINGD. AWARDS</Text>
+        <Text>bingd AWARDS</Text>
         <Pressable accessibilityRole="button" onPress={onSeeAll}>
           <Text>See all</Text>
         </Pressable>
@@ -1197,8 +1197,8 @@ describe('sharing and awards on somebody else’s profile', () => {
 
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy();
-    expect(view.queryByRole('button', { name: 'bingd. Awards' })).toBeNull();
-    expect(view.getByText('BINGD. AWARDS')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'bingd Awards' })).toBeNull();
+    expect(view.getByText('bingd AWARDS')).toBeTruthy();
     // But not Invite friends: an invitation is from the signed-in person, and this
     // page is about somebody else. The control lives on the own profile alone.
     expect(view.queryByRole('button', { name: 'Invite friends' })).toBeNull();
@@ -1250,7 +1250,7 @@ describe('sharing and awards on somebody else’s profile', () => {
 
     await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
     expect(view.queryByRole('button', { name: 'See all' })).toBeNull();
-    expect(view.queryByText('BINGD. AWARDS')).toBeNull();
+    expect(view.queryByText('bingd AWARDS')).toBeNull();
     expect(view.queryByRole('button', { name: 'Share Profile' })).toBeNull();
   });
 });

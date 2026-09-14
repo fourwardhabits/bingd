@@ -93,6 +93,6 @@ export const ROOT_SCREEN_TITLES = {
    * named a category rather than the product; the founder corrected it to the brand. The
    * award's own name is on the card, where it is the message rather than chrome.
    */
-  'awards/celebrate': 'bingd. Awards',
+  'awards/celebrate': 'bingd Awards',
   settings: 'Settings',
 } as const;

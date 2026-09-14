@@ -848,7 +848,7 @@ function Session({
               Logged, not ranked yet
             </Text>
             <Text variant="body" tone="secondary" style={styles.centre}>
-              {subject.title} is saved in your Collection without a bingd. score. Rank it from
+              {subject.title} is saved in your Collection without a bingd score. Rank it from
               your Collection or its title page whenever you like.
             </Text>
             <Button label="Done" onPress={() => void close()} />

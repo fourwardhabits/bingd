@@ -348,7 +348,7 @@ describe('when the read fails', () => {
     mockAttributionFails = true;
     const view = await renderWithProviders(<PeopleStepScreen />);
 
-    await waitFor(() => expect(view.getByText('People on bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('People on bingd')).toBeTruthy());
     expect(view.getByText(/could not load suggestions/)).toBeTruthy();
     expect(view.queryByText('Start your Feed')).toBeNull();
     expect(view.queryByText("You're already connected")).toBeNull();
@@ -363,7 +363,7 @@ describe('when the read fails', () => {
     mockAttributionFails = true;
     const view = await renderWithProviders(<PeopleStepScreen />);
 
-    await waitFor(() => expect(view.getByText('People on bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('People on bingd')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
 
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));

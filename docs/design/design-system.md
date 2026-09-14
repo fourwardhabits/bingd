@@ -287,13 +287,13 @@ Four kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised`
 
 Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. Disabled state reduces opacity to 40% **and** the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
 
-**Which kind an action takes — canonical, 2026-08-27, revised the same day.** The Maroon fill marks **the primary action of the current context** — not "the primary social act everywhere", which is what the first wording of this rule licensed and the founder's title-page pass caught: Recommend carried the only fill in the action row while Rank, the act the whole page exists for, read smaller than it. On a title page the primary context is the Rank/Ranked control in the identity column — content-sized, 44pt tall, with a `headline` label — so **Recommend in the action row is icon-only and quiet** there, and filled Maroon again inside the Recommend sheet, where sending *is* the context's primary act. (The cluster this rule was first written against — a `xl` score circle beside the control in the hero — is gone as of 2026-09-07; the reader's score is the first unit of `SCORES` now, and the judgement about the context is unchanged.) Watchlist is unchanged. **Never two equally dominant Maroon CTAs in one view.** The named examples stand where their context agrees: **Follow**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**; everything that is utility, exit, or settled state stays outlined or quiet — **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names a judgement about a context, not a licence to repaint every control that feels important.
+**Which kind an action takes — canonical, 2026-08-27, revised the same day.** The Maroon fill marks **the primary action of the current context** — not "the primary social act everywhere", which is what the first wording of this rule licensed and the founder's title-page pass caught: Recommend carried the only fill in the action row while Rank, the act the whole page exists for, read smaller than it. On a title page the primary context is the Rank/Ranked control in the identity column — content-sized, 44pt tall, with a `headline` label — so **Recommend in the action row is icon-only and quiet** there, and filled Maroon again inside the Recommend sheet, where sending *is* the context's primary act. (The cluster this rule was first written against — a `xl` score circle beside the control in the hero — is gone as of 2026-09-07; the reader's score is the first unit of `SCORES` now, and the judgement about the context is unchanged.) Watchlist is unchanged. **Never two equally dominant Maroon CTAs in one view.** The named examples stand where their context agrees: **Follow**, accept-shaped actions (**Approve**, **Add**), **bingd Awards**; everything that is utility, exit, or settled state stays outlined or quiet — **Share Profile**, **Following** (the `outline` kind), **Share off bingd**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names a judgement about a context, not a licence to repaint every control that feels important.
 
 **A pair of actions in one row — canonical, 2026-08-27.** Two buttons side by side take **equal halves** (`flex: 1` each) and both carry `fit`. Below the width where both labels fit at their natural size, the pair becomes **two full-width rows with the primary on top** — it never shrinks one column to buy the other room.
 
 Three rules, and each exists because of a device:
 
-- **Equal halves, not grow-from-a-floor.** A fill that is also the wide one reads as the only real control on the surface. `ProfileActions` settled this for Share Profile / bingd. Awards; the Recommend sheet's footer relearned it the hard way.
+- **Equal halves, not grow-from-a-floor.** A fill that is also the wide one reads as the only real control on the surface. `ProfileActions` settled this for Share Profile / bingd Awards; the Recommend sheet's footer relearned it the hard way.
 - **`fit` on both, always.** Without it a label wraps, and a label with nowhere to wrap breaks mid-word — the founder's Android screenshot read `Share off bi / ngd.`
 - **Decide the layout from the viewport, not from `flexWrap`.** Yoga gives a flex item no automatic minimum size, so `flexShrink` has no floor at the content width: children are squeezed below their own labels and a wrap that would have saved them never fires. Read the width (`useWindowDimensions`) and choose. `ScoresSection` draws the same line at 360pt and a font scale of 1.3.
 
@@ -322,9 +322,9 @@ The table was `md` 44 / `sm` 36 and drifted twice from the code that ships. `sm`
 
 `xl` (64) is **deleted**, not deprecated. It was added on 2026-08-27 for exactly one place — the personal score cluster in the title hero — and the founder's 2026-09-07 lock moves the reader's own number into the `SCORES` row with the other two, so nothing used it. Leaving it would have left a size in the system documenting a composition the app no longer has. `detail` replaces it at 48: three circles sit across a 358pt content width with their labels beneath them, and at `lg` the row runs out of column before the third label sets.
 
-**Two variants, and this is the one place the single-fill rule below does not hold.** `ScoreBadge` takes `filled` (the default, and what every badge outside the title page's `SCORES` row draws) and `outlined` (a Maroon ring, no fill, Maroon number). The `SCORES` row states three scores side by side and they are three different claims — the reader's own, the mean over accounts they chose to follow, and bingd.'s — so three identical filled circles would say those claims are interchangeable. **Exactly one circle on that page is filled Maroon and it is always the reader's own.** See [`screens.md` §6](./screens.md).
+**Two variants, and this is the one place the single-fill rule below does not hold.** `ScoreBadge` takes `filled` (the default, and what every badge outside the title page's `SCORES` row draws) and `outlined` (a Maroon ring, no fill, Maroon number). The `SCORES` row states three scores side by side and they are three different claims — the reader's own, the mean over accounts they chose to follow, and bingd's — so three identical filled circles would say those claims are interchangeable. **Exactly one circle on that page is filled Maroon and it is always the reader's own.** See [`screens.md` §6](./screens.md).
 
-> **There was a third, and sample size is why it is gone** (founder, physical QA, 2026-09-08). `quiet` drew a neutral ring and neutral ink for an aggregate with almost nothing behind it — bingd. below two ratings — on the reading that one person's opinion should not look statistically authoritative. On a device that reads as a score that failed to load or went stale rather than a thin one, because grey on that row already means *no score*.
+> **There was a third, and sample size is why it is gone** (founder, physical QA, 2026-09-08). `quiet` drew a neutral ring and neutral ink for an aggregate with almost nothing behind it — bingd below two ratings — on the reading that one person's opinion should not look statistically authoritative. On a device that reads as a score that failed to load or went stale rather than a thin one, because grey on that row already means *no score*.
 >
 > **The rule is now one sentence with no exceptions in it: a real score is Maroon, and no score is a filled grey disc.** Nothing else may be encoded in the colour of a circle — not sample size, not freshness, not confidence. How deep a sample is is stated in words directly under the number (`1 rating`, `128 ratings`), which is more precise than a colour and readable by somebody who cannot tell two greys apart. Whether there is a number at all is still the server's decision (`score.community_min_ratings`); below it the unit draws the grey disc and says so in words. The variant was deleted from the type rather than left unused, so confidence-by-colour cannot be reintroduced by passing a string.
 
@@ -580,39 +580,55 @@ Beyond the contrast work in §1 and §2.
 
 ---
 
-## How the product name is written — canonical, 2026-08-23
+## How the product name is written — canonical, 2026-09-13
 
-**`bingd.` — lowercase, with the period.** In the wordmark and in running copy alike.
+**Two forms, by what the name is doing** (founder, 2026-09-13):
 
-The wordmark rule already existed (PRD §5: *"The wordmark is lowercase with a period"*)
-and was followed in exactly one place: `Wordmark.tsx`. Every other user-facing string
-said **Bingd**, because the rule had only ever been written as a rule about the mark. It
-is a rule about the name.
+- **The graphic — logo, wordmark, lockup: `bingd.`**, lowercase, with the period. The
+  period is part of the mark.
+- **Plain human-readable text: `bingd`**, lowercase, no period. Labels, headings,
+  buttons, body copy, accessibility labels and documentation prose.
+
+This replaces the 2026-08-23 rule, which carried the wordmark's period into running copy
+(`bingd. score`, `Share off bingd.`). In a label the period read as a stray full stop,
+and in the middle of a sentence it read as the sentence ending early.
 
 ### In the interface
 
-Write it as it is spoken about: `bingd. score`, `About bingd.`, `Welcome to bingd.`,
-`bingd. Awards`, `Join me on bingd.`
+Write the name as a word: `bingd score`, `bingd Awards`, `Share off bingd`,
+`People on bingd`, `Tells whoever runs bingd about this review`.
 
-**The brand's period doubles as the sentence's.** *"Welcome to bingd."* is one period,
-not two. **Never write `bingd..`** — if a sentence would end in one, the brand's period
-is the one that stays.
+**Sentence punctuation is ordinary punctuation.** *"Welcome to bingd."* keeps its full
+stop, because it ends the sentence, not the name. So do *"You will not see each other on
+bingd. Any follow between you is removed"* and *"Join me on bingd. <link>"*. A label or
+heading that does not end in a full stop anywhere else in the app does not gain one here:
+*"You have been invited to bingd"*.
 
-Where the name is followed by other punctuation that reads badly against a period — a
-colon, most often — reword rather than stack them. *"Join me on bingd. <link>"*, not
-*"Join me on bingd.: <link>"*.
+**Uppercase keeps the name lowercase.** A section header is upper-cased by
+`SectionHeader`; the awards shelf passes `exactCase` so it reads `bingd AWARDS` rather
+than `BINGD AWARDS`.
 
 ### Where it is not written this way
 
-Three categories, and they are exceptions to the *typography*, not to the name:
+Where the name is not prose at all, it keeps whatever form the identifier or the mark requires:
 
 - **Identifiers.** Package names, bundle ids, storage keys, query keys, analytics event
   names, table and column names. `app.bingd`, `bingd.pending_display_name`.
 - **Domains and URLs.** `bingd.app`, `bingd.app/u/<username>`. The period there belongs
   to the hostname.
 - **Platform-imposed fields.** Store listing titles, legal entity names and anything a
-  platform validates against its own format. If one of these forces another spelling,
+  platform validates against its own format. The store listing copy
+  (`store-assets/`) belongs to the marketing thread and still carries the period. If one of these forces another spelling,
   note it here rather than letting it spread back into the app.
+- **The graphic.** `Wordmark.tsx` and the brand lockup draw `bingd.`, and so does any
+  image asset of the mark.
+- **Owned elsewhere, and not yet changed (2026-09-13).** Email (the auth templates, and the
+  support mailto subject and greeting `bingd. support` / `Hi bingd. team,`), the web
+  pages, and the push copy `push-sender` sends (`bingd. Awards`, `joined bingd. from your
+  invite`) still carry the period. Email and web belong to the marketing thread; push
+  needs its own function deploy.
+- **A person's own words.** A display name, a comment or a note that contains `bingd.` is
+  theirs and is never rewritten.
 
 Code comments, JSDoc and test names are prose about the product rather than product
 copy; either spelling is fine there and neither is worth a diff.
@@ -620,7 +636,7 @@ copy; either spelling is fine there and neither is worth a diff.
 ### Colour
 
 The maroon token belongs to the **wordmark**, and to a label that is naming the product
-as a source — the `bingd.` score beside `Following` is one, because there the name is
+as a source — the `bingd` score beside `Following` is one, because there the name is
 distinguishing two populations. It does not belong to every sentence that happens to
 contain the word. A screen where three unrelated phrases are maroon has no hierarchy
 left to spend.

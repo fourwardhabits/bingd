@@ -100,7 +100,7 @@ export function ProfileMenu({ userId, name, viewerId, relationship, surface }: P
             <SheetRow
               icon="flag-outline"
               label="Report"
-              value={`Tells whoever runs bingd. about ${name}`}
+              value={`Tells whoever runs bingd about ${name}`}
               onPress={() => {
                 setOpen(false);
                 setReporting(true);
@@ -127,7 +127,7 @@ export function ProfileMenu({ userId, name, viewerId, relationship, surface }: P
               <SheetRow
                 icon="ban-outline"
                 label="Block"
-                value="You will not see each other on bingd."
+                value="You will not see each other on bingd"
                 onPress={
                   busy
                     ? undefined

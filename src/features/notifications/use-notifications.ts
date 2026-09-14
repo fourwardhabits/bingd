@@ -74,7 +74,7 @@ export type NotificationKind =
    *
    * **It replaces the `follow` row that acceptance used to file, rather than joining
    * it.** The follow is still created; what changed is the sentence. "Ada Lovelace
-   * joined bingd. from your invite" is the fact worth telling, and "started following
+   * joined bingd from your invite" is the fact worth telling, and "started following
    * you" was the incidental half of it — two rows for one act is the redundancy PRD §15
    * refuses.
    *
@@ -568,7 +568,7 @@ export function verbFor(
     case 'recommendation_ranked':
       return 'ranked your recommendation';
     case 'invite_activated':
-      return 'joined bingd. from your invite';
+      return 'joined bingd from your invite';
     /**
      * The same sentence as `invite_activated`, deliberately, because it is the same
      * fact — and this is the row that says it at the moment it becomes true.
@@ -579,7 +579,7 @@ export function verbFor(
      * the same person, which is what the invite funnel actually has to say.
      */
     case 'invite_joined':
-      return 'joined bingd. from your invite';
+      return 'joined bingd from your invite';
     /**
      * No emoji here, on purpose. The row draws one; a screen reader would say "party
      * popper" in the middle of the only sentence that tells a new reader who brought

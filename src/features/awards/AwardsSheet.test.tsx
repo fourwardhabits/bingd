@@ -219,7 +219,7 @@ describe('the sheet', () => {
   it('opens with its own name and no scoreline above the rows', async () => {
     seed('user_media', movies(60));
     await open();
-    expect(screen.getByText('bingd. Awards')).toBeTruthy();
+    expect(screen.getByText('bingd Awards')).toBeTruthy();
     expect(screen.queryByText(/awards earned/)).toBeNull();
   });
 
@@ -1167,7 +1167,7 @@ describe('privacy', () => {
     expect(count('1 / 5')).toBeTruthy();
     await drillInto('Mutual Mania');
 
-    expect(screen.getByText('Someone on bingd.')).toBeTruthy();
+    expect(screen.getByText('Someone on bingd')).toBeTruthy();
     expect(screen.getByText('This account is not available to you')).toBeTruthy();
   });
 

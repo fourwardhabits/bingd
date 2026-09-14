@@ -381,7 +381,7 @@ describe('the page hierarchy', () => {
      * do once `more` was guaranteed to be *on* the fourth line rather than under it.
      */
     const view = await open();
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd')).toBeTruthy());
 
     expect(positionOf(view, '148 min')).toBeLessThan(
       positionOf(view, 'A thief who steals corporate secrets'),
@@ -389,7 +389,7 @@ describe('the page hierarchy', () => {
     expect(positionOf(view, 'A thief who steals corporate secrets')).toBeLessThan(
       positionOf(view, 'Science Fiction'),
     );
-    expect(positionOf(view, 'Science Fiction')).toBeLessThan(positionOf(view, 'bingd.'));
+    expect(positionOf(view, 'Science Fiction')).toBeLessThan(positionOf(view, 'bingd'));
   });
 
   it('keeps the scores above the tabs, which is the rule that never changed', async () => {
@@ -397,9 +397,9 @@ describe('the page hierarchy', () => {
     // at the cast. Every reordering of this page has preserved that, and this is what
     // says so out loud.
     const view = await open();
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd')).toBeTruthy());
 
-    expect(positionOf(view, 'bingd.')).toBeLessThan(positionOf(view, 'Details'));
+    expect(positionOf(view, 'bingd')).toBeLessThan(positionOf(view, 'Details'));
   });
 
   it('puts Rank, Save and Recommend in one group under the identity', async () => {
@@ -415,7 +415,7 @@ describe('the page hierarchy', () => {
      * everywhere else, and nine points of `caption` settles it.
      */
     const view = await open();
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd')).toBeTruthy());
 
     // Still there, still named in full for a screen reader — the acts are unchanged.
     expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
@@ -645,7 +645,7 @@ describe('a title this user has ranked', () => {
 
     // Three units, in the founder's order: me, then the people I chose, then the room.
     expect(view.getByText('Following')).toBeTruthy();
-    expect(view.getByText('bingd.')).toBeTruthy();
+    expect(view.getByText('bingd')).toBeTruthy();
   });
 
   it('puts no bucket word, rank or watch date under the personal score', async () => {
@@ -1082,9 +1082,9 @@ describe('the community score', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    // "bingd.", not "Community". The old label described a population where the new one
+    // "bingd", not "Community". The old label described a population where the new one
     // names it, and the app has a name.
-    expect(view.getByText('bingd.')).toBeTruthy();
+    expect(view.getByText('bingd')).toBeTruthy();
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
@@ -1102,7 +1102,7 @@ describe('the community score', () => {
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd')).toBeTruthy());
     // It is a mean. An ordinal is what "#1 in Movies" is, and that is a different
     // line about a different thing.
     expect(view.queryByText(/community rank/i)).toBeNull();
@@ -1691,7 +1691,7 @@ describe('the following score', () => {
      */
     expect(view.getByText('3 ratings')).toBeTruthy();
     expect(view.queryByText(/people you follow/)).toBeNull();
-    expect(view.getByText('bingd.')).toBeTruthy();
+    expect(view.getByText('bingd')).toBeTruthy();
   });
 
   it('shows a single followee, which community would withhold', async () => {
@@ -1717,7 +1717,7 @@ describe('the following score', () => {
     // does not close that window; the score does. (CI caught this as a flake; the
     // race was the test's, not the page's.)
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    expect(view.getByText('bingd.')).toBeTruthy();
+    expect(view.getByText('bingd')).toBeTruthy();
     // Founder correction, 2026-08-18: the row is always drawn, with the grey circle
     // and the circle. A row that appears when the data does is a page that moves under
     // somebody reading it.
@@ -1754,7 +1754,7 @@ describe('the following score', () => {
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
     expect(view.queryByText('Following')).toBeNull();
-    expect(view.queryByText('bingd.')).toBeNull();
+    expect(view.queryByText('bingd')).toBeNull();
   });
 });
 
@@ -1918,7 +1918,7 @@ describe('the following score with nothing to say', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd')).toBeTruthy());
     // Each row in its own words, and each circle carrying an em dash rather than being
     // blank: "no blank cream disc that looks like broken content" is the founder's exact
     // constraint, and an empty circle is indistinguishable from one that failed to load.
@@ -1953,7 +1953,7 @@ describe('the action row', () => {
     await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
 
     await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
-    expect(view.getByText('Share off bingd.')).toBeTruthy();
+    expect(view.getByText('Share off bingd')).toBeTruthy();
   });
 
   /**
@@ -2468,7 +2468,7 @@ describe('the score row and what surrounds it', () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
-    expect(at(view, 'bingd.')).toBeLessThan(at(view, 'Following'));
+    expect(at(view, 'bingd')).toBeLessThan(at(view, 'Following'));
   });
 
   it('follows the synopsis rather than the metadata', async () => {
@@ -2476,7 +2476,7 @@ describe('the score row and what surrounds it', () => {
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
     expect(at(view, '148 min')).toBeLessThan(at(view, 'A thief who steals corporate secrets'));
-    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
+    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd'));
   });
 
   it('draws no rule between the title metadata and the synopsis', async () => {
@@ -2535,13 +2535,13 @@ describe('the score row and what surrounds it', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
 
-    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
+    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd'));
     // Stated once, in the Scores row, where the reader's own number is the first term of
     // a comparison rather than a figure beside artwork with nothing to measure it by.
     expect(view.getAllByLabelText('10.0 out of 10')).toHaveLength(1);
     // Your score → bingd. → Following (founder, 2026-09-13).
-    expect(at(view, 'Your score')).toBeLessThan(at(view, 'bingd.'));
-    expect(at(view, 'bingd.')).toBeLessThan(at(view, 'Following'));
+    expect(at(view, 'Your score')).toBeLessThan(at(view, 'bingd'));
+    expect(at(view, 'bingd')).toBeLessThan(at(view, 'Following'));
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
@@ -2550,7 +2550,7 @@ describe('the score row and what surrounds it', () => {
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
     expect(view.getByTestId('title-action-rank')).toBeTruthy();
-    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
+    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd'));
   });
 
   it('holds for a ranked TV season', async () => {
@@ -2650,7 +2650,7 @@ describe('the score row and what surrounds it', () => {
     // Both aggregates count ratings the same way since 2026-09-08; the labels are what
     // distinguish the two populations.
     expect(view.getByText('1 rating')).toBeTruthy();
-    expect(view.getByText('bingd.')).toBeTruthy();
+    expect(view.getByText('bingd')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
   });
 });

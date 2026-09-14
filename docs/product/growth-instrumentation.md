@@ -97,7 +97,7 @@ activated — verbatim, so a visitor entitled to the profile sees the same `2 / 
 owner does, equal by construction rather than by synchronisation. It returns one
 integer or null; it cannot name an invitee, a token or a timestamp, and
 `invite_attributions_read` still admits only the two parties to a row — a visitor's
-drill-down is one aggregate line naming nobody: *N people brought to bingd. / Who they
+drill-down is one aggregate line naming nobody: *N people brought to bingd / Who they
 are is theirs to share.* The decision is scoped: Hype Courier's sent-recommendation
 count stays withheld, and one aggregate becoming public is a founder decision about
 that aggregate, not a precedent that widens every two-party fact.

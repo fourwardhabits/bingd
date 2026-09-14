@@ -16,10 +16,10 @@ export type SectionHeaderProps = {
    * Print the title exactly as given instead of upper-casing it.
    *
    * **One caller, and it is a brand exception the founder made deliberately**: the
-   * profile's awards shelf reads `bingd. AWARDS`, because the product's name is
-   * lower-case with a full stop and `BINGD. AWARDS` spells it wrong. Everything else on
-   * every surface stays upper-cased, which is what makes this an exception rather than a
-   * second style.
+   * profile's awards shelf reads `bingd AWARDS`, because the product's name is
+   * lower-case and `BINGD AWARDS` spells it wrong. Everything else on every surface
+   * stays upper-cased, which is what makes this an exception rather than a second style.
+   * (Plain text writes the name without the wordmark's period, founder 2026-09-13.)
    *
    * The spoken name is `title` either way — uppercasing was always a style and never a
    * spelling, which is why `accessibilityLabel` has never been derived from it.

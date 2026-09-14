@@ -125,7 +125,7 @@ describe('what the privacy screen promises', () => {
     const view = await open();
 
     await waitFor(() =>
-      expect(view.getByText(/Anyone on bingd. can see your ranked titles/)).toBeTruthy(),
+      expect(view.getByText(/Anyone on bingd can see your ranked titles/)).toBeTruthy(),
     );
     expect(view.queryByText(/can still find you by name or @handle/)).toBeNull();
   });
@@ -154,7 +154,7 @@ describe('what the privacy screen promises', () => {
     mockAccount.gate = new Promise<void>(() => {});
     const view = await renderWithProviders(<PrivacyScreen />);
 
-    expect(view.queryByText(/Anyone on bingd. can see your ranked titles/)).toBeNull();
+    expect(view.queryByText(/Anyone on bingd can see your ranked titles/)).toBeNull();
     expect(view.queryByText(/can still find you by name or @handle/)).toBeNull();
   });
 });

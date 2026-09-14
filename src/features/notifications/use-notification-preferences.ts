@@ -131,7 +131,7 @@ export const SECTIONS: readonly NotificationSection[] = [
     settings: [
       {
         key: 'awards',
-        label: 'bingd. Awards',
+        label: 'bingd Awards',
         description: 'You reach a new tier on an Award.',
       },
     ],

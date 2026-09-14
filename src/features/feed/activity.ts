@@ -149,7 +149,7 @@ export const verbFor = (type: ActivityType): string => VERB[type];
  * `name` is only consulted for an award, and only to avoid saying "award" twice. Every
  * seeded award is named like a title — Movie Muncher, Heart Magnet — so the tail is
  * almost always drawn; the exception is the nameless fallback (`use-feed.ts` renders
- * "bingd. Award" when a payload carries no `award_name`), where "earned the bingd.
+ * "bingd Award" when a payload carries no `award_name`), where "earned the bingd
  * Award award" is the wording the founder asked not to produce.
  *
  * Passing a title on a non-award row is harmless and deliberate: the callers hand over

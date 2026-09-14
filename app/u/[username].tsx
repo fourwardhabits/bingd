@@ -606,7 +606,7 @@ export default function PublicProfileScreen() {
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Report this review of ${entry.title}`}
-                        accessibilityHint="Tells whoever runs bingd. about this review"
+                        accessibilityHint="Tells whoever runs bingd about this review"
                         onPress={() => setReportingReview(entry.id)}
                         hitSlop={
                           (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2

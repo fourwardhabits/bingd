@@ -506,7 +506,7 @@ describe('the Settings hub', () => {
     // conversation starts with a version and a build number.
     const view = await renderWithProviders(<SettingsScreen />);
 
-    expect(view.getByText(/^bingd\. .+ \(.+\)$/)).toBeTruthy();
+    expect(view.getByText(/^bingd .+ \(.+\)$/)).toBeTruthy();
     expect(view.queryByText(/^runtime /)).toBeNull();
   });
 });
