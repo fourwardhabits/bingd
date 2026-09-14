@@ -8,7 +8,7 @@ import { unrankedMovies } from '@/lib/routes';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-import { HowToExportSheet } from './HowToExportSheet';
+import { HOW_TO_STEPS, HowToExportSheet } from './HowToExportSheet';
 import type { ArchivePreview } from './read-archive';
 import {
   useImport,
@@ -354,12 +354,9 @@ function Body({
  * The four steps, from Letterboxd's Settings to this screen. The file distinction is the part people
  * get wrong: the export is a ZIP, and a folder or a single CSV will be refused.
  */
-const STEPS = [
-  'On Letterboxd.com, go to Settings → Import & Export.',
-  'Choose Export your data to generate your export.',
-  'Download the ZIP when it’s ready.',
-  'Come back to bingd and choose it here.',
-] as const;
+// One list, shared with the help sheet, so the two cannot drift apart (independent review,
+// 2026-09-14).
+const STEPS = HOW_TO_STEPS;
 
 function Intro({ onPick, onHowTo }: { onPick: () => void; onHowTo: () => void }) {
   return (

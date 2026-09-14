@@ -46,9 +46,14 @@ describe('the help sheet', () => {
     const firstStep = view.getByText(HOW_TO_STEPS[0]) as unknown as HostNode;
     const scroll = ancestorsOf(firstStep).find((node) => node.props?.contentContainerStyle);
     expect(scroll).toBeDefined();
-    expect(StyleSheet.flatten(scroll!.props.contentContainerStyle as never)).toMatchObject({
-      padding: theme.layout.gutter,
-    });
+    const body = StyleSheet.flatten(scroll!.props.contentContainerStyle as never) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ paddingHorizontal: theme.layout.gutter });
+    // The gap under the handle is the wrapper's alone, not the wrapper's plus a gutter.
+    expect(body.padding).toBeUndefined();
+    expect(body.paddingTop).toBeUndefined();
 
     const done = view.getByRole('button', { name: 'Done' }) as unknown as HostNode;
     expect(StyleSheet.flatten(done.parent!.props.style as never)).toMatchObject({
