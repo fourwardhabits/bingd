@@ -34,9 +34,14 @@ import { theme } from '@/ui/tokens';
  *   - nothing official conditions it on a subscription.
  *
  * That is enough to stop hedging the tab. It is **not** enough to claim the live UI was
- * read, so two things stay soft on purpose: the possibility of an emailed link on a large
- * account, and the mobile app, which is simply not mentioned — the export is a website URL
- * and sending somebody hunting for it in the app is a dead end our copy would have caused.
+ * read, and the mobile app is simply not mentioned — the export is a website URL and sending
+ * somebody hunting for it in the app is a dead end our copy would have caused.
+ *
+ * **Since 2026-09-14 the sheet carries the founder's single paragraph** ("Settings → Data →
+ * Export Your Data…"). The tab and the URL are the corroborated facts above; the button
+ * label *Export Your Data* is the founder's wording and the label this file used before,
+ * and was not re-read from the live page (still a 403 to a scripted fetch). The emailed-link
+ * caveat is no longer in the copy, by the same instruction.
  *
  * The "Pro is required" claim recurs in secondary sources and is contradicted by the
  * founder's own free-account export, so it appears nowhere.
@@ -56,8 +61,8 @@ import { theme } from '@/ui/tokens';
 const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
 
 /**
- * The founder's wording (2026-09-14), checked against where it points: `LETTERBOXD_EXPORT`
- * above is letterboxd.com's Settings, Data page, whose button reads Export Your Data.
+ * The founder's wording (2026-09-14). The Settings, Data page it names is the one
+ * `LETTERBOXD_EXPORT` opens; the button label is as described in the header, not re-read live.
  */
 const HOW_TO =
   'On Letterboxd.com, go to Settings → Data → Export Your Data. Generate your export, download the ZIP when it’s ready, then come back to bingd and choose that ZIP.';
