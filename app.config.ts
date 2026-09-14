@@ -13,13 +13,77 @@ type Variant = 'development' | 'preview' | 'production';
 
 const variant = (process.env.APP_VARIANT ?? 'development') as Variant;
 
-const variants: Record<Variant, { name: string; bundleId: string; scheme: string }> = {
-  development: { name: 'bingd dev', bundleId: 'app.bingd.dev', scheme: 'bingd-dev' },
-  preview: { name: 'bingd preview', bundleId: 'app.bingd.preview', scheme: 'bingd-preview' },
-  production: { name: 'bingd', bundleId: 'app.bingd', scheme: 'bingd' },
+/**
+ * Paper, and the plum that tells a staging build apart from the real one.
+ *
+ * The whole point of the preview lane is that it sits on the same home screen as the
+ * shipped app, so the two have to be tellable apart before they are opened. The name
+ * under the icon does half of it; the icon does the half you see first.
+ */
+const PAPER = '#FBF8F4';
+const PLUM = '#773744';
+
+type VariantArt = {
+  name: string;
+  bundleId: string;
+  scheme: string;
+  icon: string;
+  adaptiveIcon: string;
+  adaptiveBackground: string;
+};
+
+/**
+ * Development and preview share one icon deliberately: the distinction that has to
+ * survive a glance is **staging versus the app people use**, and a third picture buys
+ * nothing while costing a second asset to keep in step. Their names differ.
+ */
+const variants: Record<Variant, VariantArt> = {
+  development: {
+    name: 'bingd dev',
+    bundleId: 'app.bingd.dev',
+    scheme: 'bingd-dev',
+    icon: './assets/brand/icon-preview.png',
+    adaptiveIcon: './assets/brand/icon-adaptive-preview.png',
+    adaptiveBackground: PLUM,
+  },
+  preview: {
+    name: 'bingd preview',
+    bundleId: 'app.bingd.preview',
+    scheme: 'bingd-preview',
+    icon: './assets/brand/icon-preview.png',
+    adaptiveIcon: './assets/brand/icon-adaptive-preview.png',
+    adaptiveBackground: PLUM,
+  },
+  production: {
+    name: 'bingd',
+    bundleId: 'app.bingd',
+    scheme: 'bingd',
+    icon: './assets/brand/icon.png',
+    adaptiveIcon: './assets/brand/icon-adaptive.png',
+    adaptiveBackground: PAPER,
+  },
 };
 
 const current = variants[variant];
+
+/**
+ * Only the shipped app claims `bingd.app` links, and this used to be unconditional.
+ *
+ * A preview build installed beside the real one declared the **same** universal links and
+ * the same verified Android intent filter. Neither claim can actually win - Apple's AASA
+ * names `app.bingd` alone and `assetlinks.json` pins the production package and signing
+ * certificate, so `app.bingd.preview` fails verification - but "it fails to verify" is a
+ * property of two files on a web server, and a staging build has no business asserting the
+ * marketing domain at all. On Android an unverified filter can still surface the app in a
+ * disambiguation sheet; on iOS the entitlement is requested and checked at every install.
+ *
+ * Keyed on the **variant**, not the lane, deliberately: `beta` builds the production
+ * variant, is the same `app.bingd` package the closed testers already run, and must keep
+ * the links it has today. True for production and beta alike, so their resolved config is
+ * unchanged to the byte - the property `config/variants.test.mjs` pins and the fingerprint
+ * proof confirms.
+ */
+const claimsWebLinks = variant === 'production';
 
 /**
  * Which Supabase project this lane may talk to.
@@ -170,7 +234,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // import from src, so the value is duplicated and has to be changed in step.
   backgroundColor: '#FBF8F4',
   // Rendered from bingd-icon.svg by `npm run brand:render`, not drawn by hand.
-  icon: './assets/brand/icon.png',
+  // Production resolves to the same path it always did, which is what keeps this file
+  // out of the fingerprint conversation: `expoConfigExternalFile` hashes the asset the
+  // resolved config names, and production still names that one.
+  icon: current.icon,
 
   // The Android system navigation bar is configured by omission, and it is
   // worth writing down why there is no key for it here.
@@ -193,7 +260,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false,
     bundleIdentifier: current.bundleId,
-    associatedDomains: ['applinks:bingd.app'],
+    ...(claimsWebLinks ? { associatedDomains: ['applinks:bingd.app'] } : {}),
     // Adds the entitlement, which EAS then turns into the Sign In with Apple
     // capability on the App ID during the first build — so there is nothing to do
     // by hand in the Apple portal.
@@ -228,8 +295,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // each axis, so the foreground is the mark well inside a Paper field rather
     // than the square icon above.
     adaptiveIcon: {
-      foregroundImage: './assets/brand/icon-adaptive.png',
-      backgroundColor: '#FBF8F4',
+      foregroundImage: current.adaptiveIcon,
+      backgroundColor: current.adaptiveBackground,
     },
     // Four path prefixes, not the whole host.
     //
@@ -248,19 +315,25 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     //
     // Kept in step with `web/deep-links.config.json` by `web/router.test.mjs`, which
     // fails if the two path sets ever diverge.
-    intentFilters: [
-      {
-        action: 'VIEW',
-        autoVerify: true,
-        data: [
-          { scheme: 'https', host: 'bingd.app', pathPrefix: '/u/' },
-          { scheme: 'https', host: 'bingd.app', pathPrefix: '/lists/' },
-          { scheme: 'https', host: 'bingd.app', pathPrefix: '/title/' },
-          { scheme: 'https', host: 'bingd.app', pathPrefix: '/i/' },
-        ],
-        category: ['BROWSABLE', 'DEFAULT'],
-      },
-    ],
+    // Gated on the variant by `claimsWebLinks`: a staging build does not assert the
+    // marketing domain. Production and beta are unchanged, key and value alike.
+    ...(claimsWebLinks
+      ? {
+          intentFilters: [
+            {
+              action: 'VIEW',
+              autoVerify: true,
+              data: [
+                { scheme: 'https', host: 'bingd.app', pathPrefix: '/u/' },
+                { scheme: 'https', host: 'bingd.app', pathPrefix: '/lists/' },
+                { scheme: 'https', host: 'bingd.app', pathPrefix: '/title/' },
+                { scheme: 'https', host: 'bingd.app', pathPrefix: '/i/' },
+              ],
+              category: ['BROWSABLE', 'DEFAULT'],
+            },
+          ],
+        }
+      : {}),
   },
 
   web: { bundler: 'metro', output: 'server' },

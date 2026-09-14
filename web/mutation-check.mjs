@@ -24,8 +24,10 @@
  * a user would notice, which is exactly why they need a test:
  *
  *   1. `/lists/*` reverted to `/list/*`. The exact defect that shipped.
- *   2. A variant renamed in `app.config.ts` and not in `deep-links.config.json`, so the
- *      file claims an appID no build produces.
+ *   2. The **shipped** variant renamed in `app.config.ts` and not in
+ *      `deep-links.config.json`, so the file claims an appID no build produces. It
+ *      named the preview variant until the staging separation stopped the site
+ *      claiming that one at all, at which point the mutant quietly survived.
  *   3. `associatedDomains` pointed at another host, so the binary is entitled for a
  *      domain that publishes nothing and bingd.app's file is read by nobody.
  *   4. `autoVerify` dropped. Android still matches the filter but shows a chooser
@@ -81,9 +83,22 @@ const MUTANTS = [
     apply: (s) => s.replace('"/lists/*"', '"/list/*"'),
   },
   {
-    name: 'a variant renamed in app.config.ts and not in deep-links.config.json',
+    /**
+     * **The shipped app's identifier, because that is the only one the site claims now.**
+     *
+     * This renamed `app.bingd.preview` until 2026-09-11, when the staging separation
+     * gated `associatedDomains` and the Android intent filter on the production variant
+     * and dropped the staging identifiers out of `deep-links.config.json`. Nothing in
+     * `router.test.mjs` depends on a staging identifier any more, so the old mutant
+     * **survived**: the gate went quiet about the exact class of defect it exists to
+     * catch, and an independent review found that before the next guarded release did.
+     *
+     * `bundleId: 'app.bingd',` matches the production entry alone — the development and
+     * preview entries carry a suffix before the closing quote.
+     */
+    name: 'the shipped variant renamed in app.config.ts and not in deep-links.config.json',
     file: APP_CONFIG,
-    apply: (s) => s.replace("bundleId: 'app.bingd.preview'", "bundleId: 'app.bingd.beta'"),
+    apply: (s) => s.replace("bundleId: 'app.bingd',", "bundleId: 'app.bingd.renamed',"),
   },
   {
     name: 'associatedDomains pointed at a host that publishes nothing',

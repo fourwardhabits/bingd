@@ -11,9 +11,10 @@ project at all — not the layout, not the keyboard, not a single Universal Link
 | Profile | `preview` |
 | Bundle identifier | `app.bingd.preview` |
 | App name on the home screen | **bingd preview** |
+| Home-screen icon | the mark in Paper on brand plum, with a band at the foot — *not* the shipped icon |
 | Channel | `preview` |
 | Backend | staging (`fjxhcbowoxuzulwirzyr`) — see note below |
-| Associated domain | `applinks:bingd.app` |
+| Associated domain | **none.** A staging build stopped claiming `bingd.app` on 2026-09-11 |
 | Distribution | ad hoc, to the registered iPhone 11 (`00008030-00061DA202BB802E`) |
 | Build page | *created by the founder — see below* |
 
@@ -115,31 +116,35 @@ ID during the first build.
       message** — a dismissal is not a failure.
 - [ ] Sign out and back in with Apple; the same account is restored, not a new one.
 
-## Universal Links — never once tested on hardware
+## Universal Links — not on this build, and that is the pass condition
 
-**Do not tap these in Safari's address bar, and do not tap a bingd.app link from a page on
-bingd.app.** iOS deliberately refuses both: an address-bar navigation and a same-domain link
-are not handed to apps. Put each URL in **Notes** or send it to yourself in **Messages**, and
-tap it from there.
+**This section inverted on 2026-09-11.** A staging build used to declare
+`applinks:bingd.app` and the site used to claim `98729PG8GD.app.bingd.preview` back, so a
+bingd.app link could open *either* app depending on which had most recently registered. That
+is a bad way to find out which database you were reading. The preview variant no longer
+declares the entitlement and the deployed file no longer names it.
 
-- [ ] `https://bingd.app/u/<a real handle>` from Notes → **Bingd opens on that exact
-      profile.**
-- [ ] The same link from **Messages** → same result.
-- [ ] A real **title** share URL (copied from the app's own share sheet) → **Bingd opens on
-      that exact Movie or Season.**
-- [ ] A real **invite** URL → **Bingd opens on the invitation flow** for that token.
-- [ ] `https://bingd.app/privacy` from Notes → **Safari, showing the privacy page.** This
-      one must *not* open the app.
-- [ ] With Bingd already in the background, tap a profile link. It routes inside the running
-      app.
-- [ ] Long-press a bingd.app link in Messages. The menu offers **Open in "bingd preview"**.
-      That menu item is the clearest single proof the association resolved.
+So the only check here is the negative one, and a link opening Safari is now a **PASS**:
 
-Opening Safari instead of the app is a **FAIL**, and the two likely causes are that iOS has
-not fetched the association file yet (delete the app, reinstall, wait a minute, retry on
-Wi-Fi) or that the file does not name this bundle. The deployed file currently claims
-`98729PG8GD.app.bingd`, `98729PG8GD.app.bingd.preview` and `98729PG8GD.app.bingd.dev`;
-`curl -s https://bingd.app/.well-known/apple-app-site-association` confirms it.
+- [ ] `https://bingd.app/u/<a real handle>`, from **Notes** (not the address bar — iOS
+      refuses to hand an address-bar navigation to any app) → **Safari opens the web page.**
+      "bingd preview" opening instead is a **FAIL**: it would mean a staging binary is
+      still entitled for the marketing domain.
+- [ ] Long-press the same link in Messages. The menu offers **no** *Open in "bingd preview"*
+      item. If the shipped app is also installed it may offer *Open in "bingd"*, which is
+      correct.
+- [ ] `bingd-preview://u/<a real handle>` from Notes → **bingd preview opens on that
+      profile.** The custom scheme is how deep routing is exercised on a staging build, and
+      it is the one that has to work.
+
+> **The old preview build on the phone will not agree.** Android and iOS both cache the
+> association from install time, so a preview binary installed before this change keeps its
+> claim until it is deleted and reinstalled. Delete it first, or the first checkbox fails
+> for a reason that has nothing to do with this build.
+
+**Universal Links themselves are verified on a production-variant build** — the closed test
+or the App Store one — against `docs/release/` checklists for that lane. They are not
+verifiable here any more, by design.
 
 ## Layout and safe areas
 

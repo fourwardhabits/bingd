@@ -164,40 +164,40 @@ Do not put real credentials or another person's data into a screenshot.
 - [ ] **Revoke** the link from Settings › Privacy. The revoked URL no longer redeems, and a
       new one is issued.
 
-## App Links — the part that has never been tested on hardware
+## App Links — deliberately not claimed on this build any more
 
-**Do not tap these links inside Chrome's address bar or from a bingd.app page.** Same-page
-and same-domain navigations are deliberately not handed to apps. Put them somewhere else
-first: a note, an SMS to yourself, a chat with yourself.
+**This section inverted on 2026-09-11.** A staging build used to declare a verified intent
+filter for `bingd.app`, and `assetlinks.json` used to authorise its signing certificate. So a
+bingd.app link could open *either* app, or raise a chooser between them, depending on what
+was installed — a bad way to discover which database you were about to read. The preview
+variant no longer declares the filter and the site no longer delegates to its certificate.
 
-First, ask Android whether it verified the domain at install:
+Ask Android what it thinks, and expect **none**:
 
 ```
 adb shell pm get-app-links app.bingd.preview
 ```
 
-Expect `bingd.app: verified`. If it says `none` or `legacy_failure`, the fingerprint in
-`assetlinks.json` does not match this build and every link below will open Chrome.
-Re-verification can be forced with:
+- [ ] Reports `none` (or lists no `bingd.app` entry at all). **`verified` is now a FAIL** —
+      it would mean a staging binary still holds the domain. If you see it, this is almost
+      certainly the *old* preview build: Android caches verification from install time, so
+      uninstall and reinstall before reading anything into it.
 
-```
-adb shell pm verify-app-links --re-verify app.bingd.preview
-```
+Then, from a **note or a message** — never Chrome's address bar, which is deliberately not
+handed to apps:
 
-Then, from a **note or a message**, tap each:
+- [ ] `https://bingd.app/u/<a real handle>` → **Chrome opens the web page.** No chooser, and
+      **bingd preview** must not appear in one.
+- [ ] `bingd-preview://u/<a real handle>` → **bingd preview opens on that profile.** The
+      custom scheme is how deep routing is exercised on a staging build, and it is the one
+      that has to work here.
+- [ ] With **bingd preview** already running in the background, use the custom-scheme link
+      again. It routes inside the running app rather than restarting it.
 
-- [ ] `https://bingd.app/u/<a real handle>` → **Bingd opens on that exact profile.** Not a
-      chooser, not Chrome, not the Bingd home screen.
-- [ ] A real **title** share URL (copy it out of the app's share sheet) → **Bingd opens on
-      that exact Movie or Season.**
-- [ ] A real **invite** URL → **Bingd opens on the invitation flow** for that token.
-- [ ] `https://bingd.app/privacy` → **Chrome, showing the privacy page.** This one must
-      *not* open the app; the app has no screen for it.
-- [ ] With Bingd **already running in the background**, tap a profile link. It routes
-      inside the running app rather than restarting it.
-
-A chooser dialog ("Open with…") means the intent matched but the domain was not verified.
-That is **not** a pass — it is the failure this test exists to catch.
+**App Links themselves are verified on a production-variant build** — the closed test or the
+Play release, `app.bingd`, whose two fingerprints (the EAS upload key and the Play app-signing
+key) are the only ones `assetlinks.json` still carries. They are not verifiable here, by
+design.
 
 ## Platform behaviour
 
