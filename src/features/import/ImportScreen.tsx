@@ -125,30 +125,57 @@ export function ImportScreen({
    */
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/settings'));
 
+  /**
+   * **The question uses the flow's own page, not the importer's** (founder, physical preview
+   * QA, 2026-09-14: the step "feels unlike the surrounding onboarding screens").
+   *
+   * The screens either side of it, *Your First Five* and People, draw one scaffold: the
+   * default `Screen`, the flow header, a scrolling intro in the gutter under `title1`, and a
+   * hairline-topped footer that holds the actions. The question now draws exactly that, with
+   * the same values (`onboardingStyles` below restates People's), so moving from First Five
+   * to this step to People changes the words and not the page. Every onboarding phase also
+   * takes the flow's `Screen` rather than the importer's bottom inset. Settings is untouched.
+   */
+  const asking = step !== undefined && state.phase === 'idle';
+
   return (
-    <Screen includeBottomInset>
+    <Screen includeBottomInset={!onboarding}>
       {onboarding?.header}
-      <ScrollView contentContainerStyle={styles.page}>
-        <Body
-          state={state}
+      {asking ? (
+        <OnboardingQuestion
           onPick={() => {
-            // A no-op unless this is the onboarding step, where the count waits for a tap.
             opened();
             void pick();
           }}
-          onStart={(preview) => void start(preview)}
-          onReset={reset}
-          onWatch={watchRunning}
-          onRecheck={recheck}
           onHowTo={() => {
             opened();
             setHowTo(true);
           }}
-          onLeave={leave}
-          onRank={() => router.dismissTo(unrankedMovies())}
-          onboarding={step}
+          onSkip={() => step.onLeave('skipped')}
         />
-      </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.page}>
+          <Body
+            state={state}
+            onPick={() => {
+              // A no-op unless this is the onboarding step, where the count waits for a tap.
+              opened();
+              void pick();
+            }}
+            onStart={(preview) => void start(preview)}
+            onReset={reset}
+            onWatch={watchRunning}
+            onRecheck={recheck}
+            onHowTo={() => {
+              opened();
+              setHowTo(true);
+            }}
+            onLeave={leave}
+            onRank={() => router.dismissTo(unrankedMovies())}
+            onboarding={step}
+          />
+        </ScrollView>
+      )}
       {/* The only sheet this screen has, so there is nothing to serialise it against. On
           the onboarding step the screen is a plain stack route rather than a presented
           one, so this is not a Modal inside anything either. */}
@@ -189,11 +216,8 @@ function Body({
 
   switch (state.phase) {
     case 'idle':
-      return skip ? (
-        <OnboardingIntro onPick={onPick} onHowTo={onHowTo} onSkip={skip} />
-      ) : (
-        <Intro onPick={onPick} onHowTo={onHowTo} />
-      );
+      // The onboarding step draws its question outside this page (`OnboardingQuestion`).
+      return <Intro onPick={onPick} onHowTo={onHowTo} />;
 
     case 'reading':
       return (
@@ -376,17 +400,20 @@ function Privacy() {
 /**
  * The onboarding step's opening: a question, and two answers of equal standing.
  *
- * **Import from Letterboxd goes straight to the picker.** The four-step instructions card
- * Settings opens with is one tap away under *Need help getting the file?* instead, because
- * on this screen most readers are deciding whether this applies to them at all, and a
- * how-to page is the wrong first answer to "do you use Letterboxd?". Somebody without the
- * file who opens the picker anyway cancels it and lands back here, with both answers still
- * on screen.
+ * **Import from Letterboxd goes straight to the picker.** On this screen most readers are
+ * deciding whether this applies to them at all, so the instructions are one tap away under
+ * *Need help getting the file?* rather than the first thing on the page. Somebody without
+ * the file who opens the picker anyway cancels it and lands back here, with both answers
+ * still on screen.
  *
  * **Not now is secondary, not tertiary.** The import is never required, and a way on that
  * reads as fine print makes the step feel like a gate.
+ *
+ * The privacy line is true of the implementation: the ZIP is read on the phone
+ * (`read-archive.ts`) and never uploaded, and only the entries the import needs are
+ * opened (`archive.ts`).
  */
-function OnboardingIntro({
+function OnboardingQuestion({
   onPick,
   onHowTo,
   onSkip,
@@ -396,21 +423,26 @@ function OnboardingIntro({
   onSkip: () => void;
 }) {
   return (
-    <View style={styles.block}>
-      <Text variant="title1">Already use Letterboxd?</Text>
-      <Text variant="body" tone="secondary">
-        Bring over the movies you’ve watched, your ratings, Diary dates, and Watchlist. It’s
-        optional, and you can do it anytime from Settings.
-      </Text>
+    <>
+      <ScrollView contentContainerStyle={onboardingStyles.body}>
+        <View style={onboardingStyles.intro}>
+          <Text variant="title1">Already use Letterboxd?</Text>
+          <Text variant="body" tone="secondary">
+            Bring over what you’ve watched, your ratings, Diary dates, and Watchlist. Imported
+            titles start unranked, so your bingd rankings stay yours.
+          </Text>
+        </View>
+      </ScrollView>
 
-      <Privacy />
-
-      <View style={styles.actions}>
+      <View style={onboardingStyles.footer}>
         <Button label="Import from Letterboxd" onPress={onPick} />
         <Button label="Not now" kind="secondary" onPress={onSkip} />
         <Button label="Need help getting the file?" kind="tertiary" onPress={onHowTo} />
+        <Text variant="footnote" tone="tertiary" style={styles.centred}>
+          Your ZIP stays on your phone. bingd only reads the information needed for your import.
+        </Text>
       </View>
-    </View>
+    </>
   );
 }
 
@@ -802,6 +834,29 @@ function Count({ value, label }: { value: number; label: string }) {
     </View>
   );
 }
+
+/**
+ * The first-run flow's page, restated from `app/onboarding/people.tsx` (and the matching
+ * intro and footer in `app/onboarding/taste.tsx`), so this step lines up with the steps on
+ * either side of it. Kept in step with those by hand: the flow has no shared layout
+ * component, and making one would mean rewriting two shipped screens for this one.
+ */
+const onboardingStyles = StyleSheet.create({
+  body: { paddingBottom: theme.space[6] },
+  intro: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[4],
+    gap: theme.space[2],
+  },
+  footer: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingVertical: theme.space[3],
+    gap: theme.space[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border.hairline,
+  },
+});
 
 const styles = StyleSheet.create({
   page: { padding: theme.layout.gutter, paddingBottom: theme.space[10] },

@@ -1,6 +1,6 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { strToU8, zipSync } from 'fflate';
-import { BackHandler } from 'react-native';
+import { BackHandler, StyleSheet } from 'react-native';
 
 import {
   clearCelebrations,
@@ -8,6 +8,7 @@ import {
   hasCelebrations,
 } from '@/features/awards/celebration-queue';
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { flowProgress, FLOW_STEPS } from './OnboardingHeader';
 import { resetOnboardingStages, stageInMemory } from './use-onboarding-stage';
@@ -214,15 +215,66 @@ describe('the question', () => {
   it('asks, says what comes over, and offers both answers', async () => {
     const view = await open();
 
+    // The founder's copy, 2026-09-14.
     expect(
-      view.getByText(/movies you’ve watched, your ratings, Diary dates, and Watchlist/),
+      view.getByText(
+        'Bring over what you’ve watched, your ratings, Diary dates, and Watchlist. Imported titles start unranked, so your bingd rankings stay yours.',
+      ),
     ).toBeTruthy();
     expect(view.getByRole('button', { name: 'Import from Letterboxd' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Need help getting the file?' })).toBeTruthy();
     // The privacy promise travels with the importer into onboarding.
-    expect(view.getByText(/ZIP stays on your phone/)).toBeTruthy();
+    expect(
+      view.getByText(
+        'Your ZIP stays on your phone. bingd only reads the information needed for your import.',
+      ),
+    ).toBeTruthy();
     // Not Settings' instructions page.
     expect(view.queryByText('Bring your Letterboxd history')).toBeNull();
+  });
+
+  /**
+   * **The page the steps either side of it draw** (founder, physical preview QA,
+   * 2026-09-14): the gutter intro under `title1`, then a hairline-topped footer holding the
+   * actions, with People's exact values. Asserted as structure because jest lays nothing
+   * out: the headline and body sit in the scrolling intro, and the footer holds the three
+   * actions in the founder's order with the privacy line last, outside what scrolls.
+   */
+  it('draws the same page as First Five and People', async () => {
+    const view = await open();
+
+    const headline = view.getByText('Already use Letterboxd?');
+    const intro = headline.parent!;
+    expect(StyleSheet.flatten(intro.props.style)).toMatchObject({
+      paddingHorizontal: theme.layout.gutter,
+      paddingTop: theme.space[3],
+      paddingBottom: theme.space[4],
+      gap: theme.space[2],
+    });
+
+    const importButton = view.getByRole('button', { name: 'Import from Letterboxd' });
+    const footer = importButton.parent!;
+    expect(StyleSheet.flatten(footer.props.style)).toMatchObject({
+      paddingHorizontal: theme.layout.gutter,
+      paddingVertical: theme.space[3],
+      gap: theme.space[2],
+      borderTopWidth: StyleSheet.hairlineWidth,
+    });
+
+    for (const name of ['Import from Letterboxd', 'Not now', 'Need help getting the file?']) {
+      expect(view.getByRole('button', { name }).parent).toBe(footer);
+    }
+    expect(
+      view.getByText(
+        'Your ZIP stays on your phone. bingd only reads the information needed for your import.',
+      ).parent,
+    ).toBe(footer);
+
+    // Nothing in the footer scrolls: no ancestor of it carries a content container.
+    for (let at = footer.parent; at; at = at.parent) {
+      expect(at.props?.contentContainerStyle).toBeUndefined();
+    }
   });
 
   it('does not count the importer as opened just because the step was shown', async () => {
@@ -545,6 +597,12 @@ describe('importing from the step', () => {
 
     await fireEvent.press(view.getByRole('button', { name: 'Need help getting the file?' }));
     await waitFor(() => expect(view.getByText('Getting your Letterboxd file')).toBeTruthy());
+    // The founder's help copy, one paragraph, pointing at the page the button opens.
+    expect(
+      view.getByText(
+        'On Letterboxd.com, go to Settings → Data → Export Your Data. Generate your export, download the ZIP when it’s ready, then come back to bingd and choose that ZIP.',
+      ),
+    ).toBeTruthy();
     await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
     await waitFor(() => expect(view.queryByText('Getting your Letterboxd file')).toBeNull());
