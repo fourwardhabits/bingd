@@ -16,15 +16,15 @@ names exactly what runs, in dependency order, with its check.
 | Thing | Value |
 |---|---|
 | Production migrations | 123 applied, latest `20260919000100` (Search #154, applied 2026-09-14 by the Search session; 0 pending, 0 orphan) |
-| Pending for Letterboxd | exactly the 17 files `20260917000100` … `20260917001700`, **all older than the latest applied** (so `--include-all`) |
+| Pending for this release | exactly **19** files: the 17 Letterboxd `20260917000100` … `20260917001700`, **all older than the latest applied** (so `--include-all`), then the notification fixes `20260920000100` and `20260920000200` (newer) |
 | `origin/main` | `a9aa5ae` (Search #154, squash); newest migration `20260919000100` (already on production) |
 | Function overlap with main-only migrations | none. `20260916000200` and `20260918000100` re-emit none of the 37 Letterboxd functions; `20260919000100` defines only `tmdb_put_people_index` and alters `provider_list_cache` |
 | Production Edge Functions (read 2026-09-14) | `tmdb-adapter` **v13** = `a9aa5ae`'s adapter exactly, **without** the `ids` hunk; `push-sender` v4; **no** `letterboxd-import` |
-| Staging (proof environment) | 141/141 incl. all 17 and `20260919000100`; `tmdb-adapter` v20 = `a9aa5ae` + `ids` hunk (the production target); `push-sender` v5; `letterboxd-import` v14; cron `bingd-import-drain` every 10 s, `bingd-import-maintenance` every minute |
-| **Production client source** | `integration/letterboxd-main`, code gated at **`126493b`** (later commits on the branch are docs and main’s web-only #155/#156; no app, SQL or function change) (§F): current main plus the Letterboxd branches, nothing preview-only |
-| Final preview source | `preview/letterboxd-main` **`c5dce8a`**, preview OTA `01a0a134` (iOS group `f54513f5…`, Android group `334fe09c…`; details in `docs/release/preview-qa-round-3.md`) = the release source plus the staging-separation overlay only (§F) |
-| Owning branches | `feat/letterboxd-import` (this file), `feat/letterboxd-onboarding-step` `e54bc20`, `fix/onboarding-score-confirmation` `f3b5acb`, `feat/comparison-memory-aids` `c88653b`, `fix/invite-share-label` `683f41b`, `fix/unranked-prompt-dismiss` `ec2f074`, `polish/final-ui-consistency` `b91b92a` |
-| Store binaries | public iOS Build 12 runtime `61efbf1789da…` and Android versionCode 10 runtime `c5ad66c8b509…`, both **matched** by the release source tree (computed on `126493b`, 170 and 172 sources); no native build needed |
+| Staging (proof environment) | 143/143 incl. all 17, `20260919000100`, `20260920000100` and `20260920000200` (applied 2026-09-14); `tmdb-adapter` v20 = `a9aa5ae` + `ids` hunk (the production target); `push-sender` **v6** = the release source's (award copy); `letterboxd-import` v14; cron `bingd-import-drain` every 10 s, `bingd-import-maintenance` every minute |
+| **Production client source** | `integration/letterboxd-main`, code gated at **`586a026`** (later commits on the branch are docs only) (§F): current main plus the Letterboxd branches and the notification fixes, nothing preview-only |
+| Final preview source | `preview/letterboxd-main` **`f333557`**, preview OTA `01a0a193` (iOS group `384a6e95…`, Android group `68a7e7a1…`; details in `docs/release/preview-qa-round-3.md`) = the release source plus the staging-separation overlay only (§F) |
+| Owning branches | `feat/letterboxd-import` (this file), `feat/letterboxd-onboarding-step` `e54bc20`, `fix/onboarding-score-confirmation` `f3b5acb`, `feat/comparison-memory-aids` `c88653b`, `fix/invite-share-label` `683f41b`, `fix/unranked-prompt-dismiss` `ec2f074`, `polish/final-ui-consistency` `b91b92a`, `fix/notification-consistency` `9a9c09f` |
+| Store binaries | public iOS Build 12 runtime `61efbf1789da…` and Android versionCode 10 runtime `c5ad66c8b509…`, both **matched** by the release source tree (computed on `586a026`, 170 and 172 sources); no native build needed |
 
 ---
 
@@ -64,8 +64,16 @@ alone.
 `watchlist`, and `notifications` (×2) for the length of a scan. At current production volume this
 is expected to be seconds (UNVERIFIED — count the rows in preflight). Apply in a quiet window.
 
+### A2. The notification fixes (founder physical QA, 2026-09-14), after the 17
+
+| # | File | Purpose | Notes for production |
+|---|---|---|---|
+| 18 | `20260920000100_one_arrival_one_notice` | `_maybe_activate_invite` (rebuilt from `20260916000100`) records the activation as before but files `invite_activated` only when the inviter holds no `invite_joined` from that invitee. Fixes "Leslie joined bingd from your invite" twice (acceptance 17:06:21, fifth ranking 17:10:52 on production) | no schema change, no lock beyond the function swap; existing duplicate rows are left as they are |
+| 19 | `20260920000200_an_award_push_that_names_it` | `claim_push_batch` (rebuilt from Letterboxd's `20260917001500`, additions only) returns `award_key`, `award_tier`, `award_family`, `award_tier_label` for `award_earned` | **must follow migration 15** (it redefines 15's claim). Safe with either push-sender: the names are deliberately not under `award_name`, the key v4 reads as the title |
+
 **Rollback.** Migrations are forward-only (applied files are immutable). The practical rollback
 is to stop the worker (§8) and ship the previous client; the schema is inert without imports.
+Migrations 18 and 19 are corrected, if ever needed, by the next additive migration.
 
 ---
 
@@ -74,7 +82,7 @@ is to stop the worker (§8) and ship the previous client; the schema is inert wi
 | Function | Source for production | Secrets / config | Order |
 |---|---|---|---|
 | `tmdb-adapter` | **main's adapter (`a9aa5ae`, incl. Search #154) plus the Letterboxd `ids` hunk**, which is exactly `supabase/functions/tmdb-adapter` in the release source (`git diff a9aa5ae integration/letterboxd-main -- supabase/functions/tmdb-adapter` shows only `index.ts` +27/−2 and `store.ts` +20/−6). *Not* the preview-qa-r3 copy, which predates #143/#147/#151/#154 and would roll back Search. Production v13 is `a9aa5ae` without the hunk; `20260919000100` is already applied, so the Search function the adapter needs exists. The hunk: `dueForEnrichment(db, limit, only?)` in `store.ts` (empty `only` → `[]`, else `.in('id', only)`); in `index.ts` `idList(body.ids, limit)` (absent → whole backlog as before, non-array → nothing, uuids only, capped), and `remaining` counted only when `ids` is absent. Staging runs exactly this union (v20). | existing TMDB secrets | **FIRST**, before migration 14. Backward compatible: no `ids` behaves as today. |
-| `push-sender` | main's `push-sender` plus the Letterboxd `copy.ts` change (`import_job_id`, `import_counts`, `importJobId`, `importContent()` for the three types) | none new | before or with the migrations; tolerates a database without the new fields. Without it, import notifications land in the inbox but send no push. |
+| `push-sender` | main's `push-sender` plus the Letterboxd `copy.ts` change (`import_job_id`, `import_counts`, `importJobId`, `importContent()` for the three types) **and the award push** (`award-copy.ts`, generated from the app's `awardAnnouncement`; `awardContent()` titles "You earned Seedling 🎉" over "Kept 25 titles on your watchlist" and adds `awardKey`/`awardTier` to the tap payload) | none new | before or with the migrations; tolerates a database without the new fields (it then says "You earned a new Award 🎉" and the tap opens the Awards list). Without it, import notifications land in the inbox but send no push, and award pushes keep today's generic copy. |
 | `letterboxd-import` | `supabase/functions/letterboxd-import/{index.ts,match.mjs}` from the release commit, with `supabase/config.toml` `[functions.letterboxd-import] verify_jwt = true` | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL` (platform), `TMDB_ACCESS_TOKEN` or `TMDB_API_KEY` (without one it answers `no_provider`: imports still complete, unknown films settle unmatched) | **AFTER migration 17** (it sends `p_final`). Until deployed, the drain's POST 404s harmlessly. |
 
 **Scheduling and config the backend needs** (read by `_import_provider_configured`, the poster
@@ -97,6 +105,14 @@ uncommitted `tmdb-adapter` edits; never a junctioned worktree).
   assetlinks change is required.** APNs/FCM unchanged.
 - The current production client never sees these rows (they exist only after somebody imports
   with the new client).
+- **Invite joins (migration 18):** an inviter gets one "joined bingd from your invite" row per
+  person: `invite_joined` at acceptance, or `invite_activated` at the fifth ranking only when
+  acceptance filed nothing. The invite auto-follow files no `follow` row; a later manual follow
+  still does.
+- **Award pushes (migration 19 + push-sender + client):** the push names the tier and what it
+  took, and a tap (cold, background or foreground) opens that award's celebration through the same
+  `targetFor` the inbox row uses. Old clients ignore the new payload fields and open the Awards
+  list, as today.
 
 ---
 
@@ -142,8 +158,10 @@ discovery, For You V2, Search/Cast, Similar and landing work; publishing it woul
 7. Integration-only test reconciliations: the award-queue test presses the fifth reveal's Done
    (from `bda2070`); `no-community-anchor` pins the comparison card's read as
    `id, kind, title, poster_path` (`kind` feeds `comparison_info_opened`).
-8. `origin/main` `a9aa5ae` (Search #154) merged last, clean. The adapter still differs from main
-   only by the `ids` hunk.
+8. `origin/main` `a9aa5ae` (Search #154) merged, clean. The adapter still differs from main
+   only by the `ids` hunk. Later main merges (`dfe5073`, #155/#156) are web only.
+9. `fix/notification-consistency`: migrations 18 and 19, the push-sender award copy, and the push
+   award routing; plus the independent review's fixes. See §A2 and §C.
 
 **Not in the production release:** `chore/physical-staging-separation` (preview identity and
 staging backend; applied only as the preview overlay, `preview/letterboxd-main`),
@@ -166,7 +184,7 @@ merge SHA before §6.
 - Founder go recorded; `integration/letterboxd-main` merged to main by PR (no other commits in
   between, or re-gate); release-gate green for the merge SHA.
 - `supabase migration list --project-ref abheeqyjzekiowkztfxv` → remote latest `20260919000100`;
-  pending = exactly the 17 `20260917…` files; no orphans.
+  pending = exactly the 17 `20260917…` files plus `20260920000100` and `20260920000200`; no orphans.
 - On production (read-only SQL): `select count(*) from import_jobs` and `from import_rows` → 0;
   row counts of `user_media`, `watchlist`, `notifications` (lock window estimate);
   `select extversion from pg_extension where extname in ('pg_cron','pg_net')`;
@@ -195,7 +213,8 @@ without `ids` behaves as before and reports `remaining`.
 ### 3. Schema
 
 1. `npx supabase db push --project-ref abheeqyjzekiowkztfxv --include-all --dry-run`. The list
-   must be exactly the 17 `20260917…` Letterboxd files and nothing else. Search's
+   must be exactly the 17 `20260917…` Letterboxd files followed by `20260920000100` and
+   `20260920000200`, and nothing else. Search's
    `20260919000100` is already applied on production (2026-09-14), so it must **not** appear; if
    it does, production's state is not what §0 records, so stop and re-read §0.
 2. Same command without `--dry-run`, in a quiet window.
@@ -215,7 +234,10 @@ without one). **No new secret is added by this release**: `SUPABASE_URL` and
 
 ### 5. Backend verification
 
-- `supabase migration list --project-ref abheeqyjzekiowkztfxv` → 140 applied, 0 pending, 0 orphan.
+- `supabase migration list --project-ref abheeqyjzekiowkztfxv` → 142 applied, 0 pending, 0 orphan.
+- `select pg_get_functiondef('_maybe_activate_invite(uuid)'::regprocedure) like '%invite_joined%';`
+  → true, and `select pg_get_functiondef('claim_push_batch(integer)'::regprocedure) like '%award_family%';`
+  → true. Read-only; do **not** call `claim_push_batch` to check it, which leases real pushes.
 - `select import_drain_status();` → `job` non-null, maintenance job present, schedule
   `10 seconds` (or a documented one-minute fallback when pg_cron < 1.5), `provider_ready: true`.
   Any other shape: `select unschedule_import_drain();` and stop.
@@ -255,6 +277,12 @@ runtime versions equal those values before announcing anything, and record both 
 4. Profile Movies counts imported watched titles once.
 5. Re-import the same ZIP → "already here", new pair of notifications, nothing duplicated.
 6. A fresh signup sees the optional Letterboxd step after Your First Five; Not now carries on.
+7. **Invite:** a new account redeems the founder's invite link and finishes Your First Five. The
+   founder's inbox holds exactly one "joined bingd from your invite" row for them (with Following),
+   and no second row after the fifth ranking.
+8. **Award push:** earn a tier (or use a test account close to one). The phone shows "You earned
+   <tier> 🎉" over what it took; tapping it with the app killed, backgrounded and open each opens
+   that award's celebration, and Done returns to where the app was.
 
 ### 8. Rollback / disable
 

@@ -144,3 +144,48 @@ installed preview builds; no reinstall. Settings → About must show `01a0a134`.
 6. **Details in a comparison** (long synopsis, *more*): Back to ranking still reachable.
 
 Production promotion is prepared, not executed: `docs/release/letterboxd-production-promotion.md`.
+
+---
+
+## Notification consistency (2026-09-14, supersedes `01a0a134`)
+
+From the founder's physical QA: a duplicate invite-join row, a generic award push, and an award
+push that opened the Awards list instead of the award. Release source `integration/letterboxd-main`
+**`586a026`**; preview source `preview/letterboxd-main` **`f333557`** (the same plus the
+staging-separation overlay). Fingerprint-matched; no reinstall. Settings → About must show
+`01a0a193`. Staging backend updated to match: migrations `20260920000100` and
+`20260920000200` applied (143/143), `push-sender` v6.
+
+| Platform | Runtime | Update group | Update id |
+|---|---|---|---|
+| iOS | `aa3056e7…` | `384a6e95-60b0-4c18-8359-37d6d7a90cf2` | `01a0a193-5f9f-722d-b82b-5ec091c10c9d` |
+| Android | `8e8731a2…` | `68a7e7a1-d92c-49b6-9c95-954e507b146d` | `01a0a193-5f9f-7f96-a139-aea4848e402e` |
+
+**The Genres sheet screenshot came from Android beta `01a0a119`**, which predates the gutter fix
+(`b91b92a`, first shipped in preview `01a0a134` and still in `01a0a193`). Not reopened.
+
+### What changed
+
+1. **One invite-join notice per person.** "Leslie joined bingd from your invite" arrived twice
+   because acceptance filed `invite_joined` (17:06:21) and Leslie's fifth ranking, the activation
+   bar since 20260916000100, filed `invite_activated` (17:10:52) with the same sentence.
+   Activation now files nothing when the acceptance already did. The invite's auto-follow still
+   files no `follow` row; a later manual follow still does. Existing duplicate rows stay.
+2. **Award push copy.** "You earned Seedling 🎉" over "Kept 25 titles on your watchlist", from the
+   same `awardAnnouncement` the inbox row and celebration use. Metal tracks are titled by the
+   family ("You earned Movie Muncher 🎉" / "Watched 50 movies").
+3. **Award push destination.** Tapping the push opens that award's celebration, through the same
+   resolver as the inbox row; with no award named, the Awards list.
+
+### Founder checklist (optional before production; the backend is staging)
+
+1. **Invite:** a new preview account redeems your preview invite link and finishes Your First
+   Five. Your inbox has exactly **one** "joined bingd from your invite" row for them, with
+   Following, and no second row after their fifth ranking.
+2. **Award push:** earn an award tier on a preview account (the Awards sheet shows what is
+   closest). The phone push reads "You earned <tier> 🎉"
+   over what it took, with no "bingd." spelling.
+3. **Award push tap:** tap that push three ways: app killed, app in background, app open. Each
+   opens that award's celebration (not the Awards list); Done returns to where you were and the
+   celebration does not reopen.
+4. **Inbox parity:** tapping the same award's row in the inbox opens the same celebration.
