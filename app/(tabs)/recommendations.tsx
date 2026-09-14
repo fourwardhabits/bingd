@@ -1078,11 +1078,11 @@ export default function RecommendationsScreen() {
                   that at all. */}
               {onTopRated ? null : slate.data?.popularityOnly ? (
                 <Text variant="footnote" tone="tertiary" style={styles.lowData}>
-                  Popular right now while bingd. learns your taste.
+                  Popular right now while bingd learns your taste.
                 </Text>
               ) : slate.data?.lowData ? (
                 <Text variant="footnote" tone="tertiary" style={styles.lowData}>
-                  bingd. is still learning your taste.
+                  bingd is still learning your taste.
                 </Text>
               ) : null}
               <PosterGrid

@@ -2140,7 +2140,7 @@ describe('undo at the first comparison', () => {
 
     await waitFor(() => expect(sheet.getByText('Logged, not ranked yet')).toBeTruthy());
     expect(
-      sheet.getByText(/Film A is saved in your Collection without a bingd\. score/),
+      sheet.getByText(/Film A is saved in your Collection without a bingd score/),
     ).toBeTruthy();
     expect(sheet.getByText(/Rank it from your Collection or its title page/)).toBeTruthy();
     // Copy only: nothing was written on the way.

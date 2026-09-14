@@ -27,8 +27,10 @@ export type RecommendSheetProps = {
 /**
  * The width one of the two footer actions needs before the pair may sit side by side.
  *
- * Set by the longer label. "Share off bingd." sets to about 132pt at `headline`, and
- * `fit` adds 24 of side padding, so 156 is where it stops fitting at full size — 150
+ * Set by the longer label. "Share off bingd." set to about 132pt at `headline` when this
+ * was measured; the label lost its period on 2026-09-13 and is a character shorter, so
+ * the figure is now slightly conservative rather than wrong. `fit` adds 24 of side
+ * padding, so 156 is where it stops fitting at full size — 150
  * is that figure with the rounding taken off it rather than a number chosen to make a
  * particular phone pass. Below the pair's worth of it the buttons stack, because a
  * label shrunk toward `fit`'s 85% floor beside a short one is the imbalance this
@@ -95,8 +97,8 @@ export function RecommendSheet({
    * `flexShrink: 1` on both. Yoga does not give a flex item CSS's automatic minimum
    * size, so "shrink" has no floor at the content's own width — the children were
    * squeezed below their labels instead of the row ever wrapping, and `Share off bingd.`
-   * broke mid-word into `bi / ngd.`. Wrapping could not save it because shrinking always
-   * succeeded first.
+   * (as it was labelled then) broke mid-word into `bi / ngd.`. Wrapping could not save it
+   * because shrinking always succeeded first.
    *
    * So the decision is made here, from a width, and it is one boolean a test can pin.
    *
@@ -277,7 +279,7 @@ export function RecommendSheet({
      * been sent; the fix is the segment that was wrong, and nothing else.
      */
     const titleUrl = `https://bingd.app/title/${mediaItemId}`;
-    const message = `${name} on bingd.\n${titleUrl}`;
+    const message = `${name} on bingd\n${titleUrl}`;
 
     try {
       await Share.share({ message, url: titleUrl });
@@ -362,7 +364,7 @@ export function RecommendSheet({
           every tap is a moving target, and how many people are chosen is already said by
           the checkboxes above.
 
-          Share off bingd. is the same off-platform share as ever — the native sheet
+          Share off bingd is the same off-platform share as ever — the native sheet
           carrying the reader's invite link — and it needs no selection: whether the
           somebody has the app is a detail of the address, not a different act. It is
           also still where the title page's Share button went. Outlined, because next to
@@ -388,7 +390,7 @@ export function RecommendSheet({
         ) : null}
         <View style={sideBySide ? styles.half : undefined}>
           <Button
-            label={sharing ? 'Opening…' : 'Share off bingd.'}
+            label={sharing ? 'Opening…' : 'Share off bingd'}
             kind="secondary"
             fit
             onPress={() => void shareOffPlatform()}

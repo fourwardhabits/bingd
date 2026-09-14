@@ -1,6 +1,6 @@
 # Notifications — the doctrine, the matrix, and what is deliberately not sent
 
-**Status:** written 2026-09-06. Canonical. This is the source of truth for what bingd.
+**Status:** written 2026-09-06. Canonical. This is the source of truth for what bingd
 sends, what it will not send, and why.
 
 **Companion documents:** [`PRD.md`](./PRD.md) §15 (the product requirement) ·
@@ -113,7 +113,7 @@ Status vocabulary:
 | `invite_activated` | Somebody you invited started ranking | Your invitation worked | Their profile | Once per account, ever | Recommendations › Friend joined | LIVE |
 | `invite_joined` | Somebody joined on your link | Same | Their profile | Once | Recommendations › Friend joined | LIVE |
 | `invite_welcome` | You joined on somebody's link | Who brought you | Their profile | Once | Recommendations › Friend joined | LIVE |
-| `award_earned` | You crossed an award tier | Your own achievement | **The award celebration** (2026-09-06) | Once per (award, tier), ever | Achievements › bingd. Awards | LIVE |
+| `award_earned` | You crossed an award tier | Your own achievement | **The award celebration** (2026-09-06) | Once per (award, tier), ever | Achievements › bingd Awards | LIVE |
 | `goal_completed` | You finished an annual goal | Your own achievement | Your profile's goals | Once per (year, medium) | Achievements | LIVE |
 
 ### Class B — time-sensitive personal utility
@@ -209,7 +209,7 @@ this pass.**
 |---|---|
 | Social | Follows · Follow accepted · Comments · Reactions · Watched with |
 | Recommendations & invites | Recommendations · Friend joined via invite |
-| Achievements | bingd. Awards |
+| Achievements | bingd Awards |
 
 `follow_request` is deliberately **not** silenceable. A request is a question only the
 recipient can answer; an account that could mute them would receive requests it can never
@@ -244,7 +244,7 @@ date — for a film, usually the *theatrical* one — and three things follow:
 
 - **"Now streaming" cannot be claimed from it.** Where-to-watch and release date are
   separate facts, and `WhereToWatch` reads availability live from a different call.
-  Copy must be `"[Title] is out today."` and nothing stronger, unless bingd. actually
+  Copy must be `"[Title] is out today."` and nothing stronger, unless bingd actually
   knows the streaming fact.
 - **It has no region.** A date that is right for the US can be months off elsewhere.
 - **The catalogue is a cache.** `media_items` holds what somebody already searched for,

@@ -264,10 +264,11 @@ export function ScoresSection({
                * implied, and legible to somebody who cannot tell two greys apart.
                */
               variant="outlined"
-              // The product's own name, written the way the wordmark writes it. It sits
-              // beside "Following", so the two labels name two populations — and this one
-              // is the whole of bingd. rather than a generic "community".
-              label="bingd."
+              // The product's own name, as plain text writes it: without the wordmark's
+              // period (founder, 2026-09-13). It sits beside "Following", so the two labels
+              // name two populations, and this one is the whole of bingd rather than a
+              // generic "community".
+              label="bingd"
               detail={ratingsDetail(bingd.ratingCount)}
               emptyLabel={NOT_ENOUGH}
             />

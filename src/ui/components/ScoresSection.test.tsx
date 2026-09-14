@@ -45,11 +45,11 @@ describe('the scores row', () => {
     await render(<ScoresSection {...all} />);
     expect(screen.getByText('Your score')).toBeTruthy();
     expect(screen.getByText('Following')).toBeTruthy();
-    expect(screen.getByText('bingd.')).toBeTruthy();
+    expect(screen.getByText('bingd')).toBeTruthy();
     expect(isOneRow()).toBe(true);
   });
 
-  it('reads me, then bingd., then the people I follow', async () => {
+  it('reads me, then bingd, then the people I follow', async () => {
     /**
      * **The founder's order, 2026-09-13.** The reader's own score leads because the
      * section is a comparison and they are the first term of it. bingd. comes before
@@ -69,9 +69,9 @@ describe('the scores row', () => {
       />,
     );
     const labels = screen
-      .getAllByText(/^(bingd\.|Following|Your score)$/)
+      .getAllByText(/^(bingd|Following|Your score)$/)
       .map((node) => node.props.children);
-    expect(labels).toEqual(['Your score', 'bingd.', 'Following']);
+    expect(labels).toEqual(['Your score', 'bingd', 'Following']);
   });
 
   it('keeps that order for a screen reader, with each unit still saying its sample', async () => {
@@ -91,9 +91,9 @@ describe('the scores row', () => {
       />,
     );
     const texts = screen
-      .getAllByText(/^(bingd\.|Following|Your score|128 ratings|4 ratings)$/)
+      .getAllByText(/^(bingd|Following|Your score|128 ratings|4 ratings)$/)
       .map((node) => node.props.children);
-    expect(texts).toEqual(['Your score', 'bingd.', '128 ratings', 'Following', '4 ratings']);
+    expect(texts).toEqual(['Your score', 'bingd', '128 ratings', 'Following', '4 ratings']);
     // The drill-down is still Following's, and only Following's.
     expect(screen.getByRole('button', { name: /^Following\. 8\.2 out of 10\. 4 ratings$/ })).toBeTruthy();
   });
@@ -219,7 +219,7 @@ describe('what each unit says when it has nothing', () => {
     for (const name of [
       'Your score: Not ranked yet',
       'Following: No ratings yet',
-      'bingd.: Not enough ratings',
+      'bingd: Not enough ratings',
     ]) {
       const disc = screen.getByLabelText(name);
       // Filled, in the one grey this app spends on an absent score.

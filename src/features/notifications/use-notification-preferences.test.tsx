@@ -230,7 +230,7 @@ describe('the screen', () => {
     const view = await renderLoaded();
 
     expect(view.getByLabelText('Reactions').props.value).toBe(false);
-    expect(view.getByLabelText('bingd. Awards').props.value).toBe(false);
+    expect(view.getByLabelText('bingd Awards').props.value).toBe(false);
     expect(view.getByLabelText('Comments').props.value).toBe(true);
     expect(view.getByLabelText('Follows').props.value).toBe(true);
     expect(view.getByLabelText('Recommendations').props.value).toBe(true);
@@ -401,7 +401,7 @@ describe('the screen', () => {
   it('draws the Awards row like any other, and keeps the invites copy honest', async () => {
     const view = await renderLoaded();
 
-    expect(view.getByText('bingd. Awards')).toBeTruthy();
+    expect(view.getByText('bingd Awards')).toBeTruthy();
     expect(
       view.getByText('Somebody you invited joins bingd. And again when they finish their first five.'),
     ).toBeTruthy();

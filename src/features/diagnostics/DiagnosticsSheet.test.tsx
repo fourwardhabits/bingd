@@ -98,7 +98,7 @@ describe('opening the sheet', () => {
     someActivity();
     const view = await renderWithProviders(<DiagnosticsSheet visible onClose={() => {}} />);
 
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
     expect(view.getByText(/rest:rankings/)).toBeTruthy();
     expect(view.getByText(/signOut\.supabase/)).toBeTruthy();
   });
@@ -107,7 +107,7 @@ describe('opening the sheet', () => {
     const view = await renderWithProviders(
       <DiagnosticsSheet visible={false} onClose={() => {}} />,
     );
-    expect(view.queryByText(/bingd\. diagnostics/)).toBeNull();
+    expect(view.queryByText(/bingd diagnostics/)).toBeNull();
   });
 
   /**
@@ -125,7 +125,7 @@ describe('opening the sheet', () => {
       await act(async () => {
         await jest.advanceTimersByTimeAsync(3000);
       });
-      expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy();
+      expect(view.getByText(/bingd diagnostics/)).toBeTruthy();
       expect(view.getByText(/UNKNOWN \(read did not answer\)/)).toBeTruthy();
     } finally {
       jest.useRealTimers();
@@ -135,7 +135,7 @@ describe('opening the sheet', () => {
   it('opens with no recorded activity at all, and says so', async () => {
     const view = await renderWithProviders(<DiagnosticsSheet visible onClose={() => {}} />);
 
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
     // An empty report is still a useful one: it says the recorder is empty rather than
     // leaving a blank screen that reads as another presentation failure.
     expect(view.getByText(/\(none\)/)).toBeTruthy();
@@ -145,33 +145,33 @@ describe('opening the sheet', () => {
     someActivity();
     const onClose = jest.fn();
     const view = await renderWithProviders(<DiagnosticsSheet visible onClose={onClose} />);
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
 
     await view.rerender(<DiagnosticsSheet visible={false} onClose={onClose} />);
-    expect(view.queryByText(/bingd\. diagnostics/)).toBeNull();
+    expect(view.queryByText(/bingd diagnostics/)).toBeNull();
 
     await view.rerender(<DiagnosticsSheet visible onClose={onClose} />);
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
   });
 
   /** Building the report must not become a render loop on the one screen that must not. */
   it('builds the report once per open rather than on every render', async () => {
     someActivity();
     const view = await renderWithProviders(<DiagnosticsSheet visible onClose={() => {}} />);
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
 
-    const before = view.getByText(/bingd\. diagnostics/).props.children as string;
+    const before = view.getByText(/bingd diagnostics/).props.children as string;
     await view.rerender(<DiagnosticsSheet visible onClose={() => {}} />);
     await act(async () => {});
 
     // Same text object: a rebuild would have stamped a new `captured` timestamp.
-    expect(view.getByText(/bingd\. diagnostics/).props.children).toBe(before);
+    expect(view.getByText(/bingd diagnostics/).props.children).toBe(before);
   });
 
   it('offers Refresh and Copy', async () => {
     someActivity();
     const view = await renderWithProviders(<DiagnosticsSheet visible onClose={() => {}} />);
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
 
     expect(view.getByRole('button', { name: 'Refresh' })).toBeTruthy();
     const copy = view.getByRole('button', { name: 'Copy' });
@@ -193,7 +193,7 @@ describe('what the Copy control claims', () => {
     });
 
     const view = await renderWithProviders(<DiagnosticsSheet visible onClose={() => {}} />);
-    await waitFor(() => expect(view.getByText(/bingd\. diagnostics/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/bingd diagnostics/)).toBeTruthy());
 
     await fireEvent.press(view.getByRole('button', { name: 'Copy' }));
 

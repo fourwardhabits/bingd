@@ -879,7 +879,7 @@ function CommentRow({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Report ${comment.authorName}'s comment`}
-              accessibilityHint="Tells whoever runs bingd. about this comment"
+              accessibilityHint="Tells whoever runs bingd about this comment"
               onPress={onReport}
               hitSlop={slop}
             >

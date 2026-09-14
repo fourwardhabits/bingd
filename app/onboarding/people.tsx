@@ -224,7 +224,7 @@ export default function PeopleStepScreen() {
 function CouldNotLoad({ onRetry }: { onRetry: () => void }) {
   return (
     <View style={styles.intro}>
-      <Text variant="title1">People on bingd.</Text>
+      <Text variant="title1">People on bingd</Text>
       <Text variant="body" tone="secondary">
         We could not load suggestions just now. You can find people from the Feed tab once
         you are in.

@@ -100,7 +100,7 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
   return (
     <View style={styles.section}>
       <SectionHeader
-        title="bingd. AWARDS"
+        title="bingd AWARDS"
         exactCase
         // Offered even with an empty shelf: the sheet is where the twenty are, and
         // "what could I earn" is the question a new account has.

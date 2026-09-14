@@ -129,7 +129,7 @@ export function formatReport(input: ReportInput): string {
   const { release, auth, onboarding, flight, queries, lastSession } = input;
   const lines: string[] = [];
 
-  lines.push('bingd. diagnostics');
+  lines.push('bingd diagnostics');
   lines.push(
     `captured ${new Date().toISOString()} · uptime ${Math.round(flight.uptimeMs / 1000)}s`,
   );

@@ -143,7 +143,7 @@ describe('the shape of the set', () => {
   it('agrees with the noun when a threshold is one', () => {
     expect(track('movie-muncher').next(1)).toBe('Watch 1 movie');
     expect(track('mutual-mania').next(1)).toBe('Follow 1 person who follows you back');
-    expect(track('invite-instigator').next(1)).toBe('Bring 1 person to bingd.');
+    expect(track('invite-instigator').next(1)).toBe('Bring 1 person to bingd');
   });
 
   it('separates thousands, so a top tier is a number and not a serial', () => {
@@ -742,7 +742,7 @@ describe('Invite Instigator', () => {
       track('invite-instigator').next(3),
       track('invite-instigator').earned(50),
     ].join(' ');
-    expect(copy).toBe('Bring 3 people to bingd. Brought 50 people to bingd.');
+    expect(copy).toBe('Bring 3 people to bingd Brought 50 people to bingd');
     for (const word of ['link', 'share', 'sent', 'invited']) {
       expect(copy.toLowerCase()).not.toContain(word);
     }
@@ -781,7 +781,7 @@ describe('Invite Instigator', () => {
  * still a follow — so it becomes a row that discloses nothing and leads nowhere.
  */
 describe('a person the reader may not see', () => {
-  const hidden = person({ name: 'Someone on bingd.', username: null });
+  const hidden = person({ name: 'Someone on bingd', username: null });
 
   it('still counts, so the number stays honest', () => {
     const input = facts({ mutualFollows: [person(), hidden] });
@@ -791,7 +791,7 @@ describe('a person the reader may not see', () => {
 
   it('discloses no handle and offers no route to a profile', () => {
     const { rows } = rowsFor('mutual-mania', facts({ mutualFollows: [hidden] }));
-    expect(rows[0]?.label).toBe('Someone on bingd.');
+    expect(rows[0]?.label).toBe('Someone on bingd');
     expect(rows[0]?.detail).toBe('This account is not available to you');
     expect(rows[0]?.link).toBeNull();
   });
@@ -934,7 +934,7 @@ describe('Comment Gremlin', () => {
     const contribution = { key: 'k', kind: 'comment' as const, title: null, writtenAt: null };
     expect(Object.keys(contribution)).not.toContain('body');
     const { rows } = rowsFor('comment-gremlin', facts({ written: [contribution] }));
-    expect(rows[0]?.label).toBe('A bingd. activity');
+    expect(rows[0]?.label).toBe('A bingd activity');
   });
 });
 
@@ -1282,7 +1282,7 @@ describe('a track the viewer is not entitled to read', () => {
     expect(result.withheld).toBe(false);
     expect(result.value).toBe(2);
     expect(result.countLabel).toBe('2 / 3');
-    expect(result.detailLine).toBe('Next: Bring 3 people to bingd.');
+    expect(result.detailLine).toBe('Next: Bring 3 people to bingd');
   });
 
   it('names no invitee in a visitor’s Invite Instigator breakdown', () => {
@@ -1290,7 +1290,7 @@ describe('a track the viewer is not entitled to read', () => {
     // whole count, with nowhere to tap.
     const { rows } = rowsFor('invite-instigator', withheld);
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.label).toBe('2 people brought to bingd.');
+    expect(rows[0]?.label).toBe('2 people brought to bingd');
     expect(rows[0]?.weight).toBe(2);
     expect(rows[0]?.link ?? null).toBeNull();
     expect(rows[0]?.avatarPath ?? null).toBeNull();

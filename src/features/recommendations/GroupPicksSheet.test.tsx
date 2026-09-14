@@ -182,7 +182,7 @@ describe('choosing the group', () => {
     await renderWithProviders(<GroupPicksSheet {...props()} />);
 
     expect(
-      screen.getByText('Pick who’s watching and bingd. will find movies you can all agree on.'),
+      screen.getByText('Pick who’s watching and bingd will find movies you can all agree on.'),
     ).toBeTruthy();
     // The instruction for the control underneath survives it.
     expect(screen.getByText("Who's watching?")).toBeTruthy();
@@ -195,7 +195,7 @@ describe('choosing the group', () => {
     await renderWithProviders(<GroupPicksSheet {...props()} medium="tv" />);
 
     expect(
-      screen.getByText('Pick who’s watching and bingd. will find shows you can all agree on.'),
+      screen.getByText('Pick who’s watching and bingd will find shows you can all agree on.'),
     ).toBeTruthy();
     expect(screen.queryByText(/will find movies/)).toBeNull();
   });

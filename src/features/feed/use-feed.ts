@@ -688,7 +688,7 @@ function award(row: FeedRow): FeedItem['award'] {
     },
     // The feed's own last resort. Its sentence is "Abisola earned the … award", where
     // "a new Award" would read as a title nobody has heard of.
-    'bingd. Award',
+    'bingd Award',
   );
   return {
     key: row.payload.award,
@@ -755,9 +755,9 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
           })
         : row.type === 'award_earned'
           ? // The earned tier, resolved from `tracks.ts`. `awardAnnouncement` falls back
-            // to the payload's names and finally to "bingd. Award", so this slot is never
+            // to the payload's names and finally to "bingd Award", so this slot is never
             // a track key and never empty.
-            (award(row)?.title ?? 'bingd. Award')
+            (award(row)?.title ?? 'bingd Award')
           : // And for a goal it is the goal's own name, so the sentence reads
             // "Abisola hit their 2026 Movies goal" through the same three slots.
             row.type === 'goal_completed' && row.payload?.year && row.payload?.category

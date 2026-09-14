@@ -115,7 +115,7 @@ export async function buildDiagnosticsReport(
   } catch (error) {
     // The one function in the app that must always return a string. A throw here is
     // itself the finding, so it is the report.
-    return `bingd. diagnostics could not be assembled: ${error instanceof Error ? error.name : 'unknown'}`;
+    return `bingd diagnostics could not be assembled: ${error instanceof Error ? error.name : 'unknown'}`;
   }
 }
 async function assemble(queryClient: QueryClient, route: string): Promise<string> {

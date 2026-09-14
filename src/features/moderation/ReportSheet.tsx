@@ -86,7 +86,7 @@ export function ReportSheet({ visible, onClose, subject, subjectId, noun }: Repo
       <View style={styles.head}>
         <Text variant="callout">Report this {noun}</Text>
         <Text variant="caption" tone="secondary">
-          Only whoever runs bingd. sees this. The person you are reporting is not told.
+          Only whoever runs bingd sees this. The person you are reporting is not told.
         </Text>
       </View>
 

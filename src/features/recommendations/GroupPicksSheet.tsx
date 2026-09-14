@@ -162,8 +162,8 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
            */}
           <Text variant="footnote" tone="secondary">
             {medium === 'tv'
-              ? 'Pick who’s watching and bingd. will find shows you can all agree on.'
-              : 'Pick who’s watching and bingd. will find movies you can all agree on.'}
+              ? 'Pick who’s watching and bingd will find shows you can all agree on.'
+              : 'Pick who’s watching and bingd will find movies you can all agree on.'}
           </Text>
           <Text variant="footnote" tone="tertiary">
             Who&apos;s watching?

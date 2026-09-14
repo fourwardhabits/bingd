@@ -84,7 +84,7 @@ The user lands on an empty Collection with one clear next action, never on an em
 
 **As built — 2026-09-07, the pre-GTM convergence.** Two things the shipped flow says that the specification above did not, both from the product audit of what a stranger meets in the first minute.
 
-- **What a score is, before the first one appears.** The intro of Build your taste reads *"Rank five films you have seen. bingd. learns from how they compare to each other, not from stars. Each one gets a score from where it lands, and that score can move as you rank more."* A first liked film reveals `10.0` and `#1 in Movies`, and the second ranking moves it; without that sentence the reveal read as a star rating the app had assigned and then changed its mind about. The reveal repeats it once, quietly — see §4.
+- **What a score is, before the first one appears.** The intro of Build your taste reads *"Rank five films you have seen. bingd learns from how they compare to each other, not from stars. Each one gets a score from where it lands, and that score can move as you rank more."* A first liked film reveals `10.0` and `#1 in Movies`, and the second ranking moves it; without that sentence the reveal read as a star rating the app had assigned and then changed its mind about. The reveal repeats it once, quietly — see §4.
 - **The summary offers Explore For You and Find people.** *See my collection* is gone from the second slot: the Collection is one tap away on the bar for the rest of this person's life, and the moment five films are placed is the one moment the app can say "now find the people whose rankings you will see". Find people lands on **the Feed tab opened on People** (`peopleDiscovery('onboarding')` in `lib/routes.ts`, the tab with `show=people`), which is the existing discovery surface and not a screen of its own. The empty Feed offers the same action to the same place (§7). *It pointed at For You until 2026-09-08, when §A16 moved People onto the Feed beside Feed and Leaderboard; the constant existing is what made that a one-line change at both call sites.*
 
 ---
@@ -181,7 +181,7 @@ Below the panel, three actions: **Share**, **Rank another**, and **Done**. **Sha
 
 **That line exists as built (2026-09-07), and it is the explanation rather than a celebration.** Under the anchors, in `footnote`/`tertiary`, onboarding's reveals carry *"Your score comes from where this lands in your rankings. It can move as you rank more."* The condition is the `surface` the sheet already carries for analytics — `onboarding` is exactly "the first five rankings this account will ever see" — so no first-reveal flag is persisted, reset on a second device, or got wrong. An ordinary reveal, the one a reader with two hundred rankings meets from Search or a title page, does not carry it; the intro of Build your taste says the same thing once before the first comparison (§3). Nothing about the score, the placement or the arithmetic moved.
 
-**Undo at the first comparison says what it left behind (2026-09-07).** `rank_back` with nothing to reverse ends the session, and the sheet used to say *"Still in your collection — stays logged. You can rank it whenever you like."*, which a stranger read as finished. It now reads **Logged, not ranked yet** over *"{title} is saved in your Collection without a bingd. score. Rank it from your Collection or its title page whenever you like."* Copy only: the unranked contract, the bucket and the session are untouched.
+**Undo at the first comparison says what it left behind (2026-09-07).** `rank_back` with nothing to reverse ends the session, and the sheet used to say *"Still in your collection — stays logged. You can rank it whenever you like."*, which a stranger read as finished. It now reads **Logged, not ranked yet** over *"{title} is saved in your Collection without a bingd score. Rank it from your Collection or its title page whenever you like."* Copy only: the unranked contract, the bucket and the session are untouched.
 
 ---
 
@@ -343,7 +343,7 @@ offered two ways appearing under both from one entry.
 
 ```
    ─────────────────────────────────────────────
-   ⬤ 8.7  bingd.        ⬤ 9.1  Following
+   ⬤ 8.7  bingd         ⬤ 9.1  Following
      12 ratings           2 people you follow
    ─────────────────────────────────────────────
    WHERE TO WATCH          [N] [tv] [a]  +2   ›
@@ -367,7 +367,7 @@ Nothing about a provider failure reaches the page around it.
 publishes no per-service deep link, so nothing here opens Netflix. `View watch options` —
 TMDB's own page for the title in that market — was the sheet's one action and was removed on
 the founder's ruling: a real link to the wrong place is still the wrong place. It sent
-somebody out of bingd. to a web page that sent them somewhere else, and it did not do the
+somebody out of bingd to a web page that sent them somewhere else, and it did not do the
 thing its position implied. Nothing replaces it; manufacturing a provider URL would be a
 guess presented as a destination.
 
@@ -421,7 +421,7 @@ scoring, recommendation or the catalogue moves; this is composition, hierarchy a
    [Drama] [Action & Adventure] [+2]
 
    SCORES
-   ⬤ 9.1  Following        ⬤ 8.7  bingd.        →   ← scrolls sideways
+   ⬤ 9.1  Following        ⬤ 8.7  bingd         →   ← scrolls sideways
      2 people you follow      12 ratings
 
    WHERE TO WATCH             [N] [tv] [a]  +2   ›
@@ -493,7 +493,7 @@ plain four-line clamp — honest, and still tappable.
 section treatment. It was removed on 2026-09-06 because the units name themselves, which is
 true of each unit and not of the pair — two circles arriving under a synopsis with no heading
 read as a continuation of the synopsis, and no arrangement of two units gives a screen reader
-a landmark. **Following leads bingd.**, because a mean over accounts the reader chose is a
+a landmark. **Following leads bingd**, because a mean over accounts the reader chose is a
 signal about their own taste and the app-wide mean is a fact about the app. The row is a
 horizontal scroller sized to its content rather than a flex pair with a responsive stacked
 fallback: a third unit has been asked for twice, and content sizing means `Not enough ratings`
@@ -550,7 +550,7 @@ rejected version is what makes this one legible.
    [Drama] [Action & Adventure] [+2]
 
    SCORES
-   ⬤ 9.1  Following        ⬤ 8.7  bingd.        →
+   ⬤ 9.1  Following        ⬤ 8.7  bingd         →
 
    WHERE TO WATCH             [N] [tv] [a]  +2   ›
    via JustWatch
@@ -772,8 +772,8 @@ worth introducing for one row.
 
 **One sentence saying what it is.** The sheet opened on a title, a question and a list of
 faces, which assumes the reader already knows what Group Picks does — and it is one of the few
-things in bingd. with no equivalent elsewhere, so it is exactly the screen that cannot assume
-it. *"Pick who's watching and bingd. will find movies you can all agree on."*, above
+things in bingd with no equivalent elsewhere, so it is exactly the screen that cannot assume
+it. *"Pick who's watching and bingd will find movies you can all agree on."*, above
 *Who's watching?* and not in place of it. The noun follows the wall the sheet was opened from —
 *shows* on TV — because a sentence promising movies over a list of series answers a different
 question from the one being asked. Deliberately not a carousel, a tutorial or a dismissible tip.
@@ -809,14 +809,14 @@ only for the cluster this removes. The poster is `poster.detail`, 100 × 150 —
 the column had too little width to set a serif title in.
 
 **The reader's own score is the first of three units in `SCORES`.** `Your score → Following →
-bingd.`, in that fixed order, which is a hierarchy of relevance to one reader and not a
+bingd`, in that fixed order, which is a hierarchy of relevance to one reader and not a
 leaderboard: me, then the people I chose, then the room. On the poster the number had nothing to
 be measured against; here it is the first term of a comparison read straight across. It is stated
 **once** on the page.
 
-> **Superseded 2026-09-13 (founder): `Your score → bingd. → Following`.** The middle two swap,
+> **Superseded 2026-09-13 (founder): `Your score → bingd → Following`.** The middle two swap,
 > and the reason is sample. A reader follows a handful of people, so Following usually rests on
-> one or two ratings and often none, while bingd. is the widest population on the page; the unit
+> one or two ratings and often none, while bingd is the widest population on the page; the unit
 > beside the reader's own number is the one it is compared against first, so it should be the
 > one that can bear the comparison. Everything else here stands — sample counts, the Following
 > drill-down, the empty states, the Rank control — and the order above in this section and in
@@ -838,7 +838,7 @@ Every empty circle is a **filled `scoreEmpty` disc with nothing inside it** — 
 
 **Three units stack; two did not have to.** A circle with its words *beside* it needs about 170pt,
 so three ran off a 358pt content width and the horizontal scroller that used to rescue the
-two-unit row turned bingd. into something a reader discovered by swiping. Each unit is now a
+two-unit row turned bingd into something a reader discovered by swiping. Each unit is now a
 circle with its words *beneath* it on one of three equal columns; the row overflows downward by
 wrapping its own sub-label, and the scroller is gone because there is nothing left for it to
 rescue.
@@ -848,7 +848,7 @@ rescue.
 else in the app), `outlined` (somebody else's score with enough behind it), and `quiet` (neutral
 ring, neutral ink). Three identical filled Maroon circles say the three claims are
 interchangeable, which is the opposite of what the section exists to say. `quiet` applies to
-**bingd. below two ratings** — the founder's rule is "do not make one person's score look
+**bingd below two ratings** — the founder's rule is "do not make one person's score look
 statistically authoritative" — and never to Following, whose sample is people the reader chose
 rather than a statistic about strangers. It is a visual demotion only; whether there is a number
 at all is still the server's decision.
@@ -967,7 +967,7 @@ noise. Both aggregates count the same way now:
 |---|---|---|
 | Your score | *(nothing)* | `Not ranked yet` |
 | Following | `1 rating` / `N ratings` | `No ratings yet` |
-| bingd. | `1 rating` / `N ratings` | `Not enough ratings` |
+| bingd | `1 rating` / `N ratings` | `Not enough ratings` |
 
 The labels are what say *whose* ratings these are, which is exactly what the longer copy was
 spending extra lines restating. The three still never share a string: the reader not having
@@ -976,14 +976,14 @@ different facts.
 
 **And then colour was reduced to meaning one thing** (founder, later the same day). The
 hierarchy above ran filled Maroon for the reader's own, outlined for Following at any count, and
-outlined for bingd. at two ratings or more with a *quiet* neutral treatment below that. The quiet
+outlined for bingd at two ratings or more with a *quiet* neutral treatment below that. The quiet
 one is gone. On a device a real number in grey reads as a score that failed to load or went
 stale, because grey on this row already means *no score* — so the rule is now one sentence with
 no exceptions in it:
 
 > **A real score is Maroon. No score is a filled grey disc.**
 
-bingd. is outlined at every count, including one. Sample depth is stated in the words directly
+bingd is outlined at every count, including one. Sample depth is stated in the words directly
 under the number, where `1 rating` is more precise than any colour and legible to somebody who
 cannot tell two greys apart. And the empty circle lost its em dash: a mark inside a circle is how
 this page states a number, so the dash was the last thing still blurring the two states
@@ -1184,7 +1184,7 @@ a score is not returned at all, so the low-data rule is preserved by the row bei
 rather than by a placeholder.
 
 *From contacts* is the obvious third list and is deliberately not built. It needs an
-address-book permission, which is a decision about what bingd. uploads about people who never
+address-book permission, which is a decision about what bingd uploads about people who never
 signed up.
 
 ### Follow activity in the Feed — 2026-09-08
@@ -1255,7 +1255,7 @@ Before the threshold is reached, the tab shows what is missing and the fastest w
 **As built — 2026-09-07: what a long press says, and what a thin wall admits.**
 
 - **A long press on a poster gives the reason and nothing else.** `headlineFor` derives one sentence from whichever term carried the score — *"Because you loved Heat"*, *"More drama, which you rank highly"*, *"Popular right now"* — and that sentence is the whole of what a store build shows. It used to append `score 0.412`, the anchor contributions, the genre and language affinities and the popularity prior: the engine's working, in `rank.ts` vocabulary, on a production long press. The working survives under `__DEV__` only — a dev client attached to Metro — and on no built binary, the community beta included (founder decision, 2026-09-07). It is deliberately narrower than the Diagnostics sheet's own gate.
-- **A thin-taste wall says so, and only a genuinely popular one says "popular".** When the slate resolved no anchor (`lowData`) — a reader who has ranked two films, or ranked nothing they loved — one line in the footnote register sits above the artwork. Which line depends on what is actually on the wall (Codex review of #122, same day): the pool also takes `social_candidates`, the titles people the reader follows put in their top band, so "no anchor" is not "popularity-only". `popularityOnly` is derived in the hook's `select` from the drawn items — no anchor *and* no social id on the wall — and only then does the line read *"Popular right now while bingd. learns your taste."* A thin taste with a followed reader's title on the wall reads *"bingd. is still learning your taste."*, which claims nothing about where the titles came from. Both are gone the moment an anchor resolves. Nothing about the slate, its weights, its sources or its exposure window moved; this is a label on a wall that was already being drawn.
+- **A thin-taste wall says so, and only a genuinely popular one says "popular".** When the slate resolved no anchor (`lowData`) — a reader who has ranked two films, or ranked nothing they loved — one line in the footnote register sits above the artwork. Which line depends on what is actually on the wall (Codex review of #122, same day): the pool also takes `social_candidates`, the titles people the reader follows put in their top band, so "no anchor" is not "popularity-only". `popularityOnly` is derived in the hook's `select` from the drawn items — no anchor *and* no social id on the wall — and only then does the line read *"Popular right now while bingd learns your taste."* A thin taste with a followed reader's title on the wall reads *"bingd is still learning your taste."*, which claims nothing about where the titles came from. Both are gone the moment an anchor resolves. Nothing about the slate, its weights, its sources or its exposure window moved; this is a label on a wall that was already being drawn.
 
 ---
 

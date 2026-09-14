@@ -1321,7 +1321,7 @@ poll, an awards shortlist — as a recommendation candidate source.
 
 **Why it is not planned.** The founder's reasoning, in the same breath as approving the
 social candidate source: *"someone with high Match loved this and I haven't seen it"* is
-more bingd.-native than importing generic critics' lists. A canon list is the same list for
+more bingd-native than importing generic critics' lists. A canon list is the same list for
 every reader, so it cannot answer "what should **I** watch next", and a product whose whole
 claim is a personal ranking has no use for a ranking somebody else made. It would also
 re-import the labelling problem `20260817001000` removed: presenting another organisation's
@@ -2054,7 +2054,7 @@ ranking"* — which is the friction the comparison flow exists to be worth.
 |---|---|
 | Reachable | Yes. `log_watched` and `set_bucket` both leave a title logged without a position, and `_assert_unranked` is what guards the writers that require one |
 | Collection | Shown, in the unranked slice. PRD principle 18 — a large unranked library is a normal state, not a backlog |
-| bingd. community score | **Excluded.** `community_score` aggregates `rankings`, so an unranked title contributes nothing to anybody's mean |
+| bingd community score | **Excluded.** `community_score` aggregates `rankings`, so an unranked title contributes nothing to anybody's mean |
 | Taste Match | **Excluded.** Computed on pairwise-ranked overlap only (PRD §13) |
 | Recommendations | Sees it as a watched title, which is correct — it is a thing you have seen and should not be recommended |
 | Other people | Owner-only. `user_media` is not readable across accounts (PRD §22) |
@@ -2111,7 +2111,7 @@ things a group is choosing between. It is useful and it is not why this entry is
 where it is.
 
 **Public, shareable curation** is. A list is the only artifact in the product that is
-useful to somebody with **no friends on bingd. yet** — Oscar predictions, Best Horror of the
+useful to somebody with **no friends on bingd yet** — Oscar predictions, Best Horror of the
 2010s, Movies to Watch Before Halloween, Favourite Anime, Best Movies of 2026. That makes it
 simultaneously creator surface, power-user surface, discovery surface, an externally
 shareable object, and content-driven acquisition. Every other social surface in the product
@@ -2232,14 +2232,14 @@ pain appears. Where-to-watch follow-ups (§52, plus the region note in
 implementation shipped 2026-09-05 as the baseline.
 
 **Low priority, and actively resisted.** Each of these is something a competitor does that
-bingd. is choosing not to do, rather than something nobody has got to yet:
+bingd is choosing not to do, rather than something nobody has got to yet:
 
 - **Public long-form review culture.** Letterboxd owns it. PRD principle 2
 - **Episode-level tracking.** The rankable TV unit is the season (AD-1, PRD §10), and every
   TV Time outreach message already states this rather than implying it is coming — GTM §7.4
 - **An AI assistant.** PRD principle 14: no language model is required for the core engine
 - **Editorial or news**, and **critic aggregation.** Rotten Tomatoes is the warning here
-  rather than the model — bingd.'s number is the room's, not a critic's
+  rather than the model — bingd's number is the room's, not a critic's
 - **Daily streaks, arbitrary points, and forced social actions.** PRD principle 15: quality
   over engagement loops
 - **A feature-heavy title page.** Every addition there costs above-the-fold clarity, which is

@@ -241,8 +241,8 @@ describe('why this tile is here, on a long press', () => {
 });
 
 describe('a wall that is not yet the reader’s', () => {
-  const POPULAR = 'Popular right now while bingd. learns your taste.';
-  const LEARNING = 'bingd. is still learning your taste.';
+  const POPULAR = 'Popular right now while bingd learns your taste.';
+  const LEARNING = 'bingd is still learning your taste.';
 
   it('calls the wall popular only when it genuinely came from the popularity fallback', async () => {
     // No anchor, and nothing social on the wall: the hook's `popularityOnly`.

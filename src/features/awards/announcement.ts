@@ -85,7 +85,7 @@ export function awardAnnouncement(
   /**
    * What to say when the payload names nothing either, and it differs by surface: the
    * inbox's sentence is "You earned …" and the feed's is "Abisola earned the … award",
-   * so "a new Award" and "bingd. Award" are each wrong in the other's clause. Taken as
+   * so "a new Award" and "bingd Award" are each wrong in the other's clause. Taken as
    * an argument rather than chosen here, because this function has no way to know which
    * sentence it is inside.
    */

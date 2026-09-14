@@ -360,7 +360,7 @@ function About() {
           <Text tone="action">themoviedb.org</Text>
         </Pressable>
         <Text variant="caption" tone="tertiary">
-          Artwork, cast and title details come from TMDB. Reviews and scores are bingd.
+          Artwork, cast and title details come from TMDB. Reviews and scores are bingd
           users&apos; own.
         </Text>
       </View>
@@ -420,7 +420,7 @@ function BuildDetails() {
     } catch (error) {
       // Even a failure to assemble is worth having on the clipboard: it names the thing
       // that would otherwise be a founder saying "nothing happened" for a second time.
-      report = `bingd. diagnostics could not be built: ${error instanceof Error ? error.name : 'unknown'}`;
+      report = `bingd diagnostics could not be built: ${error instanceof Error ? error.name : 'unknown'}`;
     }
     setCopy(copyDiagnostics(report) ? 'done' : 'failed');
   };
@@ -449,7 +449,7 @@ function BuildDetails() {
     <View style={styles.block}>
       <View style={styles.blockBody}>
         <Text variant="caption" tone="tertiary">
-          bingd. {version} ({build})
+          bingd {version} ({build})
         </Text>
 
         {/* Only where somebody is testing. PRD §23 keeps identifiers out of anything

@@ -451,7 +451,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
               ? [
                   {
                     key: 'invited-aggregate',
-                    label: `${count(facts.invitedSignupCount)} ${plural(facts.invitedSignupCount, 'person', 'people')} brought to bingd.`,
+                    label: `${count(facts.invitedSignupCount)} ${plural(facts.invitedSignupCount, 'person', 'people')} brought to bingd`,
                     detail: 'Who they are is theirs to share.',
                     weight: facts.invitedSignupCount,
                   },
@@ -461,8 +461,8 @@ export const AWARD_TRACKS: AwardTrack[] = [
       ],
       emptyLabel: 'No activated invites yet.',
     }),
-    next: (n) => `Bring ${count(n)} ${plural(n, 'person', 'people')} to bingd.`,
-    earned: (n) => `Brought ${count(n)} ${plural(n, 'person', 'people')} to bingd.`,
+    next: (n) => `Bring ${count(n)} ${plural(n, 'person', 'people')} to bingd`,
+    earned: (n) => `Brought ${count(n)} ${plural(n, 'person', 'people')} to bingd`,
     tiers: tiers(['bronze', 'Bronze', 3], ['silver', 'Silver', 15], ['gold', 'Gold', 50]),
   },
   {
@@ -537,7 +537,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
         {
           rows: facts.written.map((entry) => ({
             key: entry.key,
-            label: entry.title ? compactLabel(entry.title) : 'A bingd. activity',
+            label: entry.title ? compactLabel(entry.title) : 'A bingd activity',
             // "Comment" unconditionally now: `written` carries nothing else. It was a
             // branch on `entry.kind` while notes shared this track.
             detail: ['Comment', on(entry.writtenAt)].filter(Boolean).join(' · '),
@@ -946,7 +946,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
         {
           rows: facts.reactionsReceived.map((item) => ({
             key: item.key,
-            label: item.title ? compactLabel(item.title) : 'A bingd. activity',
+            label: item.title ? compactLabel(item.title) : 'A bingd activity',
             posterPath: item.title?.posterPath ?? null,
             year: item.title?.year ?? null,
             value: `${count(item.reactions)} ${plural(item.reactions, 'reaction', 'reactions')}`,

@@ -650,14 +650,14 @@ the next iOS candidate. Nothing here touches the backend.
 ### The SCORES row: one rule about colour
 
 - [ ] Open a title you have **ranked**, where **nobody you follow** has rated it and
-      bingd. has too few ratings. Three circles:
+      bingd has too few ratings. Three circles:
       ⚠ your own is **solid Maroon with your number in it**; the other two are
       **filled, muted grey, and completely empty**.
 - [ ] ⚠ **There is no dash, no line, no icon and no zero inside either grey circle.** An
       em dash there is the state this pass removed.
 - [ ] The words beneath still differ: `Your score` / *(nothing)*, `Following` /
-      `No ratings yet`, `bingd.` / `Not enough ratings`.
-- [ ] Find a title with a **real bingd. score on one rating** (`1 rating` under it).
+      `No ratings yet`, `bingd` / `Not enough ratings`.
+- [ ] Find a title with a **real bingd score on one rating** (`1 rating` under it).
       ⚠ **The number and its ring are Maroon**, exactly as they are at `128 ratings`.
       A grey number there is the regression: sample size is stated in words, never in
       colour.
@@ -693,7 +693,7 @@ Covered in *The Ranked menu* above; the short version is **★ Update your ratin
 ### Group Picks' first screen
 
 - [ ] Open **Group Picks** from the Movies wall. Under the title:
-      ⚠ *"Pick who's watching and bingd. will find movies you can all agree on."*, then
+      ⚠ *"Pick who's watching and bingd will find movies you can all agree on."*, then
       *Who's watching?*.
 - [ ] Open it from the **TV** wall: the same sentence, ending *"…find shows you can all
       agree on."*

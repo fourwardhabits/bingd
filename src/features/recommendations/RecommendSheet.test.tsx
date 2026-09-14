@@ -189,7 +189,7 @@ describe('who the sheet offers', () => {
 
     await waitFor(() => expect(view.getByText('Nobody to recommend to yet')).toBeTruthy());
     // The off-Bingd path is still offered, because it is the answer to an empty list.
-    expect(view.getByText('Share off bingd.')).toBeTruthy();
+    expect(view.getByText('Share off bingd')).toBeTruthy();
   });
 
   it('names the show a season belongs to in its heading', async () => {
@@ -565,12 +565,14 @@ describe('sharing with somebody who is not on bingd.', () => {
   it('sends the title link and nothing else', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off bingd.'));
+    await fireEvent.press(view.getByText('Share off bingd'));
 
     await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string; url: string };
 
     expect(shared.message).toContain('https://bingd.app/title/film-1');
+    // The name in plain text carries no period: "<title> on bingd", then the link.
+    expect(shared.message).toMatch(/ on bingd\nhttps:\/\/bingd\.app\/title\/film-1$/);
     expect(shared.url).toBe('https://bingd.app/title/film-1');
     // The three shapes of the old second link, each named so a reinstatement cannot pass
     // by changing the wording.
@@ -587,7 +589,7 @@ describe('sharing with somebody who is not on bingd.', () => {
     mockRpcResults.create_invite_link = { status: 'ok', token: 'abc123' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off bingd.'));
+    await fireEvent.press(view.getByText('Share off bingd'));
 
     await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
     expect(mockRpc).not.toHaveBeenCalledWith('create_invite_link', expect.anything());
@@ -599,7 +601,7 @@ describe('sharing with somebody who is not on bingd.', () => {
     // the assertion that keeps them absent.
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off bingd.'));
+    await fireEvent.press(view.getByText('Share off bingd'));
 
     await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
@@ -612,7 +614,7 @@ describe('sharing with somebody who is not on bingd.', () => {
     (Share.share as jest.Mock).mockRejectedValueOnce(new Error('Sharing failed.'));
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off bingd.'));
+    await fireEvent.press(view.getByText('Share off bingd'));
 
     await waitFor(() => expect(view.getByText('Sharing failed.')).toBeTruthy());
   });
@@ -727,15 +729,15 @@ describe('the footer at different widths', () => {
    * Recommend first in both layouts, so stacking is not also a reordering — the primary
    * act must not end up underneath the way out of the sheet.
    */
-  it('keeps Recommend above Share off bingd. when stacked', async () => {
+  it('keeps Recommend above Share off bingd when stacked', async () => {
     setViewport(320);
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
     const order = view
-      .getAllByText(/^(Recommend|Share off bingd\.)$/)
+      .getAllByText(/^(Recommend|Share off bingd)$/)
       .map((node) => node.props.children);
-    expect(order).toEqual(['Recommend', 'Share off bingd.']);
+    expect(order).toEqual(['Recommend', 'Share off bingd']);
   });
 
   /**
@@ -750,20 +752,20 @@ describe('the footer at different widths', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    for (const label of ['Recommend', 'Share off bingd.']) {
+    for (const label of ['Recommend', 'Share off bingd']) {
       expect(view.getByText(label).props.numberOfLines).toBe(1);
     }
   });
 
-  it('offers Share off bingd. whatever the selection is', async () => {
+  it('offers Share off bingd whatever the selection is', async () => {
     setViewport(412);
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
     // Nobody chosen, and it is still there and still pressable — it shares the title,
     // not the selection.
-    expect(view.getByText('Share off bingd.')).toBeTruthy();
-    await fireEvent.press(view.getByText('Share off bingd.'));
+    expect(view.getByText('Share off bingd')).toBeTruthy();
+    await fireEvent.press(view.getByText('Share off bingd'));
     await waitFor(() => expect(Share.share).toHaveBeenCalled());
   });
 });

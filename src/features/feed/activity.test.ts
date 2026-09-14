@@ -87,11 +87,11 @@ describe('the activity sentence', () => {
   /**
    * The founder's own caveat: a name that already says "Award" must not produce
    * "earned the … award award". In practice this is the nameless fallback —
-   * `use-feed.ts` renders "bingd. Award" for a payload with no `award_name` — which
+   * `use-feed.ts` renders "bingd Award" for a payload with no `award_name` — which
    * is exactly the degradation path an award renamed or removed upstream takes.
    */
   it('does not say award twice when the name already says it', () => {
-    expect(tailFor('award_earned', 'bingd. Award')).toBeNull();
+    expect(tailFor('award_earned', 'bingd Award')).toBeNull();
     expect(tailFor('award_earned', 'Lifetime Achievement award')).toBeNull();
     // A name that merely contains the letters is not the same claim.
     expect(tailFor('award_earned', 'Awardless Wonder')).toBe('award');

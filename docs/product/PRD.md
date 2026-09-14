@@ -1,4 +1,4 @@
-# bingd. — Product Requirements Document
+# bingd — Product Requirements Document
 
 **Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-19**
 **Status:** Build-ready for public-alpha architecture. **Product scope re-frozen 2026-08-19.**
@@ -65,7 +65,7 @@
 
 ## 1. Executive summary
 
-**bingd.** is a social collection and discovery app for movies and TV seasons. Users record what they have watched, sort it into three broad buckets, and then build an exact personal ordering through head-to-head comparisons. That ordering becomes the data layer for taste matching, people discovery, a social feed, recommendations, and shareable identity.
+**bingd** is a social collection and discovery app for movies and TV seasons. Users record what they have watched, sort it into three broad buckets, and then build an exact personal ordering through head-to-head comparisons. That ordering becomes the data layer for taste matching, people discovery, a social feed, recommendations, and shareable identity.
 
 | Status | Statement |
 |---|---|
@@ -157,9 +157,9 @@ instinct rather than a written position. Everything deferred here has an entry i
 [`deferred-roadmap.md`](./deferred-roadmap.md) with its own revisit trigger.
 
 **1. Ranking-first, and the reflex is the product.** The intended sequence after a fresh
-watch is `WATCH → bingd. → rank → score reveal → ordinal placement → neighbouring titles`,
+watch is `WATCH → bingd → rank → score reveal → ordinal placement → neighbouring titles`,
 and the emotional question it answers is *"what score am I going to get, and where is it
-going to land?"* bingd. is not repositioned as a generic tracker with ranking as an
+going to land?"* bingd is not repositioned as a generic tracker with ranking as an
 optional extra. Every surface that follows a watch should push toward the comparison.
 
 **Unranked remains a legitimate exception rather than an equal path.** The distinction is
@@ -167,7 +167,7 @@ between *"I watched this years ago and do not remember it well enough to rank"* 
 limit on what somebody can honestly say — and *"I do not feel like ranking"*, which is the
 friction the product exists to make worth pushing through. The state already exists in the
 schema (`user_media` without a `rankings` row) and already behaves correctly: an unranked
-title contributes nothing to the bingd. community score, nothing to Match, and nothing to
+title contributes nothing to the bingd community score, nothing to Match, and nothing to
 anybody else's view. No explicit *record it without ranking it* affordance is being built;
 roadmap §49 holds it, gated on real users hitting the memory problem independently.
 
@@ -194,7 +194,7 @@ definition of the feature. Roadmap §50.
 
 **5. Discovery is secondary, on a stated hypothesis rather than on principle.** Mainstream
 viewers already receive candidates from streaming home screens, friends, TikTok, advertising,
-general cultural awareness and search. What bingd. can own is **evaluation, history, ranking
+general cultural awareness and search. What bingd can own is **evaluation, history, ranking
 and social taste**. For You, Group Picks, Watchlist and the existing recommendation surfaces
 stay useful and stay secondary; no Engine V2 until behaviour shows real decision pain.
 Roadmap §18 already holds the engine-scale version.
@@ -264,7 +264,7 @@ Mechanically nothing diverges from what this document already specified. Compari
 
 ### Position and name
 
-**Decided.** bingd. is a social entertainment collection for people who love watching things, not analyzing them. The wordmark is lowercase with a period. The clipped spelling should feel deliberate and adjacent to *binge* without forcing branded verb usage.
+**Decided.** bingd is a social entertainment collection for people who love watching things, not analyzing them. The wordmark is lowercase with a period; in plain text the name is written lowercase without it, as **bingd** (founder, 2026-09-13; see design-system.md, *How the product name is written*). The clipped spelling should feel deliberate and adjacent to *binge* without forcing branded verb usage.
 
 ### Color system
 
@@ -504,7 +504,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > from physical device use.
 >
 > **The search field lives in the brand header row.** Search had spent two rows of chrome
-> — the bingd. header, then a separate full-width field — above every result. The field
+> — the bingd header, then a separate full-width field — above every result. The field
 > now sits beside the wordmark in the same compact header treatment the other tabs give
 > their controls. Nothing below it changes.
 >
@@ -597,7 +597,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > it; the People-chip paragraph stands.
 >
 > **The search field sits on its own row under the brand row.** The compaction into the
-> brand header row crowded the bingd. lockup; the correction is the cross-tab header
+> brand header row crowded the bingd lockup; the correction is the cross-tab header
 > rhythm — row one is the brand, row two is the screen's acting control, the same
 > position the category selector holds on For You and Collection. Results begin
 > normally underneath.
@@ -792,7 +792,7 @@ See §12 for the full specification.
 > referral token at all — see the As-built block at §6F for why that is a decision and not
 > an omission.
 >
-> Step 3 is one page, reused by every route: the bingd. wordmark, an *Open in bingd.*
+> Step 3 is one page, reused by every route: the bingd wordmark, an *Open in bingd.*
 > button, the install action for the visitor's platform, and two app screenshots.
 >
 > **Revised 2026-09-03: it now shows the permitted content, and "permitted" is the whole
@@ -1528,7 +1528,7 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > **Send to is a multi-select picker.** Each person row is a checkbox — the mark sits at
 > the far right, exactly where the per-row send icon used to be, and tapping anywhere on
 > the row toggles it. The sheet ends in two actions pinned under the list: **Recommend**
-> (filled Maroon, the primary act, disabled at zero) beside **Share off bingd.**
+> (filled Maroon, the primary act, disabled at zero) beside **Share off bingd**
 > (outlined — the same native share carrying the reader's invite link, which needs no
 > selection because whether the somebody has the app is a detail of the address).
 >
@@ -1909,7 +1909,7 @@ existing title page.
 Each row gives exactly one: `4 people saved this`, `Someone here saved this`, `Worth a
 rewatch`, `Fits the group`, `Trending now`. Counts are real counts; nothing claims
 social proof that was not measured, and "Match" stays out of the vocabulary because it
-already means Taste Match. The trailing number is the community bingd. score, or the
+already means Taste Match. The trailing number is the community bingd score, or the
 same empty circle the title page shows below its sample floor — never the internal
 group score, and never a fabricated "group match" percentage.
 
@@ -2529,7 +2529,7 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 
 **Invite Instigator counts activated invitees, and the count is public (updated 2026-08-27).** It counts `invite_attributions.activated_at is not null` — a column that read zero for everyone when this block was written, because nothing wrote it until `20260819000500` gave it its writer (§17's As-built block; "which nothing writes" is history now, not the present). It previously counted link creations, which made it a badge for pressing a button, and the founder's instruction was that the award is for bringing people to Bingd. So the metric was moved to the honest one immediately and the number left at zero rather than the semantic left wrong until the backend caught up.
 
-**The founder reversed the withheld classification on 2026-08-27**: the *count* of activated invites is public achievement data. A visitor entitled to the profile sees the same Invite Instigator progress the owner does — `2 / 3`, `Next: Bring 3 people to bingd.` — through `invited_signup_count` (`20260827001100`), a definer scalar gated on `can_i_view` over the owner's own predicate (attributed **and** activated), which is what makes the two numbers equal by construction rather than by synchronisation. Public: the count and the milestone state. Private, unchanged: invitee identities, tokens, timestamps and the raw `invite_attributions` rows, which stay two-party under the same RLS — a visitor's drill-down shows one aggregate row naming nobody: *N people brought to bingd. / Who they are is theirs to share.* **Hype Courier remains withheld**, explicitly scoped: one aggregate becoming public is a founder decision about that aggregate, not a precedent that widens every two-party fact.
+**The founder reversed the withheld classification on 2026-08-27**: the *count* of activated invites is public achievement data. A visitor entitled to the profile sees the same Invite Instigator progress the owner does — `2 / 3`, `Next: Bring 3 people to bingd` — through `invited_signup_count` (`20260827001100`), a definer scalar gated on `can_i_view` over the owner's own predicate (attributed **and** activated), which is what makes the two numbers equal by construction rather than by synchronisation. Public: the count and the milestone state. Private, unchanged: invitee identities, tokens, timestamps and the raw `invite_attributions` rows, which stay two-party under the same RLS — a visitor's drill-down shows one aggregate row naming nobody: *N people brought to bingd / Who they are is theirs to share.* **Hype Courier remains withheld**, explicitly scoped: one aggregate becoming public is a founder decision about that aggregate, not a precedent that widens every two-party fact.
 
 ~~**Award notifications are deferred**, and this is a disposition rather than an oversight. Tiers are computed entirely on the device from raw reads, so **no durable state records which tier an account has reached** — and notifying only on a *crossing* needs exactly that. The `award_earned` type, the `awards` category defaulting off, its preference row and its route to this sheet all exist; only the writer is missing.~~ **Superseded 2026-08-28**: the ledger the deferral was waiting on was built, and the writer with it — the As-built block below. The Invite Instigator constraint recorded with the deferral on 2026-08-27 — *earned Invite Instigator* may carry the award name and the badge and may never name an invitee — was honored in the shipped payload.
 
@@ -2572,7 +2572,7 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 > rather than as locked. **The progress and the next-tier requirement stay fully
 > readable**, which is the whole point of a locked row: it has to say what would earn it.
 
-**The second line explains the achievement.** A feed row's subtitle was the metal — *Bronze* — which is not product copy. It is now the threshold sentence `tracks.ts` already holds for a finished track: *Watched 50 movies*, *Wrote 20 comments*, *Brought 3 people to bingd.* The inbox row gains the same line under *You earned … 🎉*. Derived in one place from the award and tier keys, so the feed and the inbox cannot quote different numbers for one event; a track a bundle has never heard of falls back to the payload's names and drops the second line rather than guessing a number.
+**The second line explains the achievement.** A feed row's subtitle was the metal — *Bronze* — which is not product copy. It is now the threshold sentence `tracks.ts` already holds for a finished track: *Watched 50 movies*, *Wrote 20 comments*, *Brought 3 people to bingd*. The inbox row gains the same line under *You earned … 🎉*. Derived in one place from the award and tier keys, so the feed and the inbox cannot quote different numbers for one event; a track a bundle has never heard of falls back to the payload's names and drops the second line rather than guessing a number.
 
 **Comment Gremlin counts comments, and nothing else.** It counted comments *plus* published reviews and said so — "Write 100 comments or reviews". The founder's ruling is that a review is a considered thing you publish about a title you ranked, a comment is talking to somebody under their activity, and one counter rewards neither. The track keeps its names, its artwork and its thresholds; the copy is now *Write 20 comments*. The client fact and the server metric both dropped the note term in the same change, held together by the parity test, and the `award_on_note` trigger is gone with the reason it existed.
 
@@ -3448,7 +3448,7 @@ is usually gone, because `delete_comment` sweeps the notifications it wrote.
 | Reply to your comment | *[Replier] replied to your comment on Marty Supreme* |
 | Mention | *[Mentioner] mentioned you in a comment on Marty Supreme* |
 
-Every placeholder there is the **bingd. member who did it**, never a cast member of the title — see [§23](#23-data-and-technical-architecture)'s note on the two domains.
+Every placeholder there is the **bingd member who did it**, never a cast member of the title — see [§23](#23-data-and-technical-architecture)'s note on the two domains.
 
 **The noun comes from the activity, not from the title.** *Watch* is a claim about what the activity was, and a comment under a watchlist addition is not a watch — so `my_notifications` returns the subject event's own type and the client reads the noun off it, falling back to the neutral *activity* for anything that is not a watch claim and for a bundle older than the column. A reply is distinguished from a remark by `payload.reply_to`, which `add_comment` has always written and nothing read.
 
@@ -3671,7 +3671,7 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 >
 > **The inviter was being told the wrong thing.** Acceptance filed them a plain `follow`
 > row — "Ada Lovelace started following you" — with nothing in it saying this person came
-> through their invitation. The sentence that *does* say so, "joined bingd. from your
+> through their invitation. The sentence that *does* say so, "joined bingd from your
 > invite", belonged to `invite_activated`, which `_maybe_activate_invite` files only once
 > the invitee has ranked ten titles — ten when this was written, five since 2026-09-11. So
 > the interesting fact arrived days late or never, and the moment it actually happened was
@@ -3760,7 +3760,7 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > itself is bilateral social intent — one person deliberately shared their personal link,
 > and another deliberately used it to join — so making either of them go and find the other
 > afterwards was the product asking twice for a decision it had already been given. Everything
-> social in bingd. is worth more once a graph exists, and this is the one mechanism that
+> social in bingd is worth more once a graph exists, and this is the one mechanism that
 > reliably seeds one.
 >
 > **No asymmetry survives, and clause 3 is superseded with it** (founder, `20260912000200`).
@@ -4197,7 +4197,7 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > **1. A ranking is the opinion.** It is Bingd's core signal and it needs no writing at
 > all. A ranking with nothing written is complete: it sets the bucket, the position, the
 > personalized score and the Collection place, and it contributes on the existing terms
-> to the aggregate `bingd.` score, the Following score, Taste Match, recommendations and
+> to the aggregate `bingd` score, the Following score, Taste Match, recommendations and
 > Feed activity. **A ranking with no writing is never shown as an empty review** — the
 > Reviews tab requires `note is not null` and always has.
 >
@@ -4523,9 +4523,9 @@ Recorded on every account from day one: `invited_by`, `founding_member`.
 
 #### Two kinds of person, and they never mix — clarified 2026-08-29
 
-A **user** (equivalently *member*, *profile*) is a bingd. account: it ranks, logs, comments, reacts, follows, receives notifications and earns awards, and it is identified by `profiles.id`. A **media person** — a cast or crew member — is catalogue metadata from TMDB, identified by a TMDB person id, and is not a bingd. user unless somebody separately holds an account.
+A **user** (equivalently *member*, *profile*) is a bingd account: it ranks, logs, comments, reacts, follows, receives notifications and earns awards, and it is identified by `profiles.id`. A **media person** — a cast or crew member — is catalogue metadata from TMDB, identified by a TMDB person id, and is not a bingd user unless somebody separately holds an account.
 
-**`notifications.actor_id` and `feed_events.actor_id` mean the initiating bingd. user.** The name is conventional and predates this note; both columns are foreign keys to `profiles`, which is what makes the meaning a fact rather than a convention. It is stated here because "actor" also has an obvious film meaning, and a reader arriving at those columns from the catalogue side would be right to check.
+**`notifications.actor_id` and `feed_events.actor_id` mean the initiating bingd user.** The name is conventional and predates this note; both columns are foreign keys to `profiles`, which is what makes the meaning a fact rather than a convention. It is stated here because "actor" also has an obvious film meaning, and a reader arriving at those columns from the catalogue side would be right to check.
 
 The invariants that follow, all of them enforced by the foreign keys rather than by discipline: a social action, a notification, an award, a goal, a watched-with tag, an invite relationship and every RLS or visibility check reference `profiles.id`; cast and crew reference the canonical media-person identity and nothing else; a notification's avatar and name come from the initiating profile and never from title credits; tapping a member's name opens their profile and tapping a cast member opens the media-person page. Where a local name could be read either way, it is qualified — `initiating_user_id`, `activity_author_user_id`, `cast_person_id`.
 
