@@ -242,6 +242,9 @@ without one). **No new secret is added by this release**: `SUPABASE_URL` and
   `10 seconds` (or a documented one-minute fallback when pg_cron < 1.5), `provider_ready: true`.
   Any other shape: `select unschedule_import_drain();` and stop.
 - `select _push_eligible('import_completed');` → true.
+- The importer switch will work: for `import_create()`, `import_stage(uuid, jsonb)` and
+  `import_ready(uuid)`, `has_function_privilege('public', f, 'EXECUTE')` and `('anon', …)` are
+  false and `('authenticated', …)` is true. If PUBLIC or anon is true, revoke from them now.
 - `select * from profile_title_counts('<founder user id>');` as the founder → sane Movies/TV.
 - `select jobname, schedule from cron.job;` → the jobs recorded in preflight plus
   `bingd-import-drain` and `bingd-import-maintenance`, nothing else new.
@@ -290,11 +293,14 @@ runtime versions equal those values before announcing anything, and record both 
 the database, then stop the worker. Every client version and every device mid-flow is refused;
 `import_status` and `import_discard` stay callable, so a screen can still read its job and
 let it go, and the client shows its ordinary Try again failure. Pinned by
-`supabase/tests/import-entry-switch.test.mjs` (PUBLIC and anon hold no EXECUTE, so revoking
-from `authenticated` is complete; staging and production grants read the same).
+`supabase/tests/import-entry-switch.test.mjs`. The revoke names PUBLIC and anon as well as
+`authenticated` (review 84b): they hold nothing today, because `20260813001800` revokes PUBLIC's
+default EXECUTE on every new function in `public` (on production and staging the only
+PUBLIC-executable functions in `public` are the same 47 citext operators, read 2026-09-14), but
+the switch must not depend on that. §5 checks it on production after the migrations apply.
 
 ```sql
-revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from authenticated;
+revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from public, anon, authenticated;
 select unschedule_import_drain();
 -- back on, in reverse:
 select schedule_import_drain();

@@ -19,7 +19,10 @@ import { createTestDb } from './harness.mjs';
 const ENTRY = ['import_create()', 'import_stage(uuid, jsonb)', 'import_ready(uuid)'];
 const KEPT = ['import_status(uuid)', 'import_discard(uuid)'];
 
-const OFF = `revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from authenticated`;
+// From PUBLIC and anon too (review 84b). They hold nothing today, because 20260813001800 revokes
+// PUBLIC's default EXECUTE on every function created in `public`, but the switch must not
+// depend on that staying true.
+const OFF = `revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from public, anon, authenticated`;
 const ON = `grant execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) to authenticated`;
 
 let t;
