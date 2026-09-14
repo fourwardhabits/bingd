@@ -338,3 +338,62 @@ describe('a page that is still arriving', () => {
     expect(users).toEqual([]);
   });
 });
+
+describe('an exact title and later pages on the All page', () => {
+  // Matches "don" by handle, so the Users section really is on the page.
+  const donna = user('d', 'donna', 'Donna Noble');
+  const usersHeader = (rows: AllRow[]) =>
+    rows.findIndex((row) => row.type === 'header' && row.section === 'users');
+
+  it('keeps the sections where they were when an exact provider title takes the top of the lead', () => {
+    // Two local prefix titles lead; then the provider's exact "Don" is put first. The lead
+    // is still two rows, so the Users section does not move; a local title moves below it.
+    const local = [title('darko', 'Donnie Darko'), title('lookup', "Don't Look Up")];
+    const before = allRows({
+      query: 'don',
+      titles: local,
+      people: [],
+      users: [donna],
+      leadCount: 2,
+    });
+    const after = allRows({
+      query: 'don',
+      titles: [title('don-2006', 'Don'), ...local, title('don-juan', 'Don Juan')],
+      people: [],
+      users: [donna],
+      leadCount: 2,
+    });
+
+    expect(usersHeader(after.rows)).toBe(usersHeader(before.rows));
+    expect(shape(after.rows)).toEqual([
+      't:Don',
+      't:Donnie Darko',
+      'USERS',
+      'u:@donna',
+      'MORE-TITLES',
+      "t:Don't Look Up",
+      't:Don Juan',
+    ]);
+  });
+
+  it('keeps the sections where they were as later pages are appended', () => {
+    const first = manyTitles(6, 'Don');
+    const before = allRows({
+      query: 'don',
+      titles: first,
+      people: [],
+      users: [donna],
+      leadCount: 3,
+    });
+    const after = allRows({
+      query: 'don',
+      titles: [...first, ...manyTitles(20, 'Later')],
+      people: [],
+      users: [donna],
+      leadCount: 3,
+    });
+
+    expect(usersHeader(after.rows)).toBe(usersHeader(before.rows));
+    expect(after.rows.slice(0, before.rows.length)).toEqual(before.rows);
+  });
+});

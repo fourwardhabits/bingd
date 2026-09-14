@@ -73,10 +73,19 @@ function credential(): { header?: string; apiKey?: string } {
  */
 export type Charge = () => Promise<void>;
 
+/**
+ * How patient one call is. The defaults are for a request a screen needs; a best-effort
+ * request (the exact-title recovery) passes no retries and a short timeout, so a slow
+ * provider costs it one attempt and a few seconds rather than three attempts and half a
+ * minute.
+ */
+export type RequestPatience = { retries?: number; timeoutMs?: number };
+
 async function request<T>(
   path: string,
   params: Record<string, string> = {},
   charge?: Charge,
+  { retries = MAX_RETRIES, timeoutMs = REQUEST_TIMEOUT_MS }: RequestPatience = {},
 ): Promise<T> {
   const auth = credential();
 
@@ -86,7 +95,7 @@ async function request<T>(
   if (auth.apiKey) url.searchParams.set('api_key', auth.apiKey);
 
   for (let attempt = 0; ; attempt += 1) {
-    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(timeoutMs);
 
     // Before the attempt, so a caller at their ceiling is refused rather than
     // discovering it afterwards — and so a retry storm is charged as it happens.
@@ -103,11 +112,11 @@ async function request<T>(
         signal: timeout,
       });
     } catch (cause) {
-      if (attempt < MAX_RETRIES) continue;
+      if (attempt < retries) continue;
       throw new TmdbError(`TMDB request failed: ${(cause as Error).message}`, 504);
     }
 
-    if (response.status === 429 && attempt < MAX_RETRIES) {
+    if (response.status === 429 && attempt < retries) {
       // TMDB sends Retry-After in seconds. Absent, back off a beat rather than
       // immediately re-entering the limit we were just refused by.
       const wait = Number(response.headers.get('Retry-After') ?? '1');
@@ -420,14 +429,45 @@ export type TmdbSeasonDetail = {
   episodes?: unknown[];
 };
 
+/**
+ * One page of a TMDB search, with the provider's own pagination.
+ *
+ * `total_pages` is TMDB's figure and is what says whether a next page exists. TMDB serves
+ * at most page 500 and twenty results a page, so the adapter caps how deep a reader can
+ * go well before that (see `MAX_SEARCH_PAGE` in index.ts).
+ */
+export type TmdbSearchPage<T> = {
+  results: T[];
+  page?: number;
+  total_pages?: number;
+  total_results?: number;
+};
+
 export function searchMulti(
   query: string,
   charge?: Charge,
-): Promise<{ results: TmdbSearchResult[] }> {
+  page = 1,
+): Promise<TmdbSearchPage<TmdbSearchResult>> {
   return request(
     '/search/multi',
-    { query, include_adult: 'false', page: '1' },
+    { query, include_adult: 'false', page: String(page) },
     charge,
+  );
+}
+
+/** The single-kind searches: films only, or series only. Search-shaped results, no `media_type`. */
+export function searchKind(
+  kind: 'movie' | 'tv',
+  query: string,
+  charge?: Charge,
+  page = 1,
+  patience?: RequestPatience,
+): Promise<TmdbSearchPage<TmdbSearchResult>> {
+  return request(
+    `/search/${kind}`,
+    { query, include_adult: 'false', page: String(page) },
+    charge,
+    patience,
   );
 }
 

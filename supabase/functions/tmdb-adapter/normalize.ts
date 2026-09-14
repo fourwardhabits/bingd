@@ -1021,3 +1021,84 @@ export function watchAvailability(
     providers: [...byId.values()],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Exact titles in search
+// ---------------------------------------------------------------------------
+
+/**
+ * A title reduced to what a person means by "the same name": case, accents, surrounding
+ * whitespace and punctuation folded away, words kept apart.
+ *
+ * Deliberately not fuzzier than that. "Don't" is `don t`, not `don`; "Don 2" is not "Don";
+ * "Dune: Part Two" is `dune part two`. Two titles share a key only when a reader would call
+ * them the same words.
+ */
+export function titleKey(value: string | null | undefined): string {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Titles named exactly what was searched for, first; everything else in the provider's order.
+ *
+ * TMDB's search ranks by a popularity-weighted relevance that does not privilege an exact
+ * name. On 2026-09-14, "Don" put the Shah Rukh Khan film at position 47 of /search/multi,
+ * behind *Don Juan*, *Don Jon* and a page of *Don't …*. A stable partition, never a
+ * re-score: exact matches keep TMDB's order among themselves (two films called *Signs*
+ * stay in the provider's order, with the year on the row to tell them apart), and so does
+ * everything after them.
+ */
+export function exactTitleFirst<T extends { title: string }>(rows: readonly T[], query: string): T[] {
+  const key = titleKey(query);
+  if (!key) return [...rows];
+  const exact = rows.filter((row) => titleKey(row.title) === key);
+  if (!exact.length) return [...rows];
+  return [...exact, ...rows.filter((row) => titleKey(row.title) !== key)];
+}
+
+/**
+ * Whether one extra request is worth making to find a title named exactly what was typed.
+ *
+ * Narrow on purpose, because every other search costs one request. Three conditions:
+ *
+ * 1. **Page 1 has no exact match.** A popular exact title is already there ("Her", "Up",
+ *    "Signs" all lead page 1).
+ * 2. **TMDB has more pages.** A one-page answer is the whole answer.
+ * 3. **A page-1 title contains every word of the query as a whole word.** That is the
+ *    failure's shape: the query is a real word that longer, more popular titles are built
+ *    from ("Don" inside *Don Juan*, *Don't Look Up*). A half-typed word ("incepti") matches
+ *    no whole word and does not qualify, so an unfinished query never spends the extra
+ *    request.
+ * 4. **Not only filler words.** "the", "a", "of" on the way to a longer title contain
+ *    nothing a title could be named; a query made of nothing else never qualifies.
+ *
+ * The client caches page 1 for half an hour, so whatever qualifies spends its extra request
+ * once per reader per query, not once per keystroke.
+ */
+/** Words that name nothing on their own, in the languages most titles here are searched in. */
+const FILLER_WORDS = new Set([
+  'a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'is', 'it', 'of', 'on', 'or', 'the', 'to',
+  'with', 'my', 'me', 'we', 'you', 'la', 'le', 'les', 'el', 'los', 'las', 'de', 'der', 'die',
+  'das', 'un', 'une',
+]);
+
+export function wantsExactRecovery(
+  query: string,
+  rows: readonly { title: string }[],
+  totalPages: number,
+): boolean {
+  const key = titleKey(query);
+  if (!key || totalPages <= 1) return false;
+  const words = key.split(' ');
+  if (words.every((word) => FILLER_WORDS.has(word))) return false;
+  if (rows.some((row) => titleKey(row.title) === key)) return false;
+  return rows.some((row) => {
+    const titleWords = new Set(titleKey(row.title).split(' '));
+    return words.every((word) => titleWords.has(word));
+  });
+}

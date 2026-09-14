@@ -31,6 +31,9 @@ import {
   fromSearchResult,
   fromSeriesDetail,
   castSearchResults,
+  exactTitleFirst,
+  titleKey,
+  wantsExactRecovery,
   personCredits,
   personRecord,
   ratingOf,
@@ -1216,4 +1219,74 @@ Deno.test('a watch-options link that is not TMDB over https is not offered at al
     // extra, so losing one must not lose the other.
     assertEquals(withLink(bad).providers.length, 1);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Exact titles in search
+// ---------------------------------------------------------------------------
+
+/** Page 1 of /search/multi for "Don", as staging observed it on 2026-09-14 (titles only). */
+const DON_PAGE_ONE = [
+  'Don Juan', 'Father Matteo', 'Exploits of a Young Don Juan', 'Don Jon', "Don't Say Good Luck",
+  "Now You See Me: Now You Don't", 'Don McKay', "Don't Look Up", 'Donnie Darko', 'The Last Don',
+].map((title) => ({ title }));
+
+Deno.test('a title key folds case, accents and punctuation, and nothing more', () => {
+  assertEquals(titleKey('  Don  '), 'don');
+  assertEquals(titleKey('DON'), 'don');
+  assertEquals(titleKey('The Dõn'), 'the don');
+  assertEquals(titleKey('Dil Se..'), 'dil se');
+  // Not the same words, so not the same key.
+  assertEquals(titleKey("Don't"), 'don t');
+  assert(titleKey('Don 2') !== titleKey('Don'));
+  assert(titleKey('Donnie Darko') !== titleKey('Don'));
+});
+
+Deno.test('an exact title leads, and everything else keeps the provider order', () => {
+  const rows = exactTitleFirst([...DON_PAGE_ONE.slice(0, 4), { title: 'Don' }, ...DON_PAGE_ONE.slice(4)], 'don');
+
+  assertEquals(rows.map((row) => row.title).slice(0, 5), ['Don', 'Don Juan', 'Father Matteo', 'Exploits of a Young Don Juan', 'Don Jon']);
+  assertEquals(rows.length, DON_PAGE_ONE.length + 1);
+});
+
+Deno.test('several titles with the same name keep the provider order among themselves', () => {
+  const rows = exactTitleFirst(
+    [{ title: 'Signs of a Psychopath', id: 0 }, { title: 'Signs', id: 1 }, { title: 'Vital Signs', id: 2 }, { title: 'SIGNS', id: 3 }],
+    'Signs',
+  );
+
+  assertEquals(rows.map((row) => row.id), [1, 3, 0, 2]);
+});
+
+Deno.test('with no exact title the order is untouched', () => {
+  const rows = exactTitleFirst(DON_PAGE_ONE, 'don');
+
+  assertEquals(rows, DON_PAGE_ONE);
+});
+
+Deno.test('the Don failure qualifies for one recovery request', () => {
+  // No exact title on page 1, more pages, and "don" is a whole word inside Don Juan.
+  assertEquals(wantsExactRecovery('Don', DON_PAGE_ONE, 500), true);
+});
+
+Deno.test('recovery is not spent where it cannot help', () => {
+  // The exact title is already on page 1.
+  assertEquals(wantsExactRecovery('Her', [{ title: 'Her' }, { title: 'All Her Fault' }], 500), false);
+  // One page is the whole answer.
+  assertEquals(wantsExactRecovery('Don', DON_PAGE_ONE, 1), false);
+  // A half-typed word is a whole word in no title.
+  assertEquals(wantsExactRecovery('incepti', [{ title: 'Inception' }, { title: 'Inception: The Cobol Job' }], 9), false);
+  // "don 2": every page-1 title with "don" lacks a whole-word "2".
+  assertEquals(wantsExactRecovery('Don 2', DON_PAGE_ONE, 6), false);
+  // Blank.
+  assertEquals(wantsExactRecovery('  ', DON_PAGE_ONE, 500), false);
+});
+
+Deno.test('a query of nothing but filler words never spends the recovery request', () => {
+  // "the" on the way to "the office": every page-1 title contains it, none is named it.
+  const rows = [{ title: 'The Office' }, { title: 'The Bear' }, { title: 'Of Mice and Men' }];
+  assertEquals(wantsExactRecovery('the', rows, 500), false);
+  assertEquals(wantsExactRecovery('Of the', rows, 500), false);
+  // A real word beside a filler word still qualifies: "The Don".
+  assertEquals(wantsExactRecovery('The Don', [{ title: 'The Last Don' }], 131), true);
 });

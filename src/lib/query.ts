@@ -48,7 +48,9 @@ export const queryKeys = {
   // different costs: the local one is a table read and the provider one spends a TMDB
   // request against a shared quota. Sharing a key would let an invalidation of the cheap
   // pass silently re-spend the expensive one.
-  providerSearch: (query: string) => ['search', 'provider', query] as const,
+  // One entry per normalised query **and page**, so backspacing to an earlier query reuses
+  // every page already read for it, and a later page never refetches the ones before it.
+  providerSearch: (query: string, page = 1) => ['search', 'provider', query, page] as const,
   // Cast search, which also spends a provider request and is keyed on the same normalised
   // query for the same reason. Its own branch so it can never be mistaken for title rows.
   castSearch: (query: string) => ['search', 'cast', query] as const,

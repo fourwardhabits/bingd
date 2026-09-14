@@ -392,7 +392,7 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 
 | Action | Caller | Purpose |
 |---|---|---|
-| `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
+| `search` | signed-in user | Searches TMDB one page at a time (`page`, default 1, at most 10; `total_pages` in the reply), exact titles first, writes the results into `media_items`, returns them Bingd-shaped. Page 1 may spend one extra request to recover an exact title TMDB buried (see `wantsExactRecovery`) |
 | `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, certification. **For a season, also returns that season's episodes.** Added 2026-09-03 |
 | `season-episodes` | signed-in user | One season's episodes on their own, for an Episodes tab whose cache `detail` did not seed. Reads nothing into the catalogue and writes nothing. Added 2026-09-03 |
 | `watch-providers` | signed-in user | Where one title can be watched in one country, from JustWatch by way of TMDB. Reads nothing into the catalogue and writes nothing. Added 2026-09-05 |

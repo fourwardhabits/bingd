@@ -67,6 +67,9 @@ jest.mock('@tanstack/react-query', () => {
   const { useEffect, useState } = jest.requireActual('react');
   return {
     keepPreviousData: 'keepPreviousData',
+    // Later pages are covered against a real client in `use-title-search.pages.test.tsx`;
+    // here no page past the first is ever asked for, so the list of queries is empty.
+    useQueries: ({ combine }: any) => (combine ? combine([]) : []),
     useQuery: ({ queryKey, queryFn, enabled }: any) => {
       const [data, setData] = useState(undefined);
       const [error, setError] = useState(undefined);
@@ -252,7 +255,7 @@ describe('useTitleSearch reaching past the local catalogue', () => {
 
     // Twenty, which is one TMDB page and the adapter's own cap. Asking for twelve
     // fetched a page of twenty and threw eight of it away after paying for them.
-    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20);
+    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20, 1);
   });
 
   /**
@@ -277,7 +280,7 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     await renderHook(() => useTitleSearch('inception'));
     await settle();
 
-    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20);
+    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20, 1);
   });
 
   it('waits longer than the local pass before spending a provider request', async () => {
@@ -379,7 +382,7 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     }
     await wait(1000);
 
-    expect(mockSearchProvider.mock.calls).toEqual([['inception', 20]]);
+    expect(mockSearchProvider.mock.calls).toEqual([['inception', 20, 1]]);
   });
 
   it('does not re-spend on a query that differs only in case or spacing', async () => {
@@ -394,7 +397,7 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     await rerender({ q: 'NETWORK' });
     await wait(1000);
 
-    expect(mockSearchProvider.mock.calls).toEqual([['network', 20]]);
+    expect(mockSearchProvider.mock.calls).toEqual([['network', 20, 1]]);
   });
 
   it('spends nothing on the provider when the screen draws no titles', async () => {
@@ -478,7 +481,7 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     await rerender({ q: 'leonardo' });
     await wait(1000);
 
-    expect(mockSearchProvider).toHaveBeenLastCalledWith('leonardo', 20);
+    expect(mockSearchProvider).toHaveBeenLastCalledWith('leonardo', 20, 1);
     expect(result.current.providerPeople).toEqual([leo]);
   });
 

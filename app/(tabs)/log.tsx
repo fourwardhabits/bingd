@@ -23,6 +23,7 @@ import {
   type SeriesChildState,
 } from '@/features/search/series-state';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
+import { useScrollGatedEnd } from '@/features/search/use-scroll-gated-end';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { useUserSearch, type UserResult } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
@@ -201,6 +202,13 @@ export default function LogScreen() {
     providerPeople,
     localResultCount,
     localAnswered,
+    loadingMorePages,
+    morePagesFailed,
+    morePagesRateLimited,
+    morePagesAvailableAt,
+    hasMorePages,
+    loadMorePages,
+    retryMorePages,
   } = useTitleSearch(input, {
     // No title rows are drawn under Users or Cast, so no provider request is spent on them.
     wide: filter !== 'users' && filter !== 'cast',
@@ -531,6 +539,14 @@ export default function LogScreen() {
           onClearRecent={clear}
           onPickRecent={setInput}
           searchingWider={providerSearching}
+          loadingMore={loadingMorePages}
+          moreFailed={morePagesFailed}
+          moreRateLimited={morePagesRateLimited}
+          moreAvailableAt={morePagesAvailableAt}
+          // Titles only: Users is one server answer, not pages.
+          hasMore={!peopleMode && hasMorePages}
+          onEndOfList={peopleMode ? undefined : loadMorePages}
+          onRetryMore={retryMorePages}
           exhausted={providerExhausted}
           rateLimited={providerRateLimited}
           availableAt={providerAvailableAt}
@@ -656,6 +672,13 @@ function Results({
   seriesState,
   watchlistBusy,
   onToggleWatchlist,
+  loadingMore,
+  moreFailed,
+  moreRateLimited,
+  moreAvailableAt,
+  hasMore,
+  onEndOfList,
+  onRetryMore,
 }: {
   idle: boolean;
   peopleOnly: boolean;
@@ -699,8 +722,25 @@ function Results({
   /** The id of the title whose watchlist write is in flight, or null. */
   watchlistBusy: string | null;
   onToggleWatchlist: (result: SearchResult) => void;
+  /** A further page of provider titles is on its way. */
+  loadingMore: boolean;
+  /** A further page failed. `onRetry` asks for it again. */
+  moreFailed: boolean;
+  /** …because this hour's provider budget is spent. */
+  moreRateLimited: boolean;
+  /** When a refused later page can be asked for again. */
+  moreAvailableAt: number | null;
+  /** The provider has another page of titles for this query. */
+  hasMore: boolean;
+  /** Asks for the next page of titles; returns whether it asked. Absent where there are none. */
+  onEndOfList?: () => boolean;
+  /** Asks again for a later page that failed, and nothing else. */
+  onRetryMore: () => void;
   onOpenLog: (result: SearchResult) => void;
 }) {
+  // Declared before the early returns below, as every hook must be.
+  const { onScrollBeginDrag, onEndReached } = useScrollGatedEnd(onEndOfList, rows.length);
+
   if (idle) {
     return (
       <ScrollView
@@ -813,11 +853,43 @@ function Results({
     // being rate limited is not a statement about the catalogue at all; and a
     // filter hiding every row is not a failed search.
     if (filtered) {
+      // "Search further" says what it is doing, and says so when it fails: this page has no
+      // list, so the footer that reports a later page is not on screen to do it.
+      if (loadingMore) {
+        return (
+          <View style={styles.status}>
+            <Text variant="body" tone="tertiary">
+              Loading more…
+            </Text>
+          </View>
+        );
+      }
+      if (moreFailed) {
+        return (
+          <EmptyState
+            kind="couldNotLoad"
+            title="More results did not load"
+            body={
+              moreRateLimited
+                ? `Too many searches to load more just now. ${widerSearchReturns(moreAvailableAt)}`
+                : 'Nothing of this kind on the first page, and the next page did not answer.'
+            }
+            action={{ label: 'Try again', onPress: onRetryMore }}
+          />
+        );
+      }
       return (
         <EmptyState
           kind="nothingMatches"
           title="Nothing in this filter"
           body="There are results, just not of this kind. Try All."
+          // Page 1 may simply have held none of this kind. With more pages to read, the
+          // filter is not the end of the search.
+          action={
+            hasMore && onEndOfList
+              ? { label: 'Search further', onPress: () => void onEndOfList() }
+              : undefined
+          }
         />
       );
     }
@@ -905,6 +977,30 @@ function Results({
                 Looking further afield…
               </Text>
             </View>
+          ) : !peopleOnly && loadingMore ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="tertiary">
+                Loading more…
+              </Text>
+            </View>
+          ) : !peopleOnly && moreFailed ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="secondary">
+                {moreRateLimited
+                  ? `Too many searches to load more just now. ${widerSearchReturns(moreAvailableAt)}`
+                  : 'More results did not load.'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Load more results again"
+                onPress={onRetryMore}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
           ) : !peopleOnly && providerFailed ? (
             /**
              * A partial list has to say it is partial.
@@ -934,6 +1030,24 @@ function Results({
                 </Text>
               </Pressable>
             </View>
+          ) : !peopleOnly && hasMore && onEndOfList ? (
+            /**
+             * The way on for a list the end event cannot reach: too short to drag, or a
+             * filter that kept two rows of a page. A quiet text control in the footer, the
+             * same weight as Try again, not a button; scrolling to it loads the page anyway.
+             */
+            <View style={styles.status}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Show more results"
+                onPress={() => void onEndOfList()}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Show more results
+                </Text>
+              </Pressable>
+            </View>
           ) : null
         }
         keyExtractor={(item) =>
@@ -948,6 +1062,10 @@ function Results({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.results}
+        // A further page only for a reader who is scrolling: see `useScrollGatedEnd`.
+        onScrollBeginDrag={onScrollBeginDrag}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.5}
         renderItem={({ item }) => {
           if (item.type === 'header') {
             // The design system's one section header: maroon label, compact, no card. The
