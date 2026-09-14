@@ -106,3 +106,41 @@ to the installed preview builds; no reinstall). Settings → About must show `01
    re-test of the import is needed.
 
 Production promotion is prepared, not executed: `docs/release/letterboxd-production-promotion.md`.
+
+---
+
+## Current-main release candidate (2026-09-14, supersedes `01a09e71`)
+
+The preview app now runs the production release candidate: current `main` (`a9aa5ae`, with
+Similar, Search exact title/pages/grouped All/Cast, For You V2, people-only Leaderboard, Top
+Rated, score order, plain-text `bingd`) plus the Letterboxd branches. Release source
+`integration/letterboxd-main` **`126493b`**; preview source `preview/letterboxd-main`
+**`c5dce8a`** = `126493b` + the staging-separation overlay only. Fingerprint-matched to the
+installed preview builds; no reinstall. Settings → About must show `01a0a134`.
+
+| Platform | Runtime | Update group | Update id |
+|---|---|---|---|
+| iOS | `aa3056e7…` | `f54513f5-1e28-4eb4-9569-7721c08cc165` | `01a0a134-0a21-7f70-ba22-09d3231dfa24` |
+| Android | `8e8731a2…` | `334fe09c-a630-45bc-bfbc-23a80a6ade25` | `01a0a134-0a21-7dbd-a36c-989b40199d54` |
+
+### Final founder checklist
+
+1. **Letterboxd step** (new preview account, finish First Five, Continue): body reads exactly
+   "Bring over what you’ve watched, your ratings, diary dates, and watchlist. Imported titles
+   start unranked, so your bingd rankings stay yours." The buttons follow the text directly, with
+   no large empty band.
+2. **Help sheet** (*Need help getting the file?*): heading *Getting your Letterboxd file*, steps
+   1–4 in the sheet margins, **Open Letterboxd’s export page** and **Done** reachable above the
+   bottom edge. Check the step names against Letterboxd itself (Settings → Import & Export →
+   Export your data).
+3. **Choose a different file:** Settings → Import from Letterboxd → a ZIP → Ready to import →
+   *Choose a different file*. The page looks the same as when first opened: top of the page, no
+   giant empty area, last line reachable.
+4. **Title page:** the Reviews tab reads *Reviews (N)*, or just *Reviews* when there are none.
+   Tap *+N* on genres: "Genres" and the chips sit in the sheet margins, wrap, with space under
+   the handle. On a profile, *About Match* has the same margins.
+5. **Main features still there:** Search (exact title first, results continue, grouped All with
+   Cast), Similar on a film, For You, Leaderboard (people only).
+6. **Details in a comparison** (long synopsis, *more*): Back to ranking still reachable.
+
+Production promotion is prepared, not executed: `docs/release/letterboxd-production-promotion.md`.
