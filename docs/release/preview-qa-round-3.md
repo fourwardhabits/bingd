@@ -1,5 +1,9 @@
 # Preview QA — Round 3 (founder, physical device)
 
+> **Superseded by the final polish update (2026-09-14)** — see *Final preview polish* at the
+> end. Round 3 itself passed physical QA; only the two polish items below need a look.
+
+
 **What this update is:** integration `integration/preview-qa-r3` — physical staging separation,
 the Letterboxd importer, comparison memory aids, every Round-2 fix, and Round 3:
 
@@ -64,3 +68,41 @@ Staging, real cron / pg_net / Edge Function / TMDB:
 | 2,500 rows | — | 35 s (109 s with a 40 s worker outage injected mid-job) |
 
 Details: `docs/product/letterboxd-import.md` §6e.
+
+---
+
+## Final preview polish (2026-09-14)
+
+Round 3 passed physical QA. Two bounded findings were fixed on their owning branches:
+
+- **Letterboxd step copy and layout** (`feat/letterboxd-onboarding-step` `2f6180c`, `c8547d4`):
+  the step now draws the same page as Your First Five and People, with the founder's copy and a
+  one-paragraph help sheet.
+- **Details sheet** (`feat/comparison-memory-aids` `c88653b`): expanding a long synopsis can no
+  longer push *Back to ranking* off the sheet; the body scrolls above a footer that keeps its
+  bottom padding.
+
+**Published 2026-09-14** from integration `49f5854` to the `preview` branch (fingerprint-matched
+to the installed preview builds; no reinstall). Settings → About must show `01a09e71`.
+
+| Platform | Runtime | Update group | Update id |
+|---|---|---|---|
+| iOS | `aa3056e7…` | `4009b53b-5fb8-4529-aba1-de7349bfb60e` | `01a09e71-7585-7d45-97be-b31f72cb8530` |
+| Android | `8e8731a2…` | `f1b42f3f-138c-4f76-a795-8b79892b6e19` | `01a09e71-7585-70ca-a209-9d4ed6dac95e` |
+
+### The tiny final checklist
+
+1. **Letterboxd step** (new preview account, finish First Five, Continue): headline *Already use
+   Letterboxd?*, body, then a footer with **Import from Letterboxd**, **Not now**, *Need help
+   getting the file?* and the privacy line — same side margins and footer as First Five and
+   People. Open the help: one paragraph starting "On Letterboxd.com, go to Settings → Data →
+   Export Your Data". Not now carries on to People.
+2. **Details, long synopsis:** in a comparison, open Details on a film with a long synopsis,
+   tap *more*. Scroll to the end: **Back to ranking is fully visible with space under it**.
+   Tap *less*, still fine.
+3. **Details, TV:** the same on a season (episodes shown). Back to ranking reachable.
+4. **Settings import smoke:** Settings → Import from Letterboxd → choose a valid ZIP → it reaches
+   the running, finished or *already here* state without hanging or routing wrongly. No full
+   re-test of the import is needed.
+
+Production promotion is prepared, not executed: `docs/release/letterboxd-production-promotion.md`.
