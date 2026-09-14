@@ -24,15 +24,39 @@ Somebody's Letterboxd export, brought into Bingd as collection history. Films th
 watched, the dates they watched them, their ratings — turned into the three taste buckets —
 and their watchlist.
 
-It is **optional and always available**. It is not a step in onboarding; the first-run
-flow points at it once, in a small card after *Your First Five* (§6d), and the importer itself lives at
-**Settings ▸ Import from Letterboxd** and can be run at any time.
+It is **optional and always available**. Since 2026-09-13 the first-run flow offers it
+once, as an optional step of its own straight after *Your First Five* (below), and the
+importer's permanent home is **Settings ▸ Import from Letterboxd**, where it can be run at
+any time.
 
-### Where the onboarding mention sits, and why it is a sentence
+### The onboarding step (founder, preview QA Round 3, 2026-09-13)
 
-The direction was one optional, skippable discovery moment **after First Five**, with
-*Import from Letterboxd* and *Not now* — and an explicit fallback to a Settings-only entry
-if placing it inside onboarding would raise release risk.
+**Supersedes the 2026-09-13 lock below.** The founder completed onboarding on the Round 2
+preview without noticing the passive card on the payoff, so passive-only discovery was
+replaced by a dedicated optional screen, `app/onboarding/letterboxd.tsx`:
+
+| | |
+|---|---|
+| Position | After *Your First Five*'s Continue, before People. Also after the picker's *Not now*: somebody who cannot think of five films on the spot may be exactly the person with years of Letterboxd history. |
+| Opening | *Already use Letterboxd?* — bring over watched movies, ratings, Diary dates and Watchlist. **Import from Letterboxd** (primary), **Not now** (secondary), *Need help getting the file?* (the existing instructions sheet). |
+| Importer | The real one: `ImportScreen` with its `onboarding` prop, the same `useImport` machine, picker, reader, preview, upload and job. No second path. |
+| Hand-off | Once `import_ready` succeeds the step says the import keeps running in the background and that we will let you know when it is done, and offers **Continue**. It does not wait for the result. |
+| Never required | *Not now* is offered on the opening, while a file is read, on the preview and on every refusal. Not during the upload itself, which is the one moment leaving would stop something. |
+| The job | Untouched by Continue, by *Not now*, by unmounting, by backgrounding or killing the app. `import_discard` is reachable only through the importer's own *Start over*, and the server refuses it for any job past `pending`. The lifecycle notifications stay authoritative. |
+| Relaunch | A stage of its own (`letterboxd` in `STAGE_ORDER`), so a relaunch returns to the step, where `findLiveJob` shows a running import with Continue rather than asking again. The lost-stage fallback still resumes at People. |
+| A notification tap mid-flow | `/settings/import?job=` is outside the onboarding group, so `nextRoute` replaces it once with the current step, which is a fixed point: no loop (`routing.test.tsx`). After onboarding the link opens the job in Settings as before. |
+| Analytics | `onboarding_step_completed` with `step: 'letterboxd'`; `import_opened` with `surface: 'onboarding'` counts the first press, not the step being shown (`analytics.md`). |
+
+The three objections recorded below were answered rather than overruled: the importer is
+**drawn inside** the onboarding route instead of navigated to, so nothing is pushed past the
+guard; the route is a plain stack screen, so its one sheet is not a Modal inside a Modal;
+and the payoff keeps its single action, because the question comes after it.
+
+### Where the onboarding mention sat until then, and why it was a sentence
+
+*Historical, superseded above.* The direction was one optional, skippable discovery moment
+**after First Five**, with *Import from Letterboxd* and *Not now* — and an explicit fallback
+to a Settings-only entry if placing it inside onboarding would raise release risk.
 
 It would, on three counts that are facts about this codebase rather than caution:
 
@@ -48,15 +72,13 @@ It would, on three counts that are facts about this codebase rather than caution
    social half of onboarding optional in the first place, and `TasteOnboarding.test.tsx`
    asserts the absence of competing buttons.
 
-So the mention sits on the **payoff**, after the five are placed and below them, as a small
-card with no action (§6d). Skipping it is carrying on.
+So the mention sat on the **payoff**, after the five were placed and below them, as a small
+card with no action (§6d), until the step above replaced it.
 
-> **Open decision.** A true two-action moment needs the flow guard to admit one route out
-> of the onboarding group. That is a change to the machine that stranded people twice
-> (#131, #133), so it is not in this tranche. It is a small change and a separately
-> reviewable one: an allowance in `nextRoute` for `/settings/import` while a stage is
-> unfinished, plus a return path. Worth doing on its own, with its own review, once the
-> importer has been physically tested.
+> **Resolved 2026-09-13, differently.** This decision proposed an allowance in `nextRoute`
+> for `/settings/import` while a stage is unfinished. The step above needs none: the
+> importer renders inside `/onboarding/letterboxd`, so the guard is unchanged and nothing
+> leaves the onboarding group.
 
 ---
 
@@ -382,7 +404,7 @@ completed onboarding. Seven findings. Each was assigned to the branch that owns 
 | Imported titles show initials until opened | **Real defect.** 14 of 24 were provider-tier stubs: the search result's `poster_path` was discarded. | `feat/letterboxd-import` | `catalogueItem` keeps what the search returned; `_import_enrich_nudge` enriches poster-less imported titles in bounded batches (`20260917001400`). |
 | Profile "Movies: 5" beside ~25 watched films | **Real defect** against the locked semantics below. | `feat/letterboxd-import` | `profile_title_counts` (`20260917001600`). |
 | Importer copy reads like pipeline docs; summary ends on Done | **Real defect.** | `feat/letterboxd-import` | Copy rewrite; *Rank imported movies* opens Collection ▸ Movies ▸ Unranked. |
-| First Five sentence not noticed | **Real defect** (visual). | `feat/letterboxd-import` | A card after the five, locked by the founder on 2026-09-13 as informational: *Already use Letterboxd? Import your watch history anytime from* **Settings → Import from Letterboxd**. No route, no modal, no step, no tap: a button would need the onboarding stage guard to admit a route. |
+| First Five sentence not noticed | **Real defect** (visual). | `feat/letterboxd-import`, then `feat/letterboxd-onboarding-step` | First a card after the five, locked by the founder on 2026-09-13 as informational. **Superseded the same day (founder, Round 3):** the card still went unnoticed, so it was removed and replaced by the dedicated optional step described in §1, which runs the real importer inside the onboarding route. |
 | Unranked prompt "Not now" | **Real defect** (label). Pre-dates the importer (#38). | `fix/unranked-prompt-dismiss` (off main) | *Dismiss*; behaviour unchanged. |
 | Invite button says "Inviting…" behind the share sheet | **Real defect.** Main code (#27, reused in onboarding by #131). | `fix/invite-share-label` (off main) | *Invite friends* while the sheet is open, *Opening…* only while the link is minted, a synchronous tap guard. Minting writes no attribution. |
 
@@ -486,7 +508,9 @@ its last run succeeded (`import_drain_status()`), and 126/126 on the anon smoke.
 | 5 | **A large export** (the generated 10,000-film fixture) | 22 pages; the read is synchronous | A spinner that never paints; "Part n of m" going backwards |
 | 6 | **Leave the app mid-import, come back after it finishes** | The fix for review #4 is new and unproven on a device | The summary should be waiting, with *Import another file* on it |
 | 7 | **Airplane mode during the upload, then "Start over", then a different archive** | The fix for review #5 is new | The second archive must not arrive with the first's films |
-| 8 | **The Settings row and the payoff sentence** | — | Row present under Account; sentence on *Your First Five*, not during the ranking |
+| 8 | **The Settings row and the onboarding step** | — | Row present under Account; *Already use Letterboxd?* appears after *Your First Five*'s Continue (and after the picker's *Not now*), never during the ranking, and nothing about Letterboxd remains on the payoff |
+| 9 | **Import from the onboarding step, then Continue, then kill the app** | The job outliving the step is a server fact | The import's notifications still arrive; after onboarding, Settings ▸ Import shows the job; a relaunch before People lands back on the step showing it running |
+| 10 | **Tap an import notification before onboarding is finished** | Push taps cannot be simulated | One hop back to the current onboarding step, no flicker loop |
 
 ### What staging cannot show you
 
