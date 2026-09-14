@@ -469,8 +469,40 @@ are committed into `web/src/` beside the existing two, and `sharp` is an authori
 dependency that Cloudflare never installs. The blur regions are stated in source pixels
 and checked by eye, because a region that drifts shows up immediately as a legible name.
 
-Six shots: `shot-compare`, `shot-movies`, `shot-tv`, `shot-feed`, `shot-foryou`,
-`shot-watchlist`. WebP, 640px wide (760 for the hero), with only the hero eager.
+On the front page as of 2026-09-14, by section: the hero `shot-movies` + `shot-tv`; the
+ranking section `shot-ranked` + `shot-score`; the friends section `shot-feed` +
+`shot-comments`; the last section `shot-recommended` + `shot-grouppicks`. WebP, 640px wide,
+with only the hero eager. `shot-compare`, `shot-foryou` and `shot-watchlist` are still
+defined in `shots.mjs` and still in `web/src/`, but the page no longer references them.
+
+### Adding or replacing a landing-page screenshot
+
+1. **Raw capture.** Save the untouched phone screenshot into `02 Screenshots/App Store/` in
+   the primary checkout. That folder is founder-local and untracked; raw captures are never
+   committed.
+2. **Define the shot.** Add an entry to `SHOTS` in `web/shots.mjs`: `source` (the raw
+   filename), `name` (the output, `shot-<name>`), `width: 640`, and `alt`. The default
+   treatment trims only the host phone's chrome: `TOP` (3% of height, the status bar) and
+   `BOTTOM` (4.3%, the navigation bar). These are fractions, so a capture saved at a
+   smaller size works unchanged. Nothing inside the app is cropped. Optional:
+   - `masks: [[x, y, w, h], ...]` blurs regions, in source pixels. Every display name,
+     handle and avatar of another account must be blurred, because the site shows no
+     accounts, handles or faces.
+   - `crop: [x, y, w, h]` replaces the default trim, for a capture with different chrome
+     (an iPhone status bar, for instance).
+   - `paint: [{ box, rgb }]` fills a region with the screen's own background, for content
+     that must not appear at all, such as a feature not yet in the shipped app.
+3. **Render only that shot.** From a checkout with `node_modules` (or a worktree with a
+   junction to one):
+   `node web/shots.mjs --raw "<primary>/02 Screenshots/App Store" --only shot-<name>`.
+   It writes `web/src/shot-<name>.webp` and prints the width and height.
+4. **Check it by eye**, especially that every blur covers a name completely.
+5. **Wire it in.** Add or replace the entry in `SHOT` in `web/build.mjs` (src, w, h, alt),
+   reference it with `${shot('<name>')}` in the section, and update the shot list in
+   `router.test.mjs`. A pair whose second picture matters on a phone uses
+   `phone-pair stack-narrow`.
+6. **Verify.** `npm run test:web`, `npm run test:web:mutants`, and a look at 1440, 390 and
+   320 wide.
 
 **`shot-reveal` left on 2026-09-12**, in the v2 pass that cut the page from four content
 sections to three. The ranking section is now illustrated by the two ranked collections,

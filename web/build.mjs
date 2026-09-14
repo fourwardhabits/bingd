@@ -2147,8 +2147,9 @@ const LANDING_STYLES = `
         .phone-pair .phone { max-width: 16rem; }
 
         /* Except where the second picture is the point: the TV collection beside the Movies
-           one in the hero, the score a ranking lands on, and the conversation under a
-           friend's ranking. Those pairs stack instead of dropping their second half. */
+           one in the hero, the score a ranking lands on, the conversation under a friend's
+           ranking, and Group Picks beside the recommendations. Those pairs stack instead
+           of dropping their second half. */
         .phone-pair.stack-narrow { flex-direction: column; }
         .phone-pair.stack-narrow .phone + .phone { display: block; }
       }
@@ -2265,17 +2266,17 @@ const SHOT = {
     h: 1285,
     alt: 'The bingd. feed, showing trending titles above friends&rsquo; recent activity, with names and faces blurred',
   },
-  foryou: {
-    src: '/shot-foryou.webp',
+  recommended: {
+    src: '/shot-recommended.webp',
     w: 640,
     h: 1286,
-    alt: 'The bingd. For you wall, a grid of suggested films each with a control to save it or to dismiss it',
+    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to you, Group Picks and Filters',
   },
-  watchlist: {
-    src: '/shot-watchlist.webp',
+  grouppicks: {
+    src: '/shot-grouppicks.webp',
     w: 640,
-    h: 1286,
-    alt: 'A bingd. watchlist of nine films shown as a grid of posters, under the heading nine titles',
+    h: 1285,
+    alt: 'The bingd. Group Picks sheet: choose who is watching from the people you follow and bingd finds movies you can all agree on, with names blurred',
   },
 };
 
@@ -2493,9 +2494,9 @@ ${installRow({ primary: true })}
             </p>
           </div>
 
-          <div class="phone-pair">
-            ${shot('foryou')}
-            ${shot('watchlist')}
+          <div class="phone-pair stack-narrow">
+            ${shot('recommended')}
+            ${shot('grouppicks')}
           </div>
         </div>
       </section>
