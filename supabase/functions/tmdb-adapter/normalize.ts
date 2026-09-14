@@ -776,6 +776,155 @@ export type CastSearchResult = {
 const MAX_KNOWN_FOR = 3;
 
 /**
+ * How strongly a performer's name answers a Cast query: 0 is the full name, 1 a name the
+ * query starts (every typed word begins a different word of the name, the first typed word
+ * the first name), 2 any other order of those words ("hanks" for Tom Hanks), 3 only the
+ * letters run together ("leonardodi"), null no match at all.
+ *
+ * Words are matched by trying every assignment, not greedily: "j jackson" is Samuel L.
+ * Jackson even though "j" alone would also begin "jackson" (independent review). Run-together
+ * letters are the weakest match because they also join words the reader never meant as one:
+ * "joel" runs into Joe Lo Truglio (independent review).
+ *
+ * **The gate, not a score.** Popularity orders people inside a strength and never lifts a
+ * weaker one: a famous actor whose name does not begin with what was typed is not an answer
+ * to it however famous they are. Words are compared through `titleKey`, so case, accents
+ * and punctuation ("Jean-Claude", "Timothée") do not decide anything.
+ */
+export function castNameMatch(name: string, query: string): 0 | 1 | 2 | 3 | null {
+  const typed = titleKey(query).split(' ').filter(Boolean);
+  const words = titleKey(name).split(' ').filter(Boolean);
+  if (!typed.length || !words.length) return null;
+  if (words.join('') === typed.join('')) return 0;
+
+  // Can typed words from `from` on each begin a different, unused word of the name?
+  const assignable = (from: number, used: boolean[]): boolean => {
+    if (from === typed.length) return true;
+    for (let at = 0; at < words.length; at++) {
+      if (used[at] || !words[at].startsWith(typed[from])) continue;
+      used[at] = true;
+      const rest = assignable(from + 1, used);
+      used[at] = false;
+      if (rest) return true;
+    }
+    return false;
+  };
+  if (typed.length <= words.length) {
+    if (words[0].startsWith(typed[0]) && assignable(1, words.map((_, index) => index === 0))) return 1;
+    if (assignable(0, words.map(() => false))) return 2;
+  }
+
+  // A name typed without its spaces ("leonardodi", "delroy lindo" as "delroylindo").
+  return words.join('').startsWith(typed.join('')) ? 3 : null;
+}
+
+/**
+ * Cast rows for a query: TMDB's answer and the popular-performer index, ranked by name
+ * first and popularity second.
+ *
+ * **Why the index exists** (measured 2026-09-14): /search/person ranks a name with a word
+ * EQUAL to the query above every name that only starts with it, so "leo" returns 10,000
+ * people named Leo and Leonardo DiCaprio is not in the first 200. The index is TMDB's
+ * /person/popular, refreshed nightly (see 20260919000100); only its entries whose name
+ * passes `castNameMatch` are considered, so it can add the person being typed toward and
+ * nobody else. An index entry needs a word-level match (strength 0 to 2); letters that only
+ * match run together are accepted from TMDB's own answer and never from the index.
+ *
+ * **Order.** Strength (exact name, then names the query starts, then other word orders),
+ * then popularity (unknown counts as least), then where the person came from: TMDB's own
+ * position, then the index's.
+ *
+ * **A one-word exact name leads only if somebody searches for it** (measured on staging
+ * 2026-09-14). "emma", "scar" and "kean" are each the whole name of a performer at 0.3 to
+ * 0.4, and as the strongest match those led Emma Stone, Scarlett Johansson and Keanu Reeves.
+ * So a single typed word that is somebody's entire name counts as exact only at
+ * `MONONYM_EXACT_MIN_POPULARITY`, the floor the All page already uses for a whole name
+ * (Cher 1.4, Madonna 2.7); below it, it is one more name the query starts, ordered by
+ * popularity. Two or more words that are a full name are specific enough to lead as typed. That last key makes the order total, so the same inputs
+ * always give the same list. A TMDB result whose name does not pass the gate (TMDB also
+ * matches aliases and other scripts) is kept, after every match, in TMDB's order — it is
+ * the provider's answer, and dropping it would hide somebody searched for by another name.
+ */
+export function rankCast(
+  query: string,
+  provider: readonly CastSearchResult[],
+  index: readonly CastSearchResult[],
+  limit: number,
+): CastSearchResult[] {
+  const seen = new Set<number>();
+  const ranked: { person: CastSearchResult; strength: number; order: number }[] = [];
+
+  const oneWord = titleKey(query).split(' ').filter(Boolean).length === 1;
+  const strengthOf = (person: CastSearchResult) => {
+    const strength = castNameMatch(person.name, query);
+    return strength === 0 && oneWord && (person.popularity ?? 0) < MONONYM_EXACT_MIN_POPULARITY
+      ? 1
+      : strength;
+  };
+
+  provider.forEach((person, order) => {
+    if (seen.has(person.id)) return;
+    seen.add(person.id);
+    ranked.push({ person, strength: strengthOf(person) ?? UNMATCHED, order });
+  });
+  index.forEach((person, position) => {
+    if (seen.has(person.id)) return;
+    const strength = strengthOf(person);
+    if (strength === null || strength > 2) return;
+    seen.add(person.id);
+    ranked.push({ person, strength, order: provider.length + position });
+  });
+
+  ranked.sort((a, b) => {
+    if (a.strength !== b.strength) return a.strength - b.strength;
+    if (a.strength !== UNMATCHED) {
+      const popularity = (b.person.popularity ?? -1) - (a.person.popularity ?? -1);
+      if (popularity !== 0) return popularity;
+    }
+    return a.order - b.order;
+  });
+
+  return ranked.slice(0, Math.max(limit, 0)).map((entry) => entry.person);
+}
+
+/** The strength of a TMDB result the name gate did not pass: after every match. */
+const UNMATCHED = 4;
+
+/** The popularity a one-word whole name needs to lead as exact. See `rankCast`. */
+const MONONYM_EXACT_MIN_POPULARITY = 1;
+
+/**
+ * The popular-performer index row's payload, as far as it can be trusted.
+ *
+ * The adapter wrote it, but it is read back from a world-readable table on every search,
+ * so a malformed entry is skipped rather than allowed to reach a response. The shape is
+ * exactly a `CastSearchResult`.
+ */
+export function peopleIndexEntries(payload: unknown): CastSearchResult[] {
+  const people = (payload as { people?: unknown } | null)?.people;
+  if (!Array.isArray(people)) return [];
+
+  const out: CastSearchResult[] = [];
+  for (const entry of people as Record<string, unknown>[]) {
+    if (!entry || typeof entry !== 'object') continue;
+    const id = entry.id;
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0 || !name) continue;
+    out.push({
+      id,
+      name,
+      profile_path: typeof entry.profile_path === 'string' ? entry.profile_path : null,
+      known_for: Array.isArray(entry.known_for)
+        ? (entry.known_for as unknown[]).filter((title): title is string => typeof title === 'string').slice(0, MAX_KNOWN_FOR)
+        : [],
+      popularity:
+        typeof entry.popularity === 'number' && Number.isFinite(entry.popularity) ? entry.popularity : null,
+    });
+  }
+  return out;
+}
+
+/**
  * /search/person into Cast rows: performers only, in TMDB's own order.
  *
  * **Performers only**, by `known_for_department === 'Acting'`. The control is labelled

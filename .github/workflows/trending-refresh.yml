@@ -21,7 +21,8 @@ name: Trending refresh
 # CREDENTIALS
 #
 # `trending` is a service_role action on `tmdb-adapter` — four provider requests and eighty
-# upserts per call — so each target needs that project's own service-role key. They are
+# upserts per call, plus fifty requests for the popular-performer index Cast search ranks with
+# (20260919000100) — so each target needs that project's own service-role key. They are
 # repository secrets and are never printed: the script logs the project ref and the
 # environment name, which are not secrets, and `--target` makes a URL/key pair from two
 # different projects a refusal rather than a green run against the wrong shelf.

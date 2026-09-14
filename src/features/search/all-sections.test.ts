@@ -1,6 +1,6 @@
 import type { CastSearchResult } from '@/lib/tmdb-adapter';
 
-import { allRows, castMatches, TITLE_LEAD, type AllRow } from './all-sections';
+import { allRows, castMatches, SECTION_PREVIEW, type AllRow } from './all-sections';
 import type { SearchResult } from './use-title-search';
 import type { UserResult } from './use-user-search';
 
@@ -98,67 +98,137 @@ describe('the performer gate', () => {
 });
 
 describe('the All page', () => {
-  it('leaves a title-only search exactly as it was: one list, no headers', () => {
+  it('groups Movies, TV, Cast and Users, in that order, three rows each', () => {
     const { rows } = allRows({
-      query: 'inception',
-      titles: manyTitles(8),
-      people: [],
-      users: [],
-    });
-
-    expect(rows.every((row) => row.type === 'title')).toBe(true);
-    expect(rows).toHaveLength(8);
-  });
-
-  it('never puts a section above the leading titles: an exact actor follows the first titles', () => {
-    const { rows } = allRows({
-      query: 'leonardo dicaprio',
-      titles: [title('d', 'Leonardo DiCaprio: Most Wanted!')],
-      people: [leo],
-      users: [],
+      query: 'emma',
+      titles: [
+        ...manyTitles(5, 'Emma'),
+        ...manyTitles(4, 'Emma Show').map((row) => ({
+          ...row,
+          id: `s${row.id}`,
+          kind: 'series' as const,
+        })),
+      ],
+      people: [
+        person(1, 'Emma Stone', 6.8),
+        person(2, 'Emma Watson', 6.4),
+        person(3, 'Emma Myers', 6.5),
+        person(4, 'Emma Thompson', 4),
+      ],
+      users: [
+        user('a', 'emmaw', 'Emma W'),
+        user('b', 'emmab', 'Emma B'),
+        user('c', 'emmac', 'Emma C'),
+        user('d', 'emmad', 'Emma D'),
+      ],
     });
 
     expect(shape(rows)).toEqual([
-      't:Leonardo DiCaprio: Most Wanted!',
-      'CAST',
-      'c:Leonardo DiCaprio',
-    ]);
-  });
-
-  it('shows an exact actor at the top when there are no titles at all', () => {
-    const { rows } = allRows({
-      query: 'zendaya',
-      titles: [],
-      people: [person(1, 'Zendaya', 11.2)],
-      users: [],
-    });
-
-    expect(shape(rows)).toEqual(['CAST', 'c:Zendaya']);
-  });
-
-  it('puts a partial actor match after the leading titles, and the rest under More titles', () => {
-    const { rows } = allRows({
-      query: 'emma',
-      titles: manyTitles(10, 'Emma'),
-      people: [
-        person(1, 'Emma Elle Paterson', 1.7),
-        person(2, 'Emma Stone', 6.8),
-        person(3, 'Emma Watson', 6.4),
-      ],
-      users: [],
-    });
-
-    expect(shape(rows).slice(0, TITLE_LEAD + 4)).toEqual([
+      'MOVIES',
       't:Emma 1',
       't:Emma 2',
       't:Emma 3',
-      't:Emma 4',
+      'TV',
+      't:Emma Show 1',
+      't:Emma Show 2',
+      't:Emma Show 3',
       'CAST',
       'c:Emma Stone',
       'c:Emma Watson',
-      'MORE-TITLES',
+      'c:Emma Myers',
+      'USERS',
+      'u:@emmaw',
+      'u:@emmab',
+      'u:@emmac',
     ]);
-    expect(rows.filter((row) => row.type === 'title')).toHaveLength(10);
+    // No "More titles" any more: the rest of every kind is behind its See all.
+    expect(rows.filter((row) => row.type === 'title')).toHaveLength(2 * SECTION_PREVIEW);
+  });
+
+  it('puts a season under TV, beside the series', () => {
+    const { rows } = allRows({
+      query: 'bear',
+      titles: [{ ...title('s1', 'The Bear: Season 1'), kind: 'season' }],
+      people: [],
+      users: [],
+    });
+    expect(shape(rows)).toEqual(['TV', 't:The Bear: Season 1']);
+  });
+
+  it('draws only the sections that have something in them', () => {
+    expect(
+      shape(allRows({ query: 'inception', titles: manyTitles(2), people: [], users: [] }).rows),
+    ).toEqual(['MOVIES', 't:Film 1', 't:Film 2']);
+    expect(
+      shape(
+        allRows({
+          query: 'zendaya',
+          titles: [],
+          people: [person(1, 'Zendaya', 11.2)],
+          users: [],
+        }).rows,
+      ),
+    ).toEqual(['CAST', 'c:Zendaya']);
+    expect(allRows({ query: 'zzzz', titles: [], people: [], users: [] }).rows).toEqual([]);
+  });
+
+  it('offers See all only when the chip it opens holds more than the preview', () => {
+    const seeAll = (rows: AllRow[]) =>
+      Object.fromEntries(
+        rows.flatMap((row) => (row.type === 'header' ? [[row.section, row.seeAll]] : [])),
+      );
+
+    // Exactly a preview's worth of everything, and no further page: nothing more to see.
+    expect(
+      seeAll(
+        allRows({
+          query: 'emma',
+          titles: manyTitles(3, 'Emma'),
+          people: [person(1, 'Emma Stone', 6.8)],
+          users: [user('a', 'emmaw', 'Emma W')],
+        }).rows,
+      ),
+    ).toEqual({ movies: false, cast: false, users: false });
+
+    // More films and shows than fit; a performer and an account the gates left off the
+    // preview but the Cast and Users chips would list.
+    const shows = Array.from({ length: 4 }, (_, index) => ({
+      ...title(`s${index}`, `Emma Show ${index + 1}`),
+      kind: 'series' as const,
+    }));
+    expect(
+      seeAll(
+        allRows({
+          query: 'emma',
+          titles: [...manyTitles(4, 'Emma'), ...shows],
+          people: [person(1, 'Emma Stone', 6.8), person(2, 'Emma Ho', 1.5)],
+          users: [user('a', 'emmaw', 'Emma W'), user('x', 'deanna', 'Deanna Troi')],
+        }).rows,
+      ),
+    ).toEqual({ movies: true, tv: true, cast: true, users: true });
+
+    // One show, however many provider pages remain: See all would open the same one row.
+    expect(
+      seeAll(
+        allRows({
+          query: 'emma',
+          titles: [{ ...title('s', 'Emma Show'), kind: 'series' }],
+          people: [],
+          users: [],
+        }).rows,
+      ),
+    ).toEqual({ tv: false });
+  });
+
+  it('draws every header at most once, so no two rows share a key', () => {
+    const { rows } = allRows({
+      query: 'emma',
+      titles: manyTitles(9, 'Emma'),
+      people: [person(1, 'Emma Stone', 6.8)],
+      users: [user('s', 'emmaw', 'Emma W')],
+    });
+    const headers = rows.flatMap((row) => (row.type === 'header' ? [row.section] : []));
+    expect(new Set(headers).size).toBe(headers.length);
   });
 
   it('shows at most three performers, a whole-name match first', () => {
@@ -181,15 +251,23 @@ describe('the All page', () => {
     ]);
   });
 
-  it('keeps a title and a performer that share a name in their usual places', () => {
-    const { rows } = allRows({
-      query: 'madonna',
-      titles: [title('m', 'Madonna'), title('b', 'Becoming Madonna')],
-      people: [person(1, 'Madonna', 2.7)],
+  it('keeps the prominent Leo the adapter ranked first, and no weak or wrong-name performer', () => {
+    // The adapter's order for "leo" (see normalize.test.ts): DiCaprio from the popular index,
+    // then TMDB's Leos by popularity. The All gate still leaves out the ones nobody meant.
+    const { cast } = allRows({
+      query: 'leo',
+      titles: [],
+      people: [
+        person(6193, 'Leonardo DiCaprio', 8.2),
+        person(13, 'Leo Wu', 3.1),
+        person(2, 'Leo Woodall', 2.8),
+        person(3, 'Melissa Leo', 2.1),
+        person(99, 'Cleo Famous', 40),
+      ],
       users: [],
     });
 
-    expect(shape(rows)).toEqual(['t:Madonna', 't:Becoming Madonna', 'CAST', 'c:Madonna']);
+    expect(cast.map((entry) => entry.name)).toEqual(['Leonardo DiCaprio', 'Leo Wu']);
   });
 
   it('omits a weak people match entirely, heading and all', () => {
@@ -200,32 +278,11 @@ describe('the All page', () => {
       users: [user('x', 'deanna', 'Deanna Troi')],
     });
 
-    expect(rows.some((row) => row.type === 'header')).toBe(false);
-  });
-
-  it('leads with Users for an @ query, keeps its titles below, and asks nothing of Cast', () => {
-    // `@` names an account: Users leads, titles keep their place below it (existing rule:
-    // the sigil changes order, never presence), and performers are not what was asked.
-    const { rows } = allRows({
-      query: '@suraj',
-      titles: [title('s', 'Suraj')],
-      people: [person(1, 'Suraj Sharma', 3.5)],
-      users: [user('u1', 'suraj', 'Suraj Kandukuri')],
-    });
-
-    expect(shape(rows)).toEqual(['USERS', 'u:@suraj', 'TITLES', 't:Suraj']);
-  });
-
-  it('shows an exact handle or display name as a Users section after the leading titles', () => {
-    for (const query of ['Anna Rivers', 'annar', 'ann']) {
-      const { rows } = allRows({
-        query,
-        titles: manyTitles(6),
-        people: [],
-        users: [user('a', 'annar', 'Anna Rivers')],
-      });
-      expect(shape(rows).slice(TITLE_LEAD, TITLE_LEAD + 2)).toEqual(['USERS', 'u:@annar']);
-    }
+    expect(
+      rows
+        .filter((row) => row.type === 'header')
+        .map((row) => row.type === 'header' && row.section),
+    ).toEqual(['movies']);
   });
 
   it('keeps the account gate: a match in the middle of a handle stays under the Users chip', () => {
@@ -239,161 +296,136 @@ describe('the All page', () => {
     expect(rows.some((row) => row.type === 'user')).toBe(false);
   });
 
-  it('draws Cast before Users when both match, after the titles', () => {
-    const { rows } = allRows({
-      query: 'emma',
-      titles: manyTitles(5, 'Emma'),
-      people: [person(1, 'Emma Stone', 6.8)],
-      users: [user('s', 'emmaw', 'Emma W')],
-    });
-
-    expect(shape(rows)).toEqual([
-      't:Emma 1',
-      't:Emma 2',
-      't:Emma 3',
-      't:Emma 4',
-      'CAST',
-      'c:Emma Stone',
-      'USERS',
-      'u:@emmaw',
-      'MORE-TITLES',
-      't:Emma 5',
-    ]);
+  it('shows an exact handle or display name as a Users section', () => {
+    for (const query of ['Anna Rivers', 'annar', 'ann']) {
+      const { rows } = allRows({
+        query,
+        titles: manyTitles(6),
+        people: [],
+        users: [user('a', 'annar', 'Anna Rivers')],
+      });
+      expect(shape(rows).slice(-2)).toEqual(['USERS', 'u:@annar']);
+    }
   });
 
-  it('draws every header at most once, so no two rows share a key', () => {
+  it('leads with Users for an @ query, keeps its titles below, and asks nothing of Cast', () => {
     const { rows } = allRows({
-      query: 'emma',
-      titles: manyTitles(9, 'Emma'),
-      people: [person(1, 'Emma Stone', 6.8)],
-      users: [user('s', 'emmaw', 'Emma W')],
+      query: '@suraj',
+      titles: [title('s', 'Suraj')],
+      people: [person(1, 'Suraj Sharma', 3.5)],
+      users: [user('u1', 'suraj', 'Suraj Kandukuri')],
     });
-    const headers = rows
-      .filter((row) => row.type === 'header')
-      .map((row) => (row.type === 'header' ? row.section : ''));
 
-    expect(new Set(headers).size).toBe(headers.length);
+    expect(shape(rows)).toEqual(['USERS', 'u:@suraj', 'MOVIES', 't:Suraj']);
   });
 });
 
 describe('a page that is still arriving', () => {
   const anna = user('a', 'annar', 'Anna Rivers');
 
-  it('keeps a drawn Users section where it is when provider titles arrive after it', () => {
-    // Two local titles, the Users section beneath them; then TMDB adds four more.
-    const local = manyTitles(2, 'Local');
-    const before = allRows({
-      query: 'anna r',
-      titles: local,
-      people: [],
-      users: [anna],
-      leadCount: 2,
-    });
-    const after = allRows({
-      query: 'anna r',
-      titles: [...local, ...manyTitles(4, 'Remote')],
-      people: [],
-      users: [anna],
-      leadCount: 2,
-    });
-
-    const usersHeader = (rows: AllRow[]) =>
-      rows.findIndex((row) => row.type === 'header' && row.section === 'users');
-    expect(usersHeader(after.rows)).toBe(usersHeader(before.rows));
-    expect(shape(after.rows)).toEqual([
-      't:Local 1',
-      't:Local 2',
-      'USERS',
-      'u:@annar',
-      'MORE-TITLES',
-      't:Remote 1',
-      't:Remote 2',
-      't:Remote 3',
-      't:Remote 4',
-    ]);
-  });
-
-  it('heads the provider titles Titles, not More titles, when no local title led', () => {
-    const { rows } = allRows({
-      query: 'anna r',
-      titles: manyTitles(2, 'Remote'),
-      people: [],
-      users: [anna],
-      leadCount: 0,
-    });
-
-    expect(shape(rows)).toEqual(['USERS', 'u:@annar', 'TITLES', 't:Remote 1', 't:Remote 2']);
-  });
-
-  it('draws no section before the local titles have answered', () => {
-    const { rows, users } = allRows({
+  it('draws no Cast or Users section before the local titles have answered', () => {
+    const { rows, users, cast } = allRows({
       query: 'anna',
       titles: [],
-      people: [],
+      people: [person(1, 'Anna Kendrick', 5)],
       users: [anna],
       ready: false,
     });
 
     expect(rows).toEqual([]);
     expect(users).toEqual([]);
+    expect(cast).toEqual([]);
+  });
+
+  it('holds a Users section that answered first until the provider titles have arrived', () => {
+    // Independent review: no local titles, accounts answer at once, TMDB a second later.
+    // Drawing Users early would push it eleven rows down when the titles land.
+    const early = allRows({
+      query: 'anna',
+      titles: [],
+      people: [],
+      users: [anna],
+      ready: false,
+    });
+    expect(early.rows).toEqual([]);
+
+    const settled = allRows({
+      query: 'anna',
+      titles: [...manyTitles(3, 'Anna'), { ...title('s', 'Anna Show'), kind: 'series' }],
+      people: [],
+      users: [anna],
+    });
+    expect(shape(settled.rows).slice(-2)).toEqual(['USERS', 'u:@annar']);
+  });
+
+  it('does not hold the Users section of an @ query, which leads the page', () => {
+    const { rows } = allRows({
+      query: '@annar',
+      titles: [],
+      people: [],
+      users: [anna],
+      ready: false,
+    });
+    expect(shape(rows)).toEqual(['USERS', 'u:@annar']);
+  });
+
+  it('adds Cast and Users below the titles once they have answered, never above', () => {
+    const titles = manyTitles(2, 'Anna');
+    const before = allRows({ query: 'anna', titles, people: [], users: [anna], ready: false });
+    const after = allRows({
+      query: 'anna',
+      titles,
+      people: [person(1, 'Anna Kendrick', 5)],
+      users: [anna],
+    });
+
+    expect(after.rows.slice(0, before.rows.length)).toEqual(before.rows);
+    expect(shape(after.rows)).toEqual([
+      'MOVIES',
+      't:Anna 1',
+      't:Anna 2',
+      'CAST',
+      'c:Anna Kendrick',
+      'USERS',
+      'u:@annar',
+    ]);
   });
 });
 
 describe('an exact title and later pages on the All page', () => {
-  // Matches "don" by handle, so the Users section really is on the page.
-  const donna = user('d', 'donna', 'Donna Noble');
-  const usersHeader = (rows: AllRow[]) =>
-    rows.findIndex((row) => row.type === 'header' && row.section === 'users');
-
-  it('keeps the sections where they were when an exact provider title takes the top of the lead', () => {
-    // Two local prefix titles lead; then the provider's exact "Don" is put first. The lead
-    // is still two rows, so the Users section does not move; a local title moves below it.
-    const local = [title('darko', 'Donnie Darko'), title('lookup', "Don't Look Up")];
-    const before = allRows({
+  it('leads the Movies preview with the exact title', () => {
+    // useTitleSearch puts an exact "Don" first; the preview keeps that order.
+    const { rows } = allRows({
       query: 'don',
-      titles: local,
+      titles: [
+        title('don-2006', 'Don'),
+        title('darko', 'Donnie Darko'),
+        title('lookup', "Don't Look Up"),
+        title('don-juan', 'Don Juan'),
+      ],
       people: [],
-      users: [donna],
-      leadCount: 2,
-    });
-    const after = allRows({
-      query: 'don',
-      titles: [title('don-2006', 'Don'), ...local, title('don-juan', 'Don Juan')],
-      people: [],
-      users: [donna],
-      leadCount: 2,
+      users: [],
     });
 
-    expect(usersHeader(after.rows)).toBe(usersHeader(before.rows));
-    expect(shape(after.rows)).toEqual([
-      't:Don',
-      't:Donnie Darko',
-      'USERS',
-      'u:@donna',
-      'MORE-TITLES',
-      "t:Don't Look Up",
-      't:Don Juan',
-    ]);
+    expect(shape(rows)).toEqual(['MOVIES', 't:Don', 't:Donnie Darko', "t:Don't Look Up"]);
   });
 
-  it('keeps the sections where they were as later pages are appended', () => {
+  it('leaves the page unchanged as later pages are appended: they only feed See all', () => {
+    const donna = user('d', 'donna', 'Donna Noble');
     const first = manyTitles(6, 'Don');
     const before = allRows({
       query: 'don',
       titles: first,
       people: [],
       users: [donna],
-      leadCount: 3,
     });
     const after = allRows({
       query: 'don',
       titles: [...first, ...manyTitles(20, 'Later')],
       people: [],
       users: [donna],
-      leadCount: 3,
     });
 
-    expect(usersHeader(after.rows)).toBe(usersHeader(before.rows));
-    expect(after.rows.slice(0, before.rows.length)).toEqual(before.rows);
+    expect(after.rows).toEqual(before.rows);
   });
 });

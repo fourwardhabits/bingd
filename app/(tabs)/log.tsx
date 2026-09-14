@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -15,7 +15,7 @@ import { mustReconcile, newOperationId, setWatchlist } from '@/features/collecti
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { allRows, type AllRow, type AllSection } from '@/features/search/all-sections';
-import { cooldownClock } from '@/features/search/provider-budget';
+import { cooldownClock, providerQueryOf } from '@/features/search/provider-budget';
 import { useCastSearch, type CastSearchResult } from '@/features/search/use-cast-search';
 import {
   seriesChildState,
@@ -24,6 +24,7 @@ import {
 } from '@/features/search/series-state';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useScrollGatedEnd } from '@/features/search/use-scroll-gated-end';
+import { useScrollReset } from '@/features/search/use-scroll-reset';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { useUserSearch, type UserResult } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
@@ -52,13 +53,13 @@ import {
  * All first, because the filter is a narrowing of a search the user has already made
  * and the unnarrowed state is the one they arrive in.
  *
- * **Five chips, and All shows every kind** (founder, 2026-09-13). Movies and TV filter
- * the title results. Cast and Users show one kind alone, in full. All leads with titles
- * and adds the performers and accounts a query plainly means as compact sections with a
- * See all, so discovering that an actor or a friend is searchable does not depend on
- * already knowing which chip to press. The rows still say what they are (poster for a
- * title, round portrait for a person) and restrained section headers name the groups.
- * See `all-sections.ts` for who qualifies and in what order.
+ * **Five chips, and All previews every kind** (founder, 2026-09-13; grouped 2026-09-14).
+ * Movies and TV filter the title results. Cast and Users show one kind alone, in full. All
+ * is four short sections, Movies, TV, Cast and Users, each with a See all that selects its
+ * chip, so discovering that an actor or a friend is searchable does not depend on already
+ * knowing which chip to press. The rows still say what they are (poster for a title, round
+ * portrait for a person) and restrained section headers name the groups. See
+ * `all-sections.ts` for who qualifies and in what order.
  *
  * **No result counts on the chips**, deliberately: a count per chip would mean running
  * every search for every kind on every keystroke, and the Cast count would cost a
@@ -200,8 +201,7 @@ export default function LogScreen() {
     providerAvailableAt,
     providerFailed,
     providerPeople,
-    localResultCount,
-    localAnswered,
+    titlesSettled,
     loadingMorePages,
     morePagesFailed,
     morePagesRateLimited,
@@ -239,12 +239,11 @@ export default function LogScreen() {
   /**
    * **What the page lists, per chip** (founder, 2026-09-13).
    *
-   * - **All** is grouped: titles lead and stay dominant, and the performers and accounts
-   *   the query plainly means follow as their own sections, three each, each with a See
-   *   all that selects its chip. Nobody has to already know that Cast and Users exist to
-   *   find Leonardo DiCaprio or a friend. Who qualifies, and in what order the sections
-   *   fall, is `all-sections.ts`: every type is gated on its own relevance and never
-   *   scored against another.
+   * - **All** is grouped: Movies, TV, Cast and Users, three rows each, each with a See all
+   *   that selects its chip when the chip holds more. Nobody has to already know that Cast
+   *   and Users exist to find Leonardo DiCaprio or a friend. Who qualifies, and in what
+   *   order the sections fall, is `all-sections.ts`: every type is gated on its own
+   *   relevance and never scored against another.
    * - **Movies and TV** are title-only narrowings.
    * - **Users** is every account the server returned, no gate and no cap: the chip press
    *   is the intent the gate would be guessing.
@@ -262,10 +261,9 @@ export default function LogScreen() {
         titles: results,
         people: providerPeople,
         users: userResults,
-        // Only local titles lead, and nothing is drawn until they have answered, so a
-        // later arrival never pushes a section that is already on screen.
-        leadCount: localResultCount,
-        ready: localAnswered,
+        // Cast and Users wait for every title this query will get, so neither is drawn and
+        // then pushed down by titles arriving above it.
+        ready: titlesSettled,
       });
     }
     if (filter === 'users') {
@@ -280,17 +278,15 @@ export default function LogScreen() {
       cast: [],
       users: [],
     };
-  }, [
-    filter,
-    input,
-    results,
-    providerPeople,
-    userResults,
-    filtered,
-    localResultCount,
-    localAnswered,
-  ]);
+  }, [filter, input, results, providerPeople, userResults, filtered, titlesSettled]);
   const shownUsers = page.users;
+
+  /**
+   * The dataset the list is showing: which chip, and the query as the search normalises it.
+   * A change starts the list at the top (`useScrollReset`); a page appended to the same
+   * chip and query does not change it, so reading down never jumps back.
+   */
+  const listKey = `${filter}|${providerQueryOf(input)}`;
 
   /**
    * History is written on commitment, never on typing.
@@ -516,7 +512,7 @@ export default function LogScreen() {
       )}
 
       {!idle && filter === 'cast' ? (
-        <CastResults search={cast} onOpen={openCast} />
+        <CastResults search={cast} onOpen={openCast} listKey={listKey} />
       ) : (
         <Results
           idle={idle}
@@ -526,6 +522,7 @@ export default function LogScreen() {
           usersError={users.isError}
           cast={page.cast}
           rows={page.rows}
+          listKey={listKey}
           onSeeAll={setFilter}
           onOpenCast={openCast}
           relationshipLabel={relationshipLabel}
@@ -539,13 +536,16 @@ export default function LogScreen() {
           onClearRecent={clear}
           onPickRecent={setInput}
           searchingWider={providerSearching}
-          loadingMore={loadingMorePages}
-          moreFailed={morePagesFailed}
+          // A later page's progress belongs to the Movies or TV list that asked for it; All
+          // is previews and never asks, so it does not report one either.
+          loadingMore={filter !== 'all' && loadingMorePages}
+          moreFailed={filter !== 'all' && morePagesFailed}
           moreRateLimited={morePagesRateLimited}
           moreAvailableAt={morePagesAvailableAt}
-          // Titles only: Users is one server answer, not pages.
-          hasMore={!peopleMode && hasMorePages}
-          onEndOfList={peopleMode ? undefined : loadMorePages}
+          // Movies and TV only. Users is one server answer, not pages, and All is previews:
+          // its See all is the way to the rest, so reaching its end asks for nothing.
+          hasMore={filter !== 'all' && !peopleMode && hasMorePages}
+          onEndOfList={filter === 'all' || peopleMode ? undefined : loadMorePages}
           onRetryMore={retryMorePages}
           exhausted={providerExhausted}
           rateLimited={providerRateLimited}
@@ -646,6 +646,7 @@ function Results({
   usersError,
   cast,
   rows,
+  listKey,
   onSeeAll,
   onOpenCast,
   relationshipLabel,
@@ -690,6 +691,8 @@ function Results({
   cast: CastSearchResult[];
   /** The page, in order: see `allRows`. */
   rows: AllRow[];
+  /** Which chip and query the rows are for. A change starts the list at the top. */
+  listKey: string;
   /** A section's See all: selects that section's chip. */
   onSeeAll: (section: AllSection) => void;
   onOpenCast: (person: CastSearchResult) => void;
@@ -740,6 +743,7 @@ function Results({
 }) {
   // Declared before the early returns below, as every hook must be.
   const { onScrollBeginDrag, onEndReached } = useScrollGatedEnd(onEndOfList, rows.length);
+  const list = useScrollReset<FlashListRef<AllRow>>(listKey);
 
   if (idle) {
     return (
@@ -948,6 +952,12 @@ function Results({
   return (
     <View style={styles.list}>
       <FlashList
+        ref={list}
+        // FlashList 2 keeps the first visible row in place when data changes, by scrolling
+        // after it re-measures — which would undo `useScrollReset`'s return to the top one
+        // commit later, and hide rows that arrive above the top (independent review). A
+        // search list is read from its top, so neither is wanted.
+        maintainVisibleContentPosition={SEARCH_LIST_POSITION}
         data={rows}
         getItemType={(item) => item.type}
         // The wider search runs after the local one and adds to it, so its progress is
@@ -1068,11 +1078,11 @@ function Results({
         onEndReachedThreshold={0.5}
         renderItem={({ item }) => {
           if (item.type === 'header') {
-            // The design system's one section header: maroon label, compact, no card. The
-            // See all on Cast and Users selects that chip, which is where the whole list
-            // already is; Titles has none, because All is already the whole title list.
+            // The design system's one section header: maroon label, compact, no card. See all
+            // selects the section's chip, which is where the whole list already is, and is
+            // offered only when that chip holds more than the preview.
             const { section } = item;
-            return section === 'cast' || section === 'users' ? (
+            return item.seeAll ? (
               <SectionHeader
                 title={SECTION_TITLES[section]}
                 actionLabel="See all"
@@ -1275,11 +1285,15 @@ function widerSearchReturns(availableAt: number | null) {
 function CastResults({
   search,
   onOpen,
+  listKey,
 }: {
   search: ReturnType<typeof useCastSearch>;
   onOpen: (person: CastSearchResult) => void;
+  /** Which query the performers are for. A new one starts the list at the top. */
+  listKey: string;
 }) {
   const { results } = search;
+  const list = useScrollReset<FlashListRef<CastSearchResult>>(listKey);
 
   if (!results.length) {
     if (search.rateLimited) {
@@ -1321,6 +1335,8 @@ function CastResults({
   return (
     <View style={styles.list}>
       <FlashList
+        ref={list}
+        maintainVisibleContentPosition={SEARCH_LIST_POSITION}
         data={results}
         keyExtractor={(person) => `cast:${person.id}`}
         keyboardShouldPersistTaps="handled"
@@ -1383,16 +1399,25 @@ function CastResults({
 /**
  * What each section header says, and what its See all says to a screen reader.
  *
- * Two See alls can be on one page, so each is named for what it opens: "See all" twice
- * is two controls a screen reader cannot tell apart.
+ * Four See alls can be on one page, so each is named for what it opens: "See all" four
+ * times is four controls a screen reader cannot tell apart. The chip labels, so the header
+ * and the chip it selects say the same word.
  */
 const SECTION_TITLES = {
-  titles: 'Titles',
-  'more-titles': 'More titles',
+  movies: 'Movies',
+  tv: 'TV',
   cast: 'Cast',
   users: 'Users',
-} as const;
-const SEE_ALL_LABELS = { cast: 'See all cast', users: 'See all users' } as const;
+} as const satisfies Record<AllSection, string>;
+const SEE_ALL_LABELS = {
+  movies: 'See all movies',
+  tv: 'See all TV',
+  cast: 'See all cast',
+  users: 'See all users',
+} as const satisfies Record<AllSection, string>;
+
+/** See the Results list: a search list starts at its top and is not anchored elsewhere. */
+const SEARCH_LIST_POSITION = { disabled: true } as const;
 
 const styles = StyleSheet.create({
   /**

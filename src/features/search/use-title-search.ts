@@ -1,4 +1,9 @@
-import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useQueries,
+  useQuery,
+  type UseQueryResult,
+} from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
 import { queryKeys } from '@/lib/query';
@@ -186,7 +191,10 @@ export function useTitleSearch(
         p_limit: 25,
       });
       if (error) throw error;
-      const rpcRows = (data ?? []) as Omit<SearchResult, 'genres' | 'runtime_minutes' | 'season_count'>[];
+      const rpcRows = (data ?? []) as Omit<
+        SearchResult,
+        'genres' | 'runtime_minutes' | 'season_count'
+      >[];
       if (!rpcRows.length) return [];
 
       const ids = rpcRows.map((row) => row.id);
@@ -217,7 +225,10 @@ export function useTitleSearch(
       const seasonCountBySeries = new Map<string, number>();
       for (const row of seasonRows ?? []) {
         if (!row.parent_id) continue;
-        seasonCountBySeries.set(row.parent_id, (seasonCountBySeries.get(row.parent_id) ?? 0) + 1);
+        seasonCountBySeries.set(
+          row.parent_id,
+          (seasonCountBySeries.get(row.parent_id) ?? 0) + 1,
+        );
       }
 
       return rpcRows.map((row) => {
@@ -227,10 +238,15 @@ export function useTitleSearch(
           // A search result is a movie or a series, never a season, so there is no
           // parent to inherit from and the subject is the row itself.
           genres: meta
-            ? productGenres({ kind: meta.kind, genres: meta.genres, language: meta.original_language })
+            ? productGenres({
+                kind: meta.kind,
+                genres: meta.genres,
+                language: meta.original_language,
+              })
             : [],
           runtime_minutes: meta?.runtime_minutes ?? null,
-          season_count: row.kind === 'series' ? seasonCountBySeries.get(row.id) ?? 0 : undefined,
+          season_count:
+            row.kind === 'series' ? (seasonCountBySeries.get(row.id) ?? 0) : undefined,
         };
       });
     },
@@ -330,7 +346,11 @@ export function useTitleSearch(
   const nextPage = extraCount + 2;
   const hasMorePages = provider.data !== undefined && nextPage <= totalPages;
   const canLoadMore =
-    providerEnabled && hasMorePages && !provider.isFetching && extra.lastSettled && !extra.error;
+    providerEnabled &&
+    hasMorePages &&
+    !provider.isFetching &&
+    extra.lastSettled &&
+    !extra.error;
 
   // The latest provider answer, held across the keystrokes before the next one lands.
   // Adjusted during render rather than in an effect, which is React's pattern for state
@@ -353,7 +373,9 @@ export function useTitleSearch(
     // keystroke it still names the previous query, and that query's later pages under this
     // query's rows would be a wrong answer rather than an early one.
     const later =
-      providerQuery === providerQueryOf(query) ? extra.data.flatMap((page) => page?.titles ?? []) : [];
+      providerQuery === providerQueryOf(query)
+        ? extra.data.flatMap((page) => page?.titles ?? [])
+        : [];
 
     /**
      * Stale local rows are dropped the moment the provider *settles* on this query.
@@ -378,8 +400,8 @@ export function useTitleSearch(
      */
     const providerSettled =
       providerEnabled && !provider.isFetching && (provider.isFetched || provider.isError);
-    const local = result.isPlaceholderData && providerSettled ? [] : result.data ?? [];
-    if (!remote.length) return { rows: exactFirst(local, query), localCount: local.length };
+    const local = result.isPlaceholderData && providerSettled ? [] : (result.data ?? []);
+    if (!remote.length) return exactFirst(local, query);
 
     // Local ordering wins, because search_titles ranks exact and prefix matches
     // deliberately (20260814040000 §3) and TMDB's relevance does not know what the
@@ -416,7 +438,7 @@ export function useTitleSearch(
       return true;
     });
 
-    return { rows: [...firstPage, ...appended], localCount: local.length };
+    return [...firstPage, ...appended];
   }, [
     query,
     providerQuery,
@@ -434,22 +456,25 @@ export function useTitleSearch(
     ...result,
     /** True while the user has typed too little to search, which is not an empty result. */
     idle: !enabled,
-    results: merged.rows,
+    results: merged,
     /**
-     * How many of `results` came from the local pass: always the first ones, since
-     * provider-only titles are appended after them.
+     * Whether every title this query will get has arrived: the local pass has answered it (or
+     * failed), and the provider has answered it, failed, or is not going to be asked (too
+     * short, narrowed to Users or Cast, or the hour's budget spent).
      *
-     * The All page lets at most this many titles lead its Cast and Users sections. A
-     * provider title arrives a second or more after a section may already be drawn, and
-     * counting it into the lead would push that section down under a reader's thumb.
+     * The All page draws Cast and Users below the title sections only once this is true, so
+     * titles arriving later never push a section already on screen down under a reader's
+     * thumb (independent review, 2026-09-14). Per query, not per session: the local pass
+     * having answered some earlier query says nothing about this one.
      */
-    localResultCount: merged.localCount,
-    /**
-     * Whether the local pass has answered at all, for any query this session, or failed.
-     * Until it has, the All page draws no sections: local titles inserted above an account
-     * section that was already on screen would move it just as a provider title would.
-     */
-    localAnswered: result.data !== undefined || result.isError,
+    titlesSettled:
+      ((result.data !== undefined && !result.isPlaceholderData) || result.isError) &&
+      (!wide ||
+        cooldownUntil !== null ||
+        providerQueryOf(query).length < MIN_QUERY_LENGTH ||
+        (providerQuery === providerQueryOf(query) &&
+          !provider.isFetching &&
+          (provider.isFetched || provider.isError))),
     /**
      * Retries **both** passes, which is what "Try again" has to mean.
      *
@@ -496,7 +521,9 @@ export function useTitleSearch(
     morePagesRateLimited: extra.error instanceof AdapterError && extra.error.isRateLimit,
     /** When a refused later page can be asked for again: the top of the next hour. */
     morePagesAvailableAt:
-      extra.error instanceof AdapterError && extra.error.isRateLimit ? providerCooldownUntil() : null,
+      extra.error instanceof AdapterError && extra.error.isRateLimit
+        ? providerCooldownUntil()
+        : null,
     /**
      * Asks for the next page, if there is one and nothing is already on its way. Returns
      * whether it asked. The screen calls this only when a reader scrolling reaches the end.
