@@ -72,6 +72,7 @@
     "expo-system-ui": "~57.0.2",
     "expo-updates": "~57.0.13",
     "expo-web-browser": "~57.0.2",
+    "fflate": "^0.8.3",
     "posthog-react-native": "^4.63.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",

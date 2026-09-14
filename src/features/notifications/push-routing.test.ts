@@ -76,6 +76,29 @@ describe('a live payload', () => {
   });
 });
 
+describe('an import push', () => {
+  it.each(['import_started', 'import_completed', 'import_failed'])(
+    'opens %s on the exact job it names, whatever the app was doing when it was tapped',
+    (kind) => {
+      expect(
+        hrefForPush(
+          payload({ kind, actorUsername: null, mediaItemId: null, importJobId: 'job-42' }),
+        ),
+      ).toEqual({ pathname: '/settings/import', params: { job: 'job-42' } });
+    },
+  );
+
+  it('does not let an import job id steer any other kind', () => {
+    expect(hrefForPush(payload({ kind: 'follow', importJobId: 'job-42' }))).toBe('/u/suraj');
+  });
+
+  it('refuses a job id that is not a string', () => {
+    expect(
+      hrefForPush(payload({ kind: 'import_completed', actorUsername: null, importJobId: 42 })),
+    ).toEqual({ pathname: '/settings/import' });
+  });
+});
+
 describe('a payload whose subject is gone', () => {
   /**
    * Staler than an inbox row by construction — the payload was composed when the
@@ -88,8 +111,14 @@ describe('a payload whose subject is gone', () => {
       // The two actorless kinds route to the reader's *own* profile — Awards behind a
       // parameter, goals plain — so neither has a subject to have gone missing and
       // neither falls back to the inbox. Everything else does.
+      // The import kinds open the importer, which is a real screen with or without the job.
       const ownProfile = kind === 'award_earned' || kind === 'goal_completed';
-      const landed = ownProfile ? typeof href === 'object' : href === PUSH_FALLBACK_HREF;
+      const importer = kind.startsWith('import_');
+      const landed = importer
+        ? JSON.stringify(href) === JSON.stringify({ pathname: '/settings/import' })
+        : ownProfile
+          ? typeof href === 'object'
+          : href === PUSH_FALLBACK_HREF;
       expect(landed).toBe(true);
     }
   });

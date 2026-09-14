@@ -104,6 +104,11 @@ describe('the routing matrix', () => {
     // The earner's own profile, where GoalsSection sits — not the feed post the same
     // crossing produced, and not the Awards sheet.
     goal_completed: { kind: 'goals' },
+    // The fixture row's subject is a feed event, not a job, so these resolve to the importer
+    // itself. The job-bearing case is asserted on its own below.
+    import_started: { kind: 'import', jobId: null },
+    import_completed: { kind: 'import', jobId: null },
+    import_failed: { kind: 'import', jobId: null },
   };
 
   for (const kind of ROUTED_KINDS) {
@@ -130,6 +135,36 @@ describe('the routing matrix', () => {
       expect(targetChainFor(stripped).length).toBeGreaterThan(0);
       expect(targetFor(stripped)).toBeDefined();
     }
+  });
+});
+
+describe('a Letterboxd import', () => {
+  const importRow = (kind: NotificationKind, jobId: string | null = 'job-7') =>
+    row({
+      kind,
+      actorId: null,
+      actorUsername: null,
+      actorName: null,
+      mediaItemId: null,
+      mediaTitle: null,
+      mediaKind: null,
+      subjectType: jobId ? 'import_job' : null,
+      subjectId: jobId,
+    });
+
+  it.each(['import_started', 'import_completed', 'import_failed'] as const)(
+    'opens %s on its own job, which the import screen reads from the route',
+    (kind) => {
+      const target = targetFor(importRow(kind));
+      expect(target).toEqual({ kind: 'import', jobId: 'job-7' });
+      expect(hrefFor(target)).toEqual({ pathname: '/settings/import', params: { job: 'job-7' } });
+      expect(hintFor(importRow(kind))).toBe('Opens your Letterboxd import');
+    },
+  );
+
+  it('falls back to the importer rather than nowhere when the row has lost its job', () => {
+    const target = targetFor(importRow('import_completed', null));
+    expect(hrefFor(target)).toEqual({ pathname: '/settings/import' });
   });
 });
 

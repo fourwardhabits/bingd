@@ -41,16 +41,17 @@ const releaseDismissals = async () => {
  * the requests UIKit would have thrown away.
  */
 const shows = () =>
-  (globalThis as unknown as {
-    __modalShows: { hold: boolean; pending: (() => void)[]; refused: number };
-  }).__modalShows;
+  (
+    globalThis as unknown as {
+      __modalShows: { hold: boolean; pending: (() => void)[]; refused: number };
+    }
+  ).__modalShows;
 const releaseShows = async () => {
   const waiting = shows().pending.splice(0);
   await act(async () => {
     waiting.forEach((arrive) => arrive());
   });
 };
-
 
 /**
  * The first five, as a loop: pick, rank, pick, rank (founder, physical iOS 1.0.1 build 9).
@@ -630,9 +631,7 @@ describe('one turn of the loop', () => {
     await releaseDismissals();
 
     // And once iOS says the presentation is gone, the run carries on exactly as before.
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('rank_start', expect.anything()),
-    );
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('rank_start', expect.anything()));
   });
 
   /**
@@ -926,6 +925,48 @@ describe('Your First Five', () => {
       .getAllByText(/^(First|Second|Third|Fourth|Fifth)$/)
       .map((n) => n.props.children);
     expect(rows).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth']);
+  });
+
+  /**
+   * **After the five, and not during them.** The Letterboxd pointer sat on the first
+   * ranking screen in an earlier pass, which is before First Five rather than after it.
+   * It is one sentence and not a button on purpose: the flow guard replaces any route
+   * pushed out of the onboarding group, and a sheet here would be one Modal inside
+   * another. Both halves are asserted, because moving it back would pass a test that
+   * only looked for the words.
+   */
+  it('mentions the Letterboxd import once the five are placed', async () => {
+    const view = await arrive();
+
+    // What it is, what it brings, and exactly where it lives (founder lock, 2026-09-13). The
+    // card is one accessible element, so its lines are queried as hidden text and the
+    // sentence a screen reader hears is asserted as its label.
+    const hidden = { includeHiddenElements: true };
+    expect(view.getByText('Already use Letterboxd?', hidden)).toBeTruthy();
+    expect(view.getByText('Import your watch history anytime from', hidden)).toBeTruthy();
+    expect(view.getByText('Settings → Import from Letterboxd', hidden)).toBeTruthy();
+    expect(
+      view.getByLabelText(
+        'Already use Letterboxd? Import your watch history anytime from Settings, then Import from Letterboxd.',
+      ),
+    ).toBeTruthy();
+    // Still no fork: it names Settings and offers no way out of the flow.
+    expect(view.queryByRole('button', { name: /Letterboxd|Settings/ })).toBeNull();
+  });
+
+  /**
+   * **Below the five, not above them** (physical QA, 2026-09-12). The first version was a
+   * footnote under the intro that the founder never noticed; the card sits after the list
+   * so it registers without standing between somebody and their own ranking.
+   */
+  it('puts the Letterboxd card after the fifth row', async () => {
+    const view = await arrive();
+    await waitFor(() => expect(view.getByText('Fifth')).toBeTruthy());
+
+    const order = view
+      .getAllByText(/^(First|Fifth|Already use Letterboxd\?)$/, { includeHiddenElements: true })
+      .map((n) => n.props.children);
+    expect(order).toEqual(['First', 'Fifth', 'Already use Letterboxd?']);
   });
 
   it('says what the five bought without explaining the algorithm again', async () => {

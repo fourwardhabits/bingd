@@ -300,6 +300,26 @@ describe('what this person likes', () => {
     ];
   });
 
+  /**
+   * **Movies counts what they watched** (20260917001600), and when that count cannot be
+   * read the profile still draws, with the ranked count in its place (independent review).
+   */
+  it('shows the watched count in the stat row', async () => {
+    mockRpcResults.profile_title_counts = [{ movies: 25, tv: 3 }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Movies: 25')).toBeTruthy());
+    expect(view.getByLabelText('TV: 3')).toBeTruthy();
+  });
+
+  it('falls back to the ranked count rather than failing the profile', async () => {
+    mockRpcErrors.profile_title_counts = { message: 'function does not exist' };
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Movies: 2')).toBeTruthy());
+    expect(view.queryByText(/Could not load/)).toBeNull();
+  });
+
   it('leads with their titles and the scores on them', async () => {
     const view = await open();
 

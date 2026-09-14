@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -37,8 +37,10 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+const mockPush = jest.fn();
+
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: mockPush }),
   Stack: { Screen: () => null },
   useFocusEffect: () => {},
 }));
@@ -1036,5 +1038,50 @@ describe('the watched-with row', () => {
     await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
 
     expect(view.queryByRole('button', { name: 'Rank' })).toBeNull();
+  });
+});
+
+describe('a Letterboxd import', () => {
+  const importRow = (kind: string, overrides: Record<string, unknown> = {}) =>
+    follow({
+      id: `${kind}-1`,
+      kind,
+      type: kind,
+      actor_id: null,
+      actor_username: null,
+      actor_display_name: null,
+      subject_type: 'import_job',
+      subject_id: 'job-9',
+      payload: { job_id: 'job-9', watched: 19 },
+      ...overrides,
+    });
+
+  it.each([
+    ['import_started', 'Letterboxd import started'],
+    ['import_completed', 'Your Letterboxd history is ready'],
+    ['import_failed', 'We couldn’t finish your Letterboxd import'],
+  ])('draws %s with no actor, in the words the push used', async (kind, headline) => {
+    mockNotifications.length = 0;
+    mockNotifications.push(importRow(kind));
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(headline)).toBeTruthy());
+    // Spoken as the headline alone: an actorless row has no name to template in.
+    expect(view.getByLabelText(new RegExp(`^Unread\. ${headline}$`))).toBeTruthy();
+    expect(view.queryByText(/null|match/i)).toBeNull();
+  });
+
+  it('opens the exact job it is about when tapped with the app open', async () => {
+    mockPush.mockClear();
+    mockNotifications.length = 0;
+    mockNotifications.push(importRow('import_completed'));
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Your Letterboxd history is ready')).toBeTruthy());
+    fireEvent.press(view.getByLabelText(/Your Letterboxd history is ready/));
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/settings/import',
+      params: { job: 'job-9' },
+    });
   });
 });

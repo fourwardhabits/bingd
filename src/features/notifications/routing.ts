@@ -80,6 +80,12 @@ export type NotificationTarget =
   /** The reader's own profile, where their annual goals live (20260829000200). */
   | { kind: 'goals' }
   /**
+   * A Letterboxd import (20260917001500), by job. `jobId` is null when the row lost it,
+   * and the import screen is still the right place: it opens on that job when it can find
+   * it and on the importer when it cannot, so this link never dead-ends.
+   */
+  | { kind: 'import'; jobId: string | null }
+  /**
    * Stay on the inbox and say why. Reached when every better link is gone.
    *
    * Not silence: a tap that does nothing is indistinguishable from a tap the app
@@ -284,6 +290,16 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      */
     case 'goal_completed':
       return [{ kind: 'goals' }];
+
+    case 'import_started':
+    case 'import_completed':
+    case 'import_failed':
+      return [
+        {
+          kind: 'import',
+          jobId: row.subjectType === 'import_job' && row.subjectId ? row.subjectId : null,
+        },
+      ];
   }
 }
 
@@ -332,6 +348,10 @@ export function hrefFor(target: NotificationTarget): Href | null {
     // identity block, rather than behind a sheet the way Awards is.
     case 'goals':
       return { pathname: '/profile' };
+    case 'import':
+      return target.jobId
+        ? { pathname: '/settings/import', params: { job: target.jobId } }
+        : { pathname: '/settings/import' };
     /** Null is "stay here"; the caller says why, from `target.reason`. */
     case 'unavailable':
       return null;
@@ -360,6 +380,8 @@ export function hintFor(row: Notification): string {
       return 'Opens the award you earned';
     case 'goals':
       return 'Opens your goals';
+    case 'import':
+      return 'Opens your Letterboxd import';
     case 'unavailable':
       return 'No longer available';
   }
@@ -406,6 +428,8 @@ export type PushTapPayload = {
    * to the title rather than to nothing.
    */
   feedEventId?: unknown;
+  /** The import a lifecycle push is about (20260917001500). Absent on every other kind. */
+  importJobId?: unknown;
 };
 
 /** The inbox. Reached when nothing better survived, and a real destination either way. */
@@ -439,13 +463,16 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
    * says what subject_id is"; this is where a push is translated into it.
    */
   const eventId = readString(payload.feedEventId);
+  // The same translation for an import: the sender names the job, the resolver reads a
+  // subject. Only an import kind sends it, and only an import kind reads it.
+  const jobId = readString(payload.importJobId);
 
   const target = targetFor({
     kind: kind as NotificationKind,
     actorUsername: readString(payload.actorUsername),
     mediaItemId: readString(payload.mediaItemId),
-    subjectType: eventId ? 'feed_event' : null,
-    subjectId: eventId,
+    subjectType: eventId ? 'feed_event' : jobId ? 'import_job' : null,
+    subjectId: eventId ?? jobId,
   } as Notification);
 
   return hrefFor(target) ?? PUSH_FALLBACK_HREF;
@@ -468,4 +495,7 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'invite_welcome',
   'award_earned',
   'goal_completed',
+  'import_started',
+  'import_completed',
+  'import_failed',
 ];

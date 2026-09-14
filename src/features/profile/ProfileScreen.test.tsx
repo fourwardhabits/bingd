@@ -25,7 +25,45 @@ const mockPush = jest.fn();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
-    rpc: () => Promise.resolve({ data: null, error: null }),
+    /**
+     * `profile_title_counts` answers from the same tables the screen's other reads use, so a
+     * test that seeds rankings or watched rows sees the stat row the server would draw:
+     * distinct titles across both, films as Movies and seasons as TV (20260917001600). It
+     * fails with the rankings read, because both are the one "your counts" request to the
+     * reader, and the fallback tests below are about that request.
+     */
+    rpc: (name: string, args: { p_user?: string } = {}) => {
+      if (name !== 'profile_title_counts') return Promise.resolve({ data: null, error: null });
+      mockReads[name] = (mockReads[name] ?? 0) + 1;
+      if (mockFailing.has('rankings') || mockFailing.has(name)) {
+        return Promise.resolve({ data: null, error: { message: 'offline' } });
+      }
+      const kindOf = new Map<string, string>();
+      const mine = (row: Record<string, unknown>) => row.user_id === args.p_user;
+      for (const row of (mockTables.rankings ?? []) as Record<string, unknown>[]) {
+        if (mine(row)) {
+          kindOf.set(
+            String(row.media_item_id),
+            row.category === 'tv_seasons' ? 'season' : 'movie',
+          );
+        }
+      }
+      for (const row of (mockTables.user_media ?? []) as Record<string, unknown>[]) {
+        if (!mine(row)) continue;
+        const item = row.media_items as { kind?: string } | undefined;
+        kindOf.set(String(row.media_item_id), item?.kind ?? 'movie');
+      }
+      const kinds = [...kindOf.values()];
+      return Promise.resolve({
+        data: [
+          {
+            movies: kinds.filter((kind) => kind === 'movie').length,
+            tv: kinds.filter((kind) => kind === 'season').length,
+          },
+        ],
+        error: null,
+      });
+    },
     from: (table: string) => {
       /**
        * Predicates rather than a column→value map, because `in` filters too now.
@@ -358,6 +396,25 @@ describe('the stat row', () => {
     expect(view.queryByText('Could not load your counts')).toBeNull();
   });
 
+  /**
+   * **Movies is the watched collection, not the ranked count** (founder, 2026-09-12). An
+   * imported Letterboxd history has no rankings, and "Movies: 5" beside twenty-five watched
+   * films is the defect physical QA found. A film both ranked and imported counts once.
+   */
+  it('counts imported watched films in Movies, and a ranked one that is also imported once', async () => {
+    mockTables.rankings = [rankedRow('film-1', 1), rankedRow('film-2', 2)];
+    mockTables.user_media = ['film-2', 'film-3', 'film-4'].map((id) => ({
+      user_id: 'user-1',
+      media_item_id: id,
+      source: 'imported',
+      media_items: movie(id, `Film ${id}`),
+    }));
+
+    const view = await open();
+
+    await waitFor(async () => expect(await stat(view, 'Movies')).toBe('4'));
+  });
+
   it('says zero for an account that genuinely has none', async () => {
     // Deliberate, and not the same answer as a failed read: nobody follows this account
     // and it has ranked nothing, which is a fact rather than an absence of one.
@@ -561,7 +618,8 @@ describe('when a read behind this screen fails', () => {
 
     const view = await open();
     await waitFor(() => expect(view.getByText('Could not load your counts')).toBeTruthy());
-    const before = mockReads.rankings ?? 0;
+    // The counts are one request since 20260917001600: `profile_title_counts`.
+    const before = mockReads.profile_title_counts ?? 0;
 
     mockFailing.delete('rankings');
     await fireEvent.press(retryUnder(view, 'Could not load your counts'));
@@ -569,7 +627,7 @@ describe('when a read behind this screen fails', () => {
     // The read count, not just the copy: a "Try again" that re-renders the same cached
     // failure is the same dead end with a button on it.
     await waitFor(async () => expect(await stat(view, 'Movies')).toBe('1'));
-    expect(mockReads.rankings ?? 0).toBeGreaterThan(before);
+    expect(mockReads.profile_title_counts ?? 0).toBeGreaterThan(before);
     expect(view.queryByText('Could not load your counts')).toBeNull();
   });
 

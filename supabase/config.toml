@@ -38,3 +38,15 @@ verify_jwt = true
 # own here either: `resolveCaller` resolves the token to a real user or to service_role
 # before anything is claimed.
 verify_jwt = true
+
+[functions.letterboxd-import]
+# Same flag and the same coupling as the two above: `index.ts` recognises `service_role`
+# from the `role` claim without verifying a signature, and it may only do that because the
+# platform has already verified one. **Do not set this to false.**
+#
+# Unlike `push-sender`, the gate here is NOT deliberately weak. An invocation chooses
+# real work — it claims rows from `import_rows`, spends provider requests against them and
+# writes `media_items` and `letterboxd_matches`, the last of which is shared across every
+# account. So `index.ts` refuses anything that is not the service role outright, and the
+# only caller is `_drain_import_jobs` posting with the key from the vault.
+verify_jwt = true
