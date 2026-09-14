@@ -154,6 +154,16 @@ const SHOTS = [
     alt: 'The bingd. Your First Five screen: four movies ranked in order, each with its score out of ten',
   },
   {
+    // The head-to-head that comes before the score (founder, 2026-09-14): the whole screen,
+    // Harry Potter and the Goblet of Fire against Spider-Man: Far From Home, with Undo and
+    // Too tough. Taken 36 seconds before shot-score, so the two read as one ranking. 640
+    // wide, not the 760 it used to be, so the pair's two phones are the same size.
+    source: 'Screenshot_20260831_094018_bingd.jpg',
+    name: 'shot-compare',
+    width: 640,
+    alt: 'The bingd. ranking sheet asking which did you like more, Harry Potter and the Goblet of Fire or Spider-Man: Far From Home',
+  },
+  {
     // The score a ranking ends on, the whole screen: the title page behind the sheet, the
     // score, the title and the sheet's actions, with the host phone's bars removed like
     // every other Android capture.
@@ -168,12 +178,6 @@ const SHOTS = [
     width: 640,
     masks: COMMENT_MASKS,
     alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
-  },
-  {
-    source: 'Screenshot_20260831_094018_bingd.jpg',
-    name: 'shot-compare',
-    width: 760,
-    alt: 'The bingd. ranking sheet asking which did you like more, with two film posters side by side',
   },
   {
     source: 'Screenshot_20260831_093909_bingd.jpg',

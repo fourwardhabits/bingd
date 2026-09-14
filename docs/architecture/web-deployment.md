@@ -470,10 +470,12 @@ dependency that Cloudflare never installs. The blur regions are stated in source
 and checked by eye, because a region that drifts shows up immediately as a legible name.
 
 On the front page as of 2026-09-14, by section: the hero `shot-movies` + `shot-tv`; the
-ranking section `shot-ranked` + `shot-score`; the friends section `shot-feed` +
-`shot-comments`; the last section `shot-recommended` + `shot-grouppicks`. WebP, 640px wide,
-with only the hero eager. `shot-compare`, `shot-foryou` and `shot-watchlist` are still
-defined in `shots.mjs` and still in `web/src/`, but the page no longer references them.
+ranking section `shot-compare` + `shot-score` (the head-to-head, then the score it lands
+on); the friends section `shot-feed` + `shot-comments`; the last section `shot-recommended`
++ `shot-grouppicks`. WebP, 640px wide, with only the hero eager. `shot-ranked`,
+`shot-foryou` and `shot-watchlist` are still defined in `shots.mjs` and still in
+`web/src/`, but the page no longer references them. The section labels read How it works,
+A social experience and Find your next binge.
 
 ### Adding or replacing a landing-page screenshot
 

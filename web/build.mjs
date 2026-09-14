@@ -2230,11 +2230,11 @@ const LANDING_STYLES = `
  * by blurring them; the live listing's 04-social frame is the precedent this follows.
  */
 const SHOT = {
-  ranked: {
-    src: '/shot-ranked.webp',
+  compare: {
+    src: '/shot-compare.webp',
     w: 640,
-    h: 1323,
-    alt: 'The bingd. Your First Five screen: four movies ranked in order, each with its score out of ten',
+    h: 1285,
+    alt: 'The bingd. ranking sheet asking which did you like more, Harry Potter and the Goblet of Fire or Spider-Man: Far From Home',
   },
   score: {
     src: '/shot-score.webp',
@@ -2458,7 +2458,7 @@ ${installRow({ primary: true })}
           </div>
 
           <div class="phone-pair stack-narrow">
-            ${shot('ranked')}
+            ${shot('compare')}
             ${shot('score')}
           </div>
         </div>
@@ -2467,7 +2467,7 @@ ${installRow({ primary: true })}
       <section>
         <div class="wrap split">
           <div class="split-copy">
-            <p class="kicker">Friends</p>
+            <p class="kicker">A social experience</p>
             <h2>See what your friends are watching.</h2>
             <p class="section-lede">
               Follow friends to see their rankings in your feed, newest first, and send
@@ -2486,7 +2486,7 @@ ${installRow({ primary: true })}
       <section class="band">
         <div class="wrap split flip">
           <div class="split-copy">
-            <p class="kicker">What&rsquo;s next</p>
+            <p class="kicker">Find your next binge</p>
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
               For you gets sharper the more you rank. Your watchlist keeps what you mean
