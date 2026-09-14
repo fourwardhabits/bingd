@@ -2,6 +2,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useRef } from 'react';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { NotificationStep } from '@/features/onboarding/NotificationStep';
 import { useAdvanceStage } from '@/features/onboarding/use-onboarding-stage';
 import { rankingOutcome } from '@/features/onboarding/pick-five';
@@ -57,6 +58,8 @@ export default function NotificationsStepScreen() {
   const profile = useCurrentProfile();
   const advance = useAdvanceStage(profile.id);
   const complete = useCompleteTasteOnboarding(profile.id);
+  /** Drains what the ranking run earned, at the very end. See the end of `finish`. */
+  const celebrate = useCelebrationHandoff();
 
 
   // A second press must not race a second navigation. A ref, because nothing renders from
@@ -145,6 +148,27 @@ export default function NotificationsStepScreen() {
     advance('done');
     void complete({ outcome });
     router.replace(destination);
+
+    /**
+     * **What the ranking run earned, celebrated now that the flow is over** (independent
+     * review 83b).
+     *
+     * The five rankings go through `RankingSheet`, which detects a new award or streak and
+     * enqueues it (`celebration-queue.ts`), but onboarding passes `onPlaced` and so never
+     * reaches the Reveal's Done, which is where that queue is normally drained. Nothing in
+     * the flow drained it, and the queue is process-local, so an award earned on film three
+     * was simply lost. It cannot be drained earlier either: `/awards/celebrate` is outside
+     * the onboarding group, so `nextRoute` would replace it straight back to the step while
+     * the stage is unfinished.
+     *
+     * So it drains here, once, and in `closeAndCelebrate`'s order: the navigation that ends
+     * the flow first, then the hand-off. Both go through expo-router's routing queue, which
+     * dispatches them in order, so the celebration is pushed onto the app rather than racing
+     * the replace. `advance('done')` above has already published the finished stage, so the
+     * router lets the celebration route stand. Nothing on this screen is a sheet, so it
+     * never presents over one. An empty queue does nothing.
+     */
+    celebrate();
   };
 
   return (

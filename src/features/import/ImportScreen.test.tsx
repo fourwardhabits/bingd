@@ -27,6 +27,8 @@ const mockRpc = jest.fn();
 const mockFrom = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 let mockRpcErrors: Record<string, unknown> = {};
+/** RPCs whose error is a lost answer (an aborted fetch) rather than a server refusal. */
+let mockRpcLost = new Set<string>();
 
 /** What the picker will answer with. `null` means the person cancelled. */
 let mockPicked: Uint8Array | null = null;
@@ -84,6 +86,8 @@ jest.mock('@/lib/supabase', () => ({
       const result = {
         data,
         error,
+        // PostgREST's `status: 0` is a request whose answer never came back.
+        ...(error && mockRpcLost.has(name) ? { status: 0 } : {}),
         // `import_status` is read with `.maybeSingle()`.
         maybeSingle: () => Promise.resolve({ data, error }),
       };
@@ -173,6 +177,7 @@ beforeEach(() => {
   mockTrack.mockClear();
   mockRpcResults = {};
   mockRpcErrors = {};
+  mockRpcLost = new Set();
   mockPicked = null;
   mockPickThrows = false;
   mockPickedSize = undefined;
@@ -335,6 +340,46 @@ describe('uploading', () => {
     // which is what makes this copy true rather than reassuring.
     expect(screen.getByText(/Nothing gets sent twice/)).toBeTruthy();
     expect(screen.getByText('Try again')).toBeTruthy();
+  });
+
+  it('treats a page whose answer was lost as a failed upload, which is safe to resend', async () => {
+    // The production fetch deadline aborts a stalled request, and PostgREST answers that as
+    // `status: 0`. A page is idempotent, so saying it did not finish is true enough.
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = { import_create: 'job-1' };
+    mockRpcErrors = { import_stage: { message: 'AbortError: timed out', code: '' } };
+    mockRpcLost = new Set(['import_stage']);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText(/didn.+t finish sending/)).toBeTruthy());
+  });
+
+  /**
+   * **A lost hand-off is not a failed one** (independent review 83b). `import_ready` may
+   * have committed before its reply was lost, so the screen says it could not check rather
+   * than inviting a resend that would meet the person's own running import.
+   */
+  it('says it could not check when the hand-off answer was lost, and discards nothing', async () => {
+    mockPicked = exportZip(TWO_FILMS);
+    mockRpcResults = {
+      import_create: '11111111-2222-4333-8444-555555555555',
+      import_status: { status: 'pending', counts: null, completed_at: null },
+    };
+    mockRpcErrors = { import_ready: { message: 'AbortError: timed out', code: '' } };
+    mockRpcLost = new Set(['import_ready']);
+    const screen = await renderWithProviders(<ImportScreen surface="settings" />);
+
+    await fireEvent.press(screen.getByText('Choose Letterboxd ZIP'));
+    await waitFor(() => expect(screen.getByText('Import 2 films')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Import 2 films'));
+
+    await waitFor(() => expect(screen.getByText('We couldn’t check your import')).toBeTruthy());
+    expect(screen.queryByText(/didn.+t finish sending/)).toBeNull();
+    expect(mockRpc.mock.calls.map(([name]) => name)).not.toContain('import_discard');
   });
 });
 
