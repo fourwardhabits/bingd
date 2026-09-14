@@ -952,6 +952,9 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     await chooseBucket(view);
+    // The fifth ends on the full reveal (Round 3). Its Done closes without celebrating: the
+    // flow is not over, so the award stays queued through it as well.
+    await closeReveal(view);
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
     // Detected by the real ranking sheet and waiting in the queue.
