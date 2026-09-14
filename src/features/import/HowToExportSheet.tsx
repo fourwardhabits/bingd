@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Linking, StyleSheet, View } from 'react-native';
 
 import { track } from '@/lib/analytics';
@@ -56,13 +55,12 @@ import { theme } from '@/ui/tokens';
  */
 const LETTERBOXD_EXPORT = 'https://letterboxd.com/settings/data/';
 
-const STEPS = [
-  'Open letterboxd.com in a browser and sign in. The export is on the website, not in the app.',
-  'Go to Settings, then Data.',
-  'Choose Export your data. Letterboxd makes a ZIP of your account.',
-  'Download the ZIP. A big account can take a minute, and Letterboxd may email you a link instead.',
-  'Save it somewhere your phone can reach, like Files, Downloads, or Drive.',
-] as const;
+/**
+ * The founder's wording (2026-09-14), checked against where it points: `LETTERBOXD_EXPORT`
+ * above is letterboxd.com's Settings, Data page, whose button reads Export Your Data.
+ */
+const HOW_TO =
+  'On Letterboxd.com, go to Settings → Data → Export Your Data. Generate your export, download the ZIP when it’s ready, then come back to bingd and choose that ZIP.';
 
 export function HowToExportSheet({
   visible,
@@ -83,34 +81,9 @@ export function HowToExportSheet({
       <View style={styles.body}>
         <Text variant="headline">Getting your Letterboxd file</Text>
 
-        <View style={styles.steps}>
-          {STEPS.map((step, index) => (
-            <View key={step} style={styles.step}>
-              <Text variant="subhead" tone="action" style={styles.number}>
-                {index + 1}
-              </Text>
-              <Text variant="body" tone="secondary" style={styles.stepText}>
-                {step}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {/* **The one instruction that is ours rather than Letterboxd's**, and the one people
-            get wrong: a desktop browser will happily unzip the archive on download, and a
-            folder cannot be handed to a file picker. Said plainly and given its own place,
-            because it is the difference between this working and a confusing refusal. */}
-        <View style={styles.note}>
-          <Ionicons
-            name="information-circle-outline"
-            size={theme.layout.icon.sm}
-            color={theme.text.tertiary}
-          />
-          <Text variant="footnote" tone="tertiary" style={styles.noteText}>
-            Choose the ZIP file itself. If your computer unzipped it, use the original
-            download, not the folder.
-          </Text>
-        </View>
+        <Text variant="body" tone="secondary">
+          {HOW_TO}
+        </Text>
 
         <Button label="Open Letterboxd’s export page" kind="secondary" onPress={open} />
         <Button label="Done" kind="tertiary" onPress={onClose} />
@@ -121,19 +94,4 @@ export function HowToExportSheet({
 
 const styles = StyleSheet.create({
   body: { gap: theme.space[4], paddingBottom: theme.space[2] },
-  steps: { gap: theme.space[3] },
-  step: { flexDirection: 'row', gap: theme.space[3] },
-  // A fixed width so the numbers form a column and the text a straight left edge, rather
-  // than each step hanging from wherever its own digit ended.
-  number: { width: theme.space[4], textAlign: 'right' },
-  stepText: { flex: 1 },
-  note: {
-    flexDirection: 'row',
-    gap: theme.space[2],
-    alignItems: 'flex-start',
-    backgroundColor: theme.surface.raised,
-    borderRadius: theme.radius.card,
-    padding: theme.space[3],
-  },
-  noteText: { flex: 1 },
 });
