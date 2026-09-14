@@ -48,8 +48,10 @@ import {
  * The ZIP is read on the phone (`read-archive.ts`) and never uploaded. What crosses the
  * wire is the normalised rows `payload.ts` builds: film names, years, ratings, dates, and
  * the Letterboxd links that identify each film and diary entry. Reviews, comments, likes
- * and lists are never opened (`archive.ts`). The sentence is short; it is not allowed to
- * be shorter than that.
+ * and lists are never opened (`archive.ts`). On Settings the sentence is short and is not
+ * allowed to be shorter than that. The onboarding question carries the founder's shorter
+ * line instead (2026-09-14), which is true of the same implementation: the ZIP stays on the
+ * phone and only what the import needs is read.
  *
  * ---------------------------------------------------------------------------
  * AND THE SAME SCREEN, AS A STEP OF ONBOARDING (2026-09-13)
