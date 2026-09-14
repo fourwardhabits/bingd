@@ -117,51 +117,45 @@ export type RankingSheetProps = {
    */
   onFinishLog?: (placement: { score: number; position: number; category: string }) => void;
   /**
-   * **The placement, handed straight back, with no reveal drawn** — for a caller whose
-   * screen is the payoff.
+   * **The placement, told to the caller the moment it lands** — for a caller that has to
+   * count placements itself rather than wait for a refetch to do it.
    *
-   * The reveal is right nearly everywhere: somebody who ranked a film from the Log tab or
-   * a title page has finished an act, and the number, the ordinal and the two controls
-   * are what that act was for.
-   *
-   * First-run onboarding is the exception, and it is the founder's blocker from physical
-   * iOS 1.0.1 build 9. The flow there is pick, rank, pick, rank, five times, and the
-   * payoff is *Your First Five* at the end of it. A per-title reveal in the middle of
-   * that is a full stop in a sentence that has not finished: the reader is asked to
-   * acknowledge a score for a film they placed two seconds ago, four more times, before
-   * being shown the list that the whole exercise was about. The founder's brief is
-   * explicit — after a successful onboarding rank, go straight to the next picker.
-   *
-   * So this is not "hide the reveal". It is a different contract: **the sheet's job ends
-   * at the placement and the caller owns what happens next.** The session is already
-   * finished and deleted server-side by the time `placed` arrives (`apply` clears
-   * `openSession`), so there is nothing left here to close down and nothing a dismissal
-   * would have to cancel.
-   *
-   * `onFinishLog` is ignored when this is set: they are two answers to the same question
-   * and a caller that wanted the log sheet would not be suppressing the screen that
-   * offers it. The celebration queue is deliberately *not* drained — an award earned on
-   * the third of five films belongs after the flow, not across it, which is the same rule
-   * *Add details* already follows.
+   * The reveal is still drawn. This prop changes what Done means and nothing about what
+   * the reader sees: they get the same score, ordinal and genre ranks as a ranking from
+   * the Log tab or a title page, because that payoff *is* the product.
    *
    * ---------------------------------------------------------------------------
-   * THE SHEET WAITS FOR THE FIRST ANSWER (founder, physical iOS QA, 2026-09-12)
+   * WHY IT NO LONGER SUPPRESSES THE REVEAL (founder, physical preview QA, Round 3,
+   * 2026-09-13)
    *
-   * Under this contract the sheet is not asked to present until the session's first reply
-   * is known. An empty band places outright, and presenting a sheet only to take it away
-   * again one round trip later drew a sheet that rose reading *Working out what to ask…*,
-   * collapsed to an empty strip and slid out: a flash that looked broken. So a first reply
-   * of `placed` never presents anything, and the placement comes back with
-   * `presented: false` so the caller knows there is no dismissal to wait for. Any other
-   * first reply presents as before, a failure included, so its Close is reachable.
+   * From build 9 until Round 3 this prop meant "hand the placement back and draw no
+   * reveal", so onboarding could go straight from a placement to the next picker. Round 2
+   * put a line on the picker — *The Odyssey landed at 10.0* — where the reveal had been.
+   * It worked mechanically, and on a device it was an anticlimax: onboarding is where
+   * somebody learns what ranking gives back, and it was the one place that gave back a
+   * sentence. The founder's decision is that onboarding teaches the same loop as the rest
+   * of the app — bucket, comparisons, the full reveal, then the next title — at the cost
+   * of one Done per title.
+   *
+   * What went with the old contract: holding the sheet back until the first answer was
+   * known, the frozen last comparison it slid out showing, and the empty hand-off strip.
+   * All three existed only because the sheet used to leave the instant a placement
+   * landed. It now leaves when the reader presses Done, from a reveal that is already on
+   * screen, so there is no collapse to hide and no early exit to serialise.
+   *
+   * ---------------------------------------------------------------------------
+   * WHAT DONE DOES UNDER IT
+   *
+   * Closes, through `onClose`, **without draining the celebration queue.** An award
+   * earned on the third of five films belongs after the flow, not across it. That is the
+   * rule *Add details* already follows and the reason `onFinishLog` is ignored here: the
+   * log sheet is a second Modal, and onboarding has exactly one sheet at a time by
+   * construction.
+   *
+   * Handed over once per placement, from an effect, after `apply` has finished its own
+   * work. See `handedOver`.
    */
-  onPlaced?: (placement: {
-    score: number;
-    position: number;
-    category: string;
-    /** Whether this sheet was ever asked to present. False for an outright placement. */
-    presented: boolean;
-  }) => void;
+  onPlaced?: (placement: { score: number; position: number; category: string }) => void;
   /**
    * Which screen opened this, for `ranking_completed` alone.
    *
@@ -174,10 +168,10 @@ export type RankingSheetProps = {
    * Whether the sheet is presented, as distinct from whether it is mounted.
    *
    * Defaults to `true`, so the three screens that mount this only while they want it are
-   * unchanged. Onboarding sets it `false` between a placement and the picker becoming
-   * live again, and keeps the component mounted so iOS can finish dismissing before
-   * anything else is presented — the return half of the same serialisation `handoff`
-   * does on the way in. See `Sheet`'s `onDismissed`.
+   * unchanged. Onboarding sets it `false` once the reader closes the sheet, and keeps the
+   * component mounted so iOS can finish dismissing before anything else is presented —
+   * the return half of the same serialisation `handoff` does on the way in. See `Sheet`'s
+   * `onDismissed`.
    */
   visible?: boolean;
   /** iOS has finished dismissing this sheet. The next presentation is safe now. */
@@ -254,25 +248,6 @@ function Session({
   const [step, setStep] = useState<SessionStep | null>(null);
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
-
-  /**
-   * The last comparison the reader was shown, kept so an `onPlaced` exit can slide out
-   * showing it instead of collapsing to an empty strip. Rendered from, so state.
-   */
-  const [lastComparison, setLastComparison] = useState<Extract<
-    SessionStep,
-    { state: 'comparing' }
-  > | null>(null);
-
-  /**
-   * Under `onPlaced`, whether the session has answered with anything other than an
-   * outright placement, which is what lets the sheet present. Sticky, and adjusted during
-   * render the way `Sheet` adjusts `asked`. Every other caller presents immediately, as
-   * it always has. See `onPlaced`.
-   */
-  const [opened, setOpened] = useState(false);
-  if (onPlaced && !opened && step && step.state !== 'placed') setOpened(true);
-  const present = visible && (!onPlaced || opened);
 
   /**
    * The attempt to run again if the reader asks, and **the reason the operation id is
@@ -445,7 +420,6 @@ function Session({
       }
 
       setStep(next);
-      if (next.state === 'comparing') setLastComparison(next);
       if (next.state === 'placed') {
         // Everything a finished ranking changes, named in one place so the two
         // writers cannot drift. This used to be three keys inline, and the feed was
@@ -682,36 +656,29 @@ function Session({
   };
 
   /**
-   * The `onPlaced` contract: hand the placement back once, and draw no reveal.
+   * The `onPlaced` contract: tell the caller about the placement, once.
    *
    * An effect rather than a branch inside `apply`, for two reasons. `apply` is a
    * `useCallback` whose dependency list is deliberately the *subject*, so folding a
    * caller's own closure into it would re-open the session every time the parent
-   * re-rendered. And the placement has to be handed over **after** `apply` has finished
-   * its own work — the invalidation, `ranking_completed`, the award and streak detections
-   * — because the caller's very next act is to unmount this component.
+   * re-rendered. And the placement is handed over **after** `apply` has finished its own
+   * work — the invalidation, `ranking_completed`, the award and streak detections — so the
+   * caller never learns of a placement this component has not finished recording.
    *
    * The ref is what makes it once. `onPlaced` is an inline closure at the call site, so
    * its identity changes on every render of the parent, and without the guard a parent
-   * that re-rendered before it unmounted would be told twice about one ranking.
+   * that re-rendered while the reveal was up would be told twice about one ranking.
    */
   const handedOver = useRef(false);
   useEffect(() => {
     if (!onPlaced || step?.state !== 'placed' || handedOver.current) return;
     handedOver.current = true;
-    onPlaced({
-      score: step.score,
-      position: step.position,
-      category: step.category,
-      presented: opened,
-    });
-  }, [onPlaced, step, opened]);
+    onPlaced({ score: step.score, position: step.position, category: step.category });
+  }, [onPlaced, step]);
 
   return (
     <Sheet
-      // `present` rather than `visible`: under `onPlaced` the sheet is held back until the
-      // first answer is known. For every other caller the two are the same value.
-      visible={present}
+      visible={visible}
       /**
        * Inert while dismissing, for the reason `TasteBucketSheet` states: iOS keeps a
        * dismissing modal's children mounted, so closing it again would unmount this
@@ -719,51 +686,13 @@ function Session({
        *
        * Only reachable when a caller passes `visible`, which today is onboarding alone.
        */
-      onClose={present ? () => void close() : noopClose}
+      onClose={visible ? () => void close() : noopClose}
       onDismissed={onDismissed}
       onShown={onShown}
       label={`Rank ${subject.title}`}
     >
       <View style={styles.sheet}>
-        {step?.state === 'placed' && onPlaced && lastComparison ? (
-          /**
-           * What this sheet shows between the placement landing and it going away: the
-           * last comparison, frozen.
-           *
-           * Onboarding keeps this mounted with `visible` false until iOS reports the
-           * presentation gone, which is most of a slide-out. It used to be an empty strip,
-           * and a sheet that collapses to a strip before it leaves looks broken (founder,
-           * physical iOS QA, 2026-09-12). The comparison is what was on the sheet a moment
-           * ago, so it leaves showing exactly that. Every handler is a no-op and `busy`
-           * disables the controls; `Sheet` also drops touches while dismissing. It is not
-           * the reveal, because suppressing that is the whole contract.
-           */
-          <Comparison
-            subject={subject}
-            pivotId={lastComparison.pivotId}
-            skipped={lastComparison.skipped}
-            surface={surface}
-            busy
-            onPick={noopClose}
-            onBack={noopClose}
-            onSkip={noopClose}
-            onClose={noopClose}
-          />
-        ) : step?.state === 'placed' && onPlaced ? (
-          /**
-           * The fallback when there was no comparison to freeze: a sheet that opened on a
-           * failure whose Try again then placed. An outright placement never presents, so
-           * it does not reach here. Kept so the contract never draws the reveal. Empty
-           * rather than a spinner: `LoadingScreen` is the only indeterminate spinner in
-           * this app.
-           */
-          <View
-            testID="ranking-handoff"
-            style={styles.handoff}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          />
-        ) : step?.state === 'placed' ? (
+        {step?.state === 'placed' ? (
           <Reveal
             score={step.score}
             position={step.position}
@@ -772,9 +701,11 @@ function Session({
             subjectId={subject.id}
             title={subject.title}
             surface={surface}
-            onDone={() => void closeAndCelebrate()}
+            // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
+            // surface the reader finishes on. See `onPlaced`.
+            onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
             onFinishLog={
-              onFinishLog
+              onFinishLog && !onPlaced
                 ? () => {
                     // `close` is a no-op against the server at this point — `apply` cleared
                     // `openSession` the moment the placement landed, because the server
@@ -2013,9 +1944,6 @@ const styles = StyleSheet.create({
   // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
   // moving off a full-height page sheet — a comparison is a small question.
   sheet: { paddingBottom: theme.space[2] },
-  // The `onPlaced` exit when there is no comparison to freeze (see the render). Tall
-  // enough that the sheet does not visibly collapse first.
-  handoff: { height: theme.space[10] },
   // No flex anywhere in here. Both halves of the old layout stretched: the screen was
   // a full-height page sheet, and the card row inside it was `flex: 1` with the posters
   // pinned to its top — so a tall device reserved ~500pt for ~330pt of content and put

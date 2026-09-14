@@ -2,7 +2,6 @@ import { Stack, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   Platform,
   Pressable,
   ScrollView,
@@ -88,10 +87,12 @@ import {
  *       | how was it?                          | dismissed -> back to picking
  *     handoff            the bucket sheet dismissing, nothing presented yet
  *       | iOS onDismiss, or immediately on Android
- *     ranking            RankingSheet over that title, presented once the first answer is
- *       |                a question; an outright placement never presents it
- *       | placed                               | dismissed -> back to picking
- *     picking            progress is now n of 5, and "<title> landed at <score>"
+ *     ranking            RankingSheet over that title: comparisons if the band needs
+ *       |                them, then the full reveal, the same one the rest of the app draws
+ *       | Done (or closed mid-comparison), once the sheet has finished arriving
+ *     returning          RankingSheet dismissing, picker already mounted behind it
+ *       | iOS onDismiss, or immediately on Android
+ *     picking            progress is now n of 5; at five, Your First Five instead
  *
  * `step` is one value, so the sheets are mutually exclusive *by construction* rather than
  * by two conditions that have to agree. There is no arrangement of state in which both
@@ -108,21 +109,26 @@ import {
  * is a fact about `rankings` cannot disagree with `rankings`.
  *
  * ---------------------------------------------------------------------------
- * NO POST-RANK SHEET, WHICH IS A CONTRACT AND NOT A HIDDEN BUTTON
+ * THE FULL REVEAL, EVERY TIME (founder, physical preview QA, Round 3, 2026-09-13)
  *
- * `RankingSheet` takes `onPlaced` here instead of `onFinishLog`, and that prop suppresses
- * the reveal as well as the log sheet. Its own note carries the reasoning: the payoff of
- * this flow is *Your First Five*, and five per-title reveals on the way to it are four
- * interruptions in a sentence that has not finished. Nothing about the ranking itself
- * changes — the same `rank_start`/`rank_answer` session, the same comparisons, the same
- * scores, and the same celebration queue, left standing so an award earned on film three
- * arrives after the flow rather than across it.
+ * Each placement ends on the reveal the rest of the app draws — the score counting up,
+ * the ordinal, the genre ranks — and the reader presses Done to pick the next film. It
+ * replaced two earlier answers. Build 9 suppressed the reveal to go straight to the
+ * picker, and Round 2 put *The Odyssey landed at 10.0* on the picker where the reveal had
+ * been. Both were mechanically sound and both were anticlimactic on a device: this flow
+ * is where somebody learns what ranking gives back, and it should give back what ranking
+ * gives back everywhere else. One tap per title is the price, and the founder chose it.
  *
- * **What replaced the reveal is a line on the picker, not a sheet** (founder, physical iOS
- * QA, 2026-09-12). Without it a placement read as a sheet flashing up and away. Now an
- * outright placement never presents a sheet at all (see `RankingSheet`'s `onPlaced`), a
- * comparison sheet slides out still showing its last pair, and the picker says
- * *Inception landed at 9.0* until the next title is chosen. See `lastPlaced`.
+ * `RankingSheet` takes `onPlaced` rather than `onFinishLog`. That prop no longer hides the
+ * reveal. It tells this screen about the placement the moment it lands (see `confirmed`),
+ * leaves the celebration queue standing so an award earned on film three arrives after
+ * the flow rather than across it, and keeps the log sheet — a second Modal — out of a flow
+ * that has one sheet at a time by construction.
+ *
+ * **The reveal lives inside the comparison sheet, so there is no sheet-to-sheet swap to
+ * serialise.** The only exit is the reader's, from a sheet that is already on screen, and
+ * it goes through the same `ranking` -> `returning` -> `picking` path a Close
+ * mid-comparison always took. See `leaveRankingFor` for why it waits on the entrance.
  *
  * ---------------------------------------------------------------------------
  * WHAT A RELAUNCH DOES, AND WHY IT IS ALWAYS THE PICKER
@@ -249,13 +255,6 @@ export default function TasteOnboardingScreen() {
    * either — the count and the supply are answered by one fact rather than two.
    */
   const [confirmed, setConfirmed] = useState<readonly string[]>([]);
-  /**
-   * The title just ranked and its score, for the confirmation line on the picker.
-   *
-   * No timeout: it stays until the next title is chosen, which is when it stops being the
-   * latest thing that happened. Set from `onPlaced`, outside any `setStep` updater.
-   */
-  const [lastPlaced, setLastPlaced] = useState<LastPlaced | null>(null);
   const rankedIds = new Set([
     ...(rankedMovies.data ?? []).map((entry) => entry.mediaItemId),
     ...confirmed,
@@ -269,7 +268,19 @@ export default function TasteOnboardingScreen() {
    * could disagree.
    */
   const placed = Math.min(rankedIds.size, PICK_TARGET);
-  const payoff = placed >= PICK_TARGET;
+  /**
+   * Your First Five, once five are placed **and the fifth reveal has been closed.**
+   *
+   * The count reaches five the moment the fifth placement lands, which is while its reveal
+   * is still on screen. Swapping the screen then would draw the payoff behind a reveal the
+   * reader has not finished with, and its header and query would start under a sheet that
+   * is still asking for a Done. So the payoff waits for the run to leave `ranking` — it
+   * appears behind the sheet as it slides away, which is the order the reader lives it in.
+   *
+   * Still derived rather than stored, so a relaunch at five lands on it directly: a fresh
+   * mount starts on `picking`.
+   */
+  const payoff = placed >= PICK_TARGET && step.kind !== 'ranking';
 
   /**
    * `handoff` -> `ranking`, once the bucket sheet's presentation is actually gone.
@@ -295,8 +306,8 @@ export default function TasteOnboardingScreen() {
 
   /**
    * iOS has finished *presenting* the comparison sheet, so a dismissal asked for from
-   * here will actually complete. If the placement already landed, this is what releases
-   * the run — see `leaveRankingFor`.
+   * here will actually complete. If the reader already asked to leave, this is what
+   * releases the run — see `leaveRankingFor`.
    */
   const sheetShown = useCallback(() => {
     setStep((current) =>
@@ -333,9 +344,6 @@ export default function TasteOnboardingScreen() {
    */
   const choose = (pick: TasteSubject) => {
     if (rankedIds.has(pick.id)) return;
-    // The next title replaces the last one's confirmation. Only from the picker: every
-    // other step refuses the pick below, and a refused pick should not erase anything.
-    if (step.kind === 'picking') setLastPlaced(null);
     setInput('');
     setStep((current) => {
       // Picked while the comparison sheet is still dismissing: held rather than acted on,
@@ -385,18 +393,18 @@ export default function TasteOnboardingScreen() {
     );
 
   /**
-   * The comparison sheet was dismissed — placed, or abandoned mid-comparison.
+   * The reader closed the comparison sheet — Done on the reveal, or Close mid-comparison.
    *
-   * iOS keeps it mounted through the slide-out so nothing presents over it; Android has
-   * no presentation to serialise against and goes straight back to the picker.
+   * One exit for both, and it waits for the entrance. An empty band places outright, so
+   * the reveal can be on screen inside the sheet's own 350ms presentation, and a fast Done
+   * there would ask UIKit for a dismissal it refuses and never completes. `closing` records
+   * the request and `sheetShown` honours it; iOS keeps the sheet mounted through the
+   * slide-out so nothing presents over it; Android has no presentation to serialise
+   * against and goes straight back to the picker.
    */
   const returnToPicker = () =>
     setStep((current) => {
-      if (current.kind === 'ranking') {
-        return Platform.OS === 'ios'
-          ? { kind: 'returning', subject: current.subject }
-          : { kind: 'picking' };
-      }
+      if (current.kind === 'ranking') return leaveRankingFor({ ...current, closing: true });
       /**
        * Already dismissing, so this is a second `onClose` and it must do nothing.
        *
@@ -423,11 +431,11 @@ export default function TasteOnboardingScreen() {
 
   const skip = () => {
     /**
-     * **Only from the picker** (independent review). While a placement is on its way no sheet
-     * covers this screen any more, so Not now is reachable in that window; skipping then
-     * recorded the run as skipped and left for People while the title it had just asked
-     * about was still being placed behind it. The wait is short and bounded by the request
-     * deadline, and pressing again once the picker is back does what it says.
+     * **Only from the picker** (independent review). A sheet covers this screen for the
+     * whole of a ranking now, so the window this closed is the slide-out either side of
+     * it; skipping inside one recorded the run as skipped and left for People while the
+     * title it had just asked about was still being placed behind it. Pressing again once
+     * the picker is back does what it says.
      */
     if (step.kind !== 'picking') return;
     track({ name: 'onboarding_step_completed', props: { step: 'pick', outcome: 'skipped' } });
@@ -483,21 +491,6 @@ export default function TasteOnboardingScreen() {
                 : 'Each one gets compared against the ones before it.'}
             </Text>
             <Progress placed={placed} />
-            {lastPlaced ? (
-              <PlacedLine placement={lastPlaced} />
-            ) : step.kind === 'ranking' ? (
-              /**
-               * The in-flight wait before the sheet presents, or before an outright
-               * placement returns. Usually under a second, and the picker refuses a pick
-               * during it, so this says why. Text rather than a spinner: `LoadingScreen`
-               * is the only indeterminate spinner in this app.
-               */
-              <View style={styles.placed}>
-                <Text variant="footnote" tone="secondary" numberOfLines={1}>
-                  {`Ranking ${step.subject.title}…`}
-                </Text>
-              </View>
-            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -741,80 +734,31 @@ export default function TasteOnboardingScreen() {
         // the same film again, which is why the run holds no cursor to be confused by it.
         onClose={returnToPicker}
         /**
-         * The placement, with no reveal and no log sheet. This is the founder's
-         * "transition directly to the next picker", and it is one assignment because the
-         * progress it moves is `rankings` rather than anything held here.
+         * The placement, counted the moment it lands. **It moves no step**: the reveal is
+         * on screen now, and the run leaves `ranking` only when the reader presses Done
+         * (`returnToPicker`).
          *
          * The starter list is invalidated with it: the movie just ranked is excluded by
          * `starter_movies` server-side, so the grid has to ask again to stop offering it.
          */
-        onPlaced={({ score, presented }) => {
+        onPlaced={() => {
           /**
            * Read through the ref, not through the closure (independent review).
            *
            * This fires from an effect after an awaited RPC, so the `step` it closed over
            * may be several transitions old — and acting on a stale one could drop the
-           * `confirmed` record for a placement the server had already made.
-           *
-           * A ref rather than a functional `setStep`, because two pieces of state move
-           * here and a state updater must stay pure: calling `setConfirmed` from inside
-           * one is a side effect in a function React is free to run twice, and it cost a
-           * placement that never reached the count.
+           * `confirmed` record for a placement the server had already made. The subject
+           * does not change for the life of the step, so the ref is right for it.
            */
           const current = stepRef.current;
-          if (current.kind !== 'ranking') return;
+          // `returning` too: a reply that was in flight when the reader closed still placed
+          // the title, and it counts whether or not the reveal was seen.
+          if (current.kind !== 'ranking' && current.kind !== 'returning') return;
           const subject = current.subject;
           note('onboarding', 'placed', String(placed + 1));
-          // Before the step changes, so the picker cannot draw one frame with the old
-          // count. See `confirmed` for the sixth-ranking race this closes.
+          // Before the reader can press Done, so the picker they return to cannot draw one
+          // frame with the old count. See `confirmed` for the sixth-ranking race this closes.
           setConfirmed((was) => (was.includes(subject.id) ? was : [...was, subject.id]));
-          const line = placedSentence({ title: subject.title, score });
-          setLastPlaced({
-            id: subject.id,
-            title: subject.title,
-            posterUri: subject.posterUri ?? null,
-            score,
-          });
-          // Told on both platforms. The line is newly mounted each time, and an Android live
-          // region announces changes rather than mounts, so TalkBack would otherwise stay
-          // silent (independent review).
-          AccessibilityInfo.announceForAccessibility(line);
-          /**
-           * `returning` rather than `picking` on iOS: the picker is revealed either way,
-           * but the sheet stays mounted until its dismissal is acknowledged, so the next
-           * pick cannot present over it.
-           *
-           * **And only once the sheet has actually appeared.** On the first title the
-           * placement can land inside the sheet's own 350ms presentation, and a dismissal
-           * asked for then is refused by UIKit with its completion never run — so
-           * `onDismiss` would never arrive and `returning` would be terminal. If the
-           * entrance has not finished, the placement is recorded on the step and
-           * `sheetShown` makes the move when it does.
-           */
-          /**
-           * Functional, so a `sheetShown` that landed in the same batch is not undone.
-           *
-           * `stepRef` is updated in a parent effect and so lags a commit; writing the
-           * object it holds straight back would discard a concurrent `shown: true` and
-           * leave the run in `ranking` for ever — an empty sheet with no Close control,
-           * over a dead picker. That is the freeze once more, reached through the state
-           * added to prevent it (independent review).
-           *
-           * The ref is still right for the *subject*, which does not change for the life
-           * of the step, and `setConfirmed` above is outside the updater — so this one
-           * stays pure.
-           */
-          /**
-           * **An outright placement goes straight to the picker.** The sheet was never
-           * asked to present (`presented: false`), so there is no entrance to wait for and
-           * no dismissal to acknowledge. Sending it through `leaveRankingFor` instead would
-           * wait for an `onShown` that never comes: the freeze again, by a third route.
-           */
-          setStep((live) => {
-            if (live.kind !== 'ranking') return live;
-            if (!presented) return { kind: 'picking' };
-            return leaveRankingFor({ ...live, placed: true });
-          });
           void queryClient.invalidateQueries({
             queryKey: ['onboarding-starter-movies', profile.id],
           });
@@ -857,20 +801,20 @@ type RunStep =
    */
   | { kind: 'handoff'; pick: TasteSubject; bucket?: BucketId }
   /**
-   * The comparison sheet is up.
+   * The comparison sheet is up: a comparison, or the reveal that ends one.
    *
-   * `shown` and `placed` are both here because **the exit has to wait for the entrance**
+   * `shown` and `closing` are both here because **the exit has to wait for the entrance**
    * (independent review). UIKit refuses a dismissal issued while the presentation is
    * still animating and never runs its completion — and the first title on a new account
-   * has an empty band, so `rank_start` places it outright and the placement can land
-   * inside the sheet's own 350ms appearance. Flipping `visible` there would ask for a
-   * dismissal that never completes, `onDismiss` would never arrive, and `returning` would
-   * be terminal: the freeze again, on the way out.
+   * has an empty band, so `rank_start` places it outright and the reveal can be on screen,
+   * Done and all, inside the sheet's own 350ms appearance. Flipping `visible` on a fast
+   * Done there would ask for a dismissal that never completes, `onDismiss` would never
+   * arrive, and `returning` would be terminal: the freeze again, on the way out.
    *
    * So the run leaves for `returning` only once both are true, whichever order they
    * arrive in.
    */
-  | { kind: 'ranking'; subject: RankingSubject; shown: boolean; placed: boolean }
+  | { kind: 'ranking'; subject: RankingSubject; shown: boolean; closing: boolean }
   /**
    * The comparison sheet dismissing, with the picker already live behind it.
    *
@@ -896,7 +840,7 @@ type RunStep =
 const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep => ({
   kind: 'ranking',
   shown: false,
-  placed: false,
+  closing: false,
   subject: {
     id: from.pick.id,
     title: from.pick.title,
@@ -910,9 +854,9 @@ const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep
 /**
  * Where a comparison step goes once something about it changes.
  *
- * It leaves for `returning` only when the sheet has both **appeared** and **been placed**,
- * whichever order those arrive in — see `RunStep`. Android never waits: it has no
- * presentation to serialise against, so a placement goes straight back to the picker.
+ * It leaves for `returning` only when the sheet has both **appeared** and **been asked to
+ * close**, whichever order those arrive in — see `RunStep`. Android never waits: it has no
+ * presentation to serialise against, so a close goes straight back to the picker.
  *
  * **Redundant with `Sheet`, deliberately.** The same rule is enforced in the primitive,
  * which holds the presentation rather than let a dismissal be asked for mid-entrance, so
@@ -922,7 +866,7 @@ const rankingStepFor = (from: { pick: TasteSubject; bucket: BucketId }): RunStep
  * rather than correct because of what a component it renders happens to do internally.
  */
 const leaveRankingFor = (step: Extract<RunStep, { kind: 'ranking' }>): RunStep => {
-  if (!step.placed) return step;
+  if (!step.closing) return step;
   if (Platform.OS !== 'ios') return { kind: 'picking' };
   return step.shown ? { kind: 'returning', subject: step.subject } : step;
 };
@@ -943,41 +887,6 @@ function Progress({ placed }: { placed: number }) {
       ))}
       <Text variant="footnote" tone="secondary" style={styles.progressLabel}>
         {`${placed} of ${PICK_TARGET}`}
-      </Text>
-    </View>
-  );
-}
-
-/** The title the run last placed, as the picker's confirmation line needs it. */
-type LastPlaced = { id: string; title: string; posterUri: string | null; score: number };
-
-/** One sentence, shared by the line and its announcement so the two cannot differ. */
-const placedSentence = ({ title, score }: { title: string; score: number }) =>
-  `${title} landed at ${formatScore(score)}`;
-
-/**
- * *Inception landed at 9.0*, on the picker, after a placement.
- *
- * What the per-title reveal used to say, in one line that asks nothing of the reader: no
- * Done, no sheet, no timer. The score is the server's, from the placement itself, so it is
- * the number the collection and the feed will show. It is not a Modal, so it can never be
- * a second presentation fighting the next pick's bucket sheet.
- */
-function PlacedLine({ placement }: { placement: LastPlaced }) {
-  const sentence = placedSentence(placement);
-  return (
-    <View
-      style={styles.placed}
-      accessible
-      accessibilityRole="text"
-      accessibilityLabel={sentence}
-      testID="onboarding-placed-line"
-    >
-      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Poster uri={placement.posterUri} title={placement.title} size="row" />
-      </View>
-      <Text variant="callout" numberOfLines={2} style={styles.placedText}>
-        {sentence}
       </Text>
     </View>
   );
@@ -1149,15 +1058,6 @@ const styles = StyleSheet.create({
   pipDone: { backgroundColor: theme.semantic.score },
   pipTodo: { backgroundColor: theme.border.hairline },
   progressLabel: { marginLeft: theme.space[2] },
-  // One height for the confirmation and the "Ranking…" line that precedes it, so the grid
-  // below does not jump when one replaces the other.
-  placed: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[3],
-    minHeight: theme.poster.row.height,
-  },
-  placedText: { flex: 1 },
   field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   grid: {
     flexDirection: 'row',
