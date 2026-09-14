@@ -2099,7 +2099,9 @@ const LANDING_STYLES = `
         background: var(--paper);
       }
 
-      .phone-pair { display: flex; justify-content: center; gap: 1rem; min-width: 0; }
+      /* align-items: center, because the ranking pair is a list and a score rather than two
+         phone frames of one height, and a stretched flex item would distort them. */
+      .phone-pair { display: flex; justify-content: center; align-items: center; gap: 1rem; min-width: 0; }
 
       /* min-width: 0 is load-bearing and was missing.
          --------------------------------------------------------------------------
@@ -2122,6 +2124,12 @@ const LANDING_STYLES = `
       @media (max-width: 30rem) {
         .phone-pair .phone + .phone { display: none; }
         .phone-pair .phone { max-width: 16rem; }
+
+        /* Except where the second picture is the point: the score a ranking lands on, and
+           the conversation under a friend's ranking. Those pairs stack instead of
+           dropping their second half, one legible picture above the other. */
+        .phone-pair.stack-narrow { flex-direction: column; }
+        .phone-pair.stack-narrow .phone + .phone { display: block; }
       }
 
       /* -------------------------------------------------------------- final CTA */
@@ -2200,11 +2208,23 @@ const LANDING_STYLES = `
  * by blurring them; the live listing's 04-social frame is the precedent this follows.
  */
 const SHOT = {
-  compare: {
-    src: '/shot-compare.webp',
-    w: 760,
-    h: 1526,
-    alt: 'The bingd. ranking sheet asking which did you like more, with two film posters side by side to choose between',
+  ranked: {
+    src: '/shot-ranked.webp',
+    w: 640,
+    h: 626,
+    alt: 'A ranked bingd. list of four movies, each numbered by where it landed and carrying its score out of ten',
+  },
+  score: {
+    src: '/shot-score.webp',
+    w: 640,
+    h: 356,
+    alt: 'The score a ranking lands on, 9.1, above the title Harry Potter and the Goblet of Fire',
+  },
+  comments: {
+    src: '/shot-comments.webp',
+    w: 640,
+    h: 1285,
+    alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
   },
   movies: {
     src: '/shot-movies.webp',
@@ -2397,7 +2417,10 @@ ${installRow({ primary: true })}
             <p class="fineprint">${AVAILABILITY}</p>
           </div>
 
-          <div>${shot('compare', { eager: true })}</div>
+          <div class="phone-pair">
+            ${shot('movies', { eager: true })}
+            ${shot('tv', { eager: true })}
+          </div>
         </div>
       </section>
 
@@ -2412,9 +2435,9 @@ ${installRow({ primary: true })}
             </p>
           </div>
 
-          <div class="phone-pair">
-            ${shot('movies')}
-            ${shot('tv')}
+          <div class="phone-pair stack-narrow">
+            ${shot('ranked')}
+            ${shot('score')}
           </div>
         </div>
       </section>
@@ -2431,7 +2454,10 @@ ${installRow({ primary: true })}
             </p>
           </div>
 
-          <div>${shot('feed')}</div>
+          <div class="phone-pair stack-narrow">
+            ${shot('feed')}
+            ${shot('comments')}
+          </div>
         </div>
       </section>
 
@@ -2455,7 +2481,7 @@ ${installRow({ primary: true })}
 
       <section class="closer">
         <div class="wrap">
-          <h2>Start with five you love.</h2>
+          <h2>Start with five movies or TV you love.</h2>
           <p class="section-lede">
             That is enough for bingd. to have an opinion about everything else.
           </p>
