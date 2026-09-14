@@ -1012,6 +1012,35 @@ describe('more results', () => {
     ]);
   });
 
+  it('says so, with a retry, when searching further under a filter fails', async () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({ data: [series], error: null })
+        : Promise.resolve({ data: [], error: null }),
+    );
+    mockSearchProvider.mockImplementation(
+      (_query: string, _limit: number, pageNumber: number) =>
+        pageNumber === 1
+          ? Promise.resolve({
+              titles: [remote('p1-show', 'Breaking Point', 'series')],
+              people: [],
+              page: 1,
+              totalPages: 2,
+            })
+          : Promise.reject(new AdapterError('BG502', 'upstream')),
+    );
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Movies'));
+    await waitFor(() => expect(view.getByText('Search further')).toBeTruthy());
+    await fireEvent.press(view.getByText('Search further'));
+
+    await waitFor(() => expect(view.getByText('More results did not load')).toBeTruthy());
+    expect(view.getByText('Try again')).toBeTruthy();
+  });
+
   it('offers to search further when a filter hides every row of the first page', async () => {
     mockRpc.mockImplementation((fn: string) =>
       fn === 'search_titles'

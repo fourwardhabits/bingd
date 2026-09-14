@@ -853,6 +853,31 @@ function Results({
     // being rate limited is not a statement about the catalogue at all; and a
     // filter hiding every row is not a failed search.
     if (filtered) {
+      // "Search further" says what it is doing, and says so when it fails: this page has no
+      // list, so the footer that reports a later page is not on screen to do it.
+      if (loadingMore) {
+        return (
+          <View style={styles.status}>
+            <Text variant="body" tone="tertiary">
+              Loading more…
+            </Text>
+          </View>
+        );
+      }
+      if (moreFailed) {
+        return (
+          <EmptyState
+            kind="couldNotLoad"
+            title="More results did not load"
+            body={
+              moreRateLimited
+                ? `Too many searches to load more just now. ${widerSearchReturns(moreAvailableAt)}`
+                : 'Nothing of this kind on the first page, and the next page did not answer.'
+            }
+            action={{ label: 'Try again', onPress: onRetryMore }}
+          />
+        );
+      }
       return (
         <EmptyState
           kind="nothingMatches"
