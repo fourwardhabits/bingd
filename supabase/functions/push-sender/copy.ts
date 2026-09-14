@@ -32,6 +32,8 @@
  * suspended actor produced no job at all.
  */
 
+import { AWARD_COPY, AWARD_TRACK_NAMES } from './award-copy.ts';
+
 /** One job as `claim_push_batch` returns it. */
 export type PushJob = {
   notification_id: string;
@@ -73,6 +75,25 @@ export type PushJob = {
    * about how the award was earned, stay server-side.
    */
   award_name?: string | null;
+  /**
+   * The earned award and tier, and the two names the row was written with, for
+   * `award_earned` jobs only (20260920000200). The key and tier look the words up in
+   * `award-copy.ts` and ride in the tap payload so the app opens that award's celebration.
+   * `award_family` is the track's name ("Queue Dragon") and `award_tier_label` the tier's
+   * ("Seedling"); they are the fallback for a key this sender does not know. Absent from a
+   * database that predates it. (Not `award_name` above, which only a pre-20260830000100
+   * claim ever sent.)
+   */
+  award_key?: string | null;
+  award_tier?: string | null;
+  award_family?: string | null;
+  award_tier_label?: string | null;
+  /**
+   * The Letterboxd import a lifecycle push is about, and the completed job's summary
+   * (20260917001500). Absent from a database that predates it; null for every other type.
+   */
+  import_job_id?: string | null;
+  import_counts?: { watched?: number; watchlist?: number } | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -96,6 +117,14 @@ export type PushData = {
    * nothing at all.
    */
   feedEventId: string | null;
+  /** Only on an import push, so the tap opens that exact job. */
+  importJobId?: string | null;
+  /**
+   * Only on an award push (20260920000200): which award and tier, so the tap opens the
+   * same celebration the inbox row opens. Absent, the app opens the Awards list.
+   */
+  awardKey?: string | null;
+  awardTier?: string | null;
 };
 
 export type PushContent = {
@@ -263,30 +292,110 @@ function commentExcerpt(job: PushJob): string | null {
  * and a notification that cannot say who is not worth waking a phone for — the same rule
  * the inbox applies when it drops a row whose actor it cannot name.
  */
-export function contentFor(job: PushJob): PushContent | null {
-  /**
-   * The congratulations is the one actorless push (20260828000100): nobody did
-   * this to the recipient, so it is answered before the name gate rather than
-   * exempted from it. Second person, the award named, no emoji — the same rule
-   * `invite_welcome` follows: a notification centre is not the place, and the
-   * celebration lives on the inbox row. The tap payload keeps the five-field
-   * shape with the person-and-title fields honestly null; `kind` alone routes it
-   * to the reader's own Awards.
-   */
-  if (job.type === 'award_earned') {
-    const award = job.award_name?.trim() || null;
-    return {
-      title: 'bingd. Awards',
-      body: award ? `You earned ${award}` : 'You earned a new Award',
-      data: {
-        notificationId: job.notification_id,
-        kind: job.type,
-        actorUsername: null,
-        mediaItemId: null,
-        feedEventId: null,
-      },
-    };
+/**
+ * The Letterboxd import's three pushes (20260917001500), or null for any other type.
+ *
+ * Actorless, like the award: nobody did this to the reader, they started it themselves and
+ * were told they could close the app. That is why these are the pushes that most need to
+ * arrive. The inbox rows say the same headlines (`verbFor` in `use-notifications.ts`).
+ *
+ * The completion quotes one number, the films added as watched, because it is the one the
+ * next action is about. A job that added none (every film was already here) says the
+ * history is in rather than "0 movies added", which reads as a failure.
+ */
+function importContent(job: PushJob): PushContent | null {
+  const data = (): PushData => ({
+    notificationId: job.notification_id,
+    kind: job.type,
+    actorUsername: null,
+    mediaItemId: null,
+    feedEventId: null,
+    importJobId: job.import_job_id ?? null,
+  });
+
+  switch (job.type) {
+    case 'import_started':
+      return {
+        title: 'Letterboxd import started',
+        body: 'We’re bringing your history into bingd. You can close the app. We’ll let you know when it’s ready.',
+        data: data(),
+      };
+    case 'import_completed': {
+      const watched = Number(job.import_counts?.watched ?? 0);
+      return {
+        title: 'Your Letterboxd history is ready',
+        body:
+          watched > 0
+            ? `${watched} ${watched === 1 ? 'movie' : 'movies'} added as watched. Ready to rank.`
+            : 'Your Letterboxd history is now in bingd.',
+        data: data(),
+      };
+    }
+    case 'import_failed':
+      return {
+        title: 'We couldn’t finish your Letterboxd import',
+        body: 'Open bingd to see what happened and try again.',
+        data: data(),
+      };
+    default:
+      return null;
   }
+}
+
+/**
+ * The congratulations, which is the one actorless push (20260828000100).
+ *
+ * **The award named, and what earning it took** (founder, physical QA, 2026-09-14):
+ * "You earned Seedling 🎉" over "Kept 25 titles on your watchlist", where it used to be a
+ * generic "new Award". Both lines come from `award-copy.ts`, which is the app's own
+ * `awardAnnouncement` evaluated for every tier and checked against it in Jest, so the push,
+ * the inbox row and the celebration cannot say different things about one tier. The emoji
+ * is the founder's, and it closes the title so a lock screen that truncates keeps the name.
+ * The achievement is about the recipient's own collection, on their own lock screen, which
+ * is the same class of fact as the award's name.
+ *
+ * **A key the table does not know** falls back in `awardAnnouncement`'s own order, never
+ * to a key, and with no threshold sentence rather than a guessed one: a new tier of a known
+ * track is its tier label (or the family, on a metal track); an unknown track is the family
+ * name the row was written with; a database that predates 20260920000200 says "a new Award".
+ *
+ * **The tap opens that award.** `awardKey` and `awardTier` ride in the payload so the app
+ * resolves the same celebration its inbox row opens; without them it opens the Awards list.
+ */
+function awardContent(job: PushJob): PushContent {
+  const key = job.award_key?.trim() || null;
+  const tier = job.award_tier?.trim() || null;
+  const known = key && tier ? (AWARD_COPY[`${key}:${tier}`] ?? null) : null;
+  const track = key ? (AWARD_TRACK_NAMES[key] ?? null) : null;
+  const family = job.award_family?.trim() || null;
+  const tierLabel = job.award_tier_label?.trim() || null;
+  const name =
+    known?.title ??
+    (track
+      ? track.metalTiers
+        ? track.displayName
+        : (tierLabel ?? track.displayName)
+      : (family ?? tierLabel ?? 'a new Award'));
+
+  return {
+    title: `You earned ${name} 🎉`,
+    body: known?.achievement ?? 'See it in your bingd Awards',
+    data: {
+      notificationId: job.notification_id,
+      kind: job.type,
+      actorUsername: null,
+      mediaItemId: null,
+      feedEventId: null,
+      ...(key && tier ? { awardKey: key, awardTier: tier } : {}),
+    },
+  };
+}
+
+export function contentFor(job: PushJob): PushContent | null {
+  const importPush = importContent(job);
+  if (importPush) return importPush;
+
+  if (job.type === 'award_earned') return awardContent(job);
 
   const name = job.actor_name?.trim() || job.actor_username?.trim() || null;
   if (!name && job.type !== 'invite_welcome') return null;

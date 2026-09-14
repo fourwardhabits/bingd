@@ -1,6 +1,10 @@
 import { QueryClient } from '@tanstack/react-query';
 
-import { invalidateAfterCollectionChange, invalidateAfterWatchlistChange } from './invalidate';
+import {
+  invalidateAfterCollectionChange,
+  invalidateAfterImport,
+  invalidateAfterWatchlistChange,
+} from './invalidate';
 
 /**
  * The founder ranked a film and the Feed did not show it.
@@ -28,7 +32,10 @@ const invalidatedBy = (
   for (const key of seeds) client.setQueryData(key, 'seeded');
 
   const before = new Map(
-    seeds.map((key) => [JSON.stringify(key), client.getQueryState(key)?.isInvalidated ?? false]),
+    seeds.map((key) => [
+      JSON.stringify(key),
+      client.getQueryState(key)?.isInvalidated ?? false,
+    ]),
   );
   run(client);
 
@@ -287,5 +294,34 @@ describe('after a watchlist change', () => {
     const set = touched();
     expect(has(set, KEYS.otherUserCollection)).toBe(false);
     expect(has(set, KEYS.otherUserAwards)).toBe(false);
+  });
+});
+
+describe('the profile counts', () => {
+  const stats = ['profile-stats', USER];
+
+  it('are refreshed by a collection change, because Movies counts the watched collection', () => {
+    const touched = invalidatedBy([stats], (client) =>
+      invalidateAfterCollectionChange(client, USER, TITLE),
+    );
+    expect(has(touched, stats)).toBe(true);
+  });
+});
+
+describe('after a Letterboxd import ends', () => {
+  const touched = () =>
+    invalidatedBy([...all, ['profile-stats', USER] as const], invalidateAfterImport);
+
+  it('refreshes Collection, the profile counts, awards and goals', () => {
+    const set = touched();
+    expect(has(set, KEYS.collection)).toBe(true);
+    expect(has(set, ['profile-stats', USER])).toBe(true);
+    expect(has(set, KEYS.awards)).toBe(true);
+    expect(has(set, KEYS.goalsThisYear)).toBe(true);
+  });
+
+  it('leaves the rankings alone, because an import writes none', () => {
+    expect(has(touched(), KEYS.rankedMovies)).toBe(false);
+    expect(has(touched(), KEYS.search)).toBe(false);
   });
 });

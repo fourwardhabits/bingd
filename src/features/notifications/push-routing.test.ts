@@ -1,4 +1,4 @@
-import { hrefForPush, PUSH_FALLBACK_HREF, ROUTED_KINDS } from './routing';
+import { hrefFor, hrefForPush, PUSH_FALLBACK_HREF, ROUTED_KINDS, targetFor } from './routing';
 
 /**
  * Where a tapped push lands.
@@ -68,11 +68,109 @@ describe('a live payload', () => {
     );
   });
 
-  it('opens the Awards sheet for an award', () => {
+  it('opens the Awards sheet for an award the payload does not name', () => {
+    // A sender from before 20260920000200, or a row that lost its keys.
     expect(hrefForPush(payload({ kind: 'award_earned' }))).toEqual({
       pathname: '/profile',
       params: { awards: '1' },
     });
+  });
+});
+
+/**
+ * **An award push opens that award** (founder, physical QA, 2026-09-14).
+ *
+ * The inbox row opened the celebration and the lock-screen push opened the Awards list.
+ * `useLastNotificationResponse` hands cold, background and foreground taps to the same
+ * `hrefForPush`, so these cover all three entrances; the last test pins the push to the
+ * inbox row's own resolution rather than to a copy of its answer.
+ */
+describe('an award push', () => {
+  const award = (over: Record<string, unknown> = {}) =>
+    payload({
+      kind: 'award_earned',
+      actorUsername: null,
+      mediaItemId: null,
+      awardKey: 'queue-dragon',
+      awardTier: 'seedling',
+      ...over,
+    });
+
+  it('opens the celebration for the award and tier it names', () => {
+    expect(hrefForPush(award())).toEqual({
+      pathname: '/awards/celebrate',
+      params: { awards: 'queue-dragon:seedling' },
+    });
+  });
+
+  it('lands exactly where the inbox row for the same award lands', () => {
+    const row = {
+      id: 'n1',
+      kind: 'award_earned',
+      type: 'award_earned',
+      actorUsername: null,
+      mediaItemId: null,
+      subjectType: null,
+      subjectId: null,
+      award: { key: 'queue-dragon', tierKey: 'seedling' },
+    } as unknown as Parameters<typeof targetFor>[0];
+
+    expect(hrefForPush(award())).toEqual(hrefFor(targetFor(row)));
+  });
+
+  it('falls back to the Awards list when the tier is missing', () => {
+    expect(hrefForPush(award({ awardTier: null }))).toEqual({
+      pathname: '/profile',
+      params: { awards: '1' },
+    });
+  });
+
+  it('refuses award fields that are not strings', () => {
+    expect(hrefForPush(award({ awardKey: { key: 'queue-dragon' } }))).toEqual({
+      pathname: '/profile',
+      params: { awards: '1' },
+    });
+  });
+
+  it('refuses award fields that are not slugs, so a payload cannot add or split a page', () => {
+    for (const over of [
+      { awardKey: 'queue-dragon,movie-muncher' },
+      { awardTier: 'seedling:gold' },
+      { awardKey: 'Queue Dragon' },
+      { awardTier: '../seedling' },
+    ]) {
+      expect(hrefForPush(award(over))).toEqual({
+        pathname: '/profile',
+        params: { awards: '1' },
+      });
+    }
+  });
+
+  it('does not let award fields steer any other kind', () => {
+    expect(hrefForPush(award({ kind: 'follow', actorUsername: 'suraj' }))).toBe('/u/suraj');
+  });
+});
+
+describe('an import push', () => {
+  it.each(['import_started', 'import_completed', 'import_failed'])(
+    'opens %s on the exact job it names, whatever the app was doing when it was tapped',
+    (kind) => {
+      expect(
+        hrefForPush(
+          payload({ kind, actorUsername: null, mediaItemId: null, importJobId: 'job-42' }),
+        ),
+      ).toEqual({ pathname: '/settings/import', params: { job: 'job-42' } });
+    },
+  );
+
+  it('does not let an import job id steer any other kind', () => {
+    expect(hrefForPush(payload({ kind: 'follow', importJobId: 'job-42' }))).toBe('/u/suraj');
+  });
+
+  it('refuses a job id that is not a string', () => {
+    expect(
+      hrefForPush(payload({ kind: 'import_completed', actorUsername: null, importJobId: 42 })),
+    ).toEqual({ pathname: '/settings/import' });
   });
 });
 
@@ -88,8 +186,14 @@ describe('a payload whose subject is gone', () => {
       // The two actorless kinds route to the reader's *own* profile — Awards behind a
       // parameter, goals plain — so neither has a subject to have gone missing and
       // neither falls back to the inbox. Everything else does.
+      // The import kinds open the importer, which is a real screen with or without the job.
       const ownProfile = kind === 'award_earned' || kind === 'goal_completed';
-      const landed = ownProfile ? typeof href === 'object' : href === PUSH_FALLBACK_HREF;
+      const importer = kind.startsWith('import_');
+      const landed = importer
+        ? JSON.stringify(href) === JSON.stringify({ pathname: '/settings/import' })
+        : ownProfile
+          ? typeof href === 'object'
+          : href === PUSH_FALLBACK_HREF;
       expect(landed).toBe(true);
     }
   });

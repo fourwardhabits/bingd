@@ -70,8 +70,10 @@ describe('the ranking flow shows no community number', () => {
 
   it('fetches only a title and its artwork for a comparison card', () => {
     // The card's read is the narrowest thing it can be. Any widening — a score column, an
-    // embed of an aggregate — changes this string first.
+    // embed of an aggregate — changes this string first. `kind` joined it on 2026-09-11
+    // with the comparison memory aids: it is what `comparison_info_opened` reports as
+    // `media_kind`, a property of the title rather than a number about it.
     const sheet = sources.find((source) => source.file === 'RankingSheet.tsx');
-    expect(sheet?.text).toContain(".select('id, title, poster_path')");
+    expect(sheet?.text).toContain(".select('id, kind, title, poster_path')");
   });
 });

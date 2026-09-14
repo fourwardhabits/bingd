@@ -155,6 +155,30 @@ describe('the stage pointer', () => {
   });
 
   /**
+   * **The Letterboxd step sits between the ranking run and People** (2026-09-13), so a
+   * People advance that raced it cannot be undone by it, and a relaunch never resumes
+   * somebody on the import question after they had moved past it.
+   */
+  it('orders the Letterboxd step after taste and before people', async () => {
+    void advanceStage('user-1', 'taste');
+    await settle();
+    await release();
+    void advanceStage('user-1', 'letterboxd');
+    await settle();
+    await release();
+    expect(stageInMemory('user-1')).toBe('letterboxd');
+
+    void advanceStage('user-1', 'people');
+    await settle();
+    await release();
+    void advanceStage('user-1', 'letterboxd');
+    await settle();
+
+    expect(stageInMemory('user-1')).toBe('people');
+    expect(mockIssued.map((write) => write.value)).toEqual(['taste', 'letterboxd', 'people']);
+  });
+
+  /**
    * Per account, not one queue for the device. Two accounts write different keys, and
    * making one wait on the other's stalled Keychain would be a new way to lose the thing
    * this is protecting.

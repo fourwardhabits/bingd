@@ -50,7 +50,8 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 /** Mutable so a test can arrive with `?medium=` the way See all does. */
-const mockParams: { medium?: string } = {};
+const mockParams: { medium?: string; show?: string } = {};
+const mockSetParams = jest.fn();
 
 /** See the `useNavigation` stand-in below. */
 const mockTabPress: (() => void)[] = [];
@@ -75,7 +76,7 @@ jest.mock('expo-router', () => ({
   // Navigation does with it. `focused` is mutable because "already-selected" is the whole
   // of the contract.
   useNavigation: () => mockNavigation,
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), setParams: mockSetParams }),
   useLocalSearchParams: () => mockParams,
 }));
 
@@ -151,6 +152,8 @@ const ranked = (id: string, category: 'movies' | 'tv_seasons') => ({
 beforeEach(() => {
   mockProfile.id = 'user-1';
   delete mockParams.medium;
+  delete mockParams.show;
+  mockSetParams.mockClear();
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
@@ -337,6 +340,26 @@ describe('the remembered category', () => {
    * own-profile route sends them here. Without the param that choice was dropped and the
    * device habit answered instead — tap See all under Movies, arrive on TV.
    */
+  /**
+   * **"Rank imported movies"** (the Letterboxd summary, 2026-09-12) arrives with
+   * `show: 'unranked'`: Movies, on Unranked, whatever this tab was left showing.
+   */
+  it('opens Movies on Unranked when the importer sends somebody to rank', async () => {
+    mockPrefStore[MEDIUM_KEY] = 'tv_seasons';
+    mockParams.show = 'unranked';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() =>
+      expect(tab(view, 'Unranked')?.props.accessibilityState.selected).toBe(true),
+    );
+    expect(showing(view)).toBe('Showing Movies');
+    // Consumed, so choosing Watched afterwards is not undone by a param still in the URL.
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
+    // And still Movies once the remembered TV side has certainly been read.
+    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
+  });
+
   it('opens on the side a navigation asked for', async () => {
     mockParams.medium = 'tv_seasons';
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
@@ -613,24 +636,30 @@ describe('the unranked card', () => {
    * X at the far right edge, so the two things a reader could do about it sat as far
    * apart as the card allowed and only one of them looked like a control.
    */
-  it('offers Rank and Not now together, as a pair', async () => {
+  it('offers Rank and Dismiss together, as a pair', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
     await waitFor(() => expect(view.getByRole('button', { name: 'Rank' })).toBeTruthy());
     const rank = view.getByRole('button', { name: 'Rank' });
-    const notNow = view.getByRole('button', { name: 'Not now' });
+    const dismiss = view.getByRole('button', { name: 'Dismiss' });
     // Same parent, so they are one action area rather than two opposite corners.
-    expect(rank.parent).toBe(notNow.parent);
+    expect(rank.parent).toBe(dismiss.parent);
   });
 
+  /**
+   * The X was labelled "Dismiss" for screen readers; the pair's second button now says
+   * the same thing in words, so there must be exactly one control that answers to it —
+   * and the old "Not now" wording is gone from this card.
+   */
   it('offers one dismissal, not two', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
+    expect(view.getAllByRole('button', { name: 'Dismiss' })).toHaveLength(1);
     expect(view.queryByLabelText('Dismiss')).toBeNull();
-    expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Not now' })).toBeNull();
   });
 
   it('opens the Unranked tab from Rank', async () => {
@@ -654,15 +683,16 @@ describe('the unranked card', () => {
     expect(view.queryByText('You have unranked titles')).toBeNull();
   });
 
-  it('is dismissed by the X, and records the dismissal', async () => {
+  it('is dismissed by Dismiss, records the dismissal, and keeps the Unranked tab', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
-    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Dismiss' }));
 
     await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
     expect(mockPrefWrites.map((write) => write.name)).toContain(NUDGE_KEY);
+    expect(tab(view, 'Unranked')).toBeTruthy();
   });
 
   /**
@@ -675,7 +705,7 @@ describe('the unranked card', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
-    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Dismiss' }));
 
     await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
     expect(tab(view, 'Unranked')).toBeTruthy();
@@ -685,7 +715,7 @@ describe('the unranked card', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const first = await open();
     await waitFor(() => expect(first.getByText('You have unranked titles')).toBeTruthy());
-    await fireEvent.press(first.getByRole('button', { name: 'Not now' }));
+    await fireEvent.press(first.getByRole('button', { name: 'Dismiss' }));
     await waitFor(() => expect(first.queryByText('You have unranked titles')).toBeNull());
 
     // Same store, fresh mount: the dismissal was written, so it survives.

@@ -17,6 +17,7 @@ import {
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
+  IMPORT_KINDS,
   type InboxSection,
   type Notification,
 } from '@/features/notifications/use-notifications';
@@ -497,7 +498,7 @@ export default function NotificationsScreen() {
                             ? // The earned tier, from the same function the row's own
                               // sentence and the Awards sheet read.
                               `You earned ${row.award?.title ?? 'a new Award'}`
-                            : row.kind === 'goal_completed'
+                            : row.kind === 'goal_completed' || IMPORT_KINDS.has(row.kind)
                               ? // The second actorless sentence. `verbFor` returns the
                                 // whole clause here, so there is no name to template in
                                 // and no "null" to read aloud.
@@ -528,7 +529,25 @@ export default function NotificationsScreen() {
                         {/* The award's own badge where every other row has a face —
                             nobody did this to the reader, and an empty avatar chip
                             says "somebody unnameable" rather than "your award". */}
-                        {row.kind === 'goal_completed' ? (
+                        {IMPORT_KINDS.has(row.kind) ? (
+                          // The import's own mark. Nobody did this to the reader; they
+                          // started it, so the row carries the thing rather than a face.
+                          <View style={styles.goalMark}>
+                            <Ionicons
+                              name={
+                                row.kind === 'import_failed'
+                                  ? 'alert-circle-outline'
+                                  : 'download-outline'
+                              }
+                              size={theme.layout.icon.md}
+                              color={
+                                row.kind === 'import_failed'
+                                  ? theme.text.secondary
+                                  : theme.semantic.action
+                              }
+                            />
+                          </View>
+                        ) : row.kind === 'goal_completed' ? (
                           // The same flag the feed row leads with, at avatar size. An
                           // empty avatar chip would say "somebody unnameable" where the
                           // truth is that nobody did this to them.
@@ -595,6 +614,11 @@ export default function NotificationsScreen() {
                                 {' '}
                                 🎉
                               </Text>
+                            </Text>
+                          ) : IMPORT_KINDS.has(row.kind) ? (
+                            /* The same headline the push and the import screen use. */
+                            <Text variant="callout" numberOfLines={2}>
+                              {verbFor(row.kind)}
                             </Text>
                           ) : row.kind === 'goal_completed' ? (
                             /* "You hit your 2026 Movies goal 🎉" — the founder's copy.

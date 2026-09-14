@@ -57,7 +57,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
 | `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
 | `onboarding_completed` | the first-run flow ended, at the notification step which is now its last | the account | `skipped`, `titles_ranked` — either may be **absent**, see below |
-| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09) | the account | `step`, `variant`, `outcome` |
+| `onboarding_step_completed` | one step of the first-run flow was left, in either direction (2026-09-09; `step: 'letterboxd'` added 2026-09-13) | the account | `step`, `variant`, `outcome` |
 
 ### Core loop
 
@@ -66,6 +66,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | `title_logged` | `set_bucket` answered `ok` | the collector | `media_kind`, `surface`, `bucket` |
 | `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
 | `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
+| `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
 
 ### Social and discovery
@@ -284,12 +285,67 @@ versus a zero, which is what says whether the mechanic is working before any rem
 push exists. §10b carries the measurement plan it belongs to. Deliberately no
 `streak_reminder_*` events — those describe a push that does not exist.
 
+### Letterboxd import — added 2026-09-11
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `import_opened` | `settings`: the importer screen mounted, once per mount. `onboarding` (2026-09-13): *Import from Letterboxd* or *Need help getting the file?* was first pressed on the optional step, once per visit | the importer | `surface` |
+| `import_instructions_opened` | the "how to export" sheet's link to Letterboxd was tapped | the importer | `surface` |
+| `import_archive_selected` | a picked file was read, or refused, or the picker was dismissed | the importer | `outcome` |
+| `import_started` | the preview was accepted and the first page was sent | the importer | `films`, `viewings` |
+| `import_completed` | the job reached `done` **while somebody was watching** | the importer | `applied`, `unresolved` |
+
+A funnel with somebody else's app in the middle of it. The step between
+`import_instructions_opened` and `import_archive_selected` happens entirely on
+letterboxd.com and in a mail client, so those two events are the only measurement of
+whether the hand-off works at all.
+
+`surface` is `settings` or `onboarding`. The import is optional (Contract V3 §9), so the
+split is what says whether the onboarding entry earns its place — without it, a
+discoverability problem and a completion problem look the same.
+
+**On `onboarding` it counts a tap, not a view** (2026-09-13). The passive sentence on the
+payoff went unnoticed in physical QA, so onboarding now has an optional step of its own,
+*Already use Letterboxd?*, between *Your First Five* and People. Everybody past the ranking
+run is shown it, so counting its mount would make `import_opened` the step's impressions
+and the two surfaces incomparable. The step's exposure and its answer are
+`onboarding_step_completed` with `step: 'letterboxd'`: `outcome: 'skipped'` is *Not now*
+when the importer **knows** no import is running for the account; `continued` is every other
+way off the step — an import handed to the server, one already running, or a leave while
+that is not yet known (the open-job lookup had not answered, or a hand-off's reply was
+lost). A leave that might have left an import running is never counted as a skip.
+
+`import_archive_selected` is the one to watch. Its failure outcomes — `not_a_zip`,
+`not_letterboxd`, `damaged`, `empty` — are the difference between "people drop off
+here" and "people drop off here *because they unzipped the file first*", which is a
+copy fix rather than a product one.
+
 ---
 
 ## 3. What each event does **not** mean
 
 This section is the point of the document. Every line here is a number somebody could
 otherwise report in good faith and be wrong about.
+
+**`import_completed` is a deliberate undercount and must never be divided by
+`import_started` and called a success rate.** Once the client calls `import_ready` the
+work happens on a `pg_cron` tick with no app attached, and the screen explicitly tells
+people they may close the app and come back. Every import that finishes after they take
+that advice completes perfectly and emits nothing. The gap between the two events is
+therefore *mostly people following the instructions*, not failures. The real completion
+rate lives in `import_jobs.status` on the server; this event answers a narrower question —
+how many people sat and watched — and that is all it may be used for.
+
+**`import_started` is the denominator worth having.** It fires after the preview was
+accepted, so it counts decisions rather than intentions, and `films` on it is the first
+real distribution of how large an import actually is — every bound in the pipeline was
+sized against a 22-film export and three generated libraries, so this is what says whether
+those guesses were right.
+
+**`import_archive_selected` with `outcome: 'cancelled'` is not a failure.** Somebody
+opened the picker and changed their mind, or went to find the file. It is counted so that
+the refusal outcomes beside it can be read as refusals rather than as everything that was
+not a success.
 
 **`sign_in_redirect_rejected`** counts a failure that is otherwise invisible, which is the
 only reason it exists. GoTrue answers a `redirect_to` it cannot use by substituting
@@ -400,6 +456,25 @@ the session are none. It carries the same `mode` vocabulary as the completion so
 join on it, and `media_kind` comes from the title being ranked rather than from the
 server's answer, because a comparison carries no category. **`ranking_started` minus
 `ranking_completed`, per `mode`, is the abandonment rate.**
+
+**`comparison_info_opened`** is the recognition question, counted. A comparison the reader
+cannot answer from two posters is the one that loses them, and Details is the escape hatch
+built for it; nothing said how often it is reached for, or whether the two kinds reach for
+it at anything like the same rate. The memory-aid pass of 2026-09-11 is built on the claim
+that a season needs it far more than a film does, because a poster with a number on it is
+the same poster in every season of a show, and this is the only number that can test that.
+
+It fires on the press that opens the sheet, so a Details pressed while the opponent is
+still loading emits nothing. Twice in one comparison is a reader who checked both sides,
+which is a real act rather than a duplicate.
+
+**There is deliberately no `comparison_info_outcome`.** The obvious companion event says
+what the reader did next — picked, gave up, or left — and it is not specified, because a
+comparison has four ways out and one of them is Undo, which rolls the pair back
+*underneath* the answer: an outcome event would then attribute one comparison's Details to
+the next comparison's pick. Joining `comparison_info_opened` against `ranking_started` and
+`ranking_completed` at the session level answers the coarse version of the question with
+no such hazard, and that is what to read first.
 
 **`watchlist_added`** is an addition. Removals are not measured; nothing in the beta asks.
 It carries **no `media_kind`**, deliberately: the watchlist accepts a whole series as well
@@ -768,6 +843,7 @@ a number that looks like growth and is not.
 | `onboarding_completed` | once per flow | guarded on the flow having already *ended*, so two buttons on one summary report one completion |
 | `follow_created` | approximately once | `already_applied` carries no state and emits nothing; a known existing edge, and a relationship not yet read, both emit nothing |
 | `watchlist_added` | approximately once | additions only, `ok` only |
+| `comparison_info_opened` | once per open | the press that opens nothing — Details while the opponent is still loading — emits nothing; two opens in one comparison are two events on purpose |
 | `for_you_slate_shown` | once per distinct slate per process | guarded by `noteImpressions`' own returned set, so a re-render, a bookmark or a page already recorded emits nothing; the server's hour-truncated impression key is the second guard |
 | `streak_state_viewed` | once per profile mount | a component-lifetime ref, so scrolling the profile tab is not a second view; a relaunch is |
 

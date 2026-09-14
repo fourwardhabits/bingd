@@ -312,6 +312,10 @@ function Navigation() {
                   Declared individually rather than as a group because there is no
                   `onboarding/_layout.tsx` and adding one to carry a guard this file
                   already owns would put the same decision in two places. */}
+              {/* The optional Letterboxd step (2026-09-13), between the payoff and People.
+                  Inside the guard for the reason above: it opens with
+                  `useCurrentProfile()` too. */}
+              <Stack.Screen name="onboarding/letterboxd" options={{ headerShown: false }} />
               <Stack.Screen name="onboarding/people" options={{ headerShown: false }} />
               <Stack.Screen name="onboarding/notifications" options={{ headerShown: false }} />
               {/* A modal, like Settings, and for the same reason: it is a thing that

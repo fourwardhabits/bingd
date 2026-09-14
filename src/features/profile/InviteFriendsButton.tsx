@@ -35,16 +35,39 @@ import { Button } from '@/ui/components';
  * `md`'s default padding does not fit it — see `ProfileActions`.
  */
 export function InviteFriendsButton() {
-  const [inviting, setInviting] = useState(false);
+  /**
+   * **"Opening…" covers the mint and nothing after it.**
+   *
+   * The label used to read "Inviting…" from the tap until `Share.share` settled, and on
+   * iOS that promise settles only when the sheet closes, so the whole time a person was
+   * choosing where to send the link the button behind the sheet said an invitation was
+   * underway. None is: the sheet may be dismissed, and attribution happens at
+   * redemption (`redeem_invite`), not here. The one wait worth naming is the RPC before
+   * the sheet can present — there is no cached link to skip it, because every accepted
+   * tap records a creation — so the transient label is scoped to that and drops the
+   * moment the link comes back.
+   */
+  const [opening, setOpening] = useState(false);
+  /**
+   * **The tap guard is a ref, held until the sheet settles.**
+   *
+   * Reading state let two taps inside one render both through: two `create_invite_link`
+   * calls, two creation rows, two share sheets. The ref is set synchronously on the
+   * first tap and released only in `finally` — after the mint failed or the sheet
+   * closed — so a tap behind an open sheet is ignored and the first tap after it works.
+   */
+  const busy = useRef(false);
   const intent = useRef<string | null>(null);
 
   const invite = async () => {
-    if (inviting) return;
-    setInviting(true);
+    if (busy.current) return;
+    busy.current = true;
+    setOpening(true);
 
     try {
       const operationId = (intent.current ??= newOperationId());
       const url = await createInviteLink(null, operationId, 'profile');
+      setOpening(false);
 
       if (!url) {
         // The link is the whole point of this control, so unlike the title share there
@@ -60,11 +83,12 @@ export function InviteFriendsButton() {
     } catch (error) {
       Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
     } finally {
-      setInviting(false);
+      busy.current = false;
+      setOpening(false);
     }
   };
 
   return (
-    <Button label={inviting ? 'Inviting…' : 'Invite friends'} fit onPress={() => void invite()} />
+    <Button label={opening ? 'Opening…' : 'Invite friends'} fit onPress={() => void invite()} />
   );
 }

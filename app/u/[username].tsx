@@ -407,8 +407,8 @@ export default function PublicProfileScreen() {
             stats={{
               followers: profile.data.followers,
               following: profile.data.following,
-              movies: profile.data.rankedMovies,
-              seasons: profile.data.rankedSeasons,
+              movies: profile.data.watchedMovies,
+              seasons: profile.data.watchedSeasons,
             }}
             /**
              * **The privacy gate for these two lists is the branch they are inside.**

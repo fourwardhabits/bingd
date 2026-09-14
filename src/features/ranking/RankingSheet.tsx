@@ -117,32 +117,43 @@ export type RankingSheetProps = {
    */
   onFinishLog?: (placement: { score: number; position: number; category: string }) => void;
   /**
-   * **The placement, handed straight back, with no reveal drawn** — for a caller whose
-   * screen is the payoff.
+   * **The placement, told to the caller the moment it lands** — for a caller that has to
+   * count placements itself rather than wait for a refetch to do it.
    *
-   * The reveal is right nearly everywhere: somebody who ranked a film from the Log tab or
-   * a title page has finished an act, and the number, the ordinal and the two controls
-   * are what that act was for.
+   * The reveal is still drawn. This prop changes what Done means and nothing about what
+   * the reader sees: they get the same score, ordinal and genre ranks as a ranking from
+   * the Log tab or a title page, because that payoff *is* the product.
    *
-   * First-run onboarding is the exception, and it is the founder's blocker from physical
-   * iOS 1.0.1 build 9. The flow there is pick, rank, pick, rank, five times, and the
-   * payoff is *Your First Five* at the end of it. A per-title reveal in the middle of
-   * that is a full stop in a sentence that has not finished: the reader is asked to
-   * acknowledge a score for a film they placed two seconds ago, four more times, before
-   * being shown the list that the whole exercise was about. The founder's brief is
-   * explicit — after a successful onboarding rank, go straight to the next picker.
+   * ---------------------------------------------------------------------------
+   * WHY IT NO LONGER SUPPRESSES THE REVEAL (founder, physical preview QA, Round 3,
+   * 2026-09-13)
    *
-   * So this is not "hide the reveal". It is a different contract: **the sheet's job ends
-   * at the placement and the caller owns what happens next.** The session is already
-   * finished and deleted server-side by the time `placed` arrives (`apply` clears
-   * `openSession`), so there is nothing left here to close down and nothing a dismissal
-   * would have to cancel.
+   * From build 9 until Round 3 this prop meant "hand the placement back and draw no
+   * reveal", so onboarding could go straight from a placement to the next picker. Round 2
+   * put a line on the picker — *The Odyssey landed at 10.0* — where the reveal had been.
+   * It worked mechanically, and on a device it was an anticlimax: onboarding is where
+   * somebody learns what ranking gives back, and it was the one place that gave back a
+   * sentence. The founder's decision is that onboarding teaches the same loop as the rest
+   * of the app — bucket, comparisons, the full reveal, then the next title — at the cost
+   * of one Done per title.
    *
-   * `onFinishLog` is ignored when this is set: they are two answers to the same question
-   * and a caller that wanted the log sheet would not be suppressing the screen that
-   * offers it. The celebration queue is deliberately *not* drained — an award earned on
-   * the third of five films belongs after the flow, not across it, which is the same rule
-   * *Add details* already follows.
+   * What went with the old contract: holding the sheet back until the first answer was
+   * known, the frozen last comparison it slid out showing, and the empty hand-off strip.
+   * All three existed only because the sheet used to leave the instant a placement
+   * landed. It now leaves when the reader presses Done, from a reveal that is already on
+   * screen, so there is no collapse to hide and no early exit to serialise.
+   *
+   * ---------------------------------------------------------------------------
+   * WHAT DONE DOES UNDER IT
+   *
+   * Closes, through `onClose`, **without draining the celebration queue.** An award
+   * earned on the third of five films belongs after the flow, not across it. That is the
+   * rule *Add details* already follows and the reason `onFinishLog` is ignored here: the
+   * log sheet is a second Modal, and onboarding has exactly one sheet at a time by
+   * construction.
+   *
+   * Handed over once per placement, from an effect, after `apply` has finished its own
+   * work. See `handedOver`.
    */
   onPlaced?: (placement: { score: number; position: number; category: string }) => void;
   /**
@@ -157,10 +168,10 @@ export type RankingSheetProps = {
    * Whether the sheet is presented, as distinct from whether it is mounted.
    *
    * Defaults to `true`, so the three screens that mount this only while they want it are
-   * unchanged. Onboarding sets it `false` between a placement and the picker becoming
-   * live again, and keeps the component mounted so iOS can finish dismissing before
-   * anything else is presented — the return half of the same serialisation `handoff`
-   * does on the way in. See `Sheet`'s `onDismissed`.
+   * unchanged. Onboarding sets it `false` once the reader closes the sheet, and keeps the
+   * component mounted so iOS can finish dismissing before anything else is presented —
+   * the return half of the same serialisation `handoff` does on the way in. See `Sheet`'s
+   * `onDismissed`.
    */
   visible?: boolean;
   /** iOS has finished dismissing this sheet. The next presentation is safe now. */
@@ -212,6 +223,15 @@ export function RankingSheet({
 
 /** A dismissing sheet answers nothing. */
 const noopClose = () => {};
+
+/**
+ * The ranking's two kinds, in the analytics vocabulary's two words.
+ *
+ * `MediaKind` says `tv_season` where every other part of this app says `season`, so the
+ * translation has to happen somewhere. It happens here, once, because three events now
+ * need it and three copies of one conditional is three places for it to drift.
+ */
+const mediaKindOf = (kind: 'movie' | 'season') => (kind === 'season' ? 'tv_season' : 'movie');
 
 function Session({
   subject,
@@ -392,7 +412,7 @@ function Session({
         track({
           name: 'ranking_started',
           props: {
-            media_kind: subject.kind === 'season' ? 'tv_season' : 'movie',
+            media_kind: mediaKindOf(subject.kind),
             surface,
             mode: subject.mode ?? 'start',
           },
@@ -636,18 +656,18 @@ function Session({
   };
 
   /**
-   * The `onPlaced` contract: hand the placement back once, and draw no reveal.
+   * The `onPlaced` contract: tell the caller about the placement, once.
    *
    * An effect rather than a branch inside `apply`, for two reasons. `apply` is a
    * `useCallback` whose dependency list is deliberately the *subject*, so folding a
    * caller's own closure into it would re-open the session every time the parent
-   * re-rendered. And the placement has to be handed over **after** `apply` has finished
-   * its own work — the invalidation, `ranking_completed`, the award and streak detections
-   * — because the caller's very next act is to unmount this component.
+   * re-rendered. And the placement is handed over **after** `apply` has finished its own
+   * work — the invalidation, `ranking_completed`, the award and streak detections — so the
+   * caller never learns of a placement this component has not finished recording.
    *
    * The ref is what makes it once. `onPlaced` is an inline closure at the call site, so
    * its identity changes on every render of the parent, and without the guard a parent
-   * that re-rendered before it unmounted would be told twice about one ranking.
+   * that re-rendered while the reveal was up would be told twice about one ranking.
    */
   const handedOver = useRef(false);
   useEffect(() => {
@@ -672,28 +692,7 @@ function Session({
       label={`Rank ${subject.title}`}
     >
       <View style={styles.sheet}>
-        {step?.state === 'placed' && onPlaced ? (
-          /**
-           * What this sheet shows between the placement landing and it going away.
-           *
-           * Usually one frame — the effect above has already handed the placement back
-           * and the caller drops this on its next render. A caller that serialises the
-           * dismissal holds it longer: onboarding keeps this mounted with `visible` false
-           * until iOS reports the presentation gone, which is most of a slide-out. Either
-           * way it is not nothing, because a sheet that emptied itself would flash its own
-           * chrome over the screen behind it — and it is not the reveal, because
-           * suppressing that is the whole contract.
-           *
-           * Empty rather than a spinner: `LoadingScreen` is the only indeterminate
-           * spinner in this app and it earns that by being a wait of unknown length. This
-           * is a single frame with a known end.
-           */
-          <View
-            style={styles.handoff}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          />
-        ) : step?.state === 'placed' ? (
+        {step?.state === 'placed' ? (
           <Reveal
             score={step.score}
             position={step.position}
@@ -702,9 +701,11 @@ function Session({
             subjectId={subject.id}
             title={subject.title}
             surface={surface}
-            onDone={() => void closeAndCelebrate()}
+            // Under `onPlaced` the flow is not over, so what the ranking earned waits for the
+            // surface the reader finishes on. See `onPlaced`.
+            onDone={() => void (onPlaced ? close() : closeAndCelebrate())}
             onFinishLog={
-              onFinishLog
+              onFinishLog && !onPlaced
                 ? () => {
                     // `close` is a no-op against the server at this point — `apply` cleared
                     // `openSession` the moment the placement landed, because the server
@@ -879,7 +880,13 @@ function Comparison({
   onSkip,
   onClose,
 }: {
-  subject: { id: string; title: string; posterUri?: string | null };
+  /**
+   * `kind` is here for the Details affordance under the card, which says a different
+   * true sentence for a film and for a season, and for the event that fires when it is
+   * pressed. It is on `RankingSubject` already; this only stops the type dropping it on
+   * the way through.
+   */
+  subject: { id: string; title: string; posterUri?: string | null; kind: 'movie' | 'season' };
   pivotId: string;
   skipped: boolean;
   busy: boolean;
@@ -917,11 +924,19 @@ function Comparison({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('media_items')
-        .select('id, title, poster_path')
+        // `kind` joins the three columns this card has always read. The Details
+        // affordance under it describes a different sheet for a film and for a season,
+        // and this is one more column on a request that was being made anyway.
+        .select('id, kind, title, poster_path')
         .eq('id', pivotId)
         .single();
       if (error) throw error;
-      return data as { id: string; title: string; poster_path: string | null };
+      return data as {
+        id: string;
+        kind: 'movie' | 'season' | null;
+        title: string;
+        poster_path: string | null;
+      };
     },
   });
 
@@ -948,6 +963,15 @@ function Comparison({
   // Both cards wait for it, not just the pivot's. Leaving the subject tappable meant a user
   // could answer a comparison whose other side was still an ellipsis.
   const waiting = busy || !pivot;
+  /**
+   * The opponent's kind, narrowed to the two a ranking can hold.
+   *
+   * `media_items.kind` also carries `series`, which is a grouping rather than a rankable
+   * unit (PRD §10) and can never be a pivot — and while the row is still in flight there
+   * is no kind at all. Both collapse to `movie`, which is what the card said for every
+   * title before this and is only ever read while it is unpressable.
+   */
+  const pivotKind = pivot?.kind === 'season' ? 'season' : 'movie';
 
   return (
     <View style={styles.comparison}>
@@ -959,10 +983,17 @@ function Comparison({
       <View style={styles.cards}>
         <Card
           title={subject.title}
+          kind={subject.kind}
           posterUri={subject.posterUri ?? null}
           disabled={waiting}
           onPress={() => onPick(subject.id)}
-          onRecall={() => setRecalling(subject.id)}
+          onRecall={() => {
+            track({
+              name: 'comparison_info_opened',
+              props: { media_kind: mediaKindOf(subject.kind), surface },
+            });
+            setRecalling(subject.id);
+          }}
         />
         {/* Beli's device (beli-252). It turns two pictures side by side into a
             question, and it costs one 32pt circle. */}
@@ -973,10 +1004,32 @@ function Comparison({
         </View>
         <Card
           title={pivot?.title ?? '…'}
+          /**
+           * Null until the row lands, and that is the point rather than an oversight.
+           * `pivotKind` has to collapse an unresolved row to *something*, and whichever
+           * it collapsed to would be a hint asserting a film's contents over a season
+           * for as long as the read takes. A control with no hint reads its label and
+           * stops, which is honest; the hint arrives with the row.
+           */
+          kind={pivot ? pivotKind : null}
           posterUri={posterUri(pivot?.poster_path, 'card')}
           disabled={waiting}
           onPress={() => pivot && onPick(pivot.id)}
-          onRecall={() => pivot && setRecalling(pivot.id)}
+          /**
+           * The event fires inside the same guard the navigation does, and not beside
+           * it. Details is not `disabled` while the opponent loads — it is a quiet
+           * caption under a poster and dimming it would say the sheet was unavailable
+           * rather than unready — so the press is real and does nothing, and an event
+           * for a sheet that did not open would be a lie about a sheet nobody saw.
+           */
+          onRecall={() => {
+            if (!pivot) return;
+            track({
+              name: 'comparison_info_opened',
+              props: { media_kind: mediaKindOf(pivotKind), surface },
+            });
+            setRecalling(pivot.id);
+          }}
         />
       </View>
 
@@ -1143,12 +1196,42 @@ function Comparison({
       </View>
 
       {/**
-       * Mounted only while open, like every other sheet in the app, and *inside* the
+       * Presented only while open, like every other sheet in the app, and *inside* the
        * comparison rather than beside it — so the session, the pivot and the answers
        * already given are all still standing behind it. Dismissing returns to the exact
        * same pair because nothing about the pair was ever unmounted.
+       *
+       * ---------------------------------------------------------------------------
+       * **Keyed, so every open is a new sheet.**
+       *
+       * Presented is not the same as mounted: the component sits here unconditionally
+       * and draws nothing while `recalling` is null, so there is a `<Modal>` only when
+       * there is a title. Returning null unmounts its *children*, so everything they
+       * hold — an expanded synopsis, an opened episode synopsis — resets on its own and
+       * always did. What does not reset is the sheet component's **own** state, because
+       * React keeps the instance: `showAllEpisodes`.
+       *
+       * So without this, a reader who opened a twenty-one episode season, pressed *Show
+       * all 21 episodes*, closed it and pressed Details on the other card would get that
+       * card's season already expanded to its full length — a decision they made about a
+       * different show, applied to this one.
+       *
+       * A `key` rather than an effect that resets the flag, for the reason `Session`
+       * above is keyed: it is one line, it cannot be forgotten when the next piece of
+       * state is added here, and "a different title is a different sheet" is the actual
+       * rule rather than a consequence of one.
+       *
+       * **Not a second presentation.** `recalling` only ever goes id to null to id —
+       * one card's sheet covers the screen, so the other card cannot be pressed while it
+       * is open — so the key never changes with a `<Modal>` mounted, and no commit both
+       * unmounts one and mounts another. The `<Modal>` operation is the same one that
+       * happened before this: an unmount, on close.
        */}
-      <TitleRecallSheet mediaItemId={recalling} onClose={() => setRecalling(null)} />
+      <TitleRecallSheet
+        key={recalling ?? 'closed'}
+        mediaItemId={recalling}
+        onClose={() => setRecalling(null)}
+      />
     </View>
   );
 }
@@ -1172,12 +1255,18 @@ function TopBar({ onClose }: { onClose: () => void }) {
 
 function Card({
   title,
+  kind,
   posterUri,
   disabled,
   onPress,
   onRecall,
 }: {
   title: string;
+  /**
+   * What the Details sheet under this card will actually contain, or null while the
+   * card does not know yet. Null buys silence rather than a guess — see the hint below.
+   */
+  kind: 'movie' | 'season' | null;
   posterUri?: string | null;
   disabled: boolean;
   onPress: () => void;
@@ -1277,7 +1366,23 @@ function Card({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Details about ${title}`}
-        accessibilityHint="Shows the year, the runtime, the cast, and what it is about."
+        /**
+         * **The hint describes the sheet that opens, and there are two of them.**
+         *
+         * One sentence served both kinds and named the film's contents: the year, the
+         * runtime, the cast. A season's sheet has no runtime, and since the memory-aid
+         * pass it has no cast line either — what it has is the episodes, which are the
+         * whole reason somebody opens it on a season. A hint promising three things that
+         * are not there, and omitting the one that is, is worse than no hint, and it is
+         * the only description of this control a screen reader ever gets.
+         */
+        accessibilityHint={
+          kind === null
+            ? undefined
+            : kind === 'season'
+              ? 'Shows the year, the episodes in it, and what it is about.'
+              : 'Shows the year, the runtime, the cast, and what it is about.'
+        }
         hitSlop={theme.layout.minTapTarget / 2}
         onPress={onRecall}
         style={({ pressed }) => [styles.recall, pressed && styles.pressed]}
@@ -1839,9 +1944,6 @@ const styles = StyleSheet.create({
   // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
   // moving off a full-height page sheet — a comparison is a small question.
   sheet: { paddingBottom: theme.space[2] },
-  // The single frame between a placement and the caller unmounting this, under the
-  // `onPlaced` contract. Tall enough that the sheet does not visibly collapse first.
-  handoff: { height: theme.space[10] },
   // No flex anywhere in here. Both halves of the old layout stretched: the screen was
   // a full-height page sheet, and the card row inside it was `flex: 1` with the posters
   // pinned to its top — so a tall device reserved ~500pt for ~330pt of content and put

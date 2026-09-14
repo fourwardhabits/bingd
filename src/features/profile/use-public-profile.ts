@@ -15,9 +15,46 @@ export type PublicProfile = {
   memberSince: string | null;
   followers: number;
   following: number;
+  /** Ranked titles only, for the Taste Match line. Not what the stat row shows. */
   rankedMovies: number;
   rankedSeasons: number;
+  /** The stat row's Movies and TV: the watched collection, imports included. */
+  watchedMovies: number;
+  watchedSeasons: number;
 };
+
+/**
+ * The stat row's Movies and TV: the watched collection, imported history included.
+ *
+ * **Not the ranked count** (founder, 2026-09-12). A Letterboxd import brings a history in
+ * without ranking any of it, and a profile that said "Movies: 5" beside twenty-five watched
+ * films was misreporting the account. `profile_title_counts` counts distinct watched titles
+ * united with ranked ones, so a title that is both counts once, through the same
+ * `can_i_view` gate the rankings already sit behind.
+ *
+ * Only these two numbers moved. The ranked counts are still read where rankings are what is
+ * meant: the Taste Match line on somebody else's profile.
+ */
+async function watchedCounts(userId: string): Promise<{ movies: number; tv: number }> {
+  const { data, error } = await supabase.rpc('profile_title_counts', { p_user: userId });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { movies?: number; tv?: number } | null;
+  return { movies: row?.movies ?? 0, tv: row?.tv ?? 0 };
+}
+
+/** The ranked counts, for when `watchedCounts` cannot be read. */
+async function rankedCounts(userId: string): Promise<{ movies: number; tv: number }> {
+  const count = (category: 'movies' | 'tv_seasons') =>
+    supabase
+      .from('rankings')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('category', category);
+  const [movies, seasons] = await Promise.all([count('movies'), count('tv_seasons')]);
+  if (movies.error) throw movies.error;
+  if (seasons.error) throw seasons.error;
+  return { movies: movies.count ?? 0, tv: seasons.count ?? 0 };
+}
 
 /**
  * Somebody else's profile, by username.
@@ -57,7 +94,7 @@ export function usePublicProfile(username: string | null) {
 
       const id = profile.id as string;
 
-      const [followers, following, movies, seasons] = await Promise.all([
+      const [followers, following, movies, seasons, watched] = await Promise.all([
         supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
@@ -78,6 +115,12 @@ export function usePublicProfile(username: string | null) {
           .select('*', { count: 'exact', head: true })
           .eq('user_id', id)
           .eq('category', 'tv_seasons'),
+        /**
+         * Degrades to the ranked counts rather than failing the profile (independent review).
+         * The header is somebody else's whole profile; a count that could not be read is not a
+         * reason to show "Could not load this profile" over a person who loaded fine.
+         */
+        watchedCounts(id).catch(() => null),
       ]);
 
       return {
@@ -91,6 +134,8 @@ export function usePublicProfile(username: string | null) {
         following: following.count ?? 0,
         rankedMovies: movies.count ?? 0,
         rankedSeasons: seasons.count ?? 0,
+        watchedMovies: watched?.movies ?? movies.count ?? 0,
+        watchedSeasons: watched?.tv ?? seasons.count ?? 0,
       };
     },
   });
@@ -153,13 +198,15 @@ export function useProfileNotes(userId: string | null) {
       if (mediaError) throw mediaError;
 
       const byId = new Map(
-        ((media ?? []) as unknown as {
-          id: string;
-          kind: ProfileNote['kind'];
-          title: string;
-          poster_path: string | null;
-          parent: { title: string } | { title: string }[] | null;
-        }[]).map((item) => [item.id, item]),
+        (
+          (media ?? []) as unknown as {
+            id: string;
+            kind: ProfileNote['kind'];
+            title: string;
+            poster_path: string | null;
+            parent: { title: string } | { title: string }[] | null;
+          }[]
+        ).map((item) => [item.id, item]),
       );
 
       return notes
@@ -266,17 +313,19 @@ export function useProfileWatchlist(userId: string | null, limit = PROFILE_WATCH
         .limit(limit);
       if (error) throw error;
 
-      return ((data ?? []) as unknown as {
-        media_item_id: string;
-        media_items: {
-          kind: ProfileWatchlistEntry['kind'];
-          title: string;
-          season_number: number | null;
-          release_date: string | null;
-          poster_path: string | null;
-          parent: { title: string } | { title: string }[] | null;
-        } | null;
-      }[])
+      return (
+        (data ?? []) as unknown as {
+          media_item_id: string;
+          media_items: {
+            kind: ProfileWatchlistEntry['kind'];
+            title: string;
+            season_number: number | null;
+            release_date: string | null;
+            poster_path: string | null;
+            parent: { title: string } | { title: string }[] | null;
+          } | null;
+        }[]
+      )
         .map((row) => {
           const item = row.media_items;
           // A watchlist row whose catalogue row has gone is not a poster. The foreign key
@@ -316,15 +365,18 @@ export function useProfileWatchlist(userId: string | null, limit = PROFILE_WATCH
  * screen it is on.
  *
  * Four rather than the five the own profile used to show. Followers, Following, Movies
- * and TV seasons describe the account as a collection; Watched and Watchlist are the
- * reader's own working state and belong in Collection, where they can be acted on. At
- * five columns a three-digit number wrapped.
+ * and TV seasons describe the account as a collection; Watchlist is the reader's own
+ * working state and belongs in Collection, where it can be acted on. At five columns a
+ * three-digit number wrapped.
+ *
+ * Movies and TV are the watched collection, imports included, since 2026-09-12. See
+ * `watchedCounts`.
  */
 export function useProfileStats(userId: string) {
   return useQuery({
     queryKey: queryKeys.profileStats(userId),
     queryFn: async () => {
-      const [followers, following, movies, seasons] = await Promise.all([
+      const [followers, following, watched] = await Promise.all([
         supabase
           .from('follows')
           .select('*', { count: 'exact', head: true })
@@ -335,28 +387,23 @@ export function useProfileStats(userId: string) {
           .select('*', { count: 'exact', head: true })
           .eq('follower_id', userId)
           .eq('state', 'approved'),
-        supabase
-          .from('rankings')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .eq('category', 'movies'),
-        supabase
-          .from('rankings')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .eq('category', 'tv_seasons'),
+        /**
+         * Degrades to the ranked counts, as the public profile does (independent review,
+         * 2026-09-14). A bundle that reaches a backend without `profile_title_counts` must not
+         * fail Followers and Following with it; the ranked counts are what this row showed
+         * before the watched collection existed.
+         */
+        watchedCounts(userId).catch(() => rankedCounts(userId)),
       ]);
 
       if (followers.error) throw followers.error;
       if (following.error) throw following.error;
-      if (movies.error) throw movies.error;
-      if (seasons.error) throw seasons.error;
 
       return {
         followers: followers.count ?? 0,
         following: following.count ?? 0,
-        rankedMovies: movies.count ?? 0,
-        rankedSeasons: seasons.count ?? 0,
+        movies: watched.movies,
+        seasons: watched.tv,
       };
     },
   });
@@ -399,7 +446,13 @@ export function useProfileIdentity(username: string | null) {
       // A set-returning function comes back as an array; nobody by that handle, or an
       // account this viewer may not find, is an empty one.
       const row = (Array.isArray(data) ? data[0] : data) as
-        | { id: string; username: string; display_name: string | null; avatar_path: string | null; visibility: 'public' | 'private' }
+        | {
+            id: string;
+            username: string;
+            display_name: string | null;
+            avatar_path: string | null;
+            visibility: 'public' | 'private';
+          }
         | undefined;
       if (!row) return null;
 
@@ -413,4 +466,3 @@ export function useProfileIdentity(username: string | null) {
     },
   });
 }
-

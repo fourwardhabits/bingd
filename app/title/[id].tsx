@@ -62,6 +62,7 @@ import {
 } from '@/features/title/use-title-reviews';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
 import { useSimilarTitles } from '@/features/title/use-similar-titles';
+import { formatShortDate } from '@/lib/dates';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
@@ -834,6 +835,8 @@ export default function TitleScreen() {
    * line at all rather than a dangling separator.
    */
   const watchedLine = data.logged?.watched_on
+    // `lib/dates.ts`, which is where this moved: it was a byte-identical local copy of
+    // the formatter the Episodes tab below already used, in this same file.
     ? `Watched ${formatShortDate(data.logged.watched_on)}`
     : null;
   const contextLine = [
@@ -933,7 +936,9 @@ export default function TitleScreen() {
       : [
           {
             id: 'reviews' as const,
-            label: reviewCount.data ? `Reviews ${reviewCount.data}` : 'Reviews',
+            // `Reviews (2)`: a bare `Reviews 1` read as one word and a stray digit (founder,
+            // physical QA, 2026-09-14). Zero still renders `Reviews`, never `Reviews (0)`.
+            label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
           },
         ]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
@@ -1627,7 +1632,7 @@ export default function TitleScreen() {
                   <EpisodeRow
                     episodeNumber={episode.episode_number}
                     title={episode.title}
-                    airDate={formatAirDate(episode.air_date)}
+                    airDate={formatShortDate(episode.air_date)}
                     runtimeMinutes={episode.runtime_minutes}
                     stillUri={stillUri(episode.still_path)}
                     overview={episode.overview}
@@ -2372,24 +2377,6 @@ const positive = (value: number | null | undefined): boolean =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
 
 /**
- * A watch date on the identity line — `12 Feb 2026`.
- *
- * The same UTC-pinned construction the Details panel uses, with a short month: a bare
- * `new Date('2026-02-12')` is midnight UTC and renders as the day before west of
- * Greenwich, and this sits in a caption beside an ordinal rather than under a heading
- * with room for `February`.
- */
-function formatShortDate(date: string | null) {
-  if (!date) return null;
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
-    timeZone: 'UTC',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-/**
  * The embedded parent series, however PostgREST shaped it.
  *
  * A `parent:parent_id(...)` embed is a single object at runtime, and the generated
@@ -2414,27 +2401,6 @@ function formatDate(date: string | null) {
     timeZone: 'UTC',
     day: 'numeric',
     month: 'long',
-    year: 'numeric',
-  });
-}
-
-/**
- * An episode's air date, short.
- *
- * The same UTC-pinned construction `formatDate` uses — a bare `new Date('2013-06-02')`
- * is midnight UTC and renders as the day before west of Greenwich — with a short month
- * because this sits on a metadata line beside a runtime rather than under a Details
- * heading with room to spare.
- *
- * Null passes straight through, and the row drops the half of the line it would have
- * filled. An unaired episode with no announced date is the ordinary case, not an error.
- */
-function formatAirDate(date: string | null) {
-  if (!date) return null;
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
-    timeZone: 'UTC',
-    day: 'numeric',
-    month: 'short',
     year: 'numeric',
   });
 }

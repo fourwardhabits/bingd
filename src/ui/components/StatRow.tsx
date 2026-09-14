@@ -11,7 +11,9 @@ export type StatItem = {
    *
    * All four lead somewhere now — Followers and Following to their people lists,
    * Movies and TV to the ranked-titles drill-down — on both the own tab and
-   * `/u/[username]`. Optional rather than a no-op, so a stat with nothing behind it
+   * `/u/[username]`. (Since 2026-09-12 the Movies and TV numbers count the watched
+   * collection, imports included, while the drill-down still lists what is ranked.)
+   * Optional rather than a no-op, so a stat with nothing behind it
    * (still loading, say) is not drawn as a button: a control that looks pressable
    * and does nothing is the thing people press twice and then report.
    */

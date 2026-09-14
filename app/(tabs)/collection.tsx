@@ -105,7 +105,11 @@ const VIEW_MODE_PREF_KEY = 'collection.view-mode';
 export default function CollectionScreen() {
   const profile = useCurrentProfile();
   /** The side a navigation asked for, if any. See the effect that applies it. */
-  const { medium: mediumParam } = useLocalSearchParams<{ medium?: string }>();
+  const { medium: mediumParam, show: showParam } = useLocalSearchParams<{
+    medium?: string;
+    show?: string;
+  }>();
+  const router = useRouter();
   const { data: loggedSummary } = useLoggedCollection(profile.id);
   const [segment, setSegment] = useState<Segment>('watched');
   /**
@@ -184,6 +188,37 @@ export default function CollectionScreen() {
       cancelled = true;
     };
   }, [profile.id, mediumParam]);
+
+  /**
+   * **Unranked, asked for by name** (`unrankedMovies` in `src/lib/routes.ts`).
+   *
+   * The importer's summary ends on "Rank imported movies", and an import is films: so it
+   * opens Movies on Unranked, whatever side and segment this tab was left on. Collection
+   * is a tab and stays mounted, so the seeded medium above cannot carry this: it is
+   * applied when it arrives and then cleared, the way the Feed applies `show: 'people'`,
+   * so a second arrival is a second request rather than a param that never changed.
+   *
+   * `active` below still falls back to Watched while the side has nothing unranked, which
+   * is also what it shows for the moment before the collection has loaded.
+   *
+   * Applied during render against the last request seen, rather than in the effect, for the
+   * reason the seeded medium gives: state set inside an effect is a second paint of the
+   * wrong segment. The effect only consumes the param, and marks the side as chosen so a
+   * remembered side still being read from disk cannot overrule it.
+   */
+  const [askedFor, setAskedFor] = useState<string | undefined>(undefined);
+  if (showParam !== askedFor) {
+    setAskedFor(showParam);
+    if (showParam === 'unranked') {
+      setMediumPref({ profileId: profile.id, medium: 'movies' });
+      setSegment('unranked');
+    }
+  }
+  useEffect(() => {
+    if (showParam !== 'unranked') return;
+    chosenMedium.current = true;
+    router.setParams({ show: undefined });
+  }, [showParam, router]);
 
   /**
    * The remembered view mode, applied when it arrives.
@@ -391,14 +426,18 @@ export default function CollectionScreen() {
 
           The card said its piece down the left and put an X at the far right edge,
           so the two things a reader could do about it sat as far apart as the card
-          allowed and only one of them looked like a control. Rank and Not now are
+          allowed and only one of them looked like a control. Rank and Dismiss are
           now a pair, in the order the question asks them, using the same
           primary/secondary pairing the notifications screen uses for Approve and
           Decline — at the compact size that screen introduced.
 
-          One dismissal, not two: an X *and* a Not now would be the same act offered
-          twice. Dismissing hides this card only; the Unranked tab stands as long as
-          anything is unranked. */}
+          One dismissal, not two: an X *and* a Dismiss would be the same act offered
+          twice. It was labelled "Not now" until 2026-09-12; the label says what the
+          press does, and the behaviour is unchanged — `dismissNudge` records it, and
+          the card stays away until fourteen days have passed and something has been
+          ranked since (`shouldShowUnrankedNudge`). Dismissing
+          hides this card only; the Unranked tab stands as long as anything is
+          unranked. */}
       {active === 'watched' && showNudge ? (
         <View style={styles.nudge}>
           <Text variant="callout">You have unranked titles</Text>
@@ -409,7 +448,7 @@ export default function CollectionScreen() {
           <View style={styles.nudgeActions}>
             <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
             <Button
-              label="Not now"
+              label="Dismiss"
               kind="secondary"
               size="sm"
               onPress={() => {

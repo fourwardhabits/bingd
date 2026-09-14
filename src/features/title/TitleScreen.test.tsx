@@ -1187,6 +1187,27 @@ describe('tabs that have nothing behind them', () => {
     expect(view.getByRole('tab', { name: 'Reviews' })).toBeTruthy();
   });
 
+  /**
+   * The count in parentheses (founder, physical QA, 2026-09-14): `Reviews 1` read as
+   * ambiguous. The number is the server's `title_review_count`, which counts public reviews
+   * the reader may see, their own included. Zero is plain `Reviews`, never `Reviews (0)`.
+   */
+  it('puts the review count in parentheses', async () => {
+    mockRpcResults.title_review_count = 2;
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews (2)' })).toBeTruthy());
+    expect(view.queryByRole('tab', { name: 'Reviews 2' })).toBeNull();
+  });
+
+  it('never renders Reviews (0)', async () => {
+    mockRpcResults.title_review_count = 0;
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews' })).toBeTruthy());
+    expect(view.queryByRole('tab', { name: /Reviews \(0\)/ })).toBeNull();
+  });
+
   it('does not render a Videos tab until there are videos', async () => {
     const view = await open();
     expect(view.queryByRole('tab', { name: 'Videos' })).toBeNull();
