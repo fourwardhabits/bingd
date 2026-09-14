@@ -188,7 +188,7 @@ export async function run({
     log(`  start_after       ${preview.start_after}${ignored}`);
     log(`  window            ${preview.delay_hours}h to ${preview.max_age_hours}h after signup, at most ${preview.max_per_run} per run`);
     log(`  would claim       ${preview.candidates.length}`);
-    log(`  held, no invite   ${preview.waiting_for_invite_link}   (eligible, but no personal invite link yet)`);
+    log(`  links to create   ${preview.invite_links_to_create}   (have no personal invite link; a real claim mints exactly one each)`);
     for (const c of preview.candidates) {
       log(`    ${c.suppressed ? 'suppressed ' : '           '}@${c.username}  signed up ${c.signed_up_at}`);
     }
@@ -260,10 +260,11 @@ export async function run({
     let outcome;
     try {
       /**
-       * The recipient's own invite link, as the claim read it: never minted here. The
-       * claim only returns people who have one, so a missing or malformed token is a
-       * defect, and it fails this send (recorded, retried) rather than sending a letter
-       * whose "here's your invite link" points nowhere.
+       * The recipient's own invite link, as the claim ensured it inside its transaction
+       * (_welcome_email_ensure_invite_token): never minted here. Every row the claim
+       * returns carries one, so a missing or malformed token is a defect, and it fails
+       * this send (recorded, retried) rather than sending a letter whose "here's your
+       * invite link" points nowhere.
        */
       inviteUrlFor(person.invite_token);
       const values = {

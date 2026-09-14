@@ -177,6 +177,7 @@ describe('welcome email: who can call it', () => {
         `select _welcome_email_can_receive('${someone.id}')`,
         `select _welcome_email_in_scope('${someone.id}', null, null)`,
         `select _welcome_email_invite_token('${someone.id}')`,
+        `select _welcome_email_ensure_invite_token('${someone.id}')`,
         `select * from welcome_emails`,
         `select * from email_suppressions`,
         `insert into email_suppressions (email, reason) values ('x@example.com', 'requested')`,
@@ -192,7 +193,7 @@ describe('welcome email: who can call it', () => {
     await t.asRole('service_role', null, async () => {
       assert.equal(await t.errorFrom(`select welcome_email_preview()`), null);
       assert.equal(await t.errorFrom(`select * from welcome_email_claim()`), null);
-      for (const helper of [`select * from _welcome_email_candidates(1)`, `select _welcome_email_can_receive(gen_random_uuid())`, `select _welcome_email_in_scope(gen_random_uuid(), null, null)`, `select _welcome_email_invite_token(gen_random_uuid())`]) {
+      for (const helper of [`select * from _welcome_email_candidates(1)`, `select _welcome_email_can_receive(gen_random_uuid())`, `select _welcome_email_in_scope(gen_random_uuid(), null, null)`, `select _welcome_email_invite_token(gen_random_uuid())`, `select _welcome_email_invite_usable(gen_random_uuid())`, `select _welcome_email_ensure_invite_token(gen_random_uuid())`]) {
         assert.equal((await t.errorFrom(helper))?.code, '42501', helper);
       }
     });
@@ -400,22 +401,103 @@ describe('welcome email: exactly once', () => {
 });
 
 describe('welcome email: the invite link', () => {
-  it('holds an account with no personal invite link, counts it in the dry run, and mints nothing', async () => {
+  /**
+   * Row counts for every table in public, so a test can say which tables a claim changed
+   * without having to know every table that might have been touched by accident.
+   */
+  const tableCounts = async () => {
+    const { rows } = await t.sql(
+      `select c.relname as name from pg_class c where c.relkind = 'r' and c.relnamespace = 'public'::regnamespace order by 1`,
+    );
+    const counts = {};
+    for (const { name } of rows) {
+      counts[name] = Number((await t.sql(`select count(*)::int as n from "${name}"`)).rows[0].n);
+    }
+    return counts;
+  };
+
+  const changedTables = (before, after) =>
+    Object.keys(after).filter((name) => before[name] !== after[name]).sort();
+
+  it('gives an account with no link exactly one personal token, and touches no table but the ledger and invite_tokens', async () => {
     await t.exec(OPEN_COHORT_SQL);
-    const noLink = await person({ invite: false });
-    const before = await tokenCount();
+    const fresh = await person({ invite: false });
+    assert.equal(await liveToken(fresh.id), null);
 
-    assert.deepEqual(await claim(), []);
-    assert.deepEqual(await ledger(), [], 'held, not consumed');
-    assert.equal(await tokenCount(), before, 'the claim never mints a token');
-    const preview = (await t.sql(`select welcome_email_preview() as p`)).rows[0].p;
-    assert.equal(preview.waiting_for_invite_link, 1);
-    assert.deepEqual(preview.candidates, []);
-
-    // The moment they tap Invite friends, they are in, with exactly that token.
-    const token = await mintInvite(noLink.id);
+    const before = await tableCounts();
     const [row] = await claim();
-    assert.deepEqual([row.recipient_id, row.invite_token], [noLink.id, token]);
+    const after = await tableCounts();
+
+    assert.equal(row.recipient_id, fresh.id);
+    assert.match(row.invite_token, /^[0-9a-f]{32}$/);
+    assert.deepEqual(changedTables(before, after), ['invite_tokens', 'welcome_emails'],
+      'no invite_link_creations, attribution, notification, feed, push, award or operation row');
+    assert.equal(after.invite_tokens - before.invite_tokens, 1);
+
+    const { rows } = await t.sql(`select token, short_code, env, kind, revoked_at from invite_tokens where owner_id = $1`, [fresh.id]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].token, row.invite_token);
+    assert.match(rows[0].short_code, /^[0-9A-F]{8}$/);
+    assert.equal(rows[0].kind, 'personal');
+    assert.equal(rows[0].revoked_at, null);
+    const env = (await t.sql(`select environment_name() as e`)).rows[0].e;
+    assert.equal(rows[0].env, env, 'stamped with this environment, so the resolver accepts it');
+  });
+
+  it('mints the link the app then shares: create_invite_link returns the same token afterwards', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const fresh = await person({ invite: false });
+    const [row] = await claim();
+    const shared = await mintInvite(fresh.id);
+    assert.equal(shared, row.invite_token);
+    assert.equal(Number((await t.sql(`select count(*)::int as n from invite_tokens where owner_id = $1`, [fresh.id])).rows[0].n), 1);
+  });
+
+  it('reuses an existing link rather than minting a second', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const sharer = await person();
+    const existing = await liveToken(sharer.id);
+    const tokens = await tokenCount();
+    const [row] = await claim();
+    assert.equal(row.invite_token, existing);
+    assert.equal(await tokenCount(), tokens);
+  });
+
+  it('carries the same token on a retry', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const retried = await person({ invite: false });
+    const [first] = await claim();
+    await record(retried.id, 1, 'failed', null, '500 {}');
+    const tokens = await tokenCount();
+    const [second] = await claim();
+    assert.deepEqual([second.attempt, second.invite_token], [2, first.invite_token]);
+    assert.equal(await tokenCount(), tokens);
+  });
+
+  it('ensures a link again on a retry when the one the first attempt carried was revoked outright', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const lost = await person({ invite: false });
+    const [first] = await claim();
+    await record(lost.id, 1, 'failed', null, '500 {}');
+    await t.sql(`update invite_tokens set revoked_at = now() where owner_id = $1`, [lost.id]);
+
+    const [second] = await claim();
+    assert.equal(second.attempt, 2);
+    assert.match(second.invite_token, /^[0-9a-f]{32}$/);
+    assert.notEqual(second.invite_token, first.invite_token);
+    assert.equal(await liveToken(lost.id), second.invite_token);
+  });
+
+  it('does not retry an account whose live token became one this email cannot use', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const moved = await person();
+    await claim();
+    await record(moved.id, 1, 'failed', null, '500 {}');
+    await t.sql(`update invite_tokens set env = 'somewhere-else' where owner_id = $1`, [moved.id]);
+    const tokens = await tokenCount();
+    assert.deepEqual(await claim(), []);
+    assert.equal((await ledger())[0].status, 'failed');
+    assert.equal(await tokenCount(), tokens);
   });
 
   it('carries the replacement after a revocation, never the revoked token', async () => {
@@ -431,23 +513,35 @@ describe('welcome email: the invite link', () => {
     assert.notEqual(row.invite_token, old);
   });
 
-  it('holds an account whose only token was minted in another environment, or is not personal', async () => {
+  it('holds, writing nothing, an account whose live token is from another environment or not personal', async () => {
     await t.exec(OPEN_COHORT_SQL);
     const elsewhere = await person();
     await t.sql(`update invite_tokens set env = 'somewhere-else' where owner_id = $1`, [elsewhere.id]);
     const referral = await person();
     await t.sql(`update invite_tokens set kind = 'referral' where owner_id = $1`, [referral.id]);
+    const tokens = await tokenCount();
     assert.deepEqual(await claim(), []);
     assert.deepEqual(await ledger(), []);
+    assert.equal(await tokenCount(), tokens, 'never replaces somebody else-shaped token');
   });
 
-  it('does not retry a failure once the account has no live link', async () => {
+  it('never mints for a suppressed, held or out-of-window account, or in a dry run', async () => {
     await t.exec(OPEN_COHORT_SQL);
-    const lost = await person();
-    await claim();
-    await record(lost.id, 1, 'failed', null, '500 {}');
-    await t.sql(`update invite_tokens set revoked_at = now() where owner_id = $1`, [lost.id]);
-    assert.deepEqual(await claim(), []);
+    const suppressed = await person({ invite: false, email: 'nope@example.com' });
+    await t.sql(`insert into email_suppressions (email, reason) values ('nope@example.com', 'unsubscribed')`);
+    await person({ invite: false, confirmed: false });
+    await person({ invite: false, hoursAgo: 2 });
+    const due = await person({ invite: false });
+    const tokens = await tokenCount();
+
+    const preview = (await t.sql(`select welcome_email_preview() as p`)).rows[0].p;
+    assert.equal(preview.invite_links_to_create, 1);
+    assert.equal(await tokenCount(), tokens, 'the dry run mints nothing');
+
+    const taken = await claim();
+    assert.deepEqual(taken.map((r) => r.recipient_id), [due.id]);
+    assert.equal(await tokenCount(), tokens + 1, 'one token, for the one account mailed');
+    assert.equal(await liveToken(suppressed.id), null);
   });
 });
 
@@ -646,7 +740,7 @@ describe('welcome email: the worker, against the real SQL', () => {
     const [{ headers, body }] = w.resend;
     assert.equal(headers['Idempotency-Key'], `welcome-v1-${ada.id}`);
     assert.deepEqual(body.to, [ada.email]);
-    assert.equal(body.from, 'Suraj from bingd. <suraj@bingd.app>');
+    assert.equal(body.from, 'Suraj from bingd <suraj@bingd.app>');
     assert.equal(body.reply_to, 'suraj@bingd.app');
     assert.equal(body.subject, 'I built bingd. Tell me what you think.');
     assert.deepEqual(body.headers, { 'List-Unsubscribe': '<mailto:suraj@bingd.app?subject=Unsubscribe>' });
@@ -671,6 +765,25 @@ describe('welcome email: the worker, against the real SQL', () => {
     const second = await go(w);
     assert.deepEqual([second.code, second.claimed, second.sent], [0, 0, 0]);
     assert.equal(w.resend.length, 1, 'no second message');
+  });
+
+  it('sends a recipient who never tapped Invite friends their newly ensured link, once', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    const newcomer = await person({ invite: false, displayName: 'Bo Diddley' });
+    const w = world();
+    const tokens = await tokenCount();
+
+    const first = await go(w);
+    assert.deepEqual([first.code, first.sent], [0, 1]);
+    const token = await liveToken(newcomer.id);
+    assert.match(token, /^[0-9a-f]{32}$/);
+    assert.equal(await tokenCount(), tokens + 1);
+    assert.ok(w.resend[0].body.html.includes(`href="https://bingd.app/i/${token}"`));
+    assert.ok(w.resend[0].body.text.includes(`https://bingd.app/i/${token}`));
+
+    const second = await go(w);
+    assert.deepEqual([second.claimed, second.sent], [0, 0]);
+    assert.equal(await tokenCount(), tokens + 1, 'a second run mints nothing');
   });
 
   it('touches nothing and calls Resend never while delivery is off', async () => {

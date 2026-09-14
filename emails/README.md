@@ -46,7 +46,7 @@ node emails/welcome/send-test.mjs --to you@example.com --name Suraj \
   --invite-url https://bingd.app/i/<your token> --out /tmp/welcome-test
 RESEND_API_KEY=re_xxx node emails/welcome/send-test.mjs --to you@example.com --name Suraj \
   --invite-url https://bingd.app/i/<your token> --subject 1 --send \
-  --from "Suraj from bingd. <suraj@auth.bingd.app>"
+  --from "Suraj from bingd <suraj@auth.bingd.app>"
 ```
 
 The first run prints the exact envelope (From, Reply-To, subject, List-Unsubscribe, every

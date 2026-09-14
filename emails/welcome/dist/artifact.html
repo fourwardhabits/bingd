@@ -273,7 +273,7 @@
   <p class="eyebrow">bingd. &middot; lifecycle</p>
   <h1>The welcome email, before anyone gets it</h1>
   <p class="sub">
-    Rendered from <code>emails/welcome/copy.json</code> on 2026-09-13.
+    Rendered from <code>emails/welcome/copy.json</code> on 2026-09-14.
     Nothing has been sent. The automation is written and switched off. Edit the copy file,
     run <code>node emails/welcome/build.mjs</code>, and this page rebuilds with it.
   </p>
@@ -796,23 +796,23 @@
     </p>
     <ol class="inbox">
         <li class="row">
-          <span class="from">Suraj from bingd.</span>
+          <span class="from">Suraj from bingd</span>
           <span class="line"><b>I built bingd. Tell me what you think.</b><span class="pre"> &mdash; Hit reply and it comes straight to me.</span></span>
           <span class="tag">recommended</span>
         </li>
         <li class="row">
-          <span class="from">Suraj from bingd.</span>
+          <span class="from">Suraj from bingd</span>
           <span class="line"><b>Thanks for trying bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me.</span></span>
           
         </li>
         <li class="row">
-          <span class="from">Suraj from bingd.</span>
+          <span class="from">Suraj from bingd</span>
           <span class="line"><b>A note from the person who made bingd.</b><span class="pre"> &mdash; Hit reply and it comes straight to me.</span></span>
           
         </li>
     </ol>
     <p class="sub" style="margin-top:14px">
-      <code>Suraj from bingd.</code> reads as a person. <code>bingd.</code> reads as a
+      <code>Suraj from bingd</code> reads as a person. <code>bingd.</code> reads as a
       service, and this email's whole claim is that a person wrote it.
     </p>
   </section>
@@ -859,7 +859,7 @@
             <td><code>inviteLink</code></td>
             <td><span class="cls cls-C">C</span></td>
             <td class="mono"><a href="https://bingd.app/i/{{inviteToken}}">https://bingd.app/i/{{inviteToken}}</a></td>
-            <td>/i/* is in appPaths and app/i/[token].tsx receives it. It is the exact URL the app shares: use-recommend.ts builds `https://bingd.app/i/${token}` from create_invite_link's token. <b>Without the app:</b> web/dist/i.html: the invitation page with the install row and 'I already have bingd.'. <b>No token:</b> Tokens are minted lazily, on the first Invite friends tap or off-platform title share. An account with none is HELD by the claim (not mailed, not consumed) until the founder decides what should happen. README.md, 'Accounts with no invite link'.</td>
+            <td>/i/* is in appPaths and app/i/[token].tsx receives it. It is the exact URL the app shares: use-recommend.ts builds `https://bingd.app/i/${token}` from create_invite_link's token. <b>Without the app:</b> web/dist/i.html: the invitation page with the install row and 'I already have bingd.'. <b>No token:</b> Tokens are minted lazily, so many new accounts have none. The claim mints the one personal link under create_invite_link's own lock, with no invite_link_creations row and no other side effect. README.md, 'The invite link'.</td>
           </tr>
           <tr>
             <td><code>founderProfile</code></td>
@@ -942,8 +942,7 @@ Unsubscribe: {{unsubscribeUrl}}
     <ol class="decisions">
       <li><div><b>Pick the subject.</b> <span>Three candidates are shown as inbox rows above. <code>subject.chosen</code> is "I built bingd. Tell me what you think.".</span></div></li>
         <li><div><b>Postal address.</b> <span>Not set, so the worker refuses the cohort. A commercial email carries a physical mailing address; there is no company, so it is one you are willing to publish, usually a PO box or a virtual mailbox.</span></div></li>
-        <li><div><b>Accounts with no invite link.</b> <span>A personal invite token is minted the first time somebody taps Invite friends or shares a title off-platform. An account that has done neither has no link, and the claim holds it rather than send a sentence that points nowhere. A dry run counts them as <code>waiting_for_invite_link</code>. Decide: keep holding, send without that sentence, or have the send job mint the one personal link.</span></div></li>
-        <li><div><b>Send from bingd.app.</b> <span>Replies go to <code>suraj@bingd.app</code>. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (DKIM, the <code>send</code> subdomain, DMARC). Until then a test send uses <code>--from "Suraj from bingd. &lt;suraj@auth.bingd.app&gt;"</code>.</span></div></li>
+        <li><div><b>Send from bingd.app.</b> <span>Replies go to <code>suraj@bingd.app</code>. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (DKIM, the <code>send</code> subdomain, DMARC). Until then a test send uses <code>--from "Suraj from bingd &lt;suraj@auth.bingd.app&gt;"</code>.</span></div></li>
         <li><div><b>A Resend key of its own.</b> <span>Sending access, restricted to <code>bingd.app</code>. Never the key named <code>Supabase</code>: that one relays every sign-in code.</span></div></li>
     </ol>
   </section>

@@ -25,8 +25,8 @@
       "deepLink": "/i/* is in appPaths and app/i/[token].tsx receives it. It is the exact URL the app shares: use-recommend.ts builds `https://bingd.app/i/${token}` from create_invite_link's token.",
       "webFallback": "web/dist/i.html: the invitation page with the install row and 'I already have bingd.'.",
       "needsUserData": true,
-      "userData": "invite_tokens.token for the recipient: live, kind personal, minted in this environment. The same three conditions redeem_invite accepts. Read by _welcome_email_invite_token; the send job never mints one.",
-      "noToken": "Tokens are minted lazily, on the first Invite friends tap or off-platform title share. An account with none is HELD by the claim (not mailed, not consumed) until the founder decides what should happen. README.md, 'Accounts with no invite link'."
+      "userData": "invite_tokens.token for the recipient: live, kind personal, minted in this environment, which is what redeem_invite accepts. Returned by the claim from _welcome_email_ensure_invite_token.",
+      "noToken": "Tokens are minted lazily, so many new accounts have none. The claim mints the one personal link under create_invite_link's own lock, with no invite_link_creations row and no other side effect. README.md, 'The invite link'."
     },
 
     "founderProfile": {

@@ -36,9 +36,9 @@
  * The request body comes from `envelope.mjs`, the same function the automation uses, so a
  * test send is the real message with a test recipient and `[TEST]` on the subject.
  *
- * From defaults to `Suraj from bingd. <suraj@bingd.app>`, which Resend refuses until
+ * From defaults to `Suraj from bingd <suraj@bingd.app>`, which Resend refuses until
  * `bingd.app` is verified there. Until then, test with
- * `--from "Suraj from bingd. <suraj@auth.bingd.app>"`: the only verified domain today.
+ * `--from "Suraj from bingd <suraj@auth.bingd.app>"`: the only verified domain today.
  * Reply-To stays `suraj@bingd.app` either way, which is the thing to test.
  *
  * `RESEND_API_KEY` is read from the environment only and written nowhere. Make a key for
@@ -167,7 +167,7 @@ if (copy.letter.status !== 'APPROVED') warnings.push(`letter.status is "${copy.l
 if (!inviteMatch) warnings.push('No --invite-url: the invite link uses an all-zero token the resolver refuses. Fine for a dry run.');
 if (!/@(auth\.)?bingd\.app$/i.test(addressOf(from))) warnings.push(`From "${from}" is not on a bingd. domain; Resend will refuse it.`);
 if (/@bingd\.app$/i.test(addressOf(from))) {
-  warnings.push('From is @bingd.app, which Resend refuses until bingd.app is verified there. If it does, retry with --from "Suraj from bingd. <suraj@auth.bingd.app>".');
+  warnings.push('From is @bingd.app, which Resend refuses until bingd.app is verified there. If it does, retry with --from "Suraj from bingd <suraj@auth.bingd.app>".');
 }
 
 console.log('');

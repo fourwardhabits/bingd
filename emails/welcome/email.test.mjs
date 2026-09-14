@@ -200,7 +200,7 @@ describe('welcome email: brand and compliance', () => {
 describe('welcome email: the envelope', () => {
   it('replies to suraj@bingd.app from a person, never from a no-reply address', () => {
     assert.equal(DEFAULT_REPLY_TO, 'suraj@bingd.app');
-    assert.equal(DEFAULT_FROM, 'Suraj from bingd. <suraj@bingd.app>');
+    assert.equal(DEFAULT_FROM, 'Suraj from bingd <suraj@bingd.app>');
     assert.throws(() =>
       resendPayload({ from: DEFAULT_FROM, replyTo: 'no-reply@auth.bingd.app', to: 'a@b.co', subject: 's', html: 'h', text: 't', unsubscribeUrl: 'mailto:x@y.co' }),
     );

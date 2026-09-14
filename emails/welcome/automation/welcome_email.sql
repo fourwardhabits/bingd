@@ -246,20 +246,26 @@ $fn$;
 revoke all on function _welcome_email_in_scope(uuid, uuid, text) from public, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- The account's own invite link, if it has one
+-- The account's own invite link
 --
 -- The email says "here's your invite link", so it links the recipient's canonical personal
--- token: the one `create_invite_link` minted and returns on every share, at
--- https://bingd.app/i/<token>. This reads it and never mints one. The conditions are the
--- resolver's own (redeem_invite, 20260912000200): live, and minted in this environment,
--- so the email can only ever carry a link that resolves. `kind = 'personal'` because a
--- referral token redeems without connecting the two people, which is not what the
--- sentence promises.
+-- token at https://bingd.app/i/<token>: the same one `create_invite_link` returns on every
+-- share. The conditions are the resolver's own (redeem_invite, 20260912000200): live, and
+-- minted in this environment, so the email can only carry a link that resolves.
+-- `kind = 'personal'` because a referral token redeems without connecting the two people,
+-- which is not what the sentence promises.
 --
--- An account that has never opened Invite friends or shared a title off-platform has no
--- token, and gets NULL here. The claim HOLDS such an account rather than sending it a
--- broken sentence or minting a link on its behalf; what to do about them is a founder
--- decision (README.md, "Accounts with no invite link").
+-- Three functions:
+--
+--   _welcome_email_invite_token          reads the link, mints nothing. The dry run.
+--   _welcome_email_invite_usable         false only when the account holds a LIVE token
+--                                        that is not a personal token of this environment.
+--                                        One live token per owner is a unique index, so
+--                                        such an account cannot be given a personal link
+--                                        without revoking its token, which the email will
+--                                        not do. It is held. No writer mints those today.
+--   _welcome_email_ensure_invite_token   returns the live personal token, minting it if the
+--                                        account has none. See below.
 -- ---------------------------------------------------------------------------
 
 create function _welcome_email_invite_token(p_user uuid)
@@ -280,10 +286,88 @@ $fn$;
 
 revoke all on function _welcome_email_invite_token(uuid) from public, anon, authenticated, service_role;
 
+create function _welcome_email_invite_usable(p_user uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $fn$
+  select not exists (
+    select 1
+      from invite_tokens t
+     where t.owner_id = p_user
+       and t.revoked_at is null
+       and (t.kind <> 'personal'
+            or t.env <> coalesce((select c.value #>> '{}' from app_config c where c.key = 'env.name'), 'nonprod'))
+  );
+$fn$;
+
+revoke all on function _welcome_email_invite_usable(uuid) from public, anon, authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- Ensure the account has its personal invite link
+--
+-- The mint half of `create_invite_link` (20260817001300) and nothing else:
+--
+--   * the SAME per-account advisory lock (`<user id>invite_link`), so this, a Share tap in
+--     the app and `revoke_invite_link` all serialise on one key, and two of them arriving
+--     together find one token rather than racing into invite_tokens_one_live;
+--   * the SAME read: the account's live token, returned if it has one;
+--   * the SAME mint when it has none: a dashless uuid for the token, a separately drawn
+--     8-character short code, `env` stamped from env.name, kind left at its default
+--     'personal'.
+--
+-- What it deliberately does NOT do, because `create_invite_link` does it for a share:
+-- write an `invite_link_creations` row. That row is the "Link created" stage of the
+-- invite funnel (docs/product/growth-instrumentation.md), and a welcome email is not
+-- somebody sharing their link. `revoke_invite_link` (20260819000500) is the precedent: it
+-- also mints without one. Nothing else observes a token being created: there is no
+-- trigger on invite_tokens, no notification, feed event, push or award reads its creation,
+-- and attribution and Invite Instigator count only redemptions and activations.
+--
+-- NULL only when the account holds a live token this email cannot use (see
+-- _welcome_email_invite_usable). Transaction-scoped lock: released when the claim commits.
+-- ---------------------------------------------------------------------------
+
+create function _welcome_email_ensure_invite_token(p_user uuid)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $fn$
+declare
+  v_env   text := coalesce((select c.value #>> '{}' from app_config c where c.key = 'env.name'), 'nonprod');
+  v_token text;
+  v_kind  text;
+  v_owner_env text;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(coalesce(p_user::text, '') || 'invite_link', 0));
+
+  select t.token, t.kind, t.env into v_token, v_kind, v_owner_env
+    from invite_tokens t
+   where t.owner_id = p_user and t.revoked_at is null;
+
+  if v_token is not null then
+    return case when v_kind = 'personal' and v_owner_env = v_env then v_token end;
+  end if;
+
+  v_token := replace(gen_random_uuid()::text, '-', '');
+
+  insert into invite_tokens (owner_id, token, short_code, env)
+  values (p_user, v_token, upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8)), v_env);
+
+  return v_token;
+end;
+$fn$;
+
+revoke all on function _welcome_email_ensure_invite_token(uuid) from public, anon, authenticated, service_role;
+
 -- ---------------------------------------------------------------------------
 -- Who is eligible for a first claim
 --
--- In scope, able to receive, holding a live personal invite link, and no ledger row. One
+-- In scope, able to receive, able to hold a personal invite link, and no ledger row. One
 -- definition, used by the dry run and by the claim, so the preview cannot describe a
 -- different set of people from the one the claim takes. Suppressed addresses ARE
 -- returned, flagged, so the claim can record them.
@@ -300,8 +384,7 @@ returns table (
   display_name    text,
   username        text,
   signed_up_at    timestamptz,
-  suppressed      boolean,
-  invite_token    text
+  suppressed      boolean
 )
 language plpgsql
 stable
@@ -327,13 +410,12 @@ begin
            p.display_name::text,
            p.username::text,
            p.created_at,
-           exists (select 1 from email_suppressions s where s.email = lower(u.email)),
-           _welcome_email_invite_token(p.id)
+           exists (select 1 from email_suppressions s where s.email = lower(u.email))
       from profiles p
       join auth.users u on u.id = p.id
      where _welcome_email_in_scope(p.id, p_canary_user, p_canary_email)
        and _welcome_email_can_receive(p.id)
-       and _welcome_email_invite_token(p.id) is not null
+       and _welcome_email_invite_usable(p.id)
        and not exists (select 1 from welcome_emails w where w.user_id = p.id)
      order by p.created_at, p.id
      limit greatest(0, least(coalesce(p_limit, v_cap), v_cap));
@@ -377,15 +459,13 @@ as $fn$
              ) order by x.signed_up_at)
         from _welcome_email_candidates(p_limit, p_canary_user, p_canary_email) x
     ), '[]'::jsonb),
-    -- Everybody the claim would take except that they have no invite link yet: held, and
-    -- counted here so a dry run shows how many people the invite-link rule is holding.
-    'waiting_for_invite_link', (
+    -- How many of those have no invite link yet, so the claim would mint their one
+    -- personal link. The dry run mints nothing.
+    'invite_links_to_create', (
       select count(*)
-        from profiles p
-       where _welcome_email_in_scope(p.id, p_canary_user, p_canary_email)
-         and _welcome_email_can_receive(p.id)
-         and _welcome_email_invite_token(p.id) is null
-         and not exists (select 1 from welcome_emails w where w.user_id = p.id)
+        from _welcome_email_candidates(p_limit, p_canary_user, p_canary_email) x
+       where not x.suppressed
+         and _welcome_email_invite_token(x.recipient_id) is null
     )
   );
 $fn$;
@@ -444,6 +524,7 @@ declare
   v_row     record;
   v_id      uuid;
   v_attempt integer;
+  v_token   text;
 begin
   v_enabled := coalesce((select c.value from app_config c where c.key = 'welcome.delivery_enabled') = 'true'::jsonb, false);
 
@@ -464,6 +545,14 @@ begin
       continue;
     end if;
 
+    -- The link first, so an account that cannot be given one is held with nothing written.
+    -- If a concurrent run is mid-claim on the same person, this waits on the shared invite
+    -- lock, reads the token that run committed, and the insert below then does nothing.
+    v_token := _welcome_email_ensure_invite_token(v_row.recipient_id);
+    if v_token is null then
+      continue;
+    end if;
+
     v_id := null;
     insert into welcome_emails as w (user_id, status, attempts, canary)
     values (v_row.recipient_id, 'claimed', 1, v_canary)
@@ -476,7 +565,7 @@ begin
       display_name    := v_row.display_name;
       username        := v_row.username;
       attempt         := 1;
-      invite_token    := v_row.invite_token;
+      invite_token    := v_token;
       v_taken         := v_taken + 1;
       return next;
     end if;
@@ -487,8 +576,7 @@ begin
     select w.user_id              as rid,
            lower(u.email)::text   as remail,
            p.display_name::text   as rname,
-           p.username::text       as rhandle,
-           _welcome_email_invite_token(w.user_id) as rtoken
+           p.username::text       as rhandle
       from welcome_emails w
       join profiles p on p.id = w.user_id
       join auth.users u on u.id = w.user_id
@@ -498,11 +586,16 @@ begin
        and w.canary = v_canary
        and _welcome_email_in_scope(w.user_id, p_canary_user, p_canary_email)
        and _welcome_email_can_receive(w.user_id)
-       and _welcome_email_invite_token(w.user_id) is not null
+       and _welcome_email_invite_usable(w.user_id)
        and not exists (select 1 from email_suppressions s where s.email = lower(u.email))
      order by w.first_claimed_at
      limit greatest(0, v_limit - v_taken)
   loop
+    v_token := _welcome_email_ensure_invite_token(v_row.rid);
+    if v_token is null then
+      continue;
+    end if;
+
     v_attempt := null;
     update welcome_emails as w
        set status = 'claimed', attempts = w.attempts + 1, claimed_at = now(), failed_reason = null
@@ -517,7 +610,7 @@ begin
       display_name    := v_row.rname;
       username        := v_row.rhandle;
       attempt         := v_attempt;
-      invite_token    := v_row.rtoken;
+      invite_token    := v_token;
       return next;
     end if;
   end loop;

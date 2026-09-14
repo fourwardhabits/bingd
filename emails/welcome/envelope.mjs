@@ -30,7 +30,7 @@ export const TEMPLATE_VERSION = 'v1';
  * Resend, which today has `auth.bingd.app` alone; until then `send-test.mjs --from`
  * takes an `@auth.bingd.app` address for a test.
  */
-export const DEFAULT_FROM = 'Suraj from bingd. <suraj@bingd.app>';
+export const DEFAULT_FROM = 'Suraj from bingd <suraj@bingd.app>';
 export const DEFAULT_REPLY_TO = 'suraj@bingd.app';
 
 const ADDRESS = /^[^@\s<>,;"]+@[^@\s<>,;"]+\.[^@\s<>,;"]+$/;

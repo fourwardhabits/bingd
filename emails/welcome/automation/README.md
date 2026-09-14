@@ -56,7 +56,7 @@ Selected only when **all** hold:
 - and at least `welcome.delay_hours` (36) and less than `welcome.max_age_hours` (168) ago
 - the profile is `active` (not suspended)
 - the auth user has an address, **confirmed**, and is not banned, soft-deleted or anonymous
-- the account has a **live personal invite link** in this environment (see "Accounts with no invite link")
+- the account does not hold a live invite token of another environment or kind (see "The invite link"); one with no link at all is given its personal link by the claim
 - there is no row for the account in `welcome_emails`, whatever its status
 
 At most `welcome.max_per_run` (25) per run, whatever the caller asks for.
@@ -85,34 +85,45 @@ At most `welcome.max_per_run` (25) per run, whatever the caller asks for.
 | delivery off, or the cutoff still 2099 | nothing is claimed and nothing is written: hold, do not drop |
 | account created before activation | never in the window, so never selected. **This is why switching it on cannot mail the existing beta population.** |
 | unconfirmed, banned, soft-deleted, anonymous, suspended, no address | held: nothing written, so fixing it later still allows a welcome |
-| no personal invite link yet | held: nothing written, counted by the dry run as `waiting_for_invite_link` |
+| no personal invite link yet | the claim mints the one personal link, then claims; the dry run counts these as `invite_links_to_create` |
+| a live invite token of another environment or kind | held: nothing written, no token replaced |
 | account deleted before or after the send | `delete from auth.users` cascades through `profiles` to the ledger row |
 | address on `email_suppressions` | recorded as `suppressed`, never sent, never reconsidered |
 | a person excluded by hand | a pre-inserted row of any status; see below |
 | copy not approved, or no postal address | the worker refuses the run before claiming anybody |
 | `dist/` older than `copy.json` | the worker refuses the run before claiming anybody |
 
-## Accounts with no invite link
+## The invite link
 
 The letter says "here's your invite link" and links the recipient's own personal token,
-`https://bingd.app/i/<token>`: the one `create_invite_link` minted and returns on every
-share. `_welcome_email_invite_token` reads it under the resolver's own conditions (live,
-`kind = 'personal'`, minted in this environment). **The send job never mints one.**
+`https://bingd.app/i/<token>`: the same one the app shares from Invite friends.
 
-**A token is minted lazily**: the first time the person taps Invite friends (Profile, or the
-onboarding People step) or shares a title with somebody off-platform. An account that has
-done neither has no link. Until the founder decides otherwise, the claim **holds** such an
-account: not mailed, not consumed, and mailed later if it gets a link inside the one-week
-window. A dry run prints how many are waiting.
+**Tokens are minted lazily** (the first Invite friends tap, or an off-platform title share),
+so many new accounts have none. Founder decision, 2026-09-13: don't hold the email for that.
+Inside the claim, `_welcome_email_ensure_invite_token` returns the account's live personal
+token, minting it first if there is none:
 
-The decision still open, and not built:
+- **The same lock as the app.** It takes `create_invite_link`'s per-account advisory lock,
+  so a send, a Share tap and `revoke_invite_link` serialise on one key. Two overlapping
+  sends mint one token; a send and a Share tap agree on one token in either order. Both are
+  proven on real PostgreSQL (races W3, W4), and a mutant with the lock deleted collides on
+  `invite_tokens_one_live`.
+- **The same token.** A dashless uuid, a separately drawn short code, `env` stamped from
+  `env.name`, kind `personal`, which is exactly what `redeem_invite` accepts. An existing live
+  token is reused, never replaced.
+- **No other side effect.** It does not call `create_invite_link`, because that also writes an
+  `invite_link_creations` row, the "Link created" stage of the invite funnel, and a welcome
+  email is not somebody sharing their link. `revoke_invite_link` already mints without that
+  row. Nothing else observes a token being created: there is no trigger on `invite_tokens`,
+  no attribution, Invite Instigator progress, notification, feed event or push. A test
+  counts every table in the schema before and after a claim, and only `invite_tokens` and
+  `welcome_emails` change.
+- **Minted only for the one being mailed.** Never in a dry run, never for a suppressed,
+  held or out-of-window account.
 
-1. **Keep holding.** Only people who have opened Invite friends are welcomed.
-2. **Send without the invite sentence** to accounts with no link. A second render of the letter.
-3. **Mint the one personal link at send time.** A service-role writer that inserts exactly
-   the token `create_invite_link` would (one live personal token, this environment), without
-   an `invite_link_creations` row, because no share happened. A migration and a change to
-   invite semantics, so a founder call.
+An account whose live token is from another environment, or is not personal, cannot be
+given a personal link without revoking that token, which the email will not do. It is held.
+No writer creates such tokens today.
 
 ## Somebody asked not to be emailed
 
@@ -171,7 +182,7 @@ update app_config set value = '["founder.test@example.com"]'::jsonb where key = 
 export SUPABASE_URL=https://fjxhcbowoxuzulwirzyr.supabase.co
 export SUPABASE_SERVICE_ROLE_KEY=...   # npx supabase projects api-keys --project-ref <ref> -o json
 export RESEND_API_KEY=re_...           # the welcome key, not the Supabase one
-export WELCOME_FROM="Suraj from bingd. <suraj@auth.bingd.app>"   # until bingd.app is verified
+export WELCOME_FROM="Suraj from bingd <suraj@auth.bingd.app>"   # until bingd.app is verified
 
 W=emails/welcome/automation/send-welcome.mjs
 ID=<test account user id>; EMAIL=<its confirmed address>

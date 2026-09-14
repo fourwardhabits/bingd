@@ -452,13 +452,13 @@ ${copy.footer.unsubscribeLabel}: ${UNSUBSCRIBE_TOKEN}
  * it in the one context nobody sees it in.
  *
  * The sender name is the other half and is usually the half that decides an open, which
- * is why it is rendered here rather than described. `Suraj from bingd.` reads as a
+ * is why it is rendered here rather than described. `Suraj from bingd` reads as a
  * person; `bingd.` reads as a service.
  *
  * Deliberately not pixel-faithful to any one client. It is the shape they share: bold
  * sender, bold subject, the preheader trailing in grey and truncated by the width.
  */
-const FROM_NAME = 'Suraj from bingd.';
+const FROM_NAME = 'Suraj from bingd';
 
 const inboxRow = (subject, note) => `
         <li class="row">
@@ -542,12 +542,8 @@ const decisions = [
       : 'Not set, so the worker refuses the cohort. A commercial email carries a physical mailing address; there is no company, so it is one you are willing to publish, usually a PO box or a virtual mailbox.',
   },
   {
-    title: 'Accounts with no invite link.',
-    body: 'A personal invite token is minted the first time somebody taps Invite friends or shares a title off-platform. An account that has done neither has no link, and the claim holds it rather than send a sentence that points nowhere. A dry run counts them as <code>waiting_for_invite_link</code>. Decide: keep holding, send without that sentence, or have the send job mint the one personal link.',
-  },
-  {
     title: 'Send from bingd.app.',
-    body: 'Replies go to <code>suraj@bingd.app</code>. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (DKIM, the <code>send</code> subdomain, DMARC). Until then a test send uses <code>--from "Suraj from bingd. &lt;suraj@auth.bingd.app&gt;"</code>.',
+    body: 'Replies go to <code>suraj@bingd.app</code>. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (DKIM, the <code>send</code> subdomain, DMARC). Until then a test send uses <code>--from "Suraj from bingd &lt;suraj@auth.bingd.app&gt;"</code>.',
   },
   {
     title: 'A Resend key of its own.',
@@ -1073,7 +1069,7 @@ const artifact = `<title>Welcome Email Review</title>
     <ol class="inbox">${inboxRows}
     </ol>
     <p class="sub" style="margin-top:14px">
-      <code>Suraj from bingd.</code> reads as a person. <code>bingd.</code> reads as a
+      <code>Suraj from bingd</code> reads as a person. <code>bingd.</code> reads as a
       service, and this email's whole claim is that a person wrote it.
     </p>
   </section>
