@@ -1826,11 +1826,12 @@ describe('the release mode', () => {
     // ranked list and the score it lands on, and the friends section the Feed beside a
     // comment thread. The compare sheet left the page. 2026-09-14: the last section shows
     // the Recommended Movies wall beside the Group Picks sheet, in place of For you and
-    // Watchlist.
+    // Watchlist. Later the same day the compare sheet came back in place of the ranked
+    // list, so the ranking section shows the head-to-head and then the score.
     for (const name of [
       'shot-movies',
       'shot-tv',
-      'shot-ranked',
+      'shot-compare',
       'shot-score',
       'shot-feed',
       'shot-comments',
