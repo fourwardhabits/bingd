@@ -2268,3 +2268,106 @@ describe('a Too tough whose reply was lost', () => {
     expect(completions()).toHaveLength(0);
   });
 });
+
+/**
+ * `onPlaced` tells the caller about a placement and **still draws the reveal** (founder,
+ * physical preview QA, Round 3, 2026-09-13).
+ *
+ * Onboarding is the only caller. Until Round 3 this prop suppressed the reveal, held the
+ * sheet back for an outright placement and slid out on a frozen last pair; the founder
+ * found the result anticlimactic and asked for the payoff every other surface gives. What
+ * the prop still changes is what Done means: close, without draining the celebration queue,
+ * and never offer the log sheet.
+ */
+describe('handing a placement back', () => {
+  it('presents at once for an outright placement, reveals the score and tells the caller once', async () => {
+    answering(placement);
+    const onPlaced = jest.fn();
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onPlaced, onShown });
+
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    await waitFor(() =>
+      expect(onPlaced).toHaveBeenCalledWith({ score: 8.7, position: 3, category: 'movies' }),
+    );
+    expect(onShown).toHaveBeenCalledTimes(1);
+
+    // A parent that re-renders while the reveal is up is not told twice about one ranking.
+    await sheet.rerender(
+      <RankingSheet
+        subject={subject}
+        onClose={sheet.onClose}
+        surface="search"
+        onPlaced={onPlaced}
+        onShown={onShown}
+      />,
+    );
+    expect(onPlaced).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends a comparison on the reveal, not on the last pair', async () => {
+    answering(comparison(), placement);
+    const onPlaced = jest.fn();
+    const sheet = await openSheet({ onPlaced });
+
+    await fireEvent.press(await sheet.ready('Film P'));
+
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    expect(onPlaced).toHaveBeenCalledTimes(1);
+    expect(sheet.queryByText('Which did you like more?')).toBeNull();
+    expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy();
+  });
+
+  it('closes on Done without celebrating, because the flow is not over', async () => {
+    mockUnlockQueue = [
+      { rows: [] },
+      {
+        rows: [
+          { award_key: 'movie-muncher', tier_key: 'bronze', earned_at: '2026-09-06T10:00:00Z' },
+        ],
+      },
+    ];
+    answering(placement);
+    const onPlaced = jest.fn();
+    const sheet = await openSheet({ onPlaced });
+
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    await waitFor(() => expect(mockUnlockReads).toBe(2));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalledTimes(1));
+    expect(mockPush).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: '/awards/celebrate' }),
+    );
+  });
+
+  it('never offers the log sheet under onPlaced, even when a caller passes one', async () => {
+    answering(placement);
+    const onFinishLog = jest.fn();
+    const sheet = await openSheet({ onPlaced: jest.fn(), onFinishLog });
+
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    expect(sheet.queryByRole('button', { name: /Add details/ })).toBeNull();
+  });
+
+  it('opens on a failed first answer, so its Close can be reached', async () => {
+    answering({ data: null, error: { code: '42501', message: 'suspended' } });
+    const onPlaced = jest.fn();
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onPlaced, onShown });
+
+    await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
+    expect(sheet.getByRole('button', { name: 'Close' })).toBeTruthy();
+    expect(onShown).toHaveBeenCalledTimes(1);
+    expect(onPlaced).not.toHaveBeenCalled();
+  });
+
+  it('draws the same reveal for a caller without onPlaced', async () => {
+    answering(placement);
+    const onShown = jest.fn();
+    const sheet = await openSheet({ onShown });
+
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    expect(onShown).toHaveBeenCalledTimes(1);
+  });
+});

@@ -70,8 +70,8 @@ const releaseShows = async () => {
  * So the assertions here are about the **shape of the state**, not about the symptom:
  *
  *   - exactly one sheet is ever mounted, at every point in the loop;
- *   - no completion sheet appears between titles at all;
- *   - the loop returns to the picker after every placement, five times;
+ *   - every placement ends on the full reveal inside that sheet, and the run waits for Done;
+ *   - the loop returns to the picker after every Done, five times;
  *   - a dismissal at either sheet returns to the picker rather than to a cursor;
  *   - a relaunch anywhere in the run lands on the picker, at the right number;
  *   - a title that has been ranked is never offered again, so no step can fail to advance.
@@ -376,6 +376,49 @@ beforeEach(() => {
 
 const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === fn);
 
+/**
+ * A band with something in it: `rank_start` asks one question and `rank_answer` places.
+ *
+ * The default server places outright, which presents the sheet straight onto the reveal.
+ * Tests about a comparison ask for this. Called after `starterGrid`, which replaces the
+ * catalogue rows: the pivot is put first, because the comparison card reads the first row.
+ */
+const askOneComparison = (score = 8.7) => {
+  mockTableRows.media_items = [
+    { id: 'pivot-1', title: 'The Pivot', release_date: '2001-01-01', poster_path: null },
+    ...(mockTableRows.media_items ?? []),
+  ];
+  const server = mockRpc.getMockImplementation()!;
+  mockRpc.mockImplementation((fn: string, args: Record<string, unknown> = {}) => {
+    if (fn === 'rank_start') {
+      return Promise.resolve({
+        data: { done: false, session_id: 'session-1', pivot: 'pivot-1' },
+        error: null,
+      });
+    }
+    if (fn === 'rank_answer') {
+      const position = (mockTableRows.rankings ?? []).length + 1;
+      mockTableRows.rankings = [
+        ...(mockTableRows.rankings ?? []),
+        rankedRow('film-1', `Placed ${position}`, position),
+      ];
+      return Promise.resolve({
+        data: { done: true, position, category: 'movies', bucket: 'loved', score },
+        error: null,
+      });
+    }
+    return server(fn, args);
+  });
+};
+
+/** The subject's card, once the pivot has loaded and the pair is answerable. */
+const answerable = async (view: Awaited<ReturnType<typeof open>>, title: string) => {
+  await waitFor(() =>
+    expect(view.getByLabelText(`Choose ${title}`).props.accessibilityState.disabled).toBe(false),
+  );
+  return view.getByLabelText(`Choose ${title}`);
+};
+
 /** The picker, drawn and ready. */
 const open = async () => {
   const view = await renderWithProviders(<TasteScreen />);
@@ -415,6 +458,22 @@ const chooseBucket = async (view: Awaited<ReturnType<typeof open>>, label = 'I l
   // `handoff` for the comparison. Waiting on the question being *gone* is the observable
   // half of that; the comparison arriving is what each caller then asserts.
   await waitFor(() => expect(view.queryByText('How was it?')).toBeNull());
+};
+
+/**
+ * The reveal a placement ends on — the same one the Log tab and a title page draw (founder,
+ * physical preview QA, Round 3, 2026-09-13) — found by the sentence it speaks.
+ *
+ * By the score rather than the name: the reveal names the title the way the refetched
+ * collection does, and this suite's server writes its rows as *Placed n*.
+ */
+const revealOf = (view: Awaited<ReturnType<typeof open>>) =>
+  view.findByLabelText(/ scored \d+\.\d out of 10\./);
+
+/** Wait for the reveal and press its Done, which is the only way on from a placement. */
+const closeReveal = async (view: Awaited<ReturnType<typeof open>>) => {
+  await revealOf(view);
+  await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 };
 
 describe('the picker', () => {
@@ -581,11 +640,11 @@ describe('one turn of the loop', () => {
   });
 
   /**
-   * **The blocker, as an assertion.** A placement goes straight back to the picker: no
-   * reveal, no *Done / Add details*, and nothing else on screen that has to be dismissed
-   * before the flow can continue.
+   * **The Round 3 decision, as an assertion.** A placement ends on the full reveal, and one
+   * Done returns to the picker. Nothing else is stacked on it: no log sheet, no bucket
+   * question, no second thing to close.
    */
-  it('returns to the picker with no completion sheet in between', async () => {
+  it('ends the turn on the full reveal, and returns to the picker on Done', async () => {
     const view = await open();
     await search(view, 'inception');
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
@@ -593,12 +652,15 @@ describe('one turn of the loop', () => {
 
     await chooseBucket(view);
 
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
-    expect(view.getByText('Pick another one')).toBeTruthy();
-    // The three things that used to be here, each of which the founder had to close.
+    await revealOf(view);
     expect(view.queryByText('How was it?')).toBeNull();
     expect(view.queryByRole('button', { name: 'Add details' })).toBeNull();
-    expect(view.queryByRole('button', { name: 'Done' })).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    expect(view.getByText('Pick another one')).toBeTruthy();
+    expect(shows().refused).toBe(0);
   });
 
   /**
@@ -667,11 +729,13 @@ describe('one turn of the loop', () => {
    * sheet's window still covers the screen, so no poster is tappable until it is gone,
    * which RNTL models through accessibilityViewIsModal and this test relies on. What
    * is worth pinning is the invariant itself: the sheet stays mounted through its own
-   * dismissal, on the placement path and on a dismissal mid-comparison alike, so nothing
+   * dismissal, on the reveal's Done and on a dismissal mid-comparison alike, so nothing
    * ever asks UIKit to tear down a controller it is still animating.
    */
   it('keeps the comparison sheet mounted until its dismissal is acknowledged', async () => {
     starterGrid(['film-1', 'film-2']);
+    askOneComparison();
+    alreadyRanked(1);
     dismissals().hold = true;
     const view = await open();
 
@@ -680,12 +744,13 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('I liked it'));
 
-    // Through the bucket handoff and the placement, leaving the comparison sheet's own
-    // dismissal outstanding.
+    // Through the bucket handoff, to the question, to the reveal.
     await releaseDismissals();
-    await waitFor(() =>
-      expect(mockRpc.mock.calls.some(([name]) => name === 'rank_start')).toBe(true),
-    );
+    await fireEvent.press(await answerable(view, 'Inception'));
+    await closeReveal(view);
+
+    // Done, with the comparison sheet's own dismissal outstanding.
+    await waitFor(() => expect(dismissals().pending).toHaveLength(1));
 
     // Still mounted, and still covering the screen: the picker exists but is not
     // reachable, which is what a sheet that has not finished dismissing looks like.
@@ -695,8 +760,9 @@ describe('one turn of the loop', () => {
     await releaseDismissals();
 
     // Gone, and the picker is live again at the number the placement moved it to.
-    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('2 of 5 movies ranked')).toBeTruthy());
     expect(view.getByLabelText('Starter 2')).toBeTruthy();
+    expect(shows().refused).toBe(0);
   });
 
   /**
@@ -739,14 +805,14 @@ describe('one turn of the loop', () => {
   });
 
   /**
-   * **The first title places before its comparison sheet has finished arriving.**
+   * **A Done pressed before the sheet has finished arriving.**
    *
-   * `rank_start` on an empty band places outright — no comparison to make — so the sheet
-   * that just opened is finished with before iOS has finished opening it. Every later
-   * title has a person answering a question inside it and is long since presented, which
-   * is why this was only ever reachable on the first one.
+   * `rank_start` on an empty band places outright — no comparison to make — so the reveal,
+   * Done and all, is on screen inside the sheet's own presentation. A fast thumb can close
+   * it before iOS has finished opening it, and a dismissal asked for in that window is
+   * refused with its completion never run: the freeze, reached through the payoff.
    */
-  it('does not leave the comparison sheet before it has finished arriving', async () => {
+  it('does not ask the sheet to close on a Done pressed while it is still arriving', async () => {
     starterGrid(['film-1', 'film-2']);
     dismissals().hold = true;
     const view = await open();
@@ -759,17 +825,15 @@ describe('one turn of the loop', () => {
     shows().hold = true;
     await fireEvent.press(view.getByLabelText('I liked it'));
     await releaseDismissals();
-    await waitFor(() =>
-      expect(mockRpc.mock.calls.some(([name]) => name === 'rank_start')).toBe(true),
-    );
+    await closeReveal(view);
 
-    // Placed, and still arriving. The run stays where it is: the picker is behind a sheet
-    // that is still on its way up, and nothing has asked to take it away.
+    // Closed, and still arriving. Nothing has asked UIKit to take it away yet.
     expect(shows().refused).toBe(0);
     expect(dismissals().pending).toHaveLength(0);
     expect(view.queryByLabelText('1 of 5 movies ranked')).toBeNull();
 
     await releaseShows();
+    await waitFor(() => expect(dismissals().pending).toHaveLength(1));
     await releaseDismissals();
 
     await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
@@ -784,6 +848,9 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     await chooseBucket(view);
+    await revealOf(view);
+    expect(view.queryAllByText('How was it?', { includeHiddenElements: true })).toHaveLength(0);
+    await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
     await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
     expect(view.queryAllByText('How was it?')).toHaveLength(0);
@@ -798,6 +865,7 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     await chooseBucket(view);
+    await closeReveal(view);
 
     await waitFor(() =>
       expect(view.getByLabelText(`${already + 1} of 5 movies ranked`)).toBeTruthy(),
@@ -805,7 +873,13 @@ describe('one turn of the loop', () => {
     expect(view.queryByText('Your First Five')).toBeNull();
   });
 
-  it('shows Your First Five when the fifth is placed, and not before', async () => {
+  /**
+   * The fifth reveal first, then Your First Five — once, and not behind the reveal.
+   *
+   * The count reaches five while the fifth reveal is still up. The payoff waits for Done so
+   * it is never drawn under a sheet that is still asking for one.
+   */
+  it('shows Your First Five after the fifth reveal is closed, and not before', async () => {
     alreadyRanked(4);
     const view = await open();
     await search(view, 'inception');
@@ -813,8 +887,16 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     await chooseBucket(view);
+    await revealOf(view);
+    expect(view.queryByText('Your First Five', { includeHiddenElements: true })).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Done' }));
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+    expect(
+      view.queryAllByText('Your First Five', { includeHiddenElements: true }),
+    ).toHaveLength(1);
+    expect(shows().refused).toBe(0);
   });
 
   /**
@@ -842,6 +924,7 @@ describe('one turn of the loop', () => {
     holdReadsOf('rankings');
 
     await chooseBucket(view);
+    await closeReveal(view);
 
     // Five placed, and the flow says so from what it watched happen rather than from a
     // query that has not answered. No sixth picker, so no sixth ranking.
@@ -892,11 +975,155 @@ describe('one turn of the loop', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     await chooseBucket(view);
+    await closeReveal(view);
 
     await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
     expect(callsTo('rank_start')).toHaveLength(1);
     expect(callsTo('set_bucket')).toHaveLength(1);
     expect(mockTableRows.rankings).toHaveLength(5);
+  });
+});
+
+/**
+ * The reveal after every placement (founder, physical preview QA, Round 3, 2026-09-13).
+ *
+ * Round 2 replaced the per-title reveal with *Inception landed at 9.0* on the picker. It
+ * worked and it was anticlimactic, so onboarding now ends every placement on the same reveal
+ * the rest of the app draws, and waits for Done. What these cases defend is the lifecycle
+ * around it: one sheet, presented once, dismissed only after it has arrived, and the picker
+ * live again only after the dismissal is acknowledged.
+ */
+describe('the reveal after every placement', () => {
+  /** Opens the bucket question on Inception from the grid; the default server places outright. */
+  const pickFromGrid = async () => {
+    starterGrid(['film-1', 'film-2']);
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    return view;
+  };
+
+  /** Swaps the default placement's score, so the reveal is proved to carry the real one. */
+  const scoring = (score: number) => {
+    const server = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation(async (fn: string, args: Record<string, unknown> = {}) => {
+      const reply = await server(fn, args);
+      return fn === 'rank_start' ? { ...reply, data: { ...reply.data, score } } : reply;
+    });
+  };
+
+  it('presents the sheet for an outright placement and reveals the real score in it', async () => {
+    scoring(8.66);
+    const view = await pickFromGrid();
+
+    await chooseBucket(view);
+
+    const reveal = await revealOf(view);
+    expect(reveal.props.accessibilityLabel).toMatch(/ scored 8\.7 out of 10\./);
+    expect(view.getByLabelText('Rank Inception')).toBeTruthy();
+    // The onboarding reveal's one extra line, which is the explanation's only home.
+    expect(
+      view.getByText(/Your score comes from where this lands in your rankings/),
+    ).toBeTruthy();
+    expect(shows().refused).toBe(0);
+  });
+
+  it('waits for Done: time passing does not take the reveal away', async () => {
+    const view = await pickFromGrid();
+    await chooseBucket(view);
+    await revealOf(view);
+
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+
+    expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
+    expect(view.queryByLabelText('1 of 5 movies ranked')).toBeNull();
+  });
+
+  it('ends a comparison on the reveal, not on the last pair', async () => {
+    starterGrid(['film-1', 'film-2']);
+    askOneComparison(7.25);
+    alreadyRanked(1);
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await chooseBucket(view);
+    await fireEvent.press(await answerable(view, 'Inception'));
+
+    const reveal = await revealOf(view);
+    expect(reveal.props.accessibilityLabel).toMatch(/ scored 7\.3 out of 10\./);
+    expect(view.queryByText('Which did you like more?')).toBeNull();
+    expect(view.queryByTestId('ranking-handoff', { includeHiddenElements: true })).toBeNull();
+    expect(view.queryByText(/landed at/, { includeHiddenElements: true })).toBeNull();
+  });
+
+  /**
+   * The placement is counted when it lands, not when the refetch does — so the picker the
+   * reader returns to already says 1 of 5 even if the ranked collection has not answered.
+   */
+  it('counts the placement before Done, so the picker returns at the new number', async () => {
+    const view = await pickFromGrid();
+    holdReadsOf('rankings');
+
+    await chooseBucket(view);
+    await closeReveal(view);
+
+    await waitFor(() => expect(view.getByLabelText('1 of 5 movies ranked')).toBeTruthy());
+    // Inception is not offered again, from the same fact.
+    expect(view.queryByLabelText('Inception')).toBeNull();
+    releaseReadsOf('rankings');
+  });
+
+  it('reaches Your First Five once from a compared fifth, after its reveal', async () => {
+    starterGrid(['film-1', 'film-2']);
+    askOneComparison();
+    alreadyRanked(4);
+    dismissals().hold = true;
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('I liked it'));
+    await releaseDismissals();
+    await fireEvent.press(await answerable(view, 'Inception'));
+    await closeReveal(view);
+
+    // Mid-slide-out: the payoff is already drawn behind the sheet, exactly once.
+    await waitFor(() => expect(dismissals().pending).toHaveLength(1));
+    expect(
+      view.queryAllByText('Your First Five', { includeHiddenElements: true }),
+    ).toHaveLength(1);
+    await releaseDismissals();
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy());
+    expect(view.queryAllByText('Your First Five')).toHaveLength(1);
+    expect(view.queryByLabelText('Rank Inception', { includeHiddenElements: true })).toBeNull();
+    expect(shows().refused).toBe(0);
+  });
+
+  it('still presents the sheet when the first answer is a failure, with its Close', async () => {
+    const server = mockRpc.getMockImplementation()!;
+    mockRpc.mockImplementation((fn: string, args: Record<string, unknown> = {}) =>
+      fn === 'rank_start'
+        ? Promise.resolve({
+            data: null,
+            error: { code: '42501', message: 'suspended' },
+          })
+        : server(fn, args),
+    );
+    const view = await pickFromGrid();
+
+    await chooseBucket(view);
+
+    await waitFor(() => expect(view.getByText('Could not rank')).toBeTruthy());
+    expect(view.getByLabelText('Rank Inception')).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(view.getByLabelText('0 of 5 movies ranked')).toBeTruthy());
+    expect(shows().refused).toBe(0);
   });
 });
 
