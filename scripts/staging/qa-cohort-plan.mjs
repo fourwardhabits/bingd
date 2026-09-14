@@ -382,8 +382,23 @@ export function titleSpec(key) {
   throw new Error(`unknown title key: ${key}`);
 }
 
-export const usernameFor = (name) => `qa_${name}`;
-export const cohortEmail = (name) => `qa-cohort+${name}@example.com`;
+/**
+ * GENERATIONS. Deleting a profile reserves its username for ever
+ * (20260813001500 `reserve_username_on_profile_delete`), so a cohort that was reset
+ * cannot be reseeded under the same names. Each reseed after a reset is the next
+ * generation: generation 1 is `qa_<name>`, generation n > 1 is `qa_<name>_g<n>`.
+ * The runner picks the live generation, or the first one whose names are all free.
+ */
+export const MAX_GENERATION = 99;
+
+export function nameTag(name, generation = 1) {
+  if (!Number.isInteger(generation) || generation < 1 || generation > MAX_GENERATION) {
+    throw new Error(`generation must be an integer 1..${MAX_GENERATION}`);
+  }
+  return generation === 1 ? name : `${name}_g${generation}`;
+}
+export const usernameFor = (name, generation = 1) => `qa_${nameTag(name, generation)}`;
+export const cohortEmail = (name, generation = 1) => `qa-cohort+${nameTag(name, generation)}@example.com`;
 
 /** A name-based (v5-shaped) UUID: SHA-1 over the namespace bytes and the name. */
 export function operationId(...parts) {
@@ -401,7 +416,8 @@ export function operationId(...parts) {
  * then best first) with their intended band rank per category, so the seeder can
  * both answer comparisons and check the positions it ended with.
  */
-export function buildPlan() {
+export function buildPlan({ generation = 1 } = {}) {
+  const handle = (name) => usernameFor(name, generation);
   const users = USERS.map((u) => {
     const rankings = [];
     const bands = { movies: {}, tv_seasons: {} };
@@ -426,29 +442,29 @@ export function buildPlan() {
     }
     return {
       name: u.name,
-      username: usernameFor(u.name),
-      email: cohortEmail(u.name),
+      username: handle(u.name),
+      email: cohortEmail(u.name, generation),
       displayName: u.displayName,
       rankings,
       bands,
       watchlist: [...u.watchlist],
-      follows: u.follows.map(usernameFor),
+      follows: u.follows.map(handle),
     };
   });
 
   const recommendations = RECOMMENDATIONS.map((r) => ({
-    from: usernameFor(r.from),
-    to: usernameFor(r.to),
+    from: handle(r.from),
+    to: handle(r.to),
     title: r.title,
   }));
   const groups = Object.fromEntries(
     Object.entries(GROUPS).map(([medium, g]) => [
       medium,
-      { caller: usernameFor(g.caller), members: g.members.map(usernameFor) },
+      { caller: handle(g.caller), members: g.members.map(handle) },
     ]),
   );
   const pairs = Object.fromEntries(
-    Object.entries(PAIRS).map(([k, list]) => [k, list.map(([a, b]) => [usernameFor(a), usernameFor(b)])]),
+    Object.entries(PAIRS).map(([k, list]) => [k, list.map(([a, b]) => [handle(a), handle(b)])]),
   );
 
   const keys = new Set();
@@ -459,7 +475,7 @@ export function buildPlan() {
   for (const r of recommendations) keys.add(r.title);
   const titles = [...keys].sort().map(titleSpec);
 
-  return { marker: COHORT_MARKER, users, recommendations, groups, pairs, core: [...CORE], titles };
+  return { marker: COHORT_MARKER, generation, users, recommendations, groups, pairs, core: [...CORE], titles };
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +562,7 @@ export function raterCounts(plan) {
 export function summarize(plan) {
   const counts = raterCounts(plan);
   const lines = [];
-  lines.push(`cohort ${plan.marker}: ${plan.users.length} users, ${plan.titles.length} distinct titles`);
+  lines.push(`cohort ${plan.marker} generation ${plan.generation}: ${plan.users.length} users, ${plan.titles.length} distinct titles`);
   for (const u of plan.users) {
     const movies = u.rankings.filter((r) => r.category === 'movies').length;
     const seasons = u.rankings.length - movies;

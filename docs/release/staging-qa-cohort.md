@@ -29,6 +29,21 @@ finishes onboarding lands in a populated social graph.
 The totals are 267 rankings, 46 watchlist rows, 22 follows (mutual and one-way) and 8
 delivered recommendations.
 
+**Generations.** Deleting a profile reserves its username permanently
+(`reserve_username_on_profile_delete`, 20260813001500), so a cohort that has been reset
+cannot come back under the same names. Each seed after a reset is therefore a new
+generation:
+
+- generation 1 is `qa_<name>`; generation *n* is `qa_<name>_g<n>`, with the email
+  `qa-cohort+<name>_g<n>@example.com`;
+- the fixture is otherwise identical, and the display names ("QA · Horror fan") do not
+  change;
+- `seed` and `verify` use the live generation. If none is live, `seed` takes the first
+  generation whose eight emails and usernames are all unused and unreserved.
+
+As of 2026-09-13, staging holds **generation 2** (`qa_blockbuster_fan_g2` and so on).
+Generation 1 was seeded, verified and reset to prove reset works.
+
 - **Shared core.** 15 widely seen films. 12 are ranked by all eight accounts and 3 by
   seven. Everyone gives them different buckets, so the pairs disagree in useful ways.
 - **Designed Match spread.** The server's `taste_match` agrees exactly with the plan's
@@ -101,7 +116,8 @@ node scripts/staging/qa-cohort.mjs seed
 # VERIFY: PASS/FAIL table; creates and then deletes a throwaway probe account
 node scripts/staging/qa-cohort.mjs verify
 
-# RESET: delete every selector-approved cohort and probe account (cascades their data)
+# RESET: delete every selector-approved cohort and probe account (cascades their data).
+# The usernames stay reserved; the next seed creates the next generation.
 node scripts/staging/qa-cohort.mjs reset
 
 # The fixture and guard tests
@@ -181,6 +197,15 @@ These are recorded rather than forced. No product logic was changed to hide them
   and reseeded. The all-time board is unaffected.
 - **Cohort accounts get notifications.** Follows and recommendations create them. With
   no device tokens they are never delivered.
+- **A profile-less orphan exists, and reset will not remove it.** The auth user is
+  `qa-cohort+blockbuster_fan@example.com` (marker `v1`). On 2026-09-13, before
+  generations existed, a reseed created it and then failed on the reserved username.
+  - Reset refuses it by design: with no profile there is no `qa_` username to confirm.
+  - It is inert. It has no profile, so it appears on no surface, and nobody knows its
+    password.
+  - It can be deleted by hand in the dashboard.
+  - It should not recur: seed now confirms a username is free before it creates the
+    auth user.
 
 ## Extending it
 

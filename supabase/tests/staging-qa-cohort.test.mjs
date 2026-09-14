@@ -78,6 +78,39 @@ test('six to eight users, each named qa_ with a matching cohort email', () => {
   }
 });
 
+test('generations: a reset cohort reseeds under new names, and only the names change', () => {
+  // A deleted profile's username is reserved for ever (20260813001500), so generation n
+  // must never reuse generation m's names or emails.
+  const g1 = buildPlan({ generation: 1 });
+  assert.deepEqual(g1, plan, 'generation 1 is the default');
+  const seen = new Set();
+  for (const g of [1, 2, 3, 10, 99]) {
+    const p = buildPlan({ generation: g });
+    assert.equal(p.generation, g);
+    assert.deepEqual(buildPlan({ generation: g }), p, 'deterministic per generation');
+    for (const u of p.users) {
+      assert.match(u.username, /^qa_[a-z0-9_]{3,21}$/);
+      const m = COHORT_EMAIL_PATTERN.exec(u.email);
+      assert.ok(m && `qa_${m[1]}` === u.username);
+      assert.ok(!seen.has(u.username) && !seen.has(u.email), `${u.username} reused across generations`);
+      seen.add(u.username);
+      seen.add(u.email);
+      assert.equal(isResettableCohortAccount(
+        { id: 'x', email: u.email, app_metadata: { qa_cohort: COHORT_MARKER } },
+        { id: 'x', username: u.username },
+      ), true);
+    }
+    // Everything but identity is the same fixture.
+    const strip = (pl) => pl.users.map(({ username, email, follows, ...rest }) => rest);
+    assert.deepEqual(strip(p), strip(g1));
+    for (const [i, r] of p.recommendations.entries()) assert.equal(r.title, g1.recommendations[i].title);
+    for (const u of p.users) for (const f of u.follows) assert.ok(p.users.some((x) => x.username === f));
+  }
+  assert.throws(() => buildPlan({ generation: 0 }));
+  assert.throws(() => buildPlan({ generation: 100 }));
+  assert.throws(() => buildPlan({ generation: 1.5 }));
+});
+
 test('ranking volumes: 15-30 movies each (TV-leaning users rank seasons instead)', () => {
   for (const u of plan.users) {
     const movies = u.rankings.filter((r) => r.category === 'movies').length;

@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import {
   COHORT_MARKER,
   PROBE_MARKER,
+  MAX_GENERATION,
   buildPlan,
   operationId,
   summarize,
@@ -352,6 +353,54 @@ async function findCohort(api, plan) {
   return { users, found, profiles };
 }
 
+/** Throws unless the username is neither in use nor reserved by a deleted profile. */
+async function assertNameFree(api, pu) {
+  const taken = await api.rows(`profiles?username=eq.${pu.username}&select=id`);
+  const reserved = await api.rows(`username_history?username=eq.${pu.username}&select=username`);
+  if (taken.length || reserved.length) {
+    throw new Error(
+      `${pu.username} is ${taken.length ? 'taken' : 'reserved by a deleted profile'}; refusing to create ${pu.email}. ` +
+        'A deleted username is reserved for ever, so run reset and let seed pick the next generation.',
+    );
+  }
+}
+
+/**
+ * Which generation of the cohort is on staging (see nameTag in the plan). A generation is
+ * live when any of its accounts exists with its profile. With none live, seed takes the
+ * first generation whose eight emails and usernames are all unused and unreserved.
+ */
+async function resolveGeneration(api, { forSeed }) {
+  const users = await listAuthUsers(api);
+  const emails = new Set(users.map((u) => String(u.email ?? '').toLowerCase()));
+  const marked = users.filter((u) => u.app_metadata?.qa_cohort === COHORT_MARKER);
+  const profiles = await profilesFor(api, marked.map((u) => u.id));
+  const live = [];
+  for (let g = 1; g <= MAX_GENERATION; g += 1) {
+    const plan = buildPlan({ generation: g });
+    const hits = plan.users.filter((pu) => {
+      const u = marked.find((m) => String(m.email).toLowerCase() === pu.email);
+      return u && profiles.get(u.id)?.username === pu.username;
+    });
+    if (hits.length) live.push({ generation: g, plan });
+  }
+  if (live.length > 1) {
+    throw new Error(`more than one live cohort generation (${live.map((l) => l.generation).join(', ')}); run reset first.`);
+  }
+  if (live.length === 1) return { plan: live[0].plan, live: true };
+  if (!forSeed) return { plan: null, live: false };
+
+  for (let g = 1; g <= MAX_GENERATION; g += 1) {
+    const plan = buildPlan({ generation: g });
+    if (plan.users.some((pu) => emails.has(pu.email))) continue;
+    const names = plan.users.map((pu) => pu.username);
+    const taken = await api.rows(`profiles?username=${inList(names)}&select=username`);
+    const reserved = await api.rows(`username_history?username=${inList(names)}&select=username`);
+    if (!taken.length && !reserved.length) return { plan, live: false };
+  }
+  throw new Error(`no free cohort generation up to ${MAX_GENERATION}.`);
+}
+
 async function snapshotCounts(api, ids) {
   const counts = { cohort_users: ids.length };
   if (!ids.length) {
@@ -418,6 +467,7 @@ async function ensureAccount(api, pu, existing, marker) {
   const password = freshPassword();
   let user = existing;
   if (!user) {
+    await assertNameFree(api, pu);
     const created = await api.service('/auth/v1/admin/users', {
       method: 'POST',
       body: JSON.stringify({
@@ -537,10 +587,11 @@ async function seedWatchlist(api, pu, account, titles) {
 }
 
 async function seed({ dryRun }) {
-  const plan = buildPlan();
-  console.log(summarize(plan));
   const api = await connect();
-  console.log(`\nstaging ${STAGING_HOST}: environment_name() = nonprod`);
+  console.log(`staging ${STAGING_HOST}: environment_name() = nonprod`);
+  const { plan, live } = await resolveGeneration(api, { forSeed: true });
+  console.log(`${live ? 'live' : 'new'} cohort generation ${plan.generation}\n`);
+  console.log(summarize(plan));
   const titles = await resolveTitles(api, plan);
   console.log(`resolved ${titles.byKey.size} planned titles on staging`);
 
@@ -697,7 +748,7 @@ async function reset({ includeCohort = true, includeProbes = true, quiet = false
     const p = profiles.get(u.id);
     if (!isResettableCohortAccount(u, p)) {
       refused += 1;
-      console.log(`  refused ${u.id}: marker present but email/profile do not match the cohort selector`);
+      console.log(`  refused ${u.id}: marker present but ${p ? 'email/profile do not match the cohort selector' : 'no profile, so no qa_ username to confirm'}; left in place`);
       continue;
     }
     const via = await deleteCohortAccount(api, u, p);
@@ -717,8 +768,10 @@ async function reset({ includeCohort = true, includeProbes = true, quiet = false
 // ---------------------------------------------------------------------------
 
 async function verify() {
-  const plan = buildPlan();
   const api = await connect();
+  const resolved = await resolveGeneration(api, { forSeed: false });
+  const plan = resolved.plan ?? buildPlan();
+  console.log(resolved.live ? `verifying live cohort generation ${plan.generation}` : 'no live cohort generation');
   const results = [];
   const record = (status, name, detail = '') => {
     results.push({ status, name, detail });
@@ -736,7 +789,7 @@ async function verify() {
 
   const titles = await resolveTitles(api, plan);
   const cohort = await findCohort(api, plan);
-  const present = plan.users.filter((pu) => {
+  const present = !resolved.live ? [] : plan.users.filter((pu) => {
     const u = cohort.found.get(pu.username);
     return u && cohort.profiles.get(u.id)?.username === pu.username;
   });
@@ -747,7 +800,7 @@ async function verify() {
     const qaProfiles = (await api.rows('profiles?select=username&username=like.qa*&limit=1000')).filter((p) => p.username.startsWith('qa_'));
     const marked = cohort.users.filter((u) => u.app_metadata?.qa_cohort).length;
     console.log('\nCOHORT ABSENT: no qa_cohort=v1 accounts on staging.');
-    console.log(`  auth users carrying any qa_cohort marker: ${marked}; qa_ profiles: ${qaProfiles.length}; other auth users (untouched): ${cohort.users.length - marked}`);
+    console.log(`  auth users carrying any qa_cohort marker: ${marked} (qa_ profiles: ${qaProfiles.length}); other auth users (untouched): ${cohort.users.length - marked}`);
     printCounts('counts', counts);
     process.exitCode = 1;
     return;
