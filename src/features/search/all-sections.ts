@@ -129,35 +129,35 @@ export type AllRow =
  *
  * **Movies, TV, Cast, Users**, each under its own header, each cut to `SECTION_PREVIEW`, and
  * a section with nothing in it is not drawn at all. A header offers See all only when its
- * chip would show more than the preview: more rows of that kind than fit, or (for titles)
- * another provider page to read.
+ * chip already holds more than the preview: more rows of that kind than fit. A further
+ * provider page is not counted, because it may hold none of that kind, and a See all that
+ * opens the same one row is a promise the chip does not keep (independent review).
  *
  * **An `@` query leads with Users** and has no Cast: `@` is somebody naming an account,
  * and a performer is not what it asks for.
  *
  * **Nothing is inserted above rows already drawn** where that can be avoided (independent
- * review, 2026-09-13). Accounts answer before the local title pass, so until it has
- * answered (`ready`) only title sections are drawn; Cast and Users then arrive below them.
- * A provider title landing later can still lengthen a title preview by up to two rows,
- * which is bounded by the preview itself.
+ * review, 2026-09-13 and 2026-09-14). Accounts and local titles can answer long before
+ * TMDB, so until every title for the query has arrived (`ready`) only title sections are
+ * drawn; Cast and Users then arrive below them, where nothing is pushed. The title sections
+ * themselves can still grow while they arrive (a Movies preview above TV), which is the one
+ * movement a grouped page cannot avoid, and each is bounded by the preview. An `@` query's
+ * Users section leads and is not held: titles arrive below it.
  */
 export function allRows({
   query,
   titles,
   people,
   users,
-  moreTitles = false,
   ready = true,
 }: {
   query: string;
   titles: SearchResult[];
   people: CastSearchResult[];
   users: UserResult[];
-  /** The provider has another page of titles, so a title chip holds more than it shows. */
-  moreTitles?: boolean;
   /**
-   * False until the local title pass has answered. Accounts answer first, and a Users
-   * section drawn before the titles would be pushed down when they arrive.
+   * False until every title for this query has arrived (`useTitleSearch`'s
+   * `titlesSettled`). A Cast or Users section drawn before then would be pushed down.
    */
   ready?: boolean;
 }): { rows: AllRow[]; cast: CastSearchResult[]; users: UserResult[] } {
@@ -180,7 +180,7 @@ export function allRows({
   const matchedUsers = users.filter((user) => meaningfulMatch(user, query));
 
   const cast = ready ? matched.slice(0, SECTION_PREVIEW) : [];
-  const shownUsers = ready ? matchedUsers.slice(0, SECTION_PREVIEW) : [];
+  const shownUsers = ready || namesAccount ? matchedUsers.slice(0, SECTION_PREVIEW) : [];
 
   const section = <T>(
     name: AllSection,
@@ -193,13 +193,13 @@ export function allRows({
   const movieRows = section(
     'movies',
     movies.slice(0, SECTION_PREVIEW),
-    movies.length > SECTION_PREVIEW || moreTitles,
+    movies.length > SECTION_PREVIEW,
     (result) => ({ type: 'title', result }),
   );
   const tvRows = section(
     'tv',
     shows.slice(0, SECTION_PREVIEW),
-    shows.length > SECTION_PREVIEW || moreTitles,
+    shows.length > SECTION_PREVIEW,
     (result) => ({ type: 'title', result }),
   );
   // The Cast and Users chips list every answer, ungated, so either holds more than its

@@ -201,7 +201,7 @@ export default function LogScreen() {
     providerAvailableAt,
     providerFailed,
     providerPeople,
-    localAnswered,
+    titlesSettled,
     loadingMorePages,
     morePagesFailed,
     morePagesRateLimited,
@@ -261,10 +261,9 @@ export default function LogScreen() {
         titles: results,
         people: providerPeople,
         users: userResults,
-        moreTitles: hasMorePages,
-        // Cast and Users wait for the local titles, so neither is drawn above them and then
-        // pushed down when they arrive.
-        ready: localAnswered,
+        // Cast and Users wait for every title this query will get, so neither is drawn and
+        // then pushed down by titles arriving above it.
+        ready: titlesSettled,
       });
     }
     if (filter === 'users') {
@@ -279,16 +278,7 @@ export default function LogScreen() {
       cast: [],
       users: [],
     };
-  }, [
-    filter,
-    input,
-    results,
-    providerPeople,
-    userResults,
-    filtered,
-    hasMorePages,
-    localAnswered,
-  ]);
+  }, [filter, input, results, providerPeople, userResults, filtered, titlesSettled]);
   const shownUsers = page.users;
 
   /**
@@ -546,8 +536,10 @@ export default function LogScreen() {
           onClearRecent={clear}
           onPickRecent={setInput}
           searchingWider={providerSearching}
-          loadingMore={loadingMorePages}
-          moreFailed={morePagesFailed}
+          // A later page's progress belongs to the Movies or TV list that asked for it; All
+          // is previews and never asks, so it does not report one either.
+          loadingMore={filter !== 'all' && loadingMorePages}
+          moreFailed={filter !== 'all' && morePagesFailed}
           moreRateLimited={morePagesRateLimited}
           moreAvailableAt={morePagesAvailableAt}
           // Movies and TV only. Users is one server answer, not pages, and All is previews:
@@ -961,6 +953,11 @@ function Results({
     <View style={styles.list}>
       <FlashList
         ref={list}
+        // FlashList 2 keeps the first visible row in place when data changes, by scrolling
+        // after it re-measures — which would undo `useScrollReset`'s return to the top one
+        // commit later, and hide rows that arrive above the top (independent review). A
+        // search list is read from its top, so neither is wanted.
+        maintainVisibleContentPosition={SEARCH_LIST_POSITION}
         data={rows}
         getItemType={(item) => item.type}
         // The wider search runs after the local one and adds to it, so its progress is
@@ -1339,6 +1336,7 @@ function CastResults({
     <View style={styles.list}>
       <FlashList
         ref={list}
+        maintainVisibleContentPosition={SEARCH_LIST_POSITION}
         data={results}
         keyExtractor={(person) => `cast:${person.id}`}
         keyboardShouldPersistTaps="handled"
@@ -1417,6 +1415,9 @@ const SEE_ALL_LABELS = {
   cast: 'See all cast',
   users: 'See all users',
 } as const satisfies Record<AllSection, string>;
+
+/** See the Results list: a search list starts at its top and is not anchored elsewhere. */
+const SEARCH_LIST_POSITION = { disabled: true } as const;
 
 const styles = StyleSheet.create({
   /**

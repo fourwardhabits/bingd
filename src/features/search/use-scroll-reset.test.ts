@@ -42,6 +42,8 @@ describe('useScrollReset', () => {
         initialProps: { current: 'a' },
       },
     );
-    await expect(view.rerender({ current: 'b' })).resolves.not.toThrow();
+    await view.rerender({ current: 'b' });
+    // Nothing to scroll and nothing thrown: the ref is still empty after the change.
+    expect(view.result.current.current).toBeNull();
   });
 });

@@ -1255,6 +1255,71 @@ describe('the grouped All page', () => {
     expect(before.at(-1)).toBe('movies|breaking');
   });
 
+  it('holds a Users section that answered first until the provider titles have landed', async () => {
+    // Independent review: accounts answer at once, TMDB a second later. A Users section drawn
+    // in between would be pushed down under a reader's thumb by the title sections.
+    let releaseProvider: (value: unknown) => void = () => {};
+    mockSearchProvider.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseProvider = resolve;
+        }),
+    );
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [], error: null });
+      if (fn === 'search_users') {
+        return Promise.resolve({
+          data: [
+            {
+              id: 'u-b',
+              username: 'breaking',
+              display_name: 'Breaking News',
+              avatar_path: null,
+              visibility: 'public',
+            },
+          ],
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: [], error: null });
+    });
+    const view = await search('breaking');
+    await settle();
+    await waitFor(() => expect(mockSearchProvider).toHaveBeenCalled());
+
+    // The accounts are in hand, the titles are not: no Users section yet.
+    expect(view.queryByLabelText('Breaking News, @breaking')).toBeNull();
+
+    await act(async () => {
+      releaseProvider({
+        titles: [remote('p1', 'Breaking Point')],
+        people: [],
+        page: 1,
+        totalPages: 1,
+      });
+    });
+
+    await waitFor(() => expect(view.getByLabelText('Breaking News, @breaking')).toBeTruthy());
+    expect(view.getByLabelText('Breaking Point, 2012')).toBeTruthy();
+  });
+
+  it('gives the Cast list its scroll reset too', async () => {
+    mockSearchCast.mockResolvedValue([
+      { id: 6193, name: 'Leonardo DiCaprio', profilePath: null, knownFor: [], popularity: 8.2 },
+    ]);
+    const view = await search('leo');
+    await waitFor(() => expect(view.getByRole('button', { name: 'Cast' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Cast' }));
+    await settle();
+    await waitFor(() => expect(view.getByLabelText(/^Leonardo DiCaprio/)).toBeTruthy());
+
+    expect(lastKey()).toBe('cast|leo');
+    expect(
+      typeof (mockListRefs.at(-1)?.current as { scrollToOffset?: unknown } | null)
+        ?.scrollToOffset,
+    ).toBe('function');
+  });
+
   it('still leads Movies with the exact title, and lists it once', async () => {
     mockRpc.mockImplementation((fn: string) =>
       fn === 'search_titles'

@@ -497,7 +497,13 @@ Deno.test('a name is matched whole, from its start, or not at all', () => {
   assertEquals(castNameMatch('Leonardo DiCaprio', 'leo'), 1);
   assertEquals(castNameMatch('Leonardo DiCaprio', 'leo dic'), 1);
   assertEquals(castNameMatch('Jean-Claude Van Damme', 'jean claude'), 1);
-  assertEquals(castNameMatch('Leonardo DiCaprio', 'leonardodi'), 1);
+  assertEquals(castNameMatch('Leonardo DiCaprio', 'leonardodi'), 3);
+  // Every assignment is tried, not the first word each typed word fits.
+  assertEquals(castNameMatch('Jackson Jones', 'j jackson'), 2);
+  assertEquals(castNameMatch('Jack Johnson', 'j jack'), 2);
+  assertEquals(castNameMatch('Jack Johnson', 'jack j'), 1);
+  // Letters run together are the weakest match of all.
+  assertEquals(castNameMatch('Joe Lo Truglio', 'joel'), 3);
   assertEquals(castNameMatch('Melissa Leo', 'leo'), 2);
   assertEquals(castNameMatch('Tom Hanks', 'hanks tom'), 2);
   // Inside a word is not a match, however it is spelled.
@@ -548,6 +554,18 @@ Deno.test('a one-word whole name leads only when it is somebody people search fo
     rankCast('cher', [performer(6, 'Cheryl Hines', 3.2), performer(7, 'Cher', 1.4)], [], 20).map((p) => p.id),
     [7, 6],
   );
+});
+
+Deno.test('run-together letters rank below word matches, and never admit an index entry', () => {
+  const ranked = rankCast(
+    'joel',
+    [performer(1, 'Joe Lo Truglio', 9), performer(2, 'Joel Edgerton', 5)],
+    [performer(3, 'Joe Lando Famous', 50), performer(4, 'Billy Joel', 6)],
+    20,
+  );
+  // Edgerton starts with "joel"; Billy Joel matches a word; Truglio only by run-together
+  // letters, below both however popular; the index's run-together entry is not let in.
+  assertEquals(ranked.map((person) => person.id), [2, 4, 1]);
 });
 
 Deno.test('a TMDB result the gate does not pass is kept last, in TMDB order', () => {

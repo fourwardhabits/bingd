@@ -26,9 +26,10 @@
  *                              on, writing those titles into the catalogue first.
  *   search-people
  *             signed-in user   Performers TMDB knows by a name, for Cast search.
- *                              Reads nothing into the catalogue and writes nothing.
- *   trending  service_role     Refreshes the four provider_list_cache lists. The
- *                              client reads that table directly; this only fills it.
+ *                              Writes nothing; ranks with the popular-performer index.
+ *   trending  service_role     Refreshes the four trending provider_list_cache lists
+ *                              and the popular.people index. The client reads that
+ *                              table directly; this only fills it.
  *   enrich    service_role     Drains tmdb_enrich_due. The Wikidata seed has ids
  *                              and no artwork; this is what gives it posters.
  *   refresh   service_role     Drains media_refresh_due, which is what keeps
@@ -208,6 +209,9 @@ async function handleSearch(
   // **One page per call** (2026-09-14). Page 1 is what a search asks for; a later page is
   // asked for only when the reader scrolls to the end of the list. TMDB's own
   // `total_pages` says whether one exists, capped at `MAX_SEARCH_PAGE`.
+  // Started beside the provider request rather than after it: a database read, bounded by
+  // its own deadline, so it adds no waiting a search did not already do.
+  const performers = page === 1 ? popularPerformers(db) : Promise.resolve([]);
   const answer = await tmdb.searchMulti(trimmed, charge, page);
   const totalPages = Math.min(Math.max(answer.total_pages ?? 1, 1), MAX_SEARCH_PAGE);
 
@@ -286,7 +290,7 @@ async function handleSearch(
               answer.results.filter((result) => result.media_type === 'person') as tmdb.TmdbPersonSearchResult[],
               MAX_CAST_CANDIDATES,
             ),
-            await popularPerformers(db),
+            await performers,
             MAX_SEARCH_PEOPLE,
           )
         : [],
@@ -321,32 +325,52 @@ const PEOPLE_INDEX_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
 /** How long one isolate keeps the index it read, so a burst of searches reads it once. */
 const PEOPLE_INDEX_MEMO_MS = 10 * 60_000;
 
+/**
+ * How long a search waits for the index before answering without it (independent review).
+ * A cold isolate reads ~160 KB; a slow database must not become a slow search.
+ */
+const PEOPLE_INDEX_DEADLINE_MS = 800;
+
 let peopleIndexMemo: { at: number; people: CastSearchResult[] } | null = null;
+let peopleIndexLoading: Promise<CastSearchResult[]> | null = null;
 
 /**
  * The popular-performer index, for ranking a Cast query. **Never fails a search**: a missing,
  * stale or unreadable index is an empty one, and the search answers in TMDB's order ranked by
  * name, which is what it did before the index existed.
  */
-async function popularPerformers(db: Db): Promise<CastSearchResult[]> {
+function popularPerformers(db: Db): Promise<CastSearchResult[]> {
   const now = Date.now();
-  if (peopleIndexMemo && now - peopleIndexMemo.at < PEOPLE_INDEX_MEMO_MS) return peopleIndexMemo.people;
-
-  let people: CastSearchResult[] = [];
-  try {
-    const row = await readPeopleIndex(db);
-    const fetchedAt = row ? Date.parse(row.fetched_at) : Number.NaN;
-    if (row && Number.isFinite(fetchedAt) && now - fetchedAt < PEOPLE_INDEX_MAX_AGE_MS) {
-      people = peopleIndexEntries(row.payload);
-    }
-  } catch (cause) {
-    console.warn('tmdb-adapter popular performer index unavailable', (cause as Error).message);
-    // Not memoised: the next search tries the read again.
-    return [];
+  if (peopleIndexMemo && now - peopleIndexMemo.at < PEOPLE_INDEX_MEMO_MS) {
+    return Promise.resolve(peopleIndexMemo.people);
   }
 
-  peopleIndexMemo = { at: now, people };
-  return people;
+  // One read per isolate at a time; a read that outlives a search's deadline still lands
+  // in the memo for the next search.
+  peopleIndexLoading ??= (async () => {
+    try {
+      const row = await readPeopleIndex(db);
+      const fetchedAt = row ? Date.parse(row.fetched_at) : Number.NaN;
+      const people =
+        row && Number.isFinite(fetchedAt) && Date.now() - fetchedAt < PEOPLE_INDEX_MAX_AGE_MS
+          ? peopleIndexEntries(row.payload)
+          : [];
+      peopleIndexMemo = { at: Date.now(), people };
+      return people;
+    } catch (cause) {
+      console.warn('tmdb-adapter popular performer index unavailable', (cause as Error).message);
+      // Not memoised: the next search tries the read again.
+      return [];
+    } finally {
+      peopleIndexLoading = null;
+    }
+  })();
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<CastSearchResult[]>((resolve) => {
+    timer = setTimeout(() => resolve([]), PEOPLE_INDEX_DEADLINE_MS);
+  });
+  return Promise.race([peopleIndexLoading, deadline]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -361,7 +385,14 @@ async function refreshPopularPerformers(db: Db): Promise<number> {
   for (let first = 1; first <= POPULAR_PEOPLE_PAGES; first += POPULAR_PEOPLE_CONCURRENCY) {
     const batch = [];
     for (let page = first; page < first + POPULAR_PEOPLE_CONCURRENCY && page <= POPULAR_PEOPLE_PAGES; page++) {
-      batch.push(tmdb.popularPeople(page).then((answer) => answer.results ?? []));
+      // One more attempt for a page before the whole refresh fails: `request` retries a
+      // rate limit or a dropped connection, not a 5xx (independent review).
+      batch.push(
+        tmdb
+          .popularPeople(page)
+          .catch(() => tmdb.popularPeople(page))
+          .then((answer) => answer.results ?? []),
+      );
     }
     pages.push(...(await Promise.all(batch)));
   }
@@ -439,7 +470,8 @@ async function storeInOrder(db: Db, rows: TitleRow[]): Promise<string[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * The four lists `provider_list_cache` holds, and the TMDB route behind each.
+ * The four trending lists `provider_list_cache` holds, and the TMDB route behind each. The fifth
+ * row, `popular.people`, is written by `refreshPopularPerformers`.
  *
  * `series` on our side is `tv` on theirs. The key uses media_kind because that is
  * what the payload's rows are — see the header of 20260816000900.
@@ -851,6 +883,7 @@ async function handleSearchPeople(db: Db, query: string, limit: number, userId: 
   // The same floor `search` applies, and for the same reason: nothing is spent below it.
   if (trimmed.length < 2) return json({ results: [] });
 
+  const performers = popularPerformers(db);
   const { results } = await tmdb.searchPeople(trimmed, chargeTo(db, userId));
   // Ranked by name, then popularity, with the popular-performer index's name matches merged
   // in — see `rankCast`. The index is a database read: still one provider request a search.
@@ -858,7 +891,7 @@ async function handleSearchPeople(db: Db, query: string, limit: number, userId: 
     results: rankCast(
       trimmed,
       castSearchResults(results, MAX_CAST_CANDIDATES),
-      await popularPerformers(db),
+      await performers,
       limit,
     ),
   });
@@ -1025,8 +1058,8 @@ Deno.serve(async (req) => {
       }
 
       // service_role for the same reason enrich and refresh are: it spends four
-      // provider requests plus eighty upserts in one call, on a schedule, and no
-      // screen asks for it. Clients read the result straight from
+      // provider requests plus eighty upserts in one call, and fifty more for the
+      // popular-performer index, on a schedule, and no screen asks for it. Clients read the result straight from
       // provider_list_cache, which is world-readable.
       case 'trending': {
         if (caller.kind !== 'service') return fail('BG403', 'trending requires service role', 403);

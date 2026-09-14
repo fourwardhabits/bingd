@@ -190,19 +190,34 @@ describe('the All page', () => {
       ),
     ).toEqual({ movies: false, cast: false, users: false });
 
-    // More films than fit; another provider page for TV; a performer and an account the
-    // gates left off the preview but the Cast and Users chips would list.
+    // More films and shows than fit; a performer and an account the gates left off the
+    // preview but the Cast and Users chips would list.
+    const shows = Array.from({ length: 4 }, (_, index) => ({
+      ...title(`s${index}`, `Emma Show ${index + 1}`),
+      kind: 'series' as const,
+    }));
     expect(
       seeAll(
         allRows({
           query: 'emma',
-          titles: [...manyTitles(4, 'Emma'), { ...title('s', 'Emma Show'), kind: 'series' }],
+          titles: [...manyTitles(4, 'Emma'), ...shows],
           people: [person(1, 'Emma Stone', 6.8), person(2, 'Emma Ho', 1.5)],
           users: [user('a', 'emmaw', 'Emma W'), user('x', 'deanna', 'Deanna Troi')],
-          moreTitles: true,
         }).rows,
       ),
     ).toEqual({ movies: true, tv: true, cast: true, users: true });
+
+    // One show, however many provider pages remain: See all would open the same one row.
+    expect(
+      seeAll(
+        allRows({
+          query: 'emma',
+          titles: [{ ...title('s', 'Emma Show'), kind: 'series' }],
+          people: [],
+          users: [],
+        }).rows,
+      ),
+    ).toEqual({ tv: false });
   });
 
   it('draws every header at most once, so no two rows share a key', () => {
@@ -322,6 +337,38 @@ describe('a page that is still arriving', () => {
     expect(cast).toEqual([]);
   });
 
+  it('holds a Users section that answered first until the provider titles have arrived', () => {
+    // Independent review: no local titles, accounts answer at once, TMDB a second later.
+    // Drawing Users early would push it eleven rows down when the titles land.
+    const early = allRows({
+      query: 'anna',
+      titles: [],
+      people: [],
+      users: [anna],
+      ready: false,
+    });
+    expect(early.rows).toEqual([]);
+
+    const settled = allRows({
+      query: 'anna',
+      titles: [...manyTitles(3, 'Anna'), { ...title('s', 'Anna Show'), kind: 'series' }],
+      people: [],
+      users: [anna],
+    });
+    expect(shape(settled.rows).slice(-2)).toEqual(['USERS', 'u:@annar']);
+  });
+
+  it('does not hold the Users section of an @ query, which leads the page', () => {
+    const { rows } = allRows({
+      query: '@annar',
+      titles: [],
+      people: [],
+      users: [anna],
+      ready: false,
+    });
+    expect(shape(rows)).toEqual(['USERS', 'u:@annar']);
+  });
+
   it('adds Cast and Users below the titles once they have answered, never above', () => {
     const titles = manyTitles(2, 'Anna');
     const before = allRows({ query: 'anna', titles, people: [], users: [anna], ready: false });
@@ -358,7 +405,6 @@ describe('an exact title and later pages on the All page', () => {
       ],
       people: [],
       users: [],
-      moreTitles: true,
     });
 
     expect(shape(rows)).toEqual(['MOVIES', 't:Don', 't:Donnie Darko', "t:Don't Look Up"]);
@@ -372,14 +418,12 @@ describe('an exact title and later pages on the All page', () => {
       titles: first,
       people: [],
       users: [donna],
-      moreTitles: true,
     });
     const after = allRows({
       query: 'don',
       titles: [...first, ...manyTitles(20, 'Later')],
       people: [],
       users: [donna],
-      moreTitles: true,
     });
 
     expect(after.rows).toEqual(before.rows);

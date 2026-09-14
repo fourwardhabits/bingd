@@ -777,35 +777,45 @@ const MAX_KNOWN_FOR = 3;
 
 /**
  * How strongly a performer's name answers a Cast query: 0 is the full name, 1 a name the
- * query starts (every typed word begins a word of the name, the first typed word the first
- * name), 2 any other order of those words ("hanks" for Tom Hanks), null no match at all.
+ * query starts (every typed word begins a different word of the name, the first typed word
+ * the first name), 2 any other order of those words ("hanks" for Tom Hanks), 3 only the
+ * letters run together ("leonardodi"), null no match at all.
+ *
+ * Words are matched by trying every assignment, not greedily: "j jackson" is Samuel L.
+ * Jackson even though "j" alone would also begin "jackson" (independent review). Run-together
+ * letters are the weakest match because they also join words the reader never meant as one:
+ * "joel" runs into Joe Lo Truglio (independent review).
  *
  * **The gate, not a score.** Popularity orders people inside a strength and never lifts a
  * weaker one: a famous actor whose name does not begin with what was typed is not an answer
  * to it however famous they are. Words are compared through `titleKey`, so case, accents
  * and punctuation ("Jean-Claude", "Timothée") do not decide anything.
  */
-export function castNameMatch(name: string, query: string): 0 | 1 | 2 | null {
+export function castNameMatch(name: string, query: string): 0 | 1 | 2 | 3 | null {
   const typed = titleKey(query).split(' ').filter(Boolean);
   const words = titleKey(name).split(' ').filter(Boolean);
   if (!typed.length || !words.length) return null;
   if (words.join('') === typed.join('')) return 0;
 
-  const used = new Set<number>();
-  let leads = false;
-  for (let i = 0; i < typed.length; i++) {
-    const at = words.findIndex((word, index) => !used.has(index) && word.startsWith(typed[i]));
-    if (at < 0) {
-      used.clear();
-      break;
+  // Can typed words from `from` on each begin a different, unused word of the name?
+  const assignable = (from: number, used: boolean[]): boolean => {
+    if (from === typed.length) return true;
+    for (let at = 0; at < words.length; at++) {
+      if (used[at] || !words[at].startsWith(typed[from])) continue;
+      used[at] = true;
+      const rest = assignable(from + 1, used);
+      used[at] = false;
+      if (rest) return true;
     }
-    used.add(at);
-    if (i === 0 && at === 0) leads = true;
+    return false;
+  };
+  if (typed.length <= words.length) {
+    if (words[0].startsWith(typed[0]) && assignable(1, words.map((_, index) => index === 0))) return 1;
+    if (assignable(0, words.map(() => false))) return 2;
   }
-  if (used.size === typed.length) return leads ? 1 : 2;
 
   // A name typed without its spaces ("leonardodi", "delroy lindo" as "delroylindo").
-  return words.join('').startsWith(typed.join('')) ? 1 : null;
+  return words.join('').startsWith(typed.join('')) ? 3 : null;
 }
 
 /**
@@ -817,7 +827,8 @@ export function castNameMatch(name: string, query: string): 0 | 1 | 2 | null {
  * people named Leo and Leonardo DiCaprio is not in the first 200. The index is TMDB's
  * /person/popular, refreshed nightly (see 20260919000100); only its entries whose name
  * passes `castNameMatch` are considered, so it can add the person being typed toward and
- * nobody else.
+ * nobody else. An index entry needs a word-level match (strength 0 to 2); letters that only
+ * match run together are accepted from TMDB's own answer and never from the index.
  *
  * **Order.** Strength (exact name, then names the query starts, then other word orders),
  * then popularity (unknown counts as least), then where the person came from: TMDB's own
@@ -859,7 +870,7 @@ export function rankCast(
   index.forEach((person, position) => {
     if (seen.has(person.id)) return;
     const strength = strengthOf(person);
-    if (strength === null) return;
+    if (strength === null || strength > 2) return;
     seen.add(person.id);
     ranked.push({ person, strength, order: provider.length + position });
   });
@@ -877,7 +888,7 @@ export function rankCast(
 }
 
 /** The strength of a TMDB result the name gate did not pass: after every match. */
-const UNMATCHED = 3;
+const UNMATCHED = 4;
 
 /** The popularity a one-word whole name needs to lead as exact. See `rankCast`. */
 const MONONYM_EXACT_MIN_POPULARITY = 1;
