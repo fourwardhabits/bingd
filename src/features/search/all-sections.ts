@@ -4,35 +4,25 @@ import type { SearchResult } from './use-title-search';
 import { fold, meaningfulMatch, memberQuery, type UserResult } from './use-user-search';
 
 /**
- * What Search shows under **All**: titles, and the performers and accounts a query plainly
- * means, as explicit sections (founder, 2026-09-13).
+ * What Search shows under **All**: one short section per kind, Movies, TV, Cast and Users,
+ * each a preview of its chip (founder, 2026-09-14).
  *
  * **No global score.** A title's place comes from `search_titles` and TMDB's relevance, a
- * performer's from TMDB's person popularity, an account's from `search_users`. None of the
- * three is calibrated against another, so they are never ranked against each other. Each
- * type is gated on its own signal, and the page is ordered by type.
+ * performer's from the adapter's Cast ranking (name first, then popularity), an account's
+ * from `search_users`. None of the three is calibrated against another, so they are never
+ * ranked against each other. Each kind is gated on its own signal, and the page is ordered
+ * by kind.
  */
-
-/** How many performers and accounts a section shows before its See all. */
-export const SECTION_PREVIEW = 3;
 
 /**
- * How many titles lead the page before the Cast and Users sections.
+ * How many rows each section shows before its See all.
  *
- * Titles come first and stay dominant, but an ordinary search returns twenty to forty of
- * them, and a section placed after all of those is a section nobody scrolls to, which is
- * the discovery failure the sections exist to fix. Four title rows fill most of a phone
- * screen below the field and chips, so the first section header sits at or near the fold,
- * and the rest of the titles continue under "More titles".
- *
- * **Never above them** (independent review, 2026-09-13). The performers arrive with the
- * provider answer, a second or so after the local titles are drawn, and a section inserted
- * above rows already on screen moves them under a reader's thumb as they reach for `+`. So a
- * section only ever goes in *below* the leading titles, where the rows that move are ones
- * nobody was about to tap. For a whole-name query like "leonardo dicaprio" the titles are
- * few, so the Cast section is still on the first screen.
+ * Three, the preview the Cast and Users sections already had: four sections of three rows
+ * put the first row of every kind within about two screens, and the See all beside each
+ * header is where the whole list is. Titles are previewed like everything else rather than
+ * leading at length, because a long title list is exactly what hid the other kinds.
  */
-export const TITLE_LEAD = 4;
+export const SECTION_PREVIEW = 3;
 
 /**
  * The popularity a performer needs to appear under All.
@@ -120,10 +110,16 @@ export function castMatches(person: CastSearchResult, query: string): boolean {
     : popularity >= CAST_MIN_POPULARITY_PARTIAL;
 }
 
-export type AllSection = 'cast' | 'users';
+/** A section under All, named for the chip its See all selects. */
+export type AllSection = 'movies' | 'tv' | 'cast' | 'users';
 
 export type AllRow =
-  | { type: 'header'; section: 'titles' | 'more-titles' | AllSection }
+  | {
+      type: 'header';
+      section: AllSection;
+      /** The chip holds more than this preview, so the header offers See all. */
+      seeAll: boolean;
+    }
   | { type: 'title'; result: SearchResult }
   | { type: 'cast'; person: CastSearchResult }
   | { type: 'user'; user: UserResult };
@@ -131,25 +127,28 @@ export type AllRow =
 /**
  * The All list, in the order the page draws it.
  *
- * 1. **An `@` query leads with Users**, under a Users header, with the titles after it
- *    under a Titles header. `@` is somebody naming an account; accounts answer before any
- *    title search does, so this section is drawn first rather than inserted above titles,
- *    and a title beginning with `@` is rare enough that the titles below it are almost
- *    always none.
- * 2. Otherwise **titles first**, unheaded, as they always were.
- * 3. After the first `TITLE_LEAD` titles, **Cast** then **Users**, up to three each, each
- *    under its own header. Only titles the local pass found can lead; a provider title
- *    always goes below the sections, so nothing it adds moves a section already drawn.
- * 4. **More titles**, the rest, under a divider header.
+ * **Movies, TV, Cast, Users**, each under its own header, each cut to `SECTION_PREVIEW`, and
+ * a section with nothing in it is not drawn at all. A header offers See all only when its
+ * chip already holds more than the preview: more rows of that kind than fit. A further
+ * provider page is not counted, because it may hold none of that kind, and a See all that
+ * opens the same one row is a promise the chip does not keep (independent review).
  *
- * With no section, a title search is exactly what it was: one unheaded list.
+ * **An `@` query leads with Users** and has no Cast: `@` is somebody naming an account,
+ * and a performer is not what it asks for.
+ *
+ * **Nothing is inserted above rows already drawn** where that can be avoided (independent
+ * review, 2026-09-13 and 2026-09-14). Accounts and local titles can answer long before
+ * TMDB, so until every title for the query has arrived (`ready`) only title sections are
+ * drawn; Cast and Users then arrive below them, where nothing is pushed. The title sections
+ * themselves can still grow while they arrive (a Movies preview above TV), which is the one
+ * movement a grouped page cannot avoid, and each is bounded by the preview. An `@` query's
+ * Users section leads and is not held: titles arrive below it.
  */
 export function allRows({
   query,
   titles,
   people,
   users,
-  leadCount = titles.length,
   ready = true,
 }: {
   query: string;
@@ -157,90 +156,67 @@ export function allRows({
   people: CastSearchResult[];
   users: UserResult[];
   /**
-   * How many of `titles` may lead the sections: the ones from the local pass, which
-   * come first. A provider title lands a second or more later, and letting it into the
-   * lead would push a section that is already drawn down under a reader's thumb, so it
-   * goes below the sections instead (independent review, 2026-09-13).
-   */
-  leadCount?: number;
-  /**
-   * False until the local title pass has answered. Accounts answer first, and a Users
-   * section drawn before the local titles would be pushed down when they arrive.
+   * False until every title for this query has arrived (`useTitleSearch`'s
+   * `titlesSettled`). A Cast or Users section drawn before then would be pushed down.
    */
   ready?: boolean;
 }): { rows: AllRow[]; cast: CastSearchResult[]; users: UserResult[] } {
   const namesAccount = memberQuery(query).leads;
 
-  if (!ready) {
-    return {
-      rows: titles.map((result) => ({ type: 'title' as const, result })),
-      cast: [],
-      users: [],
-    };
-  }
+  const movies = titles.filter((result) => result.kind === 'movie');
+  // TV is every title that is not a film: a series, or a season found by name.
+  const shows = titles.filter((result) => result.kind !== 'movie');
 
-  // An `@` query names an account. Performers are not what it is asking for, and the Cast
-  // chip is one tap away if it was. Otherwise a performer the query names outright comes
-  // before the partial matches, whatever TMDB's order, and only then is the preview cut.
-  const cast = namesAccount
+  // A performer the query names outright comes before the partial matches, whatever order
+  // they arrived in, and only then is the preview cut. The adapter already ranks this way;
+  // doing it again here keeps an older adapter's answer in the same order.
+  const matched = namesAccount
     ? []
     : people
         .filter((person) => castMatches(person, query))
         .map((person, index) => ({ person, index, exact: namesExactly(person, query) }))
         .sort((a, b) => Number(b.exact) - Number(a.exact) || a.index - b.index)
-        .map((entry) => entry.person)
-        .slice(0, SECTION_PREVIEW);
-  const shownUsers = users
-    .filter((user) => meaningfulMatch(user, query))
-    .slice(0, SECTION_PREVIEW);
+        .map((entry) => entry.person);
+  const matchedUsers = users.filter((user) => meaningfulMatch(user, query));
 
-  const castRows: AllRow[] = cast.length
-    ? [
-        { type: 'header', section: 'cast' },
-        ...cast.map((person) => ({ type: 'cast' as const, person })),
-      ]
-    : [];
-  const userRows: AllRow[] = shownUsers.length
-    ? [
-        { type: 'header', section: 'users' },
-        ...shownUsers.map((user) => ({ type: 'user' as const, user })),
-      ]
-    : [];
-  const titleRows: AllRow[] = titles.map((result) => ({ type: 'title' as const, result }));
+  const cast = ready ? matched.slice(0, SECTION_PREVIEW) : [];
+  const shownUsers = ready || namesAccount ? matchedUsers.slice(0, SECTION_PREVIEW) : [];
 
-  if (namesAccount && userRows.length) {
-    return {
-      rows: [
-        ...userRows,
-        ...(titleRows.length ? [{ type: 'header' as const, section: 'titles' as const }] : []),
-        ...titleRows,
-      ],
-      cast,
-      users: shownUsers,
-    };
-  }
+  const section = <T>(
+    name: AllSection,
+    shown: T[],
+    seeAll: boolean,
+    row: (item: T) => AllRow,
+  ): AllRow[] =>
+    shown.length ? [{ type: 'header', section: name, seeAll }, ...shown.map(row)] : [];
 
-  const sections = [...castRows, ...userRows];
-  if (!sections.length) return { rows: titleRows, cast, users: shownUsers };
+  const movieRows = section(
+    'movies',
+    movies.slice(0, SECTION_PREVIEW),
+    movies.length > SECTION_PREVIEW,
+    (result) => ({ type: 'title', result }),
+  );
+  const tvRows = section(
+    'tv',
+    shows.slice(0, SECTION_PREVIEW),
+    shows.length > SECTION_PREVIEW,
+    (result) => ({ type: 'title', result }),
+  );
+  // The Cast and Users chips list every answer, ungated, so either holds more than its
+  // preview whenever the answer had anybody the preview left out.
+  const castRows = section('cast', cast, people.length > cast.length, (person) => ({
+    type: 'cast',
+    person,
+  }));
+  const userRows = section('users', shownUsers, users.length > shownUsers.length, (user) => ({
+    type: 'user',
+    user,
+  }));
 
-  const lead = Math.max(0, Math.min(TITLE_LEAD, leadCount));
-  const rest = titleRows.slice(lead);
   return {
-    rows: [
-      ...titleRows.slice(0, lead),
-      ...sections,
-      // "More titles" when some led; "Titles" when none did, because nothing above the
-      // sections was a title and "more" would refer to nothing.
-      ...(rest.length
-        ? [
-            {
-              type: 'header' as const,
-              section: lead ? ('more-titles' as const) : ('titles' as const),
-            },
-            ...rest,
-          ]
-        : []),
-    ],
+    rows: namesAccount
+      ? [...userRows, ...movieRows, ...tvRows]
+      : [...movieRows, ...tvRows, ...castRows, ...userRows],
     cast,
     users: shownUsers,
   };

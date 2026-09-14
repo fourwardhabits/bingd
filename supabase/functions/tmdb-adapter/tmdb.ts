@@ -617,6 +617,16 @@ export function searchPeople(
   return request('/search/person', { query, include_adult: 'false', page: '1' }, charge);
 }
 
+/**
+ * One page of TMDB's most popular people, most popular first.
+ *
+ * Read only by the nightly trending refresh, into the popular-performer index Cast search
+ * merges (20260919000100). The same result shape as /search/person.
+ */
+export function popularPeople(page: number): Promise<TmdbSearchPage<TmdbPersonSearchResult>> {
+  return request('/person/popular', { page: String(page) });
+}
+
 // ---------------------------------------------------------------------------
 // Where to watch
 //

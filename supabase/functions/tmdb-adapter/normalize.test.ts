@@ -30,7 +30,10 @@ import {
   fromSeasonDetail,
   fromSearchResult,
   fromSeriesDetail,
+  castNameMatch,
   castSearchResults,
+  peopleIndexEntries,
+  rankCast,
   exactTitleFirst,
   titleKey,
   wantsExactRecovery,
@@ -450,6 +453,169 @@ Deno.test('Cast search drops adult, nameless, malformed and repeated people, and
   );
 
   assertEquals(results.map((person) => person.id), [4, 5]);
+});
+
+// ---------------------------------------------------------------------------
+// Cast relevance: the name is the gate, popularity orders what passed it
+// ---------------------------------------------------------------------------
+
+const performer = (id: number, name: string, popularity: number | null) => ({
+  id,
+  name,
+  profile_path: null,
+  known_for: [],
+  popularity,
+});
+
+/**
+ * TMDB /search/person "leo", page 1, performers, as measured on staging 2026-09-14 — and
+ * the popular-performer index's one "Leo" (DiCaprio, #122 of /person/popular) beside other
+ * index entries that must not be let in by their fame.
+ */
+const LEO_PAGE_ONE = [
+  performer(1, 'Leo Gordon', 1.3),
+  performer(2, 'Leo Woodall', 2.8),
+  performer(3, 'Melissa Leo', 2.1),
+  performer(4, 'Leo Gassmann', 0.5),
+  performer(5, 'Leo Gorcey', 0.9),
+  performer(6, 'Leo Rossi', 1.1),
+  performer(7, 'Leo Howard', 1.5),
+  performer(8, 'Leo McKern', 1.0),
+  performer(13, 'Leo Wu', 3.1),
+];
+const INDEX = [
+  performer(500, 'Tom Hanks', 15.4),
+  performer(6193, 'Leonardo DiCaprio', 8.2),
+  performer(501, 'Cleo Rocos', 30),
+  performer(502, 'Oleo Famous', 25),
+  performer(2, 'Leo Woodall', 2.8),
+];
+
+Deno.test('a name is matched whole, from its start, or not at all', () => {
+  assertEquals(castNameMatch('Leonardo DiCaprio', 'leonardo dicaprio'), 0);
+  assertEquals(castNameMatch('Timothée Chalamet', 'TIMOTHEE CHALAMET'), 0);
+  assertEquals(castNameMatch('Leonardo DiCaprio', 'leo'), 1);
+  assertEquals(castNameMatch('Leonardo DiCaprio', 'leo dic'), 1);
+  assertEquals(castNameMatch('Jean-Claude Van Damme', 'jean claude'), 1);
+  assertEquals(castNameMatch('Leonardo DiCaprio', 'leonardodi'), 3);
+  // Every assignment is tried, not the first word each typed word fits.
+  assertEquals(castNameMatch('Jackson Jones', 'j jackson'), 2);
+  assertEquals(castNameMatch('Jack Johnson', 'j jack'), 2);
+  assertEquals(castNameMatch('Jack Johnson', 'jack j'), 1);
+  // Letters run together are the weakest match of all.
+  assertEquals(castNameMatch('Joe Lo Truglio', 'joel'), 3);
+  assertEquals(castNameMatch('Melissa Leo', 'leo'), 2);
+  assertEquals(castNameMatch('Tom Hanks', 'hanks tom'), 2);
+  // Inside a word is not a match, however it is spelled.
+  assertEquals(castNameMatch('Cleo Rocos', 'leo'), null);
+  assertEquals(castNameMatch('Oleo Famous', 'leo'), null);
+  assertEquals(castNameMatch('Tom Hanks', 'tom cruise'), null);
+  assertEquals(castNameMatch('Tom Hanks', ''), null);
+});
+
+Deno.test('"leo" leads with the prominent Leo the provider buried, and admits no other index entry', () => {
+  const ranked = rankCast('leo', LEO_PAGE_ONE, INDEX, 20);
+
+  assertEquals(ranked[0].name, 'Leonardo DiCaprio');
+  // First names the query starts, by popularity; then the surname match; nothing famous
+  // whose name does not start a word with "leo"; nobody twice.
+  assertEquals(ranked.map((person) => person.id), [6193, 13, 2, 7, 1, 6, 8, 5, 4, 3]);
+  assertEquals(new Set(ranked.map((person) => person.id)).size, ranked.length);
+});
+
+Deno.test('popularity never lifts a weaker name match over a stronger one', () => {
+  const ranked = rankCast(
+    'tom hanks',
+    [performer(9, 'Tom Hanksworth', 0.2), performer(10, 'Hanks Tom', 99)],
+    [performer(500, 'Tom Hanks', 0.1), performer(501, 'Tom Holland', 50)],
+    20,
+  );
+  // The exact name at 0.1 beats a prefix at 0.2 beats a reordering at 99; Holland is not a
+  // match for "tom hanks" at 50.
+  assertEquals(ranked.map((person) => person.id), [500, 9, 10]);
+});
+
+Deno.test('a one-word whole name leads only when it is somebody people search for', () => {
+  // Measured on staging: "emma", "scar" and "kean" are each the entire name of a performer
+  // at 0.3 to 0.4, who led the star as the strongest match.
+  assertEquals(
+    rankCast('emma', [performer(1, 'Emma', 0.4), performer(2, 'Emma Stone', 6.7)], [], 20).map((p) => p.id),
+    [2, 1],
+  );
+  assertEquals(
+    rankCast('kean', [performer(3, 'kean', 0.3), performer(4, 'Kean Cipriano', 0.5)], [performer(5, 'Keanu Reeves', 8.9)], 20).map(
+      (p) => p.id,
+    ),
+    [5, 4, 3],
+  );
+  // Cher is known by one name and searched for by it: 1.4 clears the floor, so she leads a
+  // more popular Cheryl.
+  assertEquals(
+    rankCast('cher', [performer(6, 'Cheryl Hines', 3.2), performer(7, 'Cher', 1.4)], [], 20).map((p) => p.id),
+    [7, 6],
+  );
+});
+
+Deno.test('run-together letters rank below word matches, and never admit an index entry', () => {
+  const ranked = rankCast(
+    'joel',
+    [performer(1, 'Joe Lo Truglio', 9), performer(2, 'Joel Edgerton', 5)],
+    [performer(3, 'Joe Lando Famous', 50), performer(4, 'Billy Joel', 6)],
+    20,
+  );
+  // Edgerton starts with "joel"; Billy Joel matches a word; Truglio only by run-together
+  // letters, below both however popular; the index's run-together entry is not let in.
+  assertEquals(ranked.map((person) => person.id), [2, 4, 1]);
+});
+
+Deno.test('a TMDB result the gate does not pass is kept last, in TMDB order', () => {
+  // TMDB matches aliases and other scripts; its answer is not hidden, only ranked below.
+  const ranked = rankCast(
+    'jackie',
+    [performer(20, '成龍', 40), performer(21, 'Jackie Chan', 12), performer(22, '李连杰', 60)],
+    [],
+    20,
+  );
+  assertEquals(ranked.map((person) => person.id), [21, 20, 22]);
+});
+
+Deno.test('ties are ordered by TMDB position then index position, so the order is total', () => {
+  const provider = [performer(31, 'Emma B', 2), performer(30, 'Emma A', 2)];
+  const index = [performer(33, 'Emma D', 2), performer(32, 'Emma C', 2)];
+  const once = rankCast('emma', provider, index, 20).map((person) => person.id);
+  assertEquals(once, [31, 30, 33, 32]);
+  assertEquals(rankCast('emma', provider, index, 20).map((person) => person.id), once);
+  // Unknown popularity ranks below any known one, never above.
+  assertEquals(
+    rankCast('emma', [performer(40, 'Emma Null', null), performer(41, 'Emma Low', 0)], [], 20).map((p) => p.id),
+    [41, 40],
+  );
+});
+
+Deno.test('the limit applies after ranking, and an empty index changes nothing but order', () => {
+  assertEquals(rankCast('leo', LEO_PAGE_ONE, INDEX, 3).map((person) => person.id), [6193, 13, 2]);
+  assertEquals(rankCast('leo', LEO_PAGE_ONE, [], 2).map((person) => person.id), [13, 2]);
+});
+
+Deno.test('the stored index is read back defensively', () => {
+  assertEquals(peopleIndexEntries(null), []);
+  assertEquals(peopleIndexEntries({ ids: [] }), []);
+  assertEquals(
+    peopleIndexEntries({
+      people: [
+        { id: 6193, name: ' Leonardo DiCaprio ', profile_path: '/leo.jpg', known_for: ['Titanic', 7, 'Inception', 'The Revenant', 'Extra'], popularity: 8.2 },
+        { id: -1, name: 'Negative' },
+        { id: 1.5, name: 'Fractional' },
+        { id: 7, name: '' },
+        'not a person',
+        { id: 8, name: 'Bare', popularity: 'high' },
+      ],
+    }),
+    [
+      { id: 6193, name: 'Leonardo DiCaprio', profile_path: '/leo.jpg', known_for: ['Titanic', 'Inception', 'The Revenant'], popularity: 8.2 },
+      { id: 8, name: 'Bare', profile_path: null, known_for: [], popularity: null },
+    ],
+  );
 });
 
 // ---------------------------------------------------------------------------

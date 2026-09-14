@@ -17,7 +17,8 @@
  *
  * Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local, which is
  * git-ignored. `trending` is a service_role action for the reason enrich and refresh
- * are: it spends four provider requests and eighty upserts per call.
+ * are: it spends four provider requests and eighty upserts per call, and fifty more requests
+ * for the popular-performer index Cast search ranks with (20260919000100).
  */
 
 import { readFile } from 'node:fs/promises';
@@ -130,7 +131,7 @@ async function main() {
   }
 
   for (const [listKey, count] of Object.entries(body.written ?? {})) {
-    console.log(`${listKey}: ${count} titles`);
+    console.log(`${listKey}: ${count} ${listKey === 'popular.people' ? 'performers' : 'titles'}`);
   }
 
   // A list that failed keeps its previous payload, so this is a warning rather than a
@@ -141,7 +142,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\nAll four lists refreshed.');
+  console.log('\nEvery list refreshed.');
 }
 
 await main();
