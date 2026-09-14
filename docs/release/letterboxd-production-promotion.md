@@ -286,15 +286,35 @@ runtime versions equal those values before announcing anything, and record both 
 
 ### 8. Rollback / disable
 
+**Importer off, first step for any import incident** (release review 84): stop new imports at
+the database, then stop the worker. Every client version and every device mid-flow is refused;
+`import_status` and `import_discard` stay callable, so a screen can still read its job and
+let it go, and the client shows its ordinary Try again failure. Pinned by
+`supabase/tests/import-entry-switch.test.mjs` (PUBLIC and anon hold no EXECUTE, so revoking
+from `authenticated` is complete; staging and production grants read the same).
+
+```sql
+revoke execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) from authenticated;
+select unschedule_import_drain();
+-- back on, in reverse:
+select schedule_import_drain();
+grant execute on function import_create(), import_stage(uuid, jsonb), import_ready(uuid) to authenticated;
+```
+
+Run as `npx supabase db query --linked --project-ref abheeqyjzekiowkztfxv "<sql>"` from a
+directory with no link. Jobs already queued pause in place while the drain is off and resume
+when it is back; nothing is lost.
+
 | Problem | Action |
 |---|---|
+| Any import incident | the importer-off block above, first |
 | Worker misbehaving (provider traffic, errors) | `select unschedule_import_drain();` — stops both jobs; jobs pause in place and resume on `select schedule_import_drain();` |
 | Client defect | republish the previous update group recorded in preflight on each channel (`eas update:republish --group …`), per the runbook §4a. Last known: iOS production `f10f6124…`, Android beta `23d87753…`; verify at preflight. The schema and worker can stay: an old client never creates an import |
 | Adapter regression | `select unschedule_import_drain();` first, then redeploy `a9aa5ae`'s adapter (production v13 today, no hunk). Without the hunk the poster nudge would drain arbitrary backlog, so the drain stays unscheduled until the hunk is back |
 | Push copy regression | redeploy the previous `push-sender` (import notifications still reach the inbox) |
 | Schema | forward-only; the schema is inert without imports. Correct with a new additive migration. |
 
-**Known gap:** the importer's entry points (Settings row, onboarding step) have no server-side
-switch. With the drain unscheduled a user who imports waits on "Importing…". If a server-side
-off switch for the entry points is wanted before launch, it is new work (an `app_config` flag the
-client reads).
+**Former gap, closed by the grant switch above:** the entry points (Settings row, onboarding
+step) have no client-read flag. They do not need one: the database refuses the RPCs they call,
+and the client's existing failure state is the controlled response. A friendlier "importer
+paused" message would be new client work, and is not required for safety.
