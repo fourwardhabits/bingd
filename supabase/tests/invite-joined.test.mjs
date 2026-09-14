@@ -27,9 +27,11 @@ import { createTestDb } from './harness.mjs';
  *   2. **Exactly once per pair, by position.** The insert is reachable only when the
  *      `invite_attributions` row was genuinely new, and `invitee_id` is that table's
  *      primary key. `notifications_one_join_per_pair` is the backstop.
- *   3. **Acceptance and activation stay two events.** A later activation files
- *      `invite_activated` and does *not* file a second `invite_joined`. This is the
- *      distinction the old copy collapsed, and it is asserted directly.
+ *   3. **One arrival, one notice (20260920000100).** Activation is still recorded, but it
+ *      files `invite_activated` only for an inviter the acceptance did not already tell.
+ *      Since the bar became five (20260916000100) activation is the end of Your First
+ *      Five, minutes after acceptance, and the two rows read as the same sentence twice
+ *      (founder, physical QA, 2026-09-14: "Leslie joined bingd from your invite", twice).
  *   4. **A private inviter gets `invite_joined` too, since `20260912000200`.** This
  *      property read the other way until then — a private inviter kept `follow_request`,
  *      because that row carries Approve and Decline and is the only place in the app they
@@ -271,38 +273,106 @@ describe('the row an acceptance files for the inviter', () => {
   });
 });
 
-describe('acceptance and activation stay two events', () => {
-  it('files invite_activated later without a second join row', async () => {
-    const inviter = await newUser('two_events_inviter');
-    const invitee = await newUser('two_events_invitee');
+/**
+ * **One arrival, one notice** (20260920000100).
+ *
+ * The founder's inbox held "Leslie joined bingd from your invite" twice: `invite_joined` at
+ * 17:06:21 when Leslie redeemed, and `invite_activated` at 17:10:52, which was Leslie's
+ * fifth ranking. These pin the contract at the writer: whatever the invitee does next, the
+ * inviter holds exactly one row saying they joined.
+ */
+describe('one arrival, one notice', () => {
+  /** Every row that tells an inviter this person joined from their invite. */
+  const joinNotices = async (inviter, invitee) =>
+    (await noticesTo(inviter, invitee)).filter(
+      (type) => type === 'invite_joined' || type === 'invite_activated',
+    );
+
+  const activatedAt = async (invitee) =>
+    (
+      await t.sql(`select activated_at from invite_attributions where invitee_id = $1`, [
+        invitee,
+      ])
+    ).rows[0]?.activated_at ?? null;
+
+  it('keeps the acceptance as the only notice when the invitee finishes their first five', async () => {
+    const inviter = await newUser('one_notice_inviter');
+    const invitee = await newUser('one_notice_invitee');
     const token = await mintLink(inviter);
 
     await t.actAs(invitee);
     await redeem(token);
     assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
 
-    // The **fifth** ranking, which is the bar since 20260916000100 and is the completed
-    // First Five. Ranked exactly at the boundary rather than past it: this asserted at ten
-    // and went on passing when the bar moved, because ten still clears five. A test that
-    // cannot fail when the contract changes is not pinning the contract.
+    // The **fifth** ranking, the bar since 20260916000100: exactly the moment the second
+    // row used to arrive.
     await rankTitles(invitee, 5);
-    const { rows: attributed } = await t.sql(
-      `select activated_at from invite_attributions where invitee_id = $1`,
-      [invitee],
-    );
-    assert.ok(attributed[0].activated_at, 'the fifth ranking activates');
+    assert.ok(await activatedAt(invitee), 'the fifth ranking still activates');
 
-    // Both rows, one of each. This is the property the old copy collapsed: the inviter
-    // learns that somebody joined *when they joined*, and separately that they stuck
-    // around. Neither row stands in for the other and neither is duplicated.
-    //
-    // Compared as a sorted multiset rather than in filing order, because the two rows
-    // are written by different transactions and pinning their timestamps would make
-    // this test about the clock.
+    // No `invite_activated`, no `follow`: the auto-follow is still silent, and the
+    // activation says nothing the acceptance did not.
+    assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
+  });
+
+  it('stays at one through retried redemptions and every ranking after the bar', async () => {
+    const inviter = await newUser('retry_notice_inviter');
+    const invitee = await newUser('retry_notice_invitee');
+    const token = await mintLink(inviter);
+
+    await t.actAs(invitee);
+    const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
+    await call(`redeem_invite($1, $2)`, [op, token]);
+    // A lost reply retried with the same operation, and a fresh second attempt.
+    await call(`redeem_invite($1, $2)`, [op, token]);
+    await redeem(token);
+
+    await rankTitles(invitee, 8, 100);
+
+    assert.deepEqual(await joinNotices(inviter, invitee), ['invite_joined']);
+  });
+
+  it('still tells an inviter the acceptance did not, exactly once, at activation', async () => {
+    // An invitee who already followed the inviter: the acceptance moves no edge of theirs
+    // and files nothing (20260912000300). Activation is then the first and only notice.
+    const inviter = await newUser('late_notice_inviter');
+    const invitee = await newUser('late_notice_invitee');
+    const token = await mintLink(inviter);
+
+    await t.actAs(invitee);
+    await call(`follow(gen_random_uuid(), $1)`, [inviter]);
+    await redeem(token);
+    assert.deepEqual(await joinNotices(inviter, invitee), []);
+
+    await rankTitles(invitee, 6, 200);
+    assert.ok(await activatedAt(invitee));
+    assert.deepEqual(await joinNotices(inviter, invitee), ['invite_activated']);
+  });
+
+  it('leaves a later, genuine follow its own ordinary notice', async () => {
+    const inviter = await newUser('genuine_follow_inviter');
+    const invitee = await newUser('genuine_follow_invitee');
+    const stranger = await newUser('genuine_follow_stranger');
+    const token = await mintLink(inviter);
+
+    await t.actAs(invitee);
+    await redeem(token);
+    await rankTitles(invitee, 5, 300);
+
+    // Somebody who was never invited follows the inviter: the ordinary row, untouched.
+    await t.actAs(stranger);
+    await call(`follow(gen_random_uuid(), $1)`, [inviter]);
+    assert.deepEqual(await noticesTo(inviter, stranger), ['follow']);
+
+    // The invitee ends the auto-follow and later follows again by hand. That is a new act,
+    // and it is announced as one; the join row beside it is still the only join notice.
+    await t.actAs(invitee);
+    await call(`unfollow(gen_random_uuid(), $1)`, [inviter]);
+    await call(`follow(gen_random_uuid(), $1)`, [inviter]);
     assert.deepEqual([...(await noticesTo(inviter, invitee))].sort(), [
-      'invite_activated',
+      'follow',
       'invite_joined',
     ]);
+    assert.deepEqual(await joinNotices(inviter, invitee), ['invite_joined']);
   });
 });
 

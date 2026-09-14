@@ -64,6 +64,20 @@ const attribution = async (invitee) => {
   return rows[0] ?? null;
 };
 
+/**
+ * Every row telling `recipient` that somebody joined from their invite. Since 20260920000100
+ * that is one row per invitee: the acceptance's `invite_joined`, or `invite_activated` for an
+ * inviter the acceptance did not tell.
+ */
+const joinNotices = async (recipient) => {
+  const { rows } = await t.sql(
+    `select type, actor_id, subject_type, subject_id from notifications
+      where recipient_id = $1 and type in ('invite_joined', 'invite_activated')`,
+    [recipient],
+  );
+  return rows;
+};
+
 const inbox = async (recipient) => {
   const { rows } = await t.sql(
     `select type, actor_id, subject_type, subject_id from notifications
@@ -739,7 +753,11 @@ describe('activation', () => {
 
     await rankTitles(invitee, 4);
     assert.equal((await attribution(invitee)).activated_at, null, 'four is not activation');
-    assert.equal((await inbox(inviter)).length, 0);
+    // The acceptance's one notice, and nothing more at four.
+    assert.deepEqual(
+      (await joinNotices(inviter)).map((row) => row.type),
+      ['invite_joined'],
+    );
 
     await rankTitles(invitee, 1, 4);
     assert.ok((await attribution(invitee)).activated_at, 'the fifth activates');
@@ -760,10 +778,13 @@ describe('activation', () => {
   });
 
   it('files exactly one notification, and no more as ranking continues', async () => {
-    const rows = await inbox(
+    // One arrival, one notice (20260920000100): the acceptance already filed
+    // `invite_joined`, so activation adds no `invite_activated` beside it.
+    const rows = await joinNotices(
       (await t.sql(`select id from profiles where username = 'act_inviter'`)).rows[0].id,
     );
     assert.equal(rows.length, 1);
+    assert.equal(rows[0].type, 'invite_joined');
     assert.equal(rows[0].subject_type, 'profile');
 
     const invitee = (await t.sql(`select id from profiles where username = 'act_invitee'`)).rows[0]
@@ -775,7 +796,7 @@ describe('activation', () => {
     await rankTitles(invitee, 3, 5);
     assert.equal(
       (
-        await inbox(
+        await joinNotices(
           (await t.sql(`select id from profiles where username = 'act_inviter'`)).rows[0].id,
         )
       ).length,
@@ -832,7 +853,8 @@ describe('activation', () => {
 
     await rankTitles(invitee, 1, 4007);
     assert.ok((await attribution(invitee)).activated_at);
-    assert.equal((await inbox(inviter)).length, 1);
+    // The acceptance's `invite_joined` is the one notice; activation adds none.
+    assert.equal((await joinNotices(inviter)).length, 1);
   });
 
   it('records the activation and files no notification when the inviter has gone', async () => {
@@ -880,20 +902,48 @@ describe('activation', () => {
   it('honours the inviter switching invite notifications off', async () => {
     // Mapped to the `invites` category by 20260819000300, ahead of this writer, so the
     // before-insert trigger drops the row. The activation is unaffected.
+    //
+    // Switched off **before** the redemption (independent review, 2026-09-14): with an
+    // `invite_joined` already filed, activation files nothing whatever the preference says
+    // (20260920000100), and a test that turned it off afterwards would pass with the
+    // trigger broken. Here neither acceptance nor activation may file a row.
     const inviter = await newUser('quiet_inviter');
     const invitee = await newUser('quiet_invitee');
     // Minted first: `mintLink` acts as the owner, so taking the token inline after
     // `actAs` would run the redemption as the inviter and be answered `self`.
     const token = await mintLink(inviter);
+    await t.sql(`select set_notification_preference('invites', false)`);
+
     await t.actAs(invitee);
     await redeem(token);
 
-    await t.actAs(inviter);
-    await t.sql(`select set_notification_preference('invites', false)`);
-
     await rankTitles(invitee, 5, 7000);
     assert.ok((await attribution(invitee)).activated_at);
-    assert.equal((await inbox(inviter)).length, 0);
+    assert.equal((await joinNotices(inviter)).length, 0);
+  });
+
+  it('files the one notice at activation for an inviter who turned invites back on', async () => {
+    // Off at acceptance, so no `invite_joined` was filed; on again before the fifth
+    // ranking. Activation is then the inviter's first and only join notice.
+    const inviter = await newUser('back_on_inviter');
+    const invitee = await newUser('back_on_invitee');
+    const token = await mintLink(inviter);
+    await t.sql(`select set_notification_preference('invites', false)`);
+
+    await t.actAs(invitee);
+    await redeem(token);
+    assert.equal((await joinNotices(inviter)).length, 0);
+
+    await t.actAs(inviter);
+    await t.sql(`select set_notification_preference('invites', true)`);
+
+    await rankTitles(invitee, 5, 7100);
+    const rows = await joinNotices(inviter);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].type, 'invite_activated');
+    assert.equal(rows[0].actor_id, invitee);
+    assert.equal(rows[0].subject_type, 'profile');
+    assert.equal(rows[0].subject_id, invitee);
   });
 
   it('is not reachable by a client', async () => {

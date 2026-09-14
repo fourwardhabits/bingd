@@ -103,7 +103,38 @@ const COMMENT_MASKS = [
   [218, 1016, 150, 56], // reply name
 ];
 
+/**
+ * The Group Picks sheet (Galaxy S25, 2026-09-14). It lists the people the account follows,
+ * so each friend row is blurred across its avatar, display name and handle: the site
+ * shows no accounts, handles or faces (docs/architecture/web-deployment.md). "You", the
+ * checkboxes and every other part of the sheet stay legible.
+ */
+const GROUP_PICKS_MASKS = [
+  [36, 1188, 524, 106], // Abisola
+  [36, 1334, 524, 108], // adirajan
+  [36, 1481, 524, 106], // Ashvin
+  [36, 1629, 524, 106], // bingd. founder
+  [36, 1776, 524, 106], // Eric Eichstadt
+  [36, 1923, 524, 106], // Ganga
+];
+
 const SHOTS = [
+  {
+    // The For you tab's Recommended Movies wall, with Sent to you, Group Picks and Filters
+    // (Galaxy S25, 2026-09-14). This capture was saved at 794x1721 rather than 1080x2340;
+    // the TOP and BOTTOM trims are fractions of height for exactly that reason.
+    source: 'Screenshot_20260914_111024_bingd.jpg',
+    name: 'shot-recommended',
+    width: 640,
+    alt: 'The bingd. For you tab: a wall of recommended movies, each with a save and a dismiss control, under Sent to you, Group Picks and Filters',
+  },
+  {
+    source: 'Screenshot_20260914_110947_bingd.jpg',
+    name: 'shot-grouppicks',
+    width: 640,
+    masks: GROUP_PICKS_MASKS,
+    alt: 'The bingd. Group Picks sheet: choose who is watching from the people you follow and bingd finds movies you can all agree on, with names blurred',
+  },
   {
     // Your First Five on an iPhone (2026-09-12), the whole screen (founder, 2026-09-14:
     // the earlier crop to four rows hid too much). Only the iPhone status bar goes, the

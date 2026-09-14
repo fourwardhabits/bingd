@@ -21,10 +21,10 @@ names exactly what runs, in dependency order, with its check.
 | Function overlap with main-only migrations | none. `20260916000200` and `20260918000100` re-emit none of the 37 Letterboxd functions; `20260919000100` defines only `tmdb_put_people_index` and alters `provider_list_cache` |
 | Production Edge Functions (read 2026-09-14) | `tmdb-adapter` **v13** = `a9aa5ae`'s adapter exactly, **without** the `ids` hunk; `push-sender` v4; **no** `letterboxd-import` |
 | Staging (proof environment) | 141/141 incl. all 17 and `20260919000100`; `tmdb-adapter` v20 = `a9aa5ae` + `ids` hunk (the production target); `push-sender` v5; `letterboxd-import` v14; cron `bingd-import-drain` every 10 s, `bingd-import-maintenance` every minute |
-| **Production client source** | `integration/letterboxd-main` at the head named in its PR (§F): current main plus the Letterboxd branches, nothing preview-only |
-| Final preview source | `preview/letterboxd-main` (head and update ids in `docs/release/preview-qa-round-3.md` and the PR) = the release source plus the staging-separation overlay only (§F) |
-| Owning branches | `feat/letterboxd-import` (this file), `feat/letterboxd-onboarding-step` `60cb9c2`, `fix/onboarding-score-confirmation` `f3b5acb`, `feat/comparison-memory-aids` `c88653b`, `fix/invite-share-label` `683f41b`, `fix/unranked-prompt-dismiss` `ec2f074`, `polish/final-ui-consistency` `b91b92a` |
-| Store binaries | public iOS Build 12 runtime `61efbf1789da…` and Android versionCode 10 runtime `c5ad66c8b509…`, both **matched** by the release source tree (computed on `aad19b7`, 170 and 172 sources); no native build needed |
+| **Production client source** | `integration/letterboxd-main`, code gated at **`126493b`** (later commits on the branch are docs and main’s web-only #155/#156; no app, SQL or function change) (§F): current main plus the Letterboxd branches, nothing preview-only |
+| Final preview source | `preview/letterboxd-main` **`c5dce8a`**, preview OTA `01a0a134` (iOS group `f54513f5…`, Android group `334fe09c…`; details in `docs/release/preview-qa-round-3.md`) = the release source plus the staging-separation overlay only (§F) |
+| Owning branches | `feat/letterboxd-import` (this file), `feat/letterboxd-onboarding-step` `e54bc20`, `fix/onboarding-score-confirmation` `f3b5acb`, `feat/comparison-memory-aids` `c88653b`, `fix/invite-share-label` `683f41b`, `fix/unranked-prompt-dismiss` `ec2f074`, `polish/final-ui-consistency` `b91b92a` |
+| Store binaries | public iOS Build 12 runtime `61efbf1789da…` and Android versionCode 10 runtime `c5ad66c8b509…`, both **matched** by the release source tree (computed on `126493b`, 170 and 172 sources); no native build needed |
 
 ---
 
@@ -130,7 +130,7 @@ discovery, For You V2, Search/Cast, Similar and landing work; publishing it woul
    plain-text `bingd` (#149); `src/lib/analytics.ts` keeps both event sets.
    `supabase/tests/perf/import-staging-run.mjs` is **left out**: it loads the staging QA
    cohort's `connect()` and creates `qa_bench_*` accounts.
-2. `feat/letterboxd-onboarding-step` (`60cb9c2`): the optional step, final casing, help sheet,
+2. `feat/letterboxd-onboarding-step` (`e54bc20`): the optional step, final casing, help sheet,
    layout fix. Conflict: `docs/design/screens.md`.
 3. `fix/onboarding-score-confirmation` (`f3b5acb`): full reveal in onboarding.
 4. `feat/comparison-memory-aids` (`c88653b`): the Details sheet. Conflicts: the title page keeps

@@ -430,6 +430,16 @@ export type PushTapPayload = {
   feedEventId?: unknown;
   /** The import a lifecycle push is about (20260917001500). Absent on every other kind. */
   importJobId?: unknown;
+  /**
+   * The earned award and tier, on an award push (20260920000200).
+   *
+   * Before these the push opened the Awards list while the same notification in the inbox
+   * opened that award's celebration (founder, physical QA, 2026-09-14). Read into the same
+   * `award` field the inbox row carries, so `targetChainFor` decides both, and a push
+   * without them (an older sender) still lands on the list.
+   */
+  awardKey?: unknown;
+  awardTier?: unknown;
 };
 
 /** The inbox. Reached when nothing better survived, and a real destination either way. */
@@ -437,6 +447,12 @@ export const PUSH_FALLBACK_HREF = '/settings/notifications' as Href;
 
 const readString = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
+
+/** An award or tier key from a push: a lowercase kebab-case slug, or nothing. */
+const awardSlug = (value: unknown): string | null => {
+  const text = readString(value);
+  return text && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(text) ? text : null;
+};
 
 /**
  * Where a tapped push leads. Always somewhere.
@@ -466,6 +482,10 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
   // The same translation for an import: the sender names the job, the resolver reads a
   // subject. Only an import kind sends it, and only an import kind reads it.
   const jobId = readString(payload.importJobId);
+  // Keys are kebab-case slugs (`queue-dragon`, `seedling`). Anything else is refused here
+  // rather than joined into `award:tier`, where a `,` or `:` would add or split a page.
+  const awardKey = awardSlug(payload.awardKey);
+  const awardTier = awardSlug(payload.awardTier);
 
   const target = targetFor({
     kind: kind as NotificationKind,
@@ -473,6 +493,8 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
     mediaItemId: readString(payload.mediaItemId),
     subjectType: eventId ? 'feed_event' : jobId ? 'import_job' : null,
     subjectId: eventId ?? jobId,
+    // The inbox row's own shape, so the award resolves through the same chain.
+    award: awardKey && awardTier ? { key: awardKey, tierKey: awardTier } : null,
   } as Notification);
 
   return hrefFor(target) ?? PUSH_FALLBACK_HREF;
