@@ -113,10 +113,10 @@ describe('a profile with all five', () => {
     const view = await renderWithProviders(identity({ socialLinks: all }));
 
     expect(view.getAllByRole('link').map((node) => node.props.accessibilityLabel)).toEqual([
-      'Open Instagram profile',
       'Open TikTok profile',
-      'Open YouTube profile',
+      'Open Instagram profile',
       'Open X profile',
+      'Open YouTube profile',
       'Open website',
     ]);
   });

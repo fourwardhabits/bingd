@@ -1,5 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import {
+  Linking,
+  Pressable,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { track, type SocialLinkNetwork } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
@@ -36,6 +43,21 @@ const ICONS: Record<SocialNetwork, React.ComponentProps<typeof Ionicons>['name']
 export type SocialLinkRowProps = {
   /** Null, undefined, or all-null for every account that predates 20260921000100. */
   links: Partial<ProfileSocialLinks> | null | undefined;
+  /** Placement, from the caller. Never drawn when there is nothing to draw. */
+  style?: StyleProp<ViewStyle>;
+};
+
+/**
+ * Lifts a 32pt cell to 44 on all four sides.
+ *
+ * Horizontal slop is half of the `space[3]` gap between cells, so two neighbours' slops
+ * meet exactly and a press between two icons belongs to the nearer one.
+ */
+const CELL_SLOP = {
+  top: (theme.layout.minTapTarget - theme.layout.control.chipHeight) / 2,
+  bottom: (theme.layout.minTapTarget - theme.layout.control.chipHeight) / 2,
+  left: theme.space[3] / 2,
+  right: theme.space[3] / 2,
 };
 
 /**
@@ -64,7 +86,13 @@ export type SocialLinkRowProps = {
  * an unselected glyph, which is what makes these read as controls rather than as logos.
  *
  * ---------------------------------------------------------------------------
- * 32 DRAWN, 44 ANSWERED
+ * 32 DRAWN, 44 ANSWERED — ON EVERY SIDE SINCE 2026-09-16
+ *
+ * The row moved out of the name column to full width at the gutter, so the width
+ * argument below no longer binds: 5 × 32 + 4 × 12 is 208pt against ~288 on a 320pt
+ * screen. Cells are now `space[3]` apart with `CELL_SLOP`, which answers 44 × 44 without
+ * crossing a neighbour. What follows is the history of the earlier concession.
+ *
  *
  * `theme.layout.chipHitSlop` unmodified — the shared `{ top: 6, bottom: 6, left: 4,
  * right: 4 }` that `FilterChip`, `SortMenu` and the title page's genre chips carry, and
@@ -84,7 +112,7 @@ export type SocialLinkRowProps = {
  * The glyph is `icon.sm` (20pt), which is the founder's 20–22 range and an existing
  * token rather than a number invented for this row.
  */
-export function SocialLinkRow({ links }: SocialLinkRowProps) {
+export function SocialLinkRow({ links, style }: SocialLinkRowProps) {
   const configured = configuredSocialLinks(links);
 
   // Not an empty `View`. A zero-height row still occupies a slot in a `gap` layout, so
@@ -92,13 +120,13 @@ export function SocialLinkRow({ links }: SocialLinkRowProps) {
   if (configured.length === 0) return null;
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, style]}>
       {configured.map(({ network, url, label }) => (
         <Pressable
           key={network}
           accessibilityRole="link"
           accessibilityLabel={label}
-          hitSlop={theme.layout.chipHitSlop}
+          hitSlop={CELL_SLOP}
           onPress={() => {
             // After the tap and only after it. A row that is drawn is not a row that
             // was used, and the question this event exists for is use.
@@ -138,7 +166,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.space[2],
+    gap: theme.space[3],
   },
   cell: {
     width: theme.layout.control.chipHeight,

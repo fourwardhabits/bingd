@@ -108,9 +108,9 @@ export type ProfileIdentityProps = {
    * changes.
    *
    * **It does not move the handle or Match.** The founder's rule is that the metadata
-   * block reads the same whether or not this is there — so this is a fourth thing under
-   * the third, not a rearrangement: Match stays directly under the handle, where it has
-   * been since it left the avatar's column, in every combination.
+   * block reads the same whether or not this is there, so the row sits *below* the whole
+   * identity block, at the page gutter, rather than inside the name column — where it
+   * left an empty well under the avatar (founder, 2026-09-16).
    *
    * Both screens pass it, because these are not one of the things that depend on who is
    * looking. They are the same links on your own profile as on somebody else's, which
@@ -137,7 +137,8 @@ export type ProfileIdentityProps = {
  *     [avatar]   Name
  *                @handle
  *                87% Match
- *                ⬡ ⬡ ⬡ ⬡ ⬡        ← only the ones they set; no row at all if none
+ *
+ *     ⬡ ⬡ ⬡ ⬡ ⬡                ← full width at the gutter; no row at all if none
  *
  *     Bio, across the full width
  *
@@ -216,14 +217,14 @@ export function ProfileIdentity({
               own profile and while the answer is still in flight, rather than holding a
               line open for something that may never arrive. */}
           {match}
-          {/* A fourth line in this column, and only when there is something to put in
-              it. Nothing above it moves: the founder's rule is that the handle and
-              Match read the same whether or not a profile has links, so this is added
-              under them rather than folded into them. Left-aligned with the handle,
-              because it belongs to the person rather than to the photo. */}
-          <SocialLinkRow links={socialLinks} />
         </View>
       </View>
+
+      {/* Full width, under the identity block and above the bio, starting at the page
+          gutter (founder, 2026-09-16). In the name column it left an empty well under
+          the avatar; here it lines up with the bio and everything below it. Renders
+          nothing at all when there are no links, so the bio sits where it always has. */}
+      <SocialLinkRow links={socialLinks} style={styles.social} />
 
       {/* Full width, under the header. Absent entirely rather than an empty line: a
           blank row still moves everything below it, and a profile with no bio should
@@ -292,6 +293,13 @@ const styles = StyleSheet.create({
   avatar: { alignItems: 'center', gap: theme.space[1] },
   // Takes whatever the photo leaves, and wraps inside it rather than pushing the photo.
   copy: { flex: 1, gap: 2 },
+  // The gutter, less the space between a cell's edge and its glyph, so the first icon's
+  // drawn edge lines up with the first letter of the bio rather than sitting inset.
+  social: {
+    paddingHorizontal: theme.layout.gutter,
+    marginLeft: -(theme.layout.control.chipHeight - theme.layout.icon.sm) / 2,
+    paddingBottom: theme.space[3],
+  },
   bio: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[3],
