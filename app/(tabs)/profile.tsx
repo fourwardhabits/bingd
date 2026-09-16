@@ -289,6 +289,18 @@ export default function ProfileScreen() {
           username={profile.username}
           bio={profile.bio}
           avatarUri={profile.avatarUri}
+          /* The same links a visitor sees, in the same place, because they are not one
+             of the things that depend on who is looking. Read off the session profile
+             rather than off `stats`: these are columns of the row `useCurrentProfile`
+             already holds, so they are there on the first frame and never show a
+             loading state of their own. */
+          socialLinks={{
+            instagram: profile.link_instagram,
+            tiktok: profile.link_tiktok,
+            youtube: profile.link_youtube,
+            x: profile.link_x,
+            website: profile.link_website,
+          }}
           stats={{
             followers: stats.isPending ? '—' : (stats.data?.followers ?? 0),
             following: stats.isPending ? '—' : (stats.data?.following ?? 0),
@@ -383,7 +395,6 @@ export default function ProfileScreen() {
           userId={profile.id}
           onSeeAll={() => setAwardsOpen(true)}
         />
-
 
         {/**
          * **See all goes to the Collection tab, not to a second list of the same

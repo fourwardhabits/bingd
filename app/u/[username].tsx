@@ -404,6 +404,12 @@ export default function PublicProfileScreen() {
             username={profile.data.username}
             bio={profile.data.bio}
             avatarUri={profile.data.avatarUri}
+            /* Read through `public_profiles` with the bio and gated by the same branch
+               this whole block is inside — so a private account this viewer may not
+               read never gets here, and there is no second visibility rule written for
+               links. Deliberately not on the identity-only surface below: that one is
+               drawn for an account the viewer may *not* read. */
+            socialLinks={profile.data.socialLinks}
             stats={{
               followers: profile.data.followers,
               following: profile.data.following,

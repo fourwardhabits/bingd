@@ -74,8 +74,7 @@ jest.mock('@/lib/supabase', () => ({
         }
         return max === null ? matched : matched.slice(0, max);
       };
-      const answer = () =>
-        Promise.resolve({ data: rows(), error: null, count: rows().length });
+      const answer = () => Promise.resolve({ data: rows(), error: null, count: rows().length });
       const chain = {
         select: () => chain,
         eq: (column: string, value: unknown) => {
@@ -180,9 +179,22 @@ const anna = {
   display_name: 'Anna',
   avatar_path: null,
   created_at: '2026-01-01T00:00:00Z',
+  // The default for every account: five nulls, which is what every profile that
+  // existed before 20260921000100 reads back as. The one test that wants links sets
+  // them on its own row.
+  link_instagram: null,
+  link_tiktok: null,
+  link_youtube: null,
+  link_x: null,
+  link_website: null,
 };
 
-const ranking = (id: string, title: string, position: number, over: Record<string, unknown> = {}) => ({
+const ranking = (
+  id: string,
+  title: string,
+  position: number,
+  over: Record<string, unknown> = {},
+) => ({
   media_item_id: id,
   bucket: 'loved',
   position,
@@ -294,10 +306,7 @@ describe('a profile the viewer may not see', () => {
 
 describe('what this person likes', () => {
   beforeEach(() => {
-    tableRows.rankings = [
-      ranking('a', 'Heat', 1),
-      ranking('b', 'Sinners', 2),
-    ];
+    tableRows.rankings = [ranking('a', 'Heat', 1), ranking('b', 'Sinners', 2)];
   });
 
   /**
@@ -327,7 +336,9 @@ describe('what this person likes', () => {
     // what `SectionHeader` exists to get right.
     await waitFor(() => expect(view.getByLabelText('Top ranked')).toBeTruthy());
     // Two loved titles: the top of the band takes 10.0 and the bottom takes 7.0.
-    await waitFor(() => expect(view.getAllByLabelText(/10\.0 out of 10/).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(view.getAllByLabelText(/10\.0 out of 10/).length).toBeGreaterThan(0),
+    );
   });
 
   it('shows what they want to watch next, right after what they love', async () => {
@@ -579,7 +590,10 @@ describe('reporting from a profile', () => {
     await fireEvent.press(view.getByText('Something else'));
 
     await waitFor(() =>
-      expect(alertSpy).toHaveBeenCalledWith('Thanks for telling us', 'We will take a look at this.'),
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Thanks for telling us',
+        'We will take a look at this.',
+      ),
     );
   });
 
@@ -1187,7 +1201,13 @@ describe('Taste Match', () => {
   it('says nothing about Match on a private account the viewer cannot read', async () => {
     tableRows.public_profiles = [];
     mockRpcResults.profile_identity = [
-      { id: 'anna-id', username: 'anna', display_name: 'Anna', avatar_path: null, visibility: 'private' },
+      {
+        id: 'anna-id',
+        username: 'anna',
+        display_name: 'Anna',
+        avatar_path: null,
+        visibility: 'private',
+      },
     ];
     mockRpcResults.my_blocks = [];
     mockRpcResults.taste_match = [{ score: null, common_count: 0, min_common: 5 }];
@@ -1262,9 +1282,7 @@ describe('sharing and awards on somebody else’s profile', () => {
     // back. A private account the viewer does not follow never reaches it, so there is
     // no Awards shelf and no See all to open a collection they are not entitled to.
     tableRows.public_profiles = [];
-    mockRpcResults.profile_identity = [
-      { ...anna, avatar_path: null, visibility: 'private' },
-    ];
+    mockRpcResults.profile_identity = [{ ...anna, avatar_path: null, visibility: 'private' }];
 
     const view = await open();
 
@@ -1309,7 +1327,8 @@ describe('the shape of somebody else’s profile', () => {
   const halfOf = (button: Node): Node => {
     let node = button;
     while (node) {
-      if ((StyleSheet.flatten(node.props.style) as ViewStyle | undefined)?.flex === 1) return node;
+      if ((StyleSheet.flatten(node.props.style) as ViewStyle | undefined)?.flex === 1)
+        return node;
       node = node.parent as Node;
     }
     return null;
@@ -1383,8 +1402,12 @@ describe('the shape of somebody else’s profile', () => {
     expect(label.props.minimumFontScale).toBe(0.85);
 
     // The two are still the same height, which is what the wrap used to break.
-    const requested = StyleSheet.flatten(view.getByRole('button', { name: 'Requested' }).props.style);
-    const share = StyleSheet.flatten(view.getByRole('button', { name: 'Share Profile' }).props.style);
+    const requested = StyleSheet.flatten(
+      view.getByRole('button', { name: 'Requested' }).props.style,
+    );
+    const share = StyleSheet.flatten(
+      view.getByRole('button', { name: 'Share Profile' }).props.style,
+    );
     expect(requested.minHeight).toBe(share.minHeight);
   });
 
@@ -1394,7 +1417,9 @@ describe('the shape of somebody else’s profile', () => {
     // control that renders nothing, or Share sits at half width beside a gap.
     mockViewer = { id: 'anna-id', username: 'anna', display_name: 'Anna' };
     const view = await open();
-    await waitFor(() => expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy(),
+    );
 
     expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
     // One half in the row, which is `ProfileActions` rendering nothing for the slot
@@ -1454,7 +1479,13 @@ describe('the shape of somebody else’s profile', () => {
     // Withdrawing an approved follow means the next one is a *request* somebody else
     // has to answer, so it is worth a sentence — and an accidental tap in the profile's
     // action row must not sever anything.
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Unfollow Anna?', expect.any(String), expect.any(Array)));
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Unfollow Anna?',
+        expect.any(String),
+        expect.any(Array),
+      ),
+    );
     expect(mockRpcCalls.map((call) => call.name)).not.toContain('unfollow');
   });
 
@@ -1498,5 +1529,56 @@ describe('the shape of somebody else’s profile', () => {
     // (20260813002000 §4).
     expect(view.getByLabelText('Report')).toBeTruthy();
     expect(view.queryByLabelText('Block')).toBeNull();
+  });
+});
+
+/**
+ * The five optional links, on somebody else's profile (20260921000100).
+ *
+ * `ProfileSocialLinks.test.tsx` asserts what the row draws. What belongs here is that
+ * this screen reads them through `public_profiles` and passes them on — and, more
+ * importantly, that they are gated by the branch this block is inside rather than by a
+ * second visibility rule written for links.
+ */
+describe('social links', () => {
+  it('draws the ones the subject has set', async () => {
+    tableRows.public_profiles = [{ ...anna, link_instagram: 'anna', link_x: 'anna_k' }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    expect(view.getAllByRole('link').map((node) => node.props.accessibilityLabel)).toEqual([
+      'Open Instagram profile',
+      'Open X profile',
+    ]);
+  });
+
+  it('draws no row for a subject who has set none', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    expect(view.queryAllByRole('link')).toHaveLength(0);
+  });
+
+  it('draws none on the locked shell of a private account', async () => {
+    // `profile_identity` is what a viewer who may not read the account gets: handle,
+    // name, avatar, visibility. Links are profile content and are deliberately not in
+    // it — putting them there would be a public-data bypass, and this is the client
+    // half of the assertion `profile-social-links.test.mjs` makes on the schema.
+    tableRows.public_profiles = [];
+    mockRpcResults.profile_identity = [
+      {
+        id: 'anna-id',
+        username: 'anna',
+        display_name: 'Anna',
+        avatar_path: null,
+        visibility: 'private',
+      },
+    ];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
+    expect(view.queryAllByRole('link')).toHaveLength(0);
   });
 });

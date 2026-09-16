@@ -4,6 +4,9 @@ import { StyleSheet, View } from 'react-native';
 import { Avatar, StatRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
+import { SocialLinkRow } from './SocialLinkRow';
+import type { ProfileSocialLinks } from './social-links';
+
 export type ProfileIdentityProps = {
   name: string;
   username: string;
@@ -94,6 +97,26 @@ export type ProfileIdentityProps = {
    * relationship to this person, next to the two things that identify them.
    */
   match?: ReactNode;
+  /**
+   * The five optional links, drawn as icons under the handle/Match block and above the
+   * bio (20260921000100).
+   *
+   * **Absent on a profile that has none**, and absent means absent: `SocialLinkRow`
+   * returns null rather than an empty row, so no height is reserved and the bio sits
+   * exactly where it sits today. Every account that existed before this feature has
+   * five nulls, which is the same case and is why nothing about an existing profile
+   * changes.
+   *
+   * **It does not move the handle or Match.** The founder's rule is that the metadata
+   * block reads the same whether or not this is there — so this is a fourth thing under
+   * the third, not a rearrangement: Match stays directly under the handle, where it has
+   * been since it left the avatar's column, in every combination.
+   *
+   * Both screens pass it, because these are not one of the things that depend on who is
+   * looking. They are the same links on your own profile as on somebody else's, which
+   * is most of what a profile is for.
+   */
+  socialLinks?: Partial<ProfileSocialLinks> | null;
 };
 
 /**
@@ -114,6 +137,7 @@ export type ProfileIdentityProps = {
  *     [avatar]   Name
  *                @handle
  *                87% Match
+ *                ⬡ ⬡ ⬡ ⬡ ⬡        ← only the ones they set; no row at all if none
  *
  *     Bio, across the full width
  *
@@ -165,6 +189,7 @@ export function ProfileIdentity({
   controls,
   badge,
   match,
+  socialLinks,
   onPressFollowers,
   onPressFollowing,
   onPressMovies,
@@ -191,6 +216,12 @@ export function ProfileIdentity({
               own profile and while the answer is still in flight, rather than holding a
               line open for something that may never arrive. */}
           {match}
+          {/* A fourth line in this column, and only when there is something to put in
+              it. Nothing above it moves: the founder's rule is that the handle and
+              Match read the same whether or not a profile has links, so this is added
+              under them rather than folded into them. Left-aligned with the handle,
+              because it belongs to the person rather than to the photo. */}
+          <SocialLinkRow links={socialLinks} />
         </View>
       </View>
 
@@ -225,8 +256,18 @@ export function ProfileIdentity({
             // Controls when the screen wires them (the external-beta polish): Top
             // Ranked below shows six, and these counts claim the rest. The tap opens
             // the full list, newest first.
-            { label: 'Movies', value: stats.movies, onPress: onPressMovies, hint: 'Opens the list' },
-            { label: 'TV', value: stats.seasons, onPress: onPressSeasons, hint: 'Opens the list' },
+            {
+              label: 'Movies',
+              value: stats.movies,
+              onPress: onPressMovies,
+              hint: 'Opens the list',
+            },
+            {
+              label: 'TV',
+              value: stats.seasons,
+              onPress: onPressSeasons,
+              hint: 'Opens the list',
+            },
           ]}
         />
       ) : null}

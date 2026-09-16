@@ -209,6 +209,13 @@ jest.mock('@/features/auth', () => ({
     bio: 'Films, mostly.',
     avatar_path: null,
     avatarUri: null,
+    // Two of the five, so this file can assert both halves at once: the ones that are
+    // set are drawn, and the three that are not leave nothing behind.
+    link_instagram: 'sai',
+    link_tiktok: null,
+    link_youtube: null,
+    link_x: null,
+    link_website: 'https://example.com',
   }),
 }));
 
@@ -821,7 +828,8 @@ describe('the shape of the page', () => {
 
       await waitFor(() => expect(view.getByText(/🔥 1 week streak/)).toBeTruthy());
       const found = positions(view, ['YOUR 2026', '🔥', 'bingd AWARDS']);
-      for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
+      for (const piece of found)
+        expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
       const order = found.map((piece) => piece.at);
       expect(order).toEqual([...order].sort((a, b) => a - b));
     } finally {
@@ -983,5 +991,25 @@ describe('re-tapping the Profile tab', () => {
     await act(async () => pressTab());
 
     expect(view.getByLabelText('bingd Awards')).toBeTruthy();
+  });
+});
+
+/**
+ * The five optional links, on the reader's own profile (20260921000100).
+ *
+ * The component that draws them is asserted in `ProfileSocialLinks.test.tsx`. What
+ * belongs here is the other half: that this screen reads them off the session profile
+ * and hands them over — a screen that forgot the prop would pass every test in that file
+ * and draw nothing at all on the one profile its owner looks at most.
+ */
+describe('social links', () => {
+  it('draws the ones this account has set, and nothing for the ones it has not', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@sai')).toBeTruthy());
+    expect(view.getAllByRole('link').map((node) => node.props.accessibilityLabel)).toEqual([
+      'Open Instagram profile',
+      'Open website',
+    ]);
   });
 });

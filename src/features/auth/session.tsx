@@ -19,12 +19,53 @@ import { clearProviderCooldown } from '@/features/search/provider-budget';
 import { queryKeys } from '@/lib/query';
 import { onLocalSignOut, startSessionRefresh, supabase } from '@/lib/supabase';
 
+/**
+ * The columns, as one string literal.
+ *
+ * Not assembled with `+`, and not a template. `supabase-js` parses the select list at
+ * the *type* level, so a concatenation widens to `string`, the parse fails, and the row
+ * comes back as `GenericStringError` — at which point every field read off it is an
+ * error whose message says nothing about the cause. A named constant keeps the literal
+ * and keeps the line readable, which the eleven columns had stopped being.
+ *
+ * ---------------------------------------------------------------------------
+ * **THE MIGRATION GOES OUT BEFORE THE BUNDLE. THIS IS THE READ THAT MAKES THAT A RULE.**
+ *
+ * This is the root query of the app: `AuthState` is `ready` only once it answers, so a
+ * column PostgREST does not know about is not one degraded screen. It is 42703, `status:
+ * 'error'`, and `AuthStatusOverlay`'s full-screen retry for **every signed-in user on
+ * that bundle**, with no way through — and an over-the-air update reaches phones in
+ * minutes, so publishing one against a database still missing `20260921000100` breaks the
+ * app for everybody at once.
+ *
+ * Migration first, then the OTA, in that order and with the migration confirmed applied
+ * on the environment that lane points at. It is the ordinary release order
+ * (`safe-update-runbook.md`) and it is written here rather than only in the runbook
+ * because this constant is what makes it load-bearing: the five names below are the
+ * dependency, and the next person adding a column to this list inherits the same rule.
+ */
+const MY_PROFILE_COLUMNS =
+  'id, username, display_name, bio, avatar_path, visibility, link_instagram, link_tiktok, link_youtube, link_x, link_website';
+
 export type Profile = {
   id: string;
   username: string;
   display_name: string;
   /** The line they wrote about themselves, under the handle. Null until they do. */
   bio: string | null;
+  /**
+   * The five optional links, drawn as icons under the handle (20260921000100).
+   *
+   * Five nullable columns rather than a bag, carried through here one field at a time
+   * for the reason `bio` is: the profile row is what this type is, and a nested object
+   * would be a shape the database does not have. Null on every account that existed
+   * before the migration, which `SocialLinkRow` draws as no row at all.
+   */
+  link_instagram: string | null;
+  link_tiktok: string | null;
+  link_youtube: string | null;
+  link_x: string | null;
+  link_website: string | null;
   /** The object path as stored. Pass to `set_avatar` and to the delete of the
    *  previous file; use `avatarUri` for anything that renders. */
   avatar_path: string | null;
@@ -244,7 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryFn: async (): Promise<Profile | null> => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, bio, avatar_path, visibility')
+        .select(MY_PROFILE_COLUMNS)
         .eq('id', userId!)
         .maybeSingle();
       if (error) throw error;
@@ -608,13 +649,5 @@ export function useAuthRouting() {
       tally('route.replace');
       router.replace(destination as never);
     }
-  }, [
-    auth,
-    segments,
-    router,
-    taste.isPending,
-    taste.data?.needed,
-    taste.data?.ranked,
-    stage,
-  ]);
+  }, [auth, segments, router, taste.isPending, taste.data?.needed, taste.data?.ranked, stage]);
 }
