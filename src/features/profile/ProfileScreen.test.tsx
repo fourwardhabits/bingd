@@ -119,6 +119,16 @@ jest.mock('@/lib/supabase', () => ({
           filters.push((row) => values.includes(row[column]));
           return chain;
         },
+        // The goals read bounds its year with these. Without them it threw, so Goals
+        // sat in its error state in every test here and its sheet could not be opened.
+        gte: (column: string, value: string) => {
+          filters.push((row) => String(row[column] ?? '') >= value);
+          return chain;
+        },
+        lte: (column: string, value: string) => {
+          filters.push((row) => String(row[column] ?? '') <= value);
+          return chain;
+        },
         // Both return the chain rather than the answer, because the queries on
         // this screen end on different links: the watchlist on `order`, the
         // feed on `limit`. The chain is itself thenable, so awaiting either
@@ -374,6 +384,61 @@ describe('the profile controls', () => {
 
     await fireEvent.press(view.getByLabelText('Settings'));
     expect(mockPush).toHaveBeenCalledWith('/settings');
+  });
+});
+
+/**
+ * **A goal's Save works on the first press while the keyboard is up** (2026-09-16).
+ *
+ * The reader typed a target, pressed Save, watched the sheet slide down as the keyboard
+ * went, and nothing saved; the second Save worked. The goal sheet is a `<Modal>`, but
+ * React Native's touch responder walks the *React* tree, so this screen's scroller is an
+ * ancestor of every control on it — and a scroller left at the default
+ * `keyboardShouldPersistTaps="never"` claims a touch in the capture phase whenever a text
+ * field is focused, before the control underneath is asked, and spends it lowering the
+ * keyboard.
+ *
+ * A test renderer has no keyboard and no responder negotiation, so pressing Save here
+ * would pass either way. What it can see is the property that decides it: no scroller
+ * above the sheet's controls may be one that eats the first tap.
+ */
+describe('a goal sheet opened over the profile', () => {
+  const scrollersAbove = (node: { parent: unknown; type: unknown; props: Record<string, unknown> }) => {
+    const found: unknown[] = [];
+    let current: typeof node | null = node;
+    while (current) {
+      if (current.type === 'RCTScrollView') found.push(current.props.keyboardShouldPersistTaps);
+      current = current.parent as typeof node | null;
+    }
+    return found;
+  };
+
+  it('has no scroller above Save that spends the first tap on the keyboard', async () => {
+    mockTables.watch_goals = [];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Set a goal')).toBeTruthy());
+    await fireEvent.press(view.getByText('Set a goal'));
+
+    const save = view.getByText('Save');
+    const scrollers = scrollersAbove(save as never);
+    // The profile's own scroller is above it — which is the whole finding.
+    expect(scrollers.length).toBeGreaterThan(0);
+    for (const persists of scrollers) expect(['handled', 'always']).toContain(persists);
+  });
+
+  it('and none above the fields, which sit inside the sheet’s own scroller', async () => {
+    mockTables.watch_goals = [];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Set a goal')).toBeTruthy());
+    await fireEvent.press(view.getByText('Set a goal'));
+
+    // Two scrollers above a field — the sheet's and the profile's — and neither may eat a
+    // press on a control while the keyboard is up.
+    const scrollers = scrollersAbove(view.getByLabelText('Movies') as never);
+    expect(scrollers.length).toBeGreaterThan(1);
+    for (const persists of scrollers) expect(['handled', 'always']).toContain(persists);
   });
 });
 

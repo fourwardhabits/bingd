@@ -92,7 +92,7 @@ create table ranking_sessions (
 
 `pivot` records which title is currently being compared against, rather than recomputing it as the midpoint. **Storing it is what makes Skip work at all.** Skip re-anchors deliberately away from the midpoint, so a `rank_answer` that recomputed the midpoint rejected the very title Skip had just displayed — every skip led to a dead end where the only offered answer was refused. Nothing in the bisection requires the pivot to be the midpoint; any offset inside `[lo, hi)` narrows the range correctly, and the midpoint is only the fastest choice.
 
-`history` is a stack of prior `(lo, hi, pivot)` states, which is what makes **Back** work. `skips` counts re-anchors for the 3-skip rule.
+`history` is a stack of prior `(lo, hi, pivot, seen, skips)` states, which is what makes **Back** work: `seen` is how many titles had been offered and `skips` how many had been spent when that comparison was on screen (`20260922000100`). Frames written before then carry only `(lo, hi, pivot)`. `skips` counts re-anchors for the 3-skip rule.
 
 `seen_items` is every title the session has put in front of the reader (`20260901000100`). The subject is fixed for the life of a session, so this **is** the set of unordered pairs already shown, and it is what makes "the app never asks the same pair twice" a property of the session rather than of the current band. Bounded by the band size, and in practice by the log of it.
 
@@ -213,13 +213,23 @@ no Too tough at all, and the title is as movable from Rankings as every other on
 flag stays on the response because it is a true fact about the placement and because
 removing it would be a schema change for a copy decision.
 
-**Back** pops `history`:
+**Back** pops `history` and restores the whole frame:
 
 ```
-(lo, hi, pivot) = history.pop()
-skips = max(skips - 1, 0)
-return { pivot }
+(lo, hi, pivot, seen, skips_then) = history.pop()
+if skips > skips_then:               # Too tough was pressed after that answer
+    seen_items = seen_items[:-1]     # withdraw only the comparison on screen
+else:
+    seen_items = seen_items[1:seen]  # withdraw every offer made after that comparison
+# skips is left alone: an Undo never refunds one
+return { pivot, pivot_card }
 ```
+
+**Back puts the session in exactly the state the undone comparison was shown in**, so answering it the same way again is the same progression as the first time: the same next comparison, the same placement, the same `adjustable` (`20260922000100`, pinned by `supabase/tests/ranking-undo.test.mjs`). Until then Back restored only `(lo, hi, pivot)` and took one off `skips` whatever it had undone. The title the undone answer had offered stayed in `seen_items`, so repeating the answer found that title "already shown" and walked past it — to a neighbour on a wide range, and to an early adjustable placement when it was the only title left. The real-user report was the second case: right, Undo, right, and the title was scored instead of comparison B returning.
+
+Re-offering B after an Undo is the §2 exemption for Back, not a repeated pair: the reader asked for it. `rank_skip` pushes no frame, so an Undo after Too tough undoes the answer before the skip. The skip stays spent, and the titles it declined stay in `seen_items`: handing them back re-offered the pair just skipped, and a reader who kept answering, skipping and undoing never finished. A frame without `seen` keeps the old behaviour, which only a session open across that deploy can hold.
+
+`rank_answer`, `rank_skip` and `rank_back` also return `pivot_card` — `{id, kind, title, poster_path}` for the opponent they put on screen — so the client draws the next comparison without a second request. The database's share of a comparison is a few milliseconds at any ranking size (`supabase/tests/perf/ranking-latency.mjs`); that second round trip was most of the pause between comparisons.
 
 Back at the first comparison returns to the bucket choice and cancels the session. The `user_media` bucket remains — the title stays Logged.
 

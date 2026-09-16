@@ -271,6 +271,55 @@ describe('with no goal set', () => {
 });
 
 /**
+ * **One Save, with the field still focused** (2026-09-16).
+ *
+ * The device report was a Save that only lowered the keyboard, and a second Save that
+ * worked. The cause is the scroller the section is mounted in, and it is pinned where
+ * that scroller lives (`ProfileScreen.test.tsx`). These pin the half that belongs here:
+ * with a field focused and typed into, a single press of Save writes the goal and closes
+ * the sheet, on both the path that creates a goal and the path that edits one — so
+ * nothing in the sheet itself waits for a blur, a keyboard event or a second render
+ * before it will submit.
+ */
+describe('saving with the keyboard up', () => {
+  it('creates a goal from one press of Save', async () => {
+    mockTables.watch_goals = [];
+    mockTables.user_media = [];
+    await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+    await waitFor(() => expect(screen.getByText('Set a goal')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Set a goal'));
+
+    const movies = screen.getByLabelText('Movies');
+    await fireEvent(movies, 'focus');
+    await fireEvent.changeText(movies, '24');
+    await fireEvent.press(screen.getByText('Save'));
+
+    await waitFor(() => expect(screen.queryByText('Save')).toBeNull());
+    expect(mockRpcCalls).toEqual([
+      { name: 'set_watch_goal', args: { p_year: 2026, p_category: 'movies', p_target: 24 } },
+    ]);
+  });
+
+  it('edits a goal from one press of Save', async () => {
+    mockTables.watch_goals = [{ category: 'movies', target: 52 }];
+    mockTables.user_media = [];
+    await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+    await waitFor(() => expect(screen.getByText('Edit')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Edit'));
+
+    const movies = screen.getByDisplayValue('52');
+    await fireEvent(movies, 'focus');
+    await fireEvent.changeText(movies, '60');
+    await fireEvent.press(screen.getByText('Save'));
+
+    await waitFor(() => expect(screen.queryByText('Save')).toBeNull());
+    expect(mockRpcCalls).toEqual([
+      { name: 'set_watch_goal', args: { p_year: 2026, p_category: 'movies', p_target: 60 } },
+    ]);
+  });
+});
+
+/**
  * The founder's correction: a progress row opens into the titles behind the number.
  *
  * The property worth testing is not that a sheet opens — it is that the sheet shows

@@ -105,7 +105,9 @@ export function GoalSheet({ year, targets, onSave, onClose, saving }: GoalSheetP
 
   return (
     <Sheet visible onClose={onClose} label={`Your ${year} goals`}>
-      <ScrollView contentContainerStyle={styles.content}>
+      {/* `handled`, like every other sheet scroller with a field in it: a press on a
+          control inside is not spent lowering the keyboard first (2026-09-16). */}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.intro}>
           <Text variant="title2">Your {year} goals</Text>
           <Text variant="footnote" tone="secondary">

@@ -45,6 +45,10 @@ export function Poster({ uri, title, size = 'sm', width, blurhash }: PosterProps
       {uri ? (
         <Image
           source={{ uri }}
+          // A recycled cell in a virtualised wall or list is handed a different title's
+          // poster in place. Keyed on the artwork, so the old picture is cleared before
+          // the new one loads rather than standing in for it (2026-09-16).
+          recyclingKey={uri}
           placeholder={blurhash ? { blurhash } : undefined}
           contentFit="cover"
           transition={theme.duration.state}

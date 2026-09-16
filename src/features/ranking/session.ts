@@ -53,6 +53,29 @@ export type Comparison = {
   pivotId: string;
   /** True when the pivot was reached by skipping rather than by answering. */
   skipped: boolean;
+  /**
+   * What the opponent's card draws, when the server sent it with the step
+   * (20260922000100).
+   *
+   * **This is the ranking-latency fix.** Every comparison used to be two requests in
+   * series — the RPC, which named the opponent, then a read of `media_items` for its
+   * title and poster before either card could be pressed — and on a phone that second
+   * round trip was most of the pause a reader saw between comparisons. The database's
+   * own share is a few milliseconds at any ranking size.
+   *
+   * Absent on an opening (`rank_start` and its siblings do not send it), on a replayed
+   * answer stored before the migration, and against a backend that predates it. The
+   * sheet then reads the card exactly as it always did, so this is never required.
+   */
+  pivotCard?: ComparisonCard;
+};
+
+/** The four columns a comparison card reads, in the shape its query caches them. */
+export type ComparisonCard = {
+  id: string;
+  kind: 'movie' | 'season' | null;
+  title: string;
+  poster_path: string | null;
 };
 
 export type Placed = {
@@ -135,6 +158,25 @@ type RankResponse = {
   activated?: boolean;
   cancelled?: boolean;
   skipped?: boolean;
+  pivot_card?: ComparisonCard | null;
+};
+
+/**
+ * The card, only when it is the card for the pivot this step names.
+ *
+ * Checked rather than trusted, because it is written into a cache keyed by title: a card
+ * that disagreed with `pivot` would put one title's name and poster on another's key,
+ * and the reader would be asked about a film they were not shown.
+ */
+const cardFor = (data: RankResponse, pivot: string): ComparisonCard | undefined => {
+  const card = data.pivot_card;
+  if (!card || card.id !== pivot || typeof card.title !== 'string') return undefined;
+  return {
+    id: card.id,
+    kind: card.kind === 'season' ? 'season' : card.kind === 'movie' ? 'movie' : null,
+    title: card.title,
+    poster_path: card.poster_path ?? null,
+  };
 };
 
 const fail = (error: { code?: string; message: string }): SessionFailed => {
@@ -207,12 +249,15 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
   // nothing further back to go, and the title keeps its bucket.
   if (data.cancelled || !data.session_id || !data.pivot) return { state: 'ended' };
 
+  const pivotCard = cardFor(data, data.pivot);
+
   return {
     state: 'comparing',
     sessionId: data.session_id,
     subjectId,
     pivotId: data.pivot,
     skipped: Boolean(data.skipped),
+    ...(pivotCard ? { pivotCard } : {}),
   };
 };
 

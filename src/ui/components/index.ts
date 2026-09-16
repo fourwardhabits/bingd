@@ -47,7 +47,9 @@ export {
 export { Poster } from './Poster';
 export {
   PosterGrid,
+  PosterGridList,
   PosterShelf,
+  type PosterGridListProps,
   type PosterGridProps,
   type PosterShelfProps,
   type PosterTile,

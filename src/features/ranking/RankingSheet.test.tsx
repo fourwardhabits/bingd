@@ -422,6 +422,92 @@ describe('the comparison', () => {
     expect(sheet.queryByText('Getting closer')).toBeNull();
   });
 
+  /**
+   * **One round trip between comparisons** (2026-09-16).
+   *
+   * A reader waited 1-3 seconds after each answer. The database spends a few milliseconds
+   * on it at any ranking size; the wait was the client asking twice in series — the RPC,
+   * then `media_items` for the opponent it named. Since 20260922000100 the step carries
+   * the opponent's card, and the next comparison is answerable without the second read.
+   */
+  describe('the next comparison after an answer', () => {
+    const filmQ = { id: 'film-q', kind: 'movie', title: 'Film Q', poster_path: '/q.jpg' };
+    /**
+     * The test client collects an unobserved query after 0ms, and the app after five
+     * minutes. A card seeded between one comparison and the next has no observer for a
+     * moment, so under a loaded runner the test client could drop it before it rendered —
+     * a race the app cannot have. Cards keep the app’s own retention here.
+     */
+    const open = async () => {
+      const sheet = await openSheet();
+      sheet.client.setQueryDefaults(['comparison-card'], { gcTime: 5 * 60_000 });
+      return sheet;
+    };
+    const read = (id: string, title: string) => ({
+      data: { id, title, poster_path: null },
+      error: null,
+    });
+
+    it('is drawn from the card the answer carried, with no second read', async () => {
+      answering(comparison(), comparison({ pivot: 'film-q', pivot_card: filmQ }));
+      const sheet = await open();
+
+      await fireEvent.press(await sheet.ready('Film A'));
+      await sheet.ready('Film Q');
+
+      // One read, for the opening comparison, which carries no card.
+      expect(mockPivotRead).toHaveBeenCalledTimes(1);
+    });
+
+    it('is read as before when the server sends no card', async () => {
+      answering(comparison(), comparison({ pivot: 'film-q' }));
+      mockPivotRead
+        .mockResolvedValueOnce(read('film-p', 'Film P'))
+        .mockResolvedValueOnce(read('film-q', 'Film Q'));
+      const sheet = await open();
+
+      await fireEvent.press(await sheet.ready('Film A'));
+      await sheet.ready('Film Q');
+      expect(mockPivotRead).toHaveBeenCalledTimes(2);
+    });
+
+    it('never files a card under a title it does not describe', async () => {
+      // A card naming a different title than the pivot would put one film's poster on
+      // another's key, and the reader would judge a pair they were not shown.
+      answering(
+        comparison(),
+        comparison({ pivot: 'film-q', pivot_card: { ...filmQ, id: 'film-z', title: 'Film Z' } }),
+      );
+      mockPivotRead
+        .mockResolvedValueOnce(read('film-p', 'Film P'))
+        .mockResolvedValueOnce(read('film-q', 'Film Q'));
+      const sheet = await open();
+
+      await fireEvent.press(await sheet.ready('Film A'));
+      await sheet.ready('Film Q');
+      expect(sheet.queryByLabelText('Choose Film Z')).toBeNull();
+      expect(mockPivotRead).toHaveBeenCalledTimes(2);
+    });
+
+    it('comes back from Undo with the card the Undo carried', async () => {
+      const filmP = { id: 'film-p', kind: 'movie', title: 'Film P', poster_path: null };
+      answering(
+        comparison(),
+        comparison({ pivot: 'film-q', pivot_card: filmQ }),
+        comparison({ pivot: 'film-p', pivot_card: filmP }),
+      );
+      const sheet = await open();
+
+      await fireEvent.press(await sheet.ready('Film A'));
+      await sheet.ready('Film Q');
+      await fireEvent.press(sheet.getByLabelText('Undo the last comparison'));
+      await sheet.ready('Film P');
+
+      expect(callsTo('rank_back')).toHaveLength(1);
+      expect(mockPivotRead).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('will not take an answer against a card that is not on screen yet', async () => {
     // Answering here would record a preference over a card reading "…". The subject's card
     // has to wait too, not just the pivot's.
