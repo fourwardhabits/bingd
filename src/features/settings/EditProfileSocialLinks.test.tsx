@@ -86,7 +86,21 @@ describe('the section', () => {
     for (const label of ['Instagram', 'TikTok', 'YouTube', 'X', 'Website']) {
       expect(view.getByLabelText(label)).toBeTruthy();
     }
-    expect(view.getByText(/All optional/)).toBeTruthy();
+    expect(view.getByText('Optional. Add a handle or link.')).toBeTruthy();
+    // Said once, above the five — not repeated under each box (founder, 2026-09-16).
+    expect(view.queryByText(/Your username, or the link/)).toBeNull();
+    expect(view.queryByText(/twitter\.com links work/)).toBeNull();
+    expect(view.queryByText(/add https:\/\//)).toBeNull();
+  });
+
+  it('lists the boxes TikTok, Instagram, X, YouTube, Website', async () => {
+    const view = await renderWithProviders(<EditProfileScreen />);
+    const order = ['TikTok', 'Instagram', 'X', 'YouTube', 'Website'].map(
+      (label) => view.getByLabelText(label),
+    );
+    // Document order of the inputs is the order they are drawn.
+    const inputs = view.getAllByLabelText(/^(TikTok|Instagram|X|YouTube|Website)$/);
+    expect(inputs).toEqual(order);
   });
 
   it('shows nothing in the boxes for a profile that has none', async () => {

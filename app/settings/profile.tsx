@@ -7,7 +7,6 @@ import { useCurrentProfile } from '@/features/auth';
 import { AvatarPicker } from '@/features/profile/AvatarPicker';
 import {
   normalizeSocialLink,
-  SOCIAL_FIELD_HINTS,
   SOCIAL_FIELD_LABELS,
   SOCIAL_NETWORKS,
   type SocialNetwork,
@@ -206,7 +205,13 @@ export default function EditProfileScreen() {
   };
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge**, for the reason `notifications.tsx` records: this screen shows a
+     * native-stack header, which already consumes the status-bar inset, so `Screen`'s
+     * default `top` edge added the same inset again below it — the oversized band the
+     * founder saw above the profile-picture card. Left and right still apply.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen
         options={{ headerShown: true, title: 'Edit Profile', headerBackTitle: 'Back' }}
       />
@@ -262,9 +267,11 @@ export default function EditProfileScreen() {
         <View style={styles.section}>
           <SectionHeader title="Social links" />
           <View style={styles.body}>
-            {/* Said once, above the five, rather than five times underneath them. */}
+            {/* Said once, above the five. The boxes accept the same forms as before —
+                a username, an @handle, a profile link — without a line under each one
+                explaining it (founder, 2026-09-16). */}
             <Text variant="caption" tone="tertiary">
-              All optional. Leave a box empty and nothing shows on your profile.
+              Optional. Add a handle or link.
             </Text>
 
             {SOCIAL_NETWORKS.map((network) => {
@@ -286,8 +293,6 @@ export default function EditProfileScreen() {
                   autoCorrect={false}
                   autoComplete="off"
                   keyboardType={network === 'website' ? 'url' : 'default'}
-                  hint={SOCIAL_FIELD_HINTS[network]}
-                  // Replaces the hint when it is set, which is `Field`'s own rule.
                   error={!result.ok && touched[network] ? result.message : undefined}
                 />
               );
@@ -295,7 +300,7 @@ export default function EditProfileScreen() {
           </View>
         </View>
 
-        <View style={styles.body}>
+        <View style={[styles.body, styles.footer]}>
           {error ? (
             <Text variant="footnote" tone="action">
               {error}
@@ -324,4 +329,7 @@ const styles = StyleSheet.create({
     gap: theme.space[3],
     paddingTop: theme.space[3],
   },
+  // A section's gap above Save rather than a field's, so the button reads as the end of
+  // the form and not as one more row of the Social links section.
+  footer: { paddingTop: theme.layout.sectionGap },
 });
