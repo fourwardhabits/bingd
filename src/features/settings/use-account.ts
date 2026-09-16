@@ -53,17 +53,17 @@ export function useAccountWrites() {
     try {
       const { data, error } = await fn();
 
-    /**
-     * **Reconciled on an unknown outcome as well as on a commit.**
-     *
-     * A handle or a visibility that is saved and cannot say so is the worst version of this:
-     * the person is told it failed, tries the same value again, and `save_profile` answers
-     * 23505 because the first attempt is already stored under their own account. `lib/write-outcome.ts` is what separates a refusal this app raises on
-     * purpose — which proves nothing was written — from a dropped socket, a timeout, or
-     * an `08007` out of the pooler, any of which can carry a committed transaction. This
-     * helper used to return on any error and refresh only afterwards, which is the defect
-     * independent review 21e found in four screens; it is the same defect here.
-     */
+      /**
+       * **Reconciled on an unknown outcome as well as on a commit.**
+       *
+       * A handle or a visibility that is saved and cannot say so is the worst version of this:
+       * the person is told it failed, tries the same value again, and `save_profile` answers
+       * 23505 because the first attempt is already stored under their own account. `lib/write-outcome.ts` is what separates a refusal this app raises on
+       * purpose — which proves nothing was written — from a dropped socket, a timeout, or
+       * an `08007` out of the pooler, any of which can carry a committed transaction. This
+       * helper used to return on any error and refresh only afterwards, which is the defect
+       * independent review 21e found in four screens; it is the same defect here.
+       */
       if (mustReconcile(classifyWrite(error as { code?: string }))) {
         await Promise.all(
           invalidate.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
@@ -74,14 +74,21 @@ export function useAccountWrites() {
         const message =
           diagnose(error) ??
           (error instanceof Error ? error.message : 'Something went wrong. Try again.');
-        return { ok: false, message, changed: classifyWrite(error as { code?: string }) === 'unknown' };
+        return {
+          ok: false,
+          message,
+          changed: classifyWrite(error as { code?: string }) === 'unknown',
+        };
       }
       // Only `delete_account` returns this, and only it needs to: it cannot remove
       // storage objects — Supabase refuses direct deletion from storage tables — so it
       // counts what is left and the screen tells the person rather than claiming a
       // completeness nothing could deliver.
       const remaining = (data as { avatars_remaining?: number } | null)?.avatars_remaining;
-      return { ok: true, avatarsRemaining: typeof remaining === 'number' ? remaining : undefined };
+      return {
+        ok: true,
+        avatarsRemaining: typeof remaining === 'number' ? remaining : undefined,
+      };
     } finally {
       setBusy(false);
     }
@@ -101,8 +108,24 @@ export function useAccountWrites() {
      * `undefined` leaves a field alone, which is what lets the screen send only what
      * changed. The bio is the exception: `''` clears it, because null already means
      * "do not touch" and there is no third value.
+     *
+     * **The five profile links joined it on 2026-09-15** (20260921000100) and they use
+     * that same convention rather than one of their own, because a second rule for five
+     * fields sitting beside three that use the first one is how a form ends up clearing
+     * a bio it meant to leave alone. They are also not a second call: a person editing
+     * their profile is editing one thing, and the argument for `save_profile` being one
+     * transaction is the argument for these being inside it.
      */
-    saveProfile: (fields: { displayName?: string; username?: string; bio?: string }) =>
+    saveProfile: (fields: {
+      displayName?: string;
+      username?: string;
+      bio?: string;
+      instagram?: string;
+      tiktok?: string;
+      youtube?: string;
+      x?: string;
+      website?: string;
+    }) =>
       run(
         () =>
           /**
@@ -127,6 +150,11 @@ export function useAccountWrites() {
                 p_display_name: fields.displayName ?? null,
                 p_username: fields.username ?? null,
                 p_bio: fields.bio ?? null,
+                p_instagram: fields.instagram ?? null,
+                p_tiktok: fields.tiktok ?? null,
+                p_youtube: fields.youtube ?? null,
+                p_x: fields.x ?? null,
+                p_website: fields.website ?? null,
               }),
             answerWasLost,
           ),
@@ -171,7 +199,13 @@ export function useAccountWrites() {
         // Going public approves everybody waiting, so the relationship caches and the
         // inbox both change even though the caller only touched a switch. `my-profile`
         // for the same reason as above: the switch renders from the reader's own row.
-        [['my-profile'], ['profile'], ['relationships'], ['notifications'], ['profile-follows']],
+        [
+          ['my-profile'],
+          ['profile'],
+          ['relationships'],
+          ['notifications'],
+          ['profile-follows'],
+        ],
       ),
 
     /**

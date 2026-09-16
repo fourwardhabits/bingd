@@ -5,6 +5,19 @@ import { compactName } from '@/lib/titles';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
+import type { ProfileSocialLinks } from './social-links';
+
+/**
+ * The columns, as one string literal.
+ *
+ * Not assembled with `+`, and not a template: `supabase-js` parses the select list at
+ * the *type* level, so a concatenation widens to `string`, the parse fails, and the row
+ * comes back as `GenericStringError` — every field read off it then being an error whose
+ * message says nothing about the cause.
+ */
+const PUBLIC_PROFILE_COLUMNS =
+  'id, username, display_name, bio, avatar_path, created_at, link_instagram, link_tiktok, link_youtube, link_x, link_website';
+
 export type PublicProfile = {
   id: string;
   username: string;
@@ -21,6 +34,15 @@ export type PublicProfile = {
   /** The stat row's Movies and TV: the watched collection, imports included. */
   watchedMovies: number;
   watchedSeasons: number;
+  /**
+   * The five optional links, drawn as icons under the handle (20260921000100).
+   *
+   * Read from `public_profiles` with the bio and through the same gate, which is the
+   * whole of the privacy rule for them: this hook adds no visibility logic of its own,
+   * and a private account the viewer may not read does not return a row at all. All
+   * five are null for every account that existed before the migration.
+   */
+  socialLinks: ProfileSocialLinks;
 };
 
 /**
@@ -86,7 +108,7 @@ export function usePublicProfile(username: string | null) {
     queryFn: async (): Promise<PublicProfile | null> => {
       const { data: profile, error } = await supabase
         .from('public_profiles')
-        .select('id, username, display_name, bio, avatar_path, created_at')
+        .select(PUBLIC_PROFILE_COLUMNS)
         .eq('username', username!)
         .maybeSingle();
       if (error) throw error;
@@ -128,6 +150,13 @@ export function usePublicProfile(username: string | null) {
         username: profile.username as string,
         name: (profile.display_name as string | null) || (profile.username as string),
         bio: (profile.bio as string | null) ?? null,
+        socialLinks: {
+          instagram: (profile.link_instagram as string | null) ?? null,
+          tiktok: (profile.link_tiktok as string | null) ?? null,
+          youtube: (profile.link_youtube as string | null) ?? null,
+          x: (profile.link_x as string | null) ?? null,
+          website: (profile.link_website as string | null) ?? null,
+        },
         avatarUri: avatarUri(profile.avatar_path as string | null),
         memberSince: (profile.created_at as string | null) ?? null,
         followers: followers.count ?? 0,

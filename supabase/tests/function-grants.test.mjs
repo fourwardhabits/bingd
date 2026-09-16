@@ -458,7 +458,15 @@ const ALLOWED = {
   //
   // `delete_account` takes only a confirmation string. It deletes `auth.uid()` and
   // there is no signature by which it could delete anybody else.
-  'save_profile(uuid,text,text,text)': ['authenticated'],
+  //
+  // **Nine arguments since 20260921000100**, which added the five optional profile
+  // links. Dropped and recreated rather than overloaded, for the reason above — so a
+  // caller still on the four-argument shape gets a missing function rather than an
+  // ambiguous resolution. `_social_handle` arrived with it and is deliberately absent
+  // from this list: it is reachable only from inside this definer function, which
+  // executes it as its owner, and the migration revokes the default PUBLIC grant that
+  // would otherwise have put it in front of every client.
+  'save_profile(uuid,text,text,text,text,text,text,text,text)': ['authenticated'],
   'set_profile_visibility(uuid,profile_visibility)': ['authenticated'],
   'my_notifications(integer)': ['authenticated'],
   'mark_notifications_read()': ['authenticated'],

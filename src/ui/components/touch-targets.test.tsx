@@ -10,6 +10,8 @@ import { MediumSelector } from './MediumSelector';
 import { SectionHeader } from './SectionHeader';
 import { SortMenu } from './SortControl';
 
+import { SocialLinkRow } from '@/features/profile/SocialLinkRow';
+
 /**
  * **Every tap target is at least 44 × 44** (design-system.md §10), on the six controls
  * the pre-GTM audit measured short (2026-09-07).
@@ -154,7 +156,55 @@ describe('IconToggle', () => {
   });
 });
 
+/**
+ * **The profile's social row** (20260921000100), five cells of 32 with `space[2]` between
+ * them, carrying the shared slop unmodified.
+ *
+ * It reaches 44 **tall** and 40 **wide**, and the four points are a measured concession
+ * rather than a miss. The row has to fit the column the avatar leaves — about 200pt on the
+ * 320pt screen this app supports — and five cells wide enough to answer 44 without their
+ * slops crossing would be 208, which clips the last icon on a small phone. It is the same
+ * trade `IconToggle`'s middle cell makes, for the same reason: nothing behind these is
+ * destructive, the neighbours are five links rather than five decisions, and a mis-tap
+ * costs a back gesture.
+ *
+ * Pinned so it stays a decision, and so that anyone who finds a better arrangement has a
+ * failing test telling them the vertical target and the no-crossing rule must not regress
+ * with it.
+ */
+describe('SocialLinkRow', () => {
+  it('draws 32pt cells and answers 44 tall, with slop that never crosses the gap', async () => {
+    const view = await renderWithProviders(
+      <SocialLinkRow
+        links={{
+          instagram: 'suraj',
+          tiktok: 'surajk',
+          youtube: 'SurajWatches',
+          x: 'suraj_k',
+          website: 'https://example.com',
+        }}
+      />,
+    );
 
+    const cells = view.getAllByRole('link');
+    expect(cells).toHaveLength(5);
+
+    for (const cell of cells) {
+      const drawn = StyleSheet.flatten(cell.props.style);
+      expect(drawn.width).toBe(CHIP);
+      expect(drawn.height).toBe(CHIP);
+      expect(cell.props.hitSlop).toEqual(SLOP);
+      expect(tall(CHIP, cell.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    }
+
+    // The four points, stated rather than implied — so widening the cell is a change to
+    // this line and not a silent improvement nobody notices going the other way.
+    expect(wide(CHIP, SLOP)).toBe(40);
+    // And the rule that costs them: two neighbours' slops meet in the `space[2]` gap
+    // without overlapping, so a press between two icons belongs to the nearer one.
+    expect(SLOP.left + SLOP.right).toBeLessThanOrEqual(theme.space[2]);
+  });
+});
 describe('SectionHeader', () => {
   it('lets the trailing action fill the 44pt row it sits in', async () => {
     const view = await renderWithProviders(
@@ -169,7 +219,9 @@ describe('SectionHeader', () => {
 
 describe('MediumSelector’s option sheet', () => {
   it('dims the status bar on Android and clears the bottom inset', async () => {
-    const view = await renderWithProviders(<MediumSelector value="movies" onChange={() => {}} />);
+    const view = await renderWithProviders(
+      <MediumSelector value="movies" onChange={() => {}} />,
+    );
     await fireEvent.press(view.getByLabelText('Showing Movies'));
 
     // `Sheet`'s treatment: without it an Android modal lays out under the status bar's

@@ -99,12 +99,21 @@ describe('what the privacy screen promises', () => {
     mockAccount.visibility = 'private';
     const view = await open();
 
+    // **The positive form first, because it is the only one that can gate on the read.**
+    //
+    // These two were the other way round, and the absence was doing the waiting — which
+    // it cannot: `queryByText(...).toBeNull()` is *trivially true* before the visibility
+    // row arrives, so the wait returned on the first tick and the assertion below ran
+    // against a screen that had not decided which setting it was describing yet. It
+    // passed for as long as the mocked read happened to settle inside `render`, and it
+    // failed in CI the day an unrelated branch changed how the workers were scheduled.
+    // The sibling tests below were already written this way round.
     await waitFor(() =>
-      expect(view.queryByText(/does not appear in search/)).toBeNull(),
+      expect(view.getByText(/can still find you by name or @handle/)).toBeTruthy(),
     );
-    // The positive form of the same assertion, so this cannot pass by the copy simply
-    // having been deleted.
-    expect(view.getByText(/can still find you by name or @handle/)).toBeTruthy();
+    // And the negative, which is the claim this test is actually named for. Safe here
+    // because the wait above has established that the private copy is on screen.
+    expect(view.queryByText(/does not appear in search/)).toBeNull();
   });
 
   it('names what a private account actually withholds', async () => {

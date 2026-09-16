@@ -38,6 +38,12 @@ secret: a PostHog project token is write-only and a Sentry DSN only accepts even
 
 ## 2. The canonical event set
 
+**Thirty-nine events.** The authoritative list is `ANALYTICS_EVENTS` in
+`src/lib/analytics.ts`, pinned name-for-name by `analytics.test.ts` — this prose count had
+drifted behind it through several tranches and is corrected here rather than maintained
+by hand a second time. The sections below are the vocabulary; the history that follows is
+how the first twenty-one arrived.
+
 Twenty-one events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
 resolver gave them writers, one added on 2026-09-03 with Help & Support, three added
 on 2026-09-03 with Group Picks, two added on 2026-09-06 with For You rotation and
@@ -319,6 +325,35 @@ lost). A leave that might have left an import running is never counted as a skip
 `not_letterboxd`, `damaged`, `empty` — are the difference between "people drop off
 here" and "people drop off here *because they unzipped the file first*", which is a
 copy fix rather than a product one.
+
+### Profile social links — added 2026-09-15
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `profile_social_link_opened` | a configured social icon on a profile header was **tapped** and the phone was asked to open it | the reader | `network` |
+
+One event for a whole feature, and the count is the whole question: **are profile links
+used, or are they decoration**. That answer is what decides whether this grows a sixth
+network or stays at five, and a second event would be measuring a feature that has not
+yet earned one.
+
+`network` is a closed set of five words — `instagram`, `tiktok`, `youtube`, `x`,
+`website`.
+
+**What deliberately does not travel, and why each is worse than it looks.** Not the
+handle: a handle *is* a username, which is second on the forbidden list, and it would be
+somebody else's username on somebody else's account. Not the URL, which contains the
+handle by construction. Not the target profile id, the display name, or anything else
+identifying whose profile was being looked at — that would turn an "is this used" count
+into a record of **who looked at whom**, which is a different product and one nobody
+asked for.
+
+So this can answer *are these tapped, and which ones*, and it cannot answer *whose*. That
+is the correct pair of capabilities for a decoration-or-not question.
+
+**It fires on the tap, never on the render.** A row that is drawn is not a row that was
+used, and an event counting impressions would answer a question nobody is asking with a
+number that looks like the one they are.
 
 ---
 

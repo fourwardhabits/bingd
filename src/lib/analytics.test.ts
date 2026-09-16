@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirty-eight canonical names and nothing else', () => {
+  it('is the thirty-nine canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -130,6 +130,10 @@ describe('the event vocabulary', () => {
         'onboarding_completed',
         'onboarding_started',
         'onboarding_step_completed',
+        // 2026-09-15, the five optional links on a profile header. One name for the
+        // whole feature: whether they are tapped at all is the question, and a second
+        // event would be measuring something that has not earned one.
+        'profile_social_link_opened',
         'people_suggestions_mode_changed',
         'people_suggestions_viewed',
         'ranking_completed',
@@ -207,7 +211,9 @@ describe('the privacy boundary', () => {
   it('drops an object or an array even under an allowed key', () => {
     // The failure this guards is somebody spreading a row into a property bag: the key
     // survives the allowlist and the bio travels inside the value.
-    expect(sanitize({ surface: { name: 'search', note: 'private' }, position: [1, 2] })).toEqual({});
+    expect(
+      sanitize({ surface: { name: 'search', note: 'private' }, position: [1, 2] }),
+    ).toEqual({});
   });
 
   it('drops null and undefined rather than sending them as values', () => {
@@ -264,6 +270,33 @@ describe('the privacy boundary', () => {
       pool_size: 130,
     });
   });
+
+  it('lets a profile link say which network and nothing about whose profile', () => {
+    // `network` is the only property this event has, and the assertion is as much about
+    // what is absent: a handle is a `username`, a URL contains one, and the target id
+    // would turn a "is this used" count into a record of who looked at whom. None of
+    // the three has a key it could arrive under, and this is where that is checked
+    // rather than assumed.
+    track({ name: 'profile_social_link_opened', props: { network: 'instagram' } });
+
+    expect(propertiesOf()).toMatchObject({ network: 'instagram' });
+    for (const key of ['username', 'handle', 'url', 'link', 'profile_id', 'target_id']) {
+      expect(propertiesOf()).not.toHaveProperty(key);
+    }
+  });
+
+  it('drops a handle or a URL even if a call site tried to attach one', () => {
+    // The union makes this a compile error, so the cast is the only way to write it —
+    // and the runtime filter has to hold anyway, because the union is not what runs.
+    track({
+      name: 'profile_social_link_opened',
+      props: { network: 'x', username: 'suraj', url: 'https://x.com/suraj' },
+    } as unknown as Parameters<typeof track>[0]);
+
+    expect(propertiesOf()).toMatchObject({ network: 'x' });
+    expect(propertiesOf()).not.toHaveProperty('username');
+    expect(propertiesOf()).not.toHaveProperty('url');
+  });
 });
 
 describe('ranking_completed', () => {
@@ -285,7 +318,14 @@ describe('ranking_completed', () => {
     mockCapture.mockClear();
     track({
       name: 'ranking_completed',
-      props: { media_kind: 'movie', surface: 'title', comparisons: 3, rebucket, mode, skips: 0 },
+      props: {
+        media_kind: 'movie',
+        surface: 'title',
+        comparisons: 3,
+        rebucket,
+        mode,
+        skips: 0,
+      },
     });
 
     expect(propertiesOf()).toMatchObject({ mode, rebucket, comparisons: 3, skips: 0 });
@@ -351,7 +391,11 @@ describe('ranking_completed', () => {
 
     expect(mockCapture).toHaveBeenCalledWith(
       'ranking_started',
-      expect.objectContaining({ media_kind: 'tv_season', surface: 'onboarding', mode: 'start' }),
+      expect.objectContaining({
+        media_kind: 'tv_season',
+        surface: 'onboarding',
+        mode: 'start',
+      }),
     );
   });
 });
@@ -376,7 +420,9 @@ describe('release identity', () => {
   it('is registered as well as merged, so library events carry it too', () => {
     // `register` is what reaches PostHog's own lifecycle events. Merging per event is
     // what covers the first launch, where `register` may not have persisted yet.
-    expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({ environment: 'preview' }));
+    expect(mockRegister).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: 'preview' }),
+    );
   });
 
   it('omits an update id when the build is running its own bundle', () => {
@@ -422,7 +468,9 @@ describe('identity', () => {
     mockRegister.mockClear();
     identify('user-1');
     identify(null);
-    expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({ environment: 'preview' }));
+    expect(mockRegister).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: 'preview' }),
+    );
   });
 
   it('resets before identifying a different account on the same device', () => {

@@ -86,7 +86,6 @@ export type Surface =
    */
   | 'people';
 
-
 /**
  * The steps of the first-run flow that report their own completion.
  *
@@ -124,12 +123,21 @@ export type OnboardingStep =
  * rather than being folded into an empty list.
  */
 export type PeopleStepVariant =
-  | 'connected'
-  | 'connected_alone'
-  | 'starter_shared'
-  | 'starter_active'
-  | 'could_not_load';
+  'connected' | 'connected_alone' | 'starter_shared' | 'starter_active' | 'could_not_load';
 export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
+
+/**
+ * Which of the five links on a profile header was opened.
+ *
+ * Declared here rather than imported from `features/profile/social-links`, which is
+ * where the same five words are the product's own vocabulary. That is deliberate and it
+ * is the direction of the dependency: `lib/` does not reach into `features/`, and an
+ * analytics vocabulary that follows a feature module's type would silently gain a sixth
+ * value the day somebody adds a sixth network — which is exactly the moment a human
+ * should be deciding whether the series can absorb it. The two are kept in step by a
+ * compile-time check at the one call site (`SocialLinkRow`), not by an import.
+ */
+export type SocialLinkNetwork = 'instagram' | 'tiktok' | 'youtube' | 'x' | 'website';
 
 /**
  * Which monthly leaderboard is being looked at.
@@ -499,7 +507,10 @@ export type AnalyticsEvent =
    * already follows on the same control: leaving and coming back is a second decision to
    * look, and a re-render on the busiest screen in the app is not.
    */
-  | { name: 'people_suggestions_viewed'; props: { source: PeopleEntry; mode: PeopleSuggestionMode } }
+  | {
+      name: 'people_suggestions_viewed';
+      props: { source: PeopleEntry; mode: PeopleSuggestionMode };
+    }
   /**
    * Mutuals or Match was chosen.
    *
@@ -706,6 +717,28 @@ export type AnalyticsEvent =
    * the forbidden list, and an index would only be a rank of a thing that is not named.
    */
   | { name: 'similar_title_opened'; props: { medium: 'movies' | 'tv' } }
+  /**
+   * A social icon on a profile header was tapped, and the phone was asked to open it.
+   *
+   * **One event for a whole feature**, and the count is the whole question: profile
+   * links are either used or they are decoration, and after outreach the answer decides
+   * whether this grows a sixth network or stays where it is. A second event would be
+   * measuring a feature that has not yet earned one.
+   *
+   * `network` is a closed set of five words. **Nothing else, and the exclusions are the
+   * point**: no handle, no URL, no target profile id, no display name. A handle *is* a
+   * username — the thing at the top of `FORBIDDEN_PROPERTY_KEYS` — and a URL contains
+   * one by construction, so either would put a person's identity on somebody else's
+   * account into an analytics pipeline. The target id would be worse: it would turn
+   * this into a record of who looked at whom.
+   *
+   * So what this can answer is "are these tapped, and which ones", and it cannot answer
+   * "whose", which is the correct pair of capabilities for a decoration-or-not question.
+   *
+   * Emitted **after** a configured link is tapped, never on a render of the row. A row
+   * that is drawn is not a row that was used, and the founder's question is about use.
+   */
+  | { name: 'profile_social_link_opened'; props: { network: SocialLinkNetwork } }
 
   // --- Weekly streak --------------------------------------------------------
   /**
@@ -920,6 +953,9 @@ export const ANALYTICS_EVENTS = [
   'import_completed',
   // 2026-09-11, the comparison memory aids.
   'comparison_info_opened',
+  // 2026-09-15, the five optional links on a profile header. One name for the whole
+  // feature, because the count is the whole question.
+  'profile_social_link_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -1054,6 +1090,16 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'viewings',
   'applied',
   'unresolved',
+  /**
+   * Which profile link was opened (2026-09-15, `profile_social_link_opened`).
+   *
+   * Five words and nothing else. The handle and the URL are deliberately *not* here and
+   * there is no key they could arrive under: a handle is a `username`, which is second
+   * on `FORBIDDEN_PROPERTY_KEYS`, and a URL contains one by construction. Neither is
+   * there a key for whose profile it was — that would turn a "is this used" count into
+   * a record of who looked at whom.
+   */
+  'network',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',
@@ -1264,7 +1310,6 @@ export function identify(userId: string | null): void {
  * milliseconds, for a friend beta. Recorded as debt instead.
  */
 
-
 /** Exported for tests, which must not inherit the previous one's client or identity. */
 export function resetAnalyticsForTests() {
   client = null;
@@ -1292,5 +1337,7 @@ export function setAcquisition(input: {
   cohort?: string | null;
 }): void {
   if (!client) return;
-  void client.register(sanitize({ acquisition_source: input.source, beta_cohort: input.cohort }));
+  void client.register(
+    sanitize({ acquisition_source: input.source, beta_cohort: input.cohort }),
+  );
 }
