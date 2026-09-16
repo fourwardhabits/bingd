@@ -352,6 +352,9 @@ function Session({
   // outlive the states that render nothing from it.
   const openSession = useRef<string | null>(null);
 
+  /** Whether a step is on its way to the server. See `act`. */
+  const inFlight = useRef(false);
+
   /**
    * **The award payoff, and it is downstream of everything above it.**
    *
@@ -393,6 +396,21 @@ function Session({
 
   const apply = useCallback(
     (next: SessionStep) => {
+      /**
+       * **The opponent's card, from the answer that named it** (20260922000100).
+       *
+       * Written before `setStep`, so the comparison renders with its card already in the
+       * cache and its posters pressable in the same commit — rather than rendering, reading
+       * `media_items`, and only then letting the reader answer. That read was a second
+       * round trip in series with the RPC, on every comparison.
+       *
+       * It is display data keyed by title, never search state: the server still decides
+       * every pivot, and a card that is absent simply leaves the query to read it.
+       */
+      if (next.state === 'comparing' && next.pivotCard) {
+        queryClient.setQueryData(queryKeys.comparisonCard(next.pivotId), next.pivotCard);
+      }
+
       if (next.state === 'comparing') openSession.current = next.sessionId;
       // placed and ended mean the server deleted the session itself; a failure asking for
       // a restart means it was already gone. A failure that does not — a dropped
@@ -609,10 +627,27 @@ function Session({
   }, [subject, apply, withIntent]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0, skip = false) => {
-    if (busy) return;
+    /**
+     * **One step in flight, decided synchronously** (2026-09-16).
+     *
+     * `busy` is state, so it disables the controls from the *next* render. Two presses
+     * inside one frame — a poster and then Undo, say — both read `busy` as false and
+     * both went to the server, where they serialise on the media lock in an order nobody
+     * chose. If the answer's reply then arrived after the Undo's, the screen showed the
+     * comparison the answer produced over a session the Undo had already put back, and
+     * the next press judged a pair the server was not holding. The ref closes that window
+     * in the same tick as the press; `busy` still draws the disabled state.
+     */
+    if (busy || inFlight.current) return;
+    inFlight.current = true;
     setLastAttempt({ run, skip });
     setBusy(true);
-    const next = await run();
+    let next: SessionStep;
+    try {
+      next = await run();
+    } finally {
+      inFlight.current = false;
+    }
     setBusy(false);
     if (progress) {
       answeredCount.current = Math.max(0, answeredCount.current + progress);

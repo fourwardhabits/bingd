@@ -258,6 +258,22 @@ export default function ProfileScreen() {
         ref={scroller}
         contentContainerStyle={styles.content}
         /**
+         * **A goal's Save works on the first press with the keyboard up** (2026-09-16).
+         *
+         * The goal sheet is a `<Modal>`, drawn in a window of its own, but it is still a
+         * React child of this scroller — and React Native's touch responder walks the
+         * React tree, not the native one. With the default `'never'`, a scroller claims
+         * any touch that starts while a text field is focused, *in the capture phase and
+         * before the touched control is asked*, spends it dismissing the keyboard, and
+         * the press never arrives. So the first Save lowered the keyboard, the sheet
+         * slid down as it went, and nothing saved; the second Save worked.
+         *
+         * `'handled'` lets a press a control actually handles through, and still lowers
+         * the keyboard for a tap on nothing. This screen has no text field of its own, so
+         * the only presses it changes are the ones on sheets mounted beneath it.
+         */
+        keyboardShouldPersistTaps="handled"
+        /**
          * The next page, asked for when the reader is within a screenful of the end.
          *
          * The three guards are the whole of the concurrency story, and

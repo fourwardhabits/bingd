@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { FlashList } from '@shopify/flash-list';
 import {
   Animated,
   Pressable,
@@ -190,6 +191,84 @@ export function PosterGrid({
   );
 }
 
+export type PosterGridListProps = {
+  tiles: PosterTile[];
+  onPressTile: (tile: PosterTile) => void;
+  /** Space above the first row and below the last, inside the scroller. */
+  paddingTop?: number;
+  paddingBottom?: number;
+};
+
+/**
+ * The same three-across wall as `PosterGrid`, **virtualised**, for a wall with no upper
+ * bound (2026-09-16).
+ *
+ * `PosterGrid` draws every tile it is given into whatever scroller holds it, which is
+ * right for the walls that are bounded by construction — For You's page, a profile's top
+ * titles, a title's Similar tab. It was wrong for the Collection, which is as long as a
+ * reader's library: a 688-title Letterboxd import mounted 688 tiles, each with its own
+ * press animation, elevated frame and decoded image, and scrolling it lagged on the
+ * device. This draws only the rows near the viewport and recycles the rest.
+ *
+ * It is a separate component rather than a mode of `PosterGrid` because it owns its own
+ * scroller: a virtualised list nested inside a parent `ScrollView` measures its window as
+ * its entire content and virtualises nothing. The caller gives it a flexing parent.
+ *
+ * **The tile is the same `Tile`**, so a wall drawn this way and one drawn by `PosterGrid`
+ * cannot drift in size, label, chip or press feel. The gaps are the same too: every cell
+ * is one third of the row, and the tile is aligned to the start, the centre or the end of
+ * its third. With three tiles of `cardWidth` and two gaps filling the row exactly, that
+ * places each gap at precisely `gap` — the arithmetic `PosterGrid` gets from `flexWrap`.
+ */
+export function PosterGridList({
+  tiles,
+  onPressTile,
+  paddingTop = 0,
+  paddingBottom = 0,
+}: PosterGridListProps) {
+  const { width } = useWindowDimensions();
+  const { columns, gap } = theme.layout.posterGrid;
+
+  const cardWidth = Math.floor(
+    (width - theme.layout.gutter * 2 - gap * (columns - 1)) / columns,
+  );
+
+  return (
+    <FlashList
+      data={tiles}
+      numColumns={columns}
+      keyExtractor={(tile) => tile.id}
+      // A sort or a filter replaces the data, and FlashList 2 would otherwise scroll to
+      // keep whichever tile was first on screen in place — a jump to somewhere mid-wall
+      // under a reader who only changed the order. A plain ScrollView kept the offset,
+      // which is what this wall has always done.
+      maintainVisibleContentPosition={GRID_POSITION}
+      contentContainerStyle={{
+        paddingHorizontal: theme.layout.gutter,
+        paddingTop,
+        paddingBottom,
+      }}
+      renderItem={({ item, index }) => (
+        <View
+          style={[
+            styles.gridCell,
+            { paddingBottom: gap },
+            index % columns === 0
+              ? styles.cellStart
+              : index % columns === columns - 1
+                ? styles.cellEnd
+                : styles.cellCentre,
+          ]}
+        >
+          <Tile tile={item} width={cardWidth} onPress={() => onPressTile(item)} />
+        </View>
+      )}
+    />
+  );
+}
+
+const GRID_POSITION = { disabled: true } as const;
+
 /**
  * One poster as a button.
  *
@@ -342,6 +421,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     paddingHorizontal: theme.layout.gutter,
   },
+  // The width of the cell FlashList sized, never a flex share of it: a cell's height is
+  // measured, and a flexing child would measure against the row instead of its tile.
+  gridCell: { width: '100%' },
+  cellStart: { alignItems: 'flex-start' },
+  cellCentre: { alignItems: 'center' },
+  cellEnd: { alignItems: 'flex-end' },
   save: {
     position: 'absolute',
     top: theme.space[1],

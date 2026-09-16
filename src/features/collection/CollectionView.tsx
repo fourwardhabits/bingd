@@ -1,5 +1,6 @@
+import { FlashList } from '@shopify/flash-list';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -8,7 +9,7 @@ import {
   FilterChip,
   IconToggle,
   type IconToggleOption,
-  PosterGrid,
+  PosterGridList,
   ScoreBadge,
   SortChip,
   SortMenu,
@@ -219,26 +220,48 @@ export function CollectionView({
           />
         </View>
       ) : state.mode === 'poster' ? (
-        <ScrollView contentContainerStyle={styles.wall}>
-          <PosterGrid
-            tiles={visible.map((item) => ({
-              id: item.mediaItemId,
-              title: nameOf(item),
-              year: item.year,
-              posterUri: posterUri(item.posterPath, 'card'),
-              // Only for titles that have one. A watchlist wall carries no
-              // numbers, which is what keeps it from looking like a scoreboard.
-              score: item.score,
-              bucket: item.bucket,
-            }))}
-            onPressTile={(tile) => onPressItem(tile.id)}
-          />
-        </ScrollView>
+        /**
+         * **Both modes are virtualised, and that is the 2026-09-16 fix.**
+         *
+         * Each drew every row it was given into a plain `ScrollView`, so a library of 688
+         * imported titles mounted 688 tiles before the first frame and kept every one of
+         * them alive while scrolling. It was never about the importer: Watched (ranked
+         * Movies and TV), Watchlist, Unranked and every filtered or sorted view of them
+         * are this component, and all of them grew the same way. Poster was the one a
+         * reader noticed because its tile is the heavier cell.
+         *
+         * Order, filters and counts are untouched: `visible` is computed exactly as it
+         * was, and only the drawing of it changed.
+         */
+        <PosterGridList
+          tiles={visible.map((item) => ({
+            id: item.mediaItemId,
+            title: nameOf(item),
+            year: item.year,
+            // `row` (342px wide) rather than `card` (500px). A wall tile is a third of
+            // the screen, about 115pt, which is 345px at 3x and ~300px on a typical
+            // Android panel — so 342 is the tile's own resolution, and 500 was decoding
+            // twice the pixels for every poster scrolled past.
+            posterUri: posterUri(item.posterPath, 'row'),
+            // Only for titles that have one. A watchlist wall carries no
+            // numbers, which is what keeps it from looking like a scoreboard.
+            score: item.score,
+            bucket: item.bucket,
+          }))}
+          onPressTile={(tile) => onPressItem(tile.id)}
+          paddingTop={styles.wall.paddingTop}
+          paddingBottom={styles.wall.paddingBottom}
+        />
       ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          {visible.map((item) => (
+        <FlashList
+          data={visible}
+          keyExtractor={(item) => item.mediaItemId}
+          // See the note on the grid in `PosterGridList`: a re-sort keeps the offset
+          // rather than chasing the row that happened to be on top.
+          maintainVisibleContentPosition={LIST_POSITION}
+          contentContainerStyle={styles.list}
+          renderItem={({ item }) => (
             <TitleRow
-              key={item.mediaItemId}
               title={nameOf(item)}
               year={item.year}
               posterUri={posterUri(item.posterPath)}
@@ -261,8 +284,8 @@ export function CollectionView({
               divided
               onPress={() => onPressItem(item.mediaItemId)}
             />
-          ))}
-        </ScrollView>
+          )}
+        />
       )}
 
       {/* Mounted only while open, so the draft is seeded from the filters actually
@@ -282,6 +305,8 @@ export function CollectionView({
     </View>
   );
 }
+
+const LIST_POSITION = { disabled: true } as const;
 
 /** A ranked TV list is otherwise a column of rows called "Season 2". */
 const nameOf = (item: CollectionItem) =>
