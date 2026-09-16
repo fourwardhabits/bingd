@@ -366,10 +366,10 @@ describe('configuredSocialLinks', () => {
       }),
     );
     expect(all.map((link) => link.network)).toEqual([
-      'instagram',
       'tiktok',
-      'youtube',
+      'instagram',
       'x',
+      'youtube',
       'website',
     ]);
   });
@@ -391,10 +391,10 @@ describe('configuredSocialLinks', () => {
       }),
     );
     expect(all.map((link) => link.label)).toEqual([
-      'Open Instagram profile',
       'Open TikTok profile',
-      'Open YouTube profile',
+      'Open Instagram profile',
       'Open X profile',
+      'Open YouTube profile',
       'Open website',
     ]);
   });

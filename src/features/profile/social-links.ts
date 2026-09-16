@@ -41,8 +41,14 @@
  * the box wants rather than what was wrong with the input.
  */
 
-/** Canonical order, top to bottom of the founder's list and left to right on screen. */
-export const SOCIAL_NETWORKS = ['instagram', 'tiktok', 'youtube', 'x', 'website'] as const;
+/**
+ * Canonical order: left to right on the profile, top to bottom in Edit Profile.
+ *
+ * TikTok first (founder, 2026-09-16), because it is where film people most often are
+ * and the row is read left to right. One list drives both surfaces, so the header and
+ * the form cannot disagree about it.
+ */
+export const SOCIAL_NETWORKS = ['tiktok', 'instagram', 'x', 'youtube', 'website'] as const;
 
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number];
 
@@ -99,18 +105,6 @@ export const SOCIAL_FIELD_LABELS: Record<SocialNetwork, string> = {
   youtube: 'YouTube',
   x: 'X',
   website: 'Website',
-};
-
-/**
- * Under the box, permanently. An example rather than a rule, because the rule is
- * "whatever you have" and a sentence saying so teaches nobody what to paste.
- */
-export const SOCIAL_FIELD_HINTS: Record<SocialNetwork, string> = {
-  instagram: 'Your username, or the link to your profile.',
-  tiktok: 'Your username, or the link to your profile.',
-  youtube: 'Your @handle, or the link to your channel.',
-  x: 'Your username, or the link to your profile. twitter.com links work too.',
-  website: 'Your site. We will add https:// if you leave it off.',
 };
 
 /**

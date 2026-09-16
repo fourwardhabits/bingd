@@ -157,23 +157,15 @@ describe('IconToggle', () => {
 });
 
 /**
- * **The profile's social row** (20260921000100), five cells of 32 with `space[2]` between
- * them, carrying the shared slop unmodified.
+ * **The profile's social row** (20260921000100), five 32pt cells `space[3]` apart.
  *
- * It reaches 44 **tall** and 40 **wide**, and the four points are a measured concession
- * rather than a miss. The row has to fit the column the avatar leaves — about 200pt on the
- * 320pt screen this app supports — and five cells wide enough to answer 44 without their
- * slops crossing would be 208, which clips the last icon on a small phone. It is the same
- * trade `IconToggle`'s middle cell makes, for the same reason: nothing behind these is
- * destructive, the neighbours are five links rather than five decisions, and a mis-tap
- * costs a back gesture.
- *
- * Pinned so it stays a decision, and so that anyone who finds a better arrangement has a
- * failing test telling them the vertical target and the no-crossing rule must not regress
- * with it.
+ * 44 × 44 on every cell. It was 44 × 40 while the row lived in the name column, where five
+ * cells wide enough for 44 would have clipped on a 320pt screen; since 2026-09-16 the row is
+ * full width at the gutter (~288pt), so 5 × 32 + 4 × 12 = 208 fits and the concession is
+ * gone. Pinned so the target and the no-crossing rule do not regress if the row moves again.
  */
 describe('SocialLinkRow', () => {
-  it('draws 32pt cells and answers 44 tall, with slop that never crosses the gap', async () => {
+  it('draws 32pt cells and answers 44 x 44, with slop that never crosses the gap', async () => {
     const view = await renderWithProviders(
       <SocialLinkRow
         links={{
@@ -193,18 +185,18 @@ describe('SocialLinkRow', () => {
       const drawn = StyleSheet.flatten(cell.props.style);
       expect(drawn.width).toBe(CHIP);
       expect(drawn.height).toBe(CHIP);
-      expect(cell.props.hitSlop).toEqual(SLOP);
       expect(tall(CHIP, cell.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+      expect(wide(CHIP, cell.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
     }
 
-    // The four points, stated rather than implied — so widening the cell is a change to
-    // this line and not a silent improvement nobody notices going the other way.
-    expect(wide(CHIP, SLOP)).toBe(40);
-    // And the rule that costs them: two neighbours' slops meet in the `space[2]` gap
-    // without overlapping, so a press between two icons belongs to the nearer one.
-    expect(SLOP.left + SLOP.right).toBeLessThanOrEqual(theme.space[2]);
+    // The row is full width at the gutter since 2026-09-16, so cells sit `space[3]`
+    // apart and each neighbour's slop meets the next exactly in that gap — a press
+    // between two icons still belongs to the nearer one.
+    const slop = cells[0]!.props.hitSlop;
+    expect(slop.left + slop.right).toBeLessThanOrEqual(theme.space[3]);
   });
 });
+
 describe('SectionHeader', () => {
   it('lets the trailing action fill the 44pt row it sits in', async () => {
     const view = await renderWithProviders(

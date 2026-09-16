@@ -111,10 +111,10 @@ describe('a profile with all five', () => {
     const view = await renderWithProviders(<SocialLinkRow links={all} />);
 
     expect(view.getAllByRole('link').map((node) => node.props.accessibilityLabel)).toEqual([
-      'Open Instagram profile',
       'Open TikTok profile',
-      'Open YouTube profile',
+      'Open Instagram profile',
       'Open X profile',
+      'Open YouTube profile',
       'Open website',
     ]);
   });
@@ -133,10 +133,10 @@ describe('a profile with all five', () => {
     const view = await renderWithProviders(<SocialLinkRow links={shuffled} />);
 
     expect(view.getAllByRole('link').map((node) => node.props.accessibilityLabel)).toEqual([
-      'Open Instagram profile',
       'Open TikTok profile',
-      'Open YouTube profile',
+      'Open Instagram profile',
       'Open X profile',
+      'Open YouTube profile',
       'Open website',
     ]);
   });
@@ -229,7 +229,7 @@ describe('the drawing', () => {
     }
   });
 
-  it('draws a 32pt cell and answers with the shared chip slop', async () => {
+  it('draws a 32pt cell and answers 44 x 44', async () => {
     // The arithmetic and the concession are argued in the component and pinned in
     // `touch-targets.test.tsx`; this is the half that belongs next to the component.
     const view = await renderWithProviders(<SocialLinkRow links={all} />);
@@ -237,6 +237,10 @@ describe('the drawing', () => {
 
     expect(StyleSheet.flatten(cell?.props.style).width).toBe(theme.layout.control.chipHeight);
     expect(StyleSheet.flatten(cell?.props.style).height).toBe(theme.layout.control.chipHeight);
-    expect(cell?.props.hitSlop).toEqual(theme.layout.chipHitSlop);
+    // Full width at the gutter since 2026-09-16, so the width no longer forces the
+    // 40pt concession the name column did: 32 + 6 + 6 on every side.
+    const slop = cell?.props.hitSlop;
+    expect(theme.layout.control.chipHeight + slop.top + slop.bottom).toBe(theme.layout.minTapTarget);
+    expect(theme.layout.control.chipHeight + slop.left + slop.right).toBe(theme.layout.minTapTarget);
   });
 });
