@@ -422,6 +422,19 @@ reports what the reader first met. It carries no ids, no handles and no count of
 suggested: step 9 is a private read of one person's social neighbourhood, and the analytics
 must not be able to reconstruct that graph.
 
+**Four of its six steps are emitted, and one of those in a single direction** (audited
+2026-09-17 against every call site). `profile` is never emitted — `signup_completed` is the
+signal there — and `pick` is emitted **only** with `outcome: 'skipped'`, because finishing
+the five-title run advances into the payoff screen and is reported as `payoff` with
+`outcome: 'continued'`. So `payoff` is the completed-run count and `pick` is the bail-out
+count. A funnel that reads `pick` as "the pick step" sees a 100% skip rate that is an
+artefact of where the event fires, not a fact about the product. `people` and
+`notifications` only ever report `continued`, so drop-off on those two is visible as absence
+of the next step rather than as a `skipped`. The full reading guide, the two conversion
+windows that separate a pause from an abandonment, and the dashboard recipe are in
+`onboarding-observability.md`.
+
+
 **`onboarding_completed`** covers both exits and `skipped` separates them. One event
 rather than two, so the denominator cannot drift: everybody who reaches the end of the
 flow is in it. It is emitted from `useCompleteTasteOnboarding`, which all three exits go
