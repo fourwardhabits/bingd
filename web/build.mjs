@@ -2492,7 +2492,7 @@ ${installRow({ primary: true })}
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
               A better ranking system means a better understanding of your taste and
-              stronger recommendations. Use group picks to generate recommendations based
+              stronger recommendations. Use Group Picks to generate recommendations based
               on shared taste before the popcorn runs out (a favorite feature for couples
               and movie clubs).
             </p>
