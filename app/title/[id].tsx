@@ -518,8 +518,17 @@ export default function TitleScreen() {
    * Already cached — Collection and Profile read the same key — so on the ordinary
    * path this costs nothing, and it is what lets the rank context be derived rather
    * than fetched. Only fetched at all once we know the title is ranked.
+   *
+   * That sentence was not true until 2026-09-16: with no `enabled`, every title page
+   * (most of them unranked, opened from Search, For You or a friend's activity) re-read
+   * the reader's whole ranked library with its catalogue embed once the cache was a
+   * minute old, and threw it away. A 700-title import paid for 700 rows per title
+   * opened, and a ranked season read Movies first because `rankCategory` defaults to it
+   * before the page's own read lands.
    */
-  const rankedList = useRankedCollection(profile.id, rankCategory);
+  const rankedList = useRankedCollection(profile.id, rankCategory, {
+    enabled: Boolean(data?.ranked),
+  });
 
   /**
    * The viewer's ranked seasons, for the series page only.

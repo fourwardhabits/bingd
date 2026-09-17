@@ -133,6 +133,10 @@ export function PeoplePicker({
       <ScrollView
         style={{ maxHeight: listMaxHeight }}
         contentContainerStyle={styles.listContent}
+        // The search field above is always shown, so the usual way to reach a row is with
+        // the keyboard up. At the default `never` the first tap on a name only lowered the
+        // keyboard and selected nobody, the goal-Save defect in a new place (2026-09-16).
+        keyboardShouldPersistTaps="handled"
       >
         {shown.length === 0 ? (
           <Text variant="footnote" tone="tertiary" style={styles.status}>

@@ -190,6 +190,42 @@ describe('the shared people picker', () => {
   });
 });
 
+/**
+ * **A name found by searching is chosen on the first tap** (2026-09-16).
+ *
+ * The search field is always shown, so the ordinary way to reach a row is typing with the
+ * keyboard up. A scroller at the default `keyboardShouldPersistTaps="never"` claims that
+ * tap to lower the keyboard and the row never hears it: the goal-Save defect (see
+ * `ProfileScreen.test.tsx`), here on Recommend and Group Picks. A test renderer has no
+ * keyboard, so what can be asserted is the property that decides it.
+ */
+describe('choosing somebody with the keyboard up', () => {
+  it('has no scroller above a row that spends the first tap on the keyboard', async () => {
+    await renderWithProviders(
+      <PeoplePicker
+        people={people}
+        selected={new Set()}
+        onToggle={jest.fn()}
+        searchPlaceholder="Search your friends"
+      />,
+    );
+
+    const scrollers: unknown[] = [];
+    let node = screen.getByLabelText('Abby, @abby') as unknown as {
+      type: unknown;
+      props: Record<string, unknown>;
+      parent: unknown;
+    } | null;
+    while (node) {
+      if (node.type === 'RCTScrollView') scrollers.push(node.props.keyboardShouldPersistTaps);
+      node = node.parent as typeof node;
+    }
+
+    expect(scrollers.length).toBeGreaterThan(0);
+    for (const persists of scrollers) expect(['handled', 'always']).toContain(persists);
+  });
+});
+
 describe('filterPeople', () => {
   it('returns everybody for a blank query', () => {
     expect(filterPeople(people, '  ')).toEqual(people);
