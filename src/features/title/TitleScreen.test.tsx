@@ -50,6 +50,8 @@ let mockRpcErrors: Record<string, unknown> = {};
  * asserting a helper was called (independent review 21e).
  */
 const mockReads: Record<string, number> = {};
+/** Every `select`, by table and column list, so one read of a table can be told from another. */
+const mockSelects: [string, string][] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -69,7 +71,10 @@ jest.mock('@/lib/supabase', () => ({
         });
       };
       const chain = {
-        select: () => chain,
+        select: (columns = '') => {
+          mockSelects.push([table, columns]);
+          return chain;
+        },
         eq: (column: string, value: unknown) => {
           filters[column] = value;
           return chain;
@@ -282,6 +287,7 @@ beforeEach(() => {
   mockRpcResults = {};
   mockRpcErrors = {};
   for (const key of Object.keys(mockReads)) delete mockReads[key];
+  mockSelects.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.media_items = [film];
   tableRows.user_media = [];
@@ -321,6 +327,27 @@ describe('a title nobody has ranked', () => {
     await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
 
     expect(view.queryByText(/#\d/)).toBeNull();
+  });
+
+  /**
+   * **An unranked title does not download the reader's ranked library** (2026-09-16).
+   *
+   * The ranked list feeds one thing on this page, the `#3 in Movies` segment, and only for
+   * a title that is ranked. Unconditioned, every title opened from Search, For You or a
+   * friend's activity read the whole list with its catalogue embed once the cache was a
+   * minute old, which for a 700-title import is 700 rows per title opened.
+   */
+  it('does not read the ranked library for a title that is not in it', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const libraryReads = mockSelects.filter(
+      ([table, columns]) => table === 'rankings' && columns.includes('media_items('),
+    );
+    expect(libraryReads).toHaveLength(0);
   });
 });
 

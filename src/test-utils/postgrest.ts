@@ -9,8 +9,9 @@
  * neither is reachable by a stub that answers everything in one call.
  *
  * So this honours what the reads actually say: `eq`, `neq`, `not(is null)`, `gt`, a
- * top-level `or` including the nested `and(...)` form a keyset cursor needs, `order` and
- * `limit`. It counts requests per table, and it will run a callback between them, which
+ * top-level `or` including the nested `and(...)` form a keyset cursor needs, `in`, `order`
+ * and `limit` and, when a test opts in, the row cap and URL ceiling a real deployment has
+ * (`maxRows`, `maxInList`). It counts requests per table, and it will run a callback between them, which
  * is how a test writes to the table mid-read the way another device would.
  *
  * What it is not is a database. There are no joins to resolve — embedded rows are
@@ -30,6 +31,8 @@ export type Read = {
   or: string | null;
   /** The keyset cursors this request carried, which is what makes paging assertable. */
   gt: [string, string][];
+  /** Each `in` filter and how many values it listed, which is what grows a URL. */
+  in: [string, number][];
 };
 
 export type Postgrest = {
@@ -57,7 +60,21 @@ export type Postgrest = {
   broken: Set<string>;
   /** Runs after each request is served — where a concurrent write goes. */
   between: (table: string, requestsSoFar: number, rows: Rows) => void;
+  /**
+   * PostgREST's row cap, which hosted Supabase sets to 1,000: a longer answer is cut
+   * short without an error. Off (null) unless a test sets it.
+   */
+  maxRows: number | null;
+  /**
+   * The longest `in` list a GET survives. Measured against staging on 2026-09-16: 390
+   * UUIDs reached PostgREST and 400 did not (`fetch failed`), a URL of roughly 15 KB.
+   * Past it the request fails the way a device sees it. Off (null) unless a test sets it.
+   */
+  maxInList: number | null;
 };
+
+/** The measured `in` ceiling, for tests that opt into it. */
+export const MEASURED_IN_LIST_CEILING = 390;
 
 /** `feed_events.actor_id` through a to-one embed PostgREST types as an array. */
 const valueAt = (row: unknown, path: string): unknown => {
@@ -150,6 +167,8 @@ export function createPostgrest(): Postgrest {
     requests: {},
     broken: new Set(),
     between: () => {},
+    maxRows: null,
+    maxInList: null,
     rpcAnswers: {},
     rpcCalls: [],
     rpc: (name: string, args: Record<string, unknown> = {}) => {
@@ -168,6 +187,7 @@ export function createPostgrest(): Postgrest {
         limit: null,
         or: null,
         gt: [],
+        in: [],
       };
       /** Every predicate this request carries. They are combined with AND, as PostgREST does. */
       const where: ((row: unknown) => boolean)[] = [];
@@ -185,6 +205,12 @@ export function createPostgrest(): Postgrest {
         },
         neq: (column: string, value: unknown) => {
           where.push((row) => apply(row, column, 'neq', String(value)));
+          return chain;
+        },
+        in: (column: string, values: readonly unknown[]) => {
+          read.in.push([column, values.length]);
+          const wanted = new Set(values.map(String));
+          where.push((row) => wanted.has(String(valueAt(row, column))));
           return chain;
         },
         gt: (column: string, value: unknown) => {
@@ -225,8 +251,13 @@ export function createPostgrest(): Postgrest {
         },
         then: (resolve: (value: unknown) => unknown) => {
           client.requests[table] = (client.requests[table] ?? 0) + 1;
-          if (client.broken.has(table)) {
-            const failed = Promise.resolve({ data: null, error: { message: 'nope' } }).then(
+          const tooLong =
+            client.maxInList !== null && read.in.some(([, size]) => size > client.maxInList!);
+          if (client.broken.has(table) || tooLong) {
+            const failed = Promise.resolve({
+              data: null,
+              error: { message: tooLong ? 'TypeError: fetch failed' : 'nope' },
+            }).then(
               resolve,
             );
             client.between(table, client.requests[table]!, tables);
@@ -245,6 +276,7 @@ export function createPostgrest(): Postgrest {
           const range = (read as Read & { range?: [number, number] }).range;
           if (range) rows = rows.slice(range[0], range[1] + 1);
           else if (read.limit !== null) rows = rows.slice(0, read.limit);
+          if (client.maxRows !== null) rows = rows.slice(0, client.maxRows);
 
           const served = Promise.resolve({ data: rows, error: null }).then(resolve);
           client.between(table, client.requests[table]!, tables);

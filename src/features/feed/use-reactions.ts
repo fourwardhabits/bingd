@@ -1,7 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { nudgePushDelivery } from '@/features/notifications/push';
+import { useChunkedById } from '@/lib/chunked-query';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
@@ -85,7 +86,7 @@ const one = <T>(value: T | T[] | null): T | null =>
   (Array.isArray(value) ? value[0] : value) ?? null;
 
 /**
- * Reactions for the events on screen, in one round trip.
+ * Reactions for the events on screen, one round trip per chunk of events.
  *
  * There is deliberately no aggregate RPC. `reactions_read` already answers this per
  * viewer — it requires visibility of both the reactor and the event's actor — so a
@@ -94,64 +95,69 @@ const one = <T>(value: T | T[] | null): T | null =>
  * a second time.
  *
  * The counting therefore happens here, over rows the database has already filtered.
+ *
+ * **Chunked, not one read over every loaded event** (2026-09-16). See `useChunkedById`:
+ * the single read was re-issued for the whole Feed on every page, blanked every pill
+ * while it ran, and stops reaching PostgREST around twenty pages down.
  */
 export function useReactions(eventIds: string[], viewerId: string) {
-  const key = [...eventIds].sort().join(',');
+  return useChunkedById<ReactionSummary>(['reactions', viewerId], eventIds, (ids) =>
+    readReactions(ids, viewerId),
+  );
+}
 
-  return useQuery({
-    queryKey: ['reactions', viewerId, key],
-    enabled: eventIds.length > 0,
-    queryFn: async (): Promise<Map<string, ReactionSummary>> => {
-      const { data, error } = await supabase
-        .from('reactions')
-        .select(
-          'feed_event_id, user_id, kind, profiles:user_id(id, display_name, username, avatar_path)',
-        )
-        .in('feed_event_id', eventIds);
-      if (error) throw error;
+async function readReactions(
+  eventIds: string[],
+  viewerId: string,
+): Promise<Map<string, ReactionSummary>> {
+  const { data, error } = await supabase
+    .from('reactions')
+    .select(
+      'feed_event_id, user_id, kind, profiles:user_id(id, display_name, username, avatar_path)',
+    )
+    .in('feed_event_id', eventIds);
+  if (error) throw error;
 
-      const byEvent = new Map<string, ReactionSummary>();
+  const byEvent = new Map<string, ReactionSummary>();
 
-      for (const row of (data ?? []) as unknown as ReactionRow[]) {
-        const summary =
-          byEvent.get(row.feed_event_id) ?? { ...EMPTY, kinds: [], byKind: {}, people: [] };
-        summary.total += 1;
-        if (row.user_id === viewerId) summary.mine = row.kind;
-        summary.byKind[row.kind] = (summary.byKind[row.kind] ?? 0) + 1;
+  for (const row of (data ?? []) as unknown as ReactionRow[]) {
+    const summary =
+      byEvent.get(row.feed_event_id) ?? { ...EMPTY, kinds: [], byKind: {}, people: [] };
+    summary.total += 1;
+    if (row.user_id === viewerId) summary.mine = row.kind;
+    summary.byKind[row.kind] = (summary.byKind[row.kind] ?? 0) + 1;
 
-        const profile = one(row.profiles);
-        const name = profile?.display_name || profile?.username;
-        // A reactor whose profile did not resolve is counted and not named. The
-        // count comes from the reaction row, which the viewer is authorised to see;
-        // the name comes from a profile embed, whose own policy may withhold it.
-        // Inventing "Someone" for the gap would be the feed's old bug in a new place.
-        if (profile && name) {
-          summary.people.push({
-            userId: row.user_id,
-            username: profile.username,
-            name,
-            avatarUri: avatarUri(profile.avatar_path),
-            kind: row.kind,
-          });
-        }
+    const profile = one(row.profiles);
+    const name = profile?.display_name || profile?.username;
+    // A reactor whose profile did not resolve is counted and not named. The
+    // count comes from the reaction row, which the viewer is authorised to see;
+    // the name comes from a profile embed, whose own policy may withhold it.
+    // Inventing "Someone" for the gap would be the feed's old bug in a new place.
+    if (profile && name) {
+      summary.people.push({
+        userId: row.user_id,
+        username: profile.username,
+        name,
+        avatarUri: avatarUri(profile.avatar_path),
+        kind: row.kind,
+      });
+    }
 
-        byEvent.set(row.feed_event_id, summary);
-      }
+    byEvent.set(row.feed_event_id, summary);
+  }
 
-      for (const summary of byEvent.values()) {
-        summary.kinds = (Object.entries(summary.byKind) as [ReactionKind, number][])
-          .sort((a, b) => b[1] - a[1])
-          .map(([kind]) => kind);
-        // The reader first, then alphabetical. On a surface that names people, the
-        // one whose reaction can be changed from here belongs at the top.
-        summary.people.sort((a, b) =>
-          a.userId === viewerId ? -1 : b.userId === viewerId ? 1 : a.name.localeCompare(b.name),
-        );
-      }
+  for (const summary of byEvent.values()) {
+    summary.kinds = (Object.entries(summary.byKind) as [ReactionKind, number][])
+      .sort((a, b) => b[1] - a[1])
+      .map(([kind]) => kind);
+    // The reader first, then alphabetical. On a surface that names people, the
+    // one whose reaction can be changed from here belongs at the top.
+    summary.people.sort((a, b) =>
+      a.userId === viewerId ? -1 : b.userId === viewerId ? 1 : a.name.localeCompare(b.name),
+    );
+  }
 
-      return byEvent;
-    },
-  });
+  return byEvent;
 }
 
 export const emptyReactionSummary = () => EMPTY;

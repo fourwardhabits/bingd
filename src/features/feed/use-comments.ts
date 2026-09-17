@@ -6,6 +6,7 @@ import { nudgePushDelivery } from '@/features/notifications/push';
 import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
+import { useChunkedById } from '@/lib/chunked-query';
 import { answerWasLost, useOperationIntent } from '@/lib/operation-intent';
 import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
@@ -128,23 +129,19 @@ type CommentRow = {
  * serves one reader another's number after a switch (reviews 6, 10 and 10b).
  */
 export function useCommentCounts(eventIds: string[], viewerId: string) {
-  const key = [...eventIds].sort().join(',');
+  // Chunked for the reason `useReactions` is: one read over every loaded event was
+  // re-issued for the whole list on each page and blanked every count while it ran.
+  return useChunkedById<number>(['comment-counts', viewerId], eventIds, async (ids) => {
+    const { data, error } = await supabase.rpc('activity_comment_counts', {
+      p_feed_event_ids: ids,
+    });
+    if (error) throw error;
 
-  return useQuery({
-    queryKey: ['comment-counts', viewerId, key],
-    enabled: eventIds.length > 0,
-    queryFn: async (): Promise<Map<string, number>> => {
-      const { data, error } = await supabase.rpc('activity_comment_counts', {
-        p_feed_event_ids: eventIds,
-      });
-      if (error) throw error;
-
-      const counts = new Map<string, number>();
-      for (const row of (data ?? []) as { feed_event_id: string; comment_count: number }[]) {
-        counts.set(row.feed_event_id, row.comment_count);
-      }
-      return counts;
-    },
+    const counts = new Map<string, number>();
+    for (const row of (data ?? []) as { feed_event_id: string; comment_count: number }[]) {
+      counts.set(row.feed_event_id, row.comment_count);
+    }
+    return counts;
   });
 }
 
