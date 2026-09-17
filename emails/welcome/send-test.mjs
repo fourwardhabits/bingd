@@ -54,10 +54,12 @@ import {
   DEFAULT_FROM,
   DEFAULT_REPLY_TO,
   addressOf,
+  escapeHtml,
   greetingFor,
   isAddress,
   loadTemplate,
   personalise,
+  postalAddressFrom,
   resendPayload,
   sendViaResend,
   unsubscribeFor,
@@ -138,11 +140,29 @@ if (!Number.isInteger(subjectChoice) || subjectChoice < 1 || subjectChoice > sub
   die(`--subject must be 1 to ${subjects.length}.`);
 }
 
+/**
+ * The footer address, from WELCOME_POSTAL_ADDRESS, exactly as the worker reads it.
+ *
+ * A test send renders the real footer or it is not testing the real message. For a test
+ * an obviously fake address is the right value — that is the documented staging path —
+ * but it still has to be *supplied*, so this script cannot quietly render something the
+ * cohort would refuse.
+ */
+let postalAddress;
+try {
+  postalAddress = postalAddressFrom(process.env);
+} catch (error) {
+  die(`${error.message} For a test, export it as an obviously fake address, e.g. WELCOME_POSTAL_ADDRESS="1 Example Street, Sampleton EX1 2MP".`);
+}
+
 const values = {
   greeting: greetingFor(flag('--name'), copy.letter.greeting),
   inviteToken: inviteMatch ? inviteMatch[1] : '0'.repeat(32),
   unsubscribeUrl,
 };
+// Escaped for HTML, raw for text. See send-welcome.mjs for why these are two maps.
+const htmlValues = { ...values, postalAddress: escapeHtml(postalAddress) };
+const textValues = { ...values, postalAddress };
 
 let payload;
 try {
@@ -151,8 +171,8 @@ try {
     replyTo,
     to,
     subject: `[TEST] ${subjects[subjectChoice - 1]}`,
-    html: personalise(template.html, values),
-    text: personalise(template.text, values),
+    html: personalise(template.html, htmlValues),
+    text: personalise(template.text, textValues),
     unsubscribeUrl,
   });
 } catch (error) {
@@ -162,7 +182,6 @@ try {
 const links = [...new Set([...payload.html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]))];
 
 const warnings = [];
-if (!copy.footer.postalAddress) warnings.push('footer.postalAddress is null: the footer shows a placeholder. Fine for a test.');
 if (copy.letter.status !== 'APPROVED') warnings.push(`letter.status is "${copy.letter.status}": the automation would refuse this copy.`);
 if (!inviteMatch) warnings.push('No --invite-url: the invite link uses an all-zero token the resolver refuses. Fine for a dry run.');
 if (!/@(auth\.)?bingd\.app$/i.test(addressOf(from))) warnings.push(`From "${from}" is not on a bingd domain; Resend will refuse it.`);

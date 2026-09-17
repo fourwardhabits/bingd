@@ -1,18 +1,23 @@
 -- The welcome email's send ledger, its suppression list, its switches, and the functions
 -- the worker calls.
 --
--- *** THIS FILE IS NOT IN supabase/migrations/ AND HAS NOT BEEN APPLIED ANYWHERE. ***
+-- *** APPLYING THIS SENDS NOTHING AND SWITCHES NOTHING ON. ***
 --
--- It has no timestamp on purpose. The first version was named 20260916000100, and by the
--- time anybody came to apply it main had taken that exact timestamp for something else
--- (`20260916000100_a_bar_the_first_five_already_clears.sql`). A timestamp chosen weeks
--- before a file is applied is a collision waiting for its date. It gets one in the commit
--- that moves it into `supabase/migrations/`, newer than every file there at that moment.
--- See README.md, "Turning it on".
+-- It creates two empty tables, inserts six configuration rows that all mean "send
+-- nothing to nobody", and defines functions only the service role can call, all in one
+-- statement. `welcome.delivery_enabled` is false and `welcome.start_after` is 2099, so
+-- the existing user base cannot be reached even by accident. Switching it on is two
+-- `update`s a person runs deliberately: README.md, "Turning it on", step 5.
 --
--- Applying it changes no behaviour on its own: it creates two empty tables, inserts six
--- configuration rows at values that mean "send nothing to nobody", and defines functions
--- that only the service role can call, all installed in one statement.
+-- It lived outside `supabase/migrations/` until 2026-09-17, with no timestamp, because a
+-- timestamp chosen weeks before a file is applied is a collision waiting for its date —
+-- the first version was `20260916000100`, which main took for something else
+-- (`20260916000100_a_bar_the_first_five_already_clears.sql`) before anybody applied this.
+-- It took its real timestamp on the way in, newer than every file there at that moment.
+--
+-- Forward-only and additive: it creates, it never alters or drops, and it re-applies
+-- safely because every insert is `on conflict do nothing` (so a switch somebody turned
+-- off is never re-armed).
 --
 -- Proven against every real migration by supabase/tests/welcome-email.test.mjs (PGlite)
 -- and supabase/tests/concurrency/races/welcome-email.mjs (a real PostgreSQL, two

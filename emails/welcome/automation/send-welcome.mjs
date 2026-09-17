@@ -53,11 +53,13 @@ import {
   DEFAULT_FROM,
   DEFAULT_REPLY_TO,
   TEMPLATE_VERSION,
+  escapeHtml,
   greetingFor,
   inviteUrlFor,
   isAddress,
   loadTemplate,
   personalise,
+  postalAddressFrom,
   resendPayload,
   sendViaResend,
   unsubscribeFor,
@@ -241,18 +243,35 @@ export async function run({
   const { copy } = template;
 
   /**
-   * The founder's approval gate, for the cohort. A canary goes to a test inbox and may
-   * carry unapproved copy and a placeholder address; nobody else's email may.
+   * THE POSTAL ADDRESS, AND IT GATES A CANARY TOO.
+   *
+   * Read before anything is claimed, so a missing secret costs nobody their one chance at
+   * this note: an account held here is still eligible on the next run. `postalAddressFrom`
+   * throws on missing, blank, too-short and placeholder-shaped alike, and its message names
+   * the variable rather than the value, so this line is safe to log.
+   *
+   * A canary is **not** exempt. It is a real send to a real inbox, the address is the legal
+   * line rather than a nicety, and a rehearsal that skips the one gate that can fail in
+   * production is a rehearsal of the wrong thing. Set the variable to an obviously fake
+   * address for staging; that is the documented staging path.
    */
-  const ready = Boolean(copy.footer?.postalAddress) && copy.letter?.status === 'APPROVED';
-  if (!canary && !copy.footer?.postalAddress) {
-    return stop('footer.postalAddress in copy.json is null. A commercial email needs a physical mailing address.', 1);
+  let postalAddress;
+  try {
+    postalAddress = postalAddressFrom(env);
+  } catch (error) {
+    return stop(error.message, 1);
   }
+
+  /**
+   * The founder's approval gate, for the cohort. A canary goes to a test inbox and may
+   * carry unapproved copy; nobody else's email may.
+   */
+  const ready = copy.letter?.status === 'APPROVED';
   if (!canary && copy.letter?.status !== 'APPROVED') {
     return stop(`letter.status in copy.json is "${copy.letter?.status}". The founder approves the copy by setting it to "APPROVED".`, 1);
   }
   if (canary && !ready) {
-    log('  ! canary: the copy is a draft or has no postal address. Allowed for a test inbox, refused for the cohort.');
+    log('  ! canary: the copy is a draft. Allowed for a test inbox, refused for the cohort.');
   }
 
   let owned;
@@ -296,6 +315,14 @@ export async function run({
         inviteToken: person.invite_token,
         unsubscribeUrl,
       };
+      /**
+       * One address, two renderings. The HTML part is escaped because an ampersand in a
+       * building name is ordinary and an unescaped one is invalid HTML; the plain-text part
+       * must NOT be, or the reader sees `&amp;`. Sharing one map would have to pick one of
+       * those and be wrong in the other part of every message.
+       */
+      const htmlValues = { ...values, postalAddress: escapeHtml(postalAddress) };
+      const textValues = { ...values, postalAddress };
       outcome = await sendViaResend({
         fetch: fetchImpl,
         apiKey: resendKey,
@@ -305,8 +332,8 @@ export async function run({
           replyTo,
           to: person.recipient_email,
           subject: copy.subject.chosen,
-          html: personalise(template.html, values),
-          text: personalise(template.text, values),
+          html: personalise(template.html, htmlValues),
+          text: personalise(template.text, textValues),
           unsubscribeUrl,
         }),
       });

@@ -17,8 +17,9 @@ a week are never selected, so a paused job does not send stale welcomes when res
 ## The pieces
 
 ```
+supabase/migrations/20260923000100_a_welcome_note_sent_once.sql
+                         the ledger, the suppression list, the switches, the functions
 emails/welcome/automation/
-  welcome_email.sql      the ledger, the suppression list, the switches, the functions
   send-welcome.mjs       the worker: claim, send, record
 .github/workflows/welcome-email.yml   manual only; no schedule
 supabase/tests/welcome-email.test.mjs            the SQL against every migration, and the
@@ -204,7 +205,7 @@ on conflict (user_id) do nothing;
 
 The note asks the reader to invite somebody and to try a feature, so it is treated as
 commercial email and carries: the sender (`bingd is made by Suraj Kandukuri.`), a
-**physical mailing address** (`footer.postalAddress`, a founder input, and the worker
+**physical mailing address** (the `WELCOME_POSTAL_ADDRESS` secret, and the worker
 refuses the cohort while it is null), and a visible **unsubscribe** plus a
 `List-Unsubscribe` header.
 
@@ -236,6 +237,10 @@ export SUPABASE_URL=https://fjxhcbowoxuzulwirzyr.supabase.co
 export SUPABASE_SERVICE_ROLE_KEY=...   # npx supabase projects api-keys --project-ref <ref> -o json
 export RESEND_API_KEY=re_...           # the welcome key, not the Supabase one
 export WELCOME_FROM="Suraj from bingd <suraj@auth.bingd.app>"   # until bingd.app is verified
+# The footer address. A send refuses without it, canary included: a canary is a real
+# message to a real inbox, and the address is the legal line rather than a nicety. An
+# obviously fake one is the right value for a test.
+export WELCOME_POSTAL_ADDRESS="1 Example Street, Sampleton EX1 2MP"
 
 W=emails/welcome/automation/send-welcome.mjs
 ID=<test account user id>; EMAIL=<its confirmed address>
@@ -286,8 +291,9 @@ update app_config set value = to_jsonb((now() - interval '1 day')::text) where k
 update app_config set value = 'true'::jsonb                    where key = 'welcome.delivery_enabled';
 ```
 
-Then, with staging's URL and key exported (the block under "The canary" shows how), sign up
-one or two throwaway accounts in the staging build and:
+Then, with staging's URL, key, From and `WELCOME_POSTAL_ADDRESS` exported (the block under
+"The canary" shows all four — the address is required for a send and an obviously fake one
+is correct here), sign up one or two throwaway accounts in the staging build and:
 
 ```bash
 W=emails/welcome/automation/send-welcome.mjs
@@ -364,18 +370,19 @@ the others.
    - Sign in with Apple private-relay addresses only deliver mail from registered domains.
      In Apple Developer → Certificates, Identifiers & Profiles → Services → Sign in with
      Apple for Email Communication, register `bingd.app` and `suraj@bingd.app`.
-2. **The copy.** Rewrite the note, set `footer.postalAddress`, check the P.S. title, set
+2. **The copy and the address.** Store the mailing address as the repository secret
+   `WELCOME_POSTAL_ADDRESS` (GitHub → Settings → Secrets and variables → Actions). It is
+   deliberately **not** in `copy.json`: a value committed there is in git history for
+   ever. Then rewrite the note if you want to, check the P.S. title, set
    `note.status` to `"APPROVED"`, run `node emails/welcome/build.mjs` and the tests, and send
    yourself a test at two inboxes. Read both on a phone in light and dark mode, reply from
    the one that is not the forwarding Gmail, and tap every link with and without the app.
-3. **The SQL.** Move it into the migrations under a fresh timestamp newer than every file
-   there, keeping the name the test support module looks for:
+3. **The SQL.** It is already a migration — `supabase/migrations/20260923000100_a_welcome_note_sent_once.sql`
+   — so it goes out with the next ordinary `db push`. Applying it changes no behaviour:
+   it creates two empty tables and inserts six switches that all mean "send nothing to
+   nobody". Push it to staging first:
 
    ```bash
-   ls supabase/migrations | tail -1                      # pick a later timestamp
-   git mv emails/welcome/automation/welcome_email.sql \
-     supabase/migrations/<timestamp>_a_welcome_note_sent_once.sql
-   npm run test:db && npm run test:race                  # both suites follow the file
    npx supabase@latest db push --project-ref fjxhcbowoxuzulwirzyr --skip-vault --dry-run --yes
    npx supabase@latest db push --project-ref fjxhcbowoxuzulwirzyr --skip-vault --yes
    ```

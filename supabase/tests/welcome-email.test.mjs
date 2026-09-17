@@ -781,18 +781,20 @@ const ENV = {
   SUPABASE_URL: 'https://project.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'service-key',
   RESEND_API_KEY: 're_test',
+  // Supplied by the workflow from a repository secret. Obviously fake here, which is
+  // also the documented staging value.
+  WELCOME_POSTAL_ADDRESS: '1 Example Street, Sampleton EX1 2MP',
 };
 
 /**
- * A copy of the welcome directory with the copy approved and a postal address set, built
- * by the real `build.mjs`, so the worker reads a manifest and a template it did not have
- * a hand in faking.
+ * A copy of the welcome directory with the copy approved, built by the real `build.mjs`,
+ * so the worker reads a manifest and a template it did not have a hand in faking. The
+ * postal address is not here: it is an environment variable now, so it is in `ENV`.
  */
 async function approvedRoot(change = () => {}) {
   const dir = await mkdtemp(join(tmpdir(), 'welcome-approved-'));
   const copy = JSON.parse(await readFile(join(welcomeRoot, 'copy.json'), 'utf8'));
   copy.letter.status = 'APPROVED';
-  copy.footer.postalAddress = 'PO Box 1, Testville';
   change(copy);
   await writeFile(join(dir, 'copy.json'), JSON.stringify(copy, null, 2));
   for (const file of ['targets.json', 'build.mjs']) {
@@ -835,7 +837,9 @@ describe('welcome email: the worker, against the real SQL', () => {
     assert.match(body.html, /Hey Ada,/);
     assert.match(body.text, /^Hey Ada,/);
     assert.doesNotMatch(body.html + body.text, /\{\{/);
-    assert.match(body.html, /PO Box 1, Testville/);
+    // The footer address, filled from the environment rather than from copy.json.
+    assert.ok(body.html.includes(ENV.WELCOME_POSTAL_ADDRESS), 'the HTML footer carries the address');
+    assert.ok(body.text.includes(ENV.WELCOME_POSTAL_ADDRESS), 'the text footer carries the address');
 
     // The recipient's own invite link, the exact token create_invite_link minted for them,
     // in both parts; and the founder's profile. The run minted nothing.
@@ -926,11 +930,10 @@ describe('welcome email: the worker, against the real SQL', () => {
   });
 
   /**
-   * One gate per test. The committed copy fails both gates at once, so a test run against
-   * it alone passes with either gate deleted; each case below fails exactly one.
+   * One gate per test, so a case cannot pass because some *other* gate stopped the run.
+   * The postal address left this table when it left `copy.json` — it is the suite below.
    */
   for (const [label, change, reason] of [
-    ['has no postal address', (copy) => { copy.footer.postalAddress = null; }, /postalAddress/],
     ['is not approved', (copy) => { copy.letter.status = 'DRAFT'; }, /APPROVED/],
   ]) {
     it(`refuses the cohort, before claiming anybody, while the copy ${label}`, async () => {
@@ -949,6 +952,69 @@ describe('welcome email: the worker, against the real SQL', () => {
       }
     });
   }
+
+  /**
+   * THE POSTAL ADDRESS GATE, AND WHAT MATTERS IS *WHEN* IT REFUSES.
+   *
+   * `postalAddressFrom` is unit-tested in `emails/welcome/email.test.mjs`; what can only be
+   * said here, against the real SQL, is that the refusal happens **before a single claim**.
+   * That is the difference between a forgotten secret costing nothing and it costing every
+   * account in the window their one chance at this note — a claimed row is never re-offered,
+   * so a run that claimed and then failed to render would burn the cohort silently.
+   *
+   * Asserted as `rpcs: []` and an empty ledger, not as an exit code.
+   */
+  for (const [label, postal] of [
+    ['missing', undefined],
+    ['blank', ''],
+    ['whitespace only', '   \n  '],
+    ['still a placeholder', '[POSTAL ADDRESS - FOUNDER TO SUPPLY]'],
+  ]) {
+    it(`refuses the cohort, before claiming anybody, while WELCOME_POSTAL_ADDRESS is ${label}`, async () => {
+      await t.exec(OPEN_COHORT_SQL);
+      await person();
+      const env = { ...ENV };
+      if (postal === undefined) delete env.WELCOME_POSTAL_ADDRESS;
+      else env.WELCOME_POSTAL_ADDRESS = postal;
+
+      const w = world();
+      const result = await go(w, [], { env });
+      assert.equal(result.code, 1);
+      assert.match(result.reason, /WELCOME_POSTAL_ADDRESS/);
+      assert.deepEqual(w.rpcs, [], 'nothing was claimed');
+      assert.deepEqual(await ledger(), [], 'nobody was consumed');
+      assert.equal(w.resend.length, 0);
+    });
+  }
+
+  it('renders the supplied address into both parts, escaped in the HTML, and never logs it', async () => {
+    await t.exec(OPEN_COHORT_SQL);
+    await person();
+
+    // An ampersand is ordinary in a building name; the tag is the hostile case. This value
+    // arrives from outside the repository, so it is the one part of the letter that could
+    // inject markup into every message.
+    const address = 'Suite <b>4</b> & Co, 5 Test Road, Testville TS1 2AB';
+    const lines = [];
+    const w = world();
+    const result = await go(w, [], {
+      env: { ...ENV, WELCOME_POSTAL_ADDRESS: address },
+      log: (line) => lines.push(line),
+    });
+
+    assert.equal(result.code, 0);
+    assert.equal(w.resend.length, 1);
+    const sent = w.resend[0].body;
+
+    assert.match(sent.text, /Suite <b>4<\/b> & Co, 5 Test Road/, 'the text part carries it literally');
+    assert.equal(sent.html.includes('<b>4</b>'), false, 'raw markup reached the HTML part');
+    assert.match(sent.html, /Suite &lt;b&gt;4&lt;\/b&gt; &amp; Co, 5 Test Road/, 'the HTML part is escaped');
+
+    // A refusal message names the variable; a successful run says nothing about it either.
+    const printed = lines.join(String.fromCharCode(10));
+    assert.equal(printed.includes('Test Road'), false, 'the address was printed to the log');
+    assert.equal(printed.includes(address), false, 'the address was printed to the log');
+  });
 
   it('refuses before claiming anybody when dist/ was not rebuilt after a copy edit', async () => {
     await t.exec(OPEN_COHORT_SQL);

@@ -33,6 +33,77 @@ export const TEMPLATE_VERSION = 'v1';
 export const DEFAULT_FROM = 'Suraj from bingd <suraj@bingd.app>';
 export const DEFAULT_REPLY_TO = 'suraj@bingd.app';
 
+/**
+ * THE POSTAL ADDRESS IS A RUNTIME SECRET, NOT COPY.
+ *
+ * A commercial email has to carry a physical mailing address, and the founder's is his
+ * home. It was `copy.json` `footer.postalAddress` until 2026-09-17; it is now read from
+ * the environment at send time, because a value committed to `copy.json` is a home
+ * address in the git history of a public-facing repository for ever, and rewriting
+ * history is not a remedy anybody should have to reach for.
+ *
+ * The rendered files in `dist/` therefore carry `{{postalAddress}}` exactly as they carry
+ * `{{greeting}}`, and `personalise` refuses to return a message with a token left in it.
+ * That is what makes "a placeholder cannot be sent" a property of the code rather than a
+ * thing to remember: there is no placeholder to leak, only a token that fails loudly.
+ */
+export const POSTAL_ADDRESS_ENV = 'WELCOME_POSTAL_ADDRESS';
+
+/**
+ * Anything that looks like the old placeholder, or like somebody testing the pipe rather
+ * than filling it in. Checked so that a secret set to "TODO" fails the same way an unset
+ * one does, rather than mailing the word TODO to every new account.
+ */
+const PLACEHOLDER = /\[|\]|FOUNDER TO SUPPLY|POSTAL ADDRESS|TODO|TBD|FIXME|XXXX/i;
+
+/**
+ * The address to print in the footer, read from `env` and normalised to one line.
+ *
+ * **Fails closed.** Missing, blank, whitespace-only, too short to be an address, or
+ * placeholder-shaped all throw, and every caller treats that as a refusal to send rather
+ * than as a footer to omit — an email that drops the address is the one that breaks the
+ * rule the address is there to satisfy.
+ *
+ * Whitespace is collapsed rather than rejected: a GitHub secret pasted from an address
+ * label arrives with newlines and a trailing one, and a footer is a single line. The
+ * **message never names the value**, only the variable, so a bad secret can be diagnosed
+ * from a log without the log containing somebody's home address.
+ */
+export const postalAddressFrom = (env) => {
+  const raw = env?.[POSTAL_ADDRESS_ENV];
+  if (raw === undefined || raw === null) {
+    throw new Error(`${POSTAL_ADDRESS_ENV} is not set. A commercial email needs a physical mailing address.`);
+  }
+  const line = String(raw).replace(/\s+/g, ' ').trim();
+  if (line === '') {
+    throw new Error(`${POSTAL_ADDRESS_ENV} is blank. A commercial email needs a physical mailing address.`);
+  }
+  if (line.length < 10 || !/\p{L}/u.test(line)) {
+    throw new Error(`${POSTAL_ADDRESS_ENV} is too short to be a mailing address.`);
+  }
+  if (PLACEHOLDER.test(line)) {
+    throw new Error(`${POSTAL_ADDRESS_ENV} still looks like a placeholder rather than an address.`);
+  }
+  return line;
+};
+
+/**
+ * HTML-escapes a value going into a text node of the message.
+ *
+ * The postal address is the one part of the letter that arrives from outside the
+ * repository, so it is the one part that could carry `<` or `&` — a building name with an
+ * ampersand is ordinary, not an attack — and an unescaped `&` alone is already invalid
+ * HTML. Quotes are escaped too, which costs nothing and means this is still correct if a
+ * later footer puts the value in an attribute.
+ */
+export const escapeHtml = (value) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 const ADDRESS = /^[^@\s<>,;"]+@[^@\s<>,;"]+\.[^@\s<>,;"]+$/;
 
 /** A bare address, or a display name with the address in angle brackets. */

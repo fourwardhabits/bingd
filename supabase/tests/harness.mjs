@@ -49,9 +49,33 @@ const migrationsDir = join(here, '..', 'migrations');
  * Exported rather than copied. Two shims for two harnesses is the drift that ends with
  * a race test passing against a schema production does not have.
  */
+/**
+ * **The shim models the GoTrue columns a migration is allowed to read** (2026-09-17).
+ *
+ * `id` alone was enough while nothing but a foreign key pointed at `auth.users`. It
+ * stopped being enough when the welcome email became a migration
+ * (`_a_welcome_note_sent_once`): its eligibility function is `language sql`, so
+ * PostgreSQL parses the body at *create* time, and a migration reading `u.email` cannot
+ * apply against a one-column fake — on a schema where, in production, that column has
+ * always existed.
+ *
+ * The failure reads like a broken migration and is a thin fake. These are the real names
+ * and types as Supabase Auth defines them, and every one is nullable, so no existing
+ * fixture has to learn about them. `welcome-email-support.mjs` keeps its own
+ * `AUTH_COLUMNS_SQL` for the same columns; it is `if not exists`, so the two agree.
+ */
 export const buildShim = ({ citext = 'domain' } = {}) => `
   create schema if not exists auth;
-  create table auth.users (id uuid primary key);
+  -- The GoTrue columns a migration may read. Nullable, so existing fixtures are
+  -- unaffected; see the note above buildShim for why id alone stopped being enough.
+  create table auth.users (
+    id                 uuid primary key,
+    email              varchar(255),
+    email_confirmed_at timestamptz,
+    banned_until       timestamptz,
+    deleted_at         timestamptz,
+    is_anonymous       boolean not null default false
+  );
   ${citext === 'extension' ? 'create extension if not exists citext;' : 'create domain citext as text;'}
 
   create role anon         nologin noinherit;

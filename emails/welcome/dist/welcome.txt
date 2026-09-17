@@ -34,7 +34,7 @@ Suraj
 ------------------------------------------------------------------------
 
 bingd is made by Suraj Kandukuri.
-[POSTAL ADDRESS - FOUNDER TO SUPPLY]
+{{postalAddress}}
 You are getting this one-time note because you made a bingd account.
 
 Unsubscribe: {{unsubscribeUrl}}

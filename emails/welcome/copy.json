@@ -67,12 +67,16 @@
   "$footerComment": [
     "Not part of the letter. The note asks the reader to invite somebody, so it is treated as",
     "commercial email and carries a sender, a physical mailing address and an unsubscribe.",
-    "`postalAddress` is a FOUNDER INPUT: the worker refuses to mail the cohort while it is null."
+    "The physical mailing address is NOT here and must never be added here: it is the",
+    "operator's home address, and a value committed to this file is in git history for",
+    "ever. It is supplied at send time from the WELCOME_POSTAL_ADDRESS environment",
+    "variable (the GitHub Actions secret of that name), HTML-escaped as it is filled in.",
+    "A send refuses, before claiming anybody, while that variable is missing, blank or",
+    "placeholder-shaped. See emails/welcome/envelope.mjs, postalAddressFrom."
   ],
   "footer": {
     "signature": "bingd is made by Suraj Kandukuri.",
     "reason": "You are getting this one-time note because you made a bingd account.",
-    "postalAddress": null,
     "unsubscribeLabel": "Unsubscribe"
   }
 }

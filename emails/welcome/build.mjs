@@ -193,16 +193,14 @@ const wrap = (text, width = 72) => {
  * decision which. A plausible-looking placeholder in a compliance field is worse than an
  * empty one, because it reads as done.
  *
- * The build still produces every file, because the preview is the thing being reviewed
- * tomorrow and blocking it on an address would help nobody. `send-test.mjs` is where the
- * refusal bites.
+ * **It is a runtime secret, and this build never sees it** (2026-09-17). It used to live
+ * in `copy.json`, which would have put the operator's home address in git history for
+ * ever. The sendable files carry `{{postalAddress}}`, filled from the
+ * `WELCOME_POSTAL_ADDRESS` environment variable at send time and HTML-escaped there;
+ * `personalise` refuses to return a message with the token still in it, so there is no
+ * placeholder that can reach a reader. The review pages below fill it with an obviously
+ * fake sample, so the footer still *looks* like the footer.
  */
-if (!copy.footer?.postalAddress) {
-  warnings.push(
-    'footer.postalAddress is null. The preview renders with a visible placeholder and ' +
-      'the worker refuses to mail the cohort. See copy.json $footerComment.',
-  );
-}
 
 const UNSUBSCRIBE_TOKEN = '{{unsubscribeUrl}}';
 
@@ -260,7 +258,12 @@ const paragraphs = copy.letter.paragraphs
  */
 const GREETING_TOKEN = '{{greeting}}';
 
-const postal = copy.footer.postalAddress ?? '[POSTAL ADDRESS - FOUNDER TO SUPPLY]';
+/**
+ * Stays a token in dist/ for the same reason `{{greeting}}` does, and one more: it is a
+ * secret. Escaped at fill time (`escapeHtml` in envelope.mjs), not here — this build has
+ * nothing to escape.
+ */
+const POSTAL_TOKEN = '{{postalAddress}}';
 
 const html = `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -356,7 +359,7 @@ const html = `<!DOCTYPE html>
                   <tr>
                     <td>
                       <p style="margin:0 0 6px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.tertiary};" class="dk-tertiary">${esc(copy.footer.signature)}</p>
-                      <p style="margin:0 0 6px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.tertiary};" class="dk-tertiary">${esc(postal)}</p>
+                      <p style="margin:0 0 6px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.tertiary};" class="dk-tertiary">${POSTAL_TOKEN}</p>
                       <p style="margin:0 0 6px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.tertiary};" class="dk-tertiary">${esc(copy.footer.reason)}</p>
                       <p style="margin:0;font-family:${FONT};font-size:12px;line-height:18px;color:${C.tertiary};" class="dk-tertiary"><a href="${UNSUBSCRIBE_TOKEN}" style="color:${C.tertiary};text-decoration:underline;" class="dk-tertiary">${esc(copy.footer.unsubscribeLabel)}</a></p>
                     </td>
@@ -427,7 +430,7 @@ ${copy.letter.signoff.join('\n')}
 ${'-'.repeat(72)}
 
 ${copy.footer.signature}
-${postal}
+${POSTAL_TOKEN}
 ${wrap(copy.footer.reason)}
 
 ${copy.footer.unsubscribeLabel}: ${UNSUBSCRIBE_TOKEN}
@@ -537,9 +540,8 @@ const decisions = [
   },
   {
     title: 'Postal address.',
-    body: copy.footer.postalAddress
-      ? `Set to ${esc(copy.footer.postalAddress)}.`
-      : 'Not set, so the worker refuses the cohort. A commercial email carries a physical mailing address; there is no company, so it is one you are willing to publish, usually a PO box or a virtual mailbox.',
+    body:
+      'Supplied at send time from the <code>WELCOME_POSTAL_ADDRESS</code> GitHub Actions secret, never from this repository. The footer above shows an obviously fake sample. A send refuses, before claiming anybody, while that secret is missing, blank or placeholder-shaped. A commercial email carries a physical mailing address; there is no company here, so it is one you are willing to publish.',
   },
   {
     title: 'Send from bingd.app.',
@@ -563,6 +565,8 @@ const SAMPLE = {
   '{{greeting}}': 'Hey Suraj,',
   '{{inviteToken}}': '0123456789abcdef0123456789abcdef',
   '{{unsubscribeUrl}}': 'mailto:suraj@bingd.app?subject=Unsubscribe',
+  // Obviously not a real address, on purpose: these pages are committed.
+  '{{postalAddress}}': '1 Example Street, Sampleton EX1 2MP',
 };
 const sampled = (body) => Object.entries(SAMPLE).reduce((out, [token, value]) => out.split(token).join(value), body);
 const srcdoc = escAttr(sampled(html));

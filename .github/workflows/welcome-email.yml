@@ -9,7 +9,7 @@ name: Welcome email
 # This workflow only runs when somebody presses Run workflow. There is no `schedule:`
 # below, and even a manual `send` mails nobody until all of these are true:
 #
-#   1. emails/welcome/automation/welcome_email.sql is applied to the target project
+#   1. supabase/migrations/20260923000100_a_welcome_note_sent_once.sql is applied to the target
 #      (without it every RPC is a 404 and the worker stops).
 #   2. copy.json has note.status APPROVED and a footer.postalAddress (the worker refuses
 #      the cohort otherwise, before it claims anybody).
@@ -81,6 +81,12 @@ jobs:
           # A key of its own, sending access restricted to bingd.app. Never the key named
           # Supabase, which relays every sign-in code.
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY_WELCOME }}
+          # The physical mailing address a commercial email has to carry. A repository
+          # secret rather than a line in copy.json, because it is the operator home
+          # address and a committed value is in git history for ever. The worker refuses,
+          # before claiming anybody, when it is missing, blank or placeholder-shaped, so a
+          # forgotten secret costs nobody their one chance at the note.
+          WELCOME_POSTAL_ADDRESS: ${{ secrets.WELCOME_POSTAL_ADDRESS }}
           MODE: ${{ github.event.inputs.mode }}
           CANARY_USER: ${{ github.event.inputs.canary_user }}
           CANARY_EMAIL: ${{ github.event.inputs.canary_email }}

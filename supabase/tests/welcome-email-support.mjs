@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url';
 /**
  * What the welcome-email suites need beyond the shared harness.
  *
- * Until the automation is switched on, the welcome SQL lives at
- * `emails/welcome/automation/welcome_email.sql`, outside `supabase/migrations/`, so no
- * `db push` can pick it up and neither harness applies it. The suites apply it on top of
- * every real migration, which proves it against the schema it will be applied to.
+ * **The SQL is now a migration** (2026-09-17):
+ * `supabase/migrations/20260923000100_a_welcome_note_sent_once.sql`, so both harnesses apply it
+ * themselves and `welcomeSqlToApply()` returns nothing. It was staged outside
+ * `supabase/migrations/` until then, and the fallback below is kept because it costs one
+ * `access()` and is what let the move happen without editing a single suite.
  *
- * The activation commit moves it into `supabase/migrations/` under a timestamp whose name
- * ends `_a_welcome_note_sent_once.sql`. From then on the harnesses apply it themselves,
- * `welcomeSqlToApply()` returns nothing, and every suite keeps passing without an edit.
+ * Note that applying it is still not switching it on: every switch it inserts means
+ * "send nothing to nobody", and `welcome.delivery_enabled` defaults to false.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));

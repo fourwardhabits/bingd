@@ -13,7 +13,9 @@ import {
   DEFAULT_REPLY_TO,
   greetingFor,
   inviteUrlFor,
+  escapeHtml,
   personalise,
+  postalAddressFrom,
   resendPayload,
   unsubscribeFor,
 } from './envelope.mjs';
@@ -186,8 +188,11 @@ describe('welcome email: brand and compliance', () => {
 
   it('names the sender, carries a postal address line and an unsubscribe in both parts', () => {
     assert.ok(html.includes(copy.footer.signature) && text.includes(copy.footer.signature));
-    const postal = copy.footer.postalAddress ?? '[POSTAL ADDRESS - FOUNDER TO SUPPLY]';
-    assert.ok(html.includes(postal) && text.includes(postal));
+    // The address itself is a runtime secret, so what ships is the token. That it is
+    // *filled*, and filled safely, is the suite below.
+    assert.ok(html.includes('{{postalAddress}}'), 'the HTML part carries the postal token');
+    assert.ok(text.includes('{{postalAddress}}'), 'the text part carries the postal token');
+    assert.equal('postalAddress' in copy.footer, false, 'no address may live in copy.json');
     assert.match(text, /Unsubscribe: \{\{unsubscribeUrl\}\}/);
   });
 
@@ -220,7 +225,10 @@ describe('welcome email: the envelope', () => {
   });
 
   it('fills every token and refuses to return a message with one left', () => {
-    const values = { greeting: 'Hey,', inviteToken: '0'.repeat(32), unsubscribeUrl: 'mailto:x@y.co' };
+    // Every token the sendable files carry, including the postal address, which is filled
+    // from WELCOME_POSTAL_ADDRESS at send time. Adding a token to dist/ without teaching
+    // both senders to fill it should fail here, and this line is what makes it.
+    const values = { greeting: 'Hey,', inviteToken: '0'.repeat(32), unsubscribeUrl: 'mailto:x@y.co', postalAddress: '1 Example Street, Sampleton EX1 2MP' };
     assert.doesNotMatch(personalise(html, values), /\{\{/);
     assert.doesNotMatch(personalise(text, values), /\{\{/);
     assert.throws(() => personalise('{{greeting}} {{surprise}}', { greeting: 'Hey,' }), /surprise/);
@@ -266,5 +274,98 @@ describe('welcome email: the test send cannot reach anybody it was not given', (
     ]) {
       await assert.rejects(execFileAsync(process.execPath, [script, ...args], { env: { ...process.env, RESEND_API_KEY: '' } }), args.join(' '));
     }
+  });
+});
+
+/**
+ * THE POSTAL ADDRESS, WHICH ARRIVES FROM OUTSIDE THE REPOSITORY.
+ *
+ * It is the operator's home address, so it is a GitHub Actions secret
+ * (`WELCOME_POSTAL_ADDRESS`) read at send time rather than a line in `copy.json`. That
+ * buys privacy and costs the one guarantee a committed value had for free: that there is
+ * something to print. These tests are that guarantee put back.
+ *
+ * The refusal is deliberately *before* anything is claimed — proven over the real SQL in
+ * `supabase/tests/welcome-email.test.mjs` — so a missing secret costs nobody their one
+ * chance at the note. Here the question is narrower and purely about the value: which
+ * values are refused, which is accepted, and what happens to a hostile one.
+ */
+describe('welcome email: the postal address is a runtime secret', () => {
+  it('refuses to produce an address when the secret is missing', () => {
+    // Not set at all: the shape a fresh repository, or a forgotten secret, actually has.
+    assert.throws(() => postalAddressFrom({}), /WELCOME_POSTAL_ADDRESS is not set/);
+    assert.throws(() => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: undefined }), /is not set/);
+    assert.throws(() => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: null }), /is not set/);
+  });
+
+  it('refuses a blank or whitespace-only secret, which is what a mis-paste leaves', () => {
+    assert.throws(() => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: '' }), /is blank/);
+    assert.throws(() => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: '   ' }), /is blank/);
+    // A secret set from an empty file is a newline, not an empty string.
+    assert.throws(() => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: '\n' }), /is blank/);
+    // And a value that is only shaped like an answer.
+    assert.throws(() => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: 'TODO' }), /too short|placeholder/);
+    assert.throws(
+      () => postalAddressFrom({ WELCOME_POSTAL_ADDRESS: '[POSTAL ADDRESS - FOUNDER TO SUPPLY]' }),
+      /placeholder/,
+    );
+  });
+
+  it('never names the value in the message it throws, only the variable', () => {
+    // A refusal is logged by the worker and by CI. It must be able to say what is wrong
+    // without putting somebody's home address in a build log.
+    const secret = '221B Baker Street, London NW1 6XE';
+    try {
+      postalAddressFrom({ WELCOME_POSTAL_ADDRESS: `${secret} TODO` });
+      assert.fail('expected a refusal');
+    } catch (error) {
+      assert.equal(error.message.includes('Baker Street'), false, 'the message leaks the value');
+      assert.match(error.message, /WELCOME_POSTAL_ADDRESS/);
+    }
+  });
+
+  it('accepts a real address and renders it into both parts of the message', () => {
+    const supplied = '221B Baker Street, London NW1 6XE';
+    const postalAddress = postalAddressFrom({ WELCOME_POSTAL_ADDRESS: supplied });
+    assert.equal(postalAddress, supplied);
+
+    const values = {
+      greeting: 'Hey Suraj,',
+      inviteToken: '0'.repeat(32),
+      unsubscribeUrl: unsubscribeFor(DEFAULT_REPLY_TO),
+    };
+    const filledHtml = personalise(html, { ...values, postalAddress: escapeHtml(postalAddress) });
+    const filledText = personalise(text, { ...values, postalAddress });
+
+    assert.ok(filledHtml.includes(supplied), 'the HTML footer shows the supplied address');
+    assert.ok(filledText.includes(supplied), 'the text footer shows the supplied address');
+    // `personalise` already refuses a leftover token, so reaching here is the proof that
+    // nothing was left unfilled; assert it anyway, because this is the token that matters.
+    assert.equal(filledHtml.includes('{{postalAddress}}'), false);
+    assert.equal(filledText.includes('{{postalAddress}}'), false);
+  });
+
+  it('escapes the supplied value in the HTML part and leaves the text part alone', () => {
+    // An ampersand in a building name is ordinary, not an attack, and unescaped it is
+    // already invalid HTML. The angle brackets are the hostile case: this value arrives
+    // from outside the repository, so it is the one part of the letter that could inject.
+    const nasty = 'Suite <script>alert(1)</script> & Co, 5 Test Road, Testville TS1 2AB';
+    const postalAddress = postalAddressFrom({ WELCOME_POSTAL_ADDRESS: nasty });
+    const values = {
+      greeting: 'Hey Suraj,',
+      inviteToken: '0'.repeat(32),
+      unsubscribeUrl: unsubscribeFor(DEFAULT_REPLY_TO),
+    };
+
+    const filledHtml = personalise(html, { ...values, postalAddress: escapeHtml(postalAddress) });
+    assert.equal(filledHtml.includes('<script>'), false, 'a tag reached the HTML part');
+    assert.match(filledHtml, /&lt;script&gt;/, 'the tag is shown as text');
+    assert.match(filledHtml, /Test Road/, 'the address itself still reads');
+    assert.match(filledHtml, /&amp; Co/, 'the ampersand is escaped rather than dropped');
+
+    // The plain-text part must NOT be escaped, or the reader sees &amp; in their inbox.
+    const filledText = personalise(text, { ...values, postalAddress });
+    assert.match(filledText, /& Co/, 'the text part keeps a literal ampersand');
+    assert.equal(filledText.includes('&amp;'), false, 'the text part was HTML-escaped by mistake');
   });
 });
