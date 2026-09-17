@@ -2430,9 +2430,8 @@ await writeFile(
           <div class="split-copy">
             <h1><span class="line">Rank what you watch.</span> <span class="line">See where it really lands.</span></h1>
             <p class="lede">
-              bingd is a movie and TV logging app that brings a better rating system and
-              social features to keep the magic of movies and TV going even after the reel
-              runs out.
+              bingd is your new post-watch ritual. A movie and TV logging app to surface
+              your favorite titles and make watching a shared experience.
             </p>
 
 ${installRow({ primary: true })}
@@ -2451,11 +2450,10 @@ ${installRow({ primary: true })}
         <div class="wrap split flip">
           <div class="split-copy">
             <p class="kicker">How it works</p>
-            <h2>Stop guessing between a 4 and a 4.5.</h2>
+            <h2>Stop guessing between 3.5 and 4 stars.</h2>
             <p class="section-lede">
               bingd uses head-to-head comparisons between titles you&rsquo;ve watched to
-              create a ranked list of your favorite watches. A much better ranking system
-              and way more fun than using stars.
+              create a ranked list of your favorite watches. No more ambiguous ratings.
             </p>
           </div>
 
@@ -2472,9 +2470,8 @@ ${installRow({ primary: true })}
             <p class="kicker">A social experience</p>
             <h2>See what your friends are watching.</h2>
             <p class="section-lede">
-              Keep the conversation going even after the screen turns off. Follow friends
-              to comment on and save their latest watches, compare taste, and share
-              recommendations in-app.
+              Follow friends to comment on and save their latest watches, compare taste,
+              and share recommendations in-app.
             </p>
           </div>
 
@@ -2491,9 +2488,8 @@ ${installRow({ primary: true })}
             <p class="kicker">Find your next binge</p>
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
-              A better ranking system means a better understanding of your taste and
-              stronger recommendations. Use Group Picks to generate recommendations based
-              on shared taste before the popcorn runs out (a favorite feature for couples
+              Stronger recommendations through a better rating system. Plus Group Picks to
+              generate recommendations based on shared taste (a favorite feature for couples
               and movie clubs).
             </p>
           </div>
