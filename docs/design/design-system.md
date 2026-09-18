@@ -652,11 +652,16 @@ Where the name is not prose at all, it keeps whatever form the identifier or the
   note it here rather than letting it spread back into the app.
 - **The graphic.** `Wordmark.tsx` and the brand lockup draw `bingd.`, and so does any
   image asset of the mark.
-- **Owned elsewhere, and not yet changed (2026-09-13).** Email (the auth templates, and the
-  support mailto subject and greeting `bingd. support` / `Hi bingd. team,`), the web
-  pages, and the push copy `push-sender` sends (`bingd. Awards`, `joined bingd. from your
-  invite`) still carry the period. Email and web belong to the marketing thread; push
-  needs its own function deploy.
+- **Owned elsewhere, and not yet changed (2026-09-13).** The auth templates, the support
+  mailto subject and greeting (`bingd. support` / `Hi bingd. team,`), the web pages, and the
+  push copy `push-sender` sends (`bingd. Awards`, `joined bingd. from your invite`) still
+  carry the period. Web belongs to the marketing thread; push needs its own function deploy.
+
+  **The lifecycle email follows the rule above** (2026-09-17). `emails/welcome/` writes the
+  name as `bingd` in every sentence and keeps `bingd.` only as the masthead, which is the
+  wordmark. Its subject, *"I built bingd. Tell me what you think."*, keeps its full stop
+  because the sentence ends there — the clearest example in the product of why sentence
+  punctuation is not the brand. `emails/welcome/email.test.mjs` asserts both halves.
 - **A person's own words.** A display name, a comment or a note that contains `bingd.` is
   theirs and is never rewritten.
 

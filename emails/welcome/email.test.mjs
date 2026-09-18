@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,23 @@ const repo = join(here, '..', '..');
 const LOCKED_LETTER = 'd0c279751c6ad7ee18f788a0c684fc75101dc3aacd946588cb465fa8d6e2b3d3';
 
 const read = (path) => readFile(join(repo, path), 'utf8');
+
+/**
+ * Every TypeScript source file under a directory, recursively.
+ *
+ * Used to ask what the *client bundle* contains, so the answer has to come from walking
+ * the tree rather than from a list somebody maintains: a file added next week is the one
+ * that matters.
+ */
+const sourceFiles = async (dir) => {
+  const out = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...(await sourceFiles(full)));
+    else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+};
 const lf = (text) => text.replace(/\r\n/g, '\n');
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -173,6 +190,58 @@ describe('welcome email: product labels', () => {
 });
 
 describe('welcome email: brand and compliance', () => {
+  /**
+   * THE APPROVED SUBJECT, PINNED TO THE CHARACTER.
+   *
+   * It is founder-written and signed off, and it is the one line in the product where the
+   * brand rule is most easily "corrected" into a mistake — the full stop after `bingd` ends
+   * the first sentence, and removing it as a stray brand period breaks the sentence instead
+   * of fixing the brand.
+   *
+   * `supabase/tests/welcome-email.test.mjs` asserts the same string on the *sent payload*.
+   * It is asserted here as well, and that is deliberate rather than duplicated: this file is
+   * the workflow's first step, so a subject edited without approval stops the job before it
+   * claims anybody, rather than after.
+   */
+  it('carries the approved subject, to the character', () => {
+    assert.equal(copy.subject.chosen, 'I built bingd. Tell me what you think.');
+  });
+
+  /**
+   * The brand rule as the design system states it (`docs/design/design-system.md`, "How the
+   * product name is written"): the plain-text name is `bingd`, the wordmark is `bingd.`, and
+   * **sentence punctuation is ordinary punctuation**.
+   *
+   * The distinguishing test is what follows the period. A capital letter or the end of the
+   * string means the sentence ended; a lower-case word means the period was being treated as
+   * part of the name. So "I built bingd. Tell me" is right and "bingd. is a movie app" is
+   * not, and one regex separates them without banning the form outright.
+   */
+  it('lets a sentence end after the name, and never treats the period as part of it', () => {
+    const readerText = [
+      copy.subject.chosen,
+      ...copy.subject.alternatives,
+      copy.preheader.chosen,
+      JSON.stringify(copy.letter),
+      copy.footer.signature,
+      copy.footer.reason,
+    ].join('\n');
+
+    // `bingd.` followed by a lower-case letter: the period did not end anything.
+    assert.doesNotMatch(
+      readerText,
+      /\bbingd\.\s+\p{Ll}/u,
+      'a period after the name is being treated as part of the name',
+    );
+
+    // And the approved subject is still an example of the permitted form, so this test
+    // cannot be satisfied by deleting the sentence that made it interesting.
+    assert.match(copy.subject.chosen, /\bbingd\.\s+\p{Lu}/u, 'the subject no longer ends a sentence after the name');
+
+    // The masthead is the wordmark and keeps its period; it is not a sentence.
+    assert.equal(copy.masthead, 'bingd.');
+  });
+
   it('writes the name as the brand does, in everything a reader sees', () => {
     const all = JSON.stringify([copy.subject, copy.preheader, copy.letter, copy.footer]);
     assert.doesNotMatch(all, /\bBingd\b|\bBINGD\b|bingd\.\./);
@@ -367,5 +436,104 @@ describe('welcome email: the postal address is a runtime secret', () => {
     const filledText = personalise(text, { ...values, postalAddress });
     assert.match(filledText, /& Co/, 'the text part keeps a literal ampersand');
     assert.equal(filledText.includes('&amp;'), false, 'the text part was HTML-escaped by mistake');
+  });
+});
+
+/**
+ * WHERE THE TWO SECRETS MAY APPEAR, AND WHERE THEY MAY NOT.
+ *
+ * Two secrets reach this email: the restricted Resend key and the postal address. Both are
+ * wired correctly today, and "correctly today" is the state that decays — a debug line
+ * added during an incident, a second workflow copied from this one, a helper that reads
+ * `process.env` in the app. None of those would fail any other test in this repository.
+ *
+ * These assertions are therefore about the *shape of the wiring* rather than behaviour:
+ * which credential is named, how it enters the job, and where it may not appear at all.
+ */
+describe('welcome email: the secrets are wired where they cannot leak', () => {
+  let workflow;
+  let workflowLines;
+
+  before(async () => {
+    workflow = await read('.github/workflows/welcome-email.yml');
+    workflowLines = workflow.split(/\r?\n/);
+  });
+
+  it('takes its Resend key from RESEND_API_KEY_WELCOME and names no other credential', () => {
+    // The account that sends this note also relays every sign-in code, under the key named
+    // Supabase. Reusing that key here would mean one revocation, or one Resend-side
+    // suppression, locking people out of the app. The worker reads a generically named
+    // RESEND_API_KEY; what this pins is where the workflow fills it from.
+    assert.match(workflow, /RESEND_API_KEY:\s*\$\{\{\s*secrets\.RESEND_API_KEY_WELCOME\s*\}\}/);
+
+    const named = [...new Set([...workflow.matchAll(/secrets\.(RESEND[A-Z0-9_]*)/g)].map((m) => m[1]))];
+    assert.deepEqual(named, ['RESEND_API_KEY_WELCOME'], 'another Resend credential is named here');
+  });
+
+  it('takes the postal address from the secret of that name', () => {
+    assert.match(workflow, /WELCOME_POSTAL_ADDRESS:\s*\$\{\{\s*secrets\.WELCOME_POSTAL_ADDRESS\s*\}\}/);
+  });
+
+  it('lets every secret in through env: and never through the shell', () => {
+    // The leak that actually happens: `${{ secrets.X }}` written inside a `run:` body rather
+    // than under `env:`. GitHub substitutes it before the shell sees it, so the literal
+    // becomes part of the command text — which xtrace, or a shell error quoting the line,
+    // will print. Under `env:` the value is never part of the script.
+    //
+    // Asserted as: every line that mentions a secret is a `NAME: ${{ ... }}` mapping.
+    const secretLines = workflowLines.filter((l) => l.includes('secrets.'));
+    assert.ok(secretLines.length >= 3, 'expected the job to take several secrets');
+    for (const line of secretLines) {
+      assert.match(
+        line,
+        /^\s{2,}[A-Z][A-Z0-9_]*:\s*\$\{\{/,
+        `a secret appears somewhere other than an env: mapping: ${line.trim().slice(0, 60)}`,
+      );
+    }
+
+    // And nothing turns tracing on or dumps the environment.
+    assert.doesNotMatch(workflow, /set\s+-[a-z]*x[a-z]*\b/, 'xtrace prints every expanded line');
+    assert.doesNotMatch(workflow, /\benv\s*\|/, 'the environment is piped somewhere');
+  });
+
+  it('is still manual only, and the manual path staging QA needs is intact', () => {
+    // An uncommented `schedule:` is the single line that turns a merged PR into a recurring
+    // send. A commented one reads `#   schedule:`, which does not match here because `#` is
+    // not whitespace.
+    assert.match(workflow, /workflow_dispatch:/, 'the manual path for staging QA is gone');
+    const active = workflowLines.filter((l) => /^\s*schedule:/.test(l));
+    assert.deepEqual(active, [], 'the recurring schedule is enabled');
+  });
+
+  it('keeps both secrets out of anything that ships to a phone', async () => {
+    // `emails/` is authoring-time and CI-only. `app/` and `src/` go into a client bundle,
+    // where an environment variable is neither secret nor available.
+    const shipped = (await Promise.all(['app', 'src'].map((d) => sourceFiles(join(repo, d))))).flat();
+    assert.ok(shipped.length > 100, 'the client source walk found almost nothing; the test is lying');
+    for (const file of shipped) {
+      const body = await readFile(file, 'utf8');
+      for (const name of ['WELCOME_POSTAL_ADDRESS', 'RESEND_API_KEY']) {
+        assert.equal(body.includes(name), false, `${file} references ${name}`);
+      }
+    }
+  });
+
+  it('never passes the address or the key to a log call', async () => {
+    // The other way a secret escapes. Both of these scripts log a great deal, and the
+    // refusal messages deliberately name the *variable* rather than the value.
+    for (const file of ['automation/send-welcome.mjs', 'send-test.mjs']) {
+      const source = await readFile(join(here, file), 'utf8');
+      const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      const calls = [...code.matchAll(/(?:\blog|console\.[a-z]+|\bdie)\(([^\n]*)/g)].map((m) => m[1]);
+      for (const call of calls) {
+        // `postalAddressFrom` and `POSTAL_ADDRESS_ENV` are the names, not the value.
+        assert.doesNotMatch(
+          call,
+          /\bpostalAddress\b(?!From)/,
+          `${file} logs the postal address: ${call.slice(0, 70)}`,
+        );
+        assert.doesNotMatch(call, /\bresendKey\b/, `${file} logs the Resend key: ${call.slice(0, 70)}`);
+      }
+    }
   });
 });
