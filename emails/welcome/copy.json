@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND APPROVED ON 2026-09-18.",
+    "",
+    "This letter replaces the 2026-09-13 one in full. It is the founder's own prose: do not",
+    "rewrite, shorten, reorganise or 'improve' it. The only edits made to what he wrote are",
+    "listed in `$edits`.",
+    "",
+    "After any edit run `node emails/welcome/build.mjs` and `node --test emails/welcome/email.test.mjs`,",
+    "and update LOCKED_LETTER in email.test.mjs in the same commit.",
+    "",
+    "A paragraph is a string, or an array of pieces: a string is text, `{ \"bold\": ... }` is",
+    "emphasis the copy asks for (this letter asks for none), and `{ \"link\": ..., \"target\": ... }`",
+    "is an inline link to a destination in targets.json. `{{firstName}}` and the invite token",
+    "are filled per recipient at send time."
+  ],
+
+  "$edits": [
+    "<FirstName> -> {{firstName}}. With no usable first name the greeting is 'Hey,'."
+  ],
+
+  "subject": {
+    "chosen": "Welcome to bingd, let me know what you think",
+    "alternatives": []
+  },
+
+  "$preheaderComment": "The grey line after the subject in an inbox. Not part of the letter. Kept from the 2026-09-13 copy because it still says exactly what the letter says: hit reply, it comes straight to me.",
+  "preheader": {
+    "chosen": "Hit reply and it comes straight to me.",
+    "alternatives": []
+  },
+
+  "masthead": "bingd.",
+
+  "letter": {
+    "status": "APPROVED",
+    "greeting": "Hey {{firstName}},",
+    "paragraphs": [
+      "Thanks for giving bingd a shot.",
+      "The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.",
+      "I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends' watches, and find your next title with better recommendations.",
+      "If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.",
+      [
+        "bingd is more fun with friends, so here's your ",
+        { "link": "invite link", "target": "inviteLink" },
+        ". And if you want to see what I'm watching, ",
+        { "link": "follow me on bingd", "target": "founderProfile" },
+        "."
+      ]
+    ],
+    "signoff": ["Happy binging,", "Suraj"]
+  },
+
+  "$footerComment": [
+    "Not part of the letter. The note asks the reader to invite somebody, so it is treated as",
+    "commercial email and carries a sender, a physical mailing address and an unsubscribe.",
+    "The physical mailing address is NOT here and must never be added here: it is the",
+    "operator's home address, and a value committed to this file is in git history for",
+    "ever. It is supplied at send time from the WELCOME_POSTAL_ADDRESS environment",
+    "variable (the GitHub Actions secret of that name), HTML-escaped as it is filled in.",
+    "A send refuses, before claiming anybody, while that variable is missing, blank or",
+    "placeholder-shaped. See emails/welcome/envelope.mjs, postalAddressFrom."
+  ],
+  "footer": {
+    "signature": "bingd is made by Suraj Kandukuri.",
+    "reason": "You are getting this one-time note because you made a bingd account.",
+    "unsubscribeLabel": "Unsubscribe"
+  }
+}

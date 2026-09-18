@@ -1,0 +1,52 @@
+{
+  "$comment": [
+    "EVERY LINK AND EVERY PRODUCT LABEL IN THE WELCOME EMAIL, AND WHAT IS BEHIND IT.",
+    "",
+    "A link must never point at a destination that does not exist. `targets` carry a",
+    "classification and build.mjs refuses a D:",
+    "  A  Directly deep-linkable: the path is in web/deep-links.config.json appPaths, an",
+    "     Expo Router screen receives it, and web/build.mjs publishes a fallback page.",
+    "  C  Per recipient: the send job fills it from that account's own data.",
+    "  D  Not currently practical.",
+    "",
+    "`labels` are product names the letter tells the reader to find. email.test.mjs reads",
+    "each file and fails if the label is no longer rendered there.",
+    "",
+    "Checked against origin/main 69608b5 on 2026-09-13."
+  ],
+
+  "origin": "https://bingd.app",
+
+  "targets": {
+    "inviteLink": {
+      "classification": "C",
+      "url": "https://bingd.app/i/{{inviteToken}}",
+      "capability": "The recipient's own personal invite link. Redeeming it connects the two people: both follow edges approved, whatever either account's privacy (20260912000200_an_invitation_is_a_connection_on_both_sides.sql).",
+      "deepLink": "/i/* is in appPaths and app/i/[token].tsx receives it. It is the exact URL the app shares: use-recommend.ts builds `https://bingd.app/i/${token}` from create_invite_link's token.",
+      "webFallback": "web/dist/i.html: the invitation page with the install row and 'I already have bingd.'.",
+      "needsUserData": true,
+      "userData": "invite_tokens.token for the recipient: live, kind personal, minted in this environment, which is what redeem_invite accepts. Returned by the claim from _welcome_email_ensure_invite_token.",
+      "noToken": "Tokens are minted lazily, so many new accounts have none. The claim mints the one personal link under create_invite_link's own lock, with no invite_link_creations row and no other side effect. README.md, 'The invite link'."
+    },
+
+    "founderProfile": {
+      "classification": "A",
+      "url": "https://bingd.app/u/saisurajkan",
+      "capability": "The founder's public profile, with Follow in its action row. Following a public account is approved at once.",
+      "deepLink": "/u/* is in appPaths; app/u/[username].tsx renders the profile and FollowControl.",
+      "webFallback": "web/dist/u.html resolves the display name and avatar and offers the install row plus Open in bingd.",
+      "needsUserData": false,
+      "verified": "2026-09-11 against production: the handle resolves and the account is public. 2026-09-13: route and fallback unchanged on main; https://bingd.app/u/saisurajkan answers 200."
+    }
+  },
+
+  "$labelsComment": "Empty since the 2026-09-18 letter, which names no in-app label (the 2026-09-13 one named Group Picks and For you). Add one back here the moment the copy tells the reader to find something in the app, and email.test.mjs will check it is still rendered.",
+  "labels": [],
+
+  "rejected": {
+    "mintAtSendTime": {
+      "classification": "not built",
+      "why": "Minting a personal token for an account that has none would mean a service-role writer around create_invite_link, which is SECURITY DEFINER over auth.uid() and records an invite_link_creations row per share. Doing it for an email changes what that row means. It is one of the options in README.md, not something the send job does."
+    }
+  }
+}

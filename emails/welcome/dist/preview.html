@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bingd. welcome email &mdash; preview</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0;
+        background: #e9e2d6;
+        color: #242326;
+        font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      .page { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
+      h1 { font-family: Georgia, serif; font-weight: 400; font-size: 30px; margin: 0 0 4px; color: #773744; }
+      h2 { font-family: Georgia, serif; font-weight: 400; font-size: 21px; margin: 36px 0 10px; }
+      .sub { margin: 0 0 24px; color: #5f5a56; }
+      .draft {
+        background: #fff4d6;
+        border: 1px solid #d4a64c;
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin: 0 0 24px;
+      }
+      .draft b { color: #8a6512; }
+      .frames { display: flex; gap: 20px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
+      .frame { background: #fff; border: 1px solid #cdc3b4; border-radius: 12px; overflow: hidden; flex: 0 0 auto; }
+      .frame figcaption {
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #6e6862;
+        padding: 9px 12px;
+        border-bottom: 1px solid #e6dccc;
+        background: #f7f2ea;
+      }
+      iframe { display: block; border: 0; background: #f5ebdd; }
+      figure { margin: 0; }
+      ol.inbox { list-style: none; margin: 0 0 10px; padding: 0; border: 1px solid #cdc3b4; border-radius: 8px; overflow: hidden; background: #fbf8f4; }
+      ol.inbox li { display: grid; grid-template-columns: 10rem 1fr auto; gap: 12px; align-items: baseline; padding: 12px 14px; border-bottom: 1px solid #e6dccc; }
+      ol.inbox li:last-child { border-bottom: 0; }
+      ol.inbox .from { font-weight: 600; }
+      ol.inbox .line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      ol.inbox .pre { color: #8a827a; font-weight: 400; }
+      ol.inbox .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #2f5334; background: #d8e6d9; border-radius: 4px; padding: 2px 6px; }
+
+      table.meta { border-collapse: collapse; width: 100%; font-size: 13px; background: #fbf8f4; }
+      table.meta th, table.meta td { border: 1px solid #e0d6c6; padding: 8px 10px; text-align: left; vertical-align: top; }
+      table.meta th { background: #f5ebdd; font-weight: 600; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #f0e8dc; padding: 1px 5px; border-radius: 4px; }
+      .cls { display: inline-block; min-width: 1.4em; text-align: center; font-weight: 700; border-radius: 4px; padding: 1px 6px; }
+      .cls-A, .cls-I { background: #d8e6d9; color: #2f5334; }
+      .cls-B { background: #f3e6c9; color: #6d5117; }
+      .cls-C { background: #f3e6c9; color: #6d5117; }
+      .cls-D { background: #f0d7d7; color: #7a2f2f; }
+      ul { margin: 8px 0 0; padding-left: 20px; }
+      li { margin-bottom: 8px; }
+      .pair { display: grid; gap: 20px; }
+      @media (min-width: 820px) { .pair { grid-template-columns: 1fr 1fr; } }
+      pre { background: #fbf8f4; border: 1px solid #e0d6c6; border-radius: 8px; padding: 14px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+      .warn { color: #7a2f2f; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>bingd. welcome email</h1>
+      <p class="sub">
+        Rendered from <code>emails/welcome/copy.json</code> on 2026-09-18.
+        Edit that file, run <code>node emails/welcome/build.mjs</code>, refresh this page.
+      </p>
+
+      <div class="draft">
+        <p style="margin:0 0 6px"><b>FOUNDER COPY &middot; NOT SENT.</b></p>
+        <p style="margin:0">
+          The letter is the founder&rsquo;s own, locked on 2026-09-13. Nothing is sent to anybody
+          until the postal address is set, a test send has been approved, and the automation
+          is switched on. See the list at the bottom.
+        </p>
+      </div>
+
+      <h2>How it renders</h2>
+      <div class="frames">
+        <figure class="frame">
+          <figcaption>iPhone &mdash; 390px</figcaption>
+          <iframe srcdoc='&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot; dir=&quot;ltr&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
+  &lt;head&gt;
+    &lt;meta charset=&quot;utf-8&quot; /&gt;
+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot; /&gt;
+    &lt;!-- Stops iOS shrinking the whole email to fit, which it does to anything it decides
+         is too wide and which turns 16px body copy into 11px. --&gt;
+    &lt;meta name=&quot;x-apple-disable-message-reformatting&quot; /&gt;
+    &lt;meta name=&quot;format-detection&quot; content=&quot;telephone=no,address=no,email=no,date=no&quot; /&gt;
+    &lt;!-- Tells a client this email has a dark treatment of its own, so Apple Mail uses the
+         media query below instead of inverting. --&gt;
+    &lt;meta name=&quot;color-scheme&quot; content=&quot;light dark&quot; /&gt;
+    &lt;meta name=&quot;supported-color-schemes&quot; content=&quot;light dark&quot; /&gt;
+    &lt;title&gt;Welcome to bingd, let me know what you think&lt;/title&gt;
+    &lt;!--[if mso]&gt;
+      &lt;noscript&gt;&lt;xml&gt;&lt;o:OfficeDocumentSettings&gt;&lt;o:PixelsPerInch&gt;96&lt;/o:PixelsPerInch&gt;&lt;/o:OfficeDocumentSettings&gt;&lt;/xml&gt;&lt;/noscript&gt;
+    &lt;![endif]--&gt;
+    &lt;style&gt;
+      /* Enhancements only. Every client that drops this block still gets a correct
+         light email, because everything structural is inline. */
+
+      body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+      table { border-collapse: collapse; }
+      img { border: 0; outline: none; text-decoration: none; }
+      a { color: #773744; }
+
+      /* Under 600px the shell stops being a card and becomes the page: the outer
+         padding and the border are what make a narrow phone feel cramped. */
+      @media only screen and (max-width: 620px) {
+        .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
+        .gutter { padding-left: 22px !important; padding-right: 22px !important; }
+        .pad-top { padding-top: 28px !important; }
+      }
+
+      /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
+         see DARK in build.mjs for why the light palette is chosen to survive that. */
+      @media (prefers-color-scheme: dark) {
+        .dk-ground { background-color: #14110F !important; }
+        .dk-card { background-color: #1C1917 !important; border-color: #3A332F !important; }
+        .dk-text, .dk-text * { color: #EFE6DA !important; }
+        .dk-tertiary, .dk-tertiary * { color: #A2988C !important; }
+        .dk-accent, .dk-accent * { color: #B98C97 !important; }
+        /* (0,2,0) beats the paragraph own .dk-text * rule at (0,1,1), which would otherwise
+           repaint the label back to body colour and lose the accent in dark mode. */
+        .dk-text .dk-label, .dk-label { color: #B98C97 !important; }
+        .dk-rule { border-color: #3A332F !important; }
+      }
+    &lt;/style&gt;
+  &lt;/head&gt;
+
+  &lt;body style=&quot;margin:0;padding:0;background-color:#F5EBDD;&quot; bgcolor=&quot;#F5EBDD&quot; class=&quot;dk-ground&quot;&gt;
+    &lt;!-- The grey line the inbox shows after the subject. Hidden in the body itself, and
+         padded with zero-width joiners so a client cannot pull the next sentence of the
+         email in after it and truncate mid-word. --&gt;
+    &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
+      Hit reply and it comes straight to me.
+      &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
+    &lt;/div&gt;
+
+    &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;&quot; class=&quot;dk-ground&quot;&gt;
+      &lt;tr&gt;
+        &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
+
+          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+
+            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
+                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
+                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
+                 the footer. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- Footer. Four lines, no navigation, no icons, no second logo. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:20px 36px 32px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;&lt;td style=&quot;border-top:1px solid #E6DCCC;font-size:0;line-height:0;padding-bottom:18px;&quot; class=&quot;dk-rule&quot;&gt;&amp;nbsp;&lt;/td&gt;&lt;/tr&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd is made by Suraj Kandukuri.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;1 Example Street, Sampleton EX1 2MP&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd account.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;mailto:suraj@bingd.app?subject=Unsubscribe&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+          &lt;/table&gt;
+
+        &lt;/td&gt;
+      &lt;/tr&gt;
+    &lt;/table&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+' width="390" height="900" title="The welcome email at 390 pixels wide"></iframe>
+        </figure>
+        <figure class="frame">
+          <figcaption>Narrow phone &mdash; 320px</figcaption>
+          <iframe srcdoc='&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot; dir=&quot;ltr&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
+  &lt;head&gt;
+    &lt;meta charset=&quot;utf-8&quot; /&gt;
+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot; /&gt;
+    &lt;!-- Stops iOS shrinking the whole email to fit, which it does to anything it decides
+         is too wide and which turns 16px body copy into 11px. --&gt;
+    &lt;meta name=&quot;x-apple-disable-message-reformatting&quot; /&gt;
+    &lt;meta name=&quot;format-detection&quot; content=&quot;telephone=no,address=no,email=no,date=no&quot; /&gt;
+    &lt;!-- Tells a client this email has a dark treatment of its own, so Apple Mail uses the
+         media query below instead of inverting. --&gt;
+    &lt;meta name=&quot;color-scheme&quot; content=&quot;light dark&quot; /&gt;
+    &lt;meta name=&quot;supported-color-schemes&quot; content=&quot;light dark&quot; /&gt;
+    &lt;title&gt;Welcome to bingd, let me know what you think&lt;/title&gt;
+    &lt;!--[if mso]&gt;
+      &lt;noscript&gt;&lt;xml&gt;&lt;o:OfficeDocumentSettings&gt;&lt;o:PixelsPerInch&gt;96&lt;/o:PixelsPerInch&gt;&lt;/o:OfficeDocumentSettings&gt;&lt;/xml&gt;&lt;/noscript&gt;
+    &lt;![endif]--&gt;
+    &lt;style&gt;
+      /* Enhancements only. Every client that drops this block still gets a correct
+         light email, because everything structural is inline. */
+
+      body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+      table { border-collapse: collapse; }
+      img { border: 0; outline: none; text-decoration: none; }
+      a { color: #773744; }
+
+      /* Under 600px the shell stops being a card and becomes the page: the outer
+         padding and the border are what make a narrow phone feel cramped. */
+      @media only screen and (max-width: 620px) {
+        .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
+        .gutter { padding-left: 22px !important; padding-right: 22px !important; }
+        .pad-top { padding-top: 28px !important; }
+      }
+
+      /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
+         see DARK in build.mjs for why the light palette is chosen to survive that. */
+      @media (prefers-color-scheme: dark) {
+        .dk-ground { background-color: #14110F !important; }
+        .dk-card { background-color: #1C1917 !important; border-color: #3A332F !important; }
+        .dk-text, .dk-text * { color: #EFE6DA !important; }
+        .dk-tertiary, .dk-tertiary * { color: #A2988C !important; }
+        .dk-accent, .dk-accent * { color: #B98C97 !important; }
+        /* (0,2,0) beats the paragraph own .dk-text * rule at (0,1,1), which would otherwise
+           repaint the label back to body colour and lose the accent in dark mode. */
+        .dk-text .dk-label, .dk-label { color: #B98C97 !important; }
+        .dk-rule { border-color: #3A332F !important; }
+      }
+    &lt;/style&gt;
+  &lt;/head&gt;
+
+  &lt;body style=&quot;margin:0;padding:0;background-color:#F5EBDD;&quot; bgcolor=&quot;#F5EBDD&quot; class=&quot;dk-ground&quot;&gt;
+    &lt;!-- The grey line the inbox shows after the subject. Hidden in the body itself, and
+         padded with zero-width joiners so a client cannot pull the next sentence of the
+         email in after it and truncate mid-word. --&gt;
+    &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
+      Hit reply and it comes straight to me.
+      &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
+    &lt;/div&gt;
+
+    &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;&quot; class=&quot;dk-ground&quot;&gt;
+      &lt;tr&gt;
+        &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
+
+          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+
+            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
+                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
+                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
+                 the footer. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- Footer. Four lines, no navigation, no icons, no second logo. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:20px 36px 32px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;&lt;td style=&quot;border-top:1px solid #E6DCCC;font-size:0;line-height:0;padding-bottom:18px;&quot; class=&quot;dk-rule&quot;&gt;&amp;nbsp;&lt;/td&gt;&lt;/tr&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd is made by Suraj Kandukuri.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;1 Example Street, Sampleton EX1 2MP&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd account.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;mailto:suraj@bingd.app?subject=Unsubscribe&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+          &lt;/table&gt;
+
+        &lt;/td&gt;
+      &lt;/tr&gt;
+    &lt;/table&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+' width="320" height="900" title="The welcome email at 320 pixels wide"></iframe>
+        </figure>
+        <figure class="frame">
+          <figcaption>Desktop &mdash; 680px</figcaption>
+          <iframe srcdoc='&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot; dir=&quot;ltr&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
+  &lt;head&gt;
+    &lt;meta charset=&quot;utf-8&quot; /&gt;
+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot; /&gt;
+    &lt;!-- Stops iOS shrinking the whole email to fit, which it does to anything it decides
+         is too wide and which turns 16px body copy into 11px. --&gt;
+    &lt;meta name=&quot;x-apple-disable-message-reformatting&quot; /&gt;
+    &lt;meta name=&quot;format-detection&quot; content=&quot;telephone=no,address=no,email=no,date=no&quot; /&gt;
+    &lt;!-- Tells a client this email has a dark treatment of its own, so Apple Mail uses the
+         media query below instead of inverting. --&gt;
+    &lt;meta name=&quot;color-scheme&quot; content=&quot;light dark&quot; /&gt;
+    &lt;meta name=&quot;supported-color-schemes&quot; content=&quot;light dark&quot; /&gt;
+    &lt;title&gt;Welcome to bingd, let me know what you think&lt;/title&gt;
+    &lt;!--[if mso]&gt;
+      &lt;noscript&gt;&lt;xml&gt;&lt;o:OfficeDocumentSettings&gt;&lt;o:PixelsPerInch&gt;96&lt;/o:PixelsPerInch&gt;&lt;/o:OfficeDocumentSettings&gt;&lt;/xml&gt;&lt;/noscript&gt;
+    &lt;![endif]--&gt;
+    &lt;style&gt;
+      /* Enhancements only. Every client that drops this block still gets a correct
+         light email, because everything structural is inline. */
+
+      body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+      table { border-collapse: collapse; }
+      img { border: 0; outline: none; text-decoration: none; }
+      a { color: #773744; }
+
+      /* Under 600px the shell stops being a card and becomes the page: the outer
+         padding and the border are what make a narrow phone feel cramped. */
+      @media only screen and (max-width: 620px) {
+        .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
+        .gutter { padding-left: 22px !important; padding-right: 22px !important; }
+        .pad-top { padding-top: 28px !important; }
+      }
+
+      /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
+         see DARK in build.mjs for why the light palette is chosen to survive that. */
+      @media (prefers-color-scheme: dark) {
+        .dk-ground { background-color: #14110F !important; }
+        .dk-card { background-color: #1C1917 !important; border-color: #3A332F !important; }
+        .dk-text, .dk-text * { color: #EFE6DA !important; }
+        .dk-tertiary, .dk-tertiary * { color: #A2988C !important; }
+        .dk-accent, .dk-accent * { color: #B98C97 !important; }
+        /* (0,2,0) beats the paragraph own .dk-text * rule at (0,1,1), which would otherwise
+           repaint the label back to body colour and lose the accent in dark mode. */
+        .dk-text .dk-label, .dk-label { color: #B98C97 !important; }
+        .dk-rule { border-color: #3A332F !important; }
+      }
+    &lt;/style&gt;
+  &lt;/head&gt;
+
+  &lt;body style=&quot;margin:0;padding:0;background-color:#F5EBDD;&quot; bgcolor=&quot;#F5EBDD&quot; class=&quot;dk-ground&quot;&gt;
+    &lt;!-- The grey line the inbox shows after the subject. Hidden in the body itself, and
+         padded with zero-width joiners so a client cannot pull the next sentence of the
+         email in after it and truncate mid-word. --&gt;
+    &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
+      Hit reply and it comes straight to me.
+      &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
+    &lt;/div&gt;
+
+    &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;&quot; class=&quot;dk-ground&quot;&gt;
+      &lt;tr&gt;
+        &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
+
+          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+
+            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
+                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
+                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
+                 the footer. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- Footer. Four lines, no navigation, no icons, no second logo. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:20px 36px 32px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;&lt;td style=&quot;border-top:1px solid #E6DCCC;font-size:0;line-height:0;padding-bottom:18px;&quot; class=&quot;dk-rule&quot;&gt;&amp;nbsp;&lt;/td&gt;&lt;/tr&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd is made by Suraj Kandukuri.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;1 Example Street, Sampleton EX1 2MP&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd account.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;mailto:suraj@bingd.app?subject=Unsubscribe&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+          &lt;/table&gt;
+
+        &lt;/td&gt;
+      &lt;/tr&gt;
+    &lt;/table&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+' width="680" height="900" title="The welcome email at 680 pixels wide"></iframe>
+        </figure>
+        <figure class="frame">
+          <figcaption>Dark &mdash; Apple Mail</figcaption>
+          <iframe srcdoc='&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot; dir=&quot;ltr&quot; xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xmlns:o=&quot;urn:schemas-microsoft-com:office:office&quot;&gt;
+  &lt;head&gt;
+    &lt;meta charset=&quot;utf-8&quot; /&gt;
+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot; /&gt;
+    &lt;!-- Stops iOS shrinking the whole email to fit, which it does to anything it decides
+         is too wide and which turns 16px body copy into 11px. --&gt;
+    &lt;meta name=&quot;x-apple-disable-message-reformatting&quot; /&gt;
+    &lt;meta name=&quot;format-detection&quot; content=&quot;telephone=no,address=no,email=no,date=no&quot; /&gt;
+    &lt;!-- Tells a client this email has a dark treatment of its own, so Apple Mail uses the
+         media query below instead of inverting. --&gt;
+    &lt;meta name=&quot;color-scheme&quot; content=&quot;light dark&quot; /&gt;
+    &lt;meta name=&quot;supported-color-schemes&quot; content=&quot;light dark&quot; /&gt;
+    &lt;!-- FORCED DARK PREVIEW. Generated by build.mjs; never sent. See welcome.html. --&gt;
+    &lt;title&gt;Welcome to bingd, let me know what you think&lt;/title&gt;
+    &lt;!--[if mso]&gt;
+      &lt;noscript&gt;&lt;xml&gt;&lt;o:OfficeDocumentSettings&gt;&lt;o:PixelsPerInch&gt;96&lt;/o:PixelsPerInch&gt;&lt;/o:OfficeDocumentSettings&gt;&lt;/xml&gt;&lt;/noscript&gt;
+    &lt;![endif]--&gt;
+    &lt;style&gt;
+      /* Enhancements only. Every client that drops this block still gets a correct
+         light email, because everything structural is inline. */
+
+      body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+      table { border-collapse: collapse; }
+      img { border: 0; outline: none; text-decoration: none; }
+      a { color: #773744; }
+
+      /* Under 600px the shell stops being a card and becomes the page: the outer
+         padding and the border are what make a narrow phone feel cramped. */
+      @media only screen and (max-width: 620px) {
+        .shell { width: 100% !important; border-radius: 0 !important; border-left: 0 !important; border-right: 0 !important; }
+        .gutter { padding-left: 22px !important; padding-right: 22px !important; }
+        .pad-top { padding-top: 28px !important; }
+      }
+
+      /* Apple Mail and iOS Mail. Gmail ignores all of this and inverts on its own;
+         see DARK in build.mjs for why the light palette is chosen to survive that. */
+      @media all {
+        .dk-ground { background-color: #14110F !important; }
+        .dk-card { background-color: #1C1917 !important; border-color: #3A332F !important; }
+        .dk-text, .dk-text * { color: #EFE6DA !important; }
+        .dk-tertiary, .dk-tertiary * { color: #A2988C !important; }
+        .dk-accent, .dk-accent * { color: #B98C97 !important; }
+        /* (0,2,0) beats the paragraph own .dk-text * rule at (0,1,1), which would otherwise
+           repaint the label back to body colour and lose the accent in dark mode. */
+        .dk-text .dk-label, .dk-label { color: #B98C97 !important; }
+        .dk-rule { border-color: #3A332F !important; }
+      }
+    &lt;/style&gt;
+  &lt;/head&gt;
+
+  &lt;body style=&quot;margin:0;padding:0;background-color:#F5EBDD;&quot; bgcolor=&quot;#F5EBDD&quot; class=&quot;dk-ground&quot;&gt;
+    &lt;!-- The grey line the inbox shows after the subject. Hidden in the body itself, and
+         padded with zero-width joiners so a client cannot pull the next sentence of the
+         email in after it and truncate mid-word. --&gt;
+    &lt;div style=&quot;display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;&quot;&gt;
+      Hit reply and it comes straight to me.
+      &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847; &amp;#8199;&amp;#65279;&amp;#847;
+    &lt;/div&gt;
+
+    &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#F5EBDD&quot; style=&quot;background-color:#F5EBDD;&quot; class=&quot;dk-ground&quot;&gt;
+      &lt;tr&gt;
+        &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
+
+          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+
+            &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
+                 by default, and a wordmark they cannot see is not a wordmark. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter pad-top&quot; style=&quot;padding:30px 36px 0;&quot;&gt;
+                &lt;p style=&quot;margin:0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:26px;line-height:30px;color:#773744;&quot; class=&quot;dk-accent&quot;&gt;bingd.&lt;/p&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- The letter. The founder&#39;s own words, in his order, and nothing under it but
+                 the footer. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:26px 36px 6px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
+                      &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+            &lt;!-- Footer. Four lines, no navigation, no icons, no second logo. --&gt;
+            &lt;tr&gt;
+              &lt;td class=&quot;gutter&quot; style=&quot;padding:20px 36px 32px;&quot;&gt;
+                &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;
+                  &lt;tr&gt;&lt;td style=&quot;border-top:1px solid #E6DCCC;font-size:0;line-height:0;padding-bottom:18px;&quot; class=&quot;dk-rule&quot;&gt;&amp;nbsp;&lt;/td&gt;&lt;/tr&gt;
+                  &lt;tr&gt;
+                    &lt;td&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;bingd is made by Suraj Kandukuri.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;1 Example Street, Sampleton EX1 2MP&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 6px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;You are getting this one-time note because you made a bingd account.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#6E6862;&quot; class=&quot;dk-tertiary&quot;&gt;&lt;a href=&quot;mailto:suraj@bingd.app?subject=Unsubscribe&quot; style=&quot;color:#6E6862;text-decoration:underline;&quot; class=&quot;dk-tertiary&quot;&gt;Unsubscribe&lt;/a&gt;&lt;/p&gt;
+                    &lt;/td&gt;
+                  &lt;/tr&gt;
+                &lt;/table&gt;
+              &lt;/td&gt;
+            &lt;/tr&gt;
+
+          &lt;/table&gt;
+
+        &lt;/td&gt;
+      &lt;/tr&gt;
+    &lt;/table&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+' width="390" height="900" style="background:#14110F" title="The welcome email with its dark rules forced on"></iframe>
+        </figure>
+      </div>
+      <p class="sub" style="margin-top:14px">
+        The fourth frame is the real dark treatment with its media query forced on, so it
+        is the same bytes Apple Mail would render rather than a mock-up of them. Gmail is
+        the one thing no preview can show: it ignores that block and runs its own
+        inversion over the light palette, which is what the light palette is chosen to
+        survive.
+      </p>
+
+      <h2>In an inbox</h2>
+      <ol class="inbox">
+        <li class="row">
+          <span class="from">Suraj from bingd</span>
+          <span class="line"><b>Welcome to bingd, let me know what you think</b><span class="pre"> &mdash; Hit reply and it comes straight to me.</span></span>
+          <span class="tag">recommended</span>
+        </li>
+      </ol>
+      <p class="sub">A subject is only ever read in a list, beside a sender name.</p>
+
+      <h2>Subject and preheader</h2>
+      <div class="pair">
+        <div>
+          <table class="meta">
+            <tr><th>Subject &mdash; chosen</th><td>Welcome to bingd, let me know what you think</td></tr>
+            
+          </table>
+        </div>
+        <div>
+          <table class="meta">
+            <tr><th>Preheader &mdash; chosen</th><td>Hit reply and it comes straight to me.</td></tr>
+            
+          </table>
+        </div>
+      </div>
+
+      <h2>Where every link and instruction goes</h2>
+      <table class="meta">
+        <tr><th>Name</th><th>Class</th><th>Destination</th><th>What receives it</th></tr>
+        
+      <tr>
+        <td><code>inviteLink</code></td>
+        <td><span class="cls cls-C">C</span></td>
+        <td><a href="https://bingd.app/i/{{inviteToken}}">https://bingd.app/i/{{inviteToken}}</a></td>
+        <td>/i/* is in appPaths and app/i/[token].tsx receives it. It is the exact URL the app shares: use-recommend.ts builds `https://bingd.app/i/${token}` from create_invite_link's token. <b>Without the app:</b> web/dist/i.html: the invitation page with the install row and 'I already have bingd.'. <b>No token:</b> Tokens are minted lazily, so many new accounts have none. The claim mints the one personal link under create_invite_link's own lock, with no invite_link_creations row and no other side effect. README.md, 'The invite link'.</td>
+      </tr>
+      <tr>
+        <td><code>founderProfile</code></td>
+        <td><span class="cls cls-A">A</span></td>
+        <td><a href="https://bingd.app/u/saisurajkan">https://bingd.app/u/saisurajkan</a></td>
+        <td>/u/* is in appPaths; app/u/[username].tsx renders the profile and FollowControl. <b>Without the app:</b> web/dist/u.html resolves the display name and avatar and offers the install row plus Open in bingd.</td>
+      </tr>
+      </table>
+      <p class="sub" style="margin-top:12px">
+        <b>A</b> directly deep-linkable &middot; <b>I</b> an instruction inside the app,
+        with no link, whose labels are checked against the app&rsquo;s source &middot;
+        <b>D</b> not currently practical, and refused by the build.
+        <code>targets.json</code> carries the reasoning for each destination.
+      </p>
+
+      <h2>Plain text</h2>
+      <pre>{{greeting}}
+
+Thanks for giving bingd a shot.
+
+The app was inspired by Beli, which changed the way I experienced
+restaurants. I went from someone who liked eating out occasionally to
+someone who ranked every restaurant, compared lists with friends, and
+actively looked for the next place to try.
+
+I built bingd because I think movies and TV are missing that same loop,
+one that can make the post-watch experience almost as exciting as the
+watch itself. Rank your latest binge to see where it lands, comment on
+and save your friends' watches, and find your next title with better
+recommendations.
+
+If you want to suggest a feature, find something confusing, or just want
+to say hi, hit reply. It comes straight to me.
+
+bingd is more fun with friends, so here's your invite link
+(https://bingd.app/i/{{inviteToken}}). And if you want to see what I'm
+watching, follow me on bingd (https://bingd.app/u/saisurajkan).
+
+Happy binging,
+Suraj
+
+------------------------------------------------------------------------
+
+bingd is made by Suraj Kandukuri.
+{{postalAddress}}
+You are getting this one-time note because you made a bingd account.
+
+Unsubscribe: {{unsubscribeUrl}}
+</pre>
+
+      <h2>Still to decide</h2>
+      <ul>
+        <li><b>The subject.</b> <span>Founder-approved 2026-09-18: "Welcome to bingd, let me know what you think". One subject, no alternatives, shown as an inbox row above.</span></li>
+        <li><b>Postal address.</b> <span>Supplied at send time from the <code>WELCOME_POSTAL_ADDRESS</code> GitHub Actions secret, never from this repository. The footer above shows an obviously fake sample. A send refuses, before claiming anybody, while that secret is missing, blank or placeholder-shaped. A commercial email carries a physical mailing address; there is no company here, so it is one you are willing to publish.</span></li>
+        <li><b>Send from bingd.app.</b> <span>Replies go to <code>suraj@bingd.app</code>. <em>Sending</em> as that address needs <code>bingd.app</code> added and verified in Resend (DKIM, the <code>send</code> subdomain, DMARC). Until then a test send uses <code>--from "Suraj from bingd &lt;suraj@auth.bingd.app&gt;"</code>.</span></li>
+        <li><b>A Resend key of its own.</b> <span>Sending access, restricted to <code>bingd.app</code>. Never the key named <code>Supabase</code>: that one relays every sign-in code.</span></li>
+      </ul>
+    </div>
+  </body>
+</html>

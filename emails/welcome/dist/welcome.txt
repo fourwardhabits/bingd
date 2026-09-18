@@ -1,0 +1,32 @@
+{{greeting}}
+
+Thanks for giving bingd a shot.
+
+The app was inspired by Beli, which changed the way I experienced
+restaurants. I went from someone who liked eating out occasionally to
+someone who ranked every restaurant, compared lists with friends, and
+actively looked for the next place to try.
+
+I built bingd because I think movies and TV are missing that same loop,
+one that can make the post-watch experience almost as exciting as the
+watch itself. Rank your latest binge to see where it lands, comment on
+and save your friends' watches, and find your next title with better
+recommendations.
+
+If you want to suggest a feature, find something confusing, or just want
+to say hi, hit reply. It comes straight to me.
+
+bingd is more fun with friends, so here's your invite link
+(https://bingd.app/i/{{inviteToken}}). And if you want to see what I'm
+watching, follow me on bingd (https://bingd.app/u/saisurajkan).
+
+Happy binging,
+Suraj
+
+------------------------------------------------------------------------
+
+bingd is made by Suraj Kandukuri.
+{{postalAddress}}
+You are getting this one-time note because you made a bingd account.
+
+Unsubscribe: {{unsubscribeUrl}}
