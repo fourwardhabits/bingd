@@ -3,11 +3,13 @@ name: Welcome email
 # The founder's welcome note, sent once per new account about 48 hours after signup.
 #
 # ---------------------------------------------------------------------------
-# NOT SCHEDULED, AND THAT IS THE CURRENT STATE ON PURPOSE
+# SCHEDULED HOURLY AGAINST PRODUCTION SINCE 2026-09-18
 # ---------------------------------------------------------------------------
 #
-# This workflow only runs when somebody presses Run workflow. There is no `schedule:`
-# below, and even a manual `send` mails nobody until all of these are true:
+# A scheduled run is always `send` on `production`: it has no inputs, so the
+# expressions below name both explicitly rather than falling through to nonprod.
+# A manual run keeps its inputs (default nonprod, dry-run). Either way, a send
+# mails nobody until all of these are true in the target project:
 #
 #   1. supabase/migrations/20260923000100_a_welcome_note_sent_once.sql is applied to the target
 #      (without it every RPC is a 404 and the worker stops).
@@ -16,18 +18,19 @@ name: Welcome email
 #   3. welcome.delivery_enabled is true AND welcome.start_after is a real date, in that
 #      project's app_config (the claim returns nobody otherwise, inside SQL).
 #
-# Turning on the schedule is step 5 of emails/welcome/automation/README.md "Turning it
-# on", and it is a separate commit from everything else, so the first scheduled run is a
-# decision somebody made rather than a side effect of a merge.
+# The schedule was turned on in its own commit, after the founder confirmed Sign in with
+# Apple private email relay for bingd.app (step 5 of emails/welcome/automation/README.md).
 #
-#   schedule:
-#     - cron: '23 * * * *'   # hourly, off the hour
+# Emergency stop, no deploy: `welcome.delivery_enabled` = false in production app_config.
+# A disabled run claims nobody. Commenting the schedule out again stops the runs too.
 #
 # Why a GitHub Action rather than an Edge Function: nothing in the release path deploys
 # supabase/functions/, and a welcome email running a fortnight-old template is that
 # failure. What this runs is always what is on main. See the README.
 
 on:
+  schedule:
+    - cron: '23 * * * *'   # hourly, off the hour
   workflow_dispatch:
     inputs:
       target:
@@ -54,7 +57,7 @@ on:
 # Two runs never overlap. The claim is safe under overlap anyway (see the race suite);
 # this keeps the logs readable.
 concurrency:
-  group: welcome-email-${{ github.event.inputs.target }}
+  group: welcome-email-${{ github.event_name == 'schedule' && 'production' || github.event.inputs.target }}
   cancel-in-progress: false
 
 permissions:
@@ -62,7 +65,7 @@ permissions:
 
 jobs:
   send:
-    name: ${{ github.event.inputs.mode }} on ${{ github.event.inputs.target }}
+    name: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }} on ${{ github.event_name == 'schedule' && 'production' || github.event.inputs.target }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,8 +79,8 @@ jobs:
 
       - name: Run the worker
         env:
-          SUPABASE_URL: ${{ github.event.inputs.target == 'production' && secrets.SUPABASE_URL_PRODUCTION || secrets.SUPABASE_URL_NONPROD }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ github.event.inputs.target == 'production' && secrets.SUPABASE_SERVICE_ROLE_KEY_PRODUCTION || secrets.SUPABASE_SERVICE_ROLE_KEY_NONPROD }}
+          SUPABASE_URL: ${{ (github.event_name == 'schedule' || github.event.inputs.target == 'production') && secrets.SUPABASE_URL_PRODUCTION || secrets.SUPABASE_URL_NONPROD }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ (github.event_name == 'schedule' || github.event.inputs.target == 'production') && secrets.SUPABASE_SERVICE_ROLE_KEY_PRODUCTION || secrets.SUPABASE_SERVICE_ROLE_KEY_NONPROD }}
           # A key of its own, sending access restricted to bingd.app. Never the key named
           # Supabase, which relays every sign-in code.
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY_WELCOME }}
@@ -87,7 +90,7 @@ jobs:
           # before claiming anybody, when it is missing, blank or placeholder-shaped, so a
           # forgotten secret costs nobody their one chance at the note.
           WELCOME_POSTAL_ADDRESS: ${{ secrets.WELCOME_POSTAL_ADDRESS }}
-          MODE: ${{ github.event.inputs.mode }}
+          MODE: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }}
           CANARY_USER: ${{ github.event.inputs.canary_user }}
           CANARY_EMAIL: ${{ github.event.inputs.canary_email }}
         run: |

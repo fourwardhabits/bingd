@@ -535,13 +535,55 @@ describe('welcome email: the secrets are wired where they cannot leak', () => {
     assert.doesNotMatch(workflow, /\benv\s*\|/, 'the environment is piped somewhere');
   });
 
-  it('is still manual only, and the manual path staging QA needs is intact', () => {
-    // An uncommented `schedule:` is the single line that turns a merged PR into a recurring
-    // send. A commented one reads `#   schedule:`, which does not match here because `#` is
-    // not whitespace.
-    assert.match(workflow, /workflow_dispatch:/, 'the manual path for staging QA is gone');
+  /**
+   * HOURLY, AND A SCHEDULED RUN IS ALWAYS `send` ON `production`.
+   *
+   * Enabled 2026-09-18 after the founder confirmed Apple private email relay. The trap this
+   * guards: a scheduled run has no `github.event.inputs`, and the original expressions fell
+   * through to NONPROD and to an empty MODE (which the worker treats as a send) — a staging
+   * worker every hour and a production that never sends, with every run green.
+   *
+   * GitHub's `&&`, `||` and `==` behave like JavaScript's for these string operands, so the
+   * workflow's own expressions are evaluated here for each kind of trigger rather than
+   * compared as text.
+   */
+  it('runs hourly at :23, and a scheduled run is a send on production', () => {
     const active = workflowLines.filter((l) => /^\s*schedule:/.test(l));
-    assert.deepEqual(active, [], 'the recurring schedule is enabled');
+    assert.equal(active.length, 1, 'exactly one active schedule');
+    const crons = [...workflow.matchAll(/^\s*-\s*cron:\s*'([^']+)'/gm)].map((m) => m[1]);
+    assert.deepEqual(crons, ['23 * * * *'], 'the cadence changed');
+    assert.match(workflow, /workflow_dispatch:/, 'the manual path for staging QA is gone');
+
+    const expr = (name) => {
+      const m = workflow.match(new RegExp(`^\\s*${name}:\\s*\\$\\{\\{(.+)\\}\\}\\s*$`, 'm'));
+      assert.ok(m, `${name} is not a single \${{ }} expression`);
+      return m[1];
+    };
+    const evaluate = (source, event, inputs) =>
+      new Function(
+        'ev', 'inp',
+        `return ${source.replace(/github\.event_name/g, 'ev').replace(/github\.event\.inputs\.(\w+)/g, 'inp.$1')
+          .replace(/secrets\.(\w+)/g, "'$1'")}`,
+      )(event, inputs);
+
+    const url = expr('SUPABASE_URL');
+    const key = expr('SUPABASE_SERVICE_ROLE_KEY');
+    const mode = expr('MODE');
+    const cases = [
+      ['schedule', {}, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'send'],
+      ['workflow_dispatch', { target: 'nonprod', mode: 'dry-run' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'dry-run'],
+      ['workflow_dispatch', { target: 'nonprod', mode: 'send' }, 'SUPABASE_URL_NONPROD', 'SUPABASE_SERVICE_ROLE_KEY_NONPROD', 'send'],
+      ['workflow_dispatch', { target: 'production', mode: 'dry-run' }, 'SUPABASE_URL_PRODUCTION', 'SUPABASE_SERVICE_ROLE_KEY_PRODUCTION', 'dry-run'],
+    ];
+    for (const [event, inputs, wantUrl, wantKey, wantMode] of cases) {
+      const label = `${event} ${JSON.stringify(inputs)}`;
+      assert.equal(evaluate(url, event, inputs), wantUrl, `${label}: wrong project URL`);
+      assert.equal(evaluate(key, event, inputs), wantKey, `${label}: wrong service key`);
+      assert.equal(evaluate(mode, event, inputs), wantMode, `${label}: wrong mode`);
+    }
+
+    // The URL and the key must never disagree about which project a run is for.
+    assert.equal(url.replace(/SUPABASE_URL_/g, 'X_'), key.replace(/SUPABASE_SERVICE_ROLE_KEY_/g, 'X_'), 'URL and key choose differently');
   });
 
   it('keeps both secrets out of anything that ships to a phone', async () => {
