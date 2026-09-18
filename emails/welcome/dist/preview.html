@@ -146,7 +146,12 @@
       &lt;tr&gt;
         &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
 
-          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+          &lt;!-- 680px on desktop (founder, 2026-09-18, after reading the real send in Gmail:
+               600 felt narrow). Fluid, capped by max-width, for every client that honours
+               it; Outlook on Windows ignores max-width and would stretch a 100% table to
+               the window, so it alone gets the fixed-width ghost table around it. --&gt;
+          &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
+          &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
             &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
                  by default, and a wordmark they cannot see is not a wordmark. --&gt;
@@ -164,10 +169,10 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot!&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends&#39; latest TV shows, and get stronger recommendations with a better rating system.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
                     &lt;/td&gt;
@@ -194,6 +199,7 @@
             &lt;/tr&gt;
 
           &lt;/table&gt;
+          &lt;!--[if mso]&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;![endif]--&gt;
 
         &lt;/td&gt;
       &lt;/tr&gt;
@@ -267,7 +273,12 @@
       &lt;tr&gt;
         &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
 
-          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+          &lt;!-- 680px on desktop (founder, 2026-09-18, after reading the real send in Gmail:
+               600 felt narrow). Fluid, capped by max-width, for every client that honours
+               it; Outlook on Windows ignores max-width and would stretch a 100% table to
+               the window, so it alone gets the fixed-width ghost table around it. --&gt;
+          &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
+          &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
             &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
                  by default, and a wordmark they cannot see is not a wordmark. --&gt;
@@ -285,10 +296,10 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot!&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends&#39; latest TV shows, and get stronger recommendations with a better rating system.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
                     &lt;/td&gt;
@@ -315,6 +326,7 @@
             &lt;/tr&gt;
 
           &lt;/table&gt;
+          &lt;!--[if mso]&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;![endif]--&gt;
 
         &lt;/td&gt;
       &lt;/tr&gt;
@@ -388,7 +400,12 @@
       &lt;tr&gt;
         &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
 
-          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+          &lt;!-- 680px on desktop (founder, 2026-09-18, after reading the real send in Gmail:
+               600 felt narrow). Fluid, capped by max-width, for every client that honours
+               it; Outlook on Windows ignores max-width and would stretch a 100% table to
+               the window, so it alone gets the fixed-width ghost table around it. --&gt;
+          &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
+          &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
             &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
                  by default, and a wordmark they cannot see is not a wordmark. --&gt;
@@ -406,10 +423,10 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot!&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends&#39; latest TV shows, and get stronger recommendations with a better rating system.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
                     &lt;/td&gt;
@@ -436,6 +453,7 @@
             &lt;/tr&gt;
 
           &lt;/table&gt;
+          &lt;!--[if mso]&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;![endif]--&gt;
 
         &lt;/td&gt;
       &lt;/tr&gt;
@@ -510,7 +528,12 @@
       &lt;tr&gt;
         &lt;td align=&quot;center&quot; style=&quot;padding:32px 12px 40px;&quot;&gt;
 
-          &lt;table role=&quot;presentation&quot; width=&quot;600&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:600px;max-width:600px;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
+          &lt;!-- 680px on desktop (founder, 2026-09-18, after reading the real send in Gmail:
+               600 felt narrow). Fluid, capped by max-width, for every client that honours
+               it; Outlook on Windows ignores max-width and would stretch a 100% table to
+               the window, so it alone gets the fixed-width ghost table around it. --&gt;
+          &lt;!--[if mso]&gt;&lt;table role=&quot;presentation&quot; width=&quot;680&quot; align=&quot;center&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot;&gt;&lt;tr&gt;&lt;td&gt;&lt;![endif]--&gt;
+          &lt;table role=&quot;presentation&quot; width=&quot;100%&quot; cellpadding=&quot;0&quot; cellspacing=&quot;0&quot; border=&quot;0&quot; bgcolor=&quot;#FBF8F4&quot; class=&quot;shell dk-card&quot; style=&quot;width:100%;max-width:680px;margin:0 auto;background-color:#FBF8F4;border:1px solid #E6DCCC;border-radius:14px;&quot;&gt;
 
             &lt;!-- Masthead. Text, not an image: roughly half of recipients have images off
                  by default, and a wordmark they cannot see is not a wordmark. --&gt;
@@ -528,10 +551,10 @@
                   &lt;tr&gt;
                     &lt;td&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Hey Suraj,&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends&#39; watches, and find your next title with better recommendations.&lt;/p&gt;
-                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Thanks for giving bingd a shot!&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends&#39; latest TV shows, and get stronger recommendations with a better rating system.&lt;/p&gt;
+                      &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.&lt;/p&gt;
                       &lt;p style=&quot;margin:0 0 18px;font-family:-apple-system, BlinkMacSystemFont, &#39;Segoe UI&#39;, Roboto, Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;bingd is more fun with friends, so here&#39;s your &lt;a href=&quot;https://bingd.app/i/0123456789abcdef0123456789abcdef&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;invite link&lt;/a&gt;. And if you want to see what I&#39;m watching, &lt;a href=&quot;https://bingd.app/u/saisurajkan&quot; style=&quot;color:#773744;text-decoration:underline;&quot; class=&quot;dk-accent&quot;&gt;follow me on bingd&lt;/a&gt;.&lt;/p&gt;
                       &lt;p style=&quot;margin:28px 0 0;font-family:Georgia, &#39;Times New Roman&#39;, &#39;DM Serif Display&#39;, serif;font-size:19px;line-height:28px;color:#242326;&quot; class=&quot;dk-text&quot;&gt;Happy binging,&lt;br /&gt;Suraj&lt;/p&gt;
                     &lt;/td&gt;
@@ -558,6 +581,7 @@
             &lt;/tr&gt;
 
           &lt;/table&gt;
+          &lt;!--[if mso]&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;![endif]--&gt;
 
         &lt;/td&gt;
       &lt;/tr&gt;
@@ -628,21 +652,21 @@
       <h2>Plain text</h2>
       <pre>{{greeting}}
 
-Thanks for giving bingd a shot.
+Thanks for giving bingd a shot!
 
-The app was inspired by Beli, which changed the way I experienced
-restaurants. I went from someone who liked eating out occasionally to
-someone who ranked every restaurant, compared lists with friends, and
-actively looked for the next place to try.
+The app was inspired by my experience using Beli, which changed the way
+I enjoyed restaurants. I went from someone who liked occasionally eating
+out to someone who ranked every restaurant, compared lists with friends,
+and actively looked for the next place to try.
 
 I built bingd because I think movies and TV are missing that same loop,
-one that can make the post-watch experience almost as exciting as the
-watch itself. Rank your latest binge to see where it lands, comment on
-and save your friends' watches, and find your next title with better
-recommendations.
+one that can make the post-watch ritual almost as exciting as the watch
+itself. See where your latest movie lands in your rankings, comment on
+and save your friends' latest TV shows, and get stronger recommendations
+with a better rating system.
 
-If you want to suggest a feature, find something confusing, or just want
-to say hi, hit reply. It comes straight to me.
+If you have feature suggestions, something in the app is confusing, or
+you just want to say hi, reply to this email. It comes straight to me.
 
 bingd is more fun with friends, so here's your invite link
 (https://bingd.app/i/{{inviteToken}}). And if you want to see what I'm

@@ -1,6 +1,7 @@
 {
   "$comment": [
-    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND APPROVED ON 2026-09-18.",
+    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND APPROVED ON 2026-09-18, REVISED THE SAME DAY",
+    "AFTER THE FOUNDER READ THE REAL STAGING SEND IN GMAIL.",
     "",
     "This letter replaces the 2026-09-13 one in full. It is the founder's own prose: do not",
     "rewrite, shorten, reorganise or 'improve' it. The only edits made to what he wrote are",
@@ -36,10 +37,10 @@
     "status": "APPROVED",
     "greeting": "Hey {{firstName}},",
     "paragraphs": [
-      "Thanks for giving bingd a shot.",
-      "The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.",
-      "I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends' watches, and find your next title with better recommendations.",
-      "If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.",
+      "Thanks for giving bingd a shot!",
+      "The app was inspired by my experience using Beli, which changed the way I enjoyed restaurants. I went from someone who liked occasionally eating out to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.",
+      "I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch ritual almost as exciting as the watch itself. See where your latest movie lands in your rankings, comment on and save your friends' latest TV shows, and get stronger recommendations with a better rating system.",
+      "If you have feature suggestions, something in the app is confusing, or you just want to say hi, reply to this email. It comes straight to me.",
       [
         "bingd is more fun with friends, so here's your ",
         { "link": "invite link", "target": "inviteLink" },

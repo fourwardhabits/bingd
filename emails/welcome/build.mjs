@@ -344,7 +344,12 @@ const html = `<!DOCTYPE html>
       <tr>
         <td align="center" style="padding:32px 12px 40px;">
 
-          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.paper}" class="shell dk-card" style="width:600px;max-width:600px;background-color:${C.paper};border:1px solid ${C.hairline};border-radius:14px;">
+          <!-- 680px on desktop (founder, 2026-09-18, after reading the real send in Gmail:
+               600 felt narrow). Fluid, capped by max-width, for every client that honours
+               it; Outlook on Windows ignores max-width and would stretch a 100% table to
+               the window, so it alone gets the fixed-width ghost table around it. -->
+          <!--[if mso]><table role="presentation" width="680" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.paper}" class="shell dk-card" style="width:100%;max-width:680px;margin:0 auto;background-color:${C.paper};border:1px solid ${C.hairline};border-radius:14px;">
 
             <!-- Masthead. Text, not an image: roughly half of recipients have images off
                  by default, and a wordmark they cannot see is not a wordmark. -->
@@ -388,6 +393,7 @@ const html = `<!DOCTYPE html>
             </tr>
 
           </table>
+          <!--[if mso]></td></tr></table><![endif]-->
 
         </td>
       </tr>
