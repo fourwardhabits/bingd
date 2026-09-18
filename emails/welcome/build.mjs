@@ -222,7 +222,23 @@ const paragraphHtml = (paragraph) =>
   piecesOf(paragraph)
     .map((piece) => {
       if (typeof piece === 'string') return esc(piece);
-      if (piece.bold) return `<strong style="font-weight:700;color:${C.ink};" class="dk-text">${esc(piece.bold)}</strong>`;
+      /**
+       * MAROON, BECAUSE THAT IS THE SITE'S LABEL DEVICE.
+       *
+       * bingd.app marks every section with a small maroon label above it (`.kicker`:
+       * maroon, 600, uppercase, letterspaced). It is the page's most repeated brand
+       * gesture, and the letter had no maroon in its body at all — only the masthead and
+       * the two links — which is why it read as correctly-coloured but anonymous.
+       *
+       * Translated rather than copied: **sentence case, inline, no letterspacing**. The
+       * site's kicker sits on its own line above a heading; uppercasing three labels inside
+       * a personal letter would turn it into the feature grid the founder asked this not to
+       * be. The colour is the part that carries the brand; the shouting is not.
+       *
+       * A label cannot be mistaken for a link: links here are underlined and these are not,
+       * which is the same distinction the site makes.
+       */
+      if (piece.bold) return `<strong style="font-weight:700;color:${C.maroon};" class="dk-label">${esc(piece.bold)}</strong>`;
       if (piece.link) {
         const destination = target(piece.target);
         return destination
@@ -307,6 +323,9 @@ const html = `<!DOCTYPE html>
         .dk-text, .dk-text * { color: ${DARK.text} !important; }
         .dk-tertiary, .dk-tertiary * { color: ${DARK.tertiary} !important; }
         .dk-accent, .dk-accent * { color: ${DARK.accent} !important; }
+        /* (0,2,0) beats the paragraph own .dk-text * rule at (0,1,1), which would otherwise
+           repaint the label back to body colour and lose the accent in dark mode. */
+        .dk-text .dk-label, .dk-label { color: ${DARK.accent} !important; }
         .dk-rule { border-color: ${DARK.hairline} !important; }
       }
     </style>
@@ -344,7 +363,7 @@ const html = `<!DOCTYPE html>
                     <td>
                       <p style="margin:0 0 18px;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${GREETING_TOKEN}</p>
                       ${paragraphs}
-                      <p style="margin:26px 0 0;font-family:${FONT};font-size:16px;line-height:26px;color:${C.ink};" class="dk-text">${copy.letter.signoff.map(esc).join('<br />')}</p>
+                      <p style="margin:28px 0 0;font-family:${SERIF};font-size:19px;line-height:28px;color:${C.ink};" class="dk-text">${copy.letter.signoff.map(esc).join('<br />')}</p>
                     </td>
                   </tr>
                 </table>
