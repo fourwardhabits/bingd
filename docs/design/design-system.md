@@ -659,9 +659,10 @@ Where the name is not prose at all, it keeps whatever form the identifier or the
 
   **The lifecycle email follows the rule above** (2026-09-17). `emails/welcome/` writes the
   name as `bingd` in every sentence and keeps `bingd.` only as the masthead, which is the
-  wordmark. Its subject, *"I built bingd. Tell me what you think."*, keeps its full stop
-  because the sentence ends there — the clearest example in the product of why sentence
-  punctuation is not the brand. `emails/welcome/email.test.mjs` asserts both halves.
+  wordmark. Its subject is *"Welcome to bingd, let me know what you think"* (2026-09-18).
+  `emails/welcome/email.test.mjs` rejects a period after the name that is followed by a
+  lower-case word (a branded period) and accepts one that ends a sentence, checked against
+  fixed examples in both directions.
 - **A person's own words.** A display name, a comment or a note that contains `bingd.` is
   theirs and is never rewritten.
 

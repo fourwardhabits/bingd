@@ -370,11 +370,11 @@ the others.
    - Sign in with Apple private-relay addresses only deliver mail from registered domains.
      In Apple Developer → Certificates, Identifiers & Profiles → Services → Sign in with
      Apple for Email Communication, register `bingd.app` and `suraj@bingd.app`.
-2. **The copy and the address.** Store the mailing address as the repository secret
-   `WELCOME_POSTAL_ADDRESS` (GitHub → Settings → Secrets and variables → Actions). It is
-   deliberately **not** in `copy.json`: a value committed there is in git history for
-   ever. Then rewrite the note if you want to, check the P.S. title, set
-   `note.status` to `"APPROVED"`, run `node emails/welcome/build.mjs` and the tests, and send
+2. **The copy and the address.** *Done 2026-09-18:* the founder approved the letter in
+   `copy.json` (`letter.status` is `"APPROVED"`) and stored the mailing address as the
+   repository secret `WELCOME_POSTAL_ADDRESS`. It is deliberately **not** in `copy.json`: a
+   value committed there is in git history for ever. Any later copy edit means running
+   `node emails/welcome/build.mjs` and the tests, updating `LOCKED_LETTER`, and sending
    yourself a test at two inboxes. Read both on a phone in light and dark mode, reply from
    the one that is not the forwarding Gmail, and tap every link with and without the app.
 3. **The SQL.** It is already a migration — `supabase/migrations/20260923000100_a_welcome_note_sent_once.sql`

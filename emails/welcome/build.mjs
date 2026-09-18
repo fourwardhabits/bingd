@@ -211,8 +211,8 @@ const UNSUBSCRIBE_TOKEN = '{{unsubscribeUrl}}';
 /**
  * One paragraph of the letter.
  *
- * A string is plain text. An array is pieces: a string, `{ bold }` (one of the three
- * feature labels, and nothing else is bold), or `{ link, target }` (an inline link whose
+ * A string is plain text. An array is pieces: a string, `{ bold }` (emphasis the approved
+ * copy asks for; the 2026-09-18 letter asks for none), or `{ link, target }` (an inline link whose
  * destination must be verified in targets.json). No buttons and no cards: this is a
  * letter, and the founder asked for it to look like one.
  */
@@ -554,8 +554,8 @@ const artifactRows = destinationRows
  */
 const decisions = [
   {
-    title: 'Pick the subject.',
-    body: `Three candidates are shown as inbox rows above. <code>subject.chosen</code> is "${esc(copy.subject.chosen)}".`,
+    title: 'The subject.',
+    body: `Founder-approved 2026-09-18: "${esc(copy.subject.chosen)}". One subject, no alternatives, shown as an inbox row above.`,
   },
   {
     title: 'Postal address.',
@@ -729,8 +729,7 @@ const preview = `<!doctype html>
         <b>A</b> directly deep-linkable &middot; <b>I</b> an instruction inside the app,
         with no link, whose labels are checked against the app&rsquo;s source &middot;
         <b>D</b> not currently practical, and refused by the build.
-        <code>targets.json</code> carries the reasoning, including why Invite friends and
-        Group Picks are instructions rather than buttons.
+        <code>targets.json</code> carries the reasoning for each destination.
       </p>
 
       <h2>Plain text</h2>
@@ -1104,8 +1103,8 @@ const artifact = `<title>Welcome Email Review</title>
         <div class="panel">
           <p class="label">Subject &middot; recommended</p>
           <p class="value">${esc(copy.subject.chosen)}</p>
-          <p class="alt">It asks a question, which is the one thing a subject line can do
-          that makes replying feel like the obvious response rather than an extra step.</p>
+          <p class="alt">It says what the note is and asks for a reply in the same line, so
+          replying reads as the expected response rather than an extra step.</p>
         </div>
         ${copy.subject.alternatives
           .map(
@@ -1148,9 +1147,9 @@ const artifact = `<title>Welcome Email Review</title>
       </table>
     </div>
     <p class="sub" style="margin-top:16px">
-      Invite friends and Group Picks have no link that lands on them: one lives on the
-      Profile tab, the other is a chip on the For you tab with no route. So their cards say
-      where to tap and carry no button, rather than a button that opens the wrong screen.
+      Both destinations are inline links inside one sentence of the letter: the
+      recipient&rsquo;s own invite link, and the founder&rsquo;s profile. There are no buttons
+      and no in-app instructions.
     </p>
   </section>
 

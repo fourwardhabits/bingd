@@ -40,10 +40,8 @@
     }
   },
 
-  "labels": [
-    { "label": "Group Picks", "file": "app/(tabs)/recommendations.tsx", "note": "The chip that opens GroupPicksSheet. Nothing in the app is called Group Watch." },
-    { "label": "For you", "file": "app/(tabs)/_layout.tsx", "note": "The tab's title, lower-case y." }
-  ],
+  "$labelsComment": "Empty since the 2026-09-18 letter, which names no in-app label (the 2026-09-13 one named Group Picks and For you). Add one back here the moment the copy tells the reader to find something in the app, and email.test.mjs will check it is still rendered.",
+  "labels": [],
 
   "rejected": {
     "mintAtSendTime": {

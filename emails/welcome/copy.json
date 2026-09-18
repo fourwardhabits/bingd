@@ -1,32 +1,30 @@
 {
   "$comment": [
-    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND LOCKED ON 2026-09-13.",
+    "THE WELCOME EMAIL'S COPY. FOUNDER-WRITTEN AND APPROVED ON 2026-09-18.",
     "",
-    "The letter below is the founder's own prose. Do not rewrite, shorten, reorganise or",
-    "'improve' it; the parenthetical jokes are deliberate. The only edits made to what he",
-    "wrote are listed in `$edits`.",
+    "This letter replaces the 2026-09-13 one in full. It is the founder's own prose: do not",
+    "rewrite, shorten, reorganise or 'improve' it. The only edits made to what he wrote are",
+    "listed in `$edits`.",
     "",
-    "After any edit run `node emails/welcome/build.mjs` and `node --test emails/welcome/email.test.mjs`.",
+    "After any edit run `node emails/welcome/build.mjs` and `node --test emails/welcome/email.test.mjs`,",
+    "and update LOCKED_LETTER in email.test.mjs in the same commit.",
     "",
     "A paragraph is a string, or an array of pieces: a string is text, `{ \"bold\": ... }` is",
-    "one of the three bold feature labels, and `{ \"link\": ..., \"target\": ... }` is an inline",
-    "link to a destination in targets.json. `{{firstName}}` and `{{inviteUrl}}` are filled per",
-    "recipient at send time."
+    "emphasis the copy asks for (this letter asks for none), and `{ \"link\": ..., \"target\": ... }`",
+    "is an inline link to a destination in targets.json. `{{firstName}}` and the invite token",
+    "are filled per recipient at send time."
   ],
 
   "$edits": [
-    "For You -> For you: the tab's exact label (app/(tabs)/_layout.tsx).",
-    "[VERIFY EXACT PRODUCT LABEL] -> Group Picks: the chip's exact label on the For you tab (app/(tabs)/recommendations.tsx). Nothing in the app is called Group Watch.",
-    "Avengers Doomsday -> Avengers: Doomsday, and the Emoji Movie -> The Emoji Movie: the films' titles.",
-    "[Name] -> {{firstName}}. With no usable first name the greeting is 'Hey,'."
+    "<FirstName> -> {{firstName}}. With no usable first name the greeting is 'Hey,'."
   ],
 
   "subject": {
-    "chosen": "I built bingd. Tell me what you think.",
-    "alternatives": ["Thanks for trying bingd.", "A note from the person who made bingd."]
+    "chosen": "Welcome to bingd, let me know what you think",
+    "alternatives": []
   },
 
-  "$preheaderComment": "The grey line after the subject in an inbox. Not part of the letter.",
+  "$preheaderComment": "The grey line after the subject in an inbox. Not part of the letter. Kept from the 2026-09-13 copy because it still says exactly what the letter says: hit reply, it comes straight to me.",
   "preheader": {
     "chosen": "Hit reply and it comes straight to me.",
     "alternatives": []
@@ -38,21 +36,10 @@
     "status": "APPROVED",
     "greeting": "Hey {{firstName}},",
     "paragraphs": [
-      "Thanks for giving bingd a shot. I built it because the usual 1–5 star ratings never really felt like they captured the experience of watching a good movie or TV show.",
-      "Here are a few of my favorite ways to use the app:",
-      [
-        { "bold": "Post-watch Ranking:" },
-        " Instead of picking a number, compare titles head-to-head and bingd builds your ranked list. That list keeps evolving as you discover new favorites (Avengers: Doomsday anyone?)."
-      ],
-      [
-        { "bold": "Pre-vetted Watchlist:" },
-        " My favorite part of the feed is not just seeing what my friends are watching. It's putting those titles in my watchlist and then teasing them about their taste later (The Emoji Movie, really?)."
-      ],
-      [
-        { "bold": "Smooth Planning:" },
-        " The Group Picks feature (under For you) generates recommendations across multiple bingd users when you're struggling to find a pick before the popcorn runs out. It's a favorite for movie clubs and couples!"
-      ],
-      "If you want to suggest a new feature, find something confusing, or love the app and just want to say hi, you can hit reply to this email. It comes straight to me.",
+      "Thanks for giving bingd a shot.",
+      "The app was inspired by Beli, which changed the way I experienced restaurants. I went from someone who liked eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively looked for the next place to try.",
+      "I built bingd because I think movies and TV are missing that same loop, one that can make the post-watch experience almost as exciting as the watch itself. Rank your latest binge to see where it lands, comment on and save your friends' watches, and find your next title with better recommendations.",
+      "If you want to suggest a feature, find something confusing, or just want to say hi, hit reply. It comes straight to me.",
       [
         "bingd is more fun with friends, so here's your ",
         { "link": "invite link", "target": "inviteLink" },

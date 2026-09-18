@@ -33,8 +33,9 @@ import {
  *   2. **The committed email is the one the copy renders.**
  *   3. **Every link lands.** The recipient's own invite link and the founder's profile, on
  *      paths the app claims, in both parts.
- *   4. **Every product label is one the app renders.** Group Picks, For you.
- *   5. **It is a letter.** No images, no buttons, and bold only on the three feature labels.
+ *   4. **Every product label is one the app renders.** targets.json lists them; the
+ *      2026-09-18 letter names none.
+ *   5. **It is a letter.** No images, no buttons, and no bold: the approved copy asks for none.
  *   6. **The test send cannot reach a user list.**
  */
 
@@ -47,7 +48,8 @@ const repo = join(here, '..', '..');
  * Changing a word of it changes this hash. Do not update it to make a test pass: update it
  * because the founder changed his letter.
  */
-const LOCKED_LETTER = 'd0c279751c6ad7ee18f788a0c684fc75101dc3aacd946588cb465fa8d6e2b3d3';
+// The founder's letter approved on 2026-09-18, replacing the 2026-09-13 one in full.
+const LOCKED_LETTER = '9d7ed0cf37f093dd2c487729f0be84add08d0c53d0867c9846b1db74718d960b';
 
 const read = (path) => readFile(join(repo, path), 'utf8');
 
@@ -101,10 +103,12 @@ describe('welcome email: the founder letter', () => {
     assert.equal(copy.letter.status, 'APPROVED');
   });
 
-  it('bolds the three feature labels and nothing else', () => {
+  it('bolds nothing, because the approved letter asks for no emphasis', () => {
+    // The 2026-09-13 letter had three bold feature labels; the 2026-09-18 one has none. A
+    // bold or semibold run appearing now is emphasis nobody approved.
     const bold = [...html.matchAll(/<strong[^>]*>([^<]+)<\/strong>/g)].map((m) => m[1]);
-    assert.deepEqual(bold, ['Post-watch Ranking:', 'Pre-vetted Watchlist:', 'Smooth Planning:']);
-    assert.equal((html.match(/<b>|font-weight:\s*(bold|[5-9]00)/g) ?? []).length, 3, 'no other bold or semibold text, links included');
+    assert.deepEqual(bold, []);
+    assert.equal((html.match(/<b>|font-weight:\s*(bold|[5-9]00)/g) ?? []).length, 0, 'no bold or semibold text, links included');
   });
 
   it('is a letter: no images, no buttons, no cards', () => {
@@ -112,9 +116,11 @@ describe('welcome email: the founder letter', () => {
     assert.doesNotMatch(html, /btn-wrap|class="btn"|dk-raised|dk-fill|dk-outline/);
   });
 
-  it('keeps the plain-text part as bingd, with the feature labels as plain text', () => {
+  it('keeps the plain-text part as the approved letter reads', () => {
     assert.match(text, /^\{\{greeting\}\}\n\nThanks for giving bingd a shot\./);
-    assert.match(text, /\nPost-watch Ranking: Instead of picking a number/);
+    // Whitespace-tolerant, because the text part is word-wrapped at 72 columns.
+    assert.match(text, /\nThe app was inspired by Beli,\s+which changed the way I experienced\s+restaurants\./);
+    assert.match(text, /\nI built bingd because I think movies and TV are missing that same loop,/);
     assert.doesNotMatch(text, /\*\*/);
     assert.match(text, /\nHappy binging,\nSuraj\n/);
   });
@@ -193,10 +199,9 @@ describe('welcome email: brand and compliance', () => {
   /**
    * THE APPROVED SUBJECT, PINNED TO THE CHARACTER.
    *
-   * It is founder-written and signed off, and it is the one line in the product where the
-   * brand rule is most easily "corrected" into a mistake — the full stop after `bingd` ends
-   * the first sentence, and removing it as a stray brand period breaks the sentence instead
-   * of fixing the brand.
+   * Founder-written and approved on 2026-09-18, replacing "I built bingd. Tell me what you
+   * think." It has a comma after the name and no closing punctuation, both deliberate: a
+   * well-meant "fix" to either is a subject nobody approved.
    *
    * `supabase/tests/welcome-email.test.mjs` asserts the same string on the *sent payload*.
    * It is asserted here as well, and that is deliberate rather than duplicated: this file is
@@ -204,7 +209,8 @@ describe('welcome email: brand and compliance', () => {
    * claims anybody, rather than after.
    */
   it('carries the approved subject, to the character', () => {
-    assert.equal(copy.subject.chosen, 'I built bingd. Tell me what you think.');
+    assert.equal(copy.subject.chosen, 'Welcome to bingd, let me know what you think');
+    assert.deepEqual(copy.subject.alternatives, [], 'the retired candidate subjects came back');
   });
 
   /**
@@ -234,9 +240,16 @@ describe('welcome email: brand and compliance', () => {
       'a period after the name is being treated as part of the name',
     );
 
-    // And the approved subject is still an example of the permitted form, so this test
-    // cannot be satisfied by deleting the sentence that made it interesting.
-    assert.match(copy.subject.chosen, /\bbingd\.\s+\p{Lu}/u, 'the subject no longer ends a sentence after the name');
+    // And the rule itself is checked in both directions against fixed examples, so the
+    // assertion above cannot pass by way of a pattern that matches nothing. It used to
+    // lean on the old subject for the permitted half; the 2026-09-18 copy retired it.
+    const branded = /\bbingd\.\s+\p{Ll}/u;
+    for (const ok of ['I built bingd. Tell me what you think.', 'Welcome to bingd.', 'Try bingd today.']) {
+      assert.doesNotMatch(ok, branded, `the rule rejects ordinary punctuation: ${ok}`);
+    }
+    for (const bad of ['bingd. is a movie and TV app.', 'I use bingd. with my friends.']) {
+      assert.match(bad, branded, `the rule misses a branded period: ${bad}`);
+    }
 
     // The masthead is the wordmark and keeps its period; it is not a sentence.
     assert.equal(copy.masthead, 'bingd.');
@@ -267,7 +280,7 @@ describe('welcome email: brand and compliance', () => {
 
   it('invites a reply', () => {
     assert.match(copy.preheader.chosen, /reply/i);
-    assert.match(text, /hit reply to this email/);
+    assert.match(text, /hit reply\.\s+It comes straight to me\./);
   });
 });
 

@@ -832,7 +832,7 @@ describe('welcome email: the worker, against the real SQL', () => {
     assert.deepEqual(body.to, [ada.email]);
     assert.equal(body.from, 'Suraj from bingd <suraj@bingd.app>');
     assert.equal(body.reply_to, 'suraj@bingd.app');
-    assert.equal(body.subject, 'I built bingd. Tell me what you think.');
+    assert.equal(body.subject, 'Welcome to bingd, let me know what you think');
     assert.deepEqual(body.headers, { 'List-Unsubscribe': '<mailto:suraj@bingd.app?subject=Unsubscribe>' });
     assert.match(body.html, /Hey Ada,/);
     assert.match(body.text, /^Hey Ada,/);
@@ -848,6 +848,32 @@ describe('welcome email: the worker, against the real SQL', () => {
     assert.ok(body.html.includes(`href="https://bingd.app/i/${token}"`), 'HTML carries the recipient invite link');
     assert.ok(body.text.includes(`https://bingd.app/i/${token}`), 'text carries the recipient invite link');
     assert.ok(body.html.includes('href="https://bingd.app/u/saisurajkan"'));
+
+    // THE SENT TEXT IS THE APPROVED LETTER, paragraph for paragraph — read from copy.json
+    // rather than restated here, so this proves the payload and cannot drift from the copy.
+    // Whitespace is collapsed because the text part is word-wrapped at 72 columns.
+    const approved = JSON.parse(await readFile(join(welcomeRoot, 'copy.json'), 'utf8'));
+    const flat = (v) => v.replace(/\s+/g, ' ').trim();
+    const sentText = flat(body.text);
+    for (const paragraph of approved.letter.paragraphs) {
+      const words = Array.isArray(paragraph)
+        ? paragraph.map((piece) => (typeof piece === 'string' ? piece : piece.link ?? piece.bold)).join('')
+        : paragraph;
+      // A link in the text part is followed by its URL in brackets, so compare the prose
+      // either side of each link rather than the joined sentence.
+      for (const run of flat(words).split(/invite link|follow me on bingd/)) {
+        if (run.trim()) assert.ok(sentText.includes(flat(run)), `the sent text is the approved letter: missing "${run.slice(0, 50)}"`);
+      }
+    }
+    assert.ok(sentText.includes('Happy binging, Suraj'), 'the signoff');
+    assert.equal(body.subject, approved.subject.chosen, 'the sent subject is the approved one');
+
+    // And none of the 2026-09-13 letter survived into what is actually sent.
+    assert.doesNotMatch(
+      body.html + body.text,
+      /Post-watch Ranking|Pre-vetted Watchlist|Smooth Planning|Avengers|Emoji Movie|Tell me what you think|hit reply to this email/,
+      'text from the retired letter is in the sent payload',
+    );
     assert.ok(body.text.includes('https://bingd.app/u/saisurajkan'));
     assert.equal(await tokenCount(), tokensBefore, 'the send job never mints an invite token');
 
@@ -857,6 +883,21 @@ describe('welcome email: the worker, against the real SQL', () => {
     const second = await go(w);
     assert.deepEqual([second.code, second.claimed, second.sent], [0, 0, 0]);
     assert.equal(w.resend.length, 1, 'no second message');
+  });
+
+  it('greets an account with no usable first name as "Hey," in the sent payload', async () => {
+    // The default fixture display name is its handle, welcome_<n>, which is exactly the
+    // case: a handle is never used as a name, so the greeting falls back to the bare word.
+    await t.exec(OPEN_COHORT_SQL);
+    await person();
+    const w = world();
+    const result = await go(w);
+    assert.equal(result.code, 0);
+    assert.equal(w.resend.length, 1);
+    const [{ body }] = w.resend;
+    assert.match(body.text, /^Hey,\n\nThanks for giving bingd a shot\./, 'the text part falls back to Hey,');
+    assert.match(body.html, />Hey,<\/p>/, 'the HTML part falls back to Hey,');
+    assert.doesNotMatch(body.html + body.text, /Hey welcome_|\{\{firstName\}\}/, 'a handle or a raw token reached the greeting');
   });
 
   it('sends a recipient who never tapped Invite friends their newly ensured link, once', async () => {
