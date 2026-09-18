@@ -871,7 +871,8 @@ describe('welcome email: the worker, against the real SQL', () => {
     // And none of the 2026-09-13 letter survived into what is actually sent.
     assert.doesNotMatch(
       body.html + body.text,
-      /Post-watch Ranking|Pre-vetted Watchlist|Smooth Planning|Avengers|Emoji Movie|Tell me what you think|hit reply to this email/,
+      // The 2026-09-13 letter, then the first 2026-09-18 draft the founder revised after reading it.
+      /Post-watch Ranking|Pre-vetted Watchlist|Smooth Planning|Avengers|Emoji Movie|Tell me what you think|hit reply to this email|Rank your latest binge|post-watch experience|hit reply\. It comes/,
       'text from the retired letter is in the sent payload',
     );
     assert.ok(body.text.includes('https://bingd.app/u/saisurajkan'));
@@ -895,7 +896,7 @@ describe('welcome email: the worker, against the real SQL', () => {
     assert.equal(result.code, 0);
     assert.equal(w.resend.length, 1);
     const [{ body }] = w.resend;
-    assert.match(body.text, /^Hey,\n\nThanks for giving bingd a shot\./, 'the text part falls back to Hey,');
+    assert.match(body.text, /^Hey,\n\nThanks for giving bingd a shot!/, 'the text part falls back to Hey,');
     assert.match(body.html, />Hey,<\/p>/, 'the HTML part falls back to Hey,');
     assert.doesNotMatch(body.html + body.text, /Hey welcome_|\{\{firstName\}\}/, 'a handle or a raw token reached the greeting');
   });

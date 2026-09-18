@@ -186,7 +186,7 @@ if (copy.letter.status !== 'APPROVED') warnings.push(`letter.status is "${copy.l
 if (!inviteMatch) warnings.push('No --invite-url: the invite link uses an all-zero token the resolver refuses. Fine for a dry run.');
 if (!/@(auth\.)?bingd\.app$/i.test(addressOf(from))) warnings.push(`From "${from}" is not on a bingd domain; Resend will refuse it.`);
 if (/@bingd\.app$/i.test(addressOf(from))) {
-  warnings.push('From is @bingd.app, which Resend refuses until bingd.app is verified there. If it does, retry with --from "Suraj from bingd <suraj@auth.bingd.app>".');
+  warnings.push('From is @bingd.app, verified in Resend on 2026-09-18. If Resend ever answers with a domain error, retry with --from "Suraj from bingd <suraj@auth.bingd.app>".');
 }
 
 console.log('');

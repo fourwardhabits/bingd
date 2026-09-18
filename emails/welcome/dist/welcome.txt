@@ -1,20 +1,20 @@
 {{greeting}}
 
-Thanks for giving bingd a shot.
+Thanks for giving bingd a shot!
 
-The app was inspired by Beli, which changed the way I experienced
-restaurants. I went from someone who liked eating out occasionally to
-someone who ranked every restaurant, compared lists with friends, and
-actively looked for the next place to try.
+The app was inspired by my experience using Beli, which changed the way
+I enjoyed restaurants. I went from someone who liked occasionally eating
+out to someone who ranked every restaurant, compared lists with friends,
+and actively looked for the next place to try.
 
 I built bingd because I think movies and TV are missing that same loop,
-one that can make the post-watch experience almost as exciting as the
-watch itself. Rank your latest binge to see where it lands, comment on
-and save your friends' watches, and find your next title with better
-recommendations.
+one that can make the post-watch ritual almost as exciting as the watch
+itself. See where your latest movie lands in your rankings, comment on
+and save your friends' latest TV shows, and get stronger recommendations
+with a better rating system.
 
-If you want to suggest a feature, find something confusing, or just want
-to say hi, hit reply. It comes straight to me.
+If you have feature suggestions, something in the app is confusing, or
+you just want to say hi, reply to this email. It comes straight to me.
 
 bingd is more fun with friends, so here's your invite link
 (https://bingd.app/i/{{inviteToken}}). And if you want to see what I'm

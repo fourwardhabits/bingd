@@ -48,8 +48,8 @@ const repo = join(here, '..', '..');
  * Changing a word of it changes this hash. Do not update it to make a test pass: update it
  * because the founder changed his letter.
  */
-// The founder's letter approved on 2026-09-18, replacing the 2026-09-13 one in full.
-const LOCKED_LETTER = '9d7ed0cf37f093dd2c487729f0be84add08d0c53d0867c9846b1db74718d960b';
+// The founder's letter, revised 2026-09-18 after he read the real staging send in Gmail.
+const LOCKED_LETTER = 'acef1efc973b3e79364c8a4717ea2318047be6f42628761594926b529152e8e5';
 
 const read = (path) => readFile(join(repo, path), 'utf8');
 
@@ -117,9 +117,10 @@ describe('welcome email: the founder letter', () => {
   });
 
   it('keeps the plain-text part as the approved letter reads', () => {
-    assert.match(text, /^\{\{greeting\}\}\n\nThanks for giving bingd a shot\./);
+    assert.match(text, /^\{\{greeting\}\}\n\nThanks for giving bingd a shot!/);
     // Whitespace-tolerant, because the text part is word-wrapped at 72 columns.
-    assert.match(text, /\nThe app was inspired by Beli,\s+which changed the way I experienced\s+restaurants\./);
+    assert.match(text, /\nThe app was inspired by my experience using Beli,\s+which changed the way\s+I enjoyed\s+restaurants\./);
+    assert.match(text, /See where your latest movie lands in your rankings,/);
     assert.match(text, /\nI built bingd because I think movies and TV are missing that same loop,/);
     assert.doesNotMatch(text, /\*\*/);
     assert.match(text, /\nHappy binging,\nSuraj\n/);
@@ -141,6 +142,31 @@ describe('welcome email: the committed render', () => {
     assert.match(html, /<meta name="color-scheme" content="light dark" \/>/);
     assert.match(html, /@media \(prefers-color-scheme: dark\)/);
     assert.match(html, /@media only screen and \(max-width: 620px\)/);
+  });
+
+  /**
+   * 680px ON DESKTOP, FLUID BELOW IT, AND OUTLOOK HELD TO 680 BY ITS OWN TABLE.
+   *
+   * The founder read the real send in Gmail and found 600 narrow. The shell is therefore
+   * `width:100%; max-width:680px`, never a fixed pixel width (which is what would overflow
+   * a phone) and never a viewport percentage (which Gmail and Outlook do not honour the
+   * same way). Outlook on Windows ignores max-width entirely, so it alone is given a fixed
+   * 680 table inside conditional comments every other client skips.
+   */
+  it('is 680px wide on desktop, fluid below it, with an Outlook ghost table', () => {
+    const shell = html.match(/<table[^>]*class="shell[^"]*"[^>]*>/)?.[0];
+    assert.ok(shell, 'the shell table is where this test expects it');
+    assert.match(shell, /width="100%"/);
+    assert.match(shell, /max-width:680px/);
+    assert.doesNotMatch(shell, /(?<!max-)width:\s*\d+px;|width="\d+"(?!%)/, 'a fixed pixel width would overflow a phone');
+    assert.doesNotMatch(html, /\d+vw/, 'a viewport-relative width');
+
+    // The ghost table opens immediately before the shell and closes immediately after it.
+    const open = html.indexOf('<!--[if mso]><table role="presentation" width="680"');
+    const close = html.indexOf('<!--[if mso]></td></tr></table><![endif]-->');
+    const at = html.indexOf(shell);
+    assert.ok(open > -1 && close > -1, 'the Outlook ghost table is missing');
+    assert.ok(open < at && at < close, 'the ghost table does not wrap the shell');
   });
 });
 
@@ -280,7 +306,7 @@ describe('welcome email: brand and compliance', () => {
 
   it('invites a reply', () => {
     assert.match(copy.preheader.chosen, /reply/i);
-    assert.match(text, /hit reply\.\s+It comes straight to me\./);
+    assert.match(text, /reply to this email\.\s+It comes straight to me\./);
   });
 });
 
