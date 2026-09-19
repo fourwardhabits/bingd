@@ -38,6 +38,7 @@ module.exports = [
       'scripts/**/*.mjs',
       'assets/**/*.mjs',
       'store-assets/**/*.mjs',
+      'eval/**/*.mjs',
     ],
     languageOptions: {
       globals: {
