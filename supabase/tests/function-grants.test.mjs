@@ -521,6 +521,20 @@ const ALLOWED = {
   'dismiss_recommendation(uuid)': ['authenticated'],
   'dismiss_all_recommendation_requests(uuid)': ['authenticated'],
 
+  // Added 2026-09-19 with the recommendation note (20260929000100).
+  //
+  // The four-argument `recommend_title` is the same writer with one more argument: text,
+  // normalised and bounded before the claim, that decides nothing about who may receive
+  // it. The three-argument form above is now a wrapper over it.
+  //
+  // `title_recommendations_for_me` is the title page's "who recommended this to me". It
+  // takes a title and never an account, filters on `recipient_id = auth.uid()`, and is
+  // `security invoker`, so it returns only rows `title_recommendations_recipient` already
+  // admits — which is what keeps a pending note unreadable. `_recommendation_message` is
+  // deliberately absent: it is internal to the writer.
+  'recommend_title(uuid,uuid,uuid,text)': ['authenticated'],
+  'title_recommendations_for_me(uuid)': ['authenticated'],
+
   // Added 2026-08-17 with Bingd Reviews (20260817000800). Definer, and it reuses
   // `public_notes`' own visibility predicate rather than a second copy of it — getting
   // that wrong is how a private account's writing leaks, and there is exactly one

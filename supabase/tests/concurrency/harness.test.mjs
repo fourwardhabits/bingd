@@ -44,8 +44,10 @@ describe('the harness itself', () => {
   });
 
   it('applied the real migrations, in the real order', async () => {
+    // Distinct names, not rows: `recommend_title` has two signatures since 20260929000100
+    // (the note), and this asserts the functions exist rather than how they are overloaded.
     const [{ n }] = await db.rows(
-      `select count(*)::int as n from pg_proc
+      `select count(distinct proname)::int as n from pg_proc
         where proname in ('_claim_operation', '_lock_pair', '_assert_operation_rate',
                           'follow', 'block', 'recommend_title', 'create_invite_link')`,
     );

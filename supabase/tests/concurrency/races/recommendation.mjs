@@ -315,5 +315,78 @@ export default function suite() {
 
       await s.end();
     });
+
+    /**
+     * **R-N1 (20260929000100). A note resent into a pending request, racing a block.**
+     *
+     * The note is the new thing a sender can put in front of somebody who has not
+     * followed them back, and `block` is what deletes it. The send holds the pair lock
+     * first and rewrites the pending row's note; the block queues on the same key and
+     * must then find — and delete — the row as the send left it. Whichever order the
+     * scheduler picks, a note from a blocked sender must not survive the block.
+     */
+    it('R-N1: a note resent into a pending request cannot outlive a block raced against it', async () => {
+      const { db, fx } = ctx;
+      const sender = await fx.createUser();
+      const recipient = await fx.createUser();
+      await fx.follow(sender, recipient); // one-way, so every send is a pending request
+      const movie = await fx.createMovie('Note Before Block');
+
+      const s = await db.session('sender-setup');
+      await s.actAs(sender);
+      const first = await call(s, `recommend_title($1, $2, $3, $4)`, [
+        await newOp(db),
+        recipient,
+        movie,
+        'The first note.',
+      ]);
+      assert.equal(first.delivered, false, 'fixture: the request must be pending');
+      await s.end();
+
+      const ctl = await db.controller();
+      await ctl.holdPair(sender, recipient);
+
+      const t1 = await db.session('sender');
+      await t1.actAs(sender);
+      await t1.begin();
+      const sendP = t1.start(`select recommend_title($1, $2, $3, $4) as r`, [
+        await newOp(db),
+        recipient,
+        movie,
+        'A second note, sent as the block lands.',
+      ]);
+      await t1.awaitBlocked({ on: 'advisory', advisoryKey: await db.pairKey(sender, recipient) });
+
+      const t2 = await db.session('blocker');
+      await t2.actAs(recipient);
+      await t2.begin();
+      const blockP = t2.start(`select block($1, $2) as r`, [await newOp(db), sender]);
+      await t2.awaitBlocked({ on: 'advisory', advisoryKey: await db.pairKey(sender, recipient) });
+
+      await ctl.releasePair(sender, recipient);
+      const sent = (await sendP).rows[0].r;
+      await t1.commit();
+      await blockP;
+      await t2.commit();
+
+      // The send ran first under the pair lock, so it succeeded against the old graph;
+      // what matters is that the block, queued behind it, removed what it wrote.
+      assert.equal(sent.status, 'ok');
+      assert.equal(
+        (
+          await db.rows(
+            `select 1 from title_recommendations where sender_id = $1 and recipient_id = $2`,
+            [sender, recipient],
+          )
+        ).length,
+        0,
+        'no pending note from a blocked sender survives the block',
+      );
+      assert.equal((await inbox(db, recipient, sender)).length, 0);
+
+      await t1.end();
+      await t2.end();
+      await ctl.end();
+    });
   });
 }
