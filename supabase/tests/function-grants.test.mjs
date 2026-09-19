@@ -122,6 +122,12 @@ const ALLOWED = {
   'set_bucket(uuid,uuid,taste_bucket)': ['authenticated'],
   'unlog(uuid,uuid)': ['authenticated'],
   'set_watchlist(uuid,uuid,boolean)': ['authenticated'],
+  // 20260929000200. Watch next: pins, unpins or swaps one of the caller's own Watchlist
+  // titles. Takes titles and never an account — every row it reads or writes is
+  // `auth.uid()`'s — claims an operation, is rate-limited, and refuses a title that is not
+  // on the caller's Watchlist. `_watch_next_pinned` is deliberately absent: it takes an
+  // account id and is internal to the writer, which only ever passes its own caller.
+  'set_watch_next(uuid,uuid,boolean,uuid)': ['authenticated'],
   'set_season_progress(uuid,uuid,season_progress)': ['authenticated'],
   'save_note(uuid,uuid,text,timestamp with time zone,note_visibility,boolean)': ['authenticated'],
   // Added 2026-08-24 (20260824000100). The one writer that can put a null into
