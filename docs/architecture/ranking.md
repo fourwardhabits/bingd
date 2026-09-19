@@ -328,6 +328,14 @@ A placement that replaces a position as a *correction* — `rank_rebucket`, or `
 
 An abandoned session posts nothing because it never reaches finalise, and a retried completion posts nothing because `_claim_operation_result` answers it from the ledger.
 
+### What a correction keeps — `20261001000100`
+
+A correction is not a new ranking act, and since `20261001000100` nothing downstream hears it as one. `_rank_finalize` still performs it as a delete and re-insert of the `rankings` row, but the re-inserted row **keeps the `created_at` the ranking already had**. A first placement and a *Log another watch* are ranking acts and are stamped now. So `rankings.created_at` means the instant of the latest ranking act, which is what the weekly streak, *Recently ranked* and the people suggestions all read it as.
+
+The watchlist rule follows from that by chronology rather than by a flag. The rankings triggers (`_leave_watchlist`, `_leave_series_watchlist`) remove only a watchlist entry added **at or before** the ranking's `created_at`. A first placement or a rewatch is stamped now and removes every entry, as before. A correction carries its old instant, so an entry the reader re-added since then survives it, and so does a series re-added after being finished. On `user_media`, a bucket moving from one value to another is a re-rating rather than the row becoming watched, so the update triggers fire only when the bucket was absent. `watched_on` and `progress` are unchanged. Pinned by `supabase/tests/correction-is-not-a-ranking.test.mjs`.
+
+This is not placement history. It keeps one instant per ranking; a record of every re-placement is a separate, later ledger, not this column.
+
 ### Unranking
 
 Delete the `rankings` row, close the gap, leave `user_media` intact. The title reverts to Logged with its bucket. Watch history is never lost — PRD §10 requires that reranking and recalibration never delete viewing history.

@@ -20,17 +20,21 @@
  *
  *   - Un-ranking a title removes the row, so the evidence for that week goes with it. A
  *     streak can shrink retroactively.
- *   - Re-ranking a title deletes and re-inserts it (`rank_again`), so its `created_at`
- *     moves forward and an old week can lose its only evidence.
+ *   - *Log another watch* re-inserts it with a new `created_at`, so an old week can lose
+ *     its only evidence to the newer one.
  *
  * Both are rare and both make the streak *lower* rather than higher. **The first version
  * of this header also claimed neither could fabricate one, and that was wrong in one
  * direction** (hardening audit, 2026-09-07): the re-insert stamps `now()`, so an *Adjust
  * placement* or *Change your rating* in an otherwise empty week read as "ranked this
  * week" — a correction, which posts no activity and is not a watch, advancing a streak.
- * `20260911000100` keeps the old `created_at` through a correction so the column means
- * what the PRD's sort contract says it means (the instant the activity carries), and
- * `RankingSheet` no longer asks this module about a correction at all. A rewatch (`again`)
+ * That claim was then repeated here about `20260911000100`, a migration that never shipped
+ * (its number went to Helpful reviews). `20261001000100` is the one that does it: a
+ * correction keeps the `created_at` its ranking already had, so the column means what the
+ * PRD's sort contract says it means (the instant of the ranking act), and a week with
+ * nothing but corrections in it is not a ranking week. `RankingSheet` also no longer asks
+ * this module about a correction at all, which covers a build running against a backend
+ * the migration has not reached. A rewatch (`again`)
  * is a genuine new instant and still counts. A durable per-act ledger would close the
  * two remaining edges and is a migration; if streaks turn out to matter, that is the
  * upgrade — and it can be made without changing anything a reader sees, because this

@@ -2024,8 +2024,8 @@ describe('what a completion is reported as', () => {
 /**
  * **Which completions ask about the streak.**
  *
- * The streak is derived from `rankings.created_at`, and a correction re-inserts that row
- * with `now()` until `20260911000100` lands — so an Adjust placement in an otherwise empty
+ * The streak is derived from `rankings.created_at`, and a correction re-inserted that row
+ * with `now()` before `20261001000100` — so an Adjust placement in an otherwise empty
  * week read as "ranked this week", and this sheet celebrated it. A correction is not a
  * ranking act (PRD, 2026-08-26: it posts no activity), so it is not asked. A first
  * placement and a rewatch are.
