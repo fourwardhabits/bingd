@@ -231,6 +231,35 @@ describe('All is one list ordered by score', () => {
       '7.5 Movie 6',
     ]);
   });
+
+  it('keeps each category’s own order where the printed scores collide', async () => {
+    /**
+     * A loved band of 100 films steps 0.03 a title, so #1 and #2 both print 10.0 and #3–#5
+     * all print 9.9. Sorting by the printed number left those to the id, and the ids here
+     * run the opposite way to the positions — the founder's Dark Knight / Odyssey report,
+     * where the film they picked second was drawn first. The season is a band of three,
+     * so its #1 is an exact 10 and meets Movie 1 on a genuine tie, which the id decides.
+     */
+    mockRows = [
+      ...Array.from({ length: 100 }, (_, index) =>
+        ranked(`m-${String(999 - index).padStart(4, '0')}`, `Movie ${index + 1}`, index + 1, 'movies'),
+      ),
+      ranked('s-a', 'TV A', 1, 'tv_seasons'),
+      ranked('s-b', 'TV B', 2, 'tv_seasons'),
+      ranked('s-c', 'TV C', 3, 'tv_seasons'),
+    ];
+
+    const view = await settled(await open());
+
+    expect(wall(view)).toEqual([
+      '10.0 Movie 1',
+      '10.0 TV A',
+      '10.0 Movie 2',
+      '9.9 Movie 3',
+      '9.9 Movie 4',
+      '9.9 Movie 5',
+    ]);
+  });
 });
 
 describe('the category tabs still rank inside their own category', () => {

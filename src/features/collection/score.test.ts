@@ -4,6 +4,7 @@ import {
   bandSizes,
   bucketForScore,
   formatScore,
+  projectedScore,
   rankInBand,
   revealFloor,
   scoreFor,
@@ -158,6 +159,46 @@ describe('order is preserved', () => {
 
     expect(Math.min(...loved)).toBeGreaterThan(Math.max(...fine));
     expect(Math.min(...fine)).toBeGreaterThan(Math.max(...notForMe));
+  });
+});
+
+describe('the unrounded projection and the printed score', () => {
+  // Three bands of uneven size, so the band offsets and all three ranges are exercised.
+  const s = sizes(100, 37, 9);
+  const total = 146;
+  const bucketAt = (position: number) =>
+    position <= 100 ? 'loved' : position <= 137 ? 'fine' : 'not_for_me';
+
+  it('the printed score is the projection to one decimal, at every position', () => {
+    for (let position = 1; position <= total; position += 1) {
+      const bucket = bucketAt(position);
+      expect(scoreFor(bucket, position, s)).toBe(
+        Math.round(projectedScore(bucket, position, s) * 10) / 10 || 0,
+      );
+    }
+  });
+
+  it('the projection falls strictly with position across a whole category', () => {
+    // What makes it safe to order a mixed-category list by: inside one category it can
+    // never disagree with the ordinal, even where the printed score repeats.
+    for (let position = 1; position < total; position += 1) {
+      expect(projectedScore(bucketAt(position), position, s)).toBeGreaterThan(
+        projectedScore(bucketAt(position + 1), position + 1, s),
+      );
+    }
+  });
+
+  it('is exactly where the printed score collides: positions 1 and 2 both print 10.0', () => {
+    expect(formatScore(scoreFor('loved', 1, s))).toBe('10.0');
+    expect(formatScore(scoreFor('loved', 2, s))).toBe('10.0');
+    expect(projectedScore('loved', 1, s)).toBeGreaterThan(projectedScore('loved', 2, s));
+  });
+
+  it('keeps the band edges exact, so it needs no rounding to land on them', () => {
+    expect(projectedScore('loved', 1, s)).toBe(10);
+    expect(projectedScore('loved', 100, s)).toBe(7);
+    expect(projectedScore('fine', 101, s)).toBe(6.9);
+    expect(projectedScore('not_for_me', total, s)).toBe(0);
   });
 });
 

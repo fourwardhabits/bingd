@@ -26,6 +26,18 @@ export type CollectionItem = {
   language: string | null;
   runtimeMinutes: number | null;
   score: number | null;
+  /**
+   * `rankings.position` — the ordinal inside this row's own category — for a ranked row,
+   * and absent for everything else.
+   *
+   * **The score is one decimal and the ordinal is not.** In a band of a hundred titles the
+   * step between neighbours is 0.03, so three or four of them print the same 8.5 and two
+   * at the top print the same 10.0. They are not tied: the reader ranked each above the
+   * next. The Rating order breaks an equal score on this and not on the id, which is how a
+   * film the reader picked over another came to sit below it. Optional because only the
+   * Watched list has a ranking to read it from.
+   */
+  position?: number | null;
   bucket: Bucket | null;
   watchedOn: string | null;
   /**
@@ -435,7 +447,13 @@ export function compareItems(sort: CollectionSortState) {
         if (a.score == null && b.score == null) return byId;
         if (a.score == null) return 1;
         if (b.score == null) return -1;
-        return (a.score - b.score) * flip || byId;
+        // An equal score is a rounding collision, not a tie. The ordinal decides, in the
+        // score's own direction — a better (smaller) position is the higher score — so the
+        // title the reader picked stays above the one they picked it over. The id is only
+        // for rows with no ordinal to compare.
+        const byOrdinal =
+          a.position != null && b.position != null ? (b.position - a.position) * flip : 0;
+        return (a.score - b.score) * flip || byOrdinal || byId;
       }
       case 'added': {
         if (!a.addedAt && !b.addedAt) return byId;
