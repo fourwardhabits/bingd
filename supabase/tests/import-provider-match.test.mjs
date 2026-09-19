@@ -244,3 +244,61 @@ describe('needsWindow', () => {
     assert.equal(pick(want, window), null, 'unresolved, never Cătun');
   });
 });
+
+// ===========================================================================
+// Rule 1b — same-year namesakes (staging, 2026-09-19)
+//
+// Real TMDB records: two 2023 films titled "Past Lives".
+//   666277   Past Lives   original "Past Lives"             2023-06-02   the film meant
+//   1164820  Past Lives   original "Nagligad nga Kinabuhi"  2023-03-02   a Filipino namesake
+// ===========================================================================
+
+const PAST_LIVES = film(666277, '2023-06-02', 'Past Lives', 'Past Lives');
+const PAST_LIVES_PH = film(1164820, '2023-03-02', 'Nagligad nga Kinabuhi', 'Past Lives');
+
+describe('pick, when several films share the exact year', () => {
+  it('takes the one whose original title is the exported name over a translated namesake', () => {
+    const want = claim('Past Lives', 2023);
+    assert.equal(pick(want, [PAST_LIVES_PH, PAST_LIVES]).id, 666277);
+    assert.equal(pick(want, [PAST_LIVES, PAST_LIVES_PH]).id, 666277);
+  });
+
+  it('is settled by the exact-year search alone, so it costs one request', () => {
+    assert.equal(needsWindow(claim('Past Lives', 2023), [PAST_LIVES_PH, PAST_LIVES]), false);
+  });
+
+  it('still wins with neighbouring years in the window', () => {
+    const neighbour = film(1001946, '2022-07-16', 'Past Lives', 'Past Lives');
+    assert.equal(pick(claim('Past Lives', 2023), [PAST_LIVES_PH, neighbour, PAST_LIVES]).id, 666277);
+  });
+
+  it('leaves two natively titled films in the same year unresolved', () => {
+    assert.equal(pick(claim('Hamlet', 2024), [HAMLET_2024A, HAMLET_2024B]), null);
+    assert.equal(pick(claim('Hamlet', 2024), [HAMLET_2024A, HAMLET_2024B, film(5, '2024-09-09', 'Cătun')]), null);
+  });
+
+  it('leaves same-year films unresolved when none bears the name natively', () => {
+    const one = film(11, '2023-01-01', 'Nagligad nga Kinabuhi', 'Past Lives');
+    const two = film(12, '2023-05-01', 'Vies antérieures', 'Past Lives');
+    assert.equal(pick(claim('Past Lives', 2023), [one, two]), null);
+  });
+
+  it('leaves them unresolved when a competitor’s original title is unknown', () => {
+    // Unknown could be a second native match; it is not evidence of a translation.
+    const unknown = { id: 13, title: 'Past Lives', release_date: '2023-09-01' };
+    assert.equal(pick(claim('Past Lives', 2023), [PAST_LIVES, unknown]), null);
+  });
+
+  it('never uses popularity or order to separate them', () => {
+    const loud = { ...PAST_LIVES_PH, popularity: 999, vote_count: 99999 };
+    const quiet = { ...PAST_LIVES, popularity: 0.1, vote_count: 1 };
+    assert.equal(pick(claim('Past Lives', 2023), [loud, quiet]).id, 666277);
+    const twinA = { ...HAMLET_2024A, popularity: 999 };
+    assert.equal(pick(claim('Hamlet', 2024), [twinA, HAMLET_2024B]), null);
+  });
+
+  it('leaves the adjacent-year translated-title safeguard exactly as it was', () => {
+    assert.equal(pick(claim('Hamlet', 2025), [CATUN_2025, HAMLET_2026]), null);
+    assert.equal(needsWindow(claim('Hamlet', 2025), [CATUN_2025]), true);
+  });
+});

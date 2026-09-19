@@ -125,7 +125,9 @@ function originalNameAgrees(claim, result) {
  *
  * With a year:
  *   1. An exact-year result wins over adjacent-year ones, however the provider ordered them.
- *      Two exact-year results is a remake and is left unresolved.
+ *      Two or more exact-year results are left unresolved — unless exactly one of them has
+ *      the exported name as its original title and every other one is known to be a
+ *      translation (1b, below).
  *   2. **Except** when that exact-year film is a translated title (its original title is
  *      not the exported name) and a film whose original title *is* that name sits in the
  *      adjacent year. That is the Hamlet shape exactly, and nothing in an export can tell
@@ -137,6 +139,20 @@ function originalNameAgrees(claim, result) {
  * With no year: exactly one title match, as before.
  *
  * Popularity is never consulted, and neither is the provider's order.
+ *
+ * ---------------------------------------------------------------------------
+ * 1b. THE SAME-YEAR NAMESAKE (staging, 2026-09-19)
+ *
+ * Rule 2's mirror image. A real staging import of `Past Lives, 2023` came back unresolved:
+ * TMDB holds two 2023 films titled "Past Lives" — 666277, whose original title is "Past
+ * Lives", and 1164820, a Filipino film whose original title is "Nagligad nga Kinabuhi". Two
+ * exact-year results was a remake to the old rule, and to the one before it.
+ *
+ * It is not a remake. One of them bears the exported name natively; the other only in
+ * translation. So when exactly one exact-year result's original title is the exported name
+ * and every other exact-year result's original title is known and different, that one wins.
+ * Two native matches is a genuine remake, and an unknown original title could be a second
+ * native match — both stay unresolved.
  */
 export function pick(claim, results) {
   if (!Array.isArray(results)) return null;
@@ -159,7 +175,12 @@ export function pick(claim, results) {
   const exact = confident.filter((r) => yearOf(r) === claim.year);
   const others = confident.filter((r) => yearOf(r) !== claim.year);
 
-  if (exact.length > 1) return null;
+  if (exact.length > 1) {
+    // 1b. Exactly one native original title, every other one known to be a translation.
+    const native = exact.filter((r) => originalNameAgrees(claim, r) === true);
+    const translations = exact.filter((r) => originalNameAgrees(claim, r) === false);
+    return native.length === 1 && translations.length === exact.length - 1 ? native[0] : null;
+  }
 
   if (exact.length === 1) {
     const translated = originalNameAgrees(claim, exact[0]) === false;
@@ -175,9 +196,9 @@ export function pick(claim, results) {
  * be asked for too.
  *
  * Ordinarily it can: one exact-year film whose original title is not known to differ from
- * the exported name wins over anything the neighbouring years hold (`pick`, rule 1), and two
- * exact-year films are a remake no neighbour can resolve. So the common case stays one
- * request.
+ * the exported name wins over anything the neighbouring years hold (`pick`, rule 1), and
+ * several exact-year films are either settled among themselves by their original titles
+ * (rule 1b) or a remake no neighbour can resolve. So the common case stays one request.
  *
  * It cannot when there is no exact-year film (the fallback needs the neighbours) or when
  * the only one is a translated title (a native-titled neighbour would veto it, rule 2).

@@ -418,3 +418,116 @@ describe('removing an imported, unranked title needs no ranking', () => {
     assert.deepEqual(await collection(kai), []);
   });
 });
+
+// ===========================================================================
+// Rule 1b — same-year namesakes (`20260925000100`, staging 2026-09-19)
+//
+// TMDB holds two 2023 "Past Lives": 666277 (original "Past Lives") and 1164820 (original
+// "Nagligad nga Kinabuhi"). Before, two films in exactly the export's year were a remake.
+// ===========================================================================
+
+describe('several cached films in exactly the export’s year', () => {
+  let lia;
+  const PAST_URI = 'https://boxd.it/pastlivesfilm';
+
+  const pastRow = (year, over = {}) => ({
+    ...hamletRow(year),
+    correlation: `past lives|${year ?? ''}`,
+    name: 'Past Lives',
+    filmUri: PAST_URI,
+    watches: [],
+    ...over,
+  });
+
+  const clearPast = async () => {
+    await t.sql(`delete from import_jobs`);
+    await t.sql(`delete from letterboxd_match_claims where letterboxd_uri = $1`, [PAST_URI]);
+    await t.sql(`delete from letterboxd_matches where letterboxd_uri = $1`, [PAST_URI]);
+    await t.sql(`delete from user_media where media_item_id in (select id from media_items where sort_key_squashed = 'pastlives')`);
+    await t.sql(`delete from media_items where sort_key_squashed = 'pastlives'`);
+  };
+
+  before(async () => {
+    lia = await t.createUser({ username: 'pastlives_lia' });
+  });
+
+  beforeEach(clearPast);
+
+  it('places the one whose original title is the exported name', async () => {
+    const real = await film('Past Lives', '2023-06-02');
+    await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
+
+    const row = await matchOnly(lia, [pastRow(2023)]);
+    assert.equal(row.status, 'matched');
+    assert.equal(row.media_item_id, real);
+  });
+
+  it('places it over a cached neighbour a year out, too', async () => {
+    const real = await film('Past Lives', '2023-06-02');
+    await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
+    await film('Past Lives', '2022-07-16');
+
+    const row = await matchOnly(lia, [pastRow(2023)]);
+    assert.equal(row.media_item_id, real);
+  });
+
+  it('leaves two natively titled films in that year unresolved', async () => {
+    await film('Past Lives', '2023-06-02');
+    await film('Past Lives', '2023-10-01');
+
+    const row = await matchOnly(lia, [pastRow(2023)]);
+    assert.equal(row.status, 'ambiguous');
+    assert.equal(row.media_item_id, null);
+  });
+
+  it('leaves them unresolved when none bears the name natively', async () => {
+    await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
+    await film('Past Lives', '2023-05-01', 'Vies antérieures');
+
+    const row = await matchOnly(lia, [pastRow(2023)]);
+    assert.equal(row.status, 'ambiguous');
+  });
+
+  it('leaves them unresolved when a competitor’s original title is unknown', async () => {
+    await film('Past Lives', '2023-06-02');
+    await t.sql(
+      `insert into media_items (kind, tmdb_id, title, original_title, release_date, provenance)
+       values ('movie', $1, 'Past Lives', null, '2023-09-01', 'manual')`, [-Math.abs(seq++)]);
+
+    const row = await matchOnly(lia, [pastRow(2023)]);
+    assert.equal(row.status, 'ambiguous');
+  });
+
+  it('still lets a trusted mapping speak first', async () => {
+    await film('Past Lives', '2023-06-02');
+    await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
+    const trusted = await film('Past Lives', '2023-11-11', 'Something Corroborated');
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 2)`, [PAST_URI, trusted]);
+
+    const row = await matchOnly(lia, [pastRow(2023)]);
+    assert.equal(row.media_item_id, trusted);
+  });
+
+  it('is unchanged for a row with no year', async () => {
+    await film('Past Lives', '2023-06-02');
+    await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
+
+    const row = await matchOnly(lia, [pastRow(null)]);
+    assert.equal(row.status, 'ambiguous');
+  });
+
+  it('imports once and re-imports to nothing new', async () => {
+    const real = await film('Past Lives', '2023-06-02');
+    await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
+
+    await importArchive(lia, [pastRow(2023)]);
+    const first = await collection(lia);
+    assert.deepEqual(first, [{ media_item_id: real, source: 'imported' }]);
+
+    await importArchive(lia, [pastRow(2023)]);
+    assert.deepEqual(await collection(lia), first);
+    assert.equal(await count('imported_titles', `user_id = '${lia}'`), 1);
+  });
+});
