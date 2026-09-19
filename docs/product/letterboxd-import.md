@@ -524,6 +524,56 @@ falls back to once a minute where pg_cron cannot schedule in seconds.
 
 ---
 
+## 6f. The Hamlet report, 2026-09-18: year precedence
+
+An Android beta tester's Letterboxd *Hamlet* arrived as the Romanian *Cătun* (TMDB 1234733,
+2025-12-01, English title "Hamlet") instead of *Hamlet* (TMDB 843342, 2026-02-06), logged and
+unranked, and could not be removed without ranking it first.
+
+**Cause.** The production claim ledger names the **provider** tier. It searched TMDB with an
+*exact* `primary_release_year` and accepted "exactly one result within a year" — uniqueness
+judged over a year-truncated set. A 2026 search cannot return *Cătun*, so the row carried
+2025, a year before TMDB's date for the real film; that search could not see 843342, and
+*Cătun* was the only survivor. The local tier had the same flaw over the catalogue cache:
+"exactly one *cached* film within a year".
+
+**The rule now** (`match.mjs` `pick` for the provider, `20260924000100` for SQL), with a year:
+
+1. One film in exactly the export's year wins over its neighbours. Two is a remake: unresolved.
+2. Unless that film's original title is known and differs from the exported name (a
+   translated title) **and** a neighbour's original title is the name — the Hamlet shape,
+   which no export field can separate: unresolved, never guessed.
+3. No exact-year film: a single neighbour (or undated film) is the festival/territory
+   fallback; more than one is unresolved.
+
+The provider asks for the neighbouring years only when the exact year cannot settle it
+(`needsWindow`), so the common case stays one request. The local tier settles only rule 1
+(and T1b's lone undated film); an adjacent-year or translated-title match goes to the
+provider, because the cache may not hold the film that would contradict it. Without a year,
+nothing changed.
+
+**Cost.** Foreign films whose export name is a translation, and year-shifted films, now spend
+provider requests instead of settling from the cache; a translated film with a native-titled
+namesake a year away is left unresolved. That is the price of not attaching one film's
+history to another.
+
+**Already-affected accounts.** Remove the wrong title (the title page's ⋯ now offers *Remove
+from collection* for any logged film or season, ranked or not), then import again. Removal
+cascades `imported_titles` and `imported_watches`, so the re-import re-attaches the diary
+entries to whatever the row now resolves to. Re-importing first also works for the collection,
+but the diary entries stay with the wrong row until it is removed (they are at-most-once per
+diary URI), so remove-first is the order that needs one import. No data repair is needed:
+the one stale claim for the Hamlet URI (read 2026-09-18) is below the promotion threshold,
+and once this is deployed the matcher cannot add a second. Until then another importer of
+the same row could, which would promote it into T0 — so re-check
+`letterboxd_matches` for 1234733 after deploying. Pinned in
+`supabase/tests/import-year-precedence.test.mjs`.
+
+**Deploying 6f.** Apply `20260924000100` and deploy `letterboxd-import`, in either order;
+neither depends on the other. The title-page change is JS-only and OTA-deliverable.
+
+---
+
 ## 6c. Deploying it, and turning it off
 
 **The importer is the only feature here with a worker, and a worker has to be started.**

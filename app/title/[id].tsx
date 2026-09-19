@@ -1140,10 +1140,13 @@ export default function TitleScreen() {
         // this, so a title opened from Search returns to Search and one opened from the
         // feed returns to the feed — the route stack decides, not this screen.
         onBack={() => router.back()}
-        // The menu, where the Ranked control used to keep it. Present only where there is
-        // something to manage, which is a ranked title — the same reachability the chip
-        // had, moved rather than widened.
-        onMore={data.ranked ? () => setManaging(true) : undefined}
+        // The menu, where the Ranked control used to keep it. Present wherever there is
+        // something to manage: a ranked title, and — since a wrongly imported film could not
+        // otherwise be taken out without ranking it (2026-09-18) — a film or season that is
+        // logged but unranked, for which the menu holds Remove from collection alone.
+        onMore={
+          data.ranked || (data.logged && rankable) ? () => setManaging(true) : undefined
+        }
         title={displayTitle ?? title.title}
         subtitle={parent?.title ?? null}
       />
@@ -2030,186 +2033,202 @@ export default function TitleScreen() {
              * is whether you keep it at all — and the destructive one is last and on its
              * own, which is the only ordering that never puts Remove under a thumb
              * reaching for something else.
-             */}
-            <MenuGroup title="Your log" />
-            {/**
-             * **One field, one row (founder simplification, 2026-08-27).**
              *
-             * `user_media` holds one `note` under one `note_visibility`, and the sheet
-             * now shows it as one thing: a note, with "Share as a review" as a state it
-             * can be in. The two rows this replaces — Review and Private note, each
-             * offering the conversion the other way — asked the reader to choose
-             * between two names for one piece of writing before opening it, which was
-             * the founder's exact complaint about the sheet itself. The label still
-             * says which state the writing is in, because "Edit your review" is a
-             * promise about where the text is visible; the conversion controls live in
-             * the composer, beside the text they describe.
+             * **A logged title that is not ranked gets the last group only** (Android beta
+             * report, 2026-09-18). A Letterboxd import had put the wrong film on somebody's
+             * shelf, logged and unranked, and this sheet — the only door to Remove — opened
+             * only for a ranked title, so the way out was to rank a film they had not seen.
+             * Anything in the collection can now leave it without being ranked first.
+             * `removeFromCollection` already skips `rank_unrank` when there is no ranking,
+             * and `unlog` has always accepted an unranked title.
              *
-             * **The founder's device pass: every `value` in this menu is gone.**
-             * `SheetRow` draws the label and the secondary sentence on one line, so at
-             * the width of a phone every explanation truncated — rows of clipped grey
-             * text under clear labels, worse than no explanation at all.
+             * The two upper groups stay ranked-only: both rows under Ranking act on a
+             * position, and for an unranked title the Rank control is already the door to
+             * the log. This adds a way out, not a second way in.
              */}
-            <SheetRow
-              icon="chatbubble-ellipses-outline"
-              label={
-                hasReview
-                  ? 'Edit your review'
-                  : hasPrivateNote
-                    ? 'Edit your note'
-                    : 'Add a note'
-              }
-              onPress={() => {
-                setManaging(false);
-                openLog('note', hasReview ? 'public' : 'private');
-              }}
-            />
+            {data.ranked ? (
+              <>
+                <MenuGroup title="Your log" />
+                {/**
+                 * **One field, one row (founder simplification, 2026-08-27).**
+                 *
+                 * `user_media` holds one `note` under one `note_visibility`, and the sheet
+                 * now shows it as one thing: a note, with "Share as a review" as a state it
+                 * can be in. The two rows this replaces — Review and Private note, each
+                 * offering the conversion the other way — asked the reader to choose
+                 * between two names for one piece of writing before opening it, which was
+                 * the founder's exact complaint about the sheet itself. The label still
+                 * says which state the writing is in, because "Edit your review" is a
+                 * promise about where the text is visible; the conversion controls live in
+                 * the composer, beside the text they describe.
+                 *
+                 * **The founder's device pass: every `value` in this menu is gone.**
+                 * `SheetRow` draws the label and the secondary sentence on one line, so at
+                 * the width of a phone every explanation truncated — rows of clipped grey
+                 * text under clear labels, worse than no explanation at all.
+                 */}
+                <SheetRow
+                  icon="chatbubble-ellipses-outline"
+                  label={
+                    hasReview
+                      ? 'Edit your review'
+                      : hasPrivateNote
+                        ? 'Edit your note'
+                        : 'Add a note'
+                  }
+                  onPress={() => {
+                    setManaging(false);
+                    openLog('note', hasReview ? 'public' : 'private');
+                  }}
+                />
 
-            {/**
-             * **Directly under the writing row, because it is the other half of the
-             * same log** (founder, 2026-08-29).
-             *
-             * Companions were reachable only through *Change your rating*, which opens
-             * the bucket chooser — so the way to correct who you watched something with
-             * ran through a control that offers to re-rate it. The founder's device pass
-             * called that hidden, and it is: the row a reader is looking for is named
-             * "Who I watched with" and the row they had to press was named something
-             * else entirely.
-             *
-             * **It edits the log occurrence that is already there.** `openLog` opens
-             * the same sheet every other entry point opens, on the same `user_media`
-             * row, with the companion picker expanded — `section`, not `writing`, so
-             * the note composer stays closed and the keyboard stays down. It starts no
-             * ranking, writes no bucket, creates no second log and posts no activity;
-             * `useSetCompanions` remains the only writer, so watched-with notification
-             * is exactly as once-only as it was from every other door.
-             *
-             * In *Your log* rather than in *Ranking* for the same reason the note is:
-             * this group is what you recorded about watching it, and the group below is
-             * where it sits against everything else.
-             */}
-            <SheetRow
-              icon="people-outline"
-              label="Who I watched with"
-              onPress={() => {
-                setManaging(false);
-                openLog('note', null, 'who');
-              }}
-            />
+                {/**
+                 * **Directly under the writing row, because it is the other half of the
+                 * same log** (founder, 2026-08-29).
+                 *
+                 * Companions were reachable only through *Change your rating*, which opens
+                 * the bucket chooser — so the way to correct who you watched something with
+                 * ran through a control that offers to re-rate it. The founder's device pass
+                 * called that hidden, and it is: the row a reader is looking for is named
+                 * "Who I watched with" and the row they had to press was named something
+                 * else entirely.
+                 *
+                 * **It edits the log occurrence that is already there.** `openLog` opens
+                 * the same sheet every other entry point opens, on the same `user_media`
+                 * row, with the companion picker expanded — `section`, not `writing`, so
+                 * the note composer stays closed and the keyboard stays down. It starts no
+                 * ranking, writes no bucket, creates no second log and posts no activity;
+                 * `useSetCompanions` remains the only writer, so watched-with notification
+                 * is exactly as once-only as it was from every other door.
+                 *
+                 * In *Your log* rather than in *Ranking* for the same reason the note is:
+                 * this group is what you recorded about watching it, and the group below is
+                 * where it sits against everything else.
+                 */}
+                <SheetRow
+                  icon="people-outline"
+                  label="Who I watched with"
+                  onPress={() => {
+                    setManaging(false);
+                    openLog('note', null, 'who');
+                  }}
+                />
 
-            <MenuGroup title="Ranking" />
-            {/**
-             * **Two rows, because there were only ever two acts** (founder, physical QA,
-             * 2026-09-08).
-             *
-             * ---------------------------------------------------------------------------
-             * WHAT WAS HERE, AND WHY THREE WAS ONE TOO MANY
-             *
-             * The menu offered *Rank it again*, *Log another watch* and *Change your
-             * rating*. The middle one is a real, separate act — a second viewing — and the
-             * outer two were **two doors into the same correction**, named so similarly
-             * that no ordinary reader could say which one they wanted. "Rank it again"
-             * and "Change your rating" describe the same intent in two vocabularies; the
-             * only difference was mechanical, and mechanical differences are exactly what
-             * the 2026-09-07 pass had already decided this menu must stop exposing.
-             *
-             * (That pass is worth keeping in the record: the founder ranked a season,
-             * adjusted it a minute later, and saw two "ranked" rows in the feed for one
-             * watch. Nothing was broken underneath — `_rank_finalize` has posted
-             * `title_ranked` only `if p_new_watch or not v_replaced` since
-             * 20260826000500 — the row named *Rank again* simply meant "another viewing"
-             * and read like "redo my ranking". Renaming it to *Rank it again* fixed the
-             * misfire and left two correction rows behind. This removes one.)
-             *
-             * ---------------------------------------------------------------------------
-             * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
-             *
-             * **`Update your rating` is the single same-watch correction path, and it can
-             * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
-             * has had three branches since 2026-08-15 and keeps all of them:
-             *
-             *   a *different* band   → `rank_rebucket`. The band moves and the comparisons
-             *                          are re-run, because a band change cannot be
-             *                          estimated (PRD §10).
-             *   the *same* band      → `rankAgain(newWatch: false)` — which is precisely
-             *                          what *Rank it again* called. Re-opening a rating you
-             *                          already gave means the *position* is wrong, and this
-             *                          is how a reader says so.
-             *   neither, then close  → nothing at all. Since 20260826000500 the session
-             *                          runs over the position the title holds, so opening
-             *                          this and changing your mind costs nothing.
-             *
-             * So placement can still be corrected for the same watch, and nobody is made
-             * to log a viewing they did not have in order to do it. The one extra tap is
-             * the band chooser, which is also the screen that tells the reader which of
-             * the two things they meant.
-             *
-             * ---------------------------------------------------------------------------
-             * THE SEMANTICS ARE UNTOUCHED
-             *
-             *   Update your rating   corrects the current watch. `p_new_watch` false, no
-             *                        new watch record, no feed activity, no timestamp
-             *                        heuristic anywhere.
-             *   Log another watch    an explicit second viewing. `p_new_watch` true, and
-             *                        exactly one `title_ranked` on completion.
-             *
-             * No RPC, argument, migration or piece of ranking maths changes in this pass,
-             * and no historical activity is rewritten or de-duplicated. `rerank` still
-             * exists and is still reached; it is reached through one row instead of two.
-             *
-             * The labels carry the whole distinction and there is no secondary line: a
-             * `value` on a `SheetRow` sets beside the label and truncates at phone width,
-             * which is a founder decision this menu already carries.
-             */}
-            {/* The star is kept from the row this replaces, and so is its behaviour:
-                straight into the log sheet, where the band chooser is. Leads the group
-                because correcting a rating is the common act and logging a second
-                viewing is the rare one. */}
-            <SheetRow
-              icon="star-outline"
-              label="Update your rating"
-              onPress={() => {
-                setManaging(false);
-                openLog();
-              }}
-            />
-            {/**
-             * The explicit rewatch, and the only row in the app that declares one.
-             *
-             * Completing it writes exactly one new `title_ranked` activity, which is the
-             * whole difference from the row above — and the reason the label says what
-             * happened rather than what the app will do about it. Two genuine rewatches
-             * are still two activities; that is not a duplicate.
-             *
-             * `rank_again` opens the session **over** the position the title already
-             * has, so nothing the reader can see moves until they finish: close the
-             * sheet, lose the network, kill the app, and the score, band and place are
-             * where they were. The bucket passes straight through from
-             * `rankings.bucket`, so this row decides no rating.
-             */}
-            <SheetRow
-              icon="repeat-outline"
-              label="Log another watch"
-              onPress={
-                rankedBucket
-                  ? () => {
-                      setManaging(false);
-                      setActionError(null);
-                      setRankedTitle(loggable);
-                      setRankingSubject({
-                        id: title.id,
-                        title: title.title,
-                        bucket: rankedBucket,
-                        posterUri: posterUri(title.poster_path, 'card'),
-                        // Only a film or a season is ever ranked; a series has no menu.
-                        kind: title.kind === 'season' ? 'season' : 'movie',
-                        mode: 'again',
-                      });
-                    }
-                  : undefined
-              }
-              disabledReason={rankedBucket ? undefined : 'Loading'}
-            />
+                <MenuGroup title="Ranking" />
+                {/**
+                 * **Two rows, because there were only ever two acts** (founder, physical QA,
+                 * 2026-09-08).
+                 *
+                 * ---------------------------------------------------------------------------
+                 * WHAT WAS HERE, AND WHY THREE WAS ONE TOO MANY
+                 *
+                 * The menu offered *Rank it again*, *Log another watch* and *Change your
+                 * rating*. The middle one is a real, separate act — a second viewing — and the
+                 * outer two were **two doors into the same correction**, named so similarly
+                 * that no ordinary reader could say which one they wanted. "Rank it again"
+                 * and "Change your rating" describe the same intent in two vocabularies; the
+                 * only difference was mechanical, and mechanical differences are exactly what
+                 * the 2026-09-07 pass had already decided this menu must stop exposing.
+                 *
+                 * (That pass is worth keeping in the record: the founder ranked a season,
+                 * adjusted it a minute later, and saw two "ranked" rows in the feed for one
+                 * watch. Nothing was broken underneath — `_rank_finalize` has posted
+                 * `title_ranked` only `if p_new_watch or not v_replaced` since
+                 * 20260826000500 — the row named *Rank again* simply meant "another viewing"
+                 * and read like "redo my ranking". Renaming it to *Rank it again* fixed the
+                 * misfire and left two correction rows behind. This removes one.)
+                 *
+                 * ---------------------------------------------------------------------------
+                 * THE CONSOLIDATION IS AN ENTRY POINT, NOT A CAPABILITY
+                 *
+                 * **`Update your rating` is the single same-watch correction path, and it can
+                 * do everything both rows could.** It opens `LogSheet`'s bucket chooser, which
+                 * has had three branches since 2026-08-15 and keeps all of them:
+                 *
+                 *   a *different* band   → `rank_rebucket`. The band moves and the comparisons
+                 *                          are re-run, because a band change cannot be
+                 *                          estimated (PRD §10).
+                 *   the *same* band      → `rankAgain(newWatch: false)` — which is precisely
+                 *                          what *Rank it again* called. Re-opening a rating you
+                 *                          already gave means the *position* is wrong, and this
+                 *                          is how a reader says so.
+                 *   neither, then close  → nothing at all. Since 20260826000500 the session
+                 *                          runs over the position the title holds, so opening
+                 *                          this and changing your mind costs nothing.
+                 *
+                 * So placement can still be corrected for the same watch, and nobody is made
+                 * to log a viewing they did not have in order to do it. The one extra tap is
+                 * the band chooser, which is also the screen that tells the reader which of
+                 * the two things they meant.
+                 *
+                 * ---------------------------------------------------------------------------
+                 * THE SEMANTICS ARE UNTOUCHED
+                 *
+                 *   Update your rating   corrects the current watch. `p_new_watch` false, no
+                 *                        new watch record, no feed activity, no timestamp
+                 *                        heuristic anywhere.
+                 *   Log another watch    an explicit second viewing. `p_new_watch` true, and
+                 *                        exactly one `title_ranked` on completion.
+                 *
+                 * No RPC, argument, migration or piece of ranking maths changes in this pass,
+                 * and no historical activity is rewritten or de-duplicated. `rerank` still
+                 * exists and is still reached; it is reached through one row instead of two.
+                 *
+                 * The labels carry the whole distinction and there is no secondary line: a
+                 * `value` on a `SheetRow` sets beside the label and truncates at phone width,
+                 * which is a founder decision this menu already carries.
+                 */}
+                {/* The star is kept from the row this replaces, and so is its behaviour:
+                    straight into the log sheet, where the band chooser is. Leads the group
+                    because correcting a rating is the common act and logging a second
+                    viewing is the rare one. */}
+                <SheetRow
+                  icon="star-outline"
+                  label="Update your rating"
+                  onPress={() => {
+                    setManaging(false);
+                    openLog();
+                  }}
+                />
+                {/**
+                 * The explicit rewatch, and the only row in the app that declares one.
+                 *
+                 * Completing it writes exactly one new `title_ranked` activity, which is the
+                 * whole difference from the row above — and the reason the label says what
+                 * happened rather than what the app will do about it. Two genuine rewatches
+                 * are still two activities; that is not a duplicate.
+                 *
+                 * `rank_again` opens the session **over** the position the title already
+                 * has, so nothing the reader can see moves until they finish: close the
+                 * sheet, lose the network, kill the app, and the score, band and place are
+                 * where they were. The bucket passes straight through from
+                 * `rankings.bucket`, so this row decides no rating.
+                 */}
+                <SheetRow
+                  icon="repeat-outline"
+                  label="Log another watch"
+                  onPress={
+                    rankedBucket
+                      ? () => {
+                          setManaging(false);
+                          setActionError(null);
+                          setRankedTitle(loggable);
+                          setRankingSubject({
+                            id: title.id,
+                            title: title.title,
+                            bucket: rankedBucket,
+                            posterUri: posterUri(title.poster_path, 'card'),
+                            // Only a film or a season is ever ranked; a series has no menu.
+                            kind: title.kind === 'season' ? 'season' : 'movie',
+                            mode: 'again',
+                          });
+                        }
+                      : undefined
+                  }
+                  disabledReason={rankedBucket ? undefined : 'Loading'}
+                />
+              </>
+            ) : null}
 
             <MenuGroup title="Collection" />
             <SheetRow

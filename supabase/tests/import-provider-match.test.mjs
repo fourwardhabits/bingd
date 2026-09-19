@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { isConfident, pick, squash } from '../functions/letterboxd-import/match.mjs';
+import { isConfident, needsWindow, pick, squash } from '../functions/letterboxd-import/match.mjs';
 
 /**
  * The provider tier's confidence rule — `supabase/functions/letterboxd-import/match.mjs`.
@@ -121,5 +121,126 @@ describe('pick', () => {
       result('Barbie Nutcracker', '2001-10-02', 7),
     ]);
     assert.equal(chosen.id, 5);
+  });
+});
+
+// ===========================================================================
+// The Hamlet report (Android beta, 2026-09-18)
+//
+// Real TMDB records, as the production catalogue holds them:
+//   843342   Hamlet   original "Hamlet"  2026-02-06   the film the person watched
+//   1234733  Hamlet   original "Cătun"   2025-12-01   a Romanian film translated as "Hamlet"
+//   1275052  Hamlet   original "Hamlet"  2024-05-10
+//   1205709  Hamlet   original "Hamlet"  2024-02-27
+//
+// The production claim ledger shows the provider tier chose 1234733. A 2026 search cannot
+// return it, so the export row read `Hamlet, 2025`, a year before TMDB's date for the real
+// film, and the old single exact-year search never saw 843342 at all.
+// ===========================================================================
+
+const film = (id, release_date, original_title = 'Hamlet', title = 'Hamlet') => ({
+  id, title, original_title, release_date,
+});
+const HAMLET_2026 = film(843342, '2026-02-06');
+const CATUN_2025 = film(1234733, '2025-12-01', 'Cătun');
+const HAMLET_2024A = film(1275052, '2024-05-10');
+const HAMLET_2024B = film(1205709, '2024-02-27');
+
+describe('pick, when the same title exists in adjacent years', () => {
+  it('takes the exact-year film over an adjacent-year one, whichever came first', () => {
+    const want = claim('Hamlet', 2026);
+    assert.equal(pick(want, [CATUN_2025, HAMLET_2026]).id, 843342);
+    assert.equal(pick(want, [HAMLET_2026, CATUN_2025]).id, 843342);
+  });
+
+  it('takes the exact-year film over a same-named, natively titled neighbour too', () => {
+    const neighbour = film(1, '2025-03-01');
+    assert.equal(pick(claim('Hamlet', 2026), [neighbour, HAMLET_2026]).id, 843342);
+  });
+
+  it('never lets a lone adjacent-year film win when the exact year has one', () => {
+    // The old rule called this ambiguous at best; with only the neighbour visible it chose it.
+    assert.notEqual(pick(claim('Hamlet', 2026), [CATUN_2025, HAMLET_2026])?.id, 1234733);
+  });
+
+  it('refuses the reported case: a translated title in the exact year, the native one beside it', () => {
+    // `Hamlet, 2025` — the row as the export must have carried it. Nothing an export holds
+    // says which of the two was meant, so neither is written.
+    assert.equal(pick(claim('Hamlet', 2025), [CATUN_2025, HAMLET_2026]), null);
+    assert.equal(
+      pick(claim('Hamlet', 2025), [CATUN_2025, HAMLET_2026, HAMLET_2024A, HAMLET_2024B]),
+      null,
+    );
+  });
+
+  it('still takes a translated title when nothing natively titled is within a year', () => {
+    // A foreign film exported under its English name is the ordinary case, not a suspect one.
+    const parasite = film(496243, '2019-05-30', '기생충', 'Parasite');
+    assert.equal(pick(claim('Parasite', 2019), [parasite]).id, 496243);
+    const otherTranslation = film(7, '2020-01-01', 'Paraziták', 'Parasite');
+    assert.equal(pick(claim('Parasite', 2019), [parasite, otherTranslation]).id, 496243);
+  });
+
+  it('treats an unknown original title as no evidence either way', () => {
+    const noOriginal = { id: 9, title: 'Hamlet', release_date: '2026-02-06' };
+    assert.equal(pick(claim('Hamlet', 2026), [CATUN_2025, noOriginal]).id, 9);
+  });
+
+  it('falls back to a single adjacent-year film when the exact year has none', () => {
+    // Letterboxd's first-release year against a provider date one year later.
+    assert.equal(pick(claim('Hamlet', 2025), [HAMLET_2026]).id, 843342);
+    assert.equal(
+      pick(claim('Slumdog Millionaire', 2008), [film(12405, '2009-01-09', 'Slumdog Millionaire', 'Slumdog Millionaire')]).id,
+      12405,
+    );
+  });
+
+  it('leaves two adjacent-year films unresolved when the exact year has none', () => {
+    assert.equal(pick(claim('Hamlet', 2025), [HAMLET_2024A, HAMLET_2026]), null);
+  });
+
+  it('leaves two exact-year films unresolved, whatever their neighbours', () => {
+    assert.equal(pick(claim('Hamlet', 2024), [HAMLET_2024A, HAMLET_2024B, CATUN_2025]), null);
+  });
+
+  it('counts a film returned by two searches once', () => {
+    assert.equal(pick(claim('Hamlet', 2026), [HAMLET_2026, HAMLET_2026]).id, 843342);
+  });
+
+  it('is unchanged when the export had no year', () => {
+    assert.equal(pick(claim('Hamlet', null), [HAMLET_2026, CATUN_2025]), null);
+    assert.equal(pick(claim('Hamlet', null), [HAMLET_2026]).id, 843342);
+  });
+});
+
+describe('needsWindow', () => {
+  it('is settled by one natively titled exact-year film, so the common case is one request', () => {
+    assert.equal(needsWindow(claim('Hamlet', 2026), [HAMLET_2026]), false);
+  });
+
+  it('asks the neighbouring years when the exact year has nothing', () => {
+    assert.equal(needsWindow(claim('Hamlet', 2025), []), true);
+    assert.equal(needsWindow(claim('Hamlet', 2025), [film(3, '2025-01-01', 'Hamlet 2', 'Hamlet 2')]), true);
+  });
+
+  it('asks the neighbouring years when the only exact-year film is a translated title', () => {
+    // The reported import: this is the search that would have found 843342.
+    assert.equal(needsWindow(claim('Hamlet', 2025), [CATUN_2025]), true);
+  });
+
+  it('does not bother when the exact year is already a remake', () => {
+    assert.equal(needsWindow(claim('Hamlet', 2024), [HAMLET_2024A, HAMLET_2024B]), false);
+  });
+
+  it('never widens a row with no year', () => {
+    assert.equal(needsWindow(claim('Hamlet', null), []), false);
+  });
+
+  it('decides the reported row safely once the window is asked', () => {
+    const want = claim('Hamlet', 2025);
+    const exactYear = [CATUN_2025];
+    assert.equal(needsWindow(want, exactYear), true);
+    const window = [...exactYear, HAMLET_2024A, HAMLET_2024B, HAMLET_2026];
+    assert.equal(pick(want, window), null, 'unresolved, never Cătun');
   });
 });

@@ -343,11 +343,12 @@ describe('what never becomes a claim at all', () => {
   });
 
   it('an ambiguous title, however many accounts import it', async () => {
-    // Two catalogue rows that squash identically with years within one: a remake. The row
-    // is `ambiguous` and resolves to nothing, so there is no pair to claim — the weak
-    // evidence never enters the system rather than being filtered out later.
+    // Two catalogue rows that squash identically in the same year: a remake. The row is
+    // `ambiguous` and resolves to nothing, so there is no pair to claim — the weak evidence
+    // never enters the system rather than being filtered out later. (A pair a year apart is
+    // no longer this case: the exact-year film wins, 20260924000100.)
     await collidingMovie('Twin Title Remake Pair', 1990);
-    await collidingMovie('Twin Title Remake Pair', 1991);
+    await collidingMovie('Twin Title Remake Pair', 1990);
     const URI = 'https://boxd.it/2cTwin';
 
     const jobA = await matchArchive(gil, [row('Twin Title Remake Pair', 1990, URI)]);
