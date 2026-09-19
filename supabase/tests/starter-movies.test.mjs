@@ -190,7 +190,7 @@ describe('starter_movies', () => {
       // The floor is a config row rather than a literal, and it is a floor: raising it
       // above the percentile is what makes it bite.
       await db.sql(
-        `update app_config set value = '99'::jsonb where key = 'discovery.support_min_ratings'`,
+        `update app_config set value = '99'::jsonb where key = 'discovery.support_min_ratings.movie'`,
       );
       const raised = await starters(60, db);
       assert.equal(

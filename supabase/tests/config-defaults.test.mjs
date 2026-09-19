@@ -157,6 +157,10 @@ test('the Bingd aggregate shows from the first rating', async () => {
  * (`discovery.top_rated_min_ratings` at 5 and `discovery.starter_min_ratings` at 3) are
  * asserted absent, because a surviving row that nothing reads is a knob somebody will
  * turn and watch do nothing.
+ *
+ * **Since 20260927000100 the minimum under the percentile is per medium**: 3 for movies and
+ * 2 for TV seasons, in their own rows. The shared `discovery.support_min_ratings` row they
+ * replaced is asserted absent for the same reason.
  */
 test('the discovery floor is one percentile rule, and is not the display threshold', async () => {
   const t = await createTestDb();
@@ -165,6 +169,8 @@ test('the discovery floor is one percentile rule, and is not the display thresho
       `select key, (value)::numeric as n
          from app_config
         where key in ('discovery.support_percentile', 'discovery.support_min_ratings',
+                      'discovery.support_min_ratings.movie',
+                      'discovery.support_min_ratings.season',
                       'score.community_min_ratings', 'discovery.top_rated_min_ratings',
                       'discovery.starter_min_ratings')
         order by key`,
@@ -172,7 +178,8 @@ test('the discovery floor is one percentile rule, and is not the display thresho
     assert.deepEqual(
       rows.map((row) => [row.key, Number(row.n)]),
       [
-        ['discovery.support_min_ratings', 3],
+        ['discovery.support_min_ratings.movie', 3],
+        ['discovery.support_min_ratings.season', 2],
         ['discovery.support_percentile', 0.9],
         ['score.community_min_ratings', 1],
       ],
@@ -195,12 +202,15 @@ test('the discovery floor still applies when neither row is configured', async (
   try {
     await t.sql(
       `delete from app_config
-        where key in ('discovery.support_percentile', 'discovery.support_min_ratings')`,
+        where key in ('discovery.support_percentile', 'discovery.support_min_ratings.movie',
+                      'discovery.support_min_ratings.season')`,
     );
-    const { rows } = await t.sql(`select community_support_floor('movie'::media_kind) as k`);
-    // No rankings in a fresh database, so the percentile contributes nothing and the
-    // documented floor of three is the whole answer.
-    assert.equal(rows[0].k, 3);
+    const floor = async (kind) =>
+      (await t.sql(`select community_support_floor($1::media_kind) as k`, [kind])).rows[0].k;
+    // No rankings in a fresh database, so the percentile contributes nothing and each
+    // medium's documented minimum is the whole answer.
+    assert.equal(await floor('movie'), 3);
+    assert.equal(await floor('season'), 2);
   } finally {
     await t.close();
   }
