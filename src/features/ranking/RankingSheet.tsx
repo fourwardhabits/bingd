@@ -513,8 +513,8 @@ function Session({
          * A correction is not a ranking act, so it is not asked about the streak.
          *
          * `rerank` and `rebucket` — both reached from *Update your rating* — replace a
-         * position and post no activity. Until `20260911000100` lands they also
-         * re-insert the `rankings` row with `created_at = now()`, which is the column
+         * position and post no activity. Before `20260928000100` they also
+         * re-inserted the `rankings` row with `created_at = now()`, which is the column
          * the streak is derived from — so a correction in an otherwise empty week
          * read as "ranked this week" and this detector celebrated it. The migration
          * keeps the date; this guard keeps the celebration honest on every build,
