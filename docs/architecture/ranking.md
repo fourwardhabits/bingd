@@ -80,6 +80,8 @@ create table ranking_sessions (
   history       jsonb   not null default '[]',
   skips         smallint not null default 0,
   seen_items    uuid[]  not null default '{}',  -- every title this session has offered
+  pivot_item    uuid,               -- the title on screen (20260926000100)
+  band_digest   text,               -- md5 of the band the offsets index (20260926000100)
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
   unique (user_id, media_item_id)
@@ -90,9 +92,11 @@ create table ranking_sessions (
 
 > **These were absolute positions until 2026-08-13, and that was a corruption bug.** A position only means something relative to a ranking that is not moving. Rank one more `loved` title while a `fine` session is open and every `fine` position shifts down by one — but the session's bounds did not, so answering it to completion inserted the title at coordinates that now belonged to the `loved` band. **Invariant I2 broken by using the interface exactly as designed.** An offset survives the band sliding, because nothing about it was expressed in terms that moved. Bounds are additionally clamped to the live band size on every read, which covers the band *shrinking* under an open session.
 
+> **An offset does not survive the band itself changing, and until `20260926000100` that was the same bug one level down.** Leave a session open (the app dies before `rank_cancel` lands), rank another title into the *same* band above a pivot the reader already picked, and resume: `lo` now points one title higher, and the subject is placed above the pivot it lost to. The invariant is that **a completed answer stays consistent with every final placement**. The session now records `band_digest` — md5 over its band's ordered ids, subject excluded when provisional — and every step (answer, skip, Undo, resume) checks it under the (user, category) lock via `_rank_session_sync`. Unchanged, the step runs exactly as before. Changed, the search is **rebased from the answers**: each history frame records its opponent (`pivot_item`) and outcome (`won`), so `[lo, hi)` and every frame are re-derived from where those titles are now. An answer about a title that left the band, or one the earlier answers imply, narrows nothing and drops out. Answers that contradict each other (the reader has since re-ranked one pivot against another) restart the search from the whole band. A step that arrives about a comparison the rebase replaced is not applied: the current comparison comes back with `rebased: true`. Pinned by `supabase/tests/ranking-resume-integrity.test.mjs` and the race in `concurrency/races/ranking.mjs`.
+
 `pivot` records which title is currently being compared against, rather than recomputing it as the midpoint. **Storing it is what makes Skip work at all.** Skip re-anchors deliberately away from the midpoint, so a `rank_answer` that recomputed the midpoint rejected the very title Skip had just displayed — every skip led to a dead end where the only offered answer was refused. Nothing in the bisection requires the pivot to be the midpoint; any offset inside `[lo, hi)` narrows the range correctly, and the midpoint is only the fastest choice.
 
-`history` is a stack of prior `(lo, hi, pivot, seen, skips)` states, which is what makes **Back** work: `seen` is how many titles had been offered and `skips` how many had been spent when that comparison was on screen (`20260922000100`). Frames written before then carry only `(lo, hi, pivot)`. `skips` counts re-anchors for the 3-skip rule.
+`history` is a stack of prior `(lo, hi, pivot, seen, skips)` states, which is what makes **Back** work: `seen` is how many titles had been offered and `skips` how many had been spent when that comparison was on screen (`20260922000100`). Frames written before then carry only `(lo, hi, pivot)`. Since `20260926000100` each frame also carries `pivot_item` and `won`, which makes the stack the record of the session's live answers — one frame per answer, popped by Undo — and is what a rebase replays. `skips` counts re-anchors for the 3-skip rule.
 
 `seen_items` is every title the session has put in front of the reader (`20260901000100`). The subject is fixed for the life of a session, so this **is** the set of unordered pairs already shown, and it is what makes "the app never asks the same pair twice" a property of the session rather than of the current band. Bounded by the band size, and in practice by the log of it.
 
@@ -427,7 +431,7 @@ Two things close that:
 - **`unlog` deletes the title's open comparison session** along with the collection row. Removing a title withdraws the claim its comparisons were placing, and the answers already given stay in `comparisons` exactly as `rank_cancel` leaves them.
 - **`_rank_finalize` upserts the collection row it is a claim about**, with the bucket it is writing. The insertion of a `rankings` row is the one moment the schema can state the whole truth about a title, so it states it — and `assert_ranking_valid`'s I3 check goes from being the only thing that would ever notice a drift to being a backstop.
 
-Sessions themselves need no locking: `(user_id, media_item_id)` is unique, so a second attempt to rank the same title resumes the first session.
+Sessions themselves need no locking: `(user_id, media_item_id)` is unique, so a second attempt to rank the same title resumes the first session. **Their steps do, since `20260926000100`**: answer, skip, Undo and resume take the (user, category) lock right after the media lock, so a band cannot move between the digest check and the write. Opening a session does not; it derives `hi`, the pivot and the digest from one read of the band, and a band that moves straight afterwards is caught at the first step.
 
 ### Proof rather than assertion
 
