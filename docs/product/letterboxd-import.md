@@ -546,6 +546,14 @@ judged over a year-truncated set. A 2026 search cannot return *Cătun*, so the r
 3. No exact-year film: a single neighbour (or undated film) is the festival/territory
    fallback; more than one is unresolved.
 
+**1b, added after staging (2026-09-19, `20260925000100`).** When several films share the
+exact year, exactly one of them has the exported name as its original title, and every other
+one has a known original title that differs, that one wins. Real case: TMDB holds two 2023
+"Past Lives", 666277 (original "Past Lives") and 1164820 (original "Nagligad nga
+Kinabuhi"), which rule 1 left unresolved. Two native matches, none, or an unknown original
+title stay unresolved. It is the mirror of rule 2, and it never consults popularity, order or
+votes.
+
 The provider asks for the neighbouring years only when the exact year cannot settle it
 (`needsWindow`), so the common case stays one request. The local tier settles only rule 1
 (and T1b's lone undated film); an adjacent-year or translated-title match goes to the
@@ -569,8 +577,9 @@ the same row could, which would promote it into T0 — so re-check
 `letterboxd_matches` for 1234733 after deploying. Pinned in
 `supabase/tests/import-year-precedence.test.mjs`.
 
-**Deploying 6f.** Apply `20260924000100` and deploy `letterboxd-import`, in either order;
-neither depends on the other. The title-page change is JS-only and OTA-deliverable.
+**Deploying 6f.** Apply `20260924000100` then `20260925000100`, and deploy
+`letterboxd-import`, in either order against the function; the migrations depend only on
+each other. The title-page change is JS-only and OTA-deliverable.
 
 ---
 
