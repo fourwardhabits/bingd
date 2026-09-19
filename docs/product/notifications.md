@@ -121,7 +121,8 @@ Status vocabulary:
 | Type | Trigger | Value | Deep link | Cooldown | Cap | Status |
 |---|---|---|---|---|---|---|
 | `streak_expiring` | Live streak, no ranking yet, ~48h left in the week | The one thing that keeps it | Search / ranking surface, **never home** | **One per week, maximum** | Yes | **DEFERRED** — §4 |
-| `watchlist_release_day` | A watchlist title's reliable release date is today | You asked to know about this title | Title detail | Once per (user, title), ever | Yes | **DEFERRED** — §6 |
+| `theatrical_release` | A watchlisted film opens in US theaters in about a week (T-7) | You saved it, and a week is enough time to plan | Title detail | Once per (user, film release), ever | Measured, not applied | **SHADOW** (20260930000100/200/300). Superseded `watchlist_release_day`: a day-of push arrives too late to act on, so it is not sent at all |
+| `season_premiere` | A new season of a series you are caught up on is out, on release morning | You ranked or watched the season before it | The season | Once per (user, season), ever | Measured, not applied | **SHADOW.** Behind-tier viewers get the in-app event only |
 | `watchlist_release_week` | One week before release | Planning | Title detail | Once per (user, title) | Yes | **REJECTED for v1** — doubles volume for the same title. Release day is more actionable and assumes less. Revisit as an experiment against release-day open rates. |
 
 ### Class C — friend moments
@@ -148,7 +149,7 @@ it a fact they wanted rather than an observation about somebody else.
 
 | Type | Trigger | Status |
 |---|---|---|
-| `watchlist_now_streaming` | A watchlist title becomes available in the reader's region | **DEFERRED**. Needs availability *change* detection; `WhereToWatch` reads live and stores no history, so there is nothing to diff. |
+| `watchlist_now_streaming` | A watchlist title becomes available in the reader's region | **REMOVED from the roadmap** (founder, 2026-09-19). See §11.4. The mechanics are unchanged: `WhereToWatch` reads live and stores no history, so there is nothing to diff. |
 | `watchlist_aging` | Long-saved title, reader inactive, high confidence | **DEFERRED / SHADOW candidate.** Generate and measure before ever sending. |
 
 ### Class E and everything else considered
@@ -157,7 +158,7 @@ it a fact they wanted rather than an observation about somebody else.
 |---|---|
 | Trending title matching your taste | **DEFERRED.** Needs recommendation confidence the product does not measure. Easiest of all these to turn into marketing push. |
 | Several friends ranked the same title | **DEFERRED.** A real signal, and it needs the friend triggers first. |
-| New season of a series you ranked | **DEFERRED, and genuinely wanted.** Blocked on the same release-reliability problem as Class B — `tmdb_upsert_seasons` writes no reliable future air date, and the catalogue is a cache. |
+| New season of a series you ranked | **IN SHADOW** since 2026-09-19, as `season_premiere` above. The release-reliability problem was the real one and is solved by a refresh that keeps dates current plus a 12-hour freshness rule, not by trusting the catalogue. (This row read "`tmdb_upsert_seasons` writes no reliable future air date"; it does write `air_date`, and the actual gap was that nothing refreshed it.) |
 | Availability added to a watchlist title | **DEFERRED.** Same missing history as `watchlist_now_streaming`. |
 | Award near-completion ("2 more comedies") | **REJECTED for now.** Progress is not an event; it is a state the Awards sheet already shows. A push about not-quite-finishing is the participation-trophy problem in push form. |
 | Monthly / annual recap | **DEFERRED.** Worth doing when there is a year of history to recap. |
@@ -366,3 +367,88 @@ touched.
 The next honest step is **PR C**: the cap-and-suppression ledger plus the arbitration
 function, with `friend_watched_your_watchlist` as the first type through it — because the
 cap has to exist before the first proactive type, not after the second.
+
+---
+
+## 11. A hierarchy for proactive notifications
+
+**Status: proposed, 2026-09-19, from the founder's review of the release-awareness shadow.**
+Nothing here is built beyond what release awareness already runs in shadow
+([`release-awareness.md`](./release-awareness.md)). This section exists so the next
+proactive type is placed rather than invented, and so §7's cap question is settled with
+evidence instead of a number chosen in advance.
+
+### 11.1 The three bands
+
+| Band | What belongs in it | Why it ranks there | Interruption |
+|---|---|---|---|
+| **HIGH: a person acted toward you** | A direct recommendation from somebody; a reply, comment or mention; a reaction to your activity; a follow or follow request; somebody saying they watched with you | Another person is waiting at the other end. Missing it is not a missed suggestion, it is a missed exchange, and it cannot be recovered later | Always eligible. Outside every cap, as Class A already is |
+| **HIGH INTENT: something you asked about is happening** | A caught-up new season; a watchlisted film opening in theaters (T-7) | The reader recorded the interest themselves, by ranking a season or saving a title. The event is a fact about that exact thing, on a day that matters | Eligible, and not suppressed by volume alone: see 11.3 |
+| **LOWER: an opportunity somebody might like** | Shared Watchlist overlap (not built); "several friends ranked this"; resurfacing a long-saved title; anything trending or taste-derived | Nobody asked, and nothing is lost if it arrives later or not at all | Eligible only under strict conditions, and the first candidate for bundling or for silence |
+
+Two rules follow from the table rather than from taste:
+
+- **A behind-tier release event is in-app only.** It is high intent about a series, but the
+  reader is not caught up, so the day it lands is not their day.
+- **A lower band never consumes the budget of a higher one.** If something has to give, it
+  gives from the bottom.
+
+### 11.2 Shared Watchlist, when it is built
+
+Not implemented and not scheduled. It is written down because it is the archetype of the
+lower band and the one most likely to be built next, so its constraints belong on paper
+before anybody is tempted.
+
+The event: two people have independently saved the same title, so there is a plan to be
+made. **Every one of these has to hold.**
+
+- **Both saved it independently.** Neither was told to by the other, and neither add came
+  from a recommendation the other sent.
+- **The relationship is real and visible.** A mutual follow, and the privacy rules let each
+  see the other's activity. A one-way follower is a stranger's evening.
+- **They have interacted recently and meaningfully**: a recommendation, a comment, a
+  reaction or a watched-with, inside a bounded recent window. Two accounts that have never
+  spoken have no plan to make.
+- **Neither has watched it.** A plan about a film somebody already saw is noise.
+- **Dedupe by pair and title, permanently**, in the ledger pattern releases already use.
+- **Both still have it saved at send time**, not only when the candidate was generated.
+
+**It must not bombard the people who use the product most.** Somebody with two hundred
+mutual follows and a large watchlist can generate hundreds of these, and the person the
+product works best for must not be the person it punishes. The controls, to be chosen with
+evidence rather than all at once:
+
+| Control | What it does | When it is the right answer |
+|---|---|---|
+| Per-type cooldown | At most one of this type per reader per period | The type is repetitive by nature |
+| Per-pair cooldown | At most one about this pair per period | One friendship should not fill an inbox |
+| Global soft cap | A budget that **degrades** rather than discards: over budget, the band drops to in-app only | Volume is occasionally high |
+| Batching or digest | One notification about several overlaps, opening to a list | Volume is routinely high. The most likely answer for this type |
+| Priority suppression | A lower band yields to a higher one inside a window | Two bands collide on the same day |
+
+**Prefer prioritisation and bundling over arbitrary first-come dropping.** Dropping the
+second thing that happened is the worst option available: invisible to the reader, random
+from their point of view, and it destroys the one signal that says whether the type works.
+That is the correction the founder made to release awareness on 2026-09-19, and it
+generalises past releases.
+
+### 11.3 What the shadow measures, and what it decides
+
+Release awareness records the uncapped result and, beside it, what the former
+2-per-7-days and 36-hour rules would have suppressed. When there is data:
+
+- **If a cap would rarely have bitten**, no cap is added, and §7's number is retired rather
+  than inherited.
+- **If it would have bitten a few heavy users**, the answer is a soft cap or a digest for
+  the lower band, never a hard drop of a high-intent event.
+- **If it would have bitten everybody**, the type itself is wrong, and eligibility is what
+  changes.
+
+### 11.4 Streaming availability: removed from the roadmap
+
+`watchlist_now_streaming`, "availability added to a watchlist title" and a "Streaming now"
+Watchlist filter are **removed** (founder, 2026-09-19), not deferred. Where to Watch stays
+as the downstream utility on the title page. The reasons the §3 rows give are unchanged and
+still correct: availability is read live and stored nowhere, so there is nothing to diff,
+and the underlying data moves around enough that "now streaming" is a promise the product
+cannot keep.

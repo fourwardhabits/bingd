@@ -14,7 +14,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import type { CastSearchResult, SeasonRow, TitleRow } from './normalize.ts';
+import type { CastSearchResult, ReleaseObservation, SeasonRow, TitleRow } from './normalize.ts';
 
 export type Db = SupabaseClient;
 
@@ -172,6 +172,25 @@ export async function noteRequest(db: Db, userId: string) {
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
+
+/**
+ * Hands one TMDB read to the release state machine (20260930000100). Every decision is
+ * the SQL's; an untracked subject is answered `untracked` and nothing is written.
+ */
+export async function observeRelease(db: Db, observation: ReleaseObservation) {
+  const { data, error } = await db.rpc('release_observe', { p_obs: observation });
+  if (error) throw new Error(`release_observe: ${error.message}`);
+  return data as { status: string };
+}
+
+/** A failed read of a tracked subject: backs it off, and never touches release state. */
+export async function observeReleaseFailure(db: Db, mediaItemId: string, message: string) {
+  const { error } = await db.rpc('release_observe_failure', {
+    p_media_item_id: mediaItemId,
+    p_error: message.slice(0, 300),
+  });
+  if (error) throw new Error(`release_observe_failure: ${error.message}`);
+}
 
 export type CatalogueRow = {
   id: string;

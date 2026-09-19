@@ -343,6 +343,12 @@ export type TmdbMovieDetail = {
   credits?: TmdbCredits;
   videos?: TmdbVideos;
   release_dates?: TmdbReleaseDates;
+  /**
+   * `Rumored`, `Planned`, `In Production`, `Post Production`, `Released` or `Canceled`.
+   * Read by release awareness only (20260930000100), which withdraws a canceled film's
+   * release and otherwise keys on the US type-3 date in `release_dates`, never on this.
+   */
+  status?: string | null;
 };
 
 export type TmdbSeriesDetail = {
@@ -360,6 +366,20 @@ export type TmdbSeriesDetail = {
   credits?: TmdbCredits;
   videos?: TmdbVideos;
   content_ratings?: TmdbContentRatings;
+  /**
+   * Release awareness (20260930000100). `status` is `Returning Series`, `In Production`,
+   * `Planned`, `Pilot`, `Ended` or `Canceled`; it sets how often a series is re-read and
+   * withdraws a canceled show's unaired seasons. `next_episode_to_air` is kept as a fact
+   * alongside the season list and decides nothing: a season's premiere is its own
+   * `air_date` below, and no episode is ever tracked.
+   */
+  status?: string | null;
+  in_production?: boolean | null;
+  next_episode_to_air?: {
+    season_number?: number | null;
+    episode_number?: number | null;
+    air_date?: string | null;
+  } | null;
   seasons?: {
     id: number;
     season_number: number;
@@ -534,6 +554,24 @@ export function seriesDetail(id: number, charge?: Charge): Promise<TmdbSeriesDet
     { append_to_response: 'credits,videos,content_ratings' },
     charge,
   );
+}
+
+/**
+ * The two reads the scheduled release refresh makes (`release-refresh`, 20260930000100).
+ *
+ * Leaner than `movieDetail` / `seriesDetail` on purpose: the refresh re-reads the same
+ * subjects on a cadence and renders nothing, so credits and trailers would be payload
+ * with no reader. A film still appends `release_dates`, the per-country release events
+ * the detail call has always fetched and, until this, thrown away after reading one
+ * certification. A series needs no append: its status and every season's `air_date` are
+ * on the base response. One request each, uncharged (service_role).
+ */
+export function movieReleaseDetail(id: number): Promise<TmdbMovieDetail> {
+  return request(`/movie/${id}`, { append_to_response: 'release_dates' });
+}
+
+export function seriesReleaseDetail(id: number): Promise<TmdbSeriesDetail> {
+  return request(`/tv/${id}`);
 }
 
 export function seasonDetail(

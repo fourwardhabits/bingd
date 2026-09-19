@@ -698,6 +698,14 @@ const ALLOWED = {
   // client holding it could enqueue a push for anybody.
   'register_device_token(uuid,text,text)': ['authenticated'],
   'revoke_device_token(uuid,text)': ['authenticated'],
+
+  // 20260930000100, release awareness. The device's IANA timezone and locale region, for
+  // the release send window and the US theatrical match. Takes no account: it writes
+  // `auth.uid()`'s own row, validates both values and drops what does not validate, and
+  // returns only whether each was accepted. `account_context` has no read policy, so
+  // nothing a client can call reads it back, including this. Every other release
+  // function is service_role only and is not on this list.
+  'report_device_context(text,text)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {
