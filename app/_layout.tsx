@@ -23,6 +23,7 @@ import {
 import { useRedeemPendingInvite } from '@/features/invite';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
+import { useReportDeviceContext } from '@/features/notifications/use-report-device-context';
 import { initAnalytics } from '@/lib/analytics';
 import { lastRouteSeen, note, tally } from '@/lib/flight-recorder';
 import { watchQueries } from '@/lib/flight-queries';
@@ -232,6 +233,13 @@ function Navigation() {
    * §15 names.
    */
   usePush();
+  /**
+   * The device's timezone and region, once per signed-in account per run, for release
+   * awareness's local send window (docs/product/release-awareness.md, decision 5). Here
+   * beside `usePush` because it belongs to the session rather than to any screen. Silent:
+   * no UI, and a failure is dropped.
+   */
+  useReportDeviceContext();
 
   return (
     <>
