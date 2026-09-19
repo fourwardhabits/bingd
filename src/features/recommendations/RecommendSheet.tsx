@@ -395,7 +395,7 @@ export function RecommendSheet({
                 : 'Add a note (optional)'
             }
             placeholderTextColor={theme.text.tertiary}
-            accessibilityLabel="Note to send with this recommendation, optional"
+            accessibilityLabel="Add a note, optional"
             maxLength={NOTE_MAX}
             multiline
             blurOnSubmit
