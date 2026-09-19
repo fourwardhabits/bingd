@@ -51,7 +51,11 @@ export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: Sen
               // Two facts, one line, sender first — which is the order somebody reads
               // it in: whose recommendation is this, and how recent.
               secondary={`${row.senderName} recommended this · ${relativeTime(row.recommendedAt)}`}
-              tertiary={metadataFor(row)}
+              // The sender's note, when there is one, takes the third line and may wrap to
+              // a second (20260929000100). The metadata it displaces is still what the
+              // filters read, and the title page shows it anyway; the full note is there too.
+              tertiary={row.message ? `“${row.message}”` : metadataFor(row)}
+              tertiaryLines={row.message ? 2 : 1}
               // Three lines of text per row; the compact padding left the sender
               // sentence nearly touching the divider (founder, 2026-08-27).
               spacious

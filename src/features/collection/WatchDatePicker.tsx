@@ -15,13 +15,20 @@ import {
   today,
 } from './dates';
 
+/**
+ * Which control produced a date. `today` is the one explicit answer about *mode* — "I
+ * am logging what I just watched" — and the log sheet carries it to the next title
+ * (`when-session.ts`); the other two are facts about one title only.
+ */
+export type WatchDateSource = 'today' | 'yesterday' | 'calendar';
+
 export type WatchDatePickerProps = {
   /** The chosen date, or null for a watch with no date recorded. */
   value: string | null;
   /** Which month the grid opens on when `value` is null. */
   anchor: string;
-  onChange: (iso: string) => void;
-  /** "I don't remember" — see the note on that chip below. */
+  onChange: (iso: string, source: WatchDateSource) => void;
+  /** "Earlier" — see the note on that chip below. */
   onClear: () => void;
 };
 
@@ -49,11 +56,11 @@ export function WatchDatePicker({ value, anchor, onChange, onClear }: WatchDateP
   return (
     <View style={styles.container}>
       <View style={styles.quick}>
-        <QuickChip label="Today" selected={value === now} onPress={() => onChange(now)} />
+        <QuickChip label="Today" selected={value === now} onPress={() => onChange(now, 'today')} />
         <QuickChip
           label="Yesterday"
           selected={value === addDays(now, -1)}
-          onPress={() => onChange(addDays(now, -1))}
+          onPress={() => onChange(addDays(now, -1), 'yesterday')}
         />
         <QuickChip
           label={gridOpen ? 'Hide calendar' : 'Pick a date'}
@@ -76,8 +83,13 @@ export function WatchDatePicker({ value, anchor, onChange, onClear }: WatchDateP
          * The date going away is the mechanism — what is being said is that there was a
          * watch and the day is gone. The title stays logged either way, which the
          * server enforces rather than merely allowing (20260824000100).
+         *
+         * **"Earlier", since 2026-09-19 (T0b).** Same answer, said the way somebody
+         * catching up on a library means it: *I saw this before, I don't know when.*
+         * "Don't remember" read as a failure of memory on a film watched years ago,
+         * which is most of what a new reader logs.
          */}
-        <QuickChip label="Don't remember" selected={value === null} onPress={onClear} />
+        <QuickChip label="Earlier" selected={value === null} onPress={onClear} />
       </View>
 
       {gridOpen ? (
@@ -140,7 +152,7 @@ export function WatchDatePicker({ value, anchor, onChange, onClear }: WatchDateP
                   // refuses beyond tomorrow; the UI stops at today so the two never
                   // disagree in front of the user.
                   disabled={iso > now}
-                  onPress={() => onChange(iso)}
+                  onPress={() => onChange(iso, 'calendar')}
                 />
               ),
             )}

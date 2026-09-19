@@ -32,6 +32,11 @@ export type SentRecommendation = {
   runtimeMinutes: number | null;
   recommendedAt: string;
   openedAt: string | null;
+  /**
+   * The sender's note, or null (20260929000100). Only ever on a delivered row: the
+   * recipient policy admits no pending one, so a request's note cannot arrive here.
+   */
+  message: string | null;
 };
 
 type Row = {
@@ -51,6 +56,8 @@ type Row = {
   runtime_minutes: number | null;
   recommended_at: string;
   opened_at: string | null;
+  /** Absent against a backend older than 20260929000100, which reads as no note. */
+  message?: string | null;
 };
 
 const yearOf = (date: string | null): number | null => {
@@ -129,6 +136,7 @@ export function useSentToYou(viewerId: string) {
         runtimeMinutes: row.runtime_minutes,
         recommendedAt: row.recommended_at,
         openedAt: row.opened_at,
+        message: row.message ?? null,
       }));
     },
   });
@@ -353,9 +361,18 @@ export function useMarkRecommendationOpened(viewerId: string) {
     mutationFn: async ({
       recommendationId,
       mediaKind,
+      hasNote = false,
+      surface = 'sent_to_you',
     }: {
       recommendationId: string;
       mediaKind: MediaKind;
+      /** Whether the recommendation carried a note — never the note (20260929000100). */
+      hasNote?: boolean;
+      /**
+       * Where it was opened. `title` is the title page marking what it has just shown,
+       * however the reader got there (20260929000100); Sent to you is the other door.
+       */
+      surface?: 'sent_to_you' | 'title';
     }) => {
       const { error } = await supabase.rpc('mark_recommendation_opened', {
         p_recommendation_id: recommendationId,
@@ -389,11 +406,15 @@ export function useMarkRecommendationOpened(viewerId: string) {
         reportedOpens.add(seen);
         track({
           name: 'recommendation_opened',
-          props: { media_kind: mediaKind, surface: 'sent_to_you' },
+          props: { media_kind: mediaKind, surface, has_note: hasNote },
         });
       }
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['sent-to-you', viewerId] }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['sent-to-you', viewerId] });
+      // The title page's card reads `opened_at` too; one stale copy would mark it twice.
+      void queryClient.invalidateQueries({ queryKey: ['title-recommendations', viewerId] });
+    },
   });
 }
 

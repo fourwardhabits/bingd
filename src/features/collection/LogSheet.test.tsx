@@ -4,8 +4,15 @@ import { AppState } from 'react-native';
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
 
+import { addMonths, formatWatchDate, today } from './dates';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
 import { emptyLogState } from './use-log-state';
+import {
+  WHEN_SESSION_IDLE_MS,
+  carriedWhen,
+  rememberWhen,
+  resetWhenSession,
+} from './when-session';
 
 /**
  * A real local store, because the remembered share default is only meaningful across
@@ -51,6 +58,19 @@ const filmA: LoggableTitle = {
 };
 
 const filmB: LoggableTitle = { ...filmA, id: 'film-b', title: 'Film B' };
+const filmC: LoggableTitle = { ...filmA, id: 'film-c', title: 'Film C' };
+
+/**
+ * Lets the detached default-date stamp finish.
+ *
+ * The stamp is deliberately not awaited before the ranking hand-off, so "it did not
+ * write" can only be asserted once it has had every chance to — otherwise an absence
+ * assertion passes because it ran first, not because nothing was written.
+ */
+const settle = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
 
 /**
  * `useLogState` issues two reads. Both are the same chain shape, so one builder
@@ -138,6 +158,9 @@ const stubSlowReads = (
 
 beforeEach(() => {
   issued = 0;
+  // The When sitting is module memory (R4); every test starts with none, as an app
+  // launch does.
+  resetWhenSession();
   mockPrefs.clear();
   mockRpc.mockReset();
   mockFrom.mockReset();
@@ -393,13 +416,13 @@ describe('forgetting the watch date', () => {
     const sheet = await open(filmA);
 
     await sheet.openDate();
-    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
 
     await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
     expect(callsTo('clear_watch_date')[0][1].p_media_item_id).toBe('film-a');
     // Not through log_watched, which cannot express it.
     expect(callsTo('log_watched')).toHaveLength(0);
-    await waitFor(() => expect(sheet.getByText('Not recorded')).toBeTruthy());
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'));
   });
 
   it('leaves the rating alone, so the title stays logged', async () => {
@@ -407,7 +430,7 @@ describe('forgetting the watch date', () => {
     const sheet = await open(filmA);
 
     await sheet.openDate();
-    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
     await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
 
     // Nothing touched the bucket, which is what keeps the title watched: a bucket is a
@@ -423,7 +446,7 @@ describe('forgetting the watch date', () => {
     const sheet = await open(filmA, { onRank: jest.fn() });
 
     await sheet.openDate();
-    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
     await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
 
     await fireEvent.press(sheet.bucket('It was fine'));
@@ -440,7 +463,7 @@ describe('forgetting the watch date', () => {
     stubReads({ bucket: 'loved', watched_on: null, note: '' }, null);
     const sheet = await open(filmA);
 
-    await waitFor(() => expect(sheet.getByText('Not recorded')).toBeTruthy());
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'));
   });
 
   it('takes a real date again after a clear', async () => {
@@ -448,7 +471,7 @@ describe('forgetting the watch date', () => {
     const sheet = await open(filmA);
 
     await sheet.openDate();
-    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
     await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
 
     await fireEvent.press(sheet.getByRole('button', { name: 'Today' }));
@@ -467,10 +490,10 @@ describe('forgetting the watch date', () => {
     const sheet = await open(filmA);
 
     await sheet.openDate();
-    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
 
     await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
-    expect(sheet.getByText('Not recorded')).toBeTruthy();
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
     // And it still creates nothing itself.
     expect(callsTo('log_watched')).toHaveLength(0);
     expect(callsTo('set_bucket')).toHaveLength(0);
@@ -499,7 +522,7 @@ describe('forgetting the watch date', () => {
     const sheet = await open(filmA);
     await sheet.openDate();
 
-    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
     await fireEvent.press(sheet.getByRole('button', { name: 'Today' }));
 
     // The second tap has not reached the server while the first is still in flight.
@@ -1605,6 +1628,291 @@ describe('the watch date', () => {
 });
 
 /**
+ * **Ranking now is not watching now** (T0b, 2026-09-19).
+ *
+ * A title can already be in the collection with no watch date: an imported film with
+ * no diary entry, an onboarding pick whose comparisons were abandoned, an earlier
+ * "Earlier". The sheet displayed each of those as dateless — and the moment one was
+ * ranked, the default-date stamp wrote today onto it anyway, because it asked only "is
+ * there a date?" and never "was this title already here?". That fabricated a current
+ * watch that counted toward this year's goal and this month's leaderboard.
+ *
+ * The invariant: a title that was already seen before this sheet began keeps exactly
+ * the date it had, including none. Only a title logged for the first time gets Today.
+ */
+describe('ranking a title that was already seen', () => {
+  it('does not stamp today onto a seen title with no date when it is ranked', async () => {
+    stubReads({ bucket: null, watched_on: null, note: '' }, null);
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await settle();
+
+    // One bucket write, the hand-off to ranking — and nothing about a date.
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['set_bucket']);
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
+  });
+
+  it('writes no date when a note is added to a seen title with no date', async () => {
+    stubReads({ bucket: 'fine', watched_on: null, note: '' }, null);
+    const sheet = await open(filmA);
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'better than I remembered');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
+  });
+
+  it('ranks an imported title in its Letterboxd bucket without claiming a watch today', async () => {
+    // The importer wrote the bucket from the star rating and, with no diary entry, no
+    // date. Choosing that same bucket here is the ordinary way to rank it.
+    stubReads({ bucket: 'loved', watched_on: null, note: '' }, null);
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await settle();
+
+    expect(callsTo('set_bucket')).toHaveLength(1);
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('does not stamp an onboarding pick even when the bucket is tapped before its read lands', async () => {
+    // Onboarding buckets with `set_bucket` and never writes a date; this pick's
+    // comparisons were abandoned, so it is seen, unranked and undated. The tap races
+    // the read, which is the window where the old stamp decided from a read taken
+    // after its own bucket write.
+    const { release } = stubSlowReads({ bucket: 'fine', watched_on: null, note: '' }, null);
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await fireEvent.press(sheet.bucket('It was fine'));
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    release();
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
+    await settle();
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
+  });
+
+  it('re-ranks a ranked onboarding pick with no date and still writes no date', async () => {
+    stubReads({ bucket: 'loved', watched_on: null, note: '' }, { bucket: 'loved' });
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
+    await settle();
+
+    expect(onRank).toHaveBeenCalledWith('loved', 'rerank');
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * **A title logged for the first time** — the ordinary current-watch log, unchanged:
+ * Today unless the reader says otherwise, Earlier for no date, and a picked date kept.
+ */
+describe('logging a title for the first time', () => {
+  it('dates it today when the reader leaves the default, exactly as the row promised', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue?.text).toBe('Today'));
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toBe(today());
+    expect(onRank).toHaveBeenCalledWith('loved', 'start');
+    // Nothing else: no feed-producing call and no ranking RPC from this sheet.
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['set_bucket', 'log_watched']);
+  });
+
+  it('logs it seen with no date at all when the reader chooses Earlier', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await settle();
+
+    expect(callsTo('set_bucket')).toHaveLength(1);
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
+  });
+
+  it('keeps a date picked from the calendar, and the bucket does not stamp over it', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+    // The 15th of last month: always in the past, never Today or Yesterday.
+    const picked = `${addMonths(today(), -1).slice(0, 8)}15`;
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Pick a date' }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Previous month' }));
+    await fireEvent.press(sheet.getByRole('button', { name: formatWatchDate(picked) }));
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await settle();
+
+    // Every date that reached the server is the one the reader picked.
+    expect(callsTo('log_watched').map(([, args]) => args.p_watched_on)).not.toContain(today());
+    expect(new Set(callsTo('log_watched').map(([, args]) => args.p_watched_on))).toEqual(
+      new Set([picked]),
+    );
+  });
+});
+
+/**
+ * **The reader's own last answer, carried to the next title** (founder decision R4,
+ * 2026-09-19).
+ *
+ * Somebody backfilling a library logs film after film they saw years ago. Each one
+ * opening on Today meant either an extra tap per film or a false current date per film.
+ * An explicit Earlier now carries to the next new title for the rest of the sitting —
+ * visibly, with Today one tap away — and an explicit Today switches it back. Nothing
+ * is inferred: the only inputs are those two taps.
+ */
+describe('the When row carries an explicit choice through a logging sitting', () => {
+  it('opens the next new title on Earlier, visibly, after the reader chose Earlier', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledTimes(1));
+
+    await sheet.show(filmB);
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'));
+    // On screen without opening anything: the answer the sheet is carrying is visible,
+    // and Today is one tap away rather than behind a collapsed row.
+    expect(sheet.dateRow().props.accessibilityState.expanded).toBe(true);
+    expect(sheet.getByRole('button', { name: 'Earlier' }).props.accessibilityState.selected).toBe(
+      true,
+    );
+    expect(sheet.getByRole('button', { name: 'Today' }).props.accessibilityState.selected).toBe(
+      false,
+    );
+
+    await fireEvent.press(sheet.bucket('It was fine'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('switches back to Today for the next title when the reader explicitly chooses Today', async () => {
+    rememberWhen('user-1', 'earlier');
+    const sheet = await open(filmB);
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'));
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Today' }));
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toBe(today());
+    // The calendar stays where the reader's thumb is.
+    expect(sheet.dateRow().props.accessibilityState.expanded).toBe(true);
+    expect(carriedWhen('user-1')).toBe('today');
+
+    await sheet.show(filmC);
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today'));
+    expect(sheet.dateRow().props.accessibilityState.expanded).toBe(false);
+  });
+
+  it('leaves the carried mode alone when a specific date is picked', async () => {
+    rememberWhen('user-1', 'earlier');
+    const sheet = await open(filmA);
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier'));
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Yesterday' }));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    // A date is a fact about this title and says nothing about the next one.
+    expect(carriedWhen('user-1')).toBe('earlier');
+  });
+
+  it('opens on the ordinary Today once the sitting has been idle for about thirty minutes', async () => {
+    const start = Date.now();
+    rememberWhen('user-1', 'earlier', start);
+    // Only for the mount, which is when the sheet reads the sitting; the test's own
+    // waiting must keep a moving clock.
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(start + WHEN_SESSION_IDLE_MS + 1);
+    let sheet: Awaited<ReturnType<typeof open>>;
+    try {
+      sheet = await open(filmA);
+    } finally {
+      clock.mockRestore();
+    }
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue?.text).toBe('Today'));
+    expect(sheet.dateRow().props.accessibilityState.expanded).toBe(false);
+  });
+
+  it('opens on the ordinary Today after an app restart', async () => {
+    rememberWhen('user-1', 'earlier');
+    // A launch starts with no module memory, which is what a reset is.
+    resetWhenSession();
+    const sheet = await open(filmA);
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue?.text).toBe('Today'));
+  });
+
+  it('does not carry into a title already in the collection, which keeps its own date', async () => {
+    rememberWhen('user-1', 'earlier');
+    stubReads({ bucket: 'loved', watched_on: '2020-03-04', note: '' }, null);
+    const sheet = await open(filmA);
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe(formatWatchDate('2020-03-04'));
+    expect(sheet.dateRow().props.accessibilityState.expanded).toBe(false);
+  });
+
+  /**
+   * *Log another watch* is a new current viewing, and nothing it does may be turned
+   * into an undated one by a carried Earlier. Under today's semantics it writes no date
+   * at all (`rank_again` with `p_new_watch`), and the only log sheet it reaches is the
+   * post-rank one — which never reads the sitting.
+   */
+  it('does not reach the sheet a Log another watch hands back to', async () => {
+    rememberWhen('user-1', 'earlier');
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, { bucket: 'loved' });
+    const onDone = jest.fn();
+    const sheet = await open(filmA, {
+      postRank: { score: 8.7, position: 3, category: 'movies' },
+      onDone,
+    });
+
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe(formatWatchDate('2026-08-01'));
+    expect(sheet.dateRow().props.accessibilityState.expanded).toBe(false);
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+
+    expect(onDone).toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * What the rows do when the read behind them fails.
  *
  * The founder's device showed `Loading` for ever against a backend one migration
@@ -1831,6 +2139,23 @@ describe('who I watched with', () => {
 
     await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(1);
+  });
+
+  it('creates the watch with no date when the reader has said Earlier', async () => {
+    // The watch a tag hangs off used to be created with `effectiveDate`, which falls
+    // back to today even after the reader said they do not know when.
+    withPeople([person('u1', 'Anna')].flat());
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Who I watched with' }));
+    await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
+    await fireEvent.press(sheet.getByLabelText('Anna'));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toBeNull();
   });
 
   it('untags on a second tap', async () => {

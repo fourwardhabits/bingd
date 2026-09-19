@@ -1875,29 +1875,110 @@ describe('a season, on its own page', () => {
   });
 });
 
+/**
+ * A title somebody recommended to the reader (20260929000100, founder F1).
+ *
+ * The context is no longer carried by the link: the page asks
+ * `title_recommendations_for_me`, so it is here however the reader arrived — a push, the
+ * inbox, search — and it is one card below the title rather than a pill on the artwork.
+ */
 describe('a title opened from a recommendation', () => {
-  it('says who sent it, over the hero', async () => {
-    mockParams = { recBy: 'Ada', recAt: new Date(Date.now() - 2 * 86400000).toISOString() };
+  const sent = (over: Record<string, unknown> = {}) => ({
+    id: 'rec-1',
+    sender_id: 'user-2',
+    sender_username: 'ada',
+    sender_display_name: 'Ada',
+    sender_avatar_path: null,
+    message: null,
+    recommended_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    opened_at: null,
+    ...over,
+  });
+
+  it('says who sent it, and quotes the note they wrote', async () => {
+    mockRpcResults.title_recommendations_for_me = [sent({ message: 'The second half is insane.' })];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText(/^Recommended by Ada/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/^Ada · /)).toBeTruthy());
+    expect(view.getByTestId('recommendation-note')).toHaveTextContent(
+      '“The second half is insane.”',
+    );
     expect(view.getByText(/2d ago/)).toBeTruthy();
   });
 
-  it('says nothing when the reader arrived any other way', async () => {
+  it('says it in one line when there was no note', async () => {
+    mockRpcResults.title_recommendations_for_me = [sent()];
     const view = await open();
-    expect(view.queryByText(/Recommended by/)).toBeNull();
+
+    await waitFor(() => expect(view.getByText(/^Recommended by Ada · /)).toBeTruthy());
+    expect(view.queryByTestId('recommendation-note')).toBeNull();
   });
 
-  it('still says it on a title with no artwork to sit on', async () => {
-    // The collapsed band is the same height as the poster lift, so there is no hero to
-    // overlay. The callout moves into the flow rather than disappearing or landing on
-    // top of the poster.
+  it('says nothing when nobody sent it', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+    expect(view.queryByTestId('recommendation-card')).toBeNull();
+  });
+
+  it('says it on a title with no artwork too, in the same place', async () => {
     tableRows.media_items = [{ ...film, backdrop_path: null, poster_path: null }];
-    mockParams = { recBy: 'Ada' };
+    mockRpcResults.title_recommendations_for_me = [sent()];
 
     const view = await open();
-    await waitFor(() => expect(view.getByText(/^Recommended by Ada/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/^Recommended by Ada · /)).toBeTruthy());
+  });
+
+  it('marks what it shows as opened, once, whichever door the reader came through', async () => {
+    mockRpcResults.title_recommendations_for_me = [sent({ message: 'Watch it.' })];
+    const view = await open();
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {
+        p_recommendation_id: 'rec-1',
+      }),
+    );
+    const marks = mockRpc.mock.calls.filter(([name]) => name === 'mark_recommendation_opened');
+    expect(marks).toHaveLength(1);
+    expect(view.getByTestId('recommendation-card')).toBeTruthy();
+  });
+
+  it('does not mark one that was already opened', async () => {
+    mockRpcResults.title_recommendations_for_me = [sent({ opened_at: new Date().toISOString() })];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/^Recommended by Ada · /)).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalledWith('mark_recommendation_opened', expect.anything());
+  });
+
+  it('leads with the newest note and offers the rest in a sheet', async () => {
+    mockRpcResults.title_recommendations_for_me = [
+      sent({ id: 'rec-2', sender_display_name: 'Bo', sender_username: 'bo' }),
+      sent({ id: 'rec-1', message: 'This is the one I meant.' }),
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/^Ada and 1 other · /)).toBeTruthy());
+    await fireEvent.press(view.getByTestId('recommendation-card'));
+
+    await waitFor(() => expect(view.getByText('Recommended by')).toBeTruthy());
+    expect(view.getByTestId('recommender-rec-2')).toBeTruthy();
+  });
+
+  it('says nothing once the reader has ranked it', async () => {
+    mockRpcResults.title_recommendations_for_me = [sent({ message: 'Watch it.' })];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+      },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-name')).toBeTruthy());
+    expect(view.queryByTestId('recommendation-card')).toBeNull();
   });
 });
 
