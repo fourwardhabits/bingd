@@ -1,8 +1,15 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useWatchNext } from '@/features/collection/use-watch-next';
+import {
+  WatchNextSheet,
+  type WatchNextTitle,
+} from '@/features/collection/WatchNextSheet';
+import { compactName } from '@/lib/titles';
 import {
   useLoggedCollection,
   useRankedCollection,
@@ -553,6 +560,16 @@ function Watched({
   );
 }
 
+/**
+ * Whether the one-time Watch next hint has been dismissed on this device, per account.
+ * Local and never synced, for the reason the medium and mode preferences above give.
+ */
+const WATCH_NEXT_HINT_PREF_KEY = 'collection.watch-next-hint';
+/** A stable empty pin list, so an unloaded read changes nothing downstream. */
+const NO_PINS: string[] = [];
+/** Below this many saved titles the Watchlist still answers "what next" on its own. */
+const WATCH_NEXT_HINT_FROM = 5;
+
 function Watchlist({
   userId,
   medium,
@@ -567,6 +584,62 @@ function Watchlist({
   const router = useRouter();
   const { data, isPending, isError, refetch } = useWatchlist(userId);
   const items = useMemo(() => watchlistItems(data ?? [], medium), [data, medium]);
+  /**
+   * Watch next (20260929000200): at most three of these, pinned above the rest.
+   *
+   * A failed read is no pins, never a failed Watchlist — the header is an addition to the
+   * list, and a backend without the table must leave the list exactly as it was.
+   */
+  const watchNext = useWatchNext(userId);
+  const pinned = watchNext.data ?? NO_PINS;
+  /** The title that was pressed and held, while its sheet is open. */
+  const [holding, setHolding] = useState<string | null>(null);
+  /**
+   * The one-time hint. `null` until the stored answer arrives, so a hint that was already
+   * dismissed never flashes; after that, true means it has been dismissed or used.
+   */
+  const [hintDone, setHintDone] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    readPref<boolean>(`${userId}.${WATCH_NEXT_HINT_PREF_KEY}`)
+      .then((value) => live && setHintDone(value === true))
+      .catch(() => live && setHintDone(false));
+    return () => {
+      live = false;
+    };
+  }, [userId]);
+  const finishHint = () => {
+    setHintDone(true);
+    void writePref(`${userId}.${WATCH_NEXT_HINT_PREF_KEY}`, true).catch(() => undefined);
+  };
+  // Pinning anything is the hint having done its job, on this device or another.
+  const showHint =
+    hintDone === false &&
+    pinned.length === 0 &&
+    watchNext.isSuccess &&
+    (data?.length ?? 0) >= WATCH_NEXT_HINT_FROM;
+
+  /**
+   * Every Watchlist title, both media, resolved for the sheet: Watch next's cap is across
+   * Movies and TV together, so the replace picker must be able to name a pinned season
+   * while the reader is on Movies.
+   */
+  const everything = useMemo(
+    () => [...watchlistItems(data ?? [], 'movies'), ...watchlistItems(data ?? [], 'tv_seasons')],
+    [data],
+  );
+  const titleFor = (mediaItemId: string): WatchNextTitle | null => {
+    const found = everything.find((item) => item.mediaItemId === mediaItemId);
+    return found
+      ? {
+          mediaItemId,
+          name: compactName(found) ?? found.title,
+          year: found.year,
+          posterPath: found.posterPath,
+        }
+      : null;
+  };
+  const subject = holding ? titleFor(holding) : null;
 
   if (isError) {
     return (
@@ -581,21 +654,61 @@ function Watchlist({
   if (isPending) return <Loading />;
 
   return (
-    <CollectionView
-      items={items}
-      segment="watchlist"
-      state={state}
-      onChange={onChange}
-      onPressItem={(id) => router.push(`/title/${id}`)}
-      empty={
-        <EmptyState
-          kind="nothingYet"
-          compact
-          title="Nothing saved for later yet."
-          body="Watchlist a title and it lands here."
+    <>
+      <CollectionView
+        items={items}
+        segment="watchlist"
+        state={state}
+        onChange={onChange}
+        onPressItem={(id) => router.push(`/title/${id}`)}
+        empty={
+          <EmptyState
+            kind="nothingYet"
+            compact
+            title="Nothing saved for later yet."
+            body="Watchlist a title and it lands here."
+          />
+        }
+        pinned={pinned}
+        // Press and hold is the whole entry point: nothing is added to saving a title, and
+        // nothing new is drawn on a row. The hint below is how anybody finds it.
+        onLongPressItem={(id) => {
+          if (hintDone === false) finishHint();
+          setHolding(id);
+        }}
+        longPressLabel={(id) =>
+          pinned.includes(id) ? 'Remove from Watch next' : 'Add to Watch next'
+        }
+        hint={
+          showHint ? (
+            // One quiet line and a close glyph, not a card: it is shown once and it is
+            // about a gesture, so it should read as a footnote to the list, not a panel.
+            <View style={styles.hint} testID="watch-next-hint">
+              <Text variant="footnote" tone="secondary" style={styles.hintText}>
+                Press and hold a title to pin it to Watch next.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Dismiss the Watch next hint"
+                hitSlop={theme.space[3]}
+                onPress={finishHint}
+              >
+                <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.tertiary} />
+              </Pressable>
+            </View>
+          ) : null
+        }
+      />
+      {/* Mounted only while a title is held, like every sheet here. */}
+      {subject ? (
+        <WatchNextSheet
+          userId={userId}
+          subject={subject}
+          pinned={pinned.map(titleFor).filter((t): t is WatchNextTitle => t !== null)}
+          onClose={() => setHolding(null)}
         />
-      }
-    />
+      ) : null}
+    </>
   );
 }
 
@@ -670,6 +783,14 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
   },
   nudgeActions: { flexDirection: 'row', gap: theme.space[2], paddingTop: theme.space[1] },
+  hint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[1],
+  },
+  hintText: { flex: 1 },
 
   body: { flex: 1 },
   count: {
