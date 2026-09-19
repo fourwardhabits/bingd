@@ -416,6 +416,80 @@ describe('a session that was open when 20260926000100 deployed', () => {
   });
 });
 
+/**
+ * **Positions move; relative order does not.** A real-user report (2026-09-19): four films
+ * at 10.0, and The Dark Knight "moved from second to third" without the reader changing
+ * their mind about it. Ranking a new title above it SHOULD move it down one place -- that
+ * is what an ordinal is. What must never happen is for two titles already ranked to swap.
+ * Asserted after every single insertion rather than at the end, so a swap that a later
+ * insertion happened to undo still fails.
+ */
+describe('inserting a title never reorders the titles already ranked', () => {
+  const orderOf = async (user) =>
+    (
+      await t.sql(
+        `select media_item_id from rankings
+          where user_id = $1 and category = 'movies' order by position`,
+        [user],
+      )
+    ).rows.map((row) => row.media_item_id);
+
+  /** Ranks one title honestly, then checks every pair that existed before it. */
+  async function insertKeepingOrder(user, o, id) {
+    const before = await orderOf(user);
+    await rankHonestly(o, id);
+    const after = await orderOf(user);
+    assert.deepEqual(
+      after.filter((x) => x !== id),
+      before,
+      'every title already ranked keeps its order relative to every other',
+    );
+    assert.equal(after.length, before.length + 1);
+    return after;
+  }
+
+  it('above both, between them, below both, at the very top, and many in a row', async () => {
+    const user = await reader('keeporder');
+    const o = oracle();
+    const a = await o.movie('Best Film', 100);
+    const darkKnight = await o.movie('The Dark Knight', 90);
+    const odyssey = await o.movie('The Odyssey', 80);
+    const c = await o.movie('Fourth Film', 70);
+    for (const id of [odyssey, a, c, darkKnight]) await rankHonestly(o, id);
+
+    assert.equal(await positionOf(user, darkKnight), 2);
+    assert.equal(await positionOf(user, odyssey), 3);
+
+    // Above both: The Dark Knight moves from #2 to #3, exactly as reported -- and still
+    // sits directly above The Odyssey.
+    await insertKeepingOrder(user, o, await o.movie('New Above Both', 95));
+    assert.equal(await positionOf(user, darkKnight), 3, 'the expected ordinal shift');
+    assert.equal(await positionOf(user, odyssey), 4);
+
+    // Between them.
+    await insertKeepingOrder(user, o, await o.movie('New Between', 85));
+    assert.equal((await positionOf(user, odyssey)) - (await positionOf(user, darkKnight)), 2);
+
+    // Below both.
+    await insertKeepingOrder(user, o, await o.movie('New Below Both', 75));
+    // At the very top.
+    await insertKeepingOrder(user, o, await o.movie('New Favourite', 1000));
+
+    // Several sequential rankings anywhere in the band, including between the two again.
+    for (const [i, value] of [89, 91, 81, 99, 50, 86, 101, 79, 88, 1, 95.5, 84].entries()) {
+      await insertKeepingOrder(user, o, await o.movie(`Sequential ${i}`, value));
+    }
+
+    assert.ok((await positionOf(user, darkKnight)) < (await positionOf(user, odyssey)));
+    assert.deepEqual(await contradictions(user), []);
+    await t.assertValid(user);
+
+    // And the whole list is the true order, which only holds if no step reordered.
+    const truthOrder = [...o.truth.entries()].sort((x, y) => y[1] - x[1]).map(([id]) => id);
+    assert.deepEqual(await orderOf(user), truthOrder);
+  });
+});
+
 describe('property: interleaved suspended sessions never contradict an answer', () => {
   it('holds through 220 randomised steps over one shared band', async () => {
     const user = await reader('prop');
