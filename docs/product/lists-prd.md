@@ -1,20 +1,32 @@
 # Lists — PRD (v1)
 
-**Status: BUILD-READY, 2026-09-19.** Nothing here is built. Source of truth: `origin/main` at
-`0468f1c` (re-checked at `c77d524`: nothing Lists-related changed), PRD §3 doctrine 4,
-deferred-roadmap §50, the competitive audit of 2026-09-16 (a local research file, not
-committed to this repository), and the founder decisions of
-2026-09-19 recorded in [§P](#p-decision-record-2026-09-19). The audit's "ranked slices
-first" sequencing is **superseded**: curated and utility lists are the core, and ranked
-slices come later as a template.
+**Status: BUILD-READY AND PARKED, 2026-09-19.** Nothing here is built. Source of truth:
+`origin/main` at `0468f1c` (re-checked at `c77d524` and `d675d69`: nothing Lists-related
+changed), PRD §3 doctrine 4, deferred-roadmap §50, the competitive audit of 2026-09-16 (a
+local research file, not committed to this repository), the founder decisions of
+2026-09-19 recorded in [§P](#p-decision-record-2026-09-19), and the **navigation/IA review
+of 2026-09-19** recorded in [§Q](#q-ia-review-and-the-hybrid-model-2026-09-19). The audit's "ranked
+slices first" sequencing is **superseded**: curated and utility lists are the core, and
+ranked slices come later as a template.
+
+**Implementation is intentionally parked** until after Watch History T1–T4 and the
+post-foundation hardening/scalability pass. §O's six PRs are the plan for when it unparks,
+not a queue that is running.
+
+**The IA changed on 2026-09-19 and this document has been rewritten to match it.**
+Management moved from the Profile to Collection; the Profile keeps a read-only shelf of
+public lists. Every affected section below carries the new model, and §Q states the
+decision and its reasoning in one place. A reader who remembers the "Lists live on the
+Profile" version of this PRD is remembering a superseded document.
 
 ---
 
 ## A. Executive recommendation
 
-Lists are **hand-made, optionally numbered sets of titles**. They live in one place on the
-Profile, can be created from exactly two points, and have a public web page at the URL the
-app already claims (`bingd.app/lists/<id>`).
+Lists are **hand-made, optionally numbered sets of titles**. They are **managed in one
+place, reached from Collection**; **public lists appear on the Profile** as a read-only
+shelf. They can be created from exactly two points, and have a public web page at the URL
+the app already claims (`bingd.app/lists/<id>`).
 
 - **The core object is curation, not a filtered view of your own data.** A list holds the
   titles the owner chose, in the order the owner chose. It never reads the owner's ranking,
@@ -33,8 +45,12 @@ app already claims (`bingd.app/lists/<id>`).
 - **v1 is JS + SQL + web only.** The tables, RLS and deep-link claims already exist. No
   native dependency, no fingerprint change and no binary are needed, so it ships by OTA to
   iOS production and the Android beta.
-- **No new tab, no Collection segment, no feed events, no social actions on lists.** Lists
-  stay out of the Log → Rank → Browse loop.
+- **Collection owns management; the Profile owns public display.** This is the same
+  treatment the Watchlist already has, and it is why Lists need no new navigation: the
+  entry is a `My lists ›` text action on the **unused trailing half of the Collection title
+  row**. **No new tab, no Collection segment, no new control row, no icon-only entry**, no
+  feed events and no social actions on lists. Lists stay out of the Log → Rank → Browse
+  loop (deferred-roadmap §50). §Q has the reasoning.
 - **Public and link-only lists are the acquisition object.** A logged-out visitor sees the
   title, description, attribution and posters. The link preview names the list. Install
   buttons come from `distribution.config.json`, so the Android store CTA appears the day
@@ -76,15 +92,31 @@ Six bounded PRs (§O). Roughly 2–3 weeks of focused work.
 - A single readability predicate that implements the §F rules, with the two existing link
   readers redefined onto it.
 - Screen-shaped read RPCs, limits, and the would-have-exceeded measurement.
+- **`app/lists/index.tsx`** — the My lists management screen (§I). It is app-only: the
+  deep-link claim is `/lists/*` and `listIdFromPath` accepts a uuid shape and nothing else,
+  so `bingd.app/lists` keeps its generic install page and **no claim or web route changes**.
+- **A `My lists ›` trailing action on the Collection title row** (§I), and a **read-only
+  `LISTS` shelf** on the Profile (§I).
 - All client UI and analytics, the web page render, and rich previews.
 - `appLinkFor` in `web/src/router.mjs` allows only `['i','u','title']`. It needs `lists`, and
   a new `listIdFromPath` validator.
+
+### Documents this PRD is now consistent with
+
+- **PRD §7 IA already puts Lists inside Collection, and `app/(tabs)/_layout.tsx`'s own
+  header comment already reads "Collection holds Ranked, Watched, Watchlist, and Lists."
+  Both are correct as written and need no edit.** The 2026-09-19 IA review (§Q) moved this
+  PRD back onto them rather than the other way round. L6 **confirms** §7 rather than
+  correcting it.
+- `ProfileWatchlist.tsx`'s rule — *"Collection is where the full list is, for the account
+  that owns it"*, and profile shelves carry no editing controls — is the precedent this
+  PRD now follows exactly.
 
 ### Stale documents to correct (L6)
 
 - `data-model.md` §6 cites a non-existent `create_list` limit check.
 - PRD §8 has "three-list limit enforced" as a v1 must-have; PRD §20's tier matrix and
-  resolution note describe that enforcement; PRD §7 IA puts Lists inside Collection.
+  resolution note describe that enforcement.
 - Audit §P1.2 says ranked slices come first.
 - `web-deployment.md` still carries the old AASA `/list/*` note.
 
@@ -100,9 +132,10 @@ Six bounded PRs (§O). Roughly 2–3 weeks of focused work.
 | Optional ordering | **MVP** | "Numbered" toggle, off by default; the owner arranges the order |
 | Private / Link-only / Public | **MVP** | §F |
 | View another person's list | **MVP** | In app, and on the web when logged out |
-| Profile Lists row | **MVP** | Own profile: every list. Others: their public lists |
+| My lists screen | **MVP** | `Collection → My lists ›`. Every list the caller owns, all visibilities, newest-edited first. The one place lists are created, edited, reordered and deleted |
+| Profile Lists shelf | **MVP** | **Public lists only, read-only, on own and other profiles.** Own profile also carries `Manage ›` to the My lists screen |
 | Share the URL | **MVP** | The owner shares any non-private list; others can share public lists |
-| "You've seen X of N" + per-row seen marks | **MVP** | Derived for the viewer, never stored |
+| "You've seen X of N" + per-row seen marks | **MVP** | Derived for whoever is reading — **viewer and owner alike** — never stored. Plain text, no bar (§K) |
 | Add one item to Watchlist | **MVP** | The existing bookmark on each row |
 | Add all unseen to Watchlist | **MVP** | One bulk RPC; **no feed events** |
 | Report a list | **MVP** | Required before public lists are live |
@@ -120,9 +153,17 @@ Six bounded PRs (§O). Roughly 2–3 weeks of focused work.
 
 ## D. Explicit non-goals (v1)
 
-- No bottom-nav tab, no Collection segment, and no Lists control on Feed, Search, Log or
-  For You. There is no permanent standalone list button anywhere, including the title
-  hero.
+- No bottom-nav tab, no Collection segment, **no new control row in Collection**, and no
+  Lists control on Feed, Search, Log or For You. The Collection entry is a **text +
+  chevron** action on the **unused trailing half of the existing `MediumSelector` title
+  row** — not a glyph, not a new row, and outside the Movies/TV medium axis. There is no
+  permanent standalone list button anywhere, including the title hero and `TitleActions`.
+- **No list management from a Collection poster or row.** No long-press, no per-row
+  overflow, no fourth `TitleActions` button. Every Collection row is one tap from the title
+  page, which owns the ⋯. Long-press already means three different things elsewhere in the
+  app (recall in `RankingSheet`, report on recommendation cards, the reaction picker), and
+  Collection rows have never had one. Long-press inside a list screen is a **v1.1**
+  question, alongside drag.
 - No pairwise ranking of list items, and no reading of `rankings.position` into a list.
 - No feed events (`list_created` / `list_added` stay writer-less), no notifications, no
   push.
@@ -233,7 +274,8 @@ Writers take `p_operation_id`, go through `_claim_operation`, and call `assert_c
 | `list_view(p_list_id)` | anon, authenticated | If readable: `id, title, description, order_style, item_count, updated_at`, `owner` (above), `is_owner`, `shareable_by_viewer` (owner: not private; non-owner: `visibility='public'`). For the owner also `visibility, hidden`. **Otherwise zero rows**, one answer for every failure |
 | `list_items_page(p_list_id, p_after_position, p_limit ≤ 100)` | anon, authenticated | Keyset page: `media_item_id, kind, title, year, poster_path, season_number, parent_title, ordinal`. Adds `viewer_seen` / `viewer_watchlisted` for a signed-in viewer (null for anon) |
 | `list_viewer_progress(p_list_id)` | authenticated | `{seen, total}` over the whole list |
-| `profile_lists(p_owner_id, p_before_updated_at, p_limit)` | authenticated | The owner gets all lists, with visibility. Others get **only `public`, not hidden, when `can_view_profile`**. `link` is never returned to anyone but the owner |
+| `my_lists(p_before_updated_at, p_limit)` | authenticated | **The caller's own lists, every visibility**, `updated_at desc` keyset. Returns `id, title, item_count, order_style, visibility, hidden, updated_at` and the **first four `poster_path`s** for the 2×2 cover. Backs `app/lists/index.tsx` and nothing else. It takes no owner argument at all, so it cannot be pointed at another account |
+| `profile_lists(p_owner_id, p_before_updated_at, p_limit)` | authenticated | **Public lists only, for every caller including the owner** (§Q.4). Not hidden, and `can_view_profile` must hold. `private` and `link` are never returned by this path, to anyone — **including the owner**, whose own shelf deliberately shows what a visitor sees. Backs the Profile `LISTS` shelf and its See-all screen |
 | `my_lists_for_title(p_media_item_id)` | authenticated | The caller's lists with a `contains` flag, most recently updated first |
 | `record_list_open(p_list_id, p_platform)` | anon | Returns `void`. Records only when `_list_readable(id, null)`. Rate-capped per list per minute. No IP, UA or referrer |
 | `list_preview(p_list_id)` | anon | For the L5 Pages Function: `title, item_count, owner_label` (the `@handle` only when the owner's profile is public, else null). Zero rows unless readable by anon |
@@ -257,7 +299,9 @@ with `revoke all` from clients. Its only writer is `record_list_open`.
 
 - The list screen pages 100 at a time in FlashList, which is already a dependency.
 - The web page shows the first 100, then "See all N in the app".
-- The profile row shows 10 cards; See all pages on `updated_at`.
+- **My lists** pages on `updated_at desc` through `my_lists`.
+- **The Profile `LISTS` shelf** shows up to 10 cards. **See all is a pushed read-only
+  screen, not a sheet** (§Q.4), and pages on `updated_at` through `profile_lists`.
 
 ---
 
@@ -276,7 +320,8 @@ Rows are viewers; the columns are list modes. "Profile" is the owner's account v
 | Blocked either way (signed in) | ❌ | ❌ | ❌ | ❌ |
 | Anyone, owner suspended | ❌ | ❌ | ❌ | ❌ |
 | Anyone except owner, list hidden by moderation | ❌ | ❌ | ❌ | ❌ |
-| **Shown on the owner's profile row** (to non-owners) | never | never | never | yes, to whoever can view the profile |
+| **Shown on the Profile `LISTS` shelf** (to anyone, **including the owner**) | never | never | never | yes, to whoever can view the profile |
+| **Shown on the owner's My lists screen** | yes | yes | yes | yes |
 | **Returned by any browse/list/search path** | never | never | never | `profile_lists` only |
 | **Web page** | generic "unavailable" | renders | renders | renders |
 | **Link preview** | generic card | title + count + `@handle` | title + count, **no owner** | title + count + `@handle` |
@@ -318,7 +363,9 @@ Rows are viewers; the columns are list modes. "Profile" is the owner's account v
    and reassuring fact.
 6. **Link-only cannot be enumerated.** The select policy excludes `link`. `profile_lists`,
    Search and Feed never return it. `link` reads go only through id-taking RPCs. The id is
-   `gen_random_uuid()` (122 random bits).
+   `gen_random_uuid()` (122 random bits). **`my_lists` is the single exception and is not a
+   hole**: it takes no owner argument, so it can only ever answer for the caller's own
+   account.
 7. **Blocks: signed-in only, stated plainly.** A block hides every list both ways for
    signed-in viewers. A logged-out web visitor cannot be matched to a block, so a blocked
    person who signs out and holds a link-only or public URL can read that list. This is the
@@ -345,7 +392,8 @@ Rows are viewers; the columns are list modes. "Profile" is the owner's account v
 
 ### Entry points (exactly two)
 
-1. **Own Profile → Lists row → New list.**
+1. **Collection → `My lists ›` → New list.** `Profile → LISTS → Manage ›` is a second door
+   to the same screen, not a third entry point.
 2. **Title ⋯ → Add to list…** on every movie, TV season and whole series, whether ranked,
    logged, unwatched or watchlisted.
 
@@ -362,18 +410,30 @@ With at least one list:
 ```
 ┌─────────────────────────────────────┐
 │  Add "Past Lives" to…                │
-│  [ + New list ]                       │
-│  Best breakup movies   14   [ ✓ ]     │
-│  Movies for Dad         8   [   ]     │
-│  Film club — Sept 🔗    5   [   ]     │
+│  [ + New list ]            ← pinned  │
+│ ─────────────────────────────────────│
+│  Best breakup movies   14   [ ✓ ]  ▲ │
+│  Movies for Dad         8   [   ]  │ │
+│  Film club — Sept 🔗    5   [   ]  ▼ │
 └─────────────────────────────────────┘
 ```
 
-Rows toggle membership immediately, ordered by most recently updated first.
+Rows toggle membership immediately, ordered by most recently updated first. **Toggling a
+row off removes the title from that list**, so this one control covers add, add-to-several
+and remove. The sheet stays open after each tap.
+
+**`+ New list` is pinned at the top and does not scroll with the rows.** With twenty lists
+it would otherwise sit below the fold, and creating-a-list-while-adding-a-title is the
+highest-value path in the flow.
+
+**The confirmation names the destination and offers Undo**: `Added to "Movies for Dad"`
+with an **Undo** action, not a bare "Added". Because the sheet stays open and the rows keep
+scrolling, the toast is the only feedback that the intended list was the one that was hit.
+Undo calls `remove_list_item` under its own operation id.
 
 **With no lists yet**, ⋯ → Add to list… opens the New list sheet directly, with the title
-preselected ("Will add: Past Lives"). Create returns to the title with the toast
-"Added to <list>".
+preselected ("Will add: Past Lives"). Create returns to the title with the same
+named-destination toast.
 
 ### New list sheet
 
@@ -397,8 +457,8 @@ preselected ("Will add: Past Lives"). Create returns to the title with the toast
 ```
 
 - Choosing **Anyone with the link** shows the §F.5 consent copy inline, under the option.
-- From the Profile, Create lands on the empty list with **Add titles** as the one primary
-  button.
+- **From My lists, Create pushes the empty list** with **Add titles** as the one primary
+  button. A push, not a sheet over a sheet.
 
 ### Add titles sheet (from a list)
 
@@ -455,7 +515,7 @@ preselected ("Will add: Past Lives"). Create returns to the title with the toast
 │ Ones that actually help.             │
 │ 14 titles · Numbered · Updated Sep 12│
 │ You've seen 5 of 14                  │
-│ [ Add 9 unseen to Watchlist ]        │
+│ [ Add 9 unseen to my Watchlist ]     │
 │  1 [poster] Eternal Sunshine…  ✓     │
 │      2004 · Movie                     │
 │  2 [poster] Past Lives         🔖    │
@@ -467,6 +527,9 @@ preselected ("Will add: Past Lives"). Create returns to the title with the toast
 - **Trailing control:** ✓ means the viewer has seen it and is inert. Otherwise it is the
   standard bookmark, which is the one-item Watchlist add.
 - Numbers show only when the list is numbered. There are never any owner scores.
+- **The bulk button says "my Watchlist", not "Watchlist".** On somebody else's list a bare
+  "Add 9 unseen to Watchlist" is genuinely ambiguous about whose it is, and the one word
+  also restates the §9 boundary in the place a reader is standing.
 - Bulk add is hidden when nothing qualifies. Its result reads: "Added 9 to your Watchlist.
   5 you've seen were skipped."
 - For a **private-profile owner's link-only list** viewed by a non-follower, the
@@ -474,9 +537,30 @@ preselected ("Will add: Past Lives"). Create returns to the title with the toast
 
 ### Own list
 
+```
+┌─────────────────────────────────────┐
+│ ‹                          [⤴]  ⋯   │   ⋯ = Edit · Share · Who can see it · Delete
+│ Oscar catch-up                       │
+│ Everything nominated I haven't got to│
+│ 12 titles · Numbered · 🔗 Link ·      │
+│ Updated today                        │
+│ You've seen 4 of 12                  │
+│ [ Add 8 unseen to my Watchlist ]     │
+│ [ + Add titles ]                     │
+│  1 [poster] Anora              🔖    │
+│      2024 · Movie                     │
+│  2 [poster] Conclave            ✓    │
+└─────────────────────────────────────┘
+```
+
 - ⋯ = Edit · Share · Who can see it · Delete.
-- **Add titles** sits below the header. The progress line shows for the owner too.
-- Chips mark the mode: 🔒 Private, 🔗 Link-only.
+- **`Add titles` sits below the progress and bulk block**, not above it. The header then
+  reads top to bottom as *what this is → how you are doing → what you can do*, and the
+  owner's two actions are adjacent instead of separated by a stat line.
+- The progress line shows for the owner too (§Q.5), and is **suppressed when the list is
+  empty**.
+- Chips mark all three modes: 🔒 Only you, 🔗 Link, 🌐 Profile. The same three words the
+  New-list picker uses, shortened, so the chip is recognisable as the choice that was made.
 - Share on a Private list opens the §F.5 prompt first.
 
 ### Unavailable
@@ -485,35 +569,179 @@ The existing stub copy, unchanged, for every ❌ in the §F matrix.
 
 ---
 
-## I. Profile and discovery integration
+## I. Collection and Profile integration
 
-### Own Profile
+**Collection owns management. The Profile owns public display.** This is the treatment the
+Watchlist already has, stated in `ProfileWatchlist.tsx`: *"Collection is where the full
+list is, for the account that owns it."* §Q has the reasoning; this section is the spec.
 
-Order: Identity → Actions → Goals → Awards → Top ranked → Watchlist → **Lists** →
-Recent activity.
+### Collection → My lists
+
+The entry is a **text + chevron action on the trailing edge of the existing
+`MediumSelector` title row**, in the maroon `sectionHeader` treatment `SectionHeader` uses
+for its trailing action.
 
 ```
-Lists                                       See all
-[2×2] [2×2] [2×2] [ + ]
-Movies   Oscar    Best     New list
-for Dad  catch-up breakup
-8 · 🔒   12 · 🔗  14
+  Movies ▾                                      My lists ›
+  [ Watched ][ Watchlist ][ Unranked ]
+  ─────────────────────────────────────────────────────────   ← HeaderBoundary
+  [Filters] [Sort]                                    [☰│▦]
+  …
 ```
 
-- **Zero lists:** one compact line, "Lists · Make a list for a movie night, a friend, a
-  theme  +".
-- **See all** is a sheet (`RankedTitlesSheet` pattern). Close it before pushing the list
-  screen.
+- **Zero added height.** The title row exists and its trailing half is unused.
+- **It is not a segment**, so it never inherits the Movies/TV axis. This matters: Watched,
+  Watchlist and Unranked are all slices of one medium, and a list mixes movies, seasons and
+  whole series by design (§C). A fourth segment would sit under a `Movies ▾` title it had
+  to ignore — the same class of disagreement as the Unranked-tab bug recorded at
+  `app/(tabs)/collection.tsx`.
+- **It is not the `AppHeader` right corner**, which `app/(tabs)/profile.tsx` records as the
+  bell's on every root tab, and where a *text* button was already tried and rejected.
+- **It is not an icon.** `TitleActions`' rule applies: a glyph names neither the thing nor
+  the act.
+- **"My lists", not "Lists".** Beside `Movies ▾`, the word "Lists" alone reads as one
+  phrase — "Movies lists". "My lists" reads as a destination and distinguishes it from
+  other people's.
+- It is present on **every segment and both mediums**, and it does not move or change.
 
-### Another user's Profile
+### The My lists screen — `app/lists/index.tsx`
 
-The row holds **public lists only**, and appears only when `can_view_profile` is true and
-at least one exists. Link-only lists never appear there, for anyone but the owner. There is
-no empty state on someone else's profile.
+A pushed route. Every list the caller owns, all visibilities, `updated_at desc` through
+`my_lists`. **No folders, no manual ordering, no sort control in v1.**
+
+**Zero lists**
+
+```
+┌──────────────────────────────────────────────┐
+│ ‹                                  My lists  │
+│                                              │
+│                  ▤                           │
+│              No lists yet                    │
+│                                              │
+│   A list is a set of titles you choose —     │
+│   a movie night, a theme, a gift for a       │
+│   friend. Only you can see it until you      │
+│   share it.                                  │
+│                                              │
+│              [  New list  ]                  │
+└──────────────────────────────────────────────┘
+```
+
+**One list**
+
+```
+┌──────────────────────────────────────────────┐
+│ ‹                                  My lists  │
+│  [  + New list  ]                            │
+│  ┌────┐  Movies for Dad                  ›   │
+│  │▣ ▣ │  8 titles · 🔒 Only you               │
+│  │▣ ▣ │  Updated today                        │
+│  └────┘                                      │
+└──────────────────────────────────────────────┘
+```
+
+**~10 lists**
+
+```
+┌──────────────────────────────────────────────┐
+│ ‹                                  My lists  │
+│  [  + New list  ]                            │
+│  ┌────┐  Oscar catch-up                  ›   │
+│  │▣ ▣ │  12 titles · Numbered · 🔗 Link       │
+│  │▣ ▣ │  Updated today                        │
+│  └────┘                                      │
+│  ┌────┐  Best breakup movies             ›   │
+│  │▣ ▣ │  14 titles · Numbered · 🌐 Profile    │
+│  │▣ ▣ │  Updated Sep 12                       │
+│  └────┘                                      │
+│  ┌────┐  Movies for Dad                  ›   │
+│  │▣ ▣ │  8 titles · 🔒 Only you               │
+│  │▣ ▣ │  Updated Sep 10                       │
+│  └────┘                                      │
+│  ┌────┐  Film club — September           ›   │
+│  │▣ ▣ │  5 titles · 🔗 Link                   │
+│  │▣ ▣ │  Updated Sep 8                        │
+│  └────┘        … 6 more, paged on updated_at │
+└──────────────────────────────────────────────┘
+```
+
+**The row contract — one row, three facts, no controls.**
+
+- **Cover** is the first four posters, 2×2, per §D. Fewer than four fills what there is; an
+  empty list draws the empty poster frame.
+- **Line 2** is `N titles` · `Numbered` (only when `order_style = 'ranked'`) · the
+  visibility chip.
+- **Visibility chips are three words, never a bare glyph:** 🔒 Only you · 🔗 Link ·
+  🌐 Profile. These are the New-list picker's own options, shortened, so the chip is
+  recognisable as the choice that was made.
+- **Line 3** is `Updated <date>`, which is also the sort key — so the order explains itself
+  and needs no sort control.
+- **No swipe-to-delete.** Delete lives in the list's own edit mode (§G), in one place.
+- A **moderation-hidden** list keeps its row, with the §F.10 banner state on the chip.
+
+### Profile → LISTS
+
+**Public lists only, on every profile including the owner's**, read-only, no editing
+controls — the `ProfileWatchlist` rule. A clipped `PosterShelf`, not a grid: a shelf says
+"there is more" without claiming to be the whole thing.
+
+Order is unchanged (founder, 2026-09-19): Identity → Actions → Goals → Awards →
+Top ranked → Watchlist → **Lists** → Recent activity. Lists are **not** promoted above
+Watchlist in v1.
+
+**Another person's profile, with ≥1 public list**
+
+```
+│  LISTS                              See all  │   ← See all only when > 3
+│  ┌────┐   ┌────┐   ┌────┐                    │
+│  │▣ ▣ │   │▣ ▣ │   │▣ ▣ │  ◂ clipped shelf   │
+│  │▣ ▣ │   │▣ ▣ │   │▣ ▣ │                    │
+│  └────┘   └────┘   └────┘                    │
+│  Best      Chicago   Comfort                 │
+│  breakup   movies    movies                  │
+│  14        9         22                      │
+```
+
+**Own profile**
+
+```
+│  LISTS                              Manage › │
+│  ┌────┐   ┌────┐                             │
+│  │▣ ▣ │   │▣ ▣ │                             │
+│  └────┘   └────┘                             │
+│  Best      Chicago                           │
+│  breakup   movies                            │
+│  14        9                                 │
+```
+
+**Own profile, lists exist but none are public**
+
+```
+│  LISTS                              Manage › │
+│  Nothing public yet. Lists you publish       │
+│  show up here.                               │
+```
+
+- **`Manage ›` is always present on the own profile**, whether or not anything is public,
+  and pushes the same `app/lists/index.tsx`. It is the second door, not a second home.
+- **The own shelf deliberately shows only what a visitor would see.** An owner with four
+  private lists sees the "nothing public yet" line, and learns the privacy model by looking
+  at it. **Private and link-only lists are never drawn on a profile shelf**, including the
+  owner's own.
+- **No empty state on anybody else's profile, ever.** The section is absent unless
+  `can_view_profile` holds and at least one public list exists — `ProfileWatchlist`'s rule:
+  an unviewable shelf and an empty one must render the same nothing, or the absence is
+  itself a disclosure.
+- **`See all` is a pushed read-only screen, not a sheet.** The `RankedTitlesSheet` pattern
+  is dropped here, and with it the "close the sheet before pushing the list screen"
+  sequencing hazard the earlier draft carried. A list opens straight from a shelf card.
+- Tapping a card pushes `app/lists/[id].tsx` directly. No intermediate sheet anywhere in
+  this section.
 
 ### Not in v1
 
-Feed stories, Search results for lists, "In N lists" on title pages, featured rails.
+Feed stories, Search results for lists, "In N lists" on title pages, featured rails,
+folders, pinning, manual ordering of My lists.
 
 ---
 
@@ -593,11 +821,12 @@ Desktop shows a 5-column poster grid.
 | Behaviour | v1 | Definition |
 |---|---|---|
 | Seen mark | **Yes** | **Movie:** the viewer has a `user_media` row. **Season:** a row whose `progress` is not `watching`. **Series:** any season of it logged (a documented approximation) |
-| "You've seen X of N" | **Yes** | Derived at read time over the whole list. Viewer-private. Never stored, never shown to the owner, never on the web |
+| "You've seen X of N" | **Yes, for the viewer and the owner alike** (§Q.5) | Derived at read time over the whole list, for whoever is reading. **Plain text, one line, no control.** Suppressed when the list is empty. Never stored, and never on the web. **Strictly viewer-private**: a list's owner sees their *own* progress through it and never any other reader's — "never shown to the owner" means nobody else's figure, not that the owner has none |
 | Add one to Watchlist | **Yes** | Existing `set_watchlist`, `surface:'list'`; its per-title event behaviour is unchanged |
 | Add all unseen to Watchlist | **Yes** | `add_list_to_watchlist`: **no feed events**. It skips seen and already-saved titles, and the Watchlist invariant still clears each title on watch |
 | Checkboxes, due dates, "complete", reminders | **No** | Seen is derived from logging, which people already do |
-| "Unseen only" filter | Later | |
+| Progress **bar**, ring or percentage | **No** (founder, 2026-09-19) | A bar reads as a chore tracker. The line is plain text or it is nothing |
+| "Unseen only" filter | **No** in v1; later | |
 | Group Picks → Save as list | v1.1 | Creates a private, unnumbered list of the picks |
 
 ---
@@ -629,15 +858,31 @@ Desktop shows a 5-column poster grid.
 
 | Event | Fires exactly when | Properties |
 |---|---|---|
-| `list_created` | `create_list` answered ok | `surface` (`profile`, `title_menu`), `visibility`, `order_style`, `has_first_item`, `owned_count_after`, **`would_have_exceeded_3_lists`** |
+| **`my_lists_opened`** | the My lists screen mounted | **`entry` (`collection`, `profile_manage`)**, `owned_count`. **Built in L2, not deferred to L6** (founder, 2026-09-19) |
+| `list_created` | `create_list` answered ok | `surface` (**`my_lists`**, `title_menu`), `visibility`, `order_style`, `has_first_item`, `owned_count_after`, **`would_have_exceeded_3_lists`** |
 | `list_item_added` | `add_list_item` answered `added` | `surface` (`list_add_sheet`, `title_menu`), `media_kind`, `count_after` |
 | `list_visibility_changed` | `update_list` changed visibility | `from`, `to`, `surface` (`edit`, `share_prompt`), `profile_private` |
 | `list_shared` | the share sheet **opened** for a list URL | `visibility`, `item_count`, `is_owner` |
-| `list_opened` | the list screen resolved a readable list | `surface` (`own_profile`, `profile`, `deep_link`, `title_menu`), `is_owner`, `relation` (`self`, `following`, `other`), `visibility_class` (`public`, `link`) |
+| `list_opened` | the list screen resolved a readable list | `surface` (**`my_lists`**, **`profile_shelf`**, `deep_link`, `title_menu`), `is_owner`, `relation` (`self`, `following`, `other`), `visibility_class` (`public`, `link`) |
 | `watchlist_added` | existing | `surface:'list'` |
 | `list_watchlist_bulk_added` | `add_list_to_watchlist` answered ok | `added`, `skipped_seen` |
 | `list_limit_reached` | `create_list` answered `list_limit` (the 100 ceiling) | — |
 | (server) `list_web_opens` | web page resolved a readable list | `platform` |
+
+**`my_lists_opened.entry` is the discoverability tripwire, and it ships in L2** (founder,
+2026-09-19). `My lists ›` is a text action rather than a permanent segment, which buys the
+clutter constraint at some cost in discoverability. This split is how that cost is
+measured, and it is the **only** evidence that would justify ever promoting Lists to a
+Collection segment. Deferring it to L6 would mean the first thirty days of data — the ones
+that matter — are unrecoverable.
+
+- Readout: `entry = collection` share of `my_lists_opened`, and `surface = my_lists` share
+  of `list_created`, both over the first 30 days after release.
+- **Rethink the entry** if `entry = collection` is under ~20% of opens *and* `list_created`
+  from `my_lists` is near zero, i.e. essentially every list is being born in the title
+  menu and nobody is finding the screen. The remedies then, in order of cost: a slim
+  full-width row under `HeaderBoundary`, then a conditional segment.
+- **This is not a success metric** and does not belong in the §M table below.
 
 **`would_have_exceeded_3_lists`** is true when `in_app_count_before ≥ 3`, where
 `in_app_count_before` is returned by `create_list` and counts in-app lists only. Imported
@@ -715,14 +960,35 @@ three-list cap.
   Add to list… comes first.
 - Zero lists opens New list with the title preselected.
 - Membership toggles, and Numbered on/off keeps the order.
+- **`+ New list` stays pinned while the Add-to-list rows scroll**, and toggling a row off
+  removes the title.
+- **The confirmation names the destination list, and Undo removes the item again.**
 - Move controls and their accessibility actions work.
 - The private → link consent copy, including the private-profile line.
 - "On your profile" is disabled for a private profile.
 - Share visibility follows `shareable_by_viewer`.
 - Limited-identity attribution shows its lock glyph.
-- Progress and bulk-add states render, and the unavailable stub renders.
-- The own-profile empty line vs the row; another profile shows no row when it has no
-  public lists.
+- Progress renders for the **owner and the viewer**, is **suppressed on an empty list**,
+  and bulk-add says **"my Watchlist"**; the unavailable stub renders.
+- **`Add titles` renders below the progress/bulk block on the owner's list**, not above it.
+
+**IA (the 2026-09-19 model):**
+
+- The `My lists ›` action is present on Collection **on every segment and both mediums**,
+  and it is a labelled text action, not a glyph.
+- Collection posters and rows have **no long-press and no overflow**; `TitleActions` still
+  has exactly three controls.
+- My lists renders **zero, one and ~10** list states, with the right chip, `Numbered` only
+  when ranked, and `Updated` ordering.
+- **`Collection → My lists ›` and `Profile → LISTS → Manage ›` reach the same screen.**
+- **Own profile shows public lists only** — an owner holding only private/link lists gets
+  the "Nothing public yet" line, and **no private or link-only list is ever drawn on a
+  profile shelf**.
+- **Another profile renders no LISTS section at all** when it has no public lists, and
+  renders none for an unviewable profile — the two must be indistinguishable.
+- **See all is a push, not a sheet**, and a shelf card pushes the list screen directly.
+  There is no sheet → push sequence anywhere in §I.
+- `my_lists_opened` fires once per mount with the right `entry`.
 
 ### Web
 
@@ -755,19 +1021,24 @@ three-list cap.
 
 | PR | Scope | Ships by | Depends on |
 |---|---|---|---|
-| **L1: Lists backend** | Migration: §E alters, `_list_readable`, redefined `list_by_id` / `list_items_by_list`, `hidden_at` in the select policies, writers (with the `profile_private` guard, the 100 ceiling, `in_app_count_before`), readers (incl. `list_preview`), `list_web_opens` + `record_list_open`, `app_config` keys and the `base_free_limit` re-comment. SQL tests (§N). Runbook §2d hide/unhide. `data-model.md` §6 corrected | Staging → production DB (inert without a client) | — |
-| **L2: Make and edit lists** | Real `app/lists/[id].tsx`. ⋯ on every title with **Add to list…** (and the zero-list path straight to New list). New-list sheet with the consent copy and the private-profile rules. Add-titles sheet, edit mode with move controls, delete. Share with the private → link prompt. Own-Profile Lists row, See-all sheet, empty line. The Settings → Privacy one-line addition. Events `list_created` (with `would_have_exceeded_3_lists`), `list_item_added`, `list_visibility_changed`, `list_shared`, `list_opened`, `list_limit_reached` | OTA: iOS prod + Android beta | L1 in production |
-| **L3: Reading other people's lists** | Other-profile row (public only). Attribution states (full / limited identity → locked shell). Seen marks and "You've seen X of N". Row bookmarks. Add all unseen. Report list. `list_watchlist_bulk_added` | OTA (same release as L2) | L2 |
+| **L1: Lists backend** | Migration: §E alters, `_list_readable`, redefined `list_by_id` / `list_items_by_list`, `hidden_at` in the select policies, writers (with the `profile_private` guard, the 100 ceiling, `in_app_count_before`), readers (incl. **`my_lists`**, **`profile_lists` public-only**, `list_preview`), `list_web_opens` + `record_list_open`, `app_config` keys and the `base_free_limit` re-comment. SQL tests (§N). Runbook §2d hide/unhide. `data-model.md` §6 corrected | Staging → production DB (inert without a client) | — |
+| **L2: Make and edit lists** | Real `app/lists/[id].tsx` **and new `app/lists/index.tsx` (My lists)**. **The `My lists ›` action on the Collection title row.** ⋯ on every title with **Add to list…** (pinned `+ New list`, named-destination toast with Undo, and the zero-list path straight to New list). New-list sheet with the consent copy and the private-profile rules. Add-titles sheet, edit mode with move controls, delete. Share with the private → link prompt. The Settings → Privacy one-line addition. Events **`my_lists_opened` (with `entry`)**, `list_created` (with `would_have_exceeded_3_lists`), `list_item_added`, `list_visibility_changed`, `list_shared`, `list_opened`, `list_limit_reached`. **No Profile work and no See-all sheet** — both move to L3 | OTA: iOS prod + Android beta | L1 in production |
+| **L3: Reading other people's lists** | **The Profile `LISTS` shelf, public-only, on own and other profiles**, with `Manage ›` on the own profile, the "nothing public yet" line, and the **pushed** See-all screen (no sheet). Attribution states (full / limited identity → locked shell). Seen marks and "You've seen X of N" for viewer and owner. Row bookmarks. Add all unseen ("my Watchlist"). Report list. `list_watchlist_bulk_added` | OTA (same release as L2) | L2 |
 | **L4: Public list web page** | `listIdFromPath`, `appLinkFor` + `lists`, page render with the attribution rule, `record_list_open`, router tests | Cloudflare Pages (preview URL first) | L1 in production; deploy with the L2/L3 OTA |
 | **L5: Link previews** | Pages Function on `/lists/*` using `list_preview`: title, count, `@handle` only for public owners, generic fallback, 5-minute cache, generic image | Cloudflare Pages | L4 |
-| **L6: Measurement and doc truth** | PostHog tiles for §M, including the hypothetical-cap readout. PRD §7/§8/§20, deferred-roadmap §50 status, audit §P1.2 note, `web-deployment.md` AASA note, `analytics.md` event rows | Docs + dashboard | L2–L5 live |
+| **L6: Measurement and doc truth** | PostHog tiles for §M, including the hypothetical-cap readout **and the `my_lists_opened.entry` discoverability split** (the event itself ships in L2). PRD §8/§20 corrected and **§7 confirmed as built**, deferred-roadmap §50 status, audit §P1.2 note, `web-deployment.md` AASA note, `analytics.md` event rows | Docs + dashboard | L2–L5 live |
 
 **Release:** L1 (production DB) → L2 + L3 on staging preview → device QA (§N) → one OTA
 to both lanes → L4 deployed the same day → L5 once L4 is verified → L6.
 
-**Later:** v1.1 adds drag, per-item notes, Group Picks → list, "Start from my ranking",
-and Letterboxd list import. v2 adds save/copy, "In N lists", featured/editorial, the
-collage OG image, pretty public URLs, revocable link tokens and collaboration.
+**Not yet scheduled.** Implementation is parked behind Watch History T1–T4 and the
+post-foundation hardening/scalability pass (founder, 2026-09-19). L1 does not start until
+that is cleared.
+
+**Later:** v1.1 adds drag, **long-press manipulation inside a list screen**, per-item
+notes, Group Picks → list, "Start from my ranking", and Letterboxd list import. v2 adds
+save/copy, "In N lists", featured/editorial, the collage OG image, pretty public URLs,
+revocable link tokens and collaboration.
 
 ---
 
@@ -786,10 +1057,15 @@ collage OG image, pretty public URLs, revocable link tokens and collaboration.
 4. **Title-page ⋯: yes**, on every movie, season and series, with **Add to list…**. With no
    lists, it offers Create new list. No permanent list button. The #123 layout is otherwise
    preserved.
+5. **Hybrid IA (added by the navigation review later the same day; see §Q).** Collection
+   owns list management through a `My lists ›` text action on the existing title row; the
+   Profile carries a **read-only shelf of public lists only**. No Collection segment, no
+   new control row, no bottom-nav item, no icon-only entry.
 
 Also approved: mixed media kinds; optional numbering, off by default; list order
-independent of the Collection ordinal; viewer-derived progress as MVP; Private as default;
-three modes; the two entry points; and every §D non-goal.
+independent of the Collection ordinal; **progress for the viewer and the owner alike**,
+plain text only; Private as default; three modes; the two entry points; and every §D
+non-goal.
 
 ### Defaults chosen here, not blocking (the founder can reverse any without reshaping a PR)
 
@@ -800,3 +1076,125 @@ three modes; the two entry points; and every §D non-goal.
 - In the app, private-owner attribution opens the existing locked shell (identity + follow
   request). On the web it is plain text (§F.2).
 - A non-owner gets a Share button on public lists only, not on link-only lists.
+
+---
+
+## Q. IA review and the Hybrid model, 2026-09-19
+
+A navigation and information-architecture review was run before any Lists implementation
+began, because the earlier draft of this PRD put **management** on the Profile and the
+founder was not convinced. **The review's recommendation was approved in full.** This
+section is the decision and its reasoning; every other section above has been rewritten to
+match it.
+
+### Q.0 What changed
+
+| | Earlier draft | **Approved** |
+|---|---|---|
+| Manage my lists | Profile → Lists row → See-all **sheet** | **Collection → `My lists ›` → pushed screen** |
+| Create | Profile Lists row → `+` tile | **My lists → `+ New list`** (unchanged second point: title ⋯) |
+| Own profile shows | every list, with visibility chips | **public lists only, read-only, `Manage ›`** |
+| See all | a sheet, closed before a push | **a pushed screen** |
+| `profile_lists` | owner sees all | **public-only for everyone** |
+| Discoverability data | — | **`my_lists_opened.entry`, built in L2** |
+
+### Q.1 Why not Profile-first
+
+The earlier draft was modelled on Letterboxd and Beli, where lists live on the profile. The
+review's central finding is that **those products put lists on the profile because their
+profile *is* the library** — neither has a separate collection tab. bingd deliberately
+split **Collection** (the working surface) from **Profile** (public identity), and in that
+split, copying the *placement* without the *structure* is the error.
+
+- Spotify is the only researched product with bingd's split, and it puts management in
+  **Your Library** and display on the profile.
+- bingd already has this rule written down, in `ProfileWatchlist.tsx`: *"There is no
+  separate Watchlist profile screen for beta — **Collection is where the full list is, for
+  the account that owns it**"*, and profile shelves carry **no editing controls** by
+  design. A `+ New list` tile and a Delete path two taps deep would have been the opposite
+  rule on the same screen.
+- `PRD.md` §7 and `app/(tabs)/_layout.tsx` both already said Collection holds Lists. The
+  earlier draft listed §7 as a document to *correct*; it was this PRD that had diverged.
+- The sheet → push sequence the draft required is a known dead-end class in this codebase.
+
+### Q.2 Why not a Collection segment
+
+Right instinct, wrong mechanism.
+
+**Collection is organised by medium.** `MediumSelector` is the screen's *title*, and
+Watched, Watchlist and Unranked are all slices of `Movies` or `TV seasons`. A list mixes
+movies, seasons and whole series by design (§C), so a Lists segment would sit under a
+`Movies ▾` title it had to ignore — the same disagreement as the Unranked-tab bug, which
+the code now guards against explicitly. A permanent fourth segment also fails the existing
+conditional-segment rule (*"a tab that is empty for most users is a permanent reminder of a
+chore nobody agreed to"*), and Lists will be empty for most users for a long time.
+
+And a Collection-only feature would kill the half deferred-roadmap §50 says matters most:
+a public list is the one artifact useful to somebody with **no friends on bingd yet**. That
+argument dies if lists never appear on a profile.
+
+### Q.3 Why this particular entry
+
+`My lists ›` on the **trailing edge of the existing title row**:
+
+- **zero added height** — no third control row, no segment, no tab;
+- **outside the medium axis**, so it cannot desynchronise from `MediumSelector`;
+- **not the `AppHeader` right corner**, which is the bell's on every root tab and where a
+  text button was already tried and rejected (`app/(tabs)/profile.tsx`);
+- **labelled, not a glyph** — `TitleActions`' own rule;
+- it reuses `SectionHeader`'s existing maroon trailing-action idiom, the same "go to a
+  related place" affordance as Top Ranked's *See all*.
+
+**The honest cost is discoverability**, and it is accepted rather than bought with a
+permanent segment. §M's `my_lists_opened.entry` is the tripwire, and it ships in L2 for
+exactly that reason.
+
+### Q.4 Why the Profile shelf is public-only
+
+The own-profile shelf **shows what a visitor would see**. An owner holding four private
+lists gets "Nothing public yet" and learns the privacy model by looking at it, and no
+private or link-only list is ever drawn on an identity surface. `Manage ›` is always there,
+so nothing is unreachable. `See all` is a **push**, which removes the sheet-sequencing
+hazard and lets a shelf card open a list directly.
+
+### Q.5 Why progress stays
+
+One line, no control, and the read path already computes it (`viewer_seen` is on
+`list_items_page`). It is the whole utility half: without it a list is a poster grid you
+read, with it, it is a plan you are partway through. Beli ships exactly this line on its
+Featured Lists (*"You've been to 0 of 15"*) in the nearest comparable product shape. It is
+kept **for the owner too**, because the headline utility list — Oscar catch-up, horror
+month — is the one they made for themselves, and it is the reason to reopen it. **Plain
+text only**: a bar, ring, percentage or checklist would read as a chore tracker, and that
+is the visual noise the concern was about.
+
+### Q.6 Founder decisions recorded here
+
+1. **Collection entry:** text + chevron `My lists ›` on the Movies/TV title row. **Not** a
+   fourth segment, a new control row, a bottom-nav item, or an icon-only entry. Outside the
+   medium axis.
+2. **Own profile:** public lists only, reflecting the public identity a visitor sees.
+   `LISTS … Manage ›` opens the same My lists screen as Collection. Private and link-only
+   are never exposed in the shelf.
+3. **Other-profile order:** Top Ranked → Watchlist → **Lists** → Recent activity. Lists are
+   **not** promoted above Watchlist in v1.
+4. **Progress:** "You've seen X of N" for owner and viewer, plain text. No bar, no
+   completion state, no checkboxes, no unseen-only filter.
+5. **Long-press:** none in v1, anywhere. Revisit in v1.1 alongside drag.
+6. **Discoverability analytics:** `my_lists_opened { entry: collection | profile_manage }`
+   is instrumented in **L2**, not deferred to L6. It is how the question "is `My lists ›`
+   discoverable enough" gets answered before a Collection segment is ever reconsidered.
+
+### Q.7 Preserved unchanged by this review
+
+`Title ⋯ → Add to list…`; every movie, season and whole series eligible; zero lists →
+create with the title preselected; **no Collection row long-press**; **no Collection row
+overflow**; **no fourth `TitleActions` button**; and every §D non-goal.
+
+### Q.8 Research base
+
+Letterboxd, Goodreads, Serializd, Spotify, Pinterest, Instagram, TikTok, Beli and TV Time,
+reviewed 2026-09-19 against current product behaviour. The two findings that decided it:
+**every product that puts lists on the profile has no separate library tab**, and
+**Spotify — the one product that shares bingd's split — manages in Library and displays on
+the profile.**

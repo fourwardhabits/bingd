@@ -2102,7 +2102,26 @@ specifically. There was nothing to bring to parity.
 
 ## 50. Lists — private organisation and public curation
 
-**Status: deferred, and the highest-priority deferred feature as of 2026-09-05.**
+**Status: designed, approved and PARKED, 2026-09-19.** Still the highest-priority deferred
+feature. [`lists-prd.md`](./lists-prd.md) is build-ready: scope, data model, privacy matrix,
+UX, analytics, QA and a six-PR sequence. **Nothing is built** — no migration, no client, no
+PR, no deploy. The `lists` and `list_items` tables from `20260813000800` are deployed and
+have no writer.
+
+**Unparks after** Watch History T1–T4 and the post-foundation hardening/scalability pass.
+
+**The navigation question was settled on 2026-09-19 (founder), and it went the other way
+from the PRD's first draft.** **Collection owns list management; the Profile owns public
+display** — a `My lists ›` text action on the existing Collection title row, and a
+read-only shelf of **public lists only** on the Profile. No Collection segment, no new
+control row, no sixth tab, no icon-only entry. Reasoning and the competitive review are in
+`lists-prd.md` §Q; the decision is registered in [`decision-log.md`](./decision-log.md) §12.
+
+**The constraint below is satisfied by that shape, not waived by it.** A labelled text
+action on a row that already exists is not "meeting list management in the log, rank and
+browse flows"; a permanent fourth Collection segment would have been. The cost is
+discoverability, and `my_lists_opened.entry` is instrumented in L2 to measure it — it is
+the only evidence that would justify revisiting the segment.
 
 Lists have two halves and the second is the strategically important one.
 
