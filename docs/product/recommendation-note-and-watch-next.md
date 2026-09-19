@@ -1,6 +1,11 @@
 # Recommendation note + Watch next — design
 
-**Status:** **APPROVED 2026-09-19** (founder decisions F1 and F2 in §14). Implemented by the four PRs in §12: backend migrations `20260929000100` (recommendation note) and `20260929000200` (Watch next), each with a client PR stacked on it. Nothing is deployed to production and no OTA is published; the tranche waits for the bundled device QA in §11.3.
+**Status, 2026-09-19 founder review — the two halves went different ways.**
+
+- **Part A, the recommendation note: SHIPPED to both backends, client merged, no OTA.** #181 (migration `20260929000100`) and #182 merged to main. The migration is applied to staging and production, and both smoke clean at 135/135. The client is on main and **deliberately unpublished**: it joins the consolidated Android client QA bundle with #171, #174 and the unranked Remove UX. The device script is §11.3.
+- **Part B, Watch next: PARKED.** #183 and #184 are open as drafts and were not merged; migration `20260929000200` has never been applied to any database. The founder is not yet convinced a second Watchlist concept earns its keep. Branches `feat/watch-next-backend` (`4a9e886`) and `feat/watch-next-client` (`9d5c0a0`) are preserved, with the revival notes on #183. **Part B below is therefore a design record, not a description of the product.**
+
+Founder decisions F1 and F2 are in §14; F2 only matters if Watch next is revived.
 **Audited against:** `origin/main` at `c77d524` (after #171–#173). Every file and line reference below is at that commit, and some have moved since.
 **Scope:** two small features in one bounded tranche. Both are JS + SQL and OTA-deliverable. There are no new dependencies and no native changes.
 
