@@ -2030,10 +2030,12 @@ describe('the counts the summary reads', () => {
   });
 
   it('counts an unmatched film and an ambiguous one without counting them as added', async () => {
-    // Two catalogue rows that squash identically: the remake case.
+    // Two catalogue rows that squash identically: the remake case. The same year, because a
+    // pair a year apart is no longer ambiguous to a row naming one of those years — the
+    // exact-year film wins (20260924000100).
     await t.sql(
       `insert into media_items (kind, tmdb_id, title, release_date)
-       values ('movie', $1, 'Counting Twins', '1980-01-01'), ('movie', $2, 'Counting Twins', '1981-01-01')`,
+       values ('movie', $1, 'Counting Twins', '1980-01-01'), ('movie', $2, 'Counting Twins', '1980-09-01')`,
       [-Math.abs(seq++), -Math.abs(seq++)]);
 
     const jobId = await importArchive(ada, [

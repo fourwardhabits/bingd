@@ -3068,3 +3068,125 @@ describe('the page behind an open sheet', () => {
     });
   });
 });
+
+/**
+ * **Anything in the collection can leave it without being ranked first** (Android beta
+ * report, 2026-09-18).
+ *
+ * A Letterboxd import put the wrong *Hamlet* on somebody's shelf, logged and unranked. The
+ * options sheet — the only door to Remove from collection — opened only for a ranked title,
+ * so the one way out was to rank a film they had not watched and then remove it. `unlog`
+ * has always accepted an unranked title; only the door was missing.
+ *
+ * The page cannot tell an imported row from a native one (it does not select `source`), so
+ * both shapes are pinned: an imported row carries the diary date and a bucket from the
+ * star, a natively logged one may carry neither.
+ */
+describe('a title in the collection that is not ranked', () => {
+  const importedRow = {
+    user_id: 'user-1',
+    media_item_id: 'film-1',
+    bucket: 'loved',
+    watched_on: '2026-08-30',
+    note: null,
+    note_visibility: 'private',
+    note_has_spoilers: false,
+  };
+
+  beforeEach(() => {
+    tableRows.rankings = [];
+    tableRows.user_media = [importedRow];
+    mockRpcResults.unlog = { status: 'ok' };
+  });
+
+  const openMenu = async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-more'));
+    await waitFor(() => expect(view.getByLabelText('Remove from collection')).toBeTruthy());
+    return view;
+  };
+
+  it('offers the menu for an imported title that was never ranked', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    // The Rank control is still the page's primary act, and still leads to the log.
+    expect(view.getByTestId('title-action-rank')).toBeTruthy();
+  });
+
+  it('offers the menu for a title logged here with no date and no rating', async () => {
+    tableRows.user_media = [{ ...importedRow, bucket: null, watched_on: null }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+  });
+
+  it('holds Remove from collection and nothing that acts on a ranking', async () => {
+    const view = await openMenu();
+
+    for (const label of ['Update your rating', 'Log another watch', 'Who I watched with', 'Add a note']) {
+      expect(view.queryByLabelText(label)).toBeNull();
+    }
+    expect(view.queryByText('Ranking')).toBeNull();
+  });
+
+  it('asks with the same destructive confirmation before it removes anything', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Remove from collection'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(alertSpy.mock.calls.at(-1)?.[0]).toBe('Remove Inception from your collection?');
+    const buttons = alertSpy.mock.calls.at(-1)?.[2] ?? [];
+    expect(buttons.map((button) => button.text)).toEqual(['Cancel', 'Remove']);
+    expect(buttons.find((button) => button.text === 'Remove')?.style).toBe('destructive');
+    expect(mockRpc).not.toHaveBeenCalledWith('unlog', expect.anything());
+  });
+
+  it('removes it in one confirmed action, never asking for or touching a ranking', async () => {
+    const view = await openMenu();
+    await fireEvent.press(view.getByLabelText('Remove from collection'));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+
+    const buttons = alertSpy.mock.calls.at(-1)?.[2] ?? [];
+    await act(async () => {
+      buttons.find((button) => button.text === 'Remove')?.onPress?.();
+    });
+
+    // The operation id is expo-crypto's, which has no native module under Jest; what this
+    // test is about is which title goes and through which call.
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'unlog',
+        expect.objectContaining({ p_media_item_id: 'film-1' }),
+      ),
+    );
+    // One write, and it is the removal: no ranking is started, finished or cleared on the way.
+    expect(mockRpc.mock.calls.map(([name]) => name).filter((name) => /^rank_/.test(name))).toEqual([]);
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'unlog')).toHaveLength(1);
+  });
+
+  it('still clears a ranked title’s ranking first, which is the path that already worked', async () => {
+    tableRows.rankings = [
+      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-more'));
+    // The full ranked menu, unchanged.
+    await waitFor(() => expect(view.getByLabelText('Update your rating')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Remove from collection'));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+
+    const buttons = alertSpy.mock.calls.at(-1)?.[2] ?? [];
+    await act(async () => {
+      buttons.find((button) => button.text === 'Remove')?.onPress?.();
+    });
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('unlog', expect.anything()));
+    const names = mockRpc.mock.calls.map(([name]) => name);
+    expect(names.indexOf('rank_unrank')).toBeGreaterThanOrEqual(0);
+    expect(names.indexOf('rank_unrank')).toBeLessThan(names.indexOf('unlog'));
+  });
+});

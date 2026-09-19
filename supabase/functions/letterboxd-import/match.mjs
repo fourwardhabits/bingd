@@ -22,8 +22,9 @@
  * says it went wrong.
  *
  * So the provider tier applies the same test the local tier does: the squashed titles must
- * be equal, and the years must agree within one. Two results that both pass is an
- * ambiguity, and an ambiguity is left unresolved rather than broken by popularity.
+ * be equal, and the years must agree within one. Among the results that pass, an exact
+ * year outranks an adjacent one, and anything the evidence cannot separate is left
+ * unresolved rather than broken by popularity (`pick`, and `20260924000100` for SQL).
  */
 
 /**
@@ -79,17 +80,116 @@ export function isConfident(claim, result) {
   return Math.abs(year - claim.year) <= 1;
 }
 
+/** A result's release year, or null when it has no usable date. */
+function yearOf(result) {
+  const year = result?.release_date ? Number(String(result.release_date).slice(0, 4)) : NaN;
+  return Number.isFinite(year) ? year : null;
+}
+
 /**
- * The single confident result, or null.
+ * Whether a result's *original* title is the name the export used (true), a different one
+ * (false), or unknown (null).
  *
- * **Exactly one.** Zero is an unknown film; two or more is a remake, and choosing between
- * them on popularity would put a film the person did not watch into their collection
- * carrying a rating they gave to a different one.
+ * The one field that tells a film called "Hamlet" apart from a film merely *translated* as
+ * "Hamlet". Unknown is its own answer, never a guess: it neither vetoes a candidate nor
+ * counts against one, which is how every result without the field behaved before this rule.
+ */
+function originalNameAgrees(claim, result) {
+  const original = typeof result?.original_title === 'string' ? squash(result.original_title) : '';
+  if (original === '') return null;
+  return original === squash(claim.name);
+}
+
+/**
+ * The single result the evidence supports, or null.
+ *
+ * ---------------------------------------------------------------------------
+ * THE HAMLET REPORT (2026-09-18), AND WHY "EXACTLY ONE" WAS NOT ENOUGH
+ *
+ * The rule used to be "exactly one confident result". That is only a uniqueness test if the
+ * results are every film the rule would have accepted, and they were not: `search` asked
+ * TMDB for `primary_release_year` equal to the export's year, so a film one year out never
+ * came back at all, while `isConfident` would have accepted it. Uniqueness was being judged
+ * over a truncated set.
+ *
+ * A real Android beta import paid for it. The production claim ledger records the provider
+ * tier placing a Letterboxd "Hamlet" on TMDB 1234733 — the Romanian *Cătun* (2025-12-01),
+ * whose English title is a translation of the word — when the film meant was TMDB 843342,
+ * *Hamlet*, primary release 2026-02-06. A 2026 search cannot return *Cătun*, so the row must
+ * have carried 2025 — a year earlier than TMDB's, the festival/territory gap the tolerance
+ * exists for. The 2025 search could not see the real film, and the one "Hamlet" it did
+ * return was the only survivor, so it was "confident".
+ *
+ * ---------------------------------------------------------------------------
+ * THE ORDER NOW
+ *
+ * With a year:
+ *   1. An exact-year result wins over adjacent-year ones, however the provider ordered them.
+ *      Two exact-year results is a remake and is left unresolved.
+ *   2. **Except** when that exact-year film is a translated title (its original title is
+ *      not the exported name) and a film whose original title *is* that name sits in the
+ *      adjacent year. That is the Hamlet shape exactly, and nothing in an export can tell
+ *      which of the two was meant — so it is left unresolved rather than guessed.
+ *   3. With no exact-year result, a single adjacent-year (or undated) result is the
+ *      territory/festival-year fallback the ±1 tolerance always existed for. More than one
+ *      is unresolved.
+ *
+ * With no year: exactly one title match, as before.
+ *
+ * Popularity is never consulted, and neither is the provider's order.
  */
 export function pick(claim, results) {
   if (!Array.isArray(results)) return null;
-  const confident = results.filter((r) => isConfident(claim, r));
-  return confident.length === 1 ? confident[0] : null;
+
+  // The window can be three searches; one film never counts twice.
+  const seen = new Set();
+  const confident = results.filter((r) => {
+    if (!isConfident(claim, r)) return false;
+    if (typeof r.id === 'number') {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+    }
+    return true;
+  });
+
+  if (claim.year === null || claim.year === undefined) {
+    return confident.length === 1 ? confident[0] : null;
+  }
+
+  const exact = confident.filter((r) => yearOf(r) === claim.year);
+  const others = confident.filter((r) => yearOf(r) !== claim.year);
+
+  if (exact.length > 1) return null;
+
+  if (exact.length === 1) {
+    const translated = originalNameAgrees(claim, exact[0]) === false;
+    const nativeElsewhere = others.some((r) => originalNameAgrees(claim, r) === true);
+    return translated && nativeElsewhere ? null : exact[0];
+  }
+
+  return others.length === 1 ? others[0] : null;
+}
+
+/**
+ * Whether the exact-year answer alone cannot settle the claim, so the adjacent years must
+ * be asked for too.
+ *
+ * Ordinarily it can: one exact-year film whose original title is not known to differ from
+ * the exported name wins over anything the neighbouring years hold (`pick`, rule 1), and two
+ * exact-year films are a remake no neighbour can resolve. So the common case stays one
+ * request.
+ *
+ * It cannot when there is no exact-year film (the fallback needs the neighbours) or when
+ * the only one is a translated title (a native-titled neighbour would veto it, rule 2).
+ */
+export function needsWindow(claim, results) {
+  if (!claim || claim.year === null || claim.year === undefined) return false;
+  const exact = (Array.isArray(results) ? results : []).filter(
+    (r) => isConfident(claim, r) && yearOf(r) === claim.year,
+  );
+  if (exact.length > 1) return false;
+  if (exact.length === 0) return true;
+  return originalNameAgrees(claim, exact[0]) === false;
 }
 
 /** A string the catalogue can store, or null. TMDB sends '' for "nothing here". */

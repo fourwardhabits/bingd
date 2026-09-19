@@ -5,8 +5,8 @@
  * WHY THIS IS SO SMALL
  *
  * Matching a Letterboxd row to a bingd title is mostly a local question, and
- * `_import_match_batch` answers it in SQL: the shared film-URI cache first, then exactly
- * one catalogue movie whose squashed title matches and whose year is within one. A job
+ * `_import_match_batch` answers it in SQL: the shared film-URI cache first, then a catalogue
+ * movie whose squashed title matches in exactly the export's year (`20260924000100`). A job
  * completes with or without this function; rows it cannot place simply end unmatched.
  *
  * What SQL cannot do is talk to TMDB. So this is the only part that does, and it is
@@ -38,7 +38,7 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  * the only part of this function that makes a decision, and therefore the only part worth
  * a suite of its own.
  */
-import { catalogueItem, pick } from './match.mjs';
+import { catalogueItem, needsWindow, pick } from './match.mjs';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -75,12 +75,24 @@ export type ProviderResult = {
   popularity?: number | null;
 };
 
-async function search(claim: Claim, key: string, bearer: string | null): Promise<ProviderResult[]> {
+/**
+ * One TMDB search for the claim's name, in one primary-release year (or none).
+ *
+ * `primary_release_year` is an exact filter, which is why one call is not always the whole
+ * answer: a film whose TMDB year is one off the export's never appears in it. `resolveBatch`
+ * asks for the neighbouring years when `needsWindow` says the exact year cannot settle it.
+ */
+async function search(
+  claim: Claim,
+  key: string,
+  bearer: string | null,
+  year: number | null = claim.year,
+): Promise<ProviderResult[]> {
   const url = new URL('https://api.themoviedb.org/3/search/movie');
   url.searchParams.set('query', claim.name);
   url.searchParams.set('language', 'en-US');
   url.searchParams.set('include_adult', 'false');
-  if (claim.year !== null) url.searchParams.set('primary_release_year', String(claim.year));
+  if (year !== null) url.searchParams.set('primary_release_year', String(year));
   if (!bearer) url.searchParams.set('api_key', key);
 
   const response = await fetch(url, {
@@ -171,7 +183,20 @@ async function resolveBatch(db: SupabaseClient, key: string, bearer: string | nu
     await Promise.all(
       slice.map(async (claim) => {
         try {
-          const results = await search(claim, key, bearer);
+          let results = await search(claim, key, bearer);
+          /**
+           * **The neighbouring years, when the exact one cannot decide** (the Hamlet
+           * report, 2026-09-18; `match.mjs` `pick`).
+           *
+           * Sequential rather than alongside the first, so the common case stays one request
+           * and this slice never has more than `CONCURRENCY` in flight. A 429 from either
+           * throws like any other and the row is handed back unasked below.
+           */
+          if (claim.year !== null && needsWindow(claim, results)) {
+            const before = await search(claim, key, bearer, claim.year - 1);
+            const after = await search(claim, key, bearer, claim.year + 1);
+            results = [...results, ...before, ...after];
+          }
           const chosen = pick(claim, results);
           // **"TMDB knew nothing" and "TMDB knew several" are different problems** and both
           // arrived as `matched: 0`. The first is an unknown film and nothing can be done;
