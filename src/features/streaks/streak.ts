@@ -29,7 +29,7 @@
  * placement* or *Change your rating* in an otherwise empty week read as "ranked this
  * week" — a correction, which posts no activity and is not a watch, advancing a streak.
  * That claim was then repeated here about `20260911000100`, a migration that never shipped
- * (its number went to Helpful reviews). `20260928000100` is the one that does it: a
+ * (its number went to Helpful reviews). `20261001000100` is the one that does it: a
  * correction keeps the `created_at` its ranking already had, so the column means what the
  * PRD's sort contract says it means (the instant of the ranking act), and a week with
  * nothing but corrections in it is not a ranking week. `RankingSheet` also no longer asks

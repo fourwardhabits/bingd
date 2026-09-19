@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb, one } from './harness.mjs';
 
 /**
- * A correction is not a new ranking — `20260928000100` (T0).
+ * A correction is not a new ranking — `20261001000100` (T0).
  *
  * *Update your rating* — `rank_again` with `p_new_watch` false in the same band,
  * `rank_rebucket` into another — replaces a position. It is a correction of an opinion

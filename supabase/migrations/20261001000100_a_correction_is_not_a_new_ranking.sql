@@ -84,7 +84,7 @@
 -- 1. `_rank_finalize`, restated whole
 --
 -- 20260902000100's body -- its true latest definition; nothing since has replaced it --
--- with three additions, each marked 20260928000100 in place: the old row's `created_at`
+-- with three additions, each marked 20261001000100 in place: the old row's `created_at`
 -- is read before the drop, the re-inserted row keeps it for a correction, and the comment
 -- says so. Everything else is transcribed unchanged, because a `create or replace` cannot
 -- be partial.
@@ -115,7 +115,7 @@ declare
   -- 20260902000100. The instant this activity sits at, which is what the adoption
   -- below moves an earlier announcement of this same act up to.
   v_causal_at timestamptz;
-  -- 20260928000100. The instant the title entered the ranking, carried across a
+  -- 20261001000100. The instant the title entered the ranking, carried across a
   -- correction so the re-inserted row keeps it.
   v_kept_at   timestamptz;
 begin
@@ -128,7 +128,7 @@ begin
   if p_replaces and exists (
     select 1 from rankings where user_id = target and media_item_id = item
   ) then
-    -- 20260928000100. Read before the drop deletes it.
+    -- 20261001000100. Read before the drop deletes it.
     select r.created_at into v_kept_at
       from rankings r
      where r.user_id = target and r.media_item_id = item;
@@ -156,7 +156,7 @@ begin
      set position = position + 1
    where user_id = target and category = cat and position >= pos;
 
-  -- 20260928000100. `created_at` is the instant of the ranking act this row stands
+  -- 20261001000100. `created_at` is the instant of the ranking act this row stands
   -- for: a first placement, or an explicit rewatch (`p_new_watch`), is now; a
   -- correction -- *Update your rating*, in the same band or another -- is not an act of
   -- its own and keeps the instant the ranking already had. The weekly streak, *Recently
@@ -345,7 +345,7 @@ end;
 $$;
 
 comment on function _rank_finalize(uuid, uuid, ranking_category, taste_bucket, integer, uuid, boolean, boolean, boolean) is
-  'The one moment in the schema where a ranking is created. Carries 20260826000500''s behaviour whole: the drop happens inside the category lock, the band is recomputed there, and the title_ranked event posts iff p_new_watch or the placement created a position where there was none. Since 20260827000600 a first ranking also fulfils every outstanding delivered recommendation for the title -- once each, by the fulfilled_at guard -- and notifies the senders the feed itself would answer, pointing at the exact event it just posted. Since 20260902000100 it also adopts any award or goal announced by the insert that first put this title in the collection, when nothing of the reader''s happened in between: the Log sheet buckets before it ranks, so that announcement is a real minute older than the activity it belongs to, and a newest-first feed would otherwise show the ranking above the award it earned. Since 20260928000100 a correction (a replacement without p_new_watch) keeps the rankings.created_at the ranking already had, so it is not a new ranking act to the streak, Recently ranked or the watchlist rule; a first placement and an explicit rewatch are stamped now. Internal.';
+  'The one moment in the schema where a ranking is created. Carries 20260826000500''s behaviour whole: the drop happens inside the category lock, the band is recomputed there, and the title_ranked event posts iff p_new_watch or the placement created a position where there was none. Since 20260827000600 a first ranking also fulfils every outstanding delivered recommendation for the title -- once each, by the fulfilled_at guard -- and notifies the senders the feed itself would answer, pointing at the exact event it just posted. Since 20260902000100 it also adopts any award or goal announced by the insert that first put this title in the collection, when nothing of the reader''s happened in between: the Log sheet buckets before it ranks, so that announcement is a real minute older than the activity it belongs to, and a newest-first feed would otherwise show the ranking above the award it earned. Since 20261001000100 a correction (a replacement without p_new_watch) keeps the rankings.created_at the ranking already had, so it is not a new ranking act to the streak, Recently ranked or the watchlist rule; a first placement and an explicit rewatch are stamped now. Internal.';
 
 
 -- ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-  -- 20260928000100. Chronology, for the one table whose row carries the instant of
+  -- 20261001000100. Chronology, for the one table whose row carries the instant of
   -- the act: an entry the reader put on the watchlist AFTER this ranking's instant is
   -- a newer, deliberate "I want to see this again" and outlives it. A first placement
   -- or an explicit rewatch is stamped now, so every older entry still leaves exactly
@@ -384,7 +384,7 @@ comment on function _leave_watchlist() is
   'Removes the exact (user, media item) from watchlist once it is watched or ranked. '
   'Attached to user_media and rankings by 20260815040000. Never touches a parent '
   'series when a season is written, and has no delete counterpart, so unlog does not '
-  'restore an entry. Since 20260928000100, when fired by a rankings insert it removes only '
+  'restore an entry. Since 20261001000100, when fired by a rankings insert it removes only '
   'an entry added at or before the ranking''s created_at, so a correction -- which keeps '
   'the instant the ranking already had -- leaves an entry the reader re-added since.';
 
@@ -425,7 +425,7 @@ begin
   -- concurrent set_watchlist(true) this snapshot cannot see is the rewatch
   -- re-add case, which the rule deliberately leaves alone.
   --
-  -- 20260928000100. The same chronology _leave_watchlist applies: fired by a rankings
+  -- 20261001000100. The same chronology _leave_watchlist applies: fired by a rankings
   -- insert, only a series entry added at or before that ranking's instant is a
   -- candidate. A season correction keeps its instant, so a series the reader re-added
   -- after finishing it -- to watch again -- is not re-evaluated away by a non-event.
@@ -499,7 +499,7 @@ comment on function _leave_series_watchlist() is
   '_leave_watchlist (20260815040000), which still governs the season''s own entry. '
   'Takes an advisory lock per (user, series) so two seasons completing concurrently '
   'converge on the removal. One-directional: unranking or unlogging re-adds nothing. '
-  'Since 20260928000100, when fired by a rankings insert it considers only a series entry '
+  'Since 20261001000100, when fired by a rankings insert it considers only a series entry '
   'added at or before that ranking''s created_at, so a season correction leaves a series '
   'the reader re-added since.';
 
