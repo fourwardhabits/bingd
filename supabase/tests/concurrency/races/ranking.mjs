@@ -723,4 +723,111 @@ export default function suite() {
       await ctl.end();
     });
   });
+
+  /**
+   * **A step on an open session cannot read the band while another ranking moves it**
+   * (20260926000100).
+   *
+   * The resume-integrity fix checks a session's band digest and rebases its search from
+   * its recorded answers before acting. That is only sound if the band cannot move
+   * between the check and the write, so every step now takes the (user, category) lock
+   * right after the media lock. Without it, this interleaving is the ten-title failure
+   * compressed into one instant: the answer reads the band before the intruder commits,
+   * resolves its bounds as indices into the old order, and then places the subject
+   * against the new one.
+   */
+  describe('an answer racing a placement into its own band', () => {
+    before(() => rc.open());
+    after(() => rc.close());
+
+    it('waits on the category lock, then rebases, and contradicts no answer', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const band = [];
+      for (let i = 0; i < 4; i += 1) band.push(await fx.createMovie(`Race band ${i}`));
+      const subject = await fx.createMovie('Race subject');
+      const intruder = await fx.createMovie('Race intruder');
+
+      const solo = await db.session('setup');
+      await solo.actAs(user);
+      // Band 0 best: each new title loses every comparison.
+      for (const film of band) {
+        let r = (await solo.one(`select rank_start($1, 'loved') as r`, [film])).r;
+        while (!r.done) {
+          r = (await solo.one(`select rank_answer($1, $2) as r`, [r.session_id, r.pivot])).r;
+        }
+      }
+      // The subject truly sits between Band 1 and Band 2. Opening pivot is Band 2 (index
+      // 2 of 4): the subject wins, and Band 1 goes on screen.
+      const opened = (await solo.one(`select rank_start($1, 'loved') as r`, [subject])).r;
+      assert.equal(opened.pivot, band[2]);
+      const onScreen = (
+        await solo.one(`select rank_answer($1, $2) as r`, [opened.session_id, subject])
+      ).r;
+      assert.equal(onScreen.pivot, band[1]);
+      // The intruder is better than everything: two wins now, the third will place it.
+      let placing = (await solo.one(`select rank_start($1, 'loved') as r`, [intruder])).r;
+      for (let i = 0; i < 2; i += 1) {
+        placing = (
+          await solo.one(`select rank_answer($1, $2) as r`, [placing.session_id, intruder])
+        ).r;
+      }
+      await solo.end();
+      assert.equal(placing.done, false, 'the fixture must leave the placing answer to come');
+
+      await db.armBarrier('rankings', 'answer-vs-placement');
+      const ctl = await db.controller();
+      await ctl.hold('answer-vs-placement');
+
+      const placer = await db.session('placer');
+      const answerer = await db.session('answerer');
+      await placer.actAs(user);
+      await answerer.actAs(user);
+
+      // The intruder's placing answer, stopped at the rankings insert: it holds the
+      // category lock and the band is mid-move.
+      await placer.begin();
+      await placer.pauseAt('answer-vs-placement');
+      const placed = fire(placer, `rank_answer($1, $2)`, [placing.session_id, intruder]);
+      await placer.awaitBlocked();
+
+      // The reader answers the comparison on screen: Band 1 is better.
+      await answerer.begin();
+      const answered = fire(answerer, `rank_answer($1, $2)`, [opened.session_id, band[1]]);
+      await answerer.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.categoryKey(user, 'movies'),
+      });
+
+      await ctl.release('answer-vs-placement');
+      await placed;
+      await placer.commit();
+      const result = (await answered).rows[0].r;
+      await answerer.commit();
+      await ctl.end();
+
+      assert.equal(result.done, true, 'Band 1 on screen was still the comparison; it applied');
+
+      const order = (
+        await db.rows(
+          `select media_item_id from rankings where user_id = $1 and category = 'movies' order by position`,
+          [user],
+        )
+      ).map((row) => row.media_item_id);
+      assert.deepEqual(order, [intruder, band[0], band[1], subject, band[2], band[3]]);
+
+      const contradicted = await db.rows(
+        `select 1 from comparisons c
+           join rankings w on w.user_id = c.user_id and w.media_item_id = c.winner_id
+           join rankings l on l.user_id = c.user_id and l.media_item_id = c.loser_id
+          where c.user_id = $1 and w.position > l.position`,
+        [user],
+      );
+      assert.equal(contradicted.length, 0, 'no stored position contradicts an answer');
+      await assertValid(db, user);
+
+      await placer.end();
+      await answerer.end();
+    });
+  });
 }
