@@ -48,6 +48,10 @@ import {
   useSentToYou,
   type SentRecommendation,
 } from '@/features/recommendations/use-sent-to-you';
+import {
+  seedFromSentToYou,
+  titleRecommendationsKey,
+} from '@/features/recommendations/use-title-recommendations';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { languageName } from '@/lib/language';
@@ -623,18 +627,25 @@ export default function RecommendationsScreen() {
       markOpened.mutate({
         recommendationId: row.id,
         mediaKind: row.kind === 'movie' ? 'movie' : 'tv_season',
+        hasNote: Boolean(row.message),
       });
     }
-    // Who sent it and when travel with the link, so the title page can say so over its
-    // hero. The fact belongs to this route and not to the title: the same film reached
-    // from search is not "recommended by Ada", and a lookup on every title page would
-    // be a round trip to answer a question only this one asks.
-    // The object form rather than a query string, because typed routes only accept a
-    // path that matches a known pattern and `/title/x?y=z` matches none of them.
-    router.push({
-      pathname: '/title/[id]',
-      params: { id: row.mediaItemId, recBy: row.senderName, recAt: row.recommendedAt },
-    });
+    /**
+     * Who sent it, and what they said, no longer travels in the link (20260929000100).
+     *
+     * It used to — `recBy` and `recAt` — on the reasoning that the fact belonged to this
+     * route. The note reversed that: the title page now asks `title_recommendations_for_me`
+     * whichever way the reader arrived, because an inbox tap or a push is exactly where a
+     * note most needs to be seen. What this tap still knows is handed over as the page's
+     * first frame — every delivered row for the title, so "Ada and 2 others" is right at
+     * once — and marked stale so the page asks the server anyway.
+     */
+    queryClient.setQueryData(
+      titleRecommendationsKey(profile.id, row.mediaItemId),
+      seedFromSentToYou(sentRows, row.mediaItemId),
+      { updatedAt: 0 },
+    );
+    router.push(`/title/${row.mediaItemId}`);
   };
 
   /**

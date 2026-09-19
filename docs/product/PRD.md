@@ -1938,6 +1938,53 @@ pick. No member, no title, no filter value travels (§28, `analytics.md` §2).
 people beyond approved follows, saved and recent groups, voting and shared sessions,
 deep-link integration, and collaborative learning from group outcomes.
 
+### As built — 2026-09-19: a recommendation may say why (`20260929000100`)
+
+**One optional note, up to 140 characters, and nothing else.** A sender may attach a short
+line to a direct recommendation — *"The second half is insane."* — in a field directly
+above the Recommend button. Sending without one takes exactly the taps it always did, and
+a send with no note still calls the three-argument `recommend_title`, so the common path
+is unchanged down to its arguments. One note goes to everybody chosen in that send, and
+the field says so once more than one person is picked.
+
+**Stored on the one row per (sender, recipient, title).** A resend with a note replaces it;
+a resend without one keeps it. Every rule of the 2026-08-26 tranche still holds: no second
+notification, `opened_at` never cleared, `recommended_at` moves. The server normalises a
+note to one trimmed paragraph and refuses a longer one — or one carrying control
+characters — before the operation claim, so a malformed note costs no quota.
+
+**A pending request's note is not shown.** The recipient policy admits only delivered rows
+and `recommendation_requests` does not return the column, so text from somebody who has not
+been followed back waits until the recommendation is added or released. That is the trust
+boundary the request state exists for, enforced by RLS rather than by a screen.
+
+**The recipient sees it in two places.** In Sent to you the note is the row's third line,
+quoted, wrapping to at most two — it takes the place of the metadata line rather than
+adding a fourth. On the title page it is a card **below the title and its actions**
+(founder decision F1, 2026-09-19) and never over the hero: a note is somebody's words and
+must not depend on being readable over a backdrop nobody chose. The card replaces the pill
+that used to sit on the artwork, and the no-artwork variant with it — one treatment for
+every title.
+
+**The context no longer rides in the link.** The page asks `title_recommendations_for_me`,
+so a recommendation is on screen however the reader arrived — a push, the inbox, search,
+the Feed — and the page marks what it shows as opened, which is the first time an open
+outside Sent to you has been recorded at all. It disappears once the reader ranks the
+title, the rule Sent to you already applied.
+
+**Several recommenders:** the card leads with the newest note, attributed *"Ada and 2
+others"*, and tapping it opens a short list of everybody with what each of them said. It is
+a list of context and not a conversation: no reply, no reaction, no read receipt, and the
+sender is still told nothing about what became of what they sent.
+
+**Reportable, per §22.** Pressing and holding a note — or its accessibility action —
+reports it: a new `report_subject` value whose owner resolves to the sender, accepted only
+from the recipient, and only while the recommendation is delivered and carries a note.
+Blocking the sender does not take the ability to report them away.
+
+**Push and the inbox are untouched.** The lock screen still says "recommended {title}" and
+never quotes the note, which is the rule the push copy has followed since mentions.
+
 ---
 
 ## 14. Social interaction: feed, reactions, and tagging

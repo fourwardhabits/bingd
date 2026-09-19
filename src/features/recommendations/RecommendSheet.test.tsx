@@ -769,3 +769,135 @@ describe('the footer at different widths', () => {
     await waitFor(() => expect(Share.share).toHaveBeenCalled());
   });
 });
+
+/**
+ * The optional note (20260929000100).
+ *
+ * The contract worth pinning is the one the founder set: **a send without a note is
+ * exactly the send that shipped**, down to the arguments, so the common path cannot have
+ * been made slower or different by a feature nobody used on that send.
+ */
+describe('the note', () => {
+  beforeEach(() => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'bo', 'Bo')];
+    mockIncoming = [person('user-2', 'ada', 'Ada'), person('user-3', 'bo', 'Bo')];
+  });
+
+  const pick = (view: Awaited<ReturnType<typeof renderWithProviders>>, label: string) =>
+    fireEvent.press(view.getByLabelText(label));
+  const sendNow = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    fireEvent.press(view.getByText('Recommend'));
+
+  it('sends the three-argument call, with no note argument at all, when nothing was typed', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    const [, args] = mockRpc.mock.calls.find(([name]) => name === 'recommend_title')!;
+    expect(args).toEqual({
+      p_operation_id: expect.any(String),
+      p_recipient_id: 'user-2',
+      p_media_item_id: 'film-1',
+    });
+  });
+
+  it('sends the note, normalised, to everybody chosen', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Bo, @bo');
+    await fireEvent.changeText(view.getByTestId('recommend-note'), '  The second   half is insane.  ');
+    await sendNow(view);
+
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled());
+    const sends = mockRpc.mock.calls.filter(([name]) => name === 'recommend_title');
+    expect(sends).toHaveLength(2);
+    for (const [, args] of sends) {
+      expect(args).toMatchObject({ p_message: 'The second half is insane.' });
+    }
+  });
+
+  it('treats a note of nothing but spaces as no note', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await fireEvent.changeText(view.getByTestId('recommend-note'), '   ');
+    await sendNow(view);
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    const [, args] = mockRpc.mock.calls.find(([name]) => name === 'recommend_title')!;
+    expect(args).not.toHaveProperty('p_message');
+  });
+
+  it('caps the field and counts down only near the limit', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    const field = view.getByTestId('recommend-note');
+    expect(field.props.maxLength).toBe(140);
+    expect(view.queryByTestId('recommend-note-counter')).toBeNull();
+
+    await fireEvent.changeText(field, 'x'.repeat(121));
+    expect(view.getByTestId('recommend-note-counter')).toHaveTextContent('19 left');
+  });
+
+  it('never lets a note become two lines, because the server stores one paragraph', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await fireEvent.changeText(view.getByTestId('recommend-note'), 'one\ntwo');
+    await sendNow(view);
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    const [, args] = mockRpc.mock.calls.find(([name]) => name === 'recommend_title')!;
+    expect(args).toMatchObject({ p_message: 'one two' });
+  });
+
+  it('says who the note is going to when more than one person is chosen', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(view.getByTestId('recommend-note').props.placeholder).toBe('Add a note (optional)');
+
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Bo, @bo');
+    expect(view.getByTestId('recommend-note').props.placeholder).toBe(
+      'Add a note · everyone you picked sees it',
+    );
+  });
+
+  it('carries a typed note into the off-platform share rather than dropping it', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByTestId('recommend-note'), 'Watch this one.');
+    await fireEvent.press(view.getByText('Share off bingd'));
+
+    await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
+    const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
+    expect(shared.message).toMatch(/^Watch this one\.\n\n/);
+    expect(shared.message).toMatch(/ on bingd\nhttps:\/\/bingd\.app\/title\/film-1$/);
+  });
+
+  it('keeps the note on screen when a send half fails, so the retry still carries it', async () => {
+    mockRpcResults.recommend_title = (args: { p_recipient_id: string }) =>
+      args.p_recipient_id === 'user-3' ? { status: 'refused', reason: 'not_following' } : { status: 'ok' };
+
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Bo, @bo');
+    await fireEvent.changeText(view.getByTestId('recommend-note'), 'Watch it.');
+    await sendNow(view);
+
+    await waitFor(() => expect(view.getByText(/Could not send to Bo/)).toBeTruthy());
+    expect(view.getByTestId('recommend-note').props.value).toBe('Watch it.');
+  });
+});

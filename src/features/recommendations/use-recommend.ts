@@ -190,11 +190,33 @@ const REFUSALS: Record<string, string> = {
 };
 
 /**
+ * The longest note a recommendation may carry (20260929000100). The server's check and
+ * its 22023 say the same number; this one is for the field's `maxLength` and counter.
+ */
+export const NOTE_MAX = 140;
+
+/**
+ * A note as the server will store it: trimmed, every whitespace run one space, and
+ * `null` when nothing is left. The same normalisation `_recommendation_message` applies,
+ * so the client's "is there a note" and the server's always agree.
+ */
+export const normaliseNote = (note: string | null | undefined): string | null => {
+  const normalised = (note ?? '').replace(/\s+/g, ' ').trim();
+  return normalised.length > 0 ? normalised : null;
+};
+
+/**
  * Sending one.
  *
- * One recipient per call, which is the V1 shape: no multi-select, no send-to-all, no
- * message. Refusals arrive in the body and errors arrive as codes, and both become
+ * One recipient per call. The sheet sends to several people by making several of these,
+ * each under its own held operation id — multi-select is a UI over N recommendations, not
+ * a broadcast. Refusals arrive in the body and errors arrive as codes, and both become
  * sentences here rather than reaching the sheet as either.
+ *
+ * **A send without a note calls the three-argument `recommend_title`, exactly as every
+ * build before the note did** (20260929000100). Only a send that carries one uses the
+ * four-argument form. So the common path is byte-for-byte what already shipped, including
+ * against a backend one migration behind this build.
  */
 export function useRecommendTitle(viewerId: string) {
   const queryClient = useQueryClient();
@@ -219,16 +241,30 @@ export function useRecommendTitle(viewerId: string) {
       operationId,
       recipientId,
       mediaItemId,
+      note,
     }: {
       operationId: string;
       recipientId: string;
       mediaItemId: string;
+      /** Optional. Normalised here; an empty one is no note at all. */
+      note?: string | null;
     }): Promise<SendResult> => {
-      const { data, error } = await supabase.rpc('recommend_title', {
-        p_operation_id: operationId,
-        p_recipient_id: recipientId,
-        p_media_item_id: mediaItemId,
-      });
+      const message = normaliseNote(note);
+      const { data, error } = await supabase.rpc(
+        'recommend_title',
+        message
+          ? {
+              p_operation_id: operationId,
+              p_recipient_id: recipientId,
+              p_media_item_id: mediaItemId,
+              p_message: message,
+            }
+          : {
+              p_operation_id: operationId,
+              p_recipient_id: recipientId,
+              p_media_item_id: mediaItemId,
+            },
+      );
 
       if (error) {
         // A rate limit and an `assert_can_write` are both refusals this app raises on
@@ -245,6 +281,14 @@ export function useRecommendTitle(viewerId: string) {
           // recipient comes back in the body instead.
           case '42501':
             return { ok: false, message: 'Your account cannot make changes right now.' };
+          // The note's own refusal (20260929000100), raised before the claim: nothing
+          // was sent and no quota was spent. The field caps at the same number, so this
+          // is a client that let something through, and the sentence says what to fix.
+          case '22023':
+            return {
+              ok: false,
+              message: `A note can be up to ${NOTE_MAX} characters, on one line.`,
+            };
           default:
             return { ok: false, message: diagnose(error) ?? error.message, changed };
         }

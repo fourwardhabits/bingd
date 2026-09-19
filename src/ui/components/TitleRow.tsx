@@ -14,6 +14,12 @@ export type TitleRowProps = {
   size?: 'row' | 'xs' | 'sm';
   secondary?: ReactNode;
   tertiary?: ReactNode;
+  /**
+   * How many lines a string `tertiary` may wrap to before truncating. One by default;
+   * the Sent to you row gives a sender's note two (20260929000100). Kept a string rather
+   * than handed in as an element so it stays in the row's accessibility label.
+   */
+  tertiaryLines?: number;
   leading?: ReactNode;
   trailing?: ReactNode;
   pending?: boolean;
@@ -56,6 +62,7 @@ export function TitleRow({
   size = 'row',
   secondary,
   tertiary,
+  tertiaryLines = 1,
   leading,
   trailing,
   pending = false,
@@ -95,7 +102,7 @@ export function TitleRow({
           secondary
         )}
         {typeof tertiary === 'string' ? (
-          <Text variant="footnote" tone="tertiary" numberOfLines={1}>
+          <Text variant="footnote" tone="tertiary" numberOfLines={tertiaryLines}>
             {tertiary}
           </Text>
         ) : (
