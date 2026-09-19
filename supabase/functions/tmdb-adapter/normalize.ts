@@ -1251,3 +1251,146 @@ export function wantsExactRecovery(
     return words.every((word) => titleWords.has(word));
   });
 }
+
+// ---------------------------------------------------------------------------
+// Release awareness (20260930000100)
+//
+// What `release_observe` accepts: the release facts of one film or one series, read at
+// one moment. Pure, like everything else here. The SQL owns every decision (what a
+// release is, when it is fresh, what changed); these functions only say what TMDB said,
+// in one shape, with nothing dropped that the decision needs.
+// ---------------------------------------------------------------------------
+
+/**
+ * The regions whose film release dates are kept. v1 is US only: the founder's decision
+ * is "watchlisted-film US theatrical release", and the observation still carries a
+ * region field so a second market is a list entry, not a new shape.
+ */
+export const RELEASE_REGIONS: readonly string[] = ['US'];
+
+/**
+ * One region's release events, earliest date per kind, as `YYYY-MM-DD`.
+ *
+ * TMDB's types: 1 Premiere, 2 Theatrical (limited), 3 Theatrical, 4 Digital,
+ * 5 Physical, 6 TV. Only type 3 ever makes a theatrical release in bingd (a two-city
+ * limited run is not "in theaters" to anybody outside the two cities); the rest are kept
+ * because they are what the detail call already fetched, and a later "rent it now" or
+ * streaming tranche reads `digital` without a new request.
+ */
+export type RegionalRelease = {
+  region: string;
+  premiere: string | null;
+  limited: string | null;
+  theatrical: string | null;
+  digital: string | null;
+};
+
+const RELEASE_TYPE_FIELD: Record<number, keyof Omit<RegionalRelease, 'region'>> = {
+  1: 'premiere',
+  2: 'limited',
+  3: 'theatrical',
+  4: 'digital',
+};
+
+/**
+ * A TMDB release timestamp's date. They arrive as `2031-05-16T00:00:00.000Z`, where the
+ * time is not a time (it is always midnight UTC) and the date is the local release date,
+ * so the date part is the whole fact. Anything that does not start with a date is nothing.
+ */
+const releaseDay = (value: string | null | undefined): string | null => {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value ?? '');
+  return match ? match[1] : null;
+};
+
+export function regionalReleases(
+  releases: TmdbReleaseDates | undefined,
+  regions: readonly string[] = RELEASE_REGIONS,
+): RegionalRelease[] {
+  return regions.map((region) => {
+    const out: RegionalRelease = { region, premiere: null, limited: null, theatrical: null, digital: null };
+    const entry = (releases?.results ?? []).find((result) => result?.iso_3166_1 === region);
+    for (const release of entry?.release_dates ?? []) {
+      const field = typeof release?.type === 'number' ? RELEASE_TYPE_FIELD[release.type] : undefined;
+      const day = releaseDay(release?.release_date);
+      if (!field || !day) continue;
+      const held = out[field];
+      if (!held || day < held) out[field] = day;
+    }
+    return out;
+  });
+}
+
+export type SeriesReleaseObservation = {
+  media_item_id: string;
+  kind: 'series';
+  status: string | null;
+  in_production: boolean | null;
+  read_at: string;
+  seasons: { season_number: number; air_date: string | null }[];
+  next_episode: { season_number: number | null; episode_number: number | null; air_date: string | null } | null;
+};
+
+export type MovieReleaseObservation = {
+  media_item_id: string;
+  kind: 'movie';
+  status: string | null;
+  primary_date: string | null;
+  read_at: string;
+  regions: RegionalRelease[];
+};
+
+export type ReleaseObservation = SeriesReleaseObservation | MovieReleaseObservation;
+
+/**
+ * A series' release facts: its status and every normal season's premiere date.
+ *
+ * A season's premiere is its own `air_date` in the series list — the air date of its
+ * first episode — and that is the only date the SQL reads. Season 0 (Specials) and a
+ * season with no usable number are left out here as well as there. A null `air_date` is
+ * kept and is meaningful: it is how a date TMDB has taken back becomes TBD again.
+ */
+export function seriesReleaseObservation(
+  mediaItemId: string,
+  detail: TmdbSeriesDetail,
+  readAt: string,
+): SeriesReleaseObservation {
+  const next = detail.next_episode_to_air;
+  return {
+    media_item_id: mediaItemId,
+    kind: 'series',
+    status: textOrNull(detail.status ?? null),
+    in_production: typeof detail.in_production === 'boolean' ? detail.in_production : null,
+    read_at: readAt,
+    seasons: (detail.seasons ?? [])
+      .filter((season) => Number.isSafeInteger(season?.season_number) && season.season_number > 0)
+      .map((season) => ({ season_number: season.season_number, air_date: dateOrNull(season.air_date) })),
+    next_episode: next
+      ? {
+          season_number: typeof next.season_number === 'number' ? next.season_number : null,
+          episode_number: typeof next.episode_number === 'number' ? next.episode_number : null,
+          air_date: dateOrNull(next.air_date),
+        }
+      : null,
+  };
+}
+
+/**
+ * A film's release facts: its status, its primary date for reference, and the release
+ * events of each kept region. The SQL makes a theatrical release out of the US type-3
+ * date and nothing else.
+ */
+export function movieReleaseObservation(
+  mediaItemId: string,
+  detail: TmdbMovieDetail,
+  readAt: string,
+  regions: readonly string[] = RELEASE_REGIONS,
+): MovieReleaseObservation {
+  return {
+    media_item_id: mediaItemId,
+    kind: 'movie',
+    status: textOrNull(detail.status ?? null),
+    primary_date: dateOrNull(detail.release_date),
+    read_at: readAt,
+    regions: regionalReleases(detail.release_dates, regions),
+  };
+}

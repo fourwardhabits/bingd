@@ -1,7 +1,7 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Eleven actions, split by who may call them:
+ * Twelve actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
@@ -38,6 +38,15 @@
  *             service_role     Walks season_hydration_due behind a cursor, re-reading
  *                              each series' whole season list. The scoped backfill for
  *                              the counts a stale deployment never wrote.
+ *   release-refresh
+ *             service_role     Re-reads the named release subjects (films and series
+ *                              somebody explicitly cares about) and hands each read to
+ *                              release_observe. Posted by the pg_cron release tick
+ *                              (20260930000100). Notifies nobody.
+ *
+ * `detail` also offers its film and series reads to release_observe, which ignores any
+ * title release awareness is not tracking. Best-effort: a failure there is logged and
+ * never reaches the screen that asked for the detail.
  *
  * Errors use the BGnnn vocabulary from api.md §8 so the client can respond to a
  * class of failure rather than parse a message.
@@ -53,6 +62,8 @@ import {
   claimFacet,
   claimPerson,
   noteRequest,
+  observeRelease,
+  observeReleaseFailure,
   putFacet,
   putList,
   putPeopleIndex,
@@ -79,13 +90,16 @@ import {
   fromSearchResult,
   fromSeasonDetail,
   fromSeriesDetail,
+  movieReleaseObservation,
   personCredits,
   personRecord,
   seasonTarget,
   seasonsOf,
+  seriesReleaseObservation,
   watchAvailability,
   type CastSearchResult,
   type Episode,
+  type ReleaseObservation,
   type TitleRow,
   type WatchAvailability,
 } from './normalize.ts';
@@ -659,18 +673,106 @@ async function enrichOne(
 
   if (row.kind === 'movie') {
     const detail = await tmdb.movieDetail(row.tmdb_id, charge);
+    const readAt = new Date().toISOString();
     await upsertTitles(db, [fromMovieDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
     if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
+    await offerRelease(db, movieReleaseObservation(row.id, detail, readAt));
     return { enriched: true };
   }
 
   const detail = await tmdb.seriesDetail(row.tmdb_id, charge);
+  const readAt = new Date().toISOString();
   const [stored] = await upsertTitles(db, [fromSeriesDetail(detail)]);
   if (stored) await upsertSeasons(db, stored.id, seasonsOf(detail));
   if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
   if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
+  await offerRelease(db, seriesReleaseObservation(row.id, detail, readAt));
   return { enriched: true };
+}
+
+/**
+ * Offers a read the detail path already made to release awareness, which keeps it only
+ * for a title it is tracking. **Best-effort, and never the screen's problem:** a detail
+ * page must not fail because a release observation did. The scheduled refresh is the
+ * mechanism; this only means a title opened on its release day is confirmed by the read
+ * that opened it rather than waiting for the next tick.
+ */
+async function offerRelease(db: Db, observation: ReleaseObservation) {
+  try {
+    await observeRelease(db, observation);
+  } catch (cause) {
+    console.warn('tmdb-adapter release observe failed', (cause as Error).message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// release-refresh
+// ---------------------------------------------------------------------------
+
+/** One tick's ceiling. The SQL posts at most `release.refresh_batch` (40). */
+const MAX_RELEASE_BATCH = 100;
+
+/**
+ * Four at a time rather than `BATCH_CONCURRENCY`: this runs every hour on a schedule, and
+ * there is no screen waiting for it.
+ */
+const RELEASE_CONCURRENCY = 4;
+
+/**
+ * Reads one release subject and hands the read to `release_observe`. The catalogue write
+ * comes first, so a season TMDB has just announced exists as a row before the observation
+ * names it. Anything that goes wrong is recorded against the subject, which backs it off;
+ * a failed read never touches release state.
+ */
+async function releaseRefreshOne(db: Db, id: string): Promise<'observed' | 'skipped' | 'failed'> {
+  try {
+    const row = await catalogueRow(db, id);
+    if (!row || (row.kind !== 'movie' && row.kind !== 'series')) return 'skipped';
+    if (!row.tmdb_id || row.tmdb_id <= 0) {
+      await observeReleaseFailure(db, id, 'no_tmdb_id');
+      return 'failed';
+    }
+
+    if (row.kind === 'movie') {
+      const detail = await tmdb.movieReleaseDetail(row.tmdb_id);
+      const readAt = new Date().toISOString();
+      await upsertTitles(db, [fromMovieDetail(detail)]);
+      await observeRelease(db, movieReleaseObservation(row.id, detail, readAt));
+      return 'observed';
+    }
+
+    const detail = await tmdb.seriesReleaseDetail(row.tmdb_id);
+    const readAt = new Date().toISOString();
+    const [stored] = await upsertTitles(db, [fromSeriesDetail(detail)]);
+    if (stored) await upsertSeasons(db, stored.id, seasonsOf(detail));
+    await observeRelease(db, seriesReleaseObservation(row.id, detail, readAt));
+    return 'observed';
+  } catch (cause) {
+    const message = cause instanceof tmdb.TmdbError
+      ? `TMDB ${cause.status}`
+      : (cause as Error).message ?? 'unknown';
+    try {
+      await observeReleaseFailure(db, id, message);
+    } catch (inner) {
+      console.error('tmdb-adapter release failure not recorded', (inner as Error).message);
+    }
+    return 'failed';
+  }
+}
+
+async function releaseRefreshBatch(db: Db, ids: string[]) {
+  const counts = { observed: 0, skipped: 0, failed: 0 };
+  const queue = [...ids];
+  const workers = Array.from({ length: Math.min(RELEASE_CONCURRENCY, queue.length) }, async () => {
+    for (;;) {
+      const id = queue.shift();
+      if (!id) return;
+      counts[await releaseRefreshOne(db, id)] += 1;
+    }
+  });
+  await Promise.all(workers);
+  return counts;
 }
 
 // ---------------------------------------------------------------------------
@@ -1081,6 +1183,16 @@ Deno.serve(async (req) => {
       // `remaining` over it could never reach zero. The caller carries `after`, the last
       // id of the previous page, and the pass is finished when a page comes back short.
       // `next` is what to send back; null means the walk is done.
+      // Release awareness (20260930000100). service_role only, like the three below, and
+      // always a named list: the pg_cron tick decides what is due, so there is no "drain
+      // everything" form, and a missing or malformed `ids` reads nothing.
+      case 'release-refresh': {
+        if (caller.kind !== 'service') return fail('BG403', 'release-refresh requires service role', 403);
+        const ids = idList(body.ids, MAX_RELEASE_BATCH) ?? [];
+        const result = await releaseRefreshBatch(db, ids);
+        return json({ action, attempted: ids.length, ...result });
+      }
+
       case 'enrich':
       case 'refresh':
       case 'hydrate-seasons': {

@@ -19,6 +19,7 @@ import goalCompletion from './races/goal-completion.mjs';
 import commentMention from './races/comment-mention.mjs';
 import seriesWatchlist from './races/series-watchlist.mjs';
 import welcomeEmail from './races/welcome-email.mjs';
+import releaseAwareness from './races/release-awareness.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -58,4 +59,5 @@ goalCompletion();
 commentMention();
 seriesWatchlist();
 welcomeEmail();
+releaseAwareness();
 stress();
