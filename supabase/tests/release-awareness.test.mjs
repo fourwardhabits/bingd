@@ -392,6 +392,88 @@ describe('release state: observation and transitions', () => {
     assert.equal(rows[0].facts.regions[0].limited, RELEASE, 'the US release data is kept, not discarded');
   });
 
+  /**
+   * The founder's revision: a film is announced about a week before it opens, once, and
+   * never on the day. These are the four awkward cases that policy has to survive.
+   */
+  describe('film awareness at T-7', () => {
+    const filmSubject = async (date, title) => {
+      const m = await movie(`${title} ${(seq += 1)}`, date);
+      await track(m, 'movie');
+      return m;
+    };
+
+    it('arms on T-7 and not before, and records the date it counts back from', async () => {
+      const m = await filmSubject(RELEASE, 'On Time');
+      await observeMovie(m, RELEASE, '2031-05-08T23:59:00Z');
+      assert.equal((await event(m)).evaluation, 'none', 'T-8 is not yet the week');
+      await observeMovie(m, RELEASE, '2031-05-09T00:01:00Z');
+      const e = await event(m);
+      assert.equal(e.evaluation, 'pending');
+      assert.equal(e.awareness_on.toISOString().slice(0, 10), '2031-05-09');
+      assert.equal(e.state, 'scheduled');
+      assert.equal((await logFor(e.id)).at(-1).change, 'awareness_due');
+    });
+
+    it('a film met inside the week fires at once, with less notice', async () => {
+      const m = await filmSubject(RELEASE, 'Late Find');
+      await observeMovie(m, RELEASE, '2031-05-14T09:00:00Z'); // two days out
+      assert.equal((await event(m)).evaluation, 'pending');
+    });
+
+    it('a film met on its opening day, or after, is never announced at all', async () => {
+      const onTheDay = await filmSubject(RELEASE, 'Opening Day');
+      await observeMovie(onTheDay, RELEASE, '2031-05-16T09:00:00Z');
+      let e = await event(onTheDay);
+      assert.deepEqual([e.state, e.evaluation], ['released', 'skipped_late']);
+      assert.equal((await logFor(e.id))[0].change, 'released_late');
+
+      const after = await filmSubject(RELEASE, 'Already Out');
+      await observeMovie(after, RELEASE, '2031-05-18T09:00:00Z');
+      e = await event(after);
+      assert.equal(e.evaluation, 'skipped_late', 'a day-of push is exactly what this replaces');
+    });
+
+    it('announced once: a postponement afterwards does not announce it again', async () => {
+      const m = await filmSubject(RELEASE, 'Pushed Back');
+      await observeMovie(m, RELEASE, '2031-05-09T06:00:00Z');
+      assert.equal((await event(m)).evaluation, 'pending');
+      await evaluate('2031-05-09T10:00:00Z');
+      const e = await event(m);
+      assert.equal(e.evaluation, 'done');
+
+      // The studio moves it by a month. The date is recorded; nobody is told twice.
+      await observeMovie(m, '2031-06-20', '2031-05-10T06:00:00Z');
+      assert.equal((await event(m)).evaluation, 'done');
+      await observeMovie(m, '2031-06-20', '2031-06-13T06:00:00Z'); // the new T-7
+      assert.equal((await event(m)).evaluation, 'done', 'one awareness per film release in v1');
+      assert.equal((await t.sql(`select count(*)::int n from release_event_log where release_event_id = $1 and change = 'awareness_due'`, [e.id])).rows[0].n, 1);
+    });
+
+    it('a date pulled inside the week arms on the next read', async () => {
+      const m = await filmSubject('2031-08-01', 'Moved Up');
+      await observeMovie(m, '2031-08-01', '2031-05-09T06:00:00Z');
+      assert.equal((await event(m)).evaluation, 'none');
+      await observeMovie(m, '2031-05-13', '2031-05-09T12:00:00Z'); // now four days out
+      const e = await event(m);
+      assert.equal(e.evaluation, 'pending');
+      assert.equal(e.awareness_on.toISOString().slice(0, 10), '2031-05-06');
+    });
+
+    it('a stale read never arms an awareness, and a date cleared to TBD disarms nothing already sent', async () => {
+      const stale = await filmSubject(RELEASE, 'Stale');
+      await observeMovie(stale, RELEASE, '2031-05-09T12:00:00Z', { readAt: '2031-05-08T23:00:00Z' });
+      assert.equal((await event(stale)).evaluation, 'none', '13h old: not authoritative');
+      await observeMovie(stale, RELEASE, '2031-05-09T12:00:00Z');
+      assert.equal((await event(stale)).evaluation, 'pending');
+
+      const tbd = await filmSubject(RELEASE, 'Back To TBD');
+      await observeMovie(tbd, null, '2031-05-09T06:00:00Z');
+      const e = await event(tbd);
+      assert.deepEqual([e.state, e.evaluation, e.awareness_on], ['announced', 'none', null]);
+    });
+  });
+
   it('a failed read backs off 1h, 3h, 12h, 24h and never touches release state', async () => {
     const show = await series('Flaky', { 1: '2030-01-01', 2: null });
     await track(show.id, 'series');
@@ -653,19 +735,30 @@ describe('shadow evaluation: eligibility', () => {
     assert.equal(dupes.rows.length, 0);
   });
 
-  it('watchlisted films: US region match may push, unknown region is inbox only, another region is skipped', async () => {
+  it('watchlisted films: the awareness is a week before it opens, and region decides who may be pushed', async () => {
     const film = await movie('Opening Night', RELEASE);
     const us = await user('k_us');
     const unknown = await user('l_unknown', { region: null });
     const gb = await user('m_gb', { region: 'GB' });
     for (const x of [us, unknown, gb]) await watchlist(x, film);
     await track(film, 'movie');
-    await observeMovie(film, RELEASE, '2031-05-16T08:00:00Z');
+
+    // T-8: the week has not started, so there is nothing to say yet.
+    await observeMovie(film, RELEASE, '2031-05-08T12:00:00Z');
+    assert.equal((await event(film)).evaluation, 'none');
+    assert.equal((await event(film)).awareness_on.toISOString().slice(0, 10), '2031-05-09');
+
+    // T-7.
+    await observeMovie(film, RELEASE, '2031-05-09T06:00:00Z');
     const fe = await event(film);
-    await evaluate('2031-05-16T08:05:00Z');
+    assert.equal(fe.evaluation, 'pending');
+    assert.equal(fe.state, 'scheduled', 'the film has not opened yet');
+    await evaluate('2031-05-09T06:05:00Z');
 
     const r = Object.fromEntries((await ledger(fe.id)).map((x) => [x.user_id, x]));
     assert.deepEqual([r[us].tier, r[us].region_status, r[us].outcome], ['watchlist', 'match', 'pending']);
+    assert.equal(r[us].days_to_release, 7);
+    assert.equal(r[us].timing, 'theatrical_t7');
     assert.deepEqual([r[unknown].region_status, r[unknown].outcome, r[unknown].reason], ['unknown', 'inbox_only', 'region_unknown']);
     assert.deepEqual([r[gb].region_status, r[gb].outcome, r[gb].reason], ['mismatch', 'skipped', 'region_mismatch']);
   });
@@ -700,104 +793,128 @@ describe('shadow evaluation: window, cap and priority', () => {
     return event(s.seasons[2]);
   }
 
+  /** A watchlisted film whose US wide release is `date`, observed at `observedAt`. */
+  async function filmFor(v, date, observedAt, title = 'Film') {
+    const m = await movie(`${title} ${(seq += 1)}`, date);
+    await watchlist(v, m);
+    await track(m, 'movie');
+    await observeMovie(m, date, observedAt);
+    return event(m);
+  }
+
   it('10:00-20:00 in the account’s own zone, across a DST change', async () => {
     // 2031-03-09 is the US spring-forward Sunday: 10:00 PDT is 17:00 UTC, not 18:00.
     const v = await user('o_la', { timezone: 'America/Los_Angeles' });
     const pe = await premiereFor(v, '2031-03-09', '2031-03-09T08:00:00Z');
     await evaluate('2031-03-09T16:59:00Z');
-    assert.equal((await rowFor(v, pe.id)).last_block_reason, 'quiet_window', '09:59 PDT');
+    const waiting = await rowFor(v, pe.id);
+    assert.equal(waiting.outcome, 'pending', '09:59 PDT');
+    assert.equal(waiting.last_block_reason, 'quiet_window');
+    assert.equal(waiting.plan_at.toISOString(), at('2031-03-09T17:00:00Z'), 'planned for 10:00 PDT');
     await evaluate('2031-03-09T17:00:00Z');
     const row = await rowFor(v, pe.id);
     assert.equal(row.outcome, 'would_push', '10:00 PDT');
     assert.equal(row.reason, 'would_send');
   });
 
-  it('20:00 local is closed', async () => {
+  it('past 20:00 local the plan moves to the next morning rather than waking anybody', async () => {
     const v = await user('p_kolkata', { timezone: 'Asia/Kolkata' });
-    const pe = await premiereFor(v, RELEASE, '2031-05-16T08:00:00Z');
-    await evaluate('2031-05-16T14:30:00Z'); // 20:00 IST
-    assert.equal((await rowFor(v, pe.id)).last_block_reason, 'quiet_window');
-    await evaluate('2031-05-16T14:29:00Z'); // 19:59 IST
-    assert.equal((await rowFor(v, pe.id)).outcome, 'would_push');
+    const pe = await premiereFor(v, RELEASE, '2031-05-16T14:30:00Z'); // 20:00 IST
+    await evaluate('2031-05-16T14:31:00Z');
+    const row = await rowFor(v, pe.id);
+    assert.equal(row.outcome, 'pending');
+    assert.equal(row.plan_at.toISOString(), at('2031-05-17T04:30:00Z'), '10:00 IST the next day');
   });
 
-  it('never before the date has begun locally, nor before it begins in Los Angeles for a premiere', async () => {
-    const kol = await user('q_kolkata', { timezone: 'Asia/Kolkata' });
-    const pe = await premiereFor(kol, RELEASE, '2031-05-15T11:00:00Z');
-    await evaluate('2031-05-15T11:00:00Z'); // 16:30 IST on the 15th: open window, wrong day
-    assert.equal((await rowFor(kol, pe.id)).last_block_reason, 'before_local_release');
-
+  it('a premiere is never announced before its date has begun in Los Angeles', async () => {
     const akl = await user('r_auckland', { timezone: 'Pacific/Auckland' });
     const pa = await premiereFor(akl, RELEASE, '2031-05-15T23:00:00Z');
-    await evaluate('2031-05-15T23:00:00Z'); // 11:00 NZST on the 16th, but the 15th in LA
-    assert.equal((await rowFor(akl, pa.id)).last_block_reason, 'before_local_release');
-    await evaluate('2031-05-16T07:00:00Z'); // 19:00 NZST, 00:00 PDT on the 16th
+    await evaluate('2031-05-15T23:00:00Z'); // 11:00 NZST on the 16th, still the 15th in LA
+    const row = await rowFor(akl, pa.id);
+    assert.equal(row.outcome, 'pending');
+    assert.equal(row.plan_at.toISOString(), at('2031-05-16T07:00:00Z'), '00:00 PDT, inside the NZ window');
+    await evaluate('2031-05-16T07:00:00Z');
     assert.equal((await rowFor(akl, pa.id)).outcome, 'would_push');
   });
 
-  it('2 per rolling 7 days, 36 hours apart, and the third waits for the week to roll', async () => {
-    await t.sql(`update app_config set value = '400' where key = 'release.push_expiry_hours'`);
-    try {
-      const v = await user('s_binger', { timezone: 'UTC' });
-      const a = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'A');
-      const b = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'B');
-      const c = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'C');
-      const outcome = async () =>
-        Promise.all([a, b, c].map(async (x) => (await rowFor(v, x.id)).outcome));
+  it('a film plans for its T-7 window, and records what a day-of push would have been', async () => {
+    const v = await user('w_film', { timezone: 'UTC' });
+    const fe = await filmFor(v, RELEASE, '2031-05-09T06:00:00Z');
+    await evaluate('2031-05-09T06:05:00Z');
+    let row = await rowFor(v, fe.id);
+    assert.equal(row.outcome, 'pending');
+    assert.equal(row.plan_at.toISOString(), at('2031-05-09T10:00:00Z'), 'T-7 at 10:00 local');
+    assert.equal(row.alt_timing, 'theatrical_day_of');
+    assert.equal(row.alt_plan_at.toISOString(), at('2031-05-16T10:00:00Z'), 'what the day-of policy would have done');
+    await evaluate('2031-05-09T10:00:00Z');
+    row = await rowFor(v, fe.id);
+    assert.equal(row.outcome, 'would_push');
+    assert.equal(row.days_to_release, 7);
+  });
 
-      await evaluate('2031-05-16T10:00:00Z');
-      assert.deepEqual((await outcome()).filter((o) => o === 'would_push').length, 1);
-      const losers = (await t.sql(`select last_block_reason from release_shadow_ledger where user_id = $1 and outcome = 'pending'`, [v])).rows;
-      assert.deepEqual(losers.map((r) => r.last_block_reason), ['lost_to_priority', 'lost_to_priority']);
+  it('a season records the day-before alternative beside the morning it actually plans', async () => {
+    const v = await user('x_alt', { timezone: 'UTC' });
+    const pe = await premiereFor(v, RELEASE, '2031-05-16T08:00:00Z');
+    await evaluate('2031-05-16T10:00:00Z');
+    const row = await rowFor(v, pe.id);
+    assert.equal(row.timing, 'season_release_morning');
+    assert.equal(row.alt_timing, 'season_day_before');
+    assert.equal(row.plan_at.toISOString(), at('2031-05-16T10:00:00Z'));
+    assert.equal(row.alt_plan_at.toISOString(), at('2031-05-15T10:00:00Z'), '24h earlier, for comparison only');
+    assert.equal(row.days_to_release, 0);
+  });
 
-      await evaluate('2031-05-17T10:00:00Z'); // 24h later
-      assert.equal((await outcome()).filter((o) => o === 'would_push').length, 1);
-      assert.equal(
-        (await t.sql(`select distinct last_block_reason r from release_shadow_ledger where user_id = $1 and outcome = 'pending'`, [v])).rows[0].r,
-        'cap_spacing',
-      );
+  /**
+   * The founder's revision: explicit interest is no longer capped. Every eligible release
+   * is marked would_push, and the former rules are only replayed and recorded.
+   */
+  it('three releases in one day all go, and the former cap is recorded against two of them', async () => {
+    const v = await user('s_binger', { timezone: 'UTC' });
+    const a = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'A');
+    const b = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'B');
+    const c = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'C');
+    await evaluate('2031-05-16T10:00:00Z');
 
-      await evaluate('2031-05-17T21:59:00Z'); // 35h59m: spacing (and the window) still closed
-      await evaluate('2031-05-18T10:00:00Z'); // 48h: second push
-      assert.equal((await outcome()).filter((o) => o === 'would_push').length, 2);
+    const rows = await Promise.all([a, b, c].map((x) => rowFor(v, x.id)));
+    assert.deepEqual(rows.map((r) => r.outcome), ['would_push', 'would_push', 'would_push'], 'nothing is discarded');
+    assert.equal(rows.filter((r) => r.cap_would_suppress === false).length, 1, 'the former cap would have sent one');
+    assert.deepEqual(
+      rows.filter((r) => r.cap_would_suppress).map((r) => r.cap_reason),
+      ['lost_to_priority', 'lost_to_priority'],
+    );
+  });
 
-      await evaluate('2031-05-20T10:00:00Z');
-      assert.equal(
-        (await t.sql(`select last_block_reason r from release_shadow_ledger where user_id = $1 and outcome = 'pending'`, [v])).rows[0].r,
-        'global_cap',
-      );
-
-      await evaluate('2031-05-23T10:00:01Z'); // the first has rolled out of the 7 days
-      assert.equal((await outcome()).filter((o) => o === 'would_push').length, 3);
-    } finally {
-      await t.sql(`update app_config set value = '48' where key = 'release.push_expiry_hours'`);
+  it('the counterfactual replays 2 per 7 days and the 36 hour gap over the uncapped stream', async () => {
+    const v = await user('y_replay', { timezone: 'UTC' });
+    const days = ['2031-05-16', '2031-05-17', '2031-05-18', '2031-05-19'];
+    const events = [];
+    // A day at a time, in order: each premiere is observed on its morning and evaluated
+    // that day, which is what the ticks do.
+    for (const d of days) {
+      events.push(await premiereFor(v, d, `${d}T08:00:00Z`, `Rep${d}`));
+      await evaluate(`${d}T10:00:00Z`);
     }
+
+    const rows = await Promise.all(events.map((e) => rowFor(v, e.id)));
+    assert.deepEqual(rows.map((r) => r.outcome), Array(4).fill('would_push'), 'all four are eligible');
+    assert.deepEqual(rows.map((r) => r.cap_reason), [
+      null,           // day 1: the former rules would have sent it
+      'cap_spacing',  // day 2: 24h later, inside the 36h gap
+      null,           // day 3: 48h after the last counterfactual send
+      'global_cap',   // day 4: two already sent inside the rolling week
+    ]);
   });
 
-  it('a candidate the cap never frees settles inbox_only with the reason: push is delivery, the event stands', async () => {
-    const v = await user('t_capped', { timezone: 'UTC' });
-    const a = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'Win');
-    const b = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z', 'Lose');
+  it('an inbox-only row carries no cap verdict: the cap was only ever about pushes', async () => {
+    const v = await user('z_behind', { timezone: 'UTC' });
+    const s = await series(`Behind Cap ${(seq += 1)}`, { 1: '2029-01-01', 2: '2030-01-01', 3: null });
+    await watched(v, s.seasons[1]); // behind: never watched Season 2
+    await track(s.id, 'series');
+    await observeSeries(s.id, { 1: '2029-01-01', 2: '2030-01-01', 3: RELEASE }, '2031-05-16T08:00:00Z');
     await evaluate('2031-05-16T10:00:00Z');
-    await evaluate('2031-05-17T10:00:00Z');
-    await evaluate('2031-05-18T10:00:00Z'); // 48h after the fan-out (the first evaluation): expired
-    const rows = [await rowFor(v, a.id), await rowFor(v, b.id)];
-    const lost = rows.find((r) => r.outcome !== 'would_push');
-    assert.equal(lost.outcome, 'inbox_only');
-    assert.equal(lost.reason, 'cap_spacing');
-  });
-
-  it('priority is explicit: a caught-up premiere beats a watchlisted film, then the more recent release', async () => {
-    const v = await user('u_both', { timezone: 'UTC' });
-    const film = await movie('Same Day Film', '2031-05-16');
-    await watchlist(v, film);
-    await track(film, 'movie');
-    await observeMovie(film, '2031-05-16', '2031-05-16T08:00:00Z');
-    const fe = await event(film);
-    const pe = await premiereFor(v, '2031-05-16', '2031-05-16T08:00:00Z');
-    await evaluate('2031-05-16T10:00:00Z');
-    assert.equal((await rowFor(v, pe.id)).outcome, 'would_push');
-    assert.equal((await rowFor(v, fe.id)).last_block_reason, 'lost_to_priority');
+    const row = await rowFor(v, (await event(s.seasons[3])).id);
+    assert.deepEqual([row.outcome, row.reason], ['inbox_only', 'behind_tier']);
+    assert.equal(row.cap_would_suppress, null);
   });
 
   it('a timezone that disappears is never guessed', async () => {
@@ -860,7 +977,11 @@ describe('the kill switch: nothing in this tranche can send', () => {
     for (const { proname, prosrc } of rows) {
       assert.doesNotMatch(prosrc, /(insert\s+into|update|delete\s+from)\s+(public\.)?(notifications|push_outbox)\b/i, proname);
     }
-    for (const file of ['20260930000100_a_release_you_can_see_coming.sql', '20260930000200_a_release_decided_in_the_dark.sql']) {
+    for (const file of [
+      '20260930000100_a_release_you_can_see_coming.sql',
+      '20260930000200_a_release_decided_in_the_dark.sql',
+      '20260930000300_a_week_before_it_opens.sql',
+    ]) {
       // Code only: the headers explain these tables by name, which is the point of them.
       const sql = (await readFile(join(here, '..', 'migrations', file), 'utf8')).replace(/--.*$/gm, '');
       assert.doesNotMatch(sql, /(insert\s+into|update|delete\s+from)\s+(public\.)?(notifications|push_outbox)\b/i, file);

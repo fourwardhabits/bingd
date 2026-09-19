@@ -25,7 +25,23 @@ as the reasoning, and where it proposed something different it is marked **super
 | 4 | **Kill switch**: real send **OFF**, shadow evaluation **ON**. The first production deployment must be **incapable** of sending a proactive push, even when it detects a release. Real sending needs a later explicit founder approval after the shadow review. | Structural, not just a setting: no release function writes `notifications` or `push_outbox`, and neither release type is in `_push_eligible`. `release.push_enabled = false` is recorded on every decision and acted on by nothing. Tests prove both. |
 | 5 | **Send window 10:00–20:00** in the account's local time. **Unknown timezone** → the in-app event may be recorded, **no proactive push**. Never guess a timezone from server location. | `account_context.timezone` (IANA, validated) from the device. Missing → `inbox_only / no_timezone`. |
 
-**Migration range reserved:** `20260930000100` onward. Existing migrations are never edited.
+### Review of the shadow policy, 2026-09-19. ALSO AUTHORITATIVE
+
+Made after reading the first shadow implementation. These override decisions 1 to 5 where
+they disagree, and they are implemented in `20260930000300`.
+
+| # | Decision | What it means in the build |
+|---|---|---|
+| 6 | **A film is announced about a week before it opens, not on the day.** T-7 gives a reader time to make a plan or buy a ticket. **One awareness event per film release**, and no second day-of notification. | `release.movie_lead_days` = 7. The event arms while it is still `scheduled`. A film first seen inside the week fires at once with less notice; one first seen on or after its opening day never fires (`skipped_late`). |
+| 7 | **A season stays on release morning**, and T-7 is not copied to it for consistency. The day-before alternative is measured rather than argued. | Every row records `plan_at` (the policy in force) and `alt_plan_at` (the alternative), so the comparison is data. Recommendation and reasoning in [§T](#t-season-timing-the-recommendation). |
+| 8 | **The cap no longer suppresses anything.** A release somebody explicitly asked for is not discarded because another arrived first. | The shadow records both: the **uncapped** result (`outcome`) and what the former 2-per-7-days and 36-hour rules **would** have suppressed (`cap_would_suppress`, `cap_reason`). Evidence before any cap decision. |
+| 9 | **Streaming is off the active roadmap**: no streaming-availability notification and no "Streaming now" Watchlist filter. Where to Watch stays as the downstream utility. | Nothing is built, and `notifications.md` records the removal rather than leaving it as a deferred idea somebody picks up. |
+| 10 | **No theater-chain claims.** Never say AMC, Regal, Cinemark or a local cinema is showing a film on the strength of a TMDB release date. Showtimes and ticketing need a real provider, which is deferred. | Copy says the film opens, never where. No new data source in this tranche. |
+| 11 | **Copy rules**: no em dash, short, natural, no marketing voice, project humanizer standard. | [§G1](#g1-copy). |
+
+**Migration range reserved:** `20260930000100` onward. Existing migrations are never edited:
+`20260930000100` and `20260930000200` have run on staging, so the review lands as
+`20260930000300`.
 
 ---
 
@@ -36,13 +52,13 @@ as the reasoning, and where it proposed something different it is marked **super
 | # | Event | Who | Why v1 |
 |---|---|---|---|
 | A | **New season premiere** (`season_premiere`) | Has watched or ranked an earlier normal season of the series, or saved the series or that season | Highest-signal event the product can know. The interest is already recorded in `rankings` / `user_media`, so nobody has to opt in. |
-| B | **Watchlist movie in theaters** (`theatrical_release`) | The movie is on their Watchlist, and their device region has a TMDB wide-theatrical date | It uses the same pipeline. The TMDB request that detail already makes returns the data, so it costs no extra requests. Volume is low: 6 watchlisted movies in production have a future date today. |
+| B | **Watchlist movie opening in theaters** (`theatrical_release`, fires at **T-7**) | The movie is on their Watchlist, and their device region has a TMDB wide-theatrical date | It uses the same pipeline. The TMDB request that detail already makes returns the data, so it costs no extra requests. Volume is low: 6 watchlisted movies in production have a future date today. |
 
 **Defer:**
 
 | # | Event | Why not v1 |
 |---|---|---|
-| C | Watchlist movie **streaming** | You need a stored snapshot of availability to spot a *change*, and none exists: `watch-providers` is read live and never stored. The JustWatch data flaps, so you'd also need a stability rule. Attributing JustWatch data on a lock screen is an open terms question. v1 lays the groundwork (region capture, per-region events, the `digital_date` field), so C becomes an add-on and not a redesign. |
+| C | Watchlist movie **streaming** | **Removed from the active roadmap** (decision 9), not merely deferred. Where to Watch stays as the downstream utility, and there is no "Streaming now" filter. The mechanics that made it hard are unchanged and recorded in `notifications.md`: availability is read live and never stored, so there is nothing to diff, and the JustWatch data flaps. |
 | — | Announcement or date-change pushes ("Season 3 dated for March") | These are countdown-shaped. v1 shows the date passively on the title page and sends no notification. |
 | — | Passive "Out now for you" shelf | Good follow-up (v1.1). The inbox already covers people without push. |
 
@@ -375,7 +391,18 @@ lists, recommendations received.
 
 ### E2. `theatrical_release` for movie M in region R
 
-**As built (R = US in v1).** Watchlist only, on an active account.
+**As built (R = US in v1), and it fires at T-7, not on the day.** Watchlist only, on an
+active account. The awareness arms while the film is still `scheduled`, seven days before
+its US wide-theatrical date, so there is time to plan. Four cases the policy has to
+survive, all tested:
+
+| Case | Behaviour |
+|---|---|
+| Watchlisted fewer than 7 days before it opens | Fires on the next read, with less notice. `days_to_release` records how much. |
+| Watchlisted on or after opening day | **Never fires** (`skipped_late`). A day-of push is what this replaces. |
+| Date postponed after the awareness went out | No second event, ever. The move is logged; the reader was told the date that was true when it was sent. |
+| Date pulled earlier, inside the week | Fires on the next read. |
+| The read is stale (over 12 hours) | Nothing arms. A film's date is not announced from data that old. |
 
 | Account region | Outcome |
 |---|---|
@@ -411,15 +438,25 @@ turns into marketing.
 where type in ('season_premiere','theatrical_release')`. It's cheap, and `block()` never
 deletes actorless rows.
 
-### F2. The global proactive cap (notifications.md §7, as written)
+### F2. The cap is measured, not applied (decision 8)
 
-- **At most 2 proactive pushes per rolling 7 days** per person, and **at least 36 hours
-  between them**. Read from `proactive_ledger.pushed_at`.
-- Class A (direct social) is exempt and isn't counted.
-- The cap limits **pushes, not inbox rows.** A release that loses to the cap still gets its
-  inbox row. The information isn't lost, only the interruption. This keeps the doctrine's
-  "losers are dropped, not queued": the *push* is dropped, and the fact stays where the
-  reader already looks.
+**Superseded.** The first implementation made "2 proactive pushes per rolling 7 days, 36
+hours apart" a hard rule that discarded valid releases. It no longer suppresses anything:
+
+- **Every eligible release is marked `would_push`** once its local window allows. Explicit
+  interest is not engagement marketing, and dropping the second of two things a reader
+  asked for is not restraint, it is a bug they cannot see.
+- **The former rules are replayed over that same stream** and recorded per row:
+  `cap_would_suppress` with `cap_reason` of `global_cap`, `cap_spacing` or
+  `lost_to_priority`. The replay reads only the rows it let through itself, so it is a
+  faithful counterfactual rather than a count of everything.
+- **So the shadow answers the question**: how often would a cap have bitten, on whom, and
+  for what. If the answer is "rarely, and only for people with many saved titles", a cap
+  is not needed. If somebody would have had nine pushes in a week, the evidence says what
+  to build, which is most likely bundling rather than dropping. See
+  [notifications.md §11](./notifications.md#11-a-hierarchy-for-proactive-notifications).
+- Notifications that are **inbox only** (a behind-tier season, an unknown region) carry no
+  cap verdict at all: the cap was only ever about interruptions.
 
 ### F3. Arbitration (deterministic, no model)
 
@@ -473,16 +510,26 @@ answer is a stricter rule 1 (two reads, 6 hours apart), not a correction push.
 The lock screen already shows "bingd". The push title is the **title's name**, as with
 every title push.
 
-| Event | Push, sent on the release date | Push, sent the next day (still inside the expiry) | Inbox row |
-|---|---|---|---|
-| `season_premiere` | **Severance**<br>Season 3 premieres today. | **Severance**<br>Season 3 is out now. | **New season** · Severance, Season 3<br>*Premieres today* / *Premiered Sep 19* · You watched Season 2 |
-| `theatrical_release` | **Dune: Part Three**<br>In theaters today. It's on your Watchlist. | **Dune: Part Three**<br>Now in theaters. It's on your Watchlist. | **In theaters** · Dune: Part Three<br>*Opened Dec 18* · On your Watchlist |
+| Event | Push | Inbox row |
+|---|---|---|
+| `theatrical_release` (T-7, exactly a week out and a Friday) | **Dune: Part Three**<br>Opens next Friday. You saved it to your Watchlist. | **Opens Dec 18** · Dune: Part Three<br>On your Watchlist |
+| `theatrical_release` (any other day inside the week) | **Dune: Part Three**<br>Opens Friday, Sep 26. You saved it to your Watchlist. | as above |
+| `theatrical_release` (opening tomorrow, a late find) | **Dune: Part Three**<br>Opens tomorrow. You saved it to your Watchlist. | as above |
+| `season_premiere` (release morning) | **Severance**<br>Season 3 premieres today. | **New season** · Severance, Season 3<br>*Premieres today* / *Premiered Sep 19* · You watched Season 2 |
+
+Copy rules (decision 11): **no em dash**, short, natural, no marketing voice. "Opens", not
+"hits theaters". No exclamation marks, no emoji in the push. Nothing about where it is
+playing: the notification says a film opens, never that a named chain is showing it
+(decision 10).
 
 Rules behind the copy:
 
 - **The day, not the hour.** TMDB dates are dates. "Premieres today" is true for a streaming
-  drop at 00:00 PT and for a 9pm broadcast. "Is out now" at 10am isn't true for the
-  broadcast, so it's only used from the next day.
+  drop at 00:00 PT and for a 9pm broadcast. "Is out now" at 10am would not be true for the
+  broadcast, so it is not used at all.
+- **A film's sentence is about a date in the future**, which is the safest thing a release
+  date can be used for: being wrong about next Friday is a correction, being wrong about
+  today is a reader standing outside a cinema.
 - **The inbox renders its date line from `released_on` at render time,** so a row read three
   days later still says something true.
 - **No availability claims.** Never "streaming on Netflix" (§6). Never "in theaters near
@@ -737,6 +784,13 @@ Nothing here builds monetisation. The architecture keeps it possible without rew
   (`normalize.ts` `watchOptionsLink`). A per-service deep link or an affiliate link needs a
   partner agreement (JustWatch, or a ticketing partner), and the product must work with the
   slot empty.
+- **No theater-chain claims, now or by accident later** (decision 10). A TMDB release date
+  says a film opens in a market. It does not say that AMC, Regal, Cinemark or the cinema at
+  the end of somebody's road has it on a screen, and nothing in bingd may imply that it
+  does. Showtimes, seat availability and ticket links need a showtime or ticketing
+  provider, which is a new data source and is deferred. The T-7 event is the right shape
+  for one when it arrives: a film, a date, a region, and a call to action the title page
+  fills in.
 - **Terms to check before any monetised call to action:** whether TMDB's API terms for
   commercial use change bingd's footing, and the JustWatch attribution rule for availability
   data. Neither applies to v1.
@@ -754,6 +808,33 @@ awareness can't send whatever its state.
 
 ---
 
+## T. Season timing: the recommendation
+
+**Recommendation: release morning, and it is what ships in shadow.** The day-before
+alternative is recorded beside every season row (`alt_plan_at`) so the choice can be
+revisited with data rather than reopened as an argument.
+
+Why the morning of:
+
+1. **A season is watchable the moment it is out.** The notification and the action are the
+   same event. A film needs lead time because tickets, a cinema and an evening have to be
+   arranged; a season needs none of that, which is why T-7 is not copied across
+   (decision 7).
+2. **A day early is a reminder about a reminder.** It cannot say "it's out", only "it's out
+   tomorrow", so the reader has to remember to come back. That is the shape of the
+   countdown notification the product refuses to build.
+3. **A day early is a day less certain.** Dates move, and they move latest for shows whose
+   premiere is imminent. Announcing on the morning means the date has already survived to
+   the day it claimed.
+4. **The window already does the useful part.** 10:00 local on release day reaches somebody
+   with the whole evening still ahead of them.
+
+What would change the recommendation: if the shadow shows most premieres landing for
+readers late in their local evening (which `plan_at` records), a day-before notice starts
+to buy something real. `release_timing_comparison` is the view that answers it.
+
+---
+
 ## S. The shadow tranche as built
 
 ### S1. What exists
@@ -765,11 +846,15 @@ awareness can't send whatever its state.
 | Observation | `release_observe(jsonb, timestamptz)`: every transition. `release_observe_failure`: backoff 1h/3h/12h/24h. |
 | Refresh | `_release_reconcile` (explicit interest → subjects), `_release_refresh_tick` (posts due ids to `tmdb-adapter` `release-refresh` through pg_net, 2h lease, **raises** if it can't reach the adapter). |
 | Shadow | `release_shadow_ledger` (one row per account per event, ever), `_release_fanout_event`, `_release_arbitrate`, `_release_evaluate`. Migration `20260930000200`. |
-| Operator | `release_status()`, `release_shadow_summary`, `release_event_summary`, `schedule_release_awareness()`, `unschedule_release_awareness()`. |
+| **Revision** | `20260930000300`: `release_events.awareness_on` and the `skipped_late` evaluation; `_release_event_apply` rebuilt for T-7; `_release_window_at`; ledger columns `timing`, `plan_at`, `alt_timing`, `alt_plan_at`, `days_to_release`, `cap_would_suppress`, `cap_reason`; `_release_arbitrate` rebuilt uncapped with the counterfactual replay; `release_timing_comparison`. |
+| Operator | `release_status()`, `release_shadow_summary`, `release_timing_comparison`, `release_event_summary`, `schedule_release_awareness()`, `unschedule_release_awareness()`. |
 | Adapter | `release-refresh` action (service_role, named ids only); `detail` offers its movie/series reads to `release_observe` (best-effort, tracked subjects only). `normalize.ts`: `regionalReleases`, `movieReleaseObservation`, `seriesReleaseObservation`. |
 
 ### S2. The transition rules, as implemented
 
+- **Awareness**: a film arms at `release date − release.movie_lead_days` (7) while still
+  `scheduled`, never on or after the day (`skipped_late`), and **once ever**. A season arms
+  when it is released. Arming always needs a fresh read.
 - **Reached**: the date has begun somewhere, `p_now ≥ date 00:00 UTC − 14h`.
 - **Released** only on a reached date **and** a TMDB read at most `release.freshness_hours`
   (12) old. A stale read updates dates but never releases.
@@ -797,7 +882,9 @@ for an ended or canceled one.
 | `release.shadow_enabled` | `true` | `false` stops evaluation |
 | `release.push_enabled` | **`false`** | recorded on each decision as `real_send_enabled`; **no code sends** |
 | `release.freshness_hours` / `stale_after_days` | 12 / 7 | transition rules |
-| `release.push_cap_per_week` / `push_min_gap_hours` | 2 / 36 | hypothetical cap |
+| `release.movie_lead_days` | 7 | how far ahead a film is announced |
+| `release.season_timing` / `season_timing_alternative` | release_morning / day_before | the policy in force, and the one measured beside it |
+| `release.push_cap_per_week` / `push_min_gap_hours` | 2 / 36 | **measured only**, never applied (decision 8) |
 | `release.window_start_hour` / `window_end_hour` | 10 / 20 | local send window |
 | `release.push_expiry_hours` | 48 | how long a push candidate waits |
 | `release.refresh_batch` | 40 | subjects per tick |
@@ -807,18 +894,27 @@ for an ended or canceled one.
 ```sql
 select * from release_status();                 -- healthy, problems[], zero release notifications
 select * from release_event_summary;            -- events by kind/state/evaluation, date changes
-select * from release_shadow_summary order by event_kind, tier, outcome, reason;
+select * from release_shadow_summary order by event_kind, timing, tier, outcome, reason;
+select * from release_timing_comparison;        -- the season timing question, in hours
 select change, count(*) from release_event_log group by change;          -- incl. anomalies
 select count(*) filter (where failures > 0), max(failures) from release_subjects;
 ```
 
-The questions it answers: how many real releases were detected (by kind); how many
-**would_push** vs **inbox_only** vs **skipped**, and why; the caught-up to behind ratio; how
-often the **cap** binds; how many candidates lacked a **timezone** or **region** (a client
-reporting gap); **anomalies**, meaning a date that moved after its release was recorded
-(TMDB reliability); **date changes** before release (postponements); and read **failures**.
-Spot-check a sample of `released` events against the real-world premiere or opening date
-before real sending is proposed.
+The questions it answers:
+
+| Question | Where |
+|---|---|
+| Film awareness landing at T-7, with how much notice | `release_shadow_summary.days_to_release_min/max` where `timing = 'theatrical_t7'` |
+| Films we met too late to announce | `release_event_summary`, `evaluation = 'skipped_late'` |
+| Season timing: morning against day-before | `release_timing_comparison.avg_hours_later_than_alt` |
+| **Uncapped** eligible events (the result that now stands) | `release_shadow_summary`, `outcome = 'would_push'` |
+| What the **former cap** would have suppressed, and why | `cap_would_suppress`, split by `cap_global` / `cap_spacing` / `cap_priority` |
+| Missing timezone or region (the client reporting gap) | `timezone_missing`, `region_unknown` |
+| Stale or moving dates | `release_event_log`: `moved_after_release`, `date_changed`, `skipped_stale` |
+| Caught up against behind | `release_shadow_summary.tier` |
+
+Spot-check a sample of dated events against the real-world opening or premiere date before
+real sending is proposed.
 
 ### S6. What is NOT built
 
