@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirty-nine canonical names and nothing else', () => {
+  it('is the forty-one canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -151,6 +151,11 @@ describe('the event vocabulary', () => {
         'reviews_sort_changed',
         'streak_state_viewed',
         'title_logged',
+        // 2026-09-19, Watch next (20260929000200): whether the three pins are used, and
+        // whether three is the right number. No surface on either — press and hold on the
+        // Watchlist is the only way in.
+        'watch_next_changed',
+        'watch_next_full_shown',
         'watchlist_added',
       ].sort(),
     );

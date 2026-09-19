@@ -197,6 +197,19 @@ export type PosterGridListProps = {
   /** Space above the first row and below the last, inside the scroller. */
   paddingTop?: number;
   paddingBottom?: number;
+  /**
+   * A secondary act per tile, by pressing and holding. `longPressLabel` names it for the
+   * accessibility action that offers the same act to a screen reader.
+   */
+  onLongPressTile?: (tile: PosterTile) => void;
+  longPressLabel?: (tile: PosterTile) => string;
+  /**
+   * At most one row of tiles drawn **above** the wall under a small label, and not part
+   * of `tiles` — Watch next on the Watchlist (20260929000200). The same `Tile` at the
+   * same width, so the two cannot drift; not virtualised, because it is never more than
+   * one row. A title belongs in one of the two lists and never both.
+   */
+  leading?: { label: string; tiles: PosterTile[] };
 };
 
 /**
@@ -225,6 +238,9 @@ export function PosterGridList({
   onPressTile,
   paddingTop = 0,
   paddingBottom = 0,
+  onLongPressTile,
+  longPressLabel,
+  leading,
 }: PosterGridListProps) {
   const { width } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
@@ -233,11 +249,36 @@ export function PosterGridList({
     (width - theme.layout.gutter * 2 - gap * (columns - 1)) / columns,
   );
 
+  const tileFor = (tile: PosterTile) => (
+    <Tile
+      tile={tile}
+      width={cardWidth}
+      onPress={() => onPressTile(tile)}
+      onLongPress={onLongPressTile ? () => onLongPressTile(tile) : undefined}
+      longPressLabel={longPressLabel?.(tile)}
+    />
+  );
+
+  const header =
+    leading && leading.tiles.length > 0 ? (
+      <View testID="poster-grid-leading" style={styles.leading}>
+        <Text variant="footnote" tone="secondary">
+          {leading.label}
+        </Text>
+        <View style={[styles.leadingRow, { gap }]}>
+          {leading.tiles.map((tile) => (
+            <View key={tile.id}>{tileFor(tile)}</View>
+          ))}
+        </View>
+      </View>
+    ) : null;
+
   return (
     <FlashList
       data={tiles}
       numColumns={columns}
       keyExtractor={(tile) => tile.id}
+      ListHeaderComponent={header}
       // A sort or a filter replaces the data, and FlashList 2 would otherwise scroll to
       // keep whichever tile was first on screen in place — a jump to somewhere mid-wall
       // under a reader who only changed the order. A plain ScrollView kept the offset,
@@ -260,7 +301,7 @@ export function PosterGridList({
                 : styles.cellCentre,
           ]}
         >
-          <Tile tile={item} width={cardWidth} onPress={() => onPressTile(item)} />
+          {tileFor(item)}
         </View>
       )}
     />
@@ -281,6 +322,7 @@ function Tile({
   width,
   onPress,
   onLongPress,
+  longPressLabel,
   onToggleSave,
   onDismiss,
 }: {
@@ -288,6 +330,8 @@ function Tile({
   width: number;
   onPress: () => void;
   onLongPress?: () => void;
+  /** Offers `onLongPress` as an accessibility action, which a long press is not. */
+  longPressLabel?: string;
   onToggleSave?: () => void;
   onDismiss?: () => void;
 }) {
@@ -308,6 +352,12 @@ function Tile({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={labelFor(tile)}
+        accessibilityActions={
+          onLongPress && longPressLabel ? [{ name: 'longpress', label: longPressLabel }] : undefined
+        }
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === 'longpress') onLongPress?.();
+        }}
         onPress={onPress}
         onLongPress={onLongPress}
         onPressIn={press.onPressIn}
@@ -427,6 +477,10 @@ const styles = StyleSheet.create({
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },
+  // Inside the scroller's own gutter padding, so the leading row lines up with the wall
+  // beneath it; the space under it is the only separator, and no rule is drawn.
+  leading: { gap: theme.space[2], paddingBottom: theme.space[4] },
+  leadingRow: { flexDirection: 'row' },
   save: {
     position: 'absolute',
     top: theme.space[1],
