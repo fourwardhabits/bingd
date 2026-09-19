@@ -1,7 +1,7 @@
 # Bingd — Decision Log
 
 **Version:** v0.6
-**Last updated:** 2026-08-12
+**Last updated:** 2026-09-19
 **Companion documents:** [`PRD.md`](./PRD.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md)
 
 ---
@@ -280,6 +280,7 @@ Derived from the brand system in PRD §5 at founder instruction, not separately 
 | Corner radius | 12px cards, 8px inputs, full-round for avatars only. No pill buttons | Serif type and pill shapes conflict |
 | Motion | Minimal, with one exception: the ranking reveal earns real animation | "Every surface should earn its place" |
 | Navigation | **Decided 2026-08-13.** Five tabs: Feed, Collection, center **+** to log, Recommendations, Profile. No Search tab — the **+** and title search are the same action | Reference evidence, `../design/screens.md` §2 |
+| Lists IA | **Decided 2026-09-19. Founder.** **Collection owns list management; Profile owns public display.** The entry is a `My lists ›` text + chevron action on the trailing half of the existing Movies/TV title row — **not** a fourth Collection segment, a new control row, a sixth tab, or an icon-only entry, and outside the medium axis. The Profile carries a **read-only shelf of public lists only**, on the owner's profile as well as anyone else's, with `Manage ›` to the same screen. Order stays Top Ranked → Watchlist → **Lists** → Recent activity. `Title ⋯ → Add to list…` is unchanged; there is **no Collection row long-press, no Collection row overflow and no fourth `TitleActions` button**. Discoverability is measured by `my_lists_opened.entry`, instrumented in L2 — the only evidence that would justify reconsidering a segment | `ProfileWatchlist.tsx` already states the rule ("Collection is where the full list is, for the account that owns it") and profile shelves carry no editing controls; PRD §7 and `app/(tabs)/_layout.tsx` already placed Lists in Collection. A Lists *segment* would sit under a `Movies ▾` title it had to ignore. Competitive review of 2026-09-19: every product that puts lists on the profile has no separate library tab; Spotify, the one product sharing bingd's split, manages in Library and displays on the profile. Full reasoning in [`lists-prd.md`](./lists-prd.md) §Q |
 | Reference discipline | Apple TV, Apple Wallet, and Open inform **design language**. Spotify, Cash App, Strava, and Beli inform **flows only** | Founder instruction |
 | Comparison context | **Decided 2026-08-13.** A comparison card never shows the opponent's current rank or score | A number is an anchor that invites agreement instead of a real judgment |
 | Amber and Sage | **Decided 2026-08-13.** Fill colors only, never text. Both measure below 2.2:1 on Parchment and fail WCAG at every size | Measured, `../design/design-system.md` §1 |
