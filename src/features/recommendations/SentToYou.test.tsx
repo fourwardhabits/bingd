@@ -267,12 +267,9 @@ describe('the wall and the list', () => {
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     await fireEvent.press(view.getByText('Inception (2010)'));
 
-    // The sender and the moment travel with the link, so the title page can say so
-    // over its hero without asking the server who sent it.
-    expect(mockPush).toHaveBeenCalledWith({
-      pathname: '/title/[id]',
-      params: { id: 'film-1', recBy: 'Ada', recAt: '2026-08-15T10:00:00.000Z' },
-    });
+    // A plain title route since the note (20260929000100): the title page asks who
+    // recommended it however the reader arrives, and this tap only seeds that answer.
+    expect(mockPush).toHaveBeenCalledWith('/title/film-1');
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {
         p_recommendation_id: 'r1',
@@ -290,9 +287,7 @@ describe('the wall and the list', () => {
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     await fireEvent.press(view.getByText('Inception (2010)'));
 
-    expect(mockPush).toHaveBeenCalledWith(
-      expect.objectContaining({ params: expect.objectContaining({ id: 'film-1' }) }),
-    );
+    expect(mockPush).toHaveBeenCalledWith('/title/film-1');
     expect(mockRpc).not.toHaveBeenCalledWith('mark_recommendation_opened', expect.anything());
   });
 
@@ -639,5 +634,46 @@ describe('re-tapping the For You tab', () => {
     await act(async () => pressTab());
 
     expect(view.getByText('Inception (2010)')).toBeTruthy();
+  });
+});
+
+/**
+ * The sender's note in the row (20260929000100): the third line, up to two lines, quoted,
+ * in place of the metadata it displaces. A row with no note is exactly what it was.
+ */
+describe('a note in the row', () => {
+  it('shows the note as the third line, and leaves the metadata to the title page', async () => {
+    mockRpcResults.recommendations_to_me = [
+      recommendation({ message: 'The second half is insane.' }),
+    ];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('“The second half is insane.”')).toBeTruthy());
+    expect(view.getByText('“The second half is insane.”').props.numberOfLines).toBe(2);
+    expect(view.queryByText(/148m/)).toBeNull();
+  });
+
+  it('keeps the metadata line when there is no note', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation({ message: null })];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText(/148m/)).toBeTruthy());
+    expect(view.queryByText(/“/)).toBeNull();
+  });
+
+  it('still records the open of a recommendation that carries a note', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation({ message: 'Watch it.' })];
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
+    await fireEvent.press(view.getByText('Inception (2010)'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {
+        p_recommendation_id: 'r1',
+      }),
+    );
   });
 });

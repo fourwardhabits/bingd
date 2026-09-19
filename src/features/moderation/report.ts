@@ -14,8 +14,12 @@ import { supabase } from '@/lib/supabase';
  * sees what the reporter saw. A **private** note is absent from both, and that is not
  * an omission — a private note has exactly one reader, so there is nobody to report it
  * and no route through which to try.
+ *
+ * `recommendation` (20260929000100) is the note a sender attached to a recommendation,
+ * reported by its recipient from the title page. The server resolves the sender as the
+ * owner and accepts it only from the recipient, only while it is delivered and has a note.
  */
-export type ReportSubject = 'profile' | 'comment' | 'review';
+export type ReportSubject = 'profile' | 'comment' | 'review' | 'recommendation';
 
 /** The backend taxonomy, `reports_known_reason`. Eight values, closed. */
 export type ReportReason =

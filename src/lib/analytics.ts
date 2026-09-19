@@ -415,12 +415,26 @@ export type AnalyticsEvent =
    * a refusal — `recommend_title` returns `not_mutual` inside a 200, so a 200 is not a
    * send (`use-recommend.ts`).
    */
-  | { name: 'recommendation_sent'; props: { media_kind: MediaKind; surface: Surface } }
+  | {
+      name: 'recommendation_sent';
+      /**
+       * `has_note` (20260929000100): whether the sender wrote one. Whether, never what —
+       * the note's text is somebody's writing and is not an analytics property.
+       */
+      props: { media_kind: MediaKind; surface: Surface; has_note: boolean };
+    }
   /**
-   * The **recipient** tapped through to a recommendation they had not opened before.
-   * Owned by the recipient, not by the sender. Not a delivery and not an impression.
+   * The **recipient** opened a recommendation they had not opened before. Owned by the
+   * recipient, not by the sender. Not a delivery and not an impression.
+   *
+   * `surface` is `sent_to_you` for a tap in that list and, since 20260929000100, `title`
+   * when the title page shows the recommendation and marks it — which is how an open from
+   * the inbox, a push or search is counted at all. `has_note` as on the send.
    */
-  | { name: 'recommendation_opened'; props: { media_kind: MediaKind; surface: Surface } }
+  | {
+      name: 'recommendation_opened';
+      props: { media_kind: MediaKind; surface: Surface; has_note: boolean };
+    }
   /**
    * A member search result was opened.
    *
