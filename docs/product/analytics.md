@@ -80,8 +80,8 @@ error rather than a decision somebody makes at 2am before a demo.
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
 | `follow_created` | `follow` committed **and** the screen knew there was no edge before it | the follower | `surface`, `state` |
-| `recommendation_sent` | `recommend_title` stored the row | the **sender** | `media_kind`, `surface` |
-| `recommendation_opened` | `mark_recommendation_opened` answered without error, for a row this device had not already reported | the **recipient** | `media_kind`, `surface` |
+| `recommendation_sent` | `recommend_title` stored the row | the **sender** | `media_kind`, `surface`, `has_note` |
+| `recommendation_opened` | `mark_recommendation_opened` answered without error, for a row this device had not already reported | the **recipient** | `media_kind`, `surface`, `has_note` |
 | `member_search_result_opened` | a member row in Search was opened | the searcher | `surface`, `position` |
 
 ### Growth
@@ -547,8 +547,19 @@ one. The complete fix is a server that reports whether it inserted, which is a m
 `not_recommendable` *inside* a successful response, on purpose, so that a refused attempt
 still costs the sender a rate-limit slot.
 
+**`has_note`** (2026-09-19, `20260929000100`) says **whether** the sender wrote a note, and
+never what it said. A note is one person's words addressed to another, and §8 keeps text
+like that off this pipeline entirely; whether the feature is used at all is the question
+these two events answer. How often a note leads to a watch is derivable server-side, from
+`title_recommendations.fulfilled_at`, rather than from anything sent here.
+
 **`recommendation_opened`** belongs to the **recipient**, not the sender. It is not a
 delivery and not an impression.
+
+Its `surface` gained `title` with the note: the title page now asks who recommended the
+title it is drawing, and marks what it shows — which is the first time an open from the
+inbox, a push or search has been counted at all. `sent_to_you` still means a tap in that
+list, so the two stay comparable across the change rather than being pooled by it.
 
 The screen's `opened_at is null` check is necessary and **not sufficient**: it reads a
 cached list, so two quick presses both see a null timestamp. The event is therefore emitted

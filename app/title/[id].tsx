@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter, type ErrorBoundaryProps } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
   Linking,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -72,7 +73,14 @@ import { posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
-import { relativeTime } from '@/features/recommendations/use-sent-to-you';
+import { ReportSheet } from '@/features/moderation/ReportSheet';
+import { RecommendationCard } from '@/features/recommendations/RecommendationCard';
+import { RecommendersSheet } from '@/features/recommendations/RecommendersSheet';
+import { useMarkRecommendationOpened } from '@/features/recommendations/use-sent-to-you';
+import {
+  useTitleRecommendations,
+  type TitleRecommendation,
+} from '@/features/recommendations/use-title-recommendations';
 import { compactName } from '@/lib/titles';
 import {
   CastStrip,
@@ -188,19 +196,15 @@ const TITLE_LINES = 2;
  */
 export default function TitleScreen() {
   /**
-   * The title, and — when the reader arrived from something a friend sent them — who
-   * sent it and when.
+   * The title, and nothing else.
    *
-   * Carried in the link rather than looked up, because the fact belongs to the
-   * *navigation* and not to the title: the same film opened from search is not
-   * "recommended by Ada", and a query against `recommendations_to_me` on every title
-   * page would be a round trip to answer a question only one route ever asks.
+   * Who recommended it used to ride in the link as well — `recBy` and `recAt`, set by a
+   * tap in Sent to you and by nothing else — on the reasoning that the fact belonged to
+   * the navigation. The recommendation note (20260929000100) reversed that: the page
+   * now asks `title_recommendations_for_me` however the reader arrived, because a push
+   * or an inbox tap is exactly where the note most needs to be seen.
    */
-  const { id, recBy, recAt } = useLocalSearchParams<{
-    id: string;
-    recBy?: string;
-    recAt?: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id: string }>();
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
   /** Drains the post-ranking celebration queue when the log flow ends. */
@@ -265,6 +269,18 @@ export default function TitleScreen() {
   const [followingRatingsOpen, setFollowingRatingsOpen] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
   const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
+  /**
+   * The recommendation card's two sheets, as **one** value (20260929000100).
+   *
+   * `all` is the list of everybody who recommended the title; `report` files a report on
+   * one note. Reporting from inside the list is a sheet-to-sheet handover, which iOS
+   * refuses unless the first has finished dismissing (`Sheet`'s `onDismissed`), so
+   * `handoff` is the list closing with a report waiting behind it. One union rather than
+   * two booleans, which is the rule `bingd-two-modals-is-the-dead-end` exists for.
+   */
+  const [recSheet, setRecSheet] = useState<
+    { kind: 'all' } | { kind: 'handoff'; id: string } | { kind: 'report'; id: string } | null
+  >(null);
 
   /**
    * The catalogue row, and only that.
@@ -388,6 +404,48 @@ export default function TitleScreen() {
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
+  /**
+   * Who recommended this to the reader, and what they said (20260929000100).
+   *
+   * Asked only of a film or a season — nothing can recommend a series — and only once the
+   * reader's own state is known and says they have not ranked it: a ranked title is not a
+   * recommendation any more, which is the rule Sent to you already keeps. The same gate
+   * applies to what is drawn, so a card seeded by a Sent to you tap cannot flash on a
+   * title that turns out to be ranked.
+   */
+  const recommendable = data.title?.kind === 'movie' || data.title?.kind === 'season';
+  const askRecommendations = hasId && recommendable && personal.isSuccess && !data.ranked;
+  const recommendations = useTitleRecommendations(profile.id, id ?? '', askRecommendations);
+  // Memoised, because the effect below depends on it: a fresh `[]` on every render would
+  // make "is there anything unopened here" a question asked on every frame.
+  const recommendationRows = useMemo(
+    () =>
+      askRecommendations
+        ? (recommendations.data ?? NO_RECOMMENDATIONS)
+        : NO_RECOMMENDATIONS,
+    [askRecommendations, recommendations.data],
+  );
+  const markRecommendationOpened = useMarkRecommendationOpened(profile.id);
+  /**
+   * Seeing the card is opening the recommendation, however the reader got here — which is
+   * what finally marks an inbox or push open, where only a Sent to you tap used to. Once
+   * per row per screen; the server refuses to move a timestamp it already has, and the
+   * mutation reports the analytics event once per row per process.
+   */
+  const markedHere = useRef(new Set<string>());
+  const openedKind = data.title?.kind === 'season' ? 'tv_season' : 'movie';
+  useEffect(() => {
+    for (const row of recommendationRows) {
+      if (row.openedAt || markedHere.current.has(row.id)) continue;
+      markedHere.current.add(row.id);
+      markRecommendationOpened.mutate({
+        recommendationId: row.id,
+        mediaKind: openedKind,
+        hasNote: Boolean(row.message),
+        surface: 'title',
+      });
+    }
+  }, [recommendationRows, markRecommendationOpened, openedKind]);
   // Seeded rows arrive with no artwork, overview or credits. Opening the screen is
   // what fetches them, unless the bulk pass got there first.
   // The second condition is about the Phase E deployment rather than about this title:
@@ -730,10 +788,6 @@ export default function TitleScreen() {
   const rankable = title.kind === 'movie' || title.kind === 'season';
   const isSeries = title.kind === 'series';
   const isSeason = title.kind === 'season';
-  /** "Recommended by Ada · 2d ago", or nothing at all. */
-  const recommendedBy = recBy
-    ? `Recommended by ${recBy}${recAt ? ` · ${relativeTime(recAt)}` : ''}`
-    : null;
   const year = yearOf(title.release_date);
 
   /**
@@ -1194,25 +1248,9 @@ export default function TitleScreen() {
             collapsedHeight={collapsedHero}
             topInset={insets.top}
           />
-          {/* Who sent this and how long ago, over the artwork they sent it about.
-
-              A rounded callout rather than a line of copy under the title, because it is
-              not a fact about the film — it is the reason this particular person is
-              looking at it, and it stops being true the moment they arrive any other way.
-              Solid rather than translucent: legibility over a photograph cannot depend on
-              what the photograph happens to be.
-
-              Anchored to the hero's lower edge rather than its top, which keeps it clear
-              of the transparent navigation bar without having to guess at that bar's
-              height on a device this code cannot measure.
-
-              Only where there *is* artwork. The collapsed band is short and the identity
-              block starts immediately beneath it, so a title with no backdrop has no hero
-              worth overlaying — an absolute callout there would sit on the title. That
-              case gets the same callout inline, under the heading. */}
-          {recommendedBy && hero.uri ? (
-            <RecommendedCallout label={recommendedBy} overlay />
-          ) : null}
+          {/* Nothing is drawn on the artwork. The recommendation used to sit here as a
+              pill at the hero's lower edge; it is a card below the title now, for every
+              title (founder F1, 2026-09-19) — see `RecommendationCard`. */}
         </View>
 
         {/**
@@ -1445,11 +1483,19 @@ export default function TitleScreen() {
           </View>
         </View>
 
-        {/* The no-artwork case for the recommendation callout. Same object, laid out in
-            the flow rather than over a hero that is not there. */}
-        {recommendedBy && !hero.uri ? (
+        {/* Who recommended this, and what they said — below the title and its actions,
+            in the flow, whether or not there is artwork (founder F1, 2026-09-19). It sits
+            beside Rank, Save and Recommend because those are what a note is asking for,
+            and it is off the hero because a note is somebody's words and must not depend
+            on being readable over a backdrop. Present however the reader arrived; gone
+            once they rank the title. */}
+        {recommendationRows.length > 0 ? (
           <View style={styles.block}>
-            <RecommendedCallout label={recommendedBy} />
+            <RecommendationCard
+              rows={recommendationRows}
+              onOpenAll={() => setRecSheet({ kind: 'all' })}
+              onReport={(recommendationId) => setRecSheet({ kind: 'report', id: recommendationId })}
+            />
           </View>
         ) : null}
 
@@ -2268,32 +2314,44 @@ export default function TitleScreen() {
           onClose={() => setFollowingRatingsOpen(false)}
         />
       ) : null}
+      {/* Everybody who recommended this, from the card (20260929000100). Kept mounted,
+          invisible, while it hands over to a report, so iOS has finished dismissing it
+          before the report sheet presents — `Sheet`'s `onDismissed` contract. Android has
+          no presentation to wait for and fires no dismissal, so it goes straight across. */}
+      {recSheet?.kind === 'all' || recSheet?.kind === 'handoff' ? (
+        <RecommendersSheet
+          visible={recSheet.kind === 'all'}
+          rows={recommendationRows}
+          onClose={() => setRecSheet(null)}
+          onDismissed={() =>
+            setRecSheet((current) =>
+              current?.kind === 'handoff' ? { kind: 'report', id: current.id } : current,
+            )
+          }
+          onOpenProfile={(username) => {
+            // Close first, for the reason FollowingRatingsSheet gives above.
+            setRecSheet(null);
+            router.push(`/u/${username}`);
+          }}
+          onReport={(recommendationId) =>
+            setRecSheet(
+              Platform.OS === 'ios'
+                ? { kind: 'handoff', id: recommendationId }
+                : { kind: 'report', id: recommendationId },
+            )
+          }
+        />
+      ) : null}
+      {recSheet?.kind === 'report' ? (
+        <ReportSheet
+          visible
+          onClose={() => setRecSheet(null)}
+          subject="recommendation"
+          subjectId={recSheet.id}
+          noun="note"
+        />
+      ) : null}
     </Screen>
-  );
-}
-
-/**
- * "Recommended by Ada · 2d ago", as an object rather than as a line of copy.
- *
- * It is not a fact about the film. It is the reason this particular person is looking
- * at it, and it stops being true the moment they arrive any other way — so it is drawn
- * as a callout that visibly sits *on* the page rather than as another metadata line
- * the page owns.
- *
- * Solid rather than translucent, because legibility over a photograph cannot depend on
- * what the photograph happens to be.
- */
-function RecommendedCallout({ label, overlay = false }: { label: string; overlay?: boolean }) {
-  return (
-    <View
-      pointerEvents="none"
-      style={[styles.recommendedCallout, overlay && styles.recommendedOverlay]}
-    >
-      <Ionicons name="paper-plane" size={theme.layout.icon.sm} color={theme.semantic.action} />
-      <Text variant="footnote" numberOfLines={1} style={styles.recommendedLabel}>
-        {label}
-      </Text>
-    </View>
   );
 }
 
@@ -2476,6 +2534,9 @@ const HERO_COLLAPSED_BAND = 56;
  * Four points rather than a measurement, because the leading is a property of the type
  * token and not of the string: it is the same on every title in the catalogue.
  */
+/** A stable empty list, so "nobody recommended this" is the same value every render. */
+const NO_RECOMMENDATIONS: TitleRecommendation[] = [];
+
 const TITLE_CAP_OFFSET = theme.space[1];
 /**
  * Over how many points the navigation finishes becoming a header.
@@ -2569,45 +2630,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.base,
     ...theme.elevation.e2,
   },
-  /**
-   * "Recommended by Ada · 2d ago", as an object on the page.
-   *
-   * Solid rather than translucent, because legibility over a photograph cannot depend on
-   * what the photograph happens to be — the overlay variant below sits on artwork.
-   */
-  recommendedCallout: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[2],
-    paddingHorizontal: theme.space[3],
-    paddingVertical: theme.space[2],
-    marginTop: theme.space[2],
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.surface.raised,
-    ...theme.elevation.e1,
-  },
-  /**
-   * On the hero, at its lower edge.
-   *
-   * `bottom` used to be `POSTER_LIFT + space[3]`, and the lift was the whole of it: the
-   * callout had to clear a poster that rose into the artwork. Nothing rises now, so it is
-   * a plain `space[3]` off the hero's own lower edge — where the Paper fade has almost
-   * finished, which is exactly where a solid raised card reads best.
-   *
-   * Applied only where there is artwork to sit on. The collapsed band is short and the
-   * identity block starts immediately under it, so a title with no backdrop gets the same
-   * callout inline instead.
-   */
-  recommendedOverlay: {
-    position: 'absolute',
-    left: theme.layout.gutter,
-    right: theme.layout.gutter,
-    bottom: theme.space[3],
-    marginTop: 0,
-  },
-  // Takes the width the glyph leaves, so a long name truncates rather than pushing the
-  // callout wider than the gutters allow.
-  recommendedLabel: { flex: 1 },
   menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
   // Enough air above to separate the group from the rows before it, and none below:
   // the heading belongs to what follows it.

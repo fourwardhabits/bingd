@@ -1,14 +1,23 @@
 import { useRef, useState } from 'react';
-import { Share, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Share, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
 import { PeoplePicker } from '@/features/people/PeoplePicker';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName, type MediaKind } from '@/lib/titles';
 import { Button, EmptyState, Sheet, Text } from '@/ui/components';
-import { theme } from '@/ui/tokens';
+import { inputText, theme } from '@/ui/tokens';
 
-import { useRecommendRecipients, useRecommendTitle, type Recipient } from './use-recommend';
+import {
+  NOTE_MAX,
+  normaliseNote,
+  useRecommendRecipients,
+  useRecommendTitle,
+  type Recipient,
+} from './use-recommend';
+
+/** The counter appears only this close to the limit, so an ordinary note shows no number. */
+const NOTE_COUNTER_FROM = 20;
 
 export type RecommendSheetProps = {
   viewerId: string;
@@ -115,6 +124,11 @@ export function RecommendSheet({
     width - theme.layout.gutter * 2 >= ACTION_MIN_WIDTH * fontScale * 2 + theme.space[3];
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * The optional note (20260929000100). One note for the whole send — everybody chosen
+   * gets the same words — and it survives a half-failed batch, so a retry sends it again.
+   */
+  const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -186,6 +200,7 @@ export function RecommendSheet({
         operationId: held,
         recipientId: person.id,
         mediaItemId,
+        note,
       });
 
       if (result.ok || !result.changed) sendIntents.current.delete(person.id);
@@ -204,7 +219,12 @@ export function RecommendSheet({
          */
         track({
           name: 'recommendation_sent',
-          props: { media_kind: kind === 'season' ? 'tv_season' : 'movie', surface },
+          props: {
+            media_kind: kind === 'season' ? 'tv_season' : 'movie',
+            surface,
+            // Whether, never what: the note's text is not an analytics property.
+            has_note: normaliseNote(note) !== null,
+          },
         });
       } else {
         failed.push({ person, message: result.message });
@@ -279,7 +299,13 @@ export function RecommendSheet({
      * been sent; the fix is the segment that was wrong, and nothing else.
      */
     const titleUrl = `https://bingd.app/title/${mediaItemId}`;
-    const message = `${name} on bingd\n${titleUrl}`;
+    /**
+     * A typed note leads the message (20260929000100). It was written for this title and
+     * this sheet; sending the title without it would drop words the person just typed,
+     * with nothing on screen saying so.
+     */
+    const typed = normaliseNote(note);
+    const message = `${typed ? `${typed}\n\n` : ''}${name} on bingd\n${titleUrl}`;
 
     try {
       await Share.share({ message, url: titleUrl });
@@ -346,6 +372,50 @@ export function RecommendSheet({
         </Text>
       ) : null}
 
+      {/* The optional note, directly above the two actions (20260929000100).
+
+          **A field, not an "Add a note" link that opens one.** A link would cost a tap to
+          write a note and save nothing when there is none, and Recommend works with the
+          field empty, so a note-less send takes exactly the taps it always did.
+
+          One line that grows to three as it wraps; the return key never adds a line,
+          because the server collapses whitespace into one paragraph and a field that
+          showed line breaks would be promising something that is not kept. The counter
+          appears only in the last twenty characters. The sheet already rises with the
+          keyboard (`Sheet`), which is what keeps this and the buttons in view. */}
+      {people.length > 0 ? (
+        <View style={styles.note}>
+          <TextInput
+            testID="recommend-note"
+            value={note}
+            onChangeText={(text) => setNote(text.replace(/\n/g, ' '))}
+            placeholder={
+              selected.size > 1
+                ? 'Add a note · everyone you picked sees it'
+                : 'Add a note (optional)'
+            }
+            placeholderTextColor={theme.text.tertiary}
+            accessibilityLabel="Note to send with this recommendation, optional"
+            maxLength={NOTE_MAX}
+            multiline
+            blurOnSubmit
+            returnKeyType="done"
+            editable={!sending}
+            style={styles.noteInput}
+          />
+          {NOTE_MAX - note.length <= NOTE_COUNTER_FROM ? (
+            <Text
+              testID="recommend-note-counter"
+              variant="caption"
+              tone="tertiary"
+              style={styles.counter}
+            >
+              {`${NOTE_MAX - note.length} left`}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* The sheet's two acts, pinned under the list — the list scrolls, these do not.
 
           **Two equal halves, or two full-width rows.** Never one button with the row's
@@ -406,6 +476,24 @@ export function RecommendSheet({
 const styles = StyleSheet.create({
   header: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
   status: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
+  note: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3], gap: theme.space[1] },
+  // The Field component's box, without its label: the placeholder names the field.
+  // Three lines at most, then it scrolls inside itself.
+  noteInput: {
+    // First, so the padding below wins over the single-line field's `paddingVertical: 0`.
+    ...inputText,
+    minHeight: theme.layout.buttonMinHeight,
+    maxHeight: theme.layout.buttonMinHeight * 2,
+    borderRadius: theme.radius.control,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.strong,
+    backgroundColor: theme.surface.raised,
+    paddingHorizontal: theme.space[3],
+    paddingVertical: theme.space[2],
+    color: theme.text.primary,
+    textAlignVertical: 'top',
+  },
+  counter: { alignSelf: 'flex-end' },
   actions: {
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
