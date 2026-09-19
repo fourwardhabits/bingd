@@ -193,3 +193,69 @@ describe('what is not ranked still sorts as before', () => {
     expect(sortItems(rows, LOWEST).at(-1)?.title).toBe('Logged Only');
   });
 });
+
+/**
+ * The follow-up report (2026-09-19): "four movies at 10.0, and The Dark Knight moved from
+ * second to third". A loved band of 250 steps 3.0 / 249 ≈ 0.012 a title, so the top five
+ * all print 10.0. Ranking a new title above The Dark Knight moves it from #2 to #3 -- the
+ * ordinal shifting, as it should -- and the Rating order must still draw every 10.0 in
+ * ranked order, with The Dark Knight above The Odyssey on both sides of the insertion.
+ * The ids run against the ranking, so an id tiebreak would draw them upside down.
+ */
+describe('several titles at 10.0, and a new one ranked above The Dark Knight', () => {
+  const NAMED: Record<string, string> = {
+    'best': 'ff000000-0000-4000-8000-000000000001',
+    'new': 'ee000000-0000-4000-8000-000000000002',
+    'dark knight': 'dd000000-0000-4000-8000-000000000003',
+    'odyssey': 'cc000000-0000-4000-8000-000000000004',
+    'fifth': 'bb000000-0000-4000-8000-000000000005',
+  };
+
+  /** A 250- or 251-title loved band with the named titles in `top`, in order. */
+  const bandWith = (top: string[], size: number): RankedEntry[] =>
+    Array.from({ length: size }, (_, i) => {
+      const name = top[i];
+      return {
+        mediaItemId: name
+          ? (NAMED[name] as string)
+          : `f${String(i + 1).padStart(7, '0')}-0000-4000-8000-000000000000`,
+        title: name ?? `Filler ${i + 1}`,
+        year: 2000,
+        posterPath: null,
+        genres: ['Drama'],
+        runtimeMinutes: 100,
+        kind: 'movie',
+        seriesTitle: null,
+        seriesId: null,
+        language: 'en',
+        bucket: 'loved',
+        position: i + 1,
+        category: 'movies',
+        rankedAt: '2026-09-01T00:00:00Z',
+      };
+    });
+
+  const drawn = (ranked: RankedEntry[]) =>
+    sortItems(watchedItems(ranked, [], 'movies'), HIGHEST)
+      .filter((row) => row.title in NAMED)
+      .map((row) => `${formatScore(row.score ?? NaN)} ${row.title} #${row.position}`);
+
+  it('draws every 10.0 in ranked order before the insertion', () => {
+    expect(drawn(bandWith(['best', 'dark knight', 'odyssey', 'fifth'], 250))).toEqual([
+      '10.0 best #1',
+      '10.0 dark knight #2',
+      '10.0 odyssey #3',
+      '10.0 fifth #4',
+    ]);
+  });
+
+  it('moves The Dark Knight from #2 to #3 and keeps it above The Odyssey after it', () => {
+    expect(drawn(bandWith(['best', 'new', 'dark knight', 'odyssey', 'fifth'], 251))).toEqual([
+      '10.0 best #1',
+      '10.0 new #2',
+      '10.0 dark knight #3',
+      '10.0 odyssey #4',
+      '10.0 fifth #5',
+    ]);
+  });
+});
