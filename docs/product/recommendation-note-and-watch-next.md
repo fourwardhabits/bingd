@@ -521,25 +521,45 @@ Follow the local traps: one render per test, no double `fireEvent.press` in one 
 
 **RN-web screenshot harness** (the esbuild harness in memory): the title card (1-line, 3-line, multi) and the Watch next header (poster and list) at widths 320/375/430 × font scale 1.0/1.3, attached to the PR. That takes layout out of the device pass and leaves only behaviour there.
 
-### 11.3 Manual device QA: one pass on the physical staging lane
+### 11.3 Manual device QA: the bundled script
 
-| # | Check | Accounts |
-|---|---|---|
-| M1 | Recommend with **no** note: same taps as today, push arrives, copy unchanged | A → B (B follows A) |
-| M2 | Recommend with a note on the **smallest available phone**, keyboard up: the field and footer stay visible, and the counter shows near the limit | A only for the input. B to receive |
-| M3 | B: the Sent to you row shows the 2-line note. Tap → the in-flow card on the title page, nothing on the artwork, and the row loses its dot | B |
-| M4 | B opens the same title **from the push/inbox** instead → the card shows, and Sent to you marks it opened | B |
-| M5 | A resends with a new note → no second push. B sees the new note and the row at the top | A → B |
-| M6 | B long-presses the note → Report → confirmation | B |
-| M7 | Long-press a Watchlist poster → Add → it appears in the header row. Repeat in **List** mode | Any one account |
-| M8 | Pin 3, long-press a 4th → replace picker → replace | One account |
-| M9 | Switch Movies/TV, apply a filter, choose Shuffle → the pins behave per §6.4 | One account |
-| M10 | Log or rank a pinned title from its page → it leaves Watch next and the Watchlist | One account |
-| M11 | VoiceOver or TalkBack: the custom action "Add to Watch next" exists on a tile | One account |
+**One pass, on the physical staging lane, bundled with the other client work waiting for a
+device**: #171 (Collection ordinal display), #174 (T0b historical-date hygiene) and the
+already-merged unranked Remove-from-collection UX. Eleven checks; five need a second
+account.
 
-**Two accounts are needed only for M1 and M3–M6.** Use the founder account plus one existing second account, with B following A back. The pending-request case (note hidden until Add), multiple recommenders, blocks and private senders are covered by the DB tests and screenshots, so **no extra fake accounts are needed**. If the founder wants to *see* the multi-recommender card on a device, seed two rows on **staging** with the service key from existing test accounts (the staging-keys-from-the-CLI recipe) rather than creating accounts.
+**Before starting:** both migrations applied to staging, one staging/preview OTA published
+from the merged SHA, and account **B** following account **A** back, so a send is delivered
+rather than held as a request.
 
-**One account covers all of Watch next** (M7–M11). "Others can't see it" is proven by the RLS test and needs no second device.
+| # | Check | What must be true | Accounts |
+|---|---|---|---|
+| M1 | A recommends a title to B with **no note** | The same taps as before; B's push reads "A: recommended {title}" | A → B |
+| M2 | A recommends with a note, on the **smallest phone available**, keyboard up | The field and both buttons stay visible; the counter appears only near 140 | A (B receives) |
+| M3 | B opens Sent to you | The note is the row's third line, quoted, at most two lines, and the metadata line is gone | B |
+| M4 | B taps that row | The card is **below the title**, nothing is drawn on the artwork, and the row's unread dot clears | B |
+| M5 | B opens the same title **from the push or the bell** instead | The card is there too, and Sent to you shows it opened | B |
+| M6 | A resends the same title with a different note | **No second push.** B sees the new words, and the row is back at the top | A → B |
+| M7 | B presses and holds the note | Report opens; choosing a reason confirms | B |
+| M8 | Watchlist: press and hold a poster → Add to Watch next; repeat in **List** mode | It appears above the rest under "Watch next", once, in both modes | One |
+| M9 | Pin three, then press and hold a fourth | The sheet opens straight into "Watch next is full"; one tap swaps | One |
+| M10 | Switch Movies/TV, apply a filter that excludes a pin, then choose Shuffle | Pins follow the medium; a filtered-out pin disappears and the count still reads "N of M"; pins stay on top under Shuffle | One |
+| M11 | Log or rank a pinned title, then unsave another from its title page | Each leaves Watch next with its Watchlist row | One |
+
+**Accessibility, once per platform (cheap, and worth it):** with VoiceOver or TalkBack, a
+Watchlist tile offers *Add to Watch next* in its action list, and the recommendation card
+offers *Report this note*.
+
+**Two accounts are needed only for M1–M7**, and the second can be any existing account.
+**Watch next needs one account** (M8–M11): "nobody else can see it" is proven by the RLS
+test, not by a second device.
+
+**Deliberately not on device**, because the automated tests cover them and each would cost
+an account or a contrived state: the pending-request case (a note stays hidden until Add),
+several recommenders on one title, blocks, private and suspended senders, the cascade from
+every Watchlist writer, and old-binary compatibility. If the multi-recommender card is
+wanted on a device anyway, seed a second row on **staging** with the service key from an
+existing test account rather than creating accounts.
 
 ### 11.4 What is not QA'd manually
 
