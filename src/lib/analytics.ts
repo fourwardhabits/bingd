@@ -400,6 +400,30 @@ export type AnalyticsEvent =
    * an absent one.
    */
   | { name: 'watchlist_added'; props: { surface: Surface } }
+  /**
+   * Watch next changed (20260929000200): a pin added, removed, or swapped for another.
+   *
+   * `count_after` is what the server reported it holds afterwards, 0 to 3, so adoption and
+   * churn are one event rather than two. **No `surface`**: press and hold on the Watchlist
+   * is the only way in, so a property naming it could carry one value. No title and no
+   * media kind either — the pins are private, and the question is whether the feature is
+   * used at all.
+   *
+   * Emitted after the server answered `ok`, never on a refusal and never on a replayed
+   * operation id, which reports no list and therefore counts nothing.
+   */
+  | {
+      name: 'watch_next_changed';
+      props: { action: 'added' | 'removed' | 'replaced'; count_after: number };
+    }
+  /**
+   * The replace picker was shown, because three are already pinned.
+   *
+   * The one number that says whether the cap bites: somebody meeting it constantly wants
+   * more than three, and somebody who never meets it is answered by three. Fired when the
+   * sheet opens into the picker, and when a stale sheet is told `full` by the server.
+   */
+  | { name: 'watch_next_full_shown'; props?: undefined }
 
   // --- Social and discovery -----------------------------------------------
   /**
@@ -970,6 +994,10 @@ export const ANALYTICS_EVENTS = [
   // 2026-09-15, the five optional links on a profile header. One name for the whole
   // feature, because the count is the whole question.
   'profile_social_link_opened',
+  // 2026-09-19, Watch next (20260929000200). Two names for one small feature: whether it
+  // is used, and whether three is the right number.
+  'watch_next_changed',
+  'watch_next_full_shown',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**

@@ -1231,6 +1231,50 @@ The words in that sentence carry the decisions:
 
 **Existing stuck rows were corrected.** The migration backfills away series entries whose released normal seasons were all already met, per account, and reports the count as it runs. Because the whole rule lives in database triggers, every installed binary inherits it the moment the migration deploys, with no client change and no OTA.
 
+### As built — 2026-09-19: Watch next, three pins on the Watchlist (`20260929000200`)
+
+**The problem, in one sentence:** a Watchlist past a screenful stops answering *what am I
+actually going to watch next*. The answer is not a ranked queue of the whole list and not a
+second list — it is a mark on at most three of the titles already saved.
+
+**Exactly three, and the number is structural.** `slot` is 1–3 and unique per account, so a
+fourth pin cannot exist whatever writes it. Three is the width of the poster wall, so the
+pins are one full row.
+
+**Private in v1** (founder decision F2, 2026-09-19). The Watchlist itself has been profile
+content since 2026-08-20; Watch next is not. It is its own owner-only table rather than a
+column, because a flag on `watchlist` would be readable by everybody who can read the row —
+and because the foreign key into `watchlist` with `on delete cascade` is what makes a pin a
+subset of the Watchlist *by construction*. Every path that removes a saved title removes
+its pin in the same statement, with no trigger to maintain: unsaving, logging, ranking,
+finishing a series, deleting the account or the title. Unlogging restores neither, which is
+the 2026-08-15 rule unchanged.
+
+**Press and hold, and nothing added to saving.** The only way in is a long press on a
+Watchlist poster or row, which opens a sheet with one row — *Add to Watch next*, or *Remove
+from Watch next*. Screen readers get the same act as a named accessibility action, because
+a long press is invisible to them. Nothing is added to the flow of saving a title and no
+new control appears on a row. A one-time line under the count teaches the gesture, shown
+only to a reader with five or more saved titles and nothing pinned, and dismissed for good
+by its close glyph or by the first pin.
+
+**When three are pinned, the sheet asks which to replace** — the three as rows, one tap to
+swap, in a single server call that keeps the replaced title's slot. Two taps in total. A
+disabled action would have been a dead end, and a fourth pin is refused by the schema.
+
+**How they are drawn.** The pins sit above the rest of the Watchlist under one small *Watch
+next* label, in whichever mode the reader is in: three tiles in Poster, three rows in List.
+No title is ever drawn twice — the pins are lifted out of the list rather than copied above
+it. They follow the Movies/TV selector (the cap is across both, and the replace sheet can
+name a pinned season while the reader is on Movies); they obey the filters, so a filter
+that excludes a pinned title hides it and the "N of M" count stays honest; and they stay on
+top of every sort, Shuffle included.
+
+**No Feed event, no notification, no award and no reminder.** Changing what you plan to
+watch is not an announcement. Reminders, shared or overlapping Watch next lists, Group
+Picks integration and release notifications are all deliberately out, and none of them is
+blocked by this shape.
+
 > **Stage changed 2026-08-23 — deprioritized.** Import is **not** a requirement for the
 > friend beta, for the initial App Store release, or for the initial Google Play production
 > release. **The specification below is unchanged and still canonical**; only the stage

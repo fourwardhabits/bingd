@@ -10,6 +10,7 @@ import {
   IconToggle,
   type IconToggleOption,
   PosterGridList,
+  type PosterTile,
   ScoreBadge,
   SortChip,
   SortMenu,
@@ -34,6 +35,10 @@ import {
   type CollectionSegment,
   type CollectionSortState,
 } from './filters';
+import { partitionPinned, WATCH_NEXT_LABEL } from './watch-next';
+
+/** A stable empty list, so a caller that passes no pins changes nothing downstream. */
+const NO_PINS: readonly string[] = [];
 
 /**
  * Poster or list.
@@ -107,6 +112,18 @@ export type CollectionViewProps = {
   onPressItem: (mediaItemId: string) => void;
   /** Shown when the collection itself is empty, before any filtering. */
   empty: React.ReactNode;
+  /**
+   * Watch next, on the Watchlist only (20260929000200): the pinned media item ids in slot
+   * order. They are lifted out of the filtered list and drawn above it under a small
+   * label, in the current mode's own idiom — never twice, never sorted, and still subject
+   * to the filters, so the count above them stays honest.
+   */
+  pinned?: readonly string[];
+  /** Press and hold on a title. With `longPressLabel`, also an accessibility action. */
+  onLongPressItem?: (mediaItemId: string) => void;
+  longPressLabel?: (mediaItemId: string) => string;
+  /** A line under the count, for a one-time hint about the long press. */
+  hint?: React.ReactNode;
 };
 
 /**
@@ -130,6 +147,10 @@ export function CollectionView({
   onChange,
   onPressItem,
   empty,
+  pinned: pinnedIds = NO_PINS,
+  onLongPressItem,
+  longPressLabel,
+  hint,
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -146,8 +167,50 @@ export function CollectionView({
   // a hand-written one here only gave it a dependency list it could not prove
   // stable, which it reports rather than silently ignoring.
   const visible = sortItems(applyFilters(items, state.filters), sort, state.seed);
+  // Watch next lifted out of the filtered, sorted list: in slot order, above everything,
+  // and absent from `rest`, so no title is drawn twice. Empty everywhere but the Watchlist.
+  const { pinned, rest } = partitionPinned(visible, pinnedIds);
 
   if (items.length === 0) return <>{empty}</>;
+
+  const tileOf = (item: CollectionItem): PosterTile => ({
+    id: item.mediaItemId,
+    title: nameOf(item),
+    year: item.year,
+    // `row` (342px wide) rather than `card` (500px). A wall tile is a third of the
+    // screen, about 115pt, which is 345px at 3x and ~300px on a typical Android panel —
+    // so 342 is the tile's own resolution, and 500 was decoding twice the pixels for
+    // every poster scrolled past.
+    posterUri: posterUri(item.posterPath, 'row'),
+    // Only for titles that have one. A watchlist wall carries no numbers, which is what
+    // keeps it from looking like a scoreboard.
+    score: item.score,
+    bucket: item.bucket,
+  });
+
+  const rowOf = (item: CollectionItem) => (
+    <TitleRow
+      title={nameOf(item)}
+      year={item.year}
+      posterUri={posterUri(item.posterPath)}
+      secondary={
+        <TitleMetadata runtimeMinutes={item.runtimeMinutes} genres={item.genres} showYear={false} />
+      }
+      trailing={
+        segment !== 'watchlist' ? (
+          <ScoreBadge
+            score={item.score}
+            bucket={item.bucket}
+            onPress={() => onPressItem(item.mediaItemId)}
+          />
+        ) : undefined
+      }
+      divided
+      onPress={() => onPressItem(item.mediaItemId)}
+      onLongPress={onLongPressItem ? () => onLongPressItem(item.mediaItemId) : undefined}
+      longPressLabel={longPressLabel?.(item.mediaItemId)}
+    />
+  );
 
   const activeCount = activeFilterCount(state.filters);
 
@@ -205,6 +268,7 @@ export function CollectionView({
           ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
           : `${visible.length} of ${items.length}`}
       </Text>
+      {hint}
 
       {visible.length === 0 ? (
         <View style={styles.padded}>
@@ -234,57 +298,37 @@ export function CollectionView({
          * was, and only the drawing of it changed.
          */
         <PosterGridList
-          tiles={visible.map((item) => ({
-            id: item.mediaItemId,
-            title: nameOf(item),
-            year: item.year,
-            // `row` (342px wide) rather than `card` (500px). A wall tile is a third of
-            // the screen, about 115pt, which is 345px at 3x and ~300px on a typical
-            // Android panel — so 342 is the tile's own resolution, and 500 was decoding
-            // twice the pixels for every poster scrolled past.
-            posterUri: posterUri(item.posterPath, 'row'),
-            // Only for titles that have one. A watchlist wall carries no
-            // numbers, which is what keeps it from looking like a scoreboard.
-            score: item.score,
-            bucket: item.bucket,
-          }))}
+          tiles={rest.map(tileOf)}
           onPressTile={(tile) => onPressItem(tile.id)}
+          onLongPressTile={onLongPressItem ? (tile) => onLongPressItem(tile.id) : undefined}
+          longPressLabel={longPressLabel ? (tile) => longPressLabel(tile.id) : undefined}
+          leading={pinned.length ? { label: WATCH_NEXT_LABEL, tiles: pinned.map(tileOf) } : undefined}
           paddingTop={styles.wall.paddingTop}
           paddingBottom={styles.wall.paddingBottom}
         />
       ) : (
         <FlashList
-          data={visible}
+          data={rest}
           keyExtractor={(item) => item.mediaItemId}
           // See the note on the grid in `PosterGridList`: a re-sort keeps the offset
           // rather than chasing the row that happened to be on top.
           maintainVisibleContentPosition={LIST_POSITION}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <TitleRow
-              title={nameOf(item)}
-              year={item.year}
-              posterUri={posterUri(item.posterPath)}
-              secondary={
-                <TitleMetadata
-                  runtimeMinutes={item.runtimeMinutes}
-                  genres={item.genres}
-                  showYear={false}
-                />
-              }
-              trailing={
-                segment !== 'watchlist' ? (
-                  <ScoreBadge
-                    score={item.score}
-                    bucket={item.bucket}
-                    onPress={() => onPressItem(item.mediaItemId)}
-                  />
-                ) : undefined
-              }
-              divided
-              onPress={() => onPressItem(item.mediaItemId)}
-            />
-          )}
+          // Watch next, drawn as the same rows above the virtualised rest. Never more than
+          // three, so it does not need recycling, and it scrolls away with the list.
+          ListHeaderComponent={
+            pinned.length ? (
+              <View testID="collection-pinned" style={styles.pinned}>
+                <Text variant="footnote" tone="secondary" style={styles.pinnedLabel}>
+                  {WATCH_NEXT_LABEL}
+                </Text>
+                {pinned.map((item) => (
+                  <View key={item.mediaItemId}>{rowOf(item)}</View>
+                ))}
+              </View>
+            ) : null
+          }
+          renderItem={({ item }) => rowOf(item)}
         />
       )}
 
@@ -335,6 +379,9 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[1],
   },
   list: { paddingBottom: theme.space[10] },
+  // The space under the pinned rows is the only separator from the rest; no rule.
+  pinned: { paddingBottom: theme.space[4] },
+  pinnedLabel: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   wall: { paddingBottom: theme.space[10], paddingTop: theme.space[2] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
 });

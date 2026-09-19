@@ -36,6 +36,14 @@ export type TitleRowProps = {
    */
   spacious?: boolean;
   onPress: () => void;
+  /**
+   * A secondary act on the row, reached by pressing and holding — Watch next on the
+   * Watchlist (20260929000200). Invisible to a screen reader, so a caller that passes it
+   * passes `longPressLabel` too, and the same act is offered as an accessibility action.
+   */
+  onLongPress?: () => void;
+  /** What `onLongPress` does, said as an accessibility action ("Add to Watch next"). */
+  longPressLabel?: string;
 };
 
 /**
@@ -69,6 +77,8 @@ export function TitleRow({
   divided = false,
   spacious = false,
   onPress,
+  onLongPress,
+  longPressLabel,
 }: TitleRowProps) {
   const compact = size !== 'sm';
   const secondaryLabel = typeof secondary === 'string' ? secondary : null;
@@ -79,7 +89,14 @@ export function TitleRow({
       accessibilityRole="button"
       accessibilityLabel={[title, year, secondaryLabel, tertiaryLabel].filter(Boolean).join(', ')}
       accessibilityHint={pending ? 'Saved on this device, waiting to sync' : undefined}
+      accessibilityActions={
+        onLongPress && longPressLabel ? [{ name: 'longpress', label: longPressLabel }] : undefined
+      }
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'longpress') onLongPress?.();
+      }}
       onPress={onPress}
+      onLongPress={onLongPress}
       style={[
         styles.row,
         compact && styles.rowCompact,

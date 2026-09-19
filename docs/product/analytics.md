@@ -74,6 +74,31 @@ error rather than a decision somebody makes at 2am before a demo.
 | `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
 | `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
+| `watch_next_changed` | `set_watch_next` answered `ok` with a pin list (2026-09-19) | the owner | `action`, `count_after` |
+| `watch_next_full_shown` | the replace picker was shown, because three are already pinned | the owner | — |
+
+### Watch next — added 2026-09-19
+
+Two names for one small feature (`20260929000200`), and between them they answer the two
+questions it has: **is it used**, and **is three the right number**.
+
+`watch_next_changed` carries `action` — `added`, `removed` or `replaced` — and
+`count_after`, which is what the server reported the account holds afterwards, 0 to 3. It
+follows the server's answer: a refusal counts nothing, and a replayed operation id reports
+no list and so counts nothing either. `watch_next_full_shown` fires when the sheet opens
+straight into the replace picker, and when a sheet that thought there was room is told
+otherwise by the server.
+
+**No `surface` on either**, deliberately: press and hold on the Watchlist is the only way
+in, so the property could only ever carry one value. No title, no media kind and no pin
+identity — the pins are private (PRD §22), and none of that is needed to answer either
+question.
+
+**What cannot be measured from events, and does not need to be.** Whether a pinned title
+was eventually watched is a server-side question: the pin is deleted by the same cascade
+that removes the Watchlist row, so the honest answer comes from the collection, not from a
+client event fired next to it. Adoption is `watch_next` rows against weekly actives, read
+directly.
 
 ### Social and discovery
 
