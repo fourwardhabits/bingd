@@ -44,18 +44,20 @@ before(async () => {
    * **A fixed bar of five for this shared database**, and the reason it has to be pinned.
    *
    * Since 20260916000200 the bar is `community_support_floor`: the 90th percentile of
-   * rating count, floored at `discovery.support_min_ratings`. That is a fact about every
-   * title in the database, so on a database every test in this file adds to, the bar would
-   * move with whichever tests had already run — and a boundary assertion that depends on
-   * test order is not a boundary assertion.
+   * rating count, floored at each medium's own minimum (`discovery.support_min_ratings.movie`
+   * and `.season` since 20260927000100). That is a fact about every title in the database,
+   * so on a database every test in this file adds to, the bar would move with whichever
+   * tests had already run — and a boundary assertion that depends on test order is not a
+   * boundary assertion.
    *
    * A percentile of 0 is the smallest rating count present, which in this file is always
-   * at or under five, so the floor decides and the bar is exactly five throughout. The
-   * percentile itself is proved on databases of their own in `the shared support floor`
-   * at the foot of this file.
+   * at or under five, so the floor decides and the bar is exactly five throughout, for both
+   * media. The percentile and the real per-medium minimums are proved on databases of their
+   * own in `the shared support floor` at the foot of this file.
    */
   await t.sql(`update app_config set value = '0'::jsonb where key = 'discovery.support_percentile'`);
-  await t.sql(`update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings'`);
+  await t.sql(`update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings.movie'`);
+  await t.sql(`update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings.season'`);
 });
 
 after(async () => {
@@ -126,12 +128,12 @@ describe('top_rated_titles', () => {
 
     // And the floor is the config row rather than a literal, so moving it moves the wall.
     await t.sql(
-      `update app_config set value = '4'::jsonb where key = 'discovery.support_min_ratings'`,
+      `update app_config set value = '4'::jsonb where key = 'discovery.support_min_ratings.movie'`,
     );
     const relaxed = (await topRated('movies')).map((row) => row.media_item_id);
     assert.ok(relaxed.includes(four), 'lowering the config row admits the four-rating title');
     await t.sql(
-      `update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings'`,
+      `update app_config set value = '5'::jsonb where key = 'discovery.support_min_ratings.movie'`,
     );
   });
 
@@ -500,8 +502,8 @@ describe('the shared support floor', () => {
 
   it('reads movies and TV seasons as separate distributions', async () => {
     await own(async (db) => {
-      // Movies get a percentile of 16. TV is far thinner, and a season ranked by three
-      // people must not be held to a bar the film wall set.
+      // Movies get a percentile of 16. TV is far thinner, and a season ranked by two
+      // people must not be held to a bar the film wall set -- nor to the film minimum.
       const raters = [];
       for (let i = 0; i < 16; i += 1) raters.push(await db.createUser({ username: `md${i}` }));
 
@@ -512,15 +514,154 @@ describe('the shared support floor', () => {
       for (const [index, who] of raters.entries()) {
         await db.actAs(who);
         await ownRank(db, film, 'fine');
-        if (index < 3) await ownRank(db, season, 'loved');
+        if (index < 2) await ownRank(db, season, 'loved');
       }
 
       assert.equal(await floorOf(db, 'movie'), 16);
-      assert.equal(await floorOf(db, 'season'), 3, 'the floor decides for a thin medium');
+      assert.equal(await floorOf(db, 'season'), 2, 'the TV minimum decides for a thin medium');
 
       await db.actAs(raters[0]);
       const tv = (await db.sql(`select * from top_rated_titles('tv', 50, null, null, null)`)).rows;
       assert.deepEqual(tv.map((row) => row.media_item_id), [season]);
+      assert.equal(tv[0].min_ratings, 2);
+    });
+  });
+
+  describe('each medium has its own minimum (20260927000100)', () => {
+    const rateBy = async (db, raters, id, bucket = 'loved') => {
+      for (const who of raters) {
+        await db.actAs(who);
+        await ownRank(db, id, bucket);
+      }
+    };
+    const wall = async (db, medium) =>
+      (await db.sql(`select * from top_rated_titles($1, 50, null, null, null)`, [medium])).rows;
+    const ids = (rows) => rows.map((row) => row.media_item_id);
+    const people = async (db, prefix, n) => {
+      const out = [];
+      for (let i = 0; i < n; i += 1) out.push(await db.createUser({ username: `${prefix}${i}` }));
+      return out;
+    };
+
+    it('is three for movies and two for TV seasons, before anything is rated', async () => {
+      await own(async (db) => {
+        assert.equal(await floorOf(db, 'movie'), 3);
+        assert.equal(await floorOf(db, 'season'), 2);
+      });
+    });
+
+    it('admits a season two people ranked, and not a film two people ranked', async () => {
+      await own(async (db) => {
+        const raters = await people(db, 'two', 3);
+        const film3 = await ownMovie(db, 'Film Three Raters');
+        const film2 = await ownMovie(db, 'Film Two Raters');
+        const show = await db.createSeries('Two Rater Show', ownSeq++);
+        const season2 = await db.createSeason(show, 1, 'Season 1');
+        const season1 = await db.createSeason(show, 2, 'Season 2');
+
+        await rateBy(db, raters, film3);
+        await rateBy(db, raters.slice(0, 2), film2);
+        await rateBy(db, raters.slice(0, 2), season2);
+        await rateBy(db, raters.slice(0, 1), season1);
+
+        // p90 over {3, 2} is 3 for films; over {2, 1} it is 2 for seasons. Neither lifts
+        // above its minimum, so the minimums are the whole rule here.
+        assert.equal(await floorOf(db, 'movie'), 3);
+        assert.equal(await floorOf(db, 'season'), 2);
+
+        await db.actAs(raters[0]);
+        const movies = await wall(db, 'movies');
+        const tv = await wall(db, 'tv');
+        assert.deepEqual(ids(movies), [film3], 'two ratings is not enough for a film');
+        assert.deepEqual(ids(tv), [season2], 'two is enough for a season; one never is');
+        assert.ok(movies.every((row) => row.min_ratings === 3));
+        assert.ok(tv.every((row) => row.min_ratings === 2));
+      });
+    });
+
+    it('keeps a single-rater title off both walls, even when that is all there is', async () => {
+      await own(async (db) => {
+        const [who] = await people(db, 'lone', 1);
+        const film = await ownMovie(db, 'Lone Film');
+        const show = await db.createSeries('Lone Show', ownSeq++);
+        const season = await db.createSeason(show, 1, 'Season 1');
+        await rateBy(db, [who], film);
+        await rateBy(db, [who], season);
+
+        await db.actAs(who);
+        assert.deepEqual(await wall(db, 'movies'), []);
+        assert.deepEqual(await wall(db, 'tv'), []);
+      });
+    });
+
+    it('orders eligible seasons by community score, not by how many rated them', async () => {
+      await own(async (db) => {
+        const raters = await people(db, 'ord', 3);
+        const [filler] = await people(db, 'fill', 1);
+        const show = await db.createSeries('Ordered Show', ownSeq++);
+        const lovedByTwo = await db.createSeason(show, 1, 'Season 1');
+        const fineByThree = await db.createSeason(show, 2, 'Season 2');
+        // Eight single-rater seasons hold TV's p90 at 2, so both of the above qualify.
+        for (let n = 3; n <= 10; n += 1) {
+          await rateBy(db, [filler], await db.createSeason(show, n, `Season ${n}`), 'not_for_me');
+        }
+
+        await rateBy(db, raters.slice(0, 2), lovedByTwo, 'loved');
+        await rateBy(db, raters, fineByThree, 'fine');
+        assert.equal(await floorOf(db, 'season'), 2);
+
+        await db.actAs(raters[0]);
+        const tv = await wall(db, 'tv');
+        assert.deepEqual(ids(tv), [lovedByTwo, fineByThree]);
+        assert.ok(Number(tv[0].score) > Number(tv[1].score));
+        assert.ok(tv[0].rating_count < tv[1].rating_count, 'the higher score has fewer raters');
+      });
+    });
+
+    it('does not move the TV wall when the film population grows', async () => {
+      await own(async (db) => {
+        const raters = await people(db, 'tvfix', 2);
+        const show = await db.createSeries('Steady Show', ownSeq++);
+        const season = await db.createSeason(show, 1, 'Season 1');
+        await rateBy(db, raters, season);
+
+        await db.actAs(raters[0]);
+        const floorBefore = await floorOf(db, 'season');
+        const before = await wall(db, 'tv');
+
+        // Twelve people rank one film: the film p90 goes to 12.
+        const crowd = await people(db, 'filmcrowd', 12);
+        await rateBy(db, crowd, await ownMovie(db, 'Crowded Film'));
+        assert.equal(await floorOf(db, 'movie'), 12);
+
+        await db.actAs(raters[0]);
+        assert.equal(await floorOf(db, 'season'), floorBefore);
+        assert.deepEqual(await wall(db, 'tv'), before);
+        assert.deepEqual(ids(before), [season]);
+      });
+    });
+
+    it('does not move the film wall when the TV population grows', async () => {
+      await own(async (db) => {
+        const raters = await people(db, 'filmfix', 3);
+        const film = await ownMovie(db, 'Steady Film');
+        await rateBy(db, raters, film);
+
+        await db.actAs(raters[0]);
+        const floorBefore = await floorOf(db, 'movie');
+        const before = await wall(db, 'movies');
+
+        // Nine people rank one season: the season p90 goes to 9.
+        const crowd = await people(db, 'tvcrowd', 9);
+        const show = await db.createSeries('Crowded Show', ownSeq++);
+        await rateBy(db, crowd, await db.createSeason(show, 1, 'Season 1'));
+        assert.equal(await floorOf(db, 'season'), 9);
+
+        await db.actAs(raters[0]);
+        assert.equal(await floorOf(db, 'movie'), floorBefore);
+        assert.deepEqual(await wall(db, 'movies'), before);
+        assert.deepEqual(ids(before), [film]);
+      });
     });
   });
 
@@ -541,7 +682,7 @@ describe('the shared support floor', () => {
       );
 
       await db.sql(`update app_config set value = '-1'::jsonb where key = 'discovery.support_percentile'`);
-      await db.sql(`update app_config set value = '0'::jsonb where key = 'discovery.support_min_ratings'`);
+      await db.sql(`update app_config set value = '0'::jsonb where key = 'discovery.support_min_ratings.movie'`);
       assert.equal(await floorOf(db, 'movie'), 1, 'and a floor below one is raised to one');
     });
   });
@@ -571,7 +712,7 @@ describe('the shared support floor', () => {
 
       for (const [pct, min, expected] of cases) {
         await db.sql(`update app_config set value = ${pct}::jsonb where key = 'discovery.support_percentile'`);
-        await db.sql(`update app_config set value = ${min}::jsonb where key = 'discovery.support_min_ratings'`);
+        await db.sql(`update app_config set value = ${min}::jsonb where key = 'discovery.support_min_ratings.movie'`);
 
         assert.equal(await floorOf(db, 'movie'), expected, `percentile ${pct}, minimum ${min}`);
         assert.equal(
@@ -584,6 +725,25 @@ describe('the shared support floor', () => {
           await db.errorFrom(`select * from starter_movies(5)`),
           null,
           `starter_movies must answer with percentile ${pct}, minimum ${min}`,
+        );
+      }
+
+      // The TV row has the same guarantees and its own default of two (20260927000100).
+      await db.sql(`update app_config set value = '0.9'::jsonb where key = 'discovery.support_percentile'`);
+      for (const [min, expected] of [
+        [`'"2"'`, 2],
+        [`'null'`, 2],
+        [`'2.5'`, 2],
+        [`'0'`, 1],
+      ]) {
+        await db.sql(
+          `update app_config set value = ${min}::jsonb where key = 'discovery.support_min_ratings.season'`,
+        );
+        assert.equal(await floorOf(db, 'season'), expected, `season minimum ${min}`);
+        assert.equal(
+          await db.errorFrom(`select * from top_rated_titles('tv', 5, null, null, null)`),
+          null,
+          `top_rated_titles('tv') must answer with season minimum ${min}`,
         );
       }
     });
