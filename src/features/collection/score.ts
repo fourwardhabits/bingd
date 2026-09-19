@@ -91,8 +91,17 @@ export const rankInBand = (bucket: Bucket, position: number, sizes: BandSizes): 
  *
  * A band of one scores the high, not the midpoint. The first title you ever
  * call *I liked it* is, at that moment, genuinely the best thing in your list.
+ *
+ * **Unrounded, and that is the difference from {@link scoreFor}.** Inside one
+ * category this is strictly decreasing in `position` — every step inside a band is
+ * positive and the bands do not overlap — so it orders a category exactly as the
+ * ordinal does. Rounding to one decimal does not: in a band of a hundred, three or
+ * four neighbours all print 8.5, and anything that sorts by the printed number has
+ * to break that tie somehow. The ordinal is still the truth; this is only the number
+ * to compare when titles from *different* categories meet in one list, where
+ * positions are not comparable and the rounded score collides.
  */
-export const scoreFor = (bucket: Bucket, position: number, sizes: BandSizes): number => {
+export const projectedScore = (bucket: Bucket, position: number, sizes: BandSizes): number => {
   const { high, low } = BAND_RANGE[bucket];
   const size = sizes[bucket];
   const rank = rankInBand(bucket, position, sizes);
@@ -101,8 +110,12 @@ export const scoreFor = (bucket: Bucket, position: number, sizes: BandSizes): nu
   if (rank >= size) return low;
 
   const step = (high - low) / (size - 1);
-  return round1(high - (rank - 1) * step);
+  return high - (rank - 1) * step;
 };
+
+/** The score as it is shown: {@link projectedScore} to one decimal. */
+export const scoreFor = (bucket: Bucket, position: number, sizes: BandSizes): number =>
+  round1(projectedScore(bucket, position, sizes));
 
 /** One decimal, and never `-0`. */
 const round1 = (value: number) => {

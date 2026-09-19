@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { bandSizes, scoreFor } from '@/features/collection/score';
+import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score';
 import { useRankedCollection } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -99,9 +99,17 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
       ...movieRows.map((row) => ({ row, sizes: movieSizes })),
       ...seasonRows.map((row) => ({ row, sizes: seasonSizes })),
     ]
-      .map((entry) => ({ ...entry, score: scoreFor(entry.row.bucket, entry.row.position, entry.sizes) }))
+      // By the *unrounded* projection, not the printed one decimal. Inside a category the
+      // projection falls strictly with position, so each category keeps its own ranked order
+      // — a film ranked #1 and one ranked #2 both print 10.0 in a band of a hundred, and
+      // sorting by the printed number left their order to the id. The printed scores still
+      // never rise down the wall, because rounding a falling sequence cannot make it rise.
+      .map((entry) => ({
+        ...entry,
+        score: projectedScore(entry.row.bucket, entry.row.position, entry.sizes),
+      }))
       // Highest first, then by id — the tiebreak `RankedTitlesSheet` already uses, for its
-      // reason: two 10.0s are ordinary here, since each category's best scores its band's
+      // reason: an exact tie is ordinary here, since each category's best scores its band's
       // high and so does a band of one. Without it the wall could reorder itself between
       // renders on nothing but which half of the read resolved first.
       .sort((a, b) => b.score - a.score || a.row.mediaItemId.localeCompare(b.row.mediaItemId))

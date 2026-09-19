@@ -134,6 +134,8 @@ export function watchedItems(
     language: entry.language,
     runtimeMinutes: entry.runtimeMinutes,
     score: scoreFor(entry.bucket, entry.position, sizes),
+    // What the Rating order breaks an equal score on. See `CollectionItem.position`.
+    position: entry.position,
     bucket: entry.bucket,
     // A ranked title's watch date and collection timestamp live on `user_media`, which
     // the logged query holds — so they are read across from there. See the note above
