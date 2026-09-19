@@ -32,6 +32,7 @@ import {
 } from './use-companions';
 import { emptyLogState, useLogState, type LogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
+import { carriedWhen, keepWhenAlive, rememberWhen } from './when-session';
 import {
   clearWatchDate,
   logWatched,
@@ -366,6 +367,23 @@ function Body({
    * says which of the two happened.
    */
   const [dateCleared, setDateCleared] = useState(false);
+  /**
+   * The reader's last explicit *Today* or *Earlier* from this logging sitting
+   * (`when-session.ts`, founder decision R4), read once as the sheet mounts.
+   *
+   * It only ever speaks for a title this sheet is logging for the first time — see
+   * `startsEarlier` — and never in the post-rank state, which is a title that has just
+   * been ranked rather than one being logged. Seeded rather than read in an effect for
+   * the reason every other seed here gives: the sheet mounts fresh per title.
+   */
+  const [carried] = useState(() => (postRank ? null : carriedWhen(profile.id)));
+  /**
+   * Whether the date row may still open by itself for a carried *Earlier*.
+   *
+   * True until the reader touches any row. After that the rows are theirs: collapsing
+   * the note must not pop the calendar back open underneath it.
+   */
+  const [dateAutoOpen, setDateAutoOpen] = useState(true);
   // Seeded rather than set in an effect: the sheet is keyed by the title and mounts
   // fresh for each one, so the initial value *is* the answer and an effect would only
   // be a second render saying the same thing.
@@ -532,6 +550,17 @@ function Body({
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
   /**
+   * A title being logged for the first time, opening on the *Earlier* the reader chose
+   * for the previous one (R4).
+   *
+   * Three conditions, each load-bearing. `loaded`, because "first time" is a fact only
+   * the read can state. `!state.exists`, because the carry is about logging a new title
+   * and says nothing about one already in the collection — that title's own stored date
+   * (or its absence) is what the row shows. And `dateEdit === null`, so a *Today* or a
+   * picked date tapped here wins at once.
+   */
+  const startsEarlier = carried === 'earlier' && loaded && !state.exists && dateEdit === null;
+  /**
    * Whether the row is deliberately dateless, which is a different thing from having
    * no date *yet*.
    *
@@ -544,7 +573,17 @@ function Body({
    * `dateEdit` overrides it, so a date picked in this session shows immediately rather
    * than waiting for the write and the refetch.
    */
-  const datelessOnPurpose = dateCleared || (state.exists && !state.watchedOn && !dateEdit);
+  const datelessOnPurpose =
+    dateCleared || startsEarlier || (state.exists && !state.watchedOn && !dateEdit);
+  /**
+   * The date a write that *creates* the row should carry: none at all when the reader
+   * has said Earlier, however they said it. `effectiveDate` alone falls back to today,
+   * which is right for display and wrong for a title somebody has just told us they
+   * saw at some unknown point.
+   */
+  const creatingDate = datelessOnPurpose ? null : effectiveDate;
+  // Open by itself only for a carried Earlier, and only until the reader touches a row.
+  const dateOpen = expanded === 'date' || (expanded === null && dateAutoOpen && startsEarlier);
 
   // Logging is a collection change like any other: it writes a feed event, moves the
   // watchlist, and changes what this reader has watched. The same set as ranking.
@@ -639,6 +678,22 @@ function Body({
     beginSaving();
     setProblem(null);
 
+    /**
+     * What this title was **before this tap wrote anything** — asked now, ahead of
+     * `set_bucket`, and answered by the same at-rest read the stamp below always used.
+     *
+     * The stamp used to ask *after* `set_bucket`, and asked only "is there a date?".
+     * That cannot tell a title being logged for the first time from one that has been
+     * in the collection for months with no date — an imported film, an onboarding pick,
+     * an earlier "I don't know when" — and it stamped today onto all of them the moment
+     * they were ranked, while this very sheet displayed them as dateless. Ranking now
+     * is not watching now (T0b, 2026-09-19): only a title this sheet is logging for the
+     * first time gets the default date.
+     */
+    const before = settledLogState();
+    // Captured at the tap: what the reader was looking at when they chose.
+    const undated = datelessOnPurpose || (carried === 'earlier' && dateEdit === null);
+
     // One operation id per intent. If this call is retried it must carry the same one, or
     // the ledger cannot tell a retry from a second opinion.
     const operationId = newOperationId();
@@ -696,12 +751,21 @@ function Body({
     // null, which is exactly the condition the stamp treats as "no date yet", so the
     // next bucket tap would write today's date back over an explicit "I don't
     // remember" and nothing on screen would say it had happened.
-    if (!stampPending.current && !dateCleared) {
+    //
+    // And only for a title this sheet is logging for the first time: absent before the
+    // tap, or created by this sheet a moment ago (a note or a companion written before
+    // the bucket). A title that was already in the collection keeps exactly the date it
+    // had — including none — because nothing about ranking it says when it was watched.
+    //
+    // A carried *Earlier* (R4) counts as "they do not remember" even if the tap raced
+    // the read that makes it visible, and `undated` is the answer captured at the tap.
+    if (!stampPending.current && !undated) {
       stampPending.current = true;
       void (async () => {
         try {
-          const settled = await settledLogState();
-          if (settled && !settled.watchedOn) {
+          const settled = await before;
+          const loggingItNow = settled !== undefined && (!settled.exists || createdRow.current);
+          if (settled && !settled.watchedOn && loggingItNow) {
             // Failure here is not worth blocking on. The bucket is saved, the title
             // is in the collection, and the date is recoverable from this same row.
             await logWatched({
@@ -715,6 +779,14 @@ function Body({
           stampPending.current = false;
         }
       })();
+    }
+
+    // A new title logged under the carried mode is logging activity, so the sitting
+    // stays open (`when-session.ts`). Re-rating something already collected is not.
+    if (carried) {
+      void before.then((prior) => {
+        if (prior && !prior.exists) keepWhenAlive(profile.id);
+      });
     }
 
     endSaving();
@@ -1054,6 +1126,10 @@ function Body({
     setDateEdit(null);
     setDateCleared(true);
     setProblem(null);
+    // An explicit Earlier while logging a new title carries to the next one (R4). Not
+    // on a title already in the collection: forgetting an old film's date is an edit,
+    // and says nothing about what the reader is logging next.
+    if (!state.exists || createdRow.current) rememberWhen(profile.id, 'earlier');
     beginSaving();
     await queueDateWrite(async () => {
       const result = await clearWatchDate({
@@ -1108,7 +1184,9 @@ function Body({
           const created = await logWatched({
             operationId: newOperationId(),
             mediaItemId: title.id,
-            watchedOn: effectiveDate,
+            // Not `effectiveDate`, which falls back to today: a reader who has said
+            // Earlier and then ticks a friend must not have today written for them.
+            watchedOn: creatingDate,
           });
           // Only an acknowledged success proves the row is there. An unknown outcome
           // leaves the flag false so the next tap asks again — `log_watched` upserts,
@@ -1206,6 +1284,7 @@ function Body({
     : undefined;
 
   const toggleNotes = () => {
+    setDateAutoOpen(false);
     if (expanded === 'notes') {
       // Leaving the field, so the field's contract applies: what was typed is
       // already on its way to the server before the composer is gone.
@@ -1395,7 +1474,14 @@ function Body({
             label="Who I watched with"
             value={loaded ? companionValue : undefined}
             expanded={expanded === 'who'}
-            onPress={loaded ? () => setExpanded(expanded === 'who' ? null : 'who') : undefined}
+            onPress={
+              loaded
+                ? () => {
+                    setDateAutoOpen(false);
+                    setExpanded(expanded === 'who' ? null : 'who');
+                  }
+                : undefined
+            }
             disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'who' ? (
@@ -1496,32 +1582,56 @@ function Body({
           <SheetRow
             icon="calendar-outline"
             label="Watch date"
+            // "Earlier", the same word as the choice that produces it (T0b): seen, at a
+            // time nobody recorded. It was "Not recorded", which read as the sheet having
+            // failed at something rather than as an answer the reader gave.
             value={
               loaded
                 ? datelessOnPurpose
-                  ? 'Not recorded'
+                  ? 'Earlier'
                   : formatWatchDate(effectiveDate)
                 : undefined
             }
-            expanded={expanded === 'date'}
+            expanded={dateOpen}
             onPress={
-              loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined
+              loaded
+                ? () => {
+                    setDateAutoOpen(false);
+                    setExpanded(dateOpen ? null : 'date');
+                  }
+                : undefined
             }
             disabledReason={GATE_REASON[fieldState]}
           />
-          {loaded && expanded === 'date' ? (
+          {/**
+           * Open by itself when a carried *Earlier* is in force (R4), so the choice the
+           * sheet made on the reader's behalf is on screen with *Today* one tap away —
+           * never a default hidden inside a collapsed row.
+           */}
+          {loaded && dateOpen ? (
             <View style={styles.expanded}>
               <WatchDatePicker
                 value={datelessOnPurpose ? null : effectiveDate}
                 // The grid still has to open on *some* month, and today is the only
                 // sensible one for a title with no date to anchor it.
                 anchor={effectiveDate}
-                onChange={(iso) => {
+                onChange={(iso, source) => {
+                  setExpanded('date');
                   setDateCleared(false);
                   setDateEdit(iso);
+                  // An explicit Today while logging a new title switches the sitting
+                  // back (R4). A specific date — Yesterday, or one from the calendar —
+                  // does not move the mode either way: it is a fact about this title
+                  // and says nothing about when the next one was watched.
+                  if (source === 'today' && (!state.exists || createdRow.current)) {
+                    rememberWhen(profile.id, 'today');
+                  }
                   void saveDetails({ date: iso });
                 }}
-                onClear={() => void clearDate()}
+                onClear={() => {
+                  setExpanded('date');
+                  void clearDate();
+                }}
               />
             </View>
           ) : null}
