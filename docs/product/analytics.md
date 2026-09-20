@@ -355,6 +355,62 @@ is the correct pair of capabilities for a decoration-or-not question.
 used, and an event counting impressions would answer a question nobody is asking with a
 number that looks like the one they are.
 
+### Lists — added 2026-09-20
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `my_lists_opened` | the My lists screen **mounted**, once the owned count is known | the reader | `entry`, `owned_count` |
+| `list_created` | `create_list` answered ok | the creator | `surface`, `visibility`, `order_style`, `has_first_item`, `owned_count_after`, `would_have_exceeded_3_lists` |
+| `list_item_added` | `add_list_item` answered **`added`** | the owner | `surface`, `media_kind`, `count_after` |
+| `list_visibility_changed` | `update_list` **changed** the mode | the owner | `from`, `to`, `surface`, `profile_private` |
+| `list_shared` | the system share sheet **opened** for a list URL | the sharer | `visibility`, `item_count`, `is_owner` |
+| `list_opened` | the list screen resolved a list the reader may see | the reader | `surface`, `is_owner`, `relation`, `visibility_class` |
+| `list_watchlist_bulk_added` | `add_list_to_watchlist` answered ok | the reader | `added`, `skipped_seen` |
+| `list_limit_reached` | `create_list` answered `list_limit` — the 100 ceiling | the creator | — |
+| `watchlist_added` | existing event, from a list row's bookmark | the reader | `surface: 'list'` |
+| *(server)* `list_web_opens` | the public web page resolved a list an anonymous reader may see | — | `platform` |
+
+**`my_lists_opened.entry` is why this set shipped with the feature rather than with the
+dashboards.** `My lists ›` is a *text action on Collection's title row* rather than a
+permanent segment — the IA review's choice, which buys the clutter constraint at a real
+cost in discoverability. `entry` is `collection` or `profile_manage`, the two doors to one
+identical screen, and the split is how that cost gets measured. It is the **only** evidence
+that would justify ever promoting Lists to a Collection segment, and deferring it would
+have made the first thirty days — the ones that matter — unrecoverable.
+
+Read it as: the `collection` share of `my_lists_opened`, and the `my_lists` share of
+`list_created`, over the first 30 days. **Rethink the entry** if `entry = collection` is
+under ~20% of opens *and* `list_created` from `my_lists` is near zero — i.e. essentially
+every list is being born in the title menu and nobody is finding the screen. The remedies,
+in order of cost: a slim full-width row under `HeaderBoundary`, then a conditional segment.
+
+**`would_have_exceeded_3_lists` measures a limit that does not exist.** There is no
+three-list cap: it is never enforced, never shown, and no client branches on it. The flag
+is true when the account already owned three or more in-app lists — i.e. this creation
+*would* have been refused under one. **The event is the source of truth**, because a later
+SQL snapshot cannot see a list that was created and then deleted. Imported lists are
+excluded from the count per PRD §12, so an importer's history cannot wash out the signal.
+The only enforced count is `lists.max_per_user` at 100, which has its own event.
+
+**`list_opened.visibility_class` is sent only by the owner** and is absent otherwise. The
+server tells the owner which mode a list is in and deliberately does not tell a viewer, so
+a viewer's client has nothing true to send — and `undefined` is dropped by `sanitize`,
+which is how "not known" is said here rather than by inventing a value.
+
+**`list_item_added` counts `added` and never `already`.** A second tap on a title that is
+already on a list adds nothing, and folding it in would make a double tap look like growth.
+
+**The bulk add has its own event and is not in `watchlist_added`.** One tap that saves nine
+titles is one decision, not nine — and `add_list_to_watchlist` writes no `feed_events` at
+all, so `list_watchlist_bulk_added` is the *only* record that somebody turned a list into a
+plan. That is the metric the whole utility half of the feature rests on.
+
+**What deliberately does not travel.** No list id, no list title, no description, no owner
+id, no handle, and no title of anything on a list. Every property here is a count, a
+boolean, or a word from a closed set — the schema's own rule (`lib/analytics.ts`) — and it
+matters more on this feature than on most: a list is a thing somebody named themselves,
+about films they chose.
+
 ---
 
 ## 3. What each event does **not** mean

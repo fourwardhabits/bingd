@@ -39,6 +39,7 @@ import {
   setWatchlist,
 } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
+import { AddToListSheet } from '@/features/lists/AddToListSheet';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
@@ -263,8 +264,22 @@ export default function TitleScreen() {
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
   const [recommending, setRecommending] = useState(false);
-  /** The Ranked control's menu: change the rating, drop it, or remove the title. */
+  /**
+   * The ⋯ menu: add to a list, change the rating, drop it, or remove the title.
+   *
+   * It opens for **every** title since Lists v1 (§P.4) — `Add to list…` is the one row
+   * that applies whether or not this account has ever touched the thing.
+   */
   const [managing, setManaging] = useState(false);
+  /** `Add to list…`, opened from the menu above. */
+  const [addingToList, setAddingToList] = useState(false);
+  /**
+   * Whether the menu was closed on its way to the Add-to-list sheet.
+   *
+   * A ref rather than state, so remembering the destination costs no render — see the
+   * `onDismissed` on the menu's `Sheet` for why the two are serialised on iOS at all.
+   */
+  const listSheetPending = useRef(false);
   /** The people behind the Following score (§13), opened from the Scores section. */
   const [followingRatingsOpen, setFollowingRatingsOpen] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
@@ -1194,13 +1209,23 @@ export default function TitleScreen() {
         // this, so a title opened from Search returns to Search and one opened from the
         // feed returns to the feed — the route stack decides, not this screen.
         onBack={() => router.back()}
-        // The menu, where the Ranked control used to keep it. Present wherever there is
-        // something to manage: a ranked title, and — since a wrongly imported film could not
-        // otherwise be taken out without ranking it (2026-09-18) — a film or season that is
-        // logged but unranked, for which the menu holds Remove from collection alone.
-        onMore={
-          data.ranked || (data.logged && rankable) ? () => setManaging(true) : undefined
-        }
+        /**
+         * The menu, where the Ranked control used to keep it.
+         *
+         * **It is now on every title** (lists-prd.md §P.4, 2026-09-19). It used to be
+         * present only where there was something to manage — a ranked title, and since
+         * 2026-09-18 a film or season that is logged but unranked, so that a wrongly
+         * imported film could be taken out without being ranked first. `Add to list…`
+         * applies to **every movie, season and whole series**, ranked or not, logged or
+         * not, which is the one thing that could be true of a title with nothing else in
+         * its menu — including a series, which has never had one.
+         *
+         * Nothing below it changed: the ranking rows and Remove from collection keep
+         * their place and their conditions, and a title with neither simply gets a menu
+         * whose only row is the list one. No hero control, no fourth `TitleActions`
+         * button, no permanent list button anywhere (§D).
+         */
+        onMore={() => setManaging(true)}
         title={displayTitle ?? title.title}
         subtitle={parent?.title ?? null}
       />
@@ -2069,8 +2094,58 @@ export default function TitleScreen() {
           visible
           onClose={() => setManaging(false)}
           label={`Options for ${displayTitle ?? title.title}`}
+          /**
+           * The serialised handover to the Add-to-list sheet, on iOS only.
+           *
+           * UIKit refuses a presentation issued while it is still dismissing another
+           * from the same presenter, React believes it succeeded, and what is left is a
+           * transparent window that swallows every touch — the reproduced 2026-09-10
+           * freeze (`Sheet.onDismissed`). This menu is on the audit's own list of
+           * unserialised swaps, and the row added above is a new one, so it waits.
+           *
+           * **Do not "simplify" this back into a pair of `setState` calls.** That is
+           * exactly the shape of the bug, and the screen renders perfectly while it has
+           * stopped accepting touches.
+           */
+          onDismissed={() => {
+            if (!listSheetPending.current) return;
+            listSheetPending.current = false;
+            setAddingToList(true);
+          }}
         >
           <View style={styles.menu}>
+            {/**
+             * **Add to list… is first, and it is the one row every title has**
+             * (lists-prd.md §P.4).
+             *
+             * Ungrouped and above the three headed groups, because it is the only row
+             * here that is not about this account's *collection*: the others say where
+             * a title sits in your ranking or whether you keep it at all, and this one
+             * puts it in something you made. A `MenuGroup` over a single row would
+             * imply there are more coming.
+             *
+             * It applies to every movie, season and whole series — ranked or not,
+             * logged or not, watchlisted or not — which is why `onMore` is now
+             * unconditional. On an account with no lists yet the sheet it opens skips
+             * straight to New list with this title preselected (§G).
+             */}
+            <SheetRow
+              icon="list-outline"
+              label="Add to list…"
+              onPress={() => {
+                // Closed first, then handed over on iOS once UIKit has finished
+                // dismissing — the serialised handover `Sheet.onDismissed` documents.
+                // Android has no presentation to wait for and goes straight across.
+                if (Platform.OS === 'ios') {
+                  listSheetPending.current = true;
+                  setManaging(false);
+                } else {
+                  setManaging(false);
+                  setAddingToList(true);
+                }
+              }}
+            />
+
             {/**
              * **Three groups, because seven undifferentiated rows is a list rather than
              * a menu.**
@@ -2276,14 +2351,42 @@ export default function TitleScreen() {
               </>
             ) : null}
 
-            <MenuGroup title="Collection" />
-            <SheetRow
-              icon="trash-outline"
-              label="Remove from collection"
-              onPress={confirmRemoval}
-            />
+            {/**
+             * **Gated on the title actually being in the collection**, which it was
+             * not obliged to be until this menu opened on every title (§P.4).
+             *
+             * It used to be unconditional, and that was correct while `onMore` itself
+             * carried the condition — the sheet could not open for a title that was
+             * neither ranked nor logged. Now that it can, an ungated Remove would offer
+             * to take a film off a shelf it has never been on, and the confirmation
+             * would be the first place anybody found out.
+             */}
+            {data.ranked || data.logged ? (
+              <>
+                <MenuGroup title="Collection" />
+                <SheetRow
+                  icon="trash-outline"
+                  label="Remove from collection"
+                  onPress={confirmRemoval}
+                />
+              </>
+            ) : null}
           </View>
         </Sheet>
+      ) : null}
+
+      {/* `Title ⋯ → Add to list…`. Mounted only while open, like every sheet on this
+          screen: it reads the caller's lists on mount, which is exactly the read not to
+          keep warm on a title page nobody is listing. */}
+      {addingToList ? (
+        <AddToListSheet
+          mediaItemId={title.id}
+          kind={title.kind}
+          name={displayTitle ?? title.title}
+          profilePrivate={profile.visibility === 'private'}
+          onClose={() => setAddingToList(false)}
+          onOpenList={(listId) => router.push(`/lists/${listId}?surface=title_menu`)}
+        />
       ) : null}
       {recommending ? (
         <RecommendSheet

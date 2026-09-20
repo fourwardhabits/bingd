@@ -36,6 +36,50 @@ const ALLOWED = {
   'list_by_id(uuid)': ['anon', 'authenticated'],
   'list_items_by_list(uuid)': ['anon', 'authenticated'],
 
+  // ---------------------------------------------------------------------------
+  // Lists v1 (20261010000100).
+  //
+  // The anon set is exactly six, and each one is anon for a stated reason rather than
+  // by symmetry with its neighbours:
+  //
+  //   list_view / list_items_page    — the logged-out page at bingd.app/lists/<id> is
+  //                                    the acquisition surface and has no session.
+  //   record_list_open               — that page's one metric, which must not need one
+  //                                    either.
+  //   list_preview                   — read by the Cloudflare Pages Function that sets
+  //                                    og:title. It holds the anon key and nothing more.
+  //   list_by_id / list_items_by_list — the two that predate this tranche, redefined
+  //                                    onto the same predicate at their existing grants.
+  //
+  // Every one of them is gated on `_list_readable`, which is granted to **nobody**: it
+  // takes a viewer, so a client grant would make it the block-graph and follow-graph
+  // oracle `can_view_profile` was withdrawn for being (20260813001900). Same for
+  // `_viewer_has_seen`, which would otherwise report what somebody else has watched,
+  // and for `hide_list` / `unhide_list`, which are the operator's and have no client
+  // entry by design.
+  'list_view(uuid)': ['anon', 'authenticated'],
+  'list_items_page(uuid,integer,integer)': ['anon', 'authenticated'],
+  'record_list_open(uuid,text)': ['anon', 'authenticated'],
+  'list_preview(uuid)': ['anon'],
+
+  // Signed-in list reads. Not anon: there is no viewer to have progress through a
+  // list, no caller for `my_lists` to answer about, and a profile shelf sits behind
+  // `can_view_profile`.
+  'list_viewer_progress(uuid)': ['authenticated'],
+  'my_lists(timestamp with time zone,integer)': ['authenticated'],
+  'my_lists_for_title(uuid)': ['authenticated'],
+  'profile_lists(uuid,timestamp with time zone,integer)': ['authenticated'],
+
+  // Signed-in list writes. Every one takes `p_operation_id` first and resolves the
+  // list from `auth.uid()`, so a list id is a handle rather than an authorisation.
+  'create_list(uuid,text,text,list_visibility,text,uuid)': ['authenticated'],
+  'update_list(uuid,uuid,text,text,list_visibility,text)': ['authenticated'],
+  'delete_list(uuid,uuid)': ['authenticated'],
+  'add_list_item(uuid,uuid,uuid)': ['authenticated'],
+  'remove_list_item(uuid,uuid,uuid)': ['authenticated'],
+  'move_list_item(uuid,uuid,uuid,integer)': ['authenticated'],
+  'add_list_to_watchlist(uuid,uuid)': ['authenticated'],
+
   // Signed-in reads.
   'my_capabilities()': ['authenticated'],
   'unranked_queue(integer)': ['authenticated'],

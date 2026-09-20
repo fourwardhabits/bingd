@@ -3271,3 +3271,89 @@ describe('a title in the collection that is not ranked', () => {
     expect(names.indexOf('rank_unrank')).toBeLessThan(names.indexOf('unlog'));
   });
 });
+
+/**
+ * **`Title ⋯ → Add to list…`** — the second of the feature's exactly two entry points
+ * (`docs/product/lists-prd.md` §G, §P.4).
+ *
+ * Three things are being pinned, and each is a decision rather than an accident:
+ *
+ * **The ⋯ is on every title.** It used to appear only where there was something to
+ * manage, and `Add to list…` is the first row that applies to a title the account has
+ * never touched — including a series, which has never had a menu at all.
+ *
+ * **It is first.** Ungrouped and above the three headed groups, because it is the only
+ * row here that is not about this account's collection.
+ *
+ * **Nothing else on the page changed.** No hero control, no fourth `TitleActions`
+ * button, no permanent list button anywhere (§D, §Q.7).
+ */
+describe('Add to list', () => {
+  beforeEach(() => {
+    tableRows.rankings = [];
+    tableRows.user_media = [];
+  });
+
+  const openMenu = async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-more'));
+    await waitFor(() => expect(view.getByLabelText('Add to list…')).toBeTruthy());
+    return view;
+  };
+
+  it('is offered on a title that is neither ranked nor logged', async () => {
+    await openMenu();
+  });
+
+  it('is the first row in the sheet', async () => {
+    const view = await openMenu();
+
+    // By position in the rendered tree, not by presence: "first" is the claim.
+    const labels = view
+      .queryAllByRole('button')
+      .map((node) => node.props.accessibilityLabel)
+      .filter(Boolean);
+    expect(labels.indexOf('Add to list…')).toBeLessThan(
+      labels.indexOf('Remove from collection') === -1
+        ? labels.length
+        : labels.indexOf('Remove from collection'),
+    );
+    expect(labels[labels.indexOf('Add to list…')]).toBe('Add to list…');
+  });
+
+  it('does not offer Remove from a collection the title is not in', async () => {
+    // The gate that replaced the old `onMore` condition. Without it the menu would
+    // offer to take a film off a shelf it has never been on, and the confirmation
+    // would be the first place anybody found out.
+    const view = await openMenu();
+
+    expect(view.queryByLabelText('Remove from collection')).toBeNull();
+    expect(view.queryByText('Collection')).toBeNull();
+  });
+
+  it('keeps Remove for a title that is in the collection', async () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-30',
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openMenu();
+
+    expect(view.getByLabelText('Remove from collection')).toBeTruthy();
+  });
+
+  it('adds no control to the page itself', async () => {
+    // `TitleActions` still has exactly three controls, and the hero has none of its own.
+    const view = await open();
+
+    expect(view.queryByLabelText(/add to list/i)).toBeNull();
+    expect(view.queryByText(/add to list/i)).toBeNull();
+  });
+});

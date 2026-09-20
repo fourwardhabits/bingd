@@ -198,6 +198,51 @@ export function handleFromPath(pathname) {
 }
 
 /**
+ * The list id in `/lists/<uuid>`, or null.
+ *
+ * ---------------------------------------------------------------------------
+ * THE SHAPE IS THE SECURITY STORY, AND IT IS ALSO A PRODUCT DECISION
+ * ---------------------------------------------------------------------------
+ *
+ * A uuid **directly** under `/lists/` and nothing else. That keeps three things true at
+ * once:
+ *
+ *   - The id ends up in a `bingd://` URL and in an RPC argument, both of which are
+ *     string concatenations. The alphabet permitted here contains no character that
+ *     means anything in either context — no traversal, no quote, no scheme, no `<`,
+ *     no `%`.
+ *
+ *   - **`bingd.app/lists` keeps its generic install page.** The app's My lists screen
+ *     lives at that path and is *management* rather than an object; nobody shares it,
+ *     and a web page for it would be a page about nothing.
+ *
+ *   - **`/lists/by/<uuid>`**, the app's See-all screen, falls through here for the same
+ *     reason. The path sits inside the existing claim so a universal link opens the app,
+ *     and the web answers with the install page rather than with a list that does not
+ *     exist.
+ *
+ * Unlike `/title` and `/u`, the list page **does** read from the database, and `§J` says
+ * why that is not a new exposure: `list_view` applies the same `_list_readable`
+ * predicate the app does, under the same anon key, and answers zero rows for everything
+ * the app would refuse.
+ */
+export function listIdFromPath(pathname) {
+  const match = /^\/lists\/([^/?#]+)\/?$/.exec(String(pathname ?? ''));
+  if (!match) return null;
+
+  let candidate;
+  try {
+    candidate = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(candidate)
+    ? candidate
+    : null;
+}
+
+/**
  * The media item id in `/title/<uuid>`, or null.
  *
  * Kept at `/title/` rather than renamed to `/t/`: the path is already claimed in the
@@ -279,8 +324,106 @@ export function titleIdFromPath(pathname) {
 export function appLinkFor(scheme, route, identifier) {
   if (!scheme || !identifier) return null;
   if (!/^[a-z][a-z0-9+.-]*$/.test(scheme)) return null;
-  if (!['i', 'u', 'title'].includes(route)) return null;
+  // An allow-list, not a validation. `lists` joined it with Lists v1; the identifier is
+  // a `listIdFromPath` uuid by the time it gets here, exactly as the other three are.
+  if (!['i', 'u', 'title', 'lists'].includes(route)) return null;
   return `${scheme}://${route}/${identifier}`;
+}
+
+/**
+ * The PostgREST request that resolves a list's header, or null.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS PAGE IS ALLOWED TO READ A LIST
+ * ---------------------------------------------------------------------------
+ *
+ * Because it is not a new read path and cannot widen one. `list_view` is
+ * `security definer` and gated on `_list_readable(id, auth.uid())`, which for this page
+ * is `_list_readable(id, null)` — the anon branch of the §F matrix. A private list, a
+ * hidden one, a deleted one, one whose owner is suspended, and a uuid nobody has all
+ * answer the same **zero rows**, and this page cannot tell them apart. It holds the anon
+ * key, which is the key the mobile bundle already ships and which RLS bounds.
+ *
+ * **If a private list ever appeared here it would mean the predicate had changed**, and
+ * it would be visible in the app long before it was visible on the web.
+ *
+ * An RPC rather than a table select, and that is the difference from
+ * `titleContextRequest`: `lists` is a table with a policy that deliberately excludes
+ * `link`, so a select could never resolve the one case this page most needs — the
+ * link-only list somebody was sent.
+ */
+export function listViewRequest(supabaseUrl, id) {
+  if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
+  if (!isUuid(id)) return null;
+  return `${supabaseUrl}/rest/v1/rpc/list_view`;
+}
+
+/**
+ * The first page of a list's items.
+ *
+ * One hundred, which is the server's own cap, and then the page says "See all N in the
+ * app" rather than paging. A logged-out visitor is being shown what this is; somebody
+ * who wants to read a 400-item list is somebody who should have the app.
+ */
+export function listItemsRequest(supabaseUrl, id) {
+  if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
+  if (!isUuid(id)) return null;
+  return `${supabaseUrl}/rest/v1/rpc/list_items_page`;
+}
+
+/** The uuid shape, shared by the three list helpers so they cannot drift apart. */
+const isUuid = (value) =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+
+/**
+ * What a resolved list should read as, or null when the row cannot carry a name.
+ *
+ * The **attribution rule is here** rather than in the paint layer, because it is a
+ * decision and this file's rule is that decisions live where the tests run (§F.2, §J):
+ *
+ *   - `profileVisible` true — the name is a **link** to `/u/<handle>`.
+ *   - `profileVisible` false — the name is **plain text with no link**. This is a
+ *     private account whose link-only list was shared; the limited identity is what the
+ *     product already discloses about a private account in search, and a `/u/` link from
+ *     here would be the path into private content that §F.1 says link-only does not buy.
+ *
+ * The handle is re-validated against `create_profile`'s alphabet before it is allowed to
+ * become an href. It arrives from the server rather than from the URL, so it is not
+ * attacker-controlled in the ordinary sense — and it is still the one value on this page
+ * that ends up in a link, which is exactly the class `posterUrl` is narrowed for.
+ */
+export function listDisplay(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  const title = typeof row.title === 'string' ? row.title.trim() : '';
+  if (!title) return null;
+
+  const owner = row.owner && typeof row.owner === 'object' ? row.owner : null;
+  const handle = typeof owner?.username === 'string' ? owner.username.trim() : '';
+  const display = typeof owner?.display_name === 'string' ? owner.display_name.trim() : '';
+  const visible = owner?.profile_visible === true;
+
+  const count = Number.isInteger(row.item_count) ? row.item_count : 0;
+  const numbered = row.order_style === 'ranked';
+
+  return {
+    title,
+    description: typeof row.description === 'string' ? row.description.trim() || null : null,
+    // "14 titles · numbered", lower case: it is a fact about the list rather than a
+    // label, and the page's other metadata lines read the same way.
+    facts: `${count} ${count === 1 ? 'title' : 'titles'}${numbered ? ' · numbered' : ''}`,
+    count,
+    owner: handle
+      ? {
+          name: display || handle,
+          handle: `@${handle}`,
+          // Only ever a path, only ever for a public profile, and only ever from an
+          // alphabet with no character that can close an attribute or open a tag.
+          href: visible && /^[a-z0-9_]{3,24}$/.test(handle) ? `/u/${handle}` : null,
+        }
+      : null,
+  };
 }
 // ---------------------------------------------------------------------------
 // Shared-content context

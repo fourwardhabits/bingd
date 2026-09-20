@@ -36,6 +36,7 @@ import { RankedTitlesSheet } from '@/features/profile/RankedTitlesSheet';
 import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { ProfileLists } from '@/features/lists/ProfileLists';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileStats } from '@/features/profile/use-public-profile';
@@ -441,6 +442,23 @@ export default function ProfileScreen() {
         <ProfileWatchlist
           userId={profile.id}
           onPressTitle={(id) => router.push(`/title/${id}`)}
+        />
+
+        {/* **Lists, after Watchlist and before Recent activity** (founder, 2026-09-19).
+            Deliberately not promoted above the Watchlist in v1: what somebody loves,
+            then what they are about to watch, then what they have curated.
+
+            **Public lists only, read-only — and that is true of the owner's own shelf
+            too.** It shows what a visitor would see, so an owner holding four private
+            lists reads "Nothing public yet" and learns the privacy model by looking at
+            it. `Manage ›` is always here and opens the same screen Collection's
+            `My lists ›` does, which is why the push carries its own `entry`: the split
+            between the two doors is the discoverability measurement (§M, §Q.6). */}
+        <ProfileLists
+          ownerId={profile.id}
+          isOwner
+          onOpenList={(listId) => router.push(`/lists/${listId}?surface=profile_shelf`)}
+          onManage={() => router.push('/lists?entry=profile_manage')}
         />
 
         <View style={styles.section}>

@@ -1,6 +1,7 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -410,7 +411,54 @@ export default function CollectionScreen() {
        * Search's All / Movies / TV / People is deliberately still chips: those filter a
        * result set rather than naming which collection you are in.
        */}
-      <MediumSelector value={medium} onChange={changeMedium} />
+      {/**
+       * **The title row carries the way to Lists, on its unused trailing half**
+       * (founder, IA review 2026-09-19; `docs/product/lists-prd.md` §I and §Q.3).
+       *
+       * Four things it deliberately is not:
+       *
+       * - **Not a fourth segment.** `MediumSelector` is this screen's *title*, and
+       *   Watched, Watchlist and Unranked are all slices of one medium. A list mixes
+       *   movies, seasons and whole series by design, so a Lists segment would sit
+       *   under a `Movies ▾` title it had to ignore — the same class of disagreement as
+       *   the Unranked-tab bug this file already guards against.
+       * - **Not a new control row.** The title row exists and its trailing half was
+       *   empty, so this adds no height at all.
+       * - **Not the `AppHeader` right corner**, which is the bell's on every root tab
+       *   and where a *text* button was already tried and rejected.
+       * - **Not a glyph.** `TitleActions`' rule: an icon names neither the thing nor
+       *   the act.
+       *
+       * **"My lists", not "Lists"**: beside `Movies ▾`, the bare word reads as one
+       * phrase — "Movies lists". It is present on every segment and both mediums, and
+       * it never moves.
+       *
+       * The honest cost is discoverability, and it is accepted rather than bought with
+       * a permanent segment. `my_lists_opened.entry` is the tripwire that measures it,
+       * which is why the push carries `entry=collection`.
+       */}
+      <View style={styles.titleRow}>
+        <View style={styles.titleRowSelector}>
+          <MediumSelector value={medium} onChange={changeMedium} />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="My lists"
+          accessibilityHint="Opens the lists you have made"
+          hitSlop={theme.space[2]}
+          onPress={() => router.push('/lists?entry=collection')}
+          style={({ pressed }) => [styles.myLists, pressed && styles.myListsPressed]}
+        >
+          <Text variant="footnote" tone="action">
+            My lists
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={theme.layout.icon.sm}
+            color={theme.semantic.action}
+          />
+        </Pressable>
+      </View>
       <SegmentedTabs
         options={segments}
         value={active}
@@ -655,6 +703,29 @@ function Loading() {
 }
 
 const styles = StyleSheet.create({
+  /**
+   * The medium dropdown and `My lists ›`, on one line.
+   *
+   * `MediumSelector` renders a fragment — a `Pressable` and its `Modal` — so it is
+   * wrapped rather than dropped straight into the row: with three children,
+   * `space-between` would distribute around the zero-sized modal and put the title
+   * somewhere nobody asked for. The wrapper also carries `flexShrink`, so a long
+   * category label wraps inside itself instead of pushing the action off the screen.
+   */
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  titleRowSelector: { flexShrink: 1 },
+  // The selector brings its own leading gutter; this brings the trailing one, so the
+  // two ends of the row measure from the same edges as every other row on the screen.
+  myLists: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    paddingLeft: theme.space[3],
+    paddingRight: theme.layout.gutter,
+  },
+  myListsPressed: { opacity: 0.7 },
+
   // A column now. As a row it put the copy and the dismissal at opposite edges,
   // which is what made them read as unrelated to each other.
   nudge: {
