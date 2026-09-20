@@ -127,7 +127,23 @@ hardcoded in seven places including the front page, and launch day would otherwi
 been an exercise in finding all of them, with the one that was missed being the one a
 stranger reads first.
 
-It decides three things and nothing else:
+> **Corrected 2026-09-20, with the public Android tranche. Read this before reaching for
+> the flag.** `mode` is a **pre-flight gate and no longer an output switch**. The
+> `isPublic` it used to derive is gone and so is every string that branched on it: the
+> copy stopped claiming a closed test because availability is per platform and
+> `distribution.config.json`'s URLs already carry it, and indexing became per route
+> because `/u/<handle>` must stay out of Google whether or not the apps have shipped.
+>
+> **So flipping `mode` changes no byte of the built site**, and it is not the switch that
+> takes a platform public — setting `storeUrl` is. What `mode` still does is refuse to
+> build `public` while a store URL is null, while the Terms names an unconfirmed entity,
+> **or while `TERMS_STATUS` in `build.mjs` is `draft`**. That last one is the gate that is
+> still shut: both store URLs are set and the site already sends everybody to both public
+> listings, with `mode` reading `beta` the whole time. Flipping it today fails the build.
+> It opens when L-1 is settled and a lawyer has read the Terms, which is a legal event
+> and not a release step.
+>
+> The table below is what `mode` did until 2026-09-10 and is kept for the history.
 
 | | `beta` (today) | `public` |
 |---|---|---|
@@ -236,39 +252,50 @@ the upload key is still what an EAS-distributed production APK carries.
 > **Updated 2026-09-02.** This section used to be headed *"the two beta destinations,
 > still absent"* and said both were `null`. Two of the four are filled in now.
 
-`web/distribution.config.json` today:
+`web/distribution.config.json` today (**updated 2026-09-20**):
 
 | key | value | what a visitor gets |
 |---|---|---|
-| `ios.storeUrl` | `null` | — |
-| `ios.betaUrl` | `https://testflight.apple.com/join/kkgaYsqx` | *Get the Bingd beta for iPhone* |
-| `android.storeUrl` | `null` | — |
-| `android.optInUrl` | `https://play.google.com/apps/testing/app.bingd` | *Join the Bingd beta on Android* |
+| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd. on the App Store* — **wins** |
+| `ios.betaUrl` | `https://testflight.apple.com/join/kkgaYsqx` | kept as a fallback, never chosen |
+| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd. on Google Play* — **wins** |
+| `android.optInUrl` | `https://play.google.com/apps/testing/app.bingd` | kept as a fallback, never chosen |
 | `android.betaUrl` | `null` | — |
+
+`destinationFor` prefers `storeUrl` on both platforms, so both fallbacks are inert while
+the listings exist. They are kept rather than deleted for one reason: they are the
+destination again if a listing is ever pulled. `web/router.test.mjs` asserts that neither
+wins, because "it is in the file" and "it is what a visitor gets" are different facts and
+only the second one is anybody's experience.
 
 `build.mjs` refuses any value that is not an absolute `https://` URL, which is the
 open-redirect gate. Changing any of them is **one file, no app rebuild, and no reissued
 invitation**. What a person pastes into a group chat is `https://bingd.app/i/<token>` and
 it is permanent; only the destination behind it moves.
 
-**The App Store swap, when the URL exists.** `destinationFor` prefers `storeUrl` over
-`betaUrl` on both platforms, so setting `ios.storeUrl` alone changes every iOS visitor's
-button from *Get the Bingd beta for iPhone* to *Get Bingd for iPhone*, pointing at the
-public listing. It is a config edit plus a Cloudflare deploy — **no OTA, no app rebuild,
-no change to any link already sent**. Do not invent the URL: it is
-`https://apps.apple.com/app/id<id>` and the `id` comes from App Store Connect once the app
-is approved. The separate `"mode": "public"` flag is a bigger switch and is not this one —
-it lifts `noindex` site-wide and rewrites the closed-testing copy, and the build refuses it
-while either `storeUrl` is null.
+**The store swap, when a URL exists.** `destinationFor` prefers `storeUrl` over
+everything else on both platforms, so setting one field changes every visitor's button on
+that platform, the label on it, the availability sentence under it, the `<noscript>`
+fallback and the front page's structured data. It is a config edit plus a Cloudflare
+deploy — **no OTA, no app rebuild, no change to any link already sent**. Do not invent
+either URL: iOS is `https://apps.apple.com/app/id<id>` from App Store Connect, Android is
+`https://play.google.com/store/apps/details?id=<package>`.
 
-**Android is still Closed Testing and the copy must keep saying so.** `optInUrl` leads
-while it is set, and the ordering is the easy thing to get wrong: a closed test is
-unreachable from the store listing until the tester has opted in, so sending somebody to
-the plain listing first shows them *this app is not available for your device*, which
-reads as *Bingd is broken* rather than as *you have not joined yet*. The opt-in page also
-only works for an account already on the tester list — a Google Group membership the
-founder maintains by hand. Nothing on the site automates that and nothing on the site
-claims Bingd is publicly available on Google Play.
+`ios.storeUrl` was set on 2026-09-10. `android.storeUrl` was set on 2026-09-20 with the
+public Android tranche, when vc12 cleared founder QA and was submitted to the Play
+production track for a US public launch.
+
+**Android was Closed Testing until that tranche, and the ordering was the reverse of
+today's.** `optInUrl` led while it was set, because a closed test is unreachable from the
+store listing until the tester has opted in and somebody sent to the plain listing first
+is told *this app is not available for your device*, which reads as *Bingd is broken*
+rather than as *you have not joined yet*. **That reason expired with the production
+track.** A public listing is reachable by everybody, so `storeUrl` leads and the opt-in
+page is a fallback like `ios.betaUrl`.
+
+The opt-in page still only works for an account on the tester list, which is a Google
+Group the founder maintains by hand. Nothing on the site automates that, and nothing on
+the site sends a public visitor there.
 
 ---
 
@@ -532,8 +559,20 @@ Blocking a crawl and de-indexing are opposite instructions. A test asserts the a
 
 ### The site still has no analytics, and adding some is not a small change
 
-Unchanged and still true. Two `web_app_store_clicked` / `web_android_beta_clicked` events
-were asked for and are **not** here, because neither available route is cheap:
+Unchanged and still true, and **re-asked in the public Android tranche**, which wanted
+*public page viewed*, *Open in bingd clicked* and *Get bingd clicked*, each with a
+platform and a source route. They are **not** here, and the reason is the same one below
+rather than an oversight.
+
+What the site does have is exactly one event and it is preserved: `record_invite_open`,
+which reports that `/i/<token>` loaded, with `ios` / `android` / `other` and nothing else
+— no address, no user agent, no identifier. That is *public page viewed* with a platform,
+for the one route that has a server-side sink. `web/router.test.mjs` now asserts it fires
+on a real token and does not fire on a truncated one, so it cannot be lost quietly.
+
+The four routes that have no sink are the front page, `/title/<id>`, `/u/<handle>` and
+`/lists/<id>`, and no click on any of them is counted anywhere. Neither route to fixing
+that is cheap:
 
 - **A third-party script** (PostHog is already a named processor for the *app*) adds an
   origin to a site whose `_headers` comment and whose tests both rest on there being no
@@ -543,6 +582,15 @@ were asked for and are **not** here, because neither available route is cheap:
   production database change.
 
 Either needs the privacy policy edited first, and that is a document rather than a detail.
+
+**So the web funnel is blind between the page and the store on four of five routes, and
+that is a known gap rather than a silent one.** What unblocks it is one decision, not one
+commit: whether bingd.app may carry a processor. If the answer is PostHog, the policy's
+processor list has to say the *website* sends it events and not only the app; if the
+answer is a Supabase RPC, it is a migration modelled on `record_invite_open` — anonymous,
+returning void, capped, carrying a route and a platform and nothing else. Until one of
+those is decided, Play Console's own acquisition report is the only Android install
+funnel there is.
 
 **What is free and already running:** App Store Connect's App Analytics attributes product
 page views by **Web Referrer**, so installs originating at bingd.app are already countable

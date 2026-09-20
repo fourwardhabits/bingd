@@ -54,17 +54,21 @@ export function detectPlatform(userAgent, { maxTouchPoints = 0 } = {}) {
  * Where an uninstalled visitor should be sent, given the platform and the configured
  * destinations.
  *
- * Returns `null` when there is nothing honest to offer, which is the state this beta
- * starts in: no TestFlight link exists yet, and inventing one would produce a button
- * that 404s. The page renders "not available for this device yet" instead — see
- * `distribution.config.json`.
+ * Returns `null` when there is nothing honest to offer for a platform, and inventing
+ * something would produce a button that 404s. The page renders "bingd. is not on this
+ * platform yet" instead — see `distribution.config.json`.
  *
- * The Android ordering is the part that is easy to get wrong. A closed test is not
- * reachable from the store listing until the tester has opted in, so the opt-in page
- * is the destination whenever it is set, and the plain listing is the fallback for the
- * day the track goes open. Sending somebody to the listing first shows them "this app
- * is not available for your device", which reads as *Bingd is broken* rather than as
- * *you have not joined yet*.
+ * **The ordering is the same on both platforms and the public listing wins.** It is
+ * written as one rule rather than two because the Android half used to be the other way
+ * round: while Play was a closed test, `optInUrl` led, because a closed test is not
+ * reachable from the store listing until the tester has opted in and somebody sent to
+ * the plain listing first is told the app is unavailable for their device.
+ *
+ * That reason expired when the app went to the Play production track. A public listing
+ * is reachable by everybody, so it is the better destination for everybody the moment
+ * it exists, and `optInUrl` drops to what `ios.betaUrl` already is: the fallback if the
+ * listing is ever pulled. Nothing about a visitor decides this — the order is fixed
+ * here and the URLs come from a committed file.
  */
 export function destinationFor(platform, distribution) {
   const dist = distribution ?? {};
@@ -112,10 +116,10 @@ export function allDestinations(distribution) {
  * in the paint layer, and that had a defect no beta build could surface: both
  * platforms' public listings share `kind: 'store'`, so the day the Play listing went
  * live, every Android visitor's button would have read "Get Bingd for iPhone". The
- * beta never renders that kind for Android — the closed test takes the `play-opt-in`
- * branch — which is exactly why the wrong label sat unnoticed.
- *
- * So the store label reads the platform.
+ * beta never rendered that kind for Android — the closed test took the `play-opt-in`
+ * branch — which is exactly why the wrong label sat unnoticed. **That day has now
+ * arrived**, `store` is the kind every Android visitor gets, and the label is right
+ * because it reads the platform.
  *
  * **The wordmark is lowercase with the full stop, everywhere a person reads it.** It was
  * "Bingd" here until 2026-09-03, which is the brand written the way a sentence wants it
@@ -355,19 +359,37 @@ export function avatarUrl(supabaseUrl, avatarPath) {
  * Built here rather than in `page.mjs` because it is a string concatenation with an
  * identifier in it, which is exactly the kind of thing this file exists to keep under
  * test. The id has already been through `titleIdFromPath`, so it is a uuid and nothing
- * else; the embedded `parent:parent_id(title)` is what turns a season row into
- * "The Last of Us, S1" without a second round trip.
+ * else; the embedded `parent:parent_id(title, genres)` is what turns a season row into
+ * "The Last of Us, S1" without a second round trip, and what gives it any genres at all.
  *
- * `select` names its columns. A `select=*` here would ship the overview, the genres and
- * the popularity to every visitor for no reason, and would quietly start shipping any
- * column added later.
+ * **The parent's genres are load-bearing and not a nicety.** `tmdb_upsert_seasons`
+ * writes no genres onto a season, because TMDB publishes them on the series: every one
+ * of the 2,067 seasons in the production catalogue carries an empty array. Without the
+ * embed, half the titles anybody shares would show no genres and it would look like the
+ * preview was broken rather than like the column was empty. This is the same own-then-
+ * parent rule `src/lib/media-metadata.ts` applies in the app, in the one shape this page
+ * needs.
+ *
+ * `select` names its columns, and that is a privacy rule rather than a bandwidth one. A
+ * `select=*` would quietly start shipping any column added later, and the table this
+ * reads is the one table in the schema whose read policy is `using (true)`.
+ *
+ * **The columns grew with the public title preview and every one of them is TMDB's.**
+ * `overview`, `runtime_minutes`, `genres` and `episode_count` describe the film or the
+ * season and describe nobody. Nothing from `user_media`, `rankings`, `follows`,
+ * `title_recommendations` or `feed_events` is reachable from this request: they are
+ * different tables, behind policies that answer a null viewer with zero rows, and no
+ * embed here names one. A personal score, a Following score, a recommendation note, a
+ * watch date and a predicted score are all on that side of the line.
  */
 export function titleContextRequest(supabaseUrl, id) {
   if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
   if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
     return null;
   }
-  const select = 'kind,title,release_date,season_number,poster_path,parent:parent_id(title)';
+  const select =
+    'kind,title,release_date,season_number,poster_path,overview,runtime_minutes,genres,' +
+    'episode_count,parent:parent_id(title,genres)';
   return `${supabaseUrl}/rest/v1/media_items?id=eq.${id}&select=${select}&limit=1`;
 }
 
@@ -421,6 +443,131 @@ export function titleDisplay(row) {
   // Season 0 is TMDB's specials bucket, and "S0" is not a thing anybody says.
   const suffix = number && number > 0 ? `S${number}` : own;
   return { name: `${series}, ${suffix}`, detail: year };
+}
+
+/**
+ * `109` as `1h 49m`, and nothing from a runtime the catalogue does not hold.
+ *
+ * Minutes is what TMDB gives and `1h 49m` is what a person reads, so the conversion is
+ * here rather than in the paint layer. A runtime under an hour keeps the minutes alone
+ * and a round two hours drops the trailing `0m`, because "2h 0m" is a number nobody
+ * writes down.
+ *
+ * Anything that is not a positive whole number of minutes is no runtime at all. TMDB
+ * stores 0 for a film it has no duration for, and "0m" under a poster reads as a bug.
+ */
+export function runtimeText(minutes) {
+  if (!Number.isInteger(minutes) || minutes <= 0 || minutes > 100000) return null;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest}m`;
+  if (rest === 0) return `${hours}h`;
+  return `${hours}h ${rest}m`;
+}
+
+/**
+ * A synopsis, collapsed and cut to something a card can carry.
+ *
+ * Whitespace is collapsed because TMDB overviews arrive with newlines in them and the
+ * page writes this with `textContent`, which renders them as spaces at unpredictable
+ * places. The cut is at a word boundary and only when there is enough over the limit to
+ * be worth cutting, so a 330-character overview is not given an ellipsis to save four
+ * characters.
+ *
+ * Done here rather than with a CSS line clamp because the limit is then a tested fact
+ * rather than a rendering accident, and because a clamp still ships the whole paragraph
+ * to a page whose job is to be quick.
+ */
+export function synopsisText(overview, limit = 320) {
+  if (typeof overview !== 'string') return null;
+  const collapsed = overview.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return null;
+  if (collapsed.length <= limit + 40) return collapsed;
+
+  const cut = collapsed.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(' ');
+  const head = (lastSpace > limit * 0.6 ? cut.slice(0, lastSpace) : cut).replace(/[\s.,;:]+$/, '');
+  return `${head}…`;
+}
+
+/**
+ * The public preview of a title: what `/title/<id>` shows somebody who does not have
+ * the app, built from the catalogue row and from nothing else.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS IN IT, AND WHY THAT IS THE LINE
+ * ---------------------------------------------------------------------------
+ *
+ * Every field here is TMDB's description of a film or a season. `media_items_read` is
+ * `using (true)` and has been since the catalogue was built, because catalogue metadata
+ * is not user data — so naming the film, its year, its length, its genres and its
+ * synopsis discloses nothing about anybody and makes the page worth arriving at.
+ *
+ * **What is deliberately absent is every opinion of it.** No personal score, no
+ * Following score, no community score, no recommendation note, no sender, no watch
+ * date, no predicted score. Those are `user_media`, `rankings` and
+ * `title_recommendations`, they are behind policies that answer a signed-out reader
+ * with zero rows, and this page holds no account to read them with even if they were
+ * not. An anonymous community score is the one that keeps being asked for and it is
+ * still out: it needs an RPC that does not exist, and a number invented to fill the
+ * space would be the most believed wrong thing on the site.
+ *
+ * ---------------------------------------------------------------------------
+ * SHAPE
+ * ---------------------------------------------------------------------------
+ *
+ * `meta` is the line under the name — kind, year, then length — and every part of it is
+ * dropped rather than guessed when the row does not carry it. A season says its own
+ * number, because "Season" on its own is the one word that does not identify which.
+ * Season 0 is TMDB's specials bucket and is named rather than numbered.
+ *
+ * Returns null exactly when `titleDisplay` does, so the caller has one check.
+ */
+export function titlePreview(row) {
+  const display = titleDisplay(row);
+  if (!display) return null;
+
+  const number = Number.isInteger(row.season_number) ? row.season_number : null;
+  const kindLabel =
+    row.kind === 'season'
+      ? number === 0
+        ? 'Specials'
+        : number
+          ? `Season ${number}`
+          : 'Season'
+      : row.kind === 'series'
+        ? 'Series'
+        : 'Film';
+
+  const episodes = Number.isInteger(row.episode_count) && row.episode_count > 0
+    ? `${row.episode_count} episode${row.episode_count === 1 ? '' : 's'}`
+    : null;
+
+  const meta = [
+    kindLabel,
+    display.detail,
+    row.kind === 'movie' ? runtimeText(row.runtime_minutes) : episodes,
+  ].filter(Boolean);
+
+  // Own genres first, then the series'. A season carries none of its own — TMDB
+  // publishes genres on the series and `tmdb_upsert_seasons` writes what TMDB gives —
+  // so without the fallback every television share would show a blank line where the
+  // genres go. Own-first rather than parent-first, because a season that ever does
+  // carry its own is the more specific truth. Same rule as `resolveMetadata` in the app.
+  //
+  // Postgres hands these over as an array of strings. Anything else in it is dropped
+  // rather than coerced: this is written with `textContent`, so a stray object would
+  // render as "[object Object]" under a poster.
+  const clean = (value) =>
+    (Array.isArray(value) ? value : [])
+      .filter((genre) => typeof genre === 'string')
+      .map((genre) => genre.trim())
+      .filter(Boolean);
+
+  const own = clean(row.genres);
+  const genres = (own.length > 0 ? own : clean(row.parent?.genres)).slice(0, 3);
+
+  return { name: display.name, meta, genres, synopsis: synopsisText(row.overview) };
 }
 
 /**
