@@ -496,15 +496,21 @@ Rounded to one decimal. Three properties worth stating because each one is a pla
 
 **The ranges are closed and non-overlapping**, so a bucket is always recoverable from a score. `7.0` is *I liked it* and `6.9` is *It was fine*, with nothing in between. This is what lets the feed show a friend's score without also shipping their bucket.
 
-**Scores reflow.** Because `band.size` is in the denominator, ranking one new title changes the score of every title in that band. That is correct — the score always was a statement about relative position — but it means a score must never be cached anywhere it could be read after the band changed. The one exception is §6's `feed_events.payload`, which is a snapshot on purpose.
+**Scores reflow.** Because `band.size` is in the denominator, ranking one new title changes the score of every title in that band. That is correct — the score always was a statement about relative position — but it means a score must never be cached anywhere it could be read after the band changed. **There is no longer an exception.** `feed_events.payload` was one until `20261002000100`; see below.
 
 ### Why it is not a generated column
 
 A score depends on the *sizes of all three bands* for that user and category, not on anything in its own row. Expressed in SQL it would be a correlated subquery over `rankings`, which cannot be `stored` and would have to be recomputed on read anyway. Worse, `size` changes for rows the write never touched: inserting one `loved` title would have to rewrite the score of every other `loved` row, turning a single-row insert into a whole-band update and giving I1's position shift a second thing to stay consistent with. A derived value has no such failure mode, because there is nothing to keep in step.
 
-### The feed exception
+### The feed, which used to be an exception and is not one now
 
-`_rank_finalize` denormalizes `position` into `feed_events.payload` (§6) and now writes `score` alongside it. A client cannot derive another user's score, because that needs the other user's band sizes and `rankings` is not readable across users. Writing it at finalize time also makes the feed item honest in a way a live value would not be: an activity item records what happened, and what happened was that this title landed at 8.7.
+`_rank_finalize` denormalizes `position` and `score` into `feed_events.payload` (§6), and until `20261002000100` the activity surfaces drew that snapshot. **They now read the current value, through `public_scores`, once per page.** The snapshot is still written and is only a fallback for a client whose live read failed.
+
+The original argument for the snapshot was twofold and both halves were wrong.
+
+*"A client cannot derive another user's score, because `rankings` is not readable across users."* `rankings_read` has been `can_i_view(user_id)` since `20260813001900` — the same predicate `feed_events_read` applies to the activity being drawn. What a viewer lacks is not permission but a cheap way to **count** somebody else's band, and `band_bounds` is revoked from every client role. `public_scores` is the definer read that closes exactly that gap, under `public_notes`' visibility predicate, and admits precisely the pairs `rankings_read` would have.
+
+*"An activity item records what happened, and what happened was that this title landed at 8.7."* True of the event; false of the badge. The badge carries no date, it sits beside a note that is deliberately read live so its author can correct it, and a reader takes it to mean what this person thinks of the film. And because scores reflow, the snapshot goes stale whenever its owner ranks **anything else in that band** — so it was not recording a moment so much as decaying quietly. Score-at-the-time is placement history, and it belongs to the ledger Watch History T2 adds.
 
 ---
 
