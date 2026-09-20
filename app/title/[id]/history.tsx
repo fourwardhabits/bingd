@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useCurrentProfile } from '@/features/auth/session';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import { track } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/ui/tokens';
 import { Button, LoadingScreen, Screen, Text } from '@/ui/components';
@@ -100,6 +101,27 @@ export default function WatchHistoryScreen() {
     [placements],
   );
 
+  /**
+   * `watch_history_opened`, once per visit, and **bucketed** (epic §P).
+   *
+   * The count is `1`, `2-5`, `6-20` or `20+` and never the number: an exact watch
+   * count plus a timestamp is a fingerprint, and this stream is id-free by design.
+   *
+   * Fired when the history first lands rather than on mount, because a screen that is
+   * still loading has no count to report — and guarded by a ref so a refetch after an
+   * edit is not a second opening.
+   */
+  const reported = useRef(false);
+  useEffect(() => {
+    if (reported.current || history.data === undefined) return;
+    reported.current = true;
+    const n = history.data.count;
+    track({
+      name: 'watch_history_opened',
+      props: { watch_count: n <= 1 ? '1' : n <= 5 ? '2-5' : n <= 20 ? '6-20' : '20+' },
+    });
+  }, [history.data]);
+
   const groups = useMemo(() => groupByYear(events), [events]);
   const ordered = useMemo(() => groups.flatMap((group) => group.events), [groups]);
 
@@ -169,7 +191,14 @@ export default function WatchHistoryScreen() {
       return;
     }
     const created = (data as { watch_event_id?: string } | null)?.watch_event_id;
-    if (created) setEditingId(created);
+    if (created) {
+      // `past`, which is the third kind the event declares: not a first log and not a
+      // rewatch the reader has just had, but a viewing they are adding to a history
+      // after the fact. It starts undated by construction, and the row's inline editor
+      // opens on it immediately so the reader dates it where they can see it.
+      track({ name: 'watch_logged', props: { kind: 'past', basis: 'none', surface: 'title' } });
+      setEditingId(created);
+    }
   };
 
   if (history.isPending) return <LoadingScreen message="Loading your watch history" />;

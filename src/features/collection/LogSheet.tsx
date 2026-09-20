@@ -779,6 +779,22 @@ function Body({
           bucket: chosen === 'notForMe' ? 'not_for_me' : chosen,
         },
       });
+
+      /**
+       * `watch_logged`, and **only when this call created the seen row** (epic §P).
+       *
+       * The server answers `created`, which is the same fact it used to decide whether
+       * to write an event at all — so the two cannot disagree. Re-rating a title that
+       * was already in the collection emits nothing here, because no viewing was
+       * recorded: that is §D.6 path 3, and reporting it as a watch is precisely the
+       * confusion the epic exists to end.
+       *
+       * `basis` is the reader's own tap, never an inference, and it is the property
+       * that makes §C.3.8's defect visible at all.
+       */
+      if (result.created) {
+        track({ name: 'watch_logged', props: { kind: 'first', basis, surface } });
+      }
     }
 
     /**
