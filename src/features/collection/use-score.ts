@@ -15,9 +15,13 @@ import type { RankingCategory } from './use-collection';
  * single title still has to know how many titles are in that title's band. This
  * is the cheapest form of that question: bucket alone, no joins, no metadata.
  *
- * Scoped to the signed-in user by design. `rankings` is not readable across
- * users, which is exactly why a friend's score has to be snapshotted into the
- * feed event instead of derived (ranking.md §11).
+ * Scoped to the signed-in user because that is whose score this screen draws, **not
+ * because `rankings` is private.** It said the latter, and that was wrong: the policy
+ * has been `can_i_view(user_id)` since `20260813001900` — the same predicate the feed
+ * applies to activity — and what a viewer actually lacks is a cheap way to *count*
+ * somebody else's band. That is why a friend's score is asked for by
+ * `public_scores` (`20261002000100`) rather than derived here, and it is no longer
+ * snapshotted out of a feed event.
  *
  * **`total` is a denominator and `sizes` is a divisor, so this read may not be capped.**
  * PostgREST silently truncates an unbounded select at 1,000 rows, and this was the worst
