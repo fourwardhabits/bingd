@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirty-nine canonical names and nothing else', () => {
+  it('is the forty-two canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -151,6 +151,16 @@ describe('the event vocabulary', () => {
         'reviews_sort_changed',
         'streak_state_viewed',
         'title_logged',
+        // The watch-history epic, 2026-09-20 (T3b, epic §P). Three names, and the reason
+        // there are only three is that the epic's other surfaces are deferred: Refine
+        // and the unranked queue are T5 and T6. `watch_logged` is the one that matters —
+        // its `basis` property is what makes §C.3.8's defect visible at all, because
+        // nothing before it recorded whether a date was chosen or defaulted, and a
+        // backfill through Search therefore looked exactly like three hundred people
+        // watching three hundred films today.
+        'rewatch_decision',
+        'watch_history_opened',
+        'watch_logged',
         'watchlist_added',
       ].sort(),
     );

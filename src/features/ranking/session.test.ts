@@ -380,6 +380,12 @@ describe('ranking a title again in the same bucket', () => {
       p_bucket: 'not_for_me',
       p_operation_id: op,
       p_new_watch: true,
+      // 20261005000100. Null here because this caller logged no watch first — which is
+      // also what an installed client sends, and what the server answers with an UNDATED
+      // event rather than a fabricated date. A re-check that follows `log_rewatch`
+      // passes the viewing's id, and that is what makes the two halves reach one feed
+      // activity instead of two (epic §K).
+      p_watch_event_id: null,
     });
   });
 
