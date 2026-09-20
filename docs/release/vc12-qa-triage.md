@@ -34,7 +34,15 @@ So, to the questions as asked:
 
 **Nothing was enabled.** Flipping this key would have been a placebo: it would have
 changed no behaviour and would have created a false belief that a kill switch exists.
-Wiring it is a real (small) piece of work and belongs to its own tranche.
+
+**But a working stop does exist — it is just not this key.** `unschedule_push_drain()`
+(`20260826000300`, `service_role` only) removes the `bingd-push-drain` cron job, and its
+own comment is the operator's instruction: *"the first thing to reach for if the sender is
+misbehaving — notifications keep arriving in-app, only the phone stops buzzing."*
+`schedule_push_drain('* * * * *')` puts it back. So the lever the config key was meant to
+provide is already there under a different name, which lowers the priority of wiring
+`push.delivery_enabled` to roughly zero: the honest fix may be to **delete the misleading
+row** rather than implement it.
 
 ### The pipeline is healthy end to end, proven on production
 
