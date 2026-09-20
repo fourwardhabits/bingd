@@ -773,7 +773,18 @@ describe('a title this user has ranked', () => {
    * `rank_start` here would open a window in which the title has no position and no
    * session, and a dropped connection inside it loses the ranking outright.
    */
-  it('offers Rank again, through the atomic call rather than an unrank and a restart', async () => {
+  /**
+   * **The rewatch row opens the watch, and the atomic guarantee is still what matters
+   * behind it** (T3b).
+   *
+   * The row reached `rank_again` directly until 20261005000100 — a forced full re-rank
+   * that recorded no watch and no date. It opens the sheet that records the viewing
+   * first, so this test asserts what is still true and load-bearing at this seam: the
+   * screen never composes `rank_unrank` and `rank_start`, which would open a window in
+   * which the title has no position and no session, and a dropped connection inside it
+   * loses the ranking outright.
+   */
+  it('never composes an unrank and a restart, from either ranking row', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
@@ -781,13 +792,17 @@ describe('a title this user has ranked', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('rank_again', expect.anything()));
-    // One call, and the guarantee T2 bought: never the pair.
+    // The watch comes first, and the re-check is offered after it is saved.
+    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
   });
 
-  it('re-ranks inside the band the title is already in', async () => {
+  it('names the title the rewatch is about, rather than deciding a rating', async () => {
+    // The sheet decides no band: the re-check behind it passes `rankings.bucket`
+    // straight through, which is asserted where that call is made
+    // (`adjusting a ranking versus watching it again`). What belongs here is that the
+    // row opens the right title's sheet at all.
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
@@ -795,14 +810,8 @@ describe('a title this user has ranked', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    // Rank again redoes the comparisons; it does not decide a rating. The bucket goes
-    // straight through from `rankings.bucket`, in the database's own spelling.
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith(
-        'rank_again',
-        expect.objectContaining({ p_bucket: 'loved' }),
-      ),
-    );
+    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    expect(view.getByText('Log another watch')).toBeTruthy();
   });
 
   /**
@@ -987,7 +996,16 @@ describe('a title this user has ranked', () => {
 
     // None of the four writers that would move a score, a band or a position, and none
     // of the two that would post an activity.
-    for (const rpc of ['rank_again', 'rank_start', 'rank_rebucket', 'set_bucket']) {
+    // `log_title` joins the list, and `set_bucket` stays on it: the sheet calls the
+    // first now (T3b) and installed clients still call the second, so a screen that
+    // opened a row must be silent to both.
+    for (const rpc of [
+      'rank_again',
+      'rank_start',
+      'rank_rebucket',
+      'set_bucket',
+      'log_title',
+    ]) {
       expect(mockRpc).not.toHaveBeenCalledWith(rpc, expect.anything());
     }
   });
@@ -2914,15 +2932,28 @@ describe('adjusting a ranking versus watching it again', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
   });
 
-  it('declares a new watch only from the rewatch row', async () => {
+  /**
+   * **The rewatch row records a watch first, and ranks nothing** (T3b, epic §J.3).
+   *
+   * It used to open the ranking sheet directly: a forced full re-rank that recorded no
+   * watch and no date (§C.3.2), so a reader saying "I watched Heat again last night" was
+   * made to answer six comparisons and the app learned nothing about the viewing.
+   *
+   * The assertion is therefore the opposite of what it was, and deliberately so: tapping
+   * this row must call **no** `rank_again` at all. The re-check is offered after the
+   * watch is saved, and it is optional — closing from there is a complete act.
+   *
+   * The correction row's own `p_new_watch: false` is asserted by the tests around this
+   * one, which is where that half of the distinction now lives.
+   */
+  it('records a watch before it ranks anything, from the rewatch row', async () => {
     const view = await openMenu();
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    await waitFor(() => expect(againCalls().length).toBe(1));
-    expect(againCalls()[0]![1]).toEqual(
-      expect.objectContaining({ p_new_watch: true, p_bucket: 'loved' }),
-    );
+    // The sheet, whose first control is the watch — not a comparison.
+    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    expect(againCalls().length).toBe(0);
   });
 
   it('never unranks and restarts, in either intent', async () => {
@@ -2976,9 +3007,17 @@ describe('adjusting a ranking versus watching it again', () => {
     await fireEvent.press(row);
     await fireEvent.press(row);
 
-    // The menu closes on the first press, so the second lands on nothing — and the
-    // sheet is keyed by title, so even a re-entry would reuse one session.
-    await waitFor(() => expect(againCalls().length).toBe(1));
+    /**
+     * The menu closes on the first press, so the second lands on nothing — and the
+     * sheet is keyed by title, so even a re-entry would reuse one.
+     *
+     * **What it opens is the watch, not a session** (T3b). The double tap still has to
+     * cost nothing, and the property is stronger than it was: no session exists yet at
+     * all, because the re-check is offered only after the viewing is saved.
+     */
+    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    expect(againCalls().length).toBe(0);
+    expect(view.queryAllByText('Save watch')).toHaveLength(1);
   });
 
   it('holds for a season, which is the shape the founder reported', async () => {

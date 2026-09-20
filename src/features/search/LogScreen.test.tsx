@@ -274,9 +274,9 @@ describe('a series in the results', () => {
     await waitFor(() => expect(view.getByText('Breaking Bad, S2')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
 
-    expect(callsTo('set_bucket')[0][1]).toMatchObject({ p_media_item_id: 'season-2' });
+    expect(callsTo('log_title')[0][1]).toMatchObject({ p_media_item_id: 'season-2' });
   });
 });
 
@@ -290,8 +290,8 @@ describe('a film in the results', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
-    expect(callsTo('set_bucket')[0][1]).toMatchObject({
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
+    expect(callsTo('log_title')[0][1]).toMatchObject({
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
@@ -300,7 +300,7 @@ describe('a film in the results', () => {
   /**
    * End to end across the two sheets: the bucket save and the comparison it opens are
    * separate components wired by the screen, and the title has to survive the hand-off.
-   * Sending `rank_start` a different id than `set_bucket` got would rank the wrong film
+   * Sending `rank_start` a different id than `log_title` got would rank the wrong film
    * and look entirely normal doing it.
    *
    * No "Find where it lands" step any more — the comparison opens on the bucket tap.
@@ -1853,7 +1853,7 @@ describe('saving from a search result', () => {
 
     expect(callsTo('rank_start')).toHaveLength(0);
     expect(callsTo('log_watched')).toHaveLength(0);
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
     expect(callsTo('recommend')).toHaveLength(0);
     // No navigation, and no log sheet: the reader saves and carries on searching.
     expect(mockPush).not.toHaveBeenCalled();
