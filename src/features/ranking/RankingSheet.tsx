@@ -84,6 +84,19 @@ export type RankingSubject = {
    * session over the ranking that is already there.
    */
   mode?: 'start' | 'rebucket' | 'rerank' | 'again';
+  /**
+   * The viewing this session is a re-check of (20261005000100, §K).
+   *
+   * Set only by *Log another watch*, which since T3b records the watch FIRST and offers
+   * the re-check second. Passing the event's id is what makes the two halves reach one
+   * feed activity: `_rank_finalize` finds the post `log_rewatch` already made and
+   * updates its score, rather than posting a second "watched again" for one viewing.
+   *
+   * Absent everywhere else, including on an installed client — which has never heard of
+   * a watch event, and whose `mode: 'again'` the server answers with an **undated** one
+   * rather than a fabricated date (§D.6 path 15).
+   */
+  watchEventId?: string | null;
 };
 
 export type RankingSheetProps = {
@@ -568,7 +581,13 @@ function Session({
             rankRebucket(id, bucket, operationId)
         : subject.mode === 'rerank' || subject.mode === 'again'
           ? (id: string, bucket: BucketId, operationId: string) =>
-              rankAgain(id, bucket, operationId, newWatch)
+              // 20261005000100: the viewing this re-check is about, when the caller has
+              // already logged one. It is what makes the rewatch and its re-check reach
+              // ONE feed activity instead of two (§K) — `_rank_finalize` finds the post
+              // `log_rewatch` made and updates its score rather than writing a second.
+              // Null on every other path, and on an installed client, where the server
+              // supplies an undated event instead of inventing a date.
+              rankAgain(id, bucket, operationId, newWatch, subject.watchEventId ?? null)
           : (id: string, bucket: BucketId, operationId: string) =>
               rankStart(id, bucket, operationId);
     const attempt = () =>

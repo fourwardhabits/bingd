@@ -39,6 +39,9 @@ import {
   setWatchlist,
 } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
+import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
+import { useWatchCount } from '@/features/watch-history/use-watch-history';
+import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
@@ -259,6 +262,15 @@ export default function TitleScreen() {
    */
   const [openSection, setOpenSection] = useState<'who' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
+  /**
+   * *Log another watch* (§J.3), which is now a **watch** and then an optional re-check.
+   *
+   * It used to open the ranking sheet directly in `mode: 'again'` — a forced full re-rank
+   * that recorded no watch and no date (§C.3.2). The sheet below records the viewing
+   * first, and hands the ranking sheet the event id only if the reader asks for the
+   * re-check, so the two halves reach one feed activity rather than two (§K).
+   */
+  const [rewatching, setRewatching] = useState(false);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
@@ -377,6 +389,17 @@ export default function TitleScreen() {
   const credits = useCredits(titleId);
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
+  /**
+   * How many viewings the reader has of this title (§J.2), for the personal-context
+   * line far below.
+   *
+   * **Declared up here with the other title-scoped reads, not beside the line it
+   * feeds.** There are early returns between this point and that one — loading, error,
+   * not-found — and a hook after them is called in a different order on different
+   * renders. ESLint caught it; the device symptom would have been a crash on the first
+   * title that failed to load.
+   */
+  const watchCount = useWatchCount(profile.id, titleId ?? '');
   /**
    * Reviews are Bingd's own public Notes on this exact title.
    *
@@ -897,11 +920,40 @@ export default function TitleScreen() {
    * Built by filtering, so a title ranked outside the top ten and never dated produces no
    * line at all rather than a dangling separator.
    */
-  const watchedLine = data.logged?.watched_on
-    // `lib/dates.ts`, which is where this moved: it was a byte-identical local copy of
-    // the formatter the Episodes tab below already used, in this same file.
-    ? `Watched ${formatShortDate(data.logged.watched_on)}`
-    : null;
+  /**
+   * ---------------------------------------------------------------------------
+   * **`Watched N times ›`** — founder-locked, 2026-09-19 (§J.2)
+   *
+   * The entry is the line that is already here. It gains a count and a chevron, and
+   * nothing else on the page moves — which is the whole argument against a History tab:
+   * a watch history is reader-specific and private, and it belongs with the reader's
+   * other personal facts rather than in a tab row whose every other entry describes the
+   * title itself and reads identically for every viewer (§J.1).
+   *
+   *   1 watch, dated     `#2 in Movies · Watched Aug 17, 2026 ›`
+   *   1 watch, undated   `#2 in Movies ›`
+   *   2 watches          `#2 in Movies · Watched 2 times ›`
+   *
+   * **Never `Watched 1 time`.** One viewing keeps the sentence the page already had, and
+   * the plural count appears from the second watch onward — which is also the first
+   * moment it says anything the date alone did not.
+   *
+   * The count is the reader's own and appears on nobody else's view of this title.
+   */
+  const countLabel = watchCountLabel(watchCount.data ?? 0);
+
+  const watchedLine =
+    countLabel ??
+    (data.logged?.watched_on
+      // `lib/dates.ts`, which is where this moved: it was a byte-identical local copy of
+      // the formatter the Episodes tab below already used, in this same file.
+      ? `Watched ${formatShortDate(data.logged.watched_on)}`
+      : null);
+
+  // The whole line is the route whenever there is a history to open, which is any seen
+  // title: a single dated watch still has a date to edit and a past watch to add.
+  const historyOpen = hasHistory(watchCount.data ?? 0);
+
   const contextLine = [
     heroRank?.basis === 'overall' ? heroRank.label : null,
     watchedLine,
@@ -1388,17 +1440,35 @@ export default function TitleScreen() {
              * Hidden from accessibility while empty, so a screen reader is not handed a
              * blank line to announce between the metadata and the actions.
              */}
-            <Text
-              testID="title-context"
-              variant="caption"
-              tone="tertiary"
-              numberOfLines={1}
-              style={styles.contextLine}
-              accessibilityElementsHidden={!contextLine}
-              importantForAccessibility={contextLine ? 'auto' : 'no-hide-descendants'}
+            {/**
+             * Tappable whenever there is a history to open (§J.2). A `Pressable` around
+             * the existing `Text` rather than a new row: the reservation that holds this
+             * line's height is the `Text` itself carrying a zero-width space, and
+             * replacing it would reintroduce the layout jump that reservation exists to
+             * prevent.
+             */}
+            <Pressable
+              accessibilityRole={historyOpen ? 'button' : undefined}
+              accessibilityLabel={historyOpen ? 'Watch history' : undefined}
+              disabled={!historyOpen}
+              hitSlop={8}
+              onPress={
+                historyOpen ? () => router.push(`/title/${id}/history` as never) : undefined
+              }
             >
-              {contextLine || ZERO_WIDTH}
-            </Text>
+              <Text
+                testID="title-context"
+                variant="caption"
+                tone="tertiary"
+                numberOfLines={1}
+                style={styles.contextLine}
+                accessibilityElementsHidden={!contextLine}
+                importantForAccessibility={contextLine ? 'auto' : 'no-hide-descendants'}
+              >
+                {contextLine || ZERO_WIDTH}
+                {historyOpen && contextLine ? ' ›' : ''}
+              </Text>
+            </Pressable>
 
             {/**
              * **Rank/Ranked, Save, Recommend — inside this column, directly under the
@@ -2006,6 +2076,44 @@ export default function TitleScreen() {
           setLoggingTitle(null);
         }}
       />
+      {/**
+       * *Log another watch* (§J.3). Mounted beside `RankingSheet` rather than inside it,
+       * and it closes before the ranking sheet opens — two presented sheets at once is
+       * the iOS dead end this codebase has paid for before, and the re-check hand-off is
+       * a `setState` in the same tick, not a stack.
+       */}
+      <LogAnotherWatchSheet
+        open={rewatching}
+        title={title.title}
+        mediaItemId={title.id}
+        // The exact ordinal, at any depth. This is the reader's own surface, and §B.2
+        // puts no ceiling on movement copy there — the reveal's "never a placement worse
+        // than #10" rule is about the *static reveal lines*, not about telling somebody
+        // where their own film sits. Null when the title is seen but unranked, which is
+        // the one case with no placement to re-check.
+        position={data.ranked?.position ?? null}
+        onClose={() => setRewatching(false)}
+        onSaved={() => {
+          invalidateAfterCollectionChange(queryClient, profile.id, title.id, {
+            category: data.ranked?.category,
+          });
+        }}
+        onRecheck={(watchEventId) => {
+          setRewatching(false);
+          if (!rankedBucket) return;
+          setRankedTitle(loggable);
+          setRankingSubject({
+            id: title.id,
+            title: title.title,
+            bucket: rankedBucket,
+            posterUri: posterUri(title.poster_path, 'card'),
+            // Only a film or a season is ever ranked; a series has no menu.
+            kind: title.kind === 'season' ? 'season' : 'movie',
+            mode: 'again',
+            watchEventId,
+          });
+        }}
+      />
       <RankingSheet
         subject={rankingSubject}
         onClose={() => setRankingSubject(null)}
@@ -2239,16 +2347,25 @@ export default function TitleScreen() {
                 {/**
                  * The explicit rewatch, and the only row in the app that declares one.
                  *
-                 * Completing it writes exactly one new `title_ranked` activity, which is the
-                 * whole difference from the row above — and the reason the label says what
-                 * happened rather than what the app will do about it. Two genuine rewatches
-                 * are still two activities; that is not a duplicate.
+                 * ---------------------------------------------------------------------------
+                 * **IT RECORDS A WATCH NOW, AND THAT IS THE WHOLE CHANGE** (§J.3, T3b)
                  *
-                 * `rank_again` opens the session **over** the position the title already
-                 * has, so nothing the reader can see moves until they finish: close the
-                 * sheet, lose the network, kill the app, and the score, band and place are
-                 * where they were. The bucket passes straight through from
-                 * `rankings.bucket`, so this row decides no rating.
+                 * It used to open the ranking sheet directly in `mode: 'again'`: a forced
+                 * full re-rank that recorded **no watch and no date** (§C.3.2). A reader
+                 * saying "I watched Heat again last night" was made to answer six
+                 * comparisons, and at the end of it the app knew nothing about the viewing.
+                 *
+                 * Now it opens a sheet whose first act is the watch — Today in one tap,
+                 * *Earlier* if they do not remember when — and which offers the re-check
+                 * afterwards. Save and close, and the rewatch is recorded and posted; tap
+                 * *Re-check placement*, and `rank_again` runs over the position the title
+                 * already holds with the new §F.2 policy, which costs about two comparisons
+                 * when nothing has changed.
+                 *
+                 * **One viewing still produces exactly one feed activity**, which is what
+                 * the label has always promised. The sheet posts it; the re-check enriches
+                 * that same post with the new score rather than writing a second one (§K).
+                 * Two genuine rewatches are still two activities; that is not a duplicate.
                  */}
                 <SheetRow
                   icon="repeat-outline"
@@ -2258,16 +2375,7 @@ export default function TitleScreen() {
                       ? () => {
                           setManaging(false);
                           setActionError(null);
-                          setRankedTitle(loggable);
-                          setRankingSubject({
-                            id: title.id,
-                            title: title.title,
-                            bucket: rankedBucket,
-                            posterUri: posterUri(title.poster_path, 'card'),
-                            // Only a film or a season is ever ranked; a series has no menu.
-                            kind: title.kind === 'season' ? 'season' : 'movie',
-                            mode: 'again',
-                          });
+                          setRewatching(true);
                         }
                       : undefined
                   }
