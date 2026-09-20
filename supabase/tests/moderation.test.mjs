@@ -491,6 +491,15 @@ describe('the guard is wired in, not merely present', () => {
     // suspended *subject*, which is the direction that matters.
     'public_notes',
     'community_score',
+    // 20261002000100. The live score behind a feed card, for a set of (person, title)
+    // pairs. A stable read that writes nothing and takes no subject beyond the pairs
+    // being asked about, filtered by `can_view_profile` from the caller's own side —
+    // `public_notes`' predicate verbatim, and therefore the same answer to suspension:
+    // a suspended *subject* is already absent from everybody's results, which is the
+    // direction that matters, and a suspended *caller* can read the scores behind
+    // activity they could already read. Every act a score leads to (`rank_start`,
+    // `rank_again`, `set_bucket`) calls the guard itself.
+    'public_scores',
     // 20260913000100. The same read as community_score over the whole catalogue: a
     // stable aggregate that writes nothing and takes no subject, so a suspended caller
     // learns nothing it could not learn by asking community_score title by title — and

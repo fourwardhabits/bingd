@@ -10,6 +10,16 @@ let mockNoteError: unknown = null;
 /** `follow_activity_people`'s answer: who a follow story is about, for *this* viewer. */
 let mockFollowPeopleRows: unknown[] = [];
 let mockFollowPeopleError: unknown = null;
+/**
+ * `public_scores`' answer: what each actor rates each title **now** (20261002000100).
+ *
+ * `null` rather than `[]` is the third state and it is the one the fallback turns on —
+ * it stands for a read that did not happen, which is an offline device or, until the
+ * migration is applied everywhere, a bundle talking to an older backend. An empty array
+ * is a read that happened and found no ranking.
+ */
+let mockScoreRows: unknown[] | null = [];
+let mockScoreError: unknown = null;
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 /**
  * Every `.order()` the feed asks for, per table.
@@ -59,6 +69,12 @@ jest.mock('@/lib/supabase', () => ({
         return Promise.resolve({
           data: mockFollowPeopleError ? null : mockFollowPeopleRows,
           error: mockFollowPeopleError,
+        });
+      }
+      if (name === 'public_scores') {
+        return Promise.resolve({
+          data: mockScoreError ? null : mockScoreRows,
+          error: mockScoreError,
         });
       }
       return Promise.resolve({ data: mockNoteError ? null : mockNoteRows, error: mockNoteError });
@@ -191,6 +207,20 @@ beforeEach(() => {
   mockNoteError = null;
   mockFollowPeopleRows = [];
   mockFollowPeopleError = null;
+  // The default is a read that succeeded and found the ranking the fixture event is
+  // about, still where the event says it is — so every suite written before the live
+  // read existed keeps the behaviour it was asserting.
+  mockScoreRows = [
+    {
+      user_id: 'user-1',
+      media_item_id: 'film-1',
+      category: 'movies',
+      bucket: 'loved',
+      position: 1,
+      score: 8.7,
+    },
+  ];
+  mockScoreError = null;
   rpcCalls.length = 0;
   mockFeedReads.length = 0;
   mockFeedQueue = [];
@@ -240,24 +270,171 @@ describe('the embedded profile', () => {
   });
 });
 
-describe('the score', () => {
-  it('comes from the payload, not from a derivation', async () => {
-    // A viewer cannot compute a friend's score: it needs that friend's band
-    // sizes, and `rankings` is scoped to its owner by RLS. `_rank_finalize`
-    // snapshots it instead (20260815010000).
+/**
+ * The founder's report, 2026-09-19: rank a film, look at the Feed, rerank it, look
+ * again — and the Feed still shows the first score.
+ *
+ * The cause was not a cache. `_rank_finalize` snapshotted the score into
+ * `feed_events.payload` (20260815010000) and this hook drew the snapshot; a correction
+ * posts no new activity at all (20260826000500, confirmed by 20261001000100), so there
+ * was no new payload and a refetch returned the same stale number. The wider case is
+ * worse and is asserted below too: a score is a position *within a band*, so ranking
+ * anything re-scores every other title in that band and stales every earlier card.
+ *
+ * The fix is `public_scores` (20261002000100), read once per page beside the notes.
+ * These tests are about the hook believing it, so they set the RPC's answer directly;
+ * `supabase/tests/feed-score-is-current.test.mjs` proves the RPC's own arithmetic
+ * against real rows.
+ */
+describe('the score is the one its owner holds now', () => {
+  /** `public_scores`' row for the fixture's (actor, title) pair. */
+  const live = (over: Record<string, unknown> = {}) => ({
+    user_id: 'user-1',
+    media_item_id: 'film-1',
+    category: 'movies',
+    bucket: 'loved',
+    position: 1,
+    score: 8.7,
+    ...over,
+  });
+
+  it('draws the live score over the payload snapshot after a rerank', async () => {
+    // The report, exactly. The event is the one written when the film was first placed
+    // at 8.7; the reader has since corrected the rating to 9.4 and no second event
+    // exists, because a correction is not a new ranking.
     mockFeedRows = [event()];
+    mockScoreRows = [live({ score: 9.4, position: 2 })];
+
+    const item = await only();
+    expect(item.score).toBe(9.4);
+    expect(item.position).toBe(2);
+  });
+
+  it('draws the live band, so a correction into another one re-tints the badge', async () => {
+    // A rebucket moves `rankings.bucket` and posts nothing either. Taking the live
+    // number beside the snapshotted band would print 5.2 in the *I liked it* tint.
+    mockFeedRows = [event()];
+    mockScoreRows = [live({ bucket: 'fine', score: 5.2, position: 40 })];
+
+    const item = await only();
+    expect(item.score).toBe(5.2);
+    expect(item.bucket).toBe('fine');
+  });
+
+  it('moves an untouched card when a later ranking re-scores its band', async () => {
+    // Nothing happened to this film at all. Something else was ranked into its band,
+    // the band grew, and every title in it took a new number — which is why a snapshot
+    // is stale far more often than the report's own reproduction suggests.
+    mockFeedRows = [event()];
+    mockScoreRows = [live({ score: 8.4 })];
+
+    expect((await only()).score).toBe(8.4);
+  });
+
+  it('asks once for the whole page, not once per card', async () => {
+    // The feed's pagination work exists to keep a page a fixed number of round trips.
+    // A ranking read per card is the N+1 that would undo it.
+    mockFeedRows = [
+      event(),
+      event({ id: 'event-2', actor_id: 'friend', media_item_id: 'film-2' }),
+      event({ id: 'event-3', media_item_id: 'film-3' }),
+    ];
+    mockScoreRows = [live(), live({ media_item_id: 'film-3', score: 7.1, position: 9 })];
+
+    await load();
+
+    const calls = rpcCalls.filter((call) => call.name === 'public_scores');
+    expect(calls).toHaveLength(1);
+    // Two filters, deduplicated, and the cross-product is resolved by pair on the way
+    // back — the same shape `public_notes` is called with.
+    expect(calls[0]?.args.p_user_ids).toEqual(['user-1', 'friend']);
+    expect(calls[0]?.args.p_media_item_ids).toEqual(['film-1', 'film-2', 'film-3']);
+  });
+
+  it('matches by pair, so one actor does not take another actor’s score', async () => {
+    mockFeedRows = [
+      event(),
+      event({ id: 'event-2', actor_id: 'friend', profiles: { ...profile, username: 'abi' } }),
+    ];
+    mockScoreRows = [live({ score: 9.9 }), live({ user_id: 'friend', score: 2.1 })];
+
+    const items = await load();
+    expect(items.map((item) => item.score)).toEqual([9.9, 2.1]);
+  });
+
+  it('drops the badge when the actor no longer has the title ranked', async () => {
+    // `rank_unrank` takes the position away and leaves the activity standing
+    // (20260818000100 deliberately left that path alone). The row still says "ranked";
+    // there is no rating behind it, and a number nobody holds is the false claim this
+    // read exists to stop.
+    mockFeedRows = [event()];
+    mockScoreRows = [];
+
+    const item = await only();
+    expect(item.score).toBeNull();
+    expect(item.bucket).toBeNull();
+    expect(item.position).toBeNull();
+  });
+
+  it('keeps the snapshot when the read fails, rather than blanking every badge', async () => {
+    // Offline, a policy error, or a bundle whose backend predates the migration. Nothing
+    // is known, so nothing is claimed — the card degrades to the behaviour it had before
+    // this read existed instead of to an empty one.
+    mockFeedRows = [event()];
+    mockScoreError = { message: 'function public_scores does not exist' };
 
     const item = await only();
     expect(item.score).toBe(8.7);
     expect(item.bucket).toBe('loved');
   });
 
-  it('is null on an event written before the snapshot existed', async () => {
+  it('is null on an event written before the snapshot existed and never ranked since', async () => {
     mockFeedRows = [event({ payload: { position: 3, category: 'movies' } })];
+    mockScoreRows = [];
 
     const item = await only();
     expect(item.score).toBeNull();
     expect(item.bucket).toBeNull();
+  });
+
+  it('asks about the page that just landed, and never about the ones before it', async () => {
+    // The shape the reactions read had to be rebuilt into (`social-reads-at-scale`): a
+    // hook keyed by *everything loaded so far* re-reads the whole scroll on every page
+    // and outgrows PostgREST's `in.(...)` ceiling somewhere past 390 ids. This read is
+    // per page by construction — it runs inside `hydrate`, over one page's rows — and
+    // that is worth an assertion rather than a comment, because the failure is
+    // invisible until the scroll is long.
+    mockFeedQueue = [
+      { rows: fullPage(0).map((row, i) => ({ ...row, media_item_id: `film-a-${i}` })) },
+      { rows: fullPage(50).map((row, i) => ({ ...row, media_item_id: `film-b-${i}` })) },
+    ];
+    const { feed } = await open();
+
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+
+    const calls = rpcCalls.filter((call) => call.name === 'public_scores');
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      // One page of titles, inside the server's fifty-per-filter ceiling, and never
+      // the union of both pages.
+      expect(call.args.p_media_item_ids).toHaveLength(FEED_PAGE_SIZE);
+    }
+    expect(calls[1]?.args.p_media_item_ids).not.toEqual(calls[0]?.args.p_media_item_ids);
+  });
+
+  it('does not ask about, or score, an activity that never carried a badge', async () => {
+    // A watchlist add and a season completion have never drawn a score, and giving them
+    // one here would be a redesign of the card rather than a correction of a number.
+    mockFeedRows = [
+      event({ id: 'event-2', type: 'watchlist_added', payload: null }),
+      event({ id: 'event-3', type: 'season_completed', payload: null }),
+    ];
+
+    const items = await load();
+    expect(items.map((item) => item.score)).toEqual([null, null]);
+    expect(rpcCalls.filter((call) => call.name === 'public_scores')).toHaveLength(0);
   });
 });
 

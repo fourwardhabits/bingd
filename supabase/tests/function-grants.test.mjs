@@ -139,6 +139,17 @@ const ALLOWED = {
   'public_notes(uuid[],uuid[],integer)': ['authenticated'],
   'community_score(uuid)': ['authenticated'],
 
+  // Added 2026-09-19 with the live feed score (20261002000100). Unlike its neighbours
+  // above it is SECURITY **INVOKER**, which is the interesting part of the entry: it
+  // reads `rankings`, whose policy is `can_i_view(user_id)` — the same predicate
+  // `feed_events_read` applies to the activity a caller is already drawing — so a
+  // definer version would be a hand-written second copy of an authorisation the policy
+  // states correctly. It discloses the derived score of a pair the caller could already
+  // have selected the row for; what it adds is the band arithmetic, which needs a count
+  // the caller would otherwise have to read the whole ranking to take. Not anon, by the
+  // rule public_notes set: the signed-out web pages render no activity.
+  'public_scores(uuid[],uuid[])': ['authenticated'],
+
   // Added 2026-09-09 with Top Rated (20260913000100). The same definer read as
   // `community_score` asked about the catalogue rather than about one title, over the
   // same population, so it discloses nothing that function does not — a caller could

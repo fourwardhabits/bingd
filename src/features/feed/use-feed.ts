@@ -56,13 +56,28 @@ export type FeedItem = {
   createdAt: string;
   position: number | null;
   /**
-   * Snapshotted at rank time, not derived here.
+   * What the actor rates this title **now** — read live, like the note below
+   * (`attachScores`, 20261002000100). Null when they no longer have it ranked.
    *
-   * A score is a title's place within its owner's band, so computing one needs
-   * that person's whole ranking — which a viewer cannot read and should not be
-   * able to. `_rank_finalize` writes it into the payload instead
-   * (20260815010000). A snapshot is arguably the more correct thing for an
-   * activity item anyway: it records what the moment was.
+   * It was the `_rank_finalize` snapshot in `payload.score` (20260815010000), and that
+   * snapshot is still written, still read here as the starting value and still what this
+   * falls back to if the live read fails. What changed is that it is no longer the
+   * answer, because it is stale in two ways at once:
+   *
+   *   · a correction posts no new activity (20260826000500, 20261001000100), so
+   *     *Update your rating* left the old number on the card — the founder's report of
+   *     2026-09-19; and
+   *   · a score is a title's place *within its band*, so ranking anything at all
+   *     re-scores every other title in that band and quietly invalidates every earlier
+   *     card (`collection/score.ts` says this is why the score is never stored).
+   *
+   * The old header argued a snapshot was "more correct... the feed shows the moment",
+   * and the founder's decision is that the badge carries no date, sits beside a live
+   * note, and is read as a current opinion. Score-at-the-time is placement history and
+   * belongs to the ledger Watch History adds, not to an undated badge.
+   *
+   * `position` and `bucket` travel with it for the same reason and from the same read —
+   * a correction into another band moves the badge's tint, not only its number.
    */
   score: number | null;
   bucket: Bucket | null;
@@ -806,9 +821,18 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
    */
   const watched = items.filter((item) => isWatchActivity(item.type));
   const follows = items.filter((item) => item.type === 'follow_added');
+  /**
+   * **Only `title_ranked`**, which is the only type that has ever drawn a score badge:
+   * `_rank_finalize` is the sole writer of a payload carrying one. Scoring the other
+   * watch activities here would put a number on rows that have never had one — a
+   * `season_completed` card would suddenly assert a rating — and this tranche is a
+   * correctness pass, not a redesign of what a card shows.
+   */
+  const ranked = items.filter((item) => item.type === 'title_ranked' && item.mediaItemId);
   await Promise.all([
     attachNotes(watched),
     attachCompanions(watched),
+    attachScores(ranked),
     attachFollowPeople(follows),
   ]);
 
@@ -864,6 +888,81 @@ async function attachNotes(items: FeedItem[]) {
   for (const item of items) {
     if (!item.mediaItemId) continue;
     item.note = byPair.get(`${item.actorId}:${item.mediaItemId}`) ?? null;
+  }
+}
+
+/** One row of `public_scores` (`20261002000100`). */
+type ScoreRow = {
+  user_id: string;
+  media_item_id: string;
+  category: 'movies' | 'tv_seasons';
+  bucket: Bucket;
+  position: number;
+  score: number;
+};
+
+/**
+ * The **current** score, band and ordinal for the ranking rows on this page, in one
+ * round trip (`20261002000100`).
+ *
+ * The badge on a ranking card is a claim about what its owner thinks of the film, and
+ * the payload it used to come from is a record of what they thought when they placed
+ * it. Those two are the same number only until the next thing they rank: a score is a
+ * position *within a band*, so one insertion re-scores the whole band, and a correction
+ * — which posts no new activity at all (20260826000500, 20261001000100) — changes the
+ * number with no new payload to carry it. The founder's report was the second case; the
+ * first is quietly true of almost every card older than the reader's last ranking.
+ *
+ * One call for the page, in the same `Promise.all` as the notes and the comment counts,
+ * so this costs no round trip the feed was not already waiting on. The server does one
+ * `band_bounds` per distinct (person, category, band) named by the page rather than one
+ * per row — a ranking read per card is exactly the N+1 the feed's pagination work was
+ * done to avoid.
+ *
+ * ---------------------------------------------------------------------------
+ * A FAILED READ KEEPS THE SNAPSHOT; A SUCCESSFUL ONE IS BELIEVED ABSOLUTELY
+ *
+ * The distinction is the whole of the error handling, and it is not the shape
+ * `attachNotes` uses, which clears to null either way.
+ *
+ *   · **The read failed** — offline, a policy error, or a bundle talking to a backend
+ *     older than this migration, which is every deployment until it is applied. Nothing
+ *     is known, so nothing is changed and the card keeps the payload snapshot it has
+ *     always drawn. An app running ahead of its database degrades to the old behaviour
+ *     rather than to a feed of blank badges.
+ *
+ *   · **The read succeeded and the pair is absent** — the actor no longer has this
+ *     title ranked. `rank_unrank` leaves the activity standing (20260818000100
+ *     deliberately left that path alone), so the row still says "ranked" and there is
+ *     no rating behind it. The badge goes. A number nobody holds any more is the exact
+ *     false claim this function exists to stop.
+ */
+async function attachScores(items: FeedItem[]) {
+  const actors = [...new Set(items.map((item) => item.actorId))];
+  const titles = [...new Set(items.map((item) => item.mediaItemId).filter(Boolean))] as string[];
+  if (!actors.length || !titles.length) return;
+
+  const { data, error } = await supabase.rpc('public_scores', {
+    // The server refuses more than fifty per filter; a page is twenty events, so these
+    // slices are a floor under a pathological caller rather than a real limit.
+    p_user_ids: actors.slice(0, 50),
+    p_media_item_ids: titles.slice(0, 50),
+  });
+  if (error || !data) return;
+
+  const byPair = new Map<string, ScoreRow>();
+  for (const row of data as ScoreRow[]) {
+    byPair.set(`${row.user_id}:${row.media_item_id}`, row);
+  }
+
+  for (const item of items) {
+    if (!item.mediaItemId) continue;
+    const live = byPair.get(`${item.actorId}:${item.mediaItemId}`);
+    // All three together, from one row or from none. Taking the live score beside a
+    // snapshotted bucket would tint a corrected badge with the band it left.
+    item.score = live ? Number(live.score) : null;
+    item.bucket = live?.bucket ?? null;
+    item.position = live?.position ?? null;
   }
 }
 

@@ -11,9 +11,15 @@
  * position shift that triggered them. A derived value has nothing to keep in
  * step.
  *
- * The one snapshot lives in `feed_events.payload`, written server-side at rank
- * finalize, because a client cannot derive another user's score without that
- * user's band sizes.
+ * A client still cannot derive *another* user's score, because that needs their band
+ * sizes and counting somebody else's band is not a read this app hands out. It asks
+ * `public_scores` instead (`20261002000100`), which derives the same number on the
+ * server for a page of pairs at a time.
+ *
+ * The snapshot in `feed_events.payload` is what that replaced. It is still written, and
+ * it is now only a fallback for a client whose live read failed: a score is a position
+ * *within a band*, so one insertion re-scores the whole band and a snapshot goes stale
+ * without anybody touching the title it names.
  */
 
 export type Bucket = 'loved' | 'fine' | 'not_for_me';
