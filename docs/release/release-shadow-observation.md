@@ -16,7 +16,7 @@ Doctrine and the proposed hierarchy: [`../product/notifications.md`](../product/
 
 | | |
 |---|---|
-| Migrations | `20260930000100`, `20260930000200`, `20260930000300` (production 153/153 at install) |
+| Migrations | `20260930000100`, `20260930000200`, `20260930000300` (production was 153/153 at install; it reached 154 on 2026-09-20 when another tranche's `20261001000100` landed, which touches nothing here) |
 | Edge function | `tmdb-adapter` **v15**, byte-identical to merge `f15c72b` |
 | Jobs | `bingd-release-refresh` (`7 * * * *`), `bingd-release-evaluate` (`*/15 * * * *`) |
 | Policy | film awareness **T-7**, season awareness **release morning**, **no cap applied** (the former rules are recorded as a counterfactual), send window 10:00 to 20:00 local, unknown timezone means no push |
