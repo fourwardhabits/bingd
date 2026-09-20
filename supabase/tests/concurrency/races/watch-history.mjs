@@ -258,7 +258,11 @@ export default function suite() {
       await setup.end();
       const target = logged.watch_event_id;
 
-      await db.armBarrier('watch_events', 'edit-vs-del');
+      // On the UPDATE, not the default INSERT: `edit_watch_event` changes a row's date
+      // and inserts nothing, so an insert barrier never fires — the edit runs straight
+      // through, `awaitBlocked` finds an idle transaction, and the open transaction it
+      // leaves behind then breaks the NEXT test's barrier. Both failures, one cause.
+      await db.armBarrier('watch_events', 'edit-vs-del', { event: 'update' });
       const ctl = await db.controller();
       await ctl.hold('edit-vs-del');
 

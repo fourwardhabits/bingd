@@ -257,7 +257,7 @@ describe('a second title', () => {
     const sheet = await open(filmA);
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'a private note about Film A');
 
@@ -293,10 +293,26 @@ describe('choosing a bucket', () => {
     await fireEvent.press(sheet.bucket('I didn’t like it'));
 
     await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_bucket', {
+      /**
+       * **One call, where there were three** (T3b, 20261003000100).
+       *
+       * It was `set_bucket`, then a read-back of the settled row, then
+       * `log_watched(today)` if that row had no date — with a race in the middle this
+       * file's own subject documented as accepted. `log_title` carries the date and
+       * evaluates the condition, *only when this call creates the seen row*, inside the
+       * lock.
+       *
+       * `today_default` is the basis because the sheet offered Today and the reader did
+       * not touch the row. That distinction — offered versus chosen — is the one the
+       * product could not previously record, and the whole reason a backfill through
+       * Search was indistinguishable from watching three hundred films today.
+       */
+      expect(mockRpc).toHaveBeenCalledWith('log_title', {
         p_operation_id: 'operation-1',
         p_media_item_id: 'film-a',
         p_bucket: 'not_for_me',
+        p_watched_on: expect.any(String),
+        p_basis: 'today_default',
       }),
     );
   });
@@ -326,11 +342,11 @@ describe('choosing a bucket', () => {
     const sheet = await open(filmA);
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     await fireEvent.press(sheet.bucket('It was fine'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(2));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(2));
 
-    const [first, second] = callsTo('set_bucket').map(([, args]) => args.p_operation_id);
+    const [first, second] = callsTo('log_title').map(([, args]) => args.p_operation_id);
     expect(first).not.toBe(second);
   });
 });
@@ -435,7 +451,7 @@ describe('forgetting the watch date', () => {
 
     // Nothing touched the bucket, which is what keeps the title watched: a bucket is a
     // watch signal in its own right (20260815040000).
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
     expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true);
   });
 
@@ -451,7 +467,7 @@ describe('forgetting the watch date', () => {
 
     await fireEvent.press(sheet.bucket('It was fine'));
 
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
   });
 
@@ -496,7 +512,7 @@ describe('forgetting the watch date', () => {
     expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
     // And it still creates nothing itself.
     expect(callsTo('log_watched')).toHaveLength(0);
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
   });
 
   /**
@@ -564,7 +580,7 @@ describe('a title that is already ranked', () => {
     expect(sheet.queryByText(/Changing this/)).toBeNull();
     // Still nothing written, and still nothing handed off, until it is confirmed.
     expect(onRank).not.toHaveBeenCalled();
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
   });
 
   it('confirming a same-bucket tap hands off in rerank mode, bucket unchanged', async () => {
@@ -580,7 +596,7 @@ describe('a title that is already ranked', () => {
     // The bucket it went in with is the bucket it comes out with. Only the mode differs
     // from a band change, because only the opening RPC does.
     expect(onRank).toHaveBeenCalledWith('loved', 'rerank');
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
     expect(callsTo('rank_rebucket')).toHaveLength(0);
   });
 
@@ -611,7 +627,7 @@ describe('a title that is already ranked', () => {
     expect(sheet.getByText('Changing this will re-rank Film A.')).toBeTruthy();
     // Nothing has happened yet — the prompt is the whole point.
     expect(onRank).not.toHaveBeenCalled();
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
   });
 
   it('cancelling leaves the ranking and the bucket alone', async () => {
@@ -641,7 +657,7 @@ describe('a title that is already ranked', () => {
 
     expect(onRank).toHaveBeenCalledWith('fine', 'rebucket');
     // set_bucket would have earned a 55000; rank_rebucket does the bucket change itself.
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
   });
 
   /** Editing anything other than the bucket must not touch the ranking. */
@@ -656,7 +672,7 @@ describe('a title that is already ranked', () => {
     // A row already exists, so the note is an update — save_note, not log_watched.
     await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
     expect(onRank).not.toHaveBeenCalled();
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
     expect(callsTo('rank_rebucket')).toHaveLength(0);
   });
 });
@@ -1523,7 +1539,7 @@ describe('the watch date', () => {
     expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
     await fireEvent.press(sheet.bucket('I liked it'));
 
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
   });
 
@@ -1546,7 +1562,7 @@ describe('the watch date', () => {
 
     // Pressed while the read is still held open — the window a slow network keeps.
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
 
     release();
@@ -1582,7 +1598,7 @@ describe('the watch date', () => {
     expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today');
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
 
     release();
@@ -1604,7 +1620,7 @@ describe('the watch date', () => {
     const sheet = await open(filmA);
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     // Withheld while the answer is unknown…
     expect(callsTo('log_watched')).toHaveLength(0);
 
@@ -1683,7 +1699,7 @@ describe('ranking a title that was already seen', () => {
     await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
     await settle();
 
-    expect(callsTo('set_bucket')).toHaveLength(1);
+    expect(callsTo('log_title')).toHaveLength(1);
     expect(callsTo('log_watched')).toHaveLength(0);
   });
 
@@ -1697,7 +1713,7 @@ describe('ranking a title that was already seen', () => {
     const sheet = await open(filmA, { onRank });
 
     await fireEvent.press(sheet.bucket('It was fine'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
     release();
 
     await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
@@ -1752,7 +1768,7 @@ describe('logging a title for the first time', () => {
     await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
     await settle();
 
-    expect(callsTo('set_bucket')).toHaveLength(1);
+    expect(callsTo('log_title')).toHaveLength(1);
     expect(callsTo('log_watched')).toHaveLength(0);
     expect(sheet.dateRow().props.accessibilityValue.text).toBe('Earlier');
   });
@@ -1955,7 +1971,7 @@ describe('when the log state cannot be read', () => {
     );
 
     await fireEvent.press(sheet.bucket('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
   });
 
   /**
@@ -2730,7 +2746,7 @@ describe('add more details opens the whole log', () => {
     await fireEvent(sheet.note(), 'blur');
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
     expect(callsTo('rank_start')).toHaveLength(0);
     expect(callsTo('rank_rebucket')).toHaveLength(0);
     // One write against the row that already exists, not a second log.
