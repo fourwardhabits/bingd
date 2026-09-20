@@ -52,6 +52,8 @@ jest.mock('@/lib/supabase', () => ({
 /** Mutable so a test can arrive with `?medium=` the way See all does. */
 const mockParams: { medium?: string; show?: string } = {};
 const mockSetParams = jest.fn();
+/** Stable, so a navigation this screen makes can actually be asserted. */
+const mockPush = jest.fn();
 
 /** See the `useNavigation` stand-in below. */
 const mockTabPress: (() => void)[] = [];
@@ -76,7 +78,7 @@ jest.mock('expo-router', () => ({
   // Navigation does with it. `focused` is mutable because "already-selected" is the whole
   // of the contract.
   useNavigation: () => mockNavigation,
-  useRouter: () => ({ push: jest.fn(), setParams: mockSetParams }),
+  useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
   useLocalSearchParams: () => mockParams,
 }));
 
@@ -154,6 +156,7 @@ beforeEach(() => {
   delete mockParams.medium;
   delete mockParams.show;
   mockSetParams.mockClear();
+  mockPush.mockClear();
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
@@ -826,5 +829,92 @@ describe('re-tapping the Collection tab', () => {
         true,
       ),
     );
+  });
+});
+
+/**
+ * `My lists ›` — the entry the IA review of 2026-09-19 chose, and the four things it
+ * deliberately is not (`docs/product/lists-prd.md` §I, §Q.3, §Q.6).
+ *
+ * This is the discoverability decision in test form. A text action on the title row buys
+ * the clutter constraint at a real cost in findability, and the cost is accepted rather
+ * than bought back with a permanent segment — so what has to hold is that the action is
+ * *always there*, on every segment and both mediums, and that it is a **label** rather
+ * than a glyph.
+ */
+describe('My lists', () => {
+  it('is a labelled text action on the title row, not a glyph', async () => {
+    const view = await open();
+    // The visible words matter: `TitleActions`' rule is that an icon names neither the
+    // thing nor the act, and this control is outside the medium axis with nothing
+    // beside it to borrow a meaning from.
+    view.getByText('My lists');
+    view.getByRole('button', { name: 'My lists' });
+  });
+
+  it('is present on every segment and both mediums, and never moves', async () => {
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+
+    for (const segment of ['Watched', 'Watchlist']) {
+      await fireEvent.press(view.getByRole('tab', { name: segment }));
+      expect(view.queryByRole('button', { name: 'My lists' })).toBeTruthy();
+    }
+
+    await switchTo(view, 'TV');
+    for (const segment of ['Watched', 'Watchlist']) {
+      await fireEvent.press(view.getByRole('tab', { name: segment }));
+      expect(view.queryByRole('button', { name: 'My lists' })).toBeTruthy();
+    }
+  });
+
+  it('is not a segment, so it never joins the Movies/TV axis', async () => {
+    // A Lists segment would sit under a `Movies ▾` title it had to ignore — the same
+    // class of disagreement as the Unranked-tab bug this file was written for.
+    const view = await open();
+    expect(view.queryByRole('tab', { name: 'My lists' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'Lists' })).toBeNull();
+  });
+
+  it('carries the entry that measures whether it is discoverable enough', async () => {
+    // `my_lists_opened.entry` is the tripwire, and both doors reach an identical screen
+    // — so the navigation is the only place the difference still exists (§M).
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'My lists' }));
+    expect(mockPush).toHaveBeenCalledWith('/lists?entry=collection');
+  });
+});
+
+/**
+ * **No long press and no per-row overflow on a Collection row** (§D, §Q.6, §Q.7).
+ *
+ * Long press already means three different things elsewhere in this app — recall in
+ * `RankingSheet`, report on a recommendation card, the reaction picker — and Collection
+ * rows have never had one. A fourth meaning discoverable only by accident is not a
+ * feature, and every Collection row is one tap from the title page, which owns the ⋯.
+ */
+describe('a Collection row', () => {
+  it('has no long press and no overflow control', async () => {
+    // List mode, so the rows draw their titles and this assertion has rows to be about.
+    // Poster is the default, and under it there is no text to wait for — the test would
+    // pass without ever having rendered a row.
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    // The view control's own state, which is how the rest of this file establishes that
+    // the list actually drew — a row's text lives inside FlashList and is not reliably
+    // queryable from here.
+    await waitFor(() =>
+      expect(view.getByLabelText('List view').props.accessibilityState?.selected).toBe(true),
+    );
+
+    // Every pressable on the screen, not only the rows: the claim is that Collection has
+    // no long press *anywhere*, and enumerating only the rows would miss the next
+    // control somebody adds one to.
+    for (const node of view.queryAllByRole('button', { includeHiddenElements: true })) {
+      expect(node.props.onLongPress).toBeUndefined();
+    }
+    expect(view.queryByLabelText(/more options/i)).toBeNull();
   });
 });

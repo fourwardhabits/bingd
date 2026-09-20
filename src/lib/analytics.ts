@@ -80,6 +80,17 @@ export type Surface =
   /** The Group Picks results list, for saves made from a group's pick. */
   | 'group_picks'
   /**
+   * Somebody's list, for the per-title bookmark on a list row (lists-prd.md §K).
+   *
+   * Distinct from `collection` and from `profile`, because the question a list answers
+   * is a different one: it is the only surface where a save is usually made from
+   * *another* person's curation rather than from browsing. The bulk "Add all unseen"
+   * is deliberately **not** in this number — it has its own event,
+   * `list_watchlist_bulk_added`, so that one tap adding nine titles cannot be read as
+   * nine deliberate saves.
+   */
+  | 'list'
+  /**
    * The People mode of the Feed tab (2026-09-08). Distinct from `for_you`, which is where
    * People discovery used to live: the two would otherwise be one number spanning a move,
    * and whether the move worked is the question.
@@ -138,6 +149,51 @@ export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
  * compile-time check at the one call site (`SocialLinkRow`), not by an import.
  */
 export type SocialLinkNetwork = 'instagram' | 'tiktok' | 'youtube' | 'x' | 'website';
+
+/**
+ * Which of the two doors to the My lists screen was used.
+ *
+ * `collection` is the `My lists ›` action on Collection's title row. `profile_manage`
+ * is `Manage ›` on the owner's own Lists shelf. They reach the identical screen, and
+ * **the split is the entire point**: it is the measurement behind whether a text action
+ * on a title row is discoverable enough to stay one (§Q.3, §M).
+ */
+export type MyListsEntry = 'collection' | 'profile_manage';
+
+/**
+ * The three modes, as the database spells them.
+ *
+ * Declared here rather than imported from `features/lists/types`, on the same rule
+ * `SocialLinkNetwork` records: `lib/` does not reach into `features/`, and an analytics
+ * vocabulary that followed a feature module's type would silently gain a fourth value
+ * the day somebody adds one — which is exactly the moment a human should decide whether
+ * the series can absorb it. The two are kept in step by a compile-time check at the call
+ * site, not by an import.
+ */
+export type ListVisibilityName = 'private' | 'link' | 'public';
+
+/** Where a list was made. The two entry points of §G, and there are only two. */
+export type ListCreateSurface = 'my_lists' | 'title_menu';
+
+/** Where a title was added to a list: the list's own Add sheet, or a title's ⋯. */
+export type ListAddSurface = 'list_add_sheet' | 'title_menu';
+
+/**
+ * What kind of thing was added.
+ *
+ * Wider than `MediaKind`, which is a film or a season because those are the two loggable
+ * units (AD-1). A list also holds a **whole series** — "watch The Bear" is a thing people
+ * mean — so this vocabulary has a third value and deliberately does not reuse that one.
+ */
+export type ListMediaKind = 'movie' | 'tv_season' | 'tv_series';
+
+/**
+ * How a list screen was reached.
+ *
+ * `my_lists` and `profile_shelf` are the two in-app doors; `deep_link` is a URL from
+ * outside; `title_menu` is the push straight after creating a list from a title's ⋯.
+ */
+export type ListOpenSurface = 'my_lists' | 'profile_shelf' | 'deep_link' | 'title_menu';
 
 /**
  * Which monthly leaderboard is being looked at.
@@ -876,7 +932,102 @@ export type AnalyticsEvent =
    * place — because a completion rate that ignores it would call an import that matched
    * nothing a success.
    */
-  | { name: 'import_completed'; props: { applied: number; unresolved: number } };
+  | { name: 'import_completed'; props: { applied: number; unresolved: number } }
+
+  // --- Lists ---------------------------------------------------------------
+  /**
+   * The My lists screen mounted.
+   *
+   * **`entry` is the discoverability tripwire, and it is why this event ships with the
+   * feature rather than with the dashboards** (founder, 2026-09-19). `My lists ›` is a
+   * text action on Collection's title row rather than a permanent segment — that buys
+   * the clutter constraint at a real cost in discoverability, and this split is how the
+   * cost gets measured. It is the **only** evidence that would justify ever promoting
+   * Lists to a Collection segment, and deferring it would make the first thirty days —
+   * the ones that matter — unrecoverable.
+   *
+   * Once per mount, with `owned_count` as the caller's own number of lists. Never a
+   * title, an id or a name.
+   */
+  | { name: 'my_lists_opened'; props: { entry: MyListsEntry; owned_count: number } }
+  /**
+   * `create_list` answered ok. **Not** the New list sheet opening, and not a refusal.
+   *
+   * `would_have_exceeded_3_lists` is true when the account already owned three or more
+   * in-app lists — i.e. this creation would have been refused under a three-list cap.
+   * **The event is the source of truth for it**, because a later SQL snapshot cannot see
+   * a list that was created and then deleted. It is never shown to anybody and there is
+   * no client branch on it (§P.1).
+   */
+  | {
+      name: 'list_created';
+      props: {
+        surface: ListCreateSurface;
+        visibility: ListVisibilityName;
+        order_style: 'ranked' | 'unranked';
+        has_first_item: boolean;
+        owned_count_after: number;
+        would_have_exceeded_3_lists: boolean;
+      };
+    }
+  /**
+   * `add_list_item` answered `added`. **Not** `already` — a second tap on a title that is
+   * already on the list adds nothing and must not read as growth.
+   */
+  | {
+      name: 'list_item_added';
+      props: { surface: ListAddSurface; media_kind: ListMediaKind; count_after: number };
+    }
+  /** `update_list` changed the visibility. The same call with an unchanged mode emits nothing. */
+  | {
+      name: 'list_visibility_changed';
+      props: {
+        from: ListVisibilityName;
+        to: ListVisibilityName;
+        surface: 'edit' | 'share_prompt';
+        profile_private: boolean;
+      };
+    }
+  /**
+   * The system share sheet **opened** for a list URL.
+   *
+   * The opening, not a completed share: the OS does not tell an app what somebody did
+   * with the sheet, and an event claiming otherwise would be inventing the number.
+   */
+  | {
+      name: 'list_shared';
+      props: { visibility: ListVisibilityName; item_count: number; is_owner: boolean };
+    }
+  /**
+   * The list screen resolved a list the reader may see. **Not** the unavailable state.
+   *
+   * `visibility_class` is only ever sent by the owner, who is the one caller the server
+   * tells. For a non-owner it is `undefined` and `sanitize` drops the key, because a
+   * viewer is deliberately not told whether they are reading a public or a link-only
+   * list — and a manufactured value would be worse than a missing one.
+   */
+  | {
+      name: 'list_opened';
+      props: {
+        surface: ListOpenSurface;
+        is_owner: boolean;
+        relation: 'self' | 'following' | 'other';
+        visibility_class: 'public' | 'link' | undefined;
+      };
+    }
+  /**
+   * `add_list_to_watchlist` answered ok — the "Add N unseen to my Watchlist" button.
+   *
+   * Counts only. The RPC writes no feed events, so this is the only record that a list
+   * turned into somebody's plan, which is the §M metric the whole utility half rests on.
+   */
+  | { name: 'list_watchlist_bulk_added'; props: { added: number; skipped_seen: number } }
+  /**
+   * `create_list` answered `list_limit` — the 100 ceiling, which is a sanity bound and
+   * not a tier. Its own event rather than a property on `list_created`, because a
+   * refusal is not a creation and folding it in would inflate the creation count.
+   */
+  | { name: 'list_limit_reached'; props?: undefined };
 
 /**
  * Which of the two support rows. Spelled here rather than imported from `lib/support`,

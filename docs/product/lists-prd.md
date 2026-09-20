@@ -1,5 +1,39 @@
 # Lists — PRD (v1)
 
+> **Status: BUILT, 2026-09-20, on `feat/lists-v1`.** The header below is the state this
+> document was written in, and is kept because the rest of it is written against that
+> state. This note is what supersedes it.
+>
+> Everything in §O's six PRs is implemented, in one branch rather than six: the migration
+> is `20261010000100`, its suite is `supabase/tests/lists.test.mjs`, the client is
+> `src/features/lists/` plus `app/lists/`, the web render is in `web/src/page.mjs`,
+> `web/src/router.mjs` and `web/build.mjs`, and the preview Function is
+> `functions/lists/[id].js`.
+>
+> **What has not happened**, none of it a code change: the migration has reached no
+> database, no OTA has been published, and the §N device QA has not been run. §O's release
+> order still stands — L1 to production, the client on the staging preview lane, device QA,
+> one OTA to both lanes, the web deploy, then the Function.
+>
+> **Three deliberate departures from the letter of this document**, each recorded where it
+> was made:
+>
+> - **The Settings → Privacy line is in the standing private-state explanation, not on a
+>   confirmation.** §F.4 asks for it on "the private-profile confirmation", and there is
+>   none: going *private* is the protective direction and has never had a dialog — only
+>   going public does, because that one changes other people's access. Inventing a
+>   confirmation for the safe direction would put friction on the act that screen exists to
+>   make easy. The sentence now sits in the block a reader meets every time they check what
+>   private means, which is better for what it is for than an alert read once.
+> - **The See-all screen is `app/lists/by/[userId]`**, inside the already-claimed
+>   `/lists/*`. `listIdFromPath` matches a uuid *directly* under `/lists/` and nothing
+>   else, so this path and `/lists` itself both keep the generic install page, exactly as
+>   §B requires — and a universal link to either still opens the app.
+> - **`Delete list` is a row in the list's ⋯ that opens the editor**, where §H draws it as
+>   a fourth menu row. The destructive act stays in one place (§G's edit mode, behind its
+>   own confirmation) and the menu row is a way *to* it, so there is one delete path rather
+>   than two.
+
 **Status: BUILD-READY AND PARKED, 2026-09-19.** Nothing here is built. Source of truth:
 `origin/main` at `0468f1c` (re-checked at `c77d524` and `d675d69`: nothing Lists-related
 changed), PRD §3 doctrine 4, deferred-roadmap §50, the competitive audit of 2026-09-16 (a

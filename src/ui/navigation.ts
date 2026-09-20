@@ -75,7 +75,22 @@ export const ROOT_SCREEN_TITLES = {
   'u/[username]': 'Profile',
   /** Reached from a cast strip. The screen sets the person's name once it resolves. */
   'person/[id]': '',
+  /**
+   * The management screen (`app/lists/index.tsx`), reached from Collection's title row
+   * and from `Manage ›` on the owner's own profile.
+   *
+   * **"My lists", not "Lists"**, which is the same decision the Collection action
+   * carries and for the same reason (§I): beside a list of somebody's lists, the bare
+   * word does not say whose. It is also the back label of any list pushed from here,
+   * where "‹ My lists" is the right thing to promise.
+   */
+  'lists/index': 'My lists',
   'lists/[id]': 'List',
+  /**
+   * `See all` from a profile's Lists shelf. The screen replaces this with the owner's
+   * name once the route param resolves; this is what a push shows in the meantime.
+   */
+  'lists/by/[userId]': 'Lists',
   /**
    * Where a comment or reply notification lands (`app/activity/[id].tsx`).
    *

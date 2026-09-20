@@ -1038,10 +1038,24 @@ describe('navigation', () => {
   // Two tests rather than one render, unmount and re-render: this library keeps every
   // mounted tree in one document, so a second render inside one test is a second copy of
   // the screen and every query becomes ambiguous.
-  it('offers no menu on a title with nothing to manage', async () => {
+  /**
+   * **The menu is on every title now** (`docs/product/lists-prd.md` §P.4, 2026-09-19).
+   *
+   * This test asserted the opposite, and the change is deliberate rather than a
+   * regression. `onMore` was conditional — a ranked title, and since 2026-09-18 a film
+   * or season that is logged but unranked — because until Lists there was nothing in
+   * the sheet that applied to a title the account had never touched. `Add to list…` is
+   * exactly that: it applies to every movie, season and whole series, ranked or not,
+   * logged or not, and a series has never had a menu at all.
+   *
+   * What protected the old behaviour is one level down rather than gone: the Collection
+   * group is now gated on `data.ranked || data.logged`, so a title in nobody's
+   * collection is never offered Remove from it.
+   */
+  it('offers the menu on a title nobody has touched, because a list needs no history', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
-    expect(view.queryByTestId('title-more')).toBeNull();
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
   });
 
   it('offers the menu on a ranked title, where the Ranked chip used to keep it', async () => {

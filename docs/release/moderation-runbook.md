@@ -170,11 +170,53 @@ private at every visibility level, and it is not evidence about anything.
 ### 2d. A list or a watch tag
 
 ```sql
-select id, owner_id, title, visibility, created_at from lists where id = '<subject_id>';
+select id, owner_id, title, description, visibility, order_style,
+       hidden_at, created_at, updated_at
+  from lists where id = '<subject_id>';
+
+-- What is actually on it, in the owner's order.
+select li.position, m.kind, m.title, m.release_date
+  from list_items li
+  join media_items m on m.id = li.media_item_id
+ where li.list_id = '<subject_id>'
+ order by li.position;
 
 select w.id, w.tagger_id, w.tagged_id, w.media_item_id, w.created_at
   from watch_tags w where w.id = '<subject_id>';
 ```
+
+**Hiding a list, and the way back** *(added with Lists v1, `20261010000100`)*.
+
+```sql
+select hide_list('<subject_id>',   'why, in a sentence');
+select unhide_list('<subject_id>', 'why, in a sentence');
+```
+
+Both are **service role only** — there is no client entry and there must not be one — and
+both write a `moderation_actions` row with `subject_type = 'list'`, so a hide and an unhide
+are equally auditable.
+
+What a hide does, precisely:
+
+- **It outranks every visibility level.** A hidden list is unreadable by everybody — a
+  follower, a link holder, an anonymous web visitor — through every reader, because
+  `_list_readable` checks `hidden_at` before it looks at the mode at all.
+- **The owner keeps it.** They see the list with a banner saying it is being reviewed, and
+  can still edit its title, description, order and contents. What they cannot do is
+  **change its visibility**: `update_list` answers `hidden` for any visibility change while
+  `hidden_at` is set. That is what stops a hide being laundered into a fresh audience by
+  flipping the list to private and back.
+- **It leaves the profile shelf and the web.** `profile_lists` excludes it and
+  `list_preview` answers nothing, so the link unfurls as the generic card.
+
+Prefer a hide to a suspension when the problem is *one list* rather than the account: it is
+reversible, it is proportionate, and `unhide_list` puts it back exactly as it was. A list
+whose **title** is the problem is still one list — `list_title` exists in the report
+taxonomy for triage, and there is one object and one hide.
+
+**A hide is not a delete.** There is deliberately no operator delete for a list: deletion is
+the owner's, and it is hard (items cascade, the URL answers "unavailable"). If a list must
+not exist at all, that is an account-level action taken against the account.
 
 ---
 

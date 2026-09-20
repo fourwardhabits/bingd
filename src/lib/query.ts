@@ -90,6 +90,33 @@ export const queryKeys = {
   // that prefix would answer "no longer new" the moment the first film was placed and
   // evict the user from the flow they were in the middle of.
   tasteOnboarding: (userId: string) => ['taste-onboarding', userId] as const,
+
+  // ---------------------------------------------------------------------------
+  // Lists (20261010000100).
+  //
+  // Two branches, deliberately not one. `myLists` is the caller's own management
+  // screen and holds every visibility; `profileLists` is the public shelf and holds
+  // only what a visitor would see — for the owner as well (§Q.4). Sharing a prefix
+  // would let an invalidation after creating a *private* list refill the profile
+  // shelf from a read that answered a different question, and keeping the two
+  // distinguishable is the whole reason the shelf is public-only.
+  myLists: (userId: string) => ['my-lists', userId] as const,
+  profileLists: (ownerId: string, limit: number) => ['profile-lists', ownerId, limit] as const,
+  // One list's header. Not keyed by viewer: the server answers per caller, and the
+  // client clears the whole cache on sign-out (session.tsx) — the same treatment
+  // `title` has.
+  list: (listId: string) => ['list', listId] as const,
+  // Separate from `list` for the reason `comparisonCard` is separate from `title`: a
+  // different shape read by a different query, and one key over two shapes is a race
+  // about which ran first. It is also an infinite query, so its cursor is a page param
+  // and deliberately not in the key.
+  listItems: (listId: string) => ['list-items', listId] as const,
+  // "You've seen X of N", over the whole list rather than over the loaded pages. Its
+  // own key because logging a *watch* moves it while nothing about the list changed.
+  listProgress: (listId: string) => ['list-progress', listId] as const,
+  // What the Add-to-list sheet reads: the caller's lists plus a membership flag for
+  // one title. Keyed by the title, because that flag is the whole answer.
+  listsForTitle: (mediaItemId: string) => ['lists-for-title', mediaItemId] as const,
 } as const;
 
 /**
