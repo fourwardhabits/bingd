@@ -3418,6 +3418,11 @@ describe('Add to list', () => {
     await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
     // And the menu is gone rather than sitting underneath it.
     expect(view.queryByLabelText('Add to list…')).toBeNull();
-    expect(globalThis.__modalShows.refused).toBe(0);
+    // The same accessor the onboarding hand-off tests use: `jest.setup.js` models UIKit's
+    // refusal and counts it here, and a count above zero means this passed on a dismissal
+    // no device would have sent.
+    const shows = (globalThis as unknown as { __modalShows: { refused: number } })
+      .__modalShows;
+    expect(shows.refused).toBe(0);
   });
 });
