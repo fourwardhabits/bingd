@@ -9,9 +9,9 @@ This replaces `watch-history-manual-qa.md` and the Lists PRD §N device list for
 release. It is **one pass over both features**, because they ship together and the
 interesting failures are at their seam — a watch that moves a list, a list that logs a film.
 
-**Everything provable without a person has been left out.** The candidate carries 2,429
-database assertions, 153 concurrency assertions, 4,820 client assertions and 27 grant
-probes against staging itself; re-walking that ground here would spend the only resource
+**Everything provable without a person has been left out.** The candidate carries 2,411
+database tests, 150 concurrency tests, 4,820 client tests and 27 grant probes against
+staging itself (release gate run 35554338112); re-walking that ground here would spend the only resource
 this document spends, which is you looking at a screen. So each item below says **why a
 person** — and if an item ever stops having an answer to that, delete it.
 
