@@ -1272,6 +1272,36 @@ describe('Your First Five', () => {
   });
 });
 
+/**
+ * **The five-placed settle stamps where the weekly streak starts** (founder QA,
+ * 2026-09-21). It is the first of the two exits that can end onboarding's ranking, and
+ * `streakBoundary` reads the stamp, so a flow spread over two calendar weeks is one
+ * streak week rather than a 2-week streak.
+ */
+describe('the weekly streak boundary', () => {
+  it('is stamped when the fifth title is placed', async () => {
+    mockCounts.rankings = 5;
+    await renderWithProviders(<TasteScreen />);
+
+    await waitFor(() =>
+      expect(typeof mockPrefs.get('user-1.onboarding.taste.completed_at')).toBe('string'),
+    );
+    const at = new Date(mockPrefs.get('user-1.onboarding.taste.completed_at') as string);
+    expect(Number.isNaN(at.getTime())).toBe(false);
+  });
+
+  it('is not moved by a later settle — the first completion is the completion', async () => {
+    mockPrefs.set('user-1.onboarding.taste.completed_at', '2026-09-16T19:11:00.000Z');
+    mockCounts.rankings = 5;
+    await renderWithProviders(<TasteScreen />);
+
+    await waitFor(() => expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('done'));
+    expect(mockPrefs.get('user-1.onboarding.taste.completed_at')).toBe(
+      '2026-09-16T19:11:00.000Z',
+    );
+  });
+});
+
 describe('the way out', () => {
   /**
    * **The stranding this codebase has already paid for once.**

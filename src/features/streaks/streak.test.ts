@@ -1,4 +1,5 @@
 import {
+  clampToBoundary,
   daysLeftInWeek,
   streakAdvanced,
   weeklyStreak,
@@ -254,5 +255,75 @@ describe('when a ranking advances the streak', () => {
     const after = state({ weeks: 9, rankedThisWeek: true, best: 9 });
 
     expect(streakAdvanced(before, after)).toBe(9);
+  });
+});
+
+/**
+ * **Onboarding is week one at most** (founder QA, 2026-09-21), reproduced exactly.
+ *
+ * A reader began onboarding in week A and ranked two titles, came back in week B and
+ * finished — and was shown *STREAK CONTINUED · 2-week streak*. Each step below is the
+ * reading the app takes around a ranking: `before` on mount, `after` once it lands, both
+ * through the same boundary, exactly as `use-streak-advance.ts` does.
+ *
+ * 2026-09-07 is a Monday, so week A is 7–13 September, B is 14–20 and C is 21–27.
+ */
+describe('onboarding that spans calendar weeks', () => {
+  const A1 = new Date(2026, 8, 9, 20); // week A, Wednesday — onboarding begins
+  const A2 = new Date(2026, 8, 9, 20, 5);
+  const B1 = new Date(2026, 8, 16, 19); // week B, Wednesday — onboarding resumes
+  const B2 = new Date(2026, 8, 16, 19, 10); // the fifth title; onboarding completes
+  const COMPLETED = new Date(2026, 8, 16, 19, 11);
+  const C1 = new Date(2026, 8, 23, 21); // week C — an ordinary ranking
+
+  /** One ranking, read before and after through the same boundary. */
+  const rank = (
+    history: Date[],
+    at: Date,
+    boundary: Date | null,
+  ): { advanced: number | null; after: WeeklyStreak } => {
+    const before = weeklyStreak(clampToBoundary(history, boundary), at);
+    const after = weeklyStreak(clampToBoundary([...history, at], boundary), at);
+    return { advanced: streakAdvanced(before, after), after };
+  };
+
+  it('never shows a streak card while onboarding is under way, in either week', () => {
+    // While the flow is live the boundary is "now": everything ranked in it is one week.
+    expect(rank([], A1, A1).advanced).toBeNull();
+    expect(rank([A1], A2, A2).advanced).toBeNull();
+    // The resumed week — the moment the founder's card fired — says nothing.
+    const resumed = rank([A1, A2], B1, B1);
+    expect(resumed.advanced).toBeNull();
+    expect(resumed.after.weeks).toBe(1);
+    expect(rank([A1, A2, B1], B2, B2).advanced).toBeNull();
+  });
+
+  it('reads the whole of onboarding as ONE week once it completes, not two', () => {
+    const afterCompletion = weeklyStreak(clampToBoundary([A1, A2, B1, B2], COMPLETED), COMPLETED);
+    expect(afterCompletion.weeks).toBe(1);
+    expect(afterCompletion.best).toBe(1);
+  });
+
+  it('celebrates a 2-week streak on the first ranking of the NEXT week', () => {
+    const next = rank([A1, A2, B1, B2], C1, COMPLETED);
+    // Week B (all of onboarding) + week C: the streak's first real continuation.
+    expect(next.advanced).toBe(2);
+    expect(next.after.weeks).toBe(2);
+  });
+
+  it('and would have celebrated that same history as a 2-week streak WITHOUT the boundary', () => {
+    // The control: this is the defect, so the fix is what makes the difference above.
+    expect(rank([A1, A2], B1, null).advanced).toBe(2);
+  });
+
+  it('changes nothing for an established account, which has no boundary', () => {
+    const history = [new Date(2026, 8, 2, 12), new Date(2026, 8, 9, 12)];
+    expect(clampToBoundary(history, null)).toEqual(history);
+    expect(rank(history, new Date(2026, 8, 16, 12), null).advanced).toBe(3);
+  });
+
+  it('leaves rankings after the boundary exactly as they were', () => {
+    const later = new Date(2026, 8, 30, 9);
+    expect(clampToBoundary([A1, later], COMPLETED)).toEqual([COMPLETED, later]);
   });
 });

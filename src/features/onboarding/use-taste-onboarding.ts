@@ -101,6 +101,30 @@ function withDeadline(work: Promise<TasteOnboarding>): Promise<TasteOnboarding> 
  */
 const PHASE_PREF = 'onboarding.taste.phase';
 
+/**
+ * When the flow ended, as an ISO instant — the moment the weekly streak's lifecycle starts.
+ *
+ * Written once, by whichever of the two exits reaches it first (the five-placed settle in
+ * `readState`, or `useCompleteTasteOnboarding`), and never moved afterwards: a second exit
+ * on the same account is the same completion, not a later one. Device-local for the same
+ * reason and with the same trade as `PHASE_PREF` above. See `streakBoundary`.
+ */
+const COMPLETED_AT_PREF = 'onboarding.taste.completed_at';
+
+const completedAtKey = (userId: string) => `${userId}.${COMPLETED_AT_PREF}`;
+
+/** Records the completion instant unless one is already recorded. Never rejects. */
+async function stampCompletion(userId: string): Promise<void> {
+  try {
+    const existing = await readPref<string>(completedAtKey(userId));
+    if (existing) return;
+    await writePref<string>(completedAtKey(userId), new Date().toISOString());
+  } catch {
+    // A stamp that does not land leaves the streak reading exactly as it did before this
+    // existed — the established-account behaviour — which is a safe place to fall back to.
+  }
+}
+
 export type TastePhase = 'active' | 'done' | 'skipped';
 
 export type TasteOnboarding = {
@@ -258,6 +282,9 @@ async function readState(userId: string): Promise<TasteOnboarding> {
         () => note('onboarding', 'settle.write', 'ok'),
         () => note('onboarding', 'settle.write', 'failed'),
       );
+      // The streak's lifecycle starts here (see `streakBoundary`). Not awaited, and it
+      // cannot reject, for the same reason the phase write above is not.
+      void stampCompletion(userId);
     }
 
     return { ranked, needed: true };
@@ -446,10 +473,44 @@ export function useCompleteTasteOnboarding(userId: string) {
         });
       }
 
-      await written;
+      // The streak's lifecycle starts at completion, whichever exit it was (see
+      // `streakBoundary`). Idempotent: the first stamp wins, including the settle's.
+      await Promise.all([written, stampCompletion(userId)]);
     },
     [queryClient, userId],
   );
+}
+
+/**
+ * The instant before which rankings count as one week for the weekly streak — onboarding.
+ *
+ * `clampToBoundary` in `streaks/streak.ts` is what applies it; this only says where it is:
+ *
+ *   - **onboarding in progress** (this process is in the flow, or the device says `active`)
+ *     → *now*, so nothing ranked during onboarding can add up to more than one week and no
+ *     streak card can fire mid-flow;
+ *   - **onboarding finished, instant recorded** → that instant;
+ *   - **anything else** → `null`, which changes nothing. That covers every account that
+ *     finished before this was recorded, another person's profile, and a device that never
+ *     saw the flow — so no established streak moves.
+ *
+ * Never rejects: a streak must not fail to draw because a preference could not be read.
+ */
+export async function streakBoundary(userId: string): Promise<Date | null> {
+  try {
+    const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
+    const stamped = await readPref<string>(completedAtKey(userId));
+    // The settle marks the flow live in memory (`intent = 'active'`) for the rest of the
+    // session while writing `done` to disk; once the completion is stamped, the stamp is
+    // the truth even inside that session.
+    if (stamped) {
+      const at = new Date(stamped);
+      return Number.isNaN(at.getTime()) ? null : at;
+    }
+    return phase === 'active' ? new Date() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

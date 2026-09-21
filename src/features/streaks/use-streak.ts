@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { after, readAllByKey } from '@/lib/read-all';
 import { supabase } from '@/lib/supabase';
 
-import { weeklyStreak, type WeeklyStreak } from './streak';
+import { streakBoundary } from '@/features/onboarding/use-taste-onboarding';
+
+import { clampToBoundary, weeklyStreak, type WeeklyStreak } from './streak';
 
 /**
  * The reader's weekly ranking streak.
@@ -57,8 +59,14 @@ export function useStreak(userId: string | null) {
        * being computed against. React Query caches the *result* for a minute, which is
        * the right granularity: a week does not turn over inside one.
        */
+      // The same boundary the celebration uses (`use-streak-advance.ts`), so the line on the
+      // profile can never say a streak the card was right not to announce. For another
+      // person's profile there is no boundary on this device, and nothing changes.
       return weeklyStreak(
-        (result.data ?? []).map((row) => row.created_at),
+        clampToBoundary(
+          (result.data ?? []).map((row) => row.created_at),
+          await streakBoundary(userId as string),
+        ),
         new Date(),
       );
     },

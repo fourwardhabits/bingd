@@ -179,6 +179,44 @@ export function daysLeftInWeek(now: Date): number {
 }
 
 /**
+ * Rankings made before `boundary` count as the boundary's own week, and no earlier.
+ *
+ * ---------------------------------------------------------------------------
+ * ONBOARDING IS WEEK ONE AT MOST (founder QA, 2026-09-21)
+ *
+ * A reader started onboarding in one calendar week, ranked two films, came back the next
+ * week and finished — and was greeted with *STREAK CONTINUED · 2-week streak*. The streak
+ * is derived from the calendar weeks of `rankings.created_at`, so two weeks of onboarding
+ * were two consecutive qualifying weeks. They were not a habit; they were one unfinished
+ * form.
+ *
+ * The contract: onboarding may establish the **first** week of the eventual streak, and the
+ * streak's lifecycle begins at onboarding completion. So every ranking made before that
+ * instant is read as if it were made at it — which collapses however many weeks onboarding
+ * took into the completion week, and leaves everything after it exactly as it was:
+ *
+ *   week A  begin onboarding, rank two     ┐
+ *   week B  finish onboarding              ┘ one week (B) → no streak, no card
+ *   week C  rank normally                    B + C → a 2-week streak, celebrated
+ *
+ * While onboarding is still under way the boundary is *now*, so nothing ranked during it
+ * can add up to more than one week either — that is what keeps the card from firing
+ * mid-flow. A `null` boundary (an account that finished before this existed, another
+ * person's profile, or a device that never recorded it) changes nothing, which is what
+ * keeps every established streak exactly as it is.
+ */
+export function clampToBoundary(
+  rankedAt: readonly (string | Date)[],
+  boundary: Date | null,
+): (string | Date)[] {
+  if (!boundary || Number.isNaN(boundary.getTime())) return [...rankedAt];
+  return rankedAt.map((at) => {
+    const date = at instanceof Date ? at : new Date(at);
+    return date.getTime() < boundary.getTime() ? boundary : at;
+  });
+}
+
+/**
  * Did this ranking start or extend a streak, and is that worth celebrating?
  *
  * ---------------------------------------------------------------------------
