@@ -433,3 +433,59 @@ describe('what a correction does not do', () => {
     await t.sql(`delete from rankings where user_id = $1 and media_item_id = $2`, [user, film]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The founder's contract after device QA (2026-09-21): Update your rating goes straight into
+// the comparisons and records NO watch; Log another watch records one. The client asserts the
+// calls it makes; this asserts what the database is left holding once each session FINISHES.
+// ---------------------------------------------------------------------------
+
+describe('a correction is never a watch event', () => {
+  const watchEvents = async (item) =>
+    Number(
+      (
+        await t.sql(
+          `select count(*)::int as n from watch_events where user_id = $1 and media_item_id = $2`,
+          [user, item],
+        )
+      ).rows[0].n,
+    );
+
+  it('Update your rating, same band and new band, leaves the watch history exactly as it was', async () => {
+    await anchors(3);
+    const film = await movie('Corrected, never rewatched');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    const seen = await watchEvents(film);
+    assert.equal(seen, 1, 'a first ranking leaves exactly one watch event');
+
+    await correct(film);
+    assert.equal(await watchEvents(film), seen, 'a same-band correction recorded a watch');
+
+    await correctBand(film, 'fine');
+    assert.equal(await watchEvents(film), seen, 'a band correction recorded a watch');
+
+    await t.assertValid(user);
+  });
+
+  it('while Log another watch records exactly one, from either entry point', async () => {
+    await anchors(3);
+    const film = await movie('Watched again');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    const seen = await watchEvents(film);
+
+    // The T3 path: the watch is recorded by `log_rewatch`, before any re-check.
+    const logged = await call(`log_rewatch($1, $2, current_date, 'today_default')`, [
+      await op(),
+      film,
+    ]);
+    assert.notEqual(logged?.status, 'error');
+    assert.equal(await watchEvents(film), seen + 1, 'log_rewatch did not record the viewing');
+
+    // The legacy path an installed client still takes: `rank_again(p_new_watch: true)`,
+    // which T1 records as an undated viewing rather than inventing a date.
+    await watchAgain(film);
+    assert.equal(await watchEvents(film), seen + 2, 'a legacy rewatch did not record a viewing');
+
+    await t.assertValid(user);
+  });
+});
