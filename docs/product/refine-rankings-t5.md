@@ -167,6 +167,59 @@ target, never per answer.
 The dense 2,500 case is above §G.3's 50 ms target on this machine. It is still one read per title
 refined, bounded by the rolling 24-hour ceiling, and nobody near that size exists yet.
 
+### 5a. The dense 2,500 case, investigated (2026-09-21)
+
+**Setup.** A scratch benchmark on real PostgreSQL 17 (not committed). 2,500 ranked titles and 27,201
+answers: bisection-shaped evidence plus a 5% re-answer set, with 259 and then 699 live conflicts.
+Analysed tables. Variants were interleaved over 15 rounds, because the machine was under about 50%
+load from another session and back-to-back runs varied 84–192 ms.
+
+| Variant of `_refine_support` | Median | Min | Output |
+|---|---|---|---|
+| **current** (as committed) | **101 ms** | 92 ms | — |
+| A: latest-per-pair via grouped `max` + join back (instead of sort + `distinct on`) | 127 ms | 116 ms | identical, **rejected (slower)** |
+| **B: `max(created_at)` for conflicts instead of `array_agg(created_at)`** | **70 ms** | 60 ms | identical on named columns at 259 and 699 conflicts |
+| C: `set work_mem = '16MB'` on the function | 70 ms | 61 ms | identical |
+| B + C | 68 ms | 55 ms | identical |
+
+**Where the time goes.** The sort for "latest answer per pair" is about 15 ms and cannot be avoided,
+because every answer must be read once. The per-title aggregate is the hotspot. The planner estimates
+200 groups against 2,500 actual. The `array_agg` of conflict timestamps gives every group a memory
+context, so the hash aggregate **spills to disk** (`temp written=329`). B removes the spill; C removes
+it by giving the aggregate more memory.
+
+**B preserves semantics.** Every consumer reads only `conflicts > 0`. That is the same as "the latest
+contradicting answer is newer than the last confirmation", which one `max()` answers. Only the internal
+`conflicts` column changes, from a count to 0/1. It is a two-line change.
+
+**Not applied now.** `20261013000100` is frozen while #196's head moves. It has not been applied
+anywhere, so B can be folded into it at restack without a second migration. That is the
+recommendation. It needs no function-level setting (C), which would add a knob and gain nothing over B.
+
+**Why 50 ms is not worth chasing further.** After B, what remains is reading and joining every answer
+once, about 45 ms of scans, joins and the per-pair sort at 27,000 answers. Getting under it would need
+a persisted evidence table, which the design rejects (§G.2: it would be stale after every insertion).
+The call runs once per title refined, at most 30 a day. 2,500 ranked titles with 27,000 answers is
+also an extreme shape; no real account's size was checked for this note.
+
+**Patch B, to apply at restack** (in `_refine_support`):
+
+```diff
+-           array_agg(e.created_at) filter (where e.side = 3) as conflict_at
++           max(e.created_at) filter (where e.side = 3) as conflict_last
+ …
+-         coalesce((
+-           select count(*)::integer from unnest(pi.conflict_at) as ca(at)
+-            where ld.confirmed_at is null or ca.at > ld.confirmed_at
+-         ), 0),
++         (case when pi.conflict_last is not null
++                and (ld.confirmed_at is null or pi.conflict_last > ld.confirmed_at)
++               then 1 else 0 end),
+```
+
+`refine.test.mjs`'s contradiction tests cover it: one contradiction is offered with reason
+`contradicted`, and it stops being offered once a refine confirms it.
+
 ## 6. Entry and UX
 
 - **Entry:** `Refine rankings ›`, one line of action text at the top of Collection's **Watched**

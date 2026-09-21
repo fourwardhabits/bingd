@@ -8,6 +8,7 @@ import {
   parseCandidates,
   reasonLine,
   recordFinished,
+  refinePlacementLine,
   ROUND_ANSWERS,
   ROUND_TARGETS,
   type RefinedTitle,
@@ -150,5 +151,25 @@ describe('the entry rests after a sitting', () => {
     expect(isQuiet('2026-09-19T12:00:00Z', now)).toBe(true);
     expect(isQuiet('2026-09-12T11:00:00Z', now)).toBe(false);
     expect(isQuiet('garbage', now)).toBe(false);
+  });
+});
+
+describe('refinePlacementLine (Watch History)', () => {
+  it('says what the refine did, never "Still" for a move', () => {
+    expect(refinePlacementLine({ outcome: 'unchanged', position: 21, fromPosition: 21 })).toBe(
+      'Refined · Still #21',
+    );
+    expect(refinePlacementLine({ outcome: 'moved', position: 15, fromPosition: 21 })).toBe(
+      'Refined · Moved from #21 → #15',
+    );
+    expect(refinePlacementLine({ outcome: 'kept', position: 57, fromPosition: 57 })).toBe(
+      'Refined · Kept at #57',
+    );
+  });
+
+  it('is labelled as a refine, not as a watch', () => {
+    const line = refinePlacementLine({ outcome: 'moved', position: 3, fromPosition: 9 });
+    expect(line.startsWith('Refined · ')).toBe(true);
+    expect(line).not.toMatch(/watch/i);
   });
 });

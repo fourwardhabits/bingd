@@ -184,7 +184,14 @@ const sideEffects = async () =>
          (select coalesce(jsonb_agg(to_jsonb(li) order by li.media_item_id), '[]')
             from list_items li join lists l on l.id = li.list_id where l.owner_id = $1) as listed,
          (select coalesce(jsonb_agg(r.created_at order by r.media_item_id), '[]')
-            from rankings r where r.user_id = $1) as ranked_at`,
+            from rankings r where r.user_id = $1) as ranked_at,
+         -- Watched-with companions, a per-watch detail: whole rows.
+         (select coalesce(jsonb_agg(to_jsonb(wt) order by wt.id), '[]')
+            from watch_tags wt where wt.tagger_id = $1 or wt.tagged_id = $1) as companions,
+         (select coalesce(jsonb_agg(to_jsonb(gc) order by gc.year, gc.category), '[]')
+            from goal_completions gc where gc.user_id = $1) as goals,
+         (select coalesce(jsonb_agg(to_jsonb(au) order by au.award_key, au.tier_key), '[]')
+            from award_unlocks au where au.user_id = $1) as awards`,
       [user],
     )
   ).rows[0];
@@ -300,18 +307,16 @@ describe('library shapes', () => {
     const ids = await library(1200);
     // A dense top 100 so the pool has to reach below it.
     await compareAdjacent(ids.slice(0, 100));
-    const started = Date.now();
+    // No wall-clock bound here: under the parallel `test:db` run PGlite is CPU-starved and a
+    // timing assertion only measures the machine (it flaked at 5.6s, 2026-09-21). Latency is
+    // measured on real PostgreSQL by perf/refine-scale.mjs.
     const r = await candidates({ limit: 5 });
-    const elapsed = Date.now() - started;
     assert.equal(r.status, 'ready');
     assert.equal(r.candidates.length, 5);
     for (const c of r.candidates) {
       assert.ok(c.position >= 100, `#${c.position} was already evidenced`);
       assert.equal(c.tolerance, c.position <= 100 ? 1 : c.position <= 300 ? 3 : 7);
     }
-    // PGlite, single-threaded wasm: a sanity bound, not the measurement. The real
-    // PostgreSQL numbers are in perf/refine-scale.mjs.
-    assert.ok(elapsed < 5000, `candidates took ${elapsed}ms`);
   });
 });
 
@@ -667,6 +672,123 @@ describe('finite sessions', () => {
     const offered = (await candidates({ limit: 40 })).candidates.map((c) => c.media_item_id);
     assert.ok(!offered.includes(target));
     assert.ok(ids.includes(target));
+  });
+});
+
+/**
+ * #196's direction, pinned from T5's side (2026-09-21): *Log another watch* saves a watch
+ * event first and then runs bucket + ranking, and a watch carries more detail (date,
+ * companions). Refine must stay outside all of it — it is ranking evidence only.
+ */
+describe('refine is never a watch', () => {
+  const watchCount = async (id) =>
+    (
+      await t.sql(
+        `select count(*)::int as n from watch_events where user_id = $1 and media_item_id = $2`,
+        [user, id],
+      )
+    ).rows[0].n;
+
+  it('over a title with a dated rewatch and a companion: no watch, no detail touched', async () => {
+    const ids = await library(30, { triggers: true });
+    const target = ids[20];
+    const rewatch = await call(`log_rewatch($1, $2, '2026-09-01'::date, 'reader')`, [
+      await op(),
+      target,
+    ]);
+    assert.equal(rewatch.status, 'ok');
+    const friend = await t.createUser({ username: `refine_friend_${seq}` });
+    await t.sql(
+      `insert into watch_tags (tagger_id, tagged_id, media_item_id) values ($1, $2, $3)`,
+      [user, friend, target],
+    );
+    const watchesBefore = await watchCount(target);
+    const effects = await sideEffects();
+
+    const truth = [...ids.slice(0, 15), target, ...ids.slice(15, 20), ...ids.slice(21)];
+    const r = await refine(target, truth);
+    assert.equal(r.movement.outcome, 'moved');
+
+    assert.equal(await watchCount(target), watchesBefore, 'the watch count is untouched');
+    assert.deepEqual(await sideEffects(), effects);
+    const { rows } = await t.sql(
+      `select kind, watch_event_id from ranking_placements
+        where user_id = $1 and media_item_id = $2 order by created_at desc limit 1`,
+      [user, target],
+    );
+    assert.deepEqual(rows[0], { kind: 'refine', watch_event_id: null }, 'a placement, not a watch');
+    await t.sql(`select assert_watch_history_valid($1)`, [user]);
+    await valid();
+  });
+
+  it('an open Log-another-watch re-check is not resumed as a refine, nor the reverse', async () => {
+    const ids = await library(30, { triggers: true });
+    const target = ids[12];
+    const { watch_event_id: event } = await call(
+      `log_rewatch($1, $2, current_date, 'today_default')`,
+      [await op(), target],
+    );
+    const recheck = await call(`rank_again($1, 'loved', $2, true, $3)`, [
+      target,
+      await op(),
+      event,
+    ]);
+    assert.equal(recheck.done, false);
+    const watchesBefore = await watchCount(target);
+    const effects = await sideEffects();
+
+    // Refine over it: a different act, so the rewatch session is replaced, not resumed.
+    const opened = await call(`refine_start($1, $2)`, [target, await op()]);
+    assert.equal(opened.resumed, false);
+    assert.notEqual(opened.session_id, recheck.session_id);
+    const kinds = async () =>
+      (
+        await t.sql(
+          `select kind::text from ranking_sessions where user_id = $1 and media_item_id = $2`,
+          [user, target],
+        )
+      ).rows.map((row) => row.kind);
+    assert.deepEqual(await kinds(), ['refine']);
+
+    // And the reverse: a re-check opened over an open refine restarts as a rewatch.
+    const again = await call(`rank_again($1, 'loved', $2, true, $3)`, [
+      target,
+      await op(),
+      event,
+    ]);
+    assert.notEqual(again.session_id, opened.session_id);
+    assert.deepEqual(await kinds(), ['rewatch']);
+    await call(`rank_cancel($1)`, [again.session_id]);
+
+    // A refine carried to the end writes no watch and nothing a watch owns.
+    const r = await refine(target, ids);
+    assert.equal(r.movement.kind, 'refine');
+    assert.equal(await watchCount(target), watchesBefore);
+    assert.deepEqual(await sideEffects(), effects);
+    await valid();
+  });
+
+  it('cancelling mid-refine leaves the ranking and the ledger exactly as they were', async () => {
+    const ids = await library(30);
+    const target = ids[20];
+    const placementsBefore = (
+      await t.sql(`select count(*)::int as n from ranking_placements where user_id = $1`, [user])
+    ).rows[0].n;
+
+    let r = await call(`refine_start($1, $2)`, [target, await op()]);
+    // An answer that says it belongs higher: the search is now heading upward.
+    r = await call(`rank_answer($1, $2, $3)`, [r.session_id, target, await op()]);
+    assert.equal(r.done, false);
+    await call(`rank_cancel($1)`, [r.session_id]);
+
+    assert.deepEqual(await order(), ids, 'nothing moved');
+    const { rows } = await t.sql(
+      `select (select count(*)::int from ranking_placements where user_id = $1) as placements,
+              (select count(*)::int from ranking_sessions where user_id = $1) as sessions`,
+      [user],
+    );
+    assert.deepEqual(rows[0], { placements: placementsBefore, sessions: 0 });
+    await valid();
   });
 });
 

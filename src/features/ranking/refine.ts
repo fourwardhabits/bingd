@@ -1,4 +1,5 @@
 import type { RankingCategory } from '@/features/collection/use-collection';
+import { movementSentence } from '@/features/watch-history/watch-history';
 import { supabase } from '@/lib/supabase';
 
 import type { PlacedMovement } from './session';
@@ -250,4 +251,27 @@ function monthYear(iso: string | null): string | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
   return `${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+/**
+ * The line Watch History prints for a `refine` placement (T5).
+ *
+ * A refine is **ranking evidence, never a viewing**: its ledger row has no
+ * `watch_event_id`, so Watch History lists it with the unattached placements and never
+ * as a watch row. What it says comes from the ledger's own outcome — `#196` printed
+ * `Still #N` for every refine, which is false for one that moved the title. Owned here,
+ * beside the rest of Refine, so the screen that draws it needs one call and nothing else.
+ */
+export function refinePlacementLine(placement: {
+  outcome: string;
+  position: number;
+  fromPosition: number | null;
+}): string {
+  const outcome =
+    placement.outcome === 'moved' || placement.outcome === 'kept' ? placement.outcome : 'unchanged';
+  const sentence = movementSentence(
+    { outcome, fromPosition: placement.fromPosition },
+    placement.position,
+  );
+  return `Refined · ${sentence ?? `#${placement.position}`}`;
 }
