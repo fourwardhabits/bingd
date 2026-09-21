@@ -923,7 +923,12 @@ function Session({
   );
 }
 
-function Comparison({
+/**
+ * Exported for Refine (T5), which asks the same question with the same two cards and the
+ * same Undo / Too tough row. It draws its own header — the target, its position and the
+ * round's progress — so it passes `topBar={false}` rather than stacking a second Close.
+ */
+export function Comparison({
   subject,
   pivotId,
   skipped,
@@ -933,6 +938,7 @@ function Comparison({
   onBack,
   onSkip,
   onClose,
+  topBar = true,
 }: {
   /**
    * `kind` is here for the Details affordance under the card, which says a different
@@ -954,6 +960,8 @@ function Comparison({
   onBack: () => void;
   onSkip: () => void;
   onClose: () => void;
+  /** Whether to draw the Close row. Off only when the host screen has its own. */
+  topBar?: boolean;
 }) {
   /**
    * Which title the reader asked to be reminded about, if any.
@@ -999,7 +1007,7 @@ function Comparison({
     // preference over something they were never shown.
     return (
       <View style={styles.comparison}>
-        <TopBar onClose={onClose} />
+        {topBar ? <TopBar onClose={onClose} /> : null}
         <Centred>
           <Text variant="title2" style={styles.centre}>
             Could not load the other title
@@ -1029,7 +1037,7 @@ function Comparison({
 
   return (
     <View style={styles.comparison}>
-      <TopBar onClose={onClose} />
+      {topBar ? <TopBar onClose={onClose} /> : null}
       <Text variant="headline" style={styles.centre} accessibilityRole="header">
         Which did you like more?
       </Text>

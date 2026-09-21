@@ -304,6 +304,13 @@ function Navigation() {
                 name="activity/[id]"
                 options={{ headerShown: true, title: ROOT_SCREEN_TITLES['activity/[id]'] }}
               />
+              {/* Refine your rankings (T5). No native header: the screen draws its own
+                Close, title and round dots, because the comparison below it is the whole
+                screen and a second bar would push the two posters down. */}
+              <Stack.Screen
+                name="refine"
+                options={{ headerShown: false, title: ROOT_SCREEN_TITLES.refine }}
+              />
               {/* No header and no back: it is the first thing a new account sees, and
                 there is nowhere behind it to return to. Leaving is an explicit choice
                 made on the screen itself. */}
