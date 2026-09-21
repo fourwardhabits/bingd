@@ -23,6 +23,7 @@ import listAdd from './races/list-add.mjs';
 import welcomeEmail from './races/welcome-email.mjs';
 import releaseAwareness from './races/release-awareness.mjs';
 import watchHistory from './races/watch-history.mjs';
+import scaleHardening from './races/scale-hardening.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -66,4 +67,5 @@ listMove();
 listAdd();
 welcomeEmail();
 releaseAwareness();
+scaleHardening();
 stress();
