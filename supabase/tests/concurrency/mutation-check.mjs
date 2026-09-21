@@ -445,6 +445,8 @@ end; $$;`;
 
 await startCluster();
 const results = [];
+/** Invariants that must still hold under a mutant: reported apart, never counted as a catch. */
+const controls = [];
 
 // --- Mutant 1: the pair lock removed. The block must stop waiting, and a row must survive.
 {
@@ -1357,12 +1359,20 @@ end; $$;`);
     [who, show],
   );
 
+  // THE detection. `races/series-watchlist.mjs` SW1 asserts the real function makes the
+  // second completion wait on exactly this advisory key; with the lock deleted it no longer
+  // waits, so SW1 goes red. That is the release gate catching the mutant for real — through
+  // the lock's own observable effect, not through a symptom T1 has since made unreachable.
   results.push([
-    'series lock removed -> the second completion no longer waits',
+    'series lock removed -> the second completion no longer waits on the series key',
     blockedOnSeries === false,
   ]);
-  results.push([
-    // Under 20261003000100 the commit-time event trigger sweeps it; see the note above.
+  // A CONTROL, not a detection, and reported as one. Under 20261003000100 the commit-time
+  // event trigger sweeps the series at the later commit, so the entry is not stranded even
+  // without the lock (see the note above). Counting that as "DETECTED" would claim a catch
+  // this mutant cannot produce; failing the run if it ever reads stranded keeps the note
+  // honest, because then the event-side sweep has gone.
+  controls.push([
     'series lock removed -> the event-side trigger still clears the series at the later commit',
     stranded.length === 0,
   ]);
@@ -1505,4 +1515,10 @@ for (const [name, passed] of results) {
   console.log(`${passed ? 'DETECTED ' : 'MISSED   '} ${name}`);
   if (!passed) ok = false;
 }
+for (const [name, held] of controls) {
+  console.log(`${held ? 'CONTROL  ' : 'BROKEN   '} ${name}`);
+  if (!held) ok = false;
+}
+console.log(`
+${results.filter(([, d]) => d).length} / ${results.length} mutations detected, ${controls.filter(([, h]) => h).length} / ${controls.length} controls held`);
 process.exit(ok ? 0 : 1);
