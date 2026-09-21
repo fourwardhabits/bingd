@@ -58,6 +58,8 @@ export type YearGoals = {
 type Embedded = { kind: CountableWatch['kind']; title: string | null; poster_path: string | null };
 
 type WatchRow = {
+  /** The watch event's own id, which is what this read pages on (T4). */
+  id: string;
   media_item_id: string;
   watched_on: string | null;
   media_items: Embedded | Embedded[] | null;
@@ -88,24 +90,55 @@ export function useWatchGoals(userId: string, year: number) {
         // a *number* on a progress bar. PostgREST caps an unbounded select at 1,000 rows,
         // so a year past that would have shown a goal stuck at a thousand — a wrong
         // figure with nothing to distinguish it from a true one.
+        /**
+         * ---------------------------------------------------------------------------
+         * **THE CLOCK IS `watch_events`, NOT THE CACHE** (T4, §L.2)
+         *
+         * This read was `user_media`, whose `watched_on` is ONE date per title — and
+         * this file's own header has carried the consequence since 2026-08-16: *"a film
+         * watched in 2025 and rewatched in 2026 counts in 2026 and stops counting in
+         * 2025 — the rewatch moved the only date there is… accepted rather than fixed:
+         * the alternative is a watch-history table"*. The watch-history table exists, so
+         * the goal counts what it always meant to count: **distinct titles with at least
+         * one viewing dated in the year**, and 2025 stays true.
+         *
+         * Both native-dated and diary-dated viewings count. The goal contract is that a
+         * genuine date counts, and a Letterboxd diary date is genuine — it is the
+         * authoritative record of a viewing, from the reader's own archive. An undated
+         * viewing counts for nothing, which is rule 2 unchanged.
+         *
+         * **Rule 4 stops being documentary here.** `qualifyingWatches` dedupes on
+         * `mediaItemId`, which was free while `user_media` was keyed `(user, title)` and
+         * is now the thing standing between a goal of 52 and a goal of 52 viewings —
+         * exactly as rule 4 predicted it would have to be. Three rewatches in one year
+         * are one film.
+         *
+         * **Owner-only.** `watch_events` carries `using (user_id = auth.uid())` and no
+         * other policy, so this read answers for the signed-in reader and for nobody
+         * else. `user_id` is not filtered here for that reason: the policy is the filter,
+         * and a column filter as well would read as though another account's goals were
+         * one parameter away.
+         */
         readAllByKey<WatchRow>(
           (cursor, limit) =>
             after(
               supabase
-                .from('user_media')
-                .select('media_item_id, watched_on, media_items!inner(kind, title, poster_path)')
-                .eq('user_id', userId)
+                .from('watch_events')
+                .select('id, media_item_id, watched_on, media_items!inner(kind, title, poster_path)')
                 // Bounds the transfer to one year. The year is *also* checked in
                 // `countWatched`, which is where the rule is tested — this filter is an
                 // optimisation and is not trusted to be the only one.
                 .gte('watched_on', from)
                 .lte('watched_on', to),
-              'media_item_id',
+              // Paged on the EVENT id, not the title: a title can now have several rows
+              // in this result, so paging on `media_item_id` would skip every viewing
+              // after the first at each page boundary.
+              'id',
               cursor,
             )
-              .order('media_item_id', { ascending: true })
+              .order('id', { ascending: true })
               .limit(limit),
-          (row) => [row.media_item_id],
+          (row) => [row.id],
         ),
       ]);
 

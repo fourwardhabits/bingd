@@ -263,6 +263,12 @@ export type AcquisitionSource =
  * component that fired it, and be able to say what it does **not** mean. Both halves
  * are written down per event in `docs/product/analytics.md`.
  */
+/**
+ * Where a watch date came from (T1, `watch_date_basis`). A closed set of five words and
+ * the one new vocabulary this epic puts on the wire (§P).
+ */
+export type WatchBasis = 'today_default' | 'reader' | 'diary' | 'unattributed' | 'none';
+
 export type AnalyticsEvent =
   // --- Activation ---------------------------------------------------------
   /**
@@ -375,6 +381,34 @@ export type AnalyticsEvent =
       name: 'title_logged';
       props: { media_kind: MediaKind; surface: Surface; bucket: Bucket };
     }
+  /**
+   * A viewing was recorded (T3b, epic §P).
+   *
+   * `kind` separates the three acts that write one: the first log of a title, a
+   * rewatch from *Log another watch*, and a past watch added from the Watch History
+   * screen. `basis` is where the date came from, and it is the property this epic
+   * exists to be able to ask about: §C.3.8's defect — a new user backfilling three
+   * hundred old films through Search, every one stamped Today — was undetectable
+   * precisely because nothing recorded whether a date was chosen or defaulted.
+   *
+   * **A recording time, never a consumption one** (§L.2). The event's timestamp says
+   * when somebody used bingd; `watched_on` is not sent and must never be inferred
+   * from it.
+   */
+  | {
+      name: 'watch_logged';
+      props: { kind: 'first' | 'rewatch' | 'past'; basis: WatchBasis; surface: Surface };
+    }
+  /** Which half of *Log another watch* the reader took (§P). */
+  | { name: 'rewatch_decision'; props: { choice: 'keep' | 'recheck' } }
+  /**
+   * The Watch History screen was opened.
+   *
+   * `watch_count` is a BUCKET — "1", "2-5", "6-20", "20+" — and not the number.
+   * A title's exact watch count is a fact about one person's history, and a count plus
+   * a timestamp is how an id-free analytics stream stops being id-free.
+   */
+  | { name: 'watch_history_opened'; props: { watch_count: string } }
   /**
    * A ranking session opened: the server answered the opening call with a comparison
    * to show, or with a placement outright (an empty band needs no comparison).
@@ -1074,6 +1108,11 @@ export const ANALYTICS_EVENTS = [
   'onboarding_completed',
   'onboarding_step_completed',
   'title_logged',
+  // T3b (2026-09-20). Engagement events: their timestamps are recording times and must
+  // never feed a consumption metric (epic §L.2, §P).
+  'watch_logged',
+  'rewatch_decision',
+  'watch_history_opened',
   'ranking_started',
   'ranking_completed',
   'watchlist_added',
@@ -1218,6 +1257,20 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   // so a key that could hold one would put credentials on the wire. The sanitized
   // scheme/host/path goes to the flight recorder and to Sentry instead.
   'problem',
+  /**
+   * The watch-history epic's four keys (2026-09-20, §P).
+   *
+   * `basis` joins as a **closed enum** — `today_default`, `reader`, `diary`,
+   * `unattributed`, `none` — which is the whole reason it is safe to send: it says
+   * how hard somebody asserted a date and says nothing about which date, which title or
+   * which person. `kind` and `choice` are closed sets of three and two words.
+   * `watch_count` is a bucket string, never the count: an exact watch count plus a
+   * timestamp is a fingerprint.
+   */
+  'kind',
+  'basis',
+  'choice',
+  'watch_count',
   /**
    * Which of the two media the reader is on — `movies` or `tv` (2026-09-11, Similar).
    *

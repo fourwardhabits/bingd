@@ -958,7 +958,17 @@ describe('the action group', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('declares a new watch only from the rewatch row', async () => {
+  /**
+   * **The rewatch row records the viewing, and ranks nothing** (T3b, epic §J.3).
+   *
+   * It used to call `rank_again(p_new_watch: true)` on the tap: a forced full re-rank
+   * that recorded no watch and no date. The viewing comes first now, and the re-check is
+   * offered after it is saved — so the assertion is that the row opens the watch and
+   * declares nothing yet. The test directly above still pins `p_new_watch: false` for
+   * the correction row, which is the other half of the distinction and the half that did
+   * not move.
+   */
+  it('records a watch, and ranks nothing, from the rewatch row', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
@@ -966,18 +976,8 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
     await fireEvent.press(view.getByText('Log another watch'));
 
-    // The one row in the app that declares a second viewing, and the only one that asks
-    // for an activity. Exactly one, on completion.
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith(
-        'rank_again',
-        expect.objectContaining({ p_new_watch: true }),
-      ),
-    );
-    expect(mockRpc).not.toHaveBeenCalledWith(
-      'rank_again',
-      expect.objectContaining({ p_new_watch: false }),
-    );
+    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
   });
 
   it('opens the log rather than a comparison for an unranked title', async () => {

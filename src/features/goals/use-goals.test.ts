@@ -84,7 +84,18 @@ jest.mock('@/lib/supabase', () => ({
 
 const USER = 'user-1';
 
+/**
+ * One VIEWING, not one collection row (T4, epic §L.2).
+ *
+ * The goal reads `watch_events` since 20261006000100, so a title can appear here more
+ * than once — which is the whole point: a film watched in 2025 and rewatched in 2026 is
+ * two rows and two true years, where the collection row held one overwritten date. The
+ * event's own `id` is what the read pages on, because paging on the title would skip
+ * every viewing after the first at a page boundary.
+ */
+let eventSeq = 0;
 const watched = (mediaItemId: string, kind: string, watchedOn: string | null) => ({
+  id: `event-${(eventSeq += 1)}`,
   media_item_id: mediaItemId,
   watched_on: watchedOn,
   media_items: { kind },
@@ -92,6 +103,7 @@ const watched = (mediaItemId: string, kind: string, watchedOn: string | null) =>
 
 beforeEach(() => {
   reads.length = 0;
+  eventSeq = 0;
   for (const key of Object.keys(rows)) delete rows[key];
 });
 
@@ -103,8 +115,13 @@ describe('reading a year of goals', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(readOf('watch_goals')?.filters).toEqual({ user_id: USER, year: 2026 });
-    expect(readOf('user_media')?.filters).toEqual({ user_id: USER });
-    expect(readOf('user_media')?.ranges).toEqual([
+    // **No `user_id` filter, and that is deliberate** (T4). `watch_events` carries
+    // `using (user_id = auth.uid())` and no other policy, so the policy IS the filter —
+    // and a column filter beside it would read as though another account's goals were one
+    // parameter away. The year range is still checked here, because that one is an
+    // optimisation on the transfer rather than a rule.
+    expect(readOf('watch_events')?.filters).toEqual({});
+    expect(readOf('watch_events')?.ranges).toEqual([
       { op: 'gte', column: 'watched_on', value: '2026-01-01' },
       { op: 'lte', column: 'watched_on', value: '2026-12-31' },
     ]);
@@ -119,12 +136,12 @@ describe('reading a year of goals', () => {
     // The title and the poster come with it, because the drill-down lists exactly the
     // rows this read counted — a second query for the same titles is how a list and
     // the number above it start to disagree.
-    expect(readOf('user_media')?.columns).toContain('media_items!inner(kind, title, poster_path)');
+    expect(readOf('watch_events')?.columns).toContain('media_items!inner(kind, title, poster_path)');
   });
 
   it('reports a status only for a medium with a goal', async () => {
     rows.watch_goals = [{ category: 'movies', target: 52 }];
-    rows.user_media = [
+    rows.watch_events = [
       watched('a', 'movie', '2026-03-01'),
       watched('b', 'season', '2026-04-01'),
     ];
@@ -158,7 +175,7 @@ describe('reading a year of goals', () => {
       { category: 'movies', target: 10 },
       { category: 'tv_seasons', target: 10 },
     ];
-    rows.user_media = [watched('show', 'series', '2026-05-01')];
+    rows.watch_events = [watched('show', 'series', '2026-05-01')];
 
     const { result } = await renderHookWithProviders(() => useWatchGoals(USER, 2026));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -170,7 +187,7 @@ describe('reading a year of goals', () => {
     rows.watch_goals = [{ category: 'movies', target: 10 }];
     // A row the query filter should never have returned. If the hook trusted the
     // filter, this would land on the 2026 bar.
-    rows.user_media = [watched('old', 'movie', '2019-05-01'), watched('new', 'movie', null)];
+    rows.watch_events = [watched('old', 'movie', '2019-05-01'), watched('new', 'movie', null)];
 
     const { result } = await renderHookWithProviders(() => useWatchGoals(USER, 2026));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

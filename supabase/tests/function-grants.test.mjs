@@ -141,7 +141,12 @@ const ALLOWED = {
   'rank_unrank(uuid,uuid)': ['authenticated'],
   // Added 2026-08-14 with the comparison screen, which needed a way out of a session.
   'rank_cancel(uuid)': ['authenticated'],
-  'rank_reorder(uuid,integer,uuid)': ['authenticated'],
+  // `rank_reorder` is DELIBERATELY ABSENT since 20261004000100, and its absence is the
+  // assertion. It moves a ranking without writing a `ranking_placements` row, so a title
+  // could sit at #7 with nothing in the ledger explaining how it got there -- which is
+  // the one hole that makes a placement history untrustworthy. It has never had a
+  // caller, and a drag-to-reorder UI is an explicit non-goal (epic §Q). Granting it back
+  // means teaching it to write a `manual` placement first (§E.1).
   'rank_rebucket(uuid,taste_bucket,uuid)': ['authenticated'],
   // New in 20260825000200, and re-signed in 20260826000500. The same-band re-rank the
   // client used to perform as an unrank followed by a start. It no longer unranks at
@@ -150,7 +155,14 @@ const ALLOWED = {
   // another viewing, and one feed activity — from Change your rating, which is a
   // correction and writes none. It defaults to false, so the friend-beta build calling
   // the three-argument form gets the conservative answer.
-  'rank_again(uuid,taste_bucket,uuid,boolean)': ['authenticated'],
+  //
+  // 20261005000100 added a fifth parameter, `p_watch_event_id`, and DROPPED the
+  // four-argument form rather than leaving it as an overload -- the same PostgREST
+  // nesting-ambiguity rule the `log_watched` note below records. It defaults to null, so
+  // an installed client's four-argument call resolves here unchanged; a new client
+  // passes the watch event it has just logged, and the placement links to that viewing
+  // so the re-check enriches one feed activity instead of posting a second (§K).
+  'rank_again(uuid,taste_bucket,uuid,boolean,uuid)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
 
   // The collection writes (api.md §1). Their helpers are absent on purpose:
@@ -173,6 +185,32 @@ const ALLOWED = {
   // from a date-less re-log and is also why "I don't remember when" had no route.
   // Own-row only through auth.uid(), like the rest of this group.
   'clear_watch_date(uuid,uuid)': ['authenticated'],
+
+  // ---------------------------------------------------------------------------
+  // The watch-history writers (20261003000100 T1, 20261005000100 T3).
+  //
+  // Every one of them resolves the account from auth.uid() and takes no identity to act
+  // on behalf of, so a client can only write its own history. The two that take a
+  // `watch_event_id` -- edit and delete -- re-read the row under `user_id = auth.uid()`
+  // and refuse anything else as P0002 "no such watch", which is absent rather than
+  // forbidden: whether somebody else has a viewing of a film is not a client's business
+  // to learn from an error code (20260813001900's rule).
+  //
+  // The READS are plain `select` under the owner-only RLS policy on `watch_events` and
+  // `ranking_placements`, so no function appears here for them. That is deliberate:
+  // watch dates are private at every profile visibility (PRD §22), and a definer read
+  // would be a second door to check.
+  //
+  // `next_pivot`, `_rewatch_posts`, `_watch_cache_recompute`, `_seen_implies_a_watch`
+  // and the rest of the epic's helpers are absent because they are revoked. A client
+  // asking the server what comparison it would offer next is not a surface this product
+  // has, and the ones that write are trigger and definer internals.
+  // ---------------------------------------------------------------------------
+  'log_title(uuid,uuid,taste_bucket,date,watch_date_basis)': ['authenticated'],
+  'set_watch_date(uuid,uuid,date,watch_date_basis)': ['authenticated'],
+  'log_rewatch(uuid,uuid,date,watch_date_basis)': ['authenticated'],
+  'edit_watch_event(uuid,uuid,date,watch_date_basis)': ['authenticated'],
+  'delete_watch_event(uuid,uuid)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

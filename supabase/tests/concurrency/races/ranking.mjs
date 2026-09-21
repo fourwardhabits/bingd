@@ -477,11 +477,20 @@ export default function suite() {
       await reranker.actAs(user);
       await reorderer.actAs(user);
 
-      // The answer finalises the provisional session, so it reaches the `rankings`
-      // insert — which is *after* the old row has been dropped. That is the window.
+      /**
+       * The answer finalises the provisional session, so it reaches the `rankings`
+       * insert — which is *after* the old row has been dropped. That is the window.
+       *
+       * **The ANCHOR wins, and since 20261004000100 it has to.** The subject holds #1,
+       * and answering for the subject now resolves at the position it already has —
+       * which is the **no-op finalize** (§E.3.2): `rankings` is left entirely alone, no
+       * delete and no insert, so there is no window and the barrier never fires. The
+       * anchor winning moves the subject to #2, which is a genuine delete-and-insert
+       * and is what this test has always been about.
+       */
       await reranker.begin();
       await reranker.pauseAt('rerank-vs-reorder');
-      const reranking = fire(reranker, `rank_answer($1, $2)`, [again.session_id, subject]);
+      const reranking = fire(reranker, `rank_answer($1, $2)`, [again.session_id, anchor]);
       await reranker.awaitBlocked();
 
       /**
@@ -490,8 +499,22 @@ export default function suite() {
        * different titles. Only the category lock can, which is the whole point of
        * correlating the wait on its key rather than merely observing a wait.
        */
+      /**
+       * **`rank_rebucket`, not `rank_reorder`** (20261004000100). The drag was the
+       * natural second writer and it is no longer callable: `rank_reorder` moves a
+       * ranking without writing a `ranking_placements` row, so it was revoked rather
+       * than left as a hole in a ledger that is supposed to explain every position. It
+       * had no caller, and a drag-to-reorder UI is an explicit non-goal.
+       *
+       * A band change on the anchor serves the same purpose exactly: a different title,
+       * so `_lock_media` cannot be what serialises the two, and its finalise takes the
+       * category lock for the band arithmetic. That is the lock this test is about.
+       */
       await reorderer.begin();
-      const reordering = fire(reorderer, `rank_reorder($1, 1, $2)`, [anchor, await newOp(db)]);
+      const reordering = fire(reorderer, `rank_rebucket($1, 'fine'::taste_bucket, $2)`, [
+        anchor,
+        await newOp(db),
+      ]);
       await reorderer.awaitBlocked({
         on: 'advisory',
         advisoryKey: await db.categoryKey(user, 'movies'),
@@ -507,7 +530,11 @@ export default function suite() {
       const after = await rankingOf(db, user, subject);
       assert.ok(after, 'the subject came out of it with a position');
       assert.equal(after.bucket, 'loved', 'in the band it never left');
-      assert.equal((await rankingOf(db, user, anchor)).position, 1, 'and the drag landed');
+      assert.equal(
+        (await rankingOf(db, user, anchor)).bucket,
+        'fine',
+        'and the band change landed',
+      );
       await assertValid(db, user);
 
       await reranker.end();

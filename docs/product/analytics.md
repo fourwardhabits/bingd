@@ -69,7 +69,10 @@ error rather than a decision somebody makes at 2am before a demo.
 
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
-| `title_logged` | `set_bucket` answered `ok` | the collector | `media_kind`, `surface`, `bucket` |
+| `title_logged` | `log_title` answered `ok` (`set_bucket` before T3b) | the collector | `media_kind`, `surface`, `bucket` |
+| `watch_logged` | a viewing was recorded: the first log of a title, a rewatch, or a past watch added from Watch History (T3b) | the collector | `kind`, `basis`, `surface` |
+| `rewatch_decision` | the reader chose *Keep* or *Re-check placement* after saving a rewatch | the collector | `choice` |
+| `watch_history_opened` | the Watch History screen was opened | the collector | `watch_count` |
 | `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
 | `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
 | `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
@@ -516,6 +519,25 @@ back out. So the flow still ends normally on an unknown outcome — that is a pr
 decision the app is entitled to make on incomplete information — and the event simply does
 not say. `sanitize` drops the undefined, so nothing reaches PostHog.
 
+**`basis`** is the one new vocabulary the watch-history epic puts on the wire, and it is
+a **closed enum** of five words — `today_default`, `reader`, `diary`, `unattributed`,
+`none`. It says *how hard somebody asserted a date*, and it says nothing about which
+date, which title or which person.
+
+It exists because the product could not previously tell an **offered** date from a
+**chosen** one, and that silence hid a real defect for the life of the app: a new reader
+backfilling three hundred old films through Search left Today on every one, and nothing
+stored separated that from three hundred people watching three hundred films today.
+Every in-app date written before 2026-09-20 is therefore `unattributed` — which is the
+honest answer, and the only thing that makes those rows findable at all.
+
+**`watch_count` is a bucket string**, never the number. An exact watch count plus a
+timestamp is a fingerprint, and this stream is id-free by design.
+
+**These three are engagement events.** Their timestamps are recording times and must
+never feed a consumption metric: what somebody watched and when they told bingd are
+different facts, and the epic exists because one column was doing both jobs.
+
 **`title_logged`** is a bucket, not a position. A bucket is a band (PRD §11); the exact
 ordering is `ranking_completed`. It is not the log sheet opening.
 
@@ -952,6 +974,7 @@ a number that looks like growth and is not.
 | `invite_redeemed` | **structurally unique** | the primary key on `invitee_id` means only one call can insert; a replay is `already_applied`, a second token is `already_attributed`, and both emit nothing |
 | `invite_activated` | **structurally unique** | the server reports the transition, not the state: only the transaction whose guarded UPDATE flipped `activated_at` is told `activated: true` |
 | `title_logged` | approximately once | `already_applied` is one intent replayed; only `ok` counts |
+| `watch_logged` | approximately once **per viewing** | `log_rewatch` and `log_title` both carry an operation id, so a replay answers `already_applied` and emits nothing. Two genuine viewings of one title are two events, which is the point |
 | `ranking_completed` | approximately once **per completion** | `failed && changed` is the lost-reply case and emits nothing. A rerank or rewatch of an already-ranked title is a second completion and a second event, and `mode` is what says it was not a second *title* |
 | `recommendation_sent` | approximately once | a refusal inside a 200 is not a send; an unknown outcome holds its id for the retry and emits nothing |
 | `recommendation_opened` | once per row per process | the server answered; a per-process set covers a stale `opened_at` and two quick presses |

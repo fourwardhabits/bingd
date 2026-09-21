@@ -32,6 +32,18 @@ export const queryKeys = {
   // one's job — and `myProfile` above is keyed this way for exactly the reason given
   // in its own comment. One argument is a cheaper guarantee than a lifecycle.
   logState: (userId: string, mediaItemId: string) => ['log-state', userId, mediaItemId] as const,
+  // One title's viewings and placements, for the Watch History screen (§J.2). Keyed by
+  // the account for the reason `logState` records above: a watch date is owner-only at
+  // every profile visibility (PRD §22), so an entry holding one must not be reachable
+  // from a second account signed in on the same device.
+  watchHistory: (userId: string, mediaItemId: string) =>
+    ['watch-history', userId, mediaItemId] as const,
+  // Just the integer the title page's context line draws. Its own key, not a slice of
+  // `watchHistory`, because the line renders on every title page visit and the history
+  // is a list — sharing a key would put a twenty-row diary on the wire to draw four
+  // words, and the `head: true` count sends no rows at all.
+  watchCount: (userId: string, mediaItemId: string) =>
+    ['watch-count', userId, mediaItemId] as const,
   // Deliberately separate from `title`: the comparison card reads three columns, and
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.

@@ -380,6 +380,20 @@ export const rankAgain = (
   bucket: BucketId,
   operationId: string,
   newWatch: boolean,
+  /**
+   * The viewing this re-check is about (20261005000100, §K).
+   *
+   * *Log another watch* now records the watch FIRST — `log_rewatch` — and offers the
+   * re-check second, so by the time this runs the viewing already exists and may already
+   * have posted an activity. Passing its id is what makes the two halves reach **one**
+   * feed event: `_rank_finalize` finds that post and updates its score instead of
+   * writing a second one.
+   *
+   * Null is the correction path, and it is also what an installed client sends, because
+   * it has never heard of a watch event. The server gives that case an **undated** event
+   * at finalize rather than inventing a date for it.
+   */
+  watchEventId: string | null = null,
 ) =>
   call(
     'rank_again',
@@ -388,6 +402,7 @@ export const rankAgain = (
       p_bucket: BUCKET_VALUES[bucket],
       p_operation_id: operationId,
       p_new_watch: newWatch,
+      p_watch_event_id: watchEventId,
     },
     mediaItemId,
   );

@@ -69,7 +69,7 @@ beforeEach(() => {
 describe('editing a goal that arrived after the first render', () => {
   beforeEach(() => {
     mockTables.watch_goals = [{ category: 'movies', target: 52 }];
-    mockTables.user_media = [];
+    mockTables.watch_events = [];
   });
 
   it('opens the sheet on the stored target rather than on a blank field', async () => {
@@ -149,7 +149,7 @@ describe('when the goals change on the server while the sheet is open', () => {
    */
   beforeEach(() => {
     mockTables.watch_goals = [{ category: 'movies', target: 52 }];
-    mockTables.user_media = [];
+    mockTables.watch_events = [];
   });
 
   const openThenRefetchTo = async (target: number) => {
@@ -221,7 +221,7 @@ describe('before the goals have arrived', () => {
 describe('when the goals cannot be read', () => {
   beforeEach(() => {
     mockTables.watch_goals = [{ category: 'movies', target: 52 }];
-    mockTables.user_media = [];
+    mockTables.watch_events = [];
   });
 
   it('says so, and offers something to do about it', async () => {
@@ -259,7 +259,7 @@ describe('when the goals cannot be read', () => {
 describe('with no goal set', () => {
   it('offers to take one', async () => {
     mockTables.watch_goals = [];
-    mockTables.user_media = [];
+    mockTables.watch_events = [];
 
     await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
 
@@ -284,7 +284,7 @@ describe('with no goal set', () => {
 describe('saving with the keyboard up', () => {
   it('creates a goal from one press of Save', async () => {
     mockTables.watch_goals = [];
-    mockTables.user_media = [];
+    mockTables.watch_events = [];
     await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
     await waitFor(() => expect(screen.getByText('Set a goal')).toBeTruthy());
     await fireEvent.press(screen.getByText('Set a goal'));
@@ -302,7 +302,7 @@ describe('saving with the keyboard up', () => {
 
   it('edits a goal from one press of Save', async () => {
     mockTables.watch_goals = [{ category: 'movies', target: 52 }];
-    mockTables.user_media = [];
+    mockTables.watch_events = [];
     await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
     await waitFor(() => expect(screen.getByText('Edit')).toBeTruthy());
     await fireEvent.press(screen.getByText('Edit'));
@@ -328,12 +328,21 @@ describe('saving with the keyboard up', () => {
  * away and asserts that the list and the count agree about all of them.
  */
 describe('opening a goal into the titles behind it', () => {
+  /**
+   * One VIEWING, not one collection row (T4, 20261006000100).
+   *
+   * The goal reads `watch_events` now, so a title can legitimately appear more than
+   * once — which is the whole correction: a film watched in 2025 and rewatched in 2026
+   * is two rows and two true years, where the cached date held only the later one. The
+   * event id is what the read pages on.
+   */
   const watch = (
     id: string,
     title: string,
     kind: 'movie' | 'season' | 'series',
     watchedOn: string | null,
   ) => ({
+    id: `event-${id}-${watchedOn ?? 'undated'}`,
     media_item_id: id,
     watched_on: watchedOn,
     media_items: { kind, title, poster_path: null },
@@ -344,7 +353,7 @@ describe('opening a goal into the titles behind it', () => {
       { category: 'movies', target: 52 },
       { category: 'tv_seasons', target: 10 },
     ];
-    mockTables.user_media = [
+    mockTables.watch_events = [
       watch('m1', 'Sinners', 'movie', '2026-03-04'),
       watch('m2', 'Heat', 'movie', '2026-01-20'),
       // Rule 2: no watch date, so it counts for nothing and must not be listed.
