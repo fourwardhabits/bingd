@@ -1,3 +1,5 @@
+import { StyleSheet } from 'react-native';
+
 import { renderWithProviders } from '@/test-utils/render';
 
 import { ListRow } from './ListRow';
@@ -109,6 +111,38 @@ describe('the cover (founder QA, 2026-09-21)', () => {
   it('draws four or more as a 2×2 mosaic of the first four', async () => {
     const view = await renderWithProviders(<ListCover posterUris={uris(5)} size={64} />);
     expect(hidden(view, 'list-cover-poster')).toHaveLength(4);
+  });
+
+  /**
+   * The device bug (founder QA, 2026-09-21): a six-title list drew two half-width strips
+   * over beige. Tiles sized as `(size - seam) / 2` did not fit inside the cover's hairline
+   * border, so each wrapped onto its own line. The mosaic must be two rows of two cells
+   * that flex to fill, with no width computed from `size` anywhere inside it.
+   */
+  it('fills the whole cover for a six-title list: two rows of two flexing cells', async () => {
+    const view = await renderWithProviders(<ListCover posterUris={uris(6)} size={64} />);
+    const rows = hidden(view, 'list-cover-row');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(StyleSheet.flatten(row.props.style)).toMatchObject({ flex: 1, flexDirection: 'row' });
+      const cells = row.children as unknown as { props: { style: unknown } }[];
+      expect(cells).toHaveLength(2);
+      for (const cell of cells) {
+        const style = StyleSheet.flatten(cell.props.style as never) as Record<string, unknown>;
+        expect(style.flex).toBe(1);
+        expect(style.width).toBeUndefined();
+        expect(style.flexWrap).toBeUndefined();
+      }
+    }
+    expect(hidden(view, 'list-cover-poster')).toHaveLength(4);
+  });
+
+  // One render per test (the RNTL trap this repo documents), so one case per poster count.
+  it.each([1, 2, 3])('draws %i poster(s) as the first poster alone, full cover', async (n) => {
+    const view = await renderWithProviders(<ListCover posterUris={uris(n)} size={64} />);
+    const posters = hidden(view, 'list-cover-poster');
+    expect(posters).toHaveLength(1);
+    expect(JSON.stringify(posters[0]?.props.source)).toContain('https://x/1.jpg');
   });
 
   it('draws a neutral placeholder for a list with nothing in it', async () => {

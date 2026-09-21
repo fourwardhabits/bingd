@@ -66,26 +66,39 @@ export function ListCover({ posterUris, size }: ListCoverProps) {
           transition={0}
         />
       ) : (
-        <Mosaic posterUris={posterUris.slice(0, 4)} size={size} />
+        <Mosaic posterUris={posterUris.slice(0, 4)} />
       )}
     </View>
   );
 }
 
-function Mosaic({ posterUris, size }: { posterUris: string[]; size: number }) {
-  const seam = StyleSheet.hairlineWidth;
-  const tile = (size - seam) / 2;
+/**
+ * Two explicit rows of two cells, each cell `flex: 1`.
+ *
+ * **No arithmetic on the cover's width** (founder device QA, 2026-09-21). The first
+ * version sized each tile as `(size - seam) / 2` inside a wrapping row, but the cover
+ * draws a hairline border, so its inside is `size - 2 × hairline`: two tiles plus the
+ * seam were a hair wider than the space they had, every tile wrapped onto its own line,
+ * and the clipped square showed two half-width strips over beige. Flex cells fill
+ * whatever the inside actually is, on every density.
+ */
+function Mosaic({ posterUris }: { posterUris: string[] }) {
+  const rows = [posterUris.slice(0, 2), posterUris.slice(2, 4)];
   return (
     <View style={styles.grid}>
-      {posterUris.map((uri, index) => (
-        <View key={index} style={[styles.cell, { width: tile, height: tile }]}>
-          <Image
-            testID="list-cover-poster"
-            source={{ uri }}
-            style={styles.art}
-            contentFit="cover"
-            transition={0}
-          />
+      {rows.map((row, r) => (
+        <View key={r} style={styles.gridRow} testID="list-cover-row">
+          {row.map((uri, c) => (
+            <View key={c} style={styles.cell}>
+              <Image
+                testID="list-cover-poster"
+                source={{ uri }}
+                style={styles.art}
+                contentFit="cover"
+                transition={0}
+              />
+            </View>
+          ))}
         </View>
       ))}
     </View>
@@ -101,7 +114,8 @@ const styles = StyleSheet.create({
     borderColor: theme.border.hairline,
   },
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  grid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: StyleSheet.hairlineWidth },
-  cell: { backgroundColor: theme.surface.sunken },
+  grid: { flex: 1, gap: StyleSheet.hairlineWidth },
+  gridRow: { flex: 1, flexDirection: 'row', gap: StyleSheet.hairlineWidth },
+  cell: { flex: 1, backgroundColor: theme.surface.sunken },
   art: { width: '100%', height: '100%' },
 });
