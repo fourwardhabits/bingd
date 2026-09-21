@@ -20,6 +20,16 @@ export type LogAnotherWatchSheetProps = {
   /** The reader chose *Re-check placement*. The caller opens the ranking sheet. */
   onRecheck: (watchEventId: string) => void;
   onSaved: () => void;
+  /**
+   * iOS has finished dismissing this sheet, forwarded straight from `Sheet`.
+   *
+   * The caller needs it because the re-check hands over to *another* modal: the ranking
+   * sheet cannot be presented until this one has finished going away, which is the
+   * unserialised-swap freeze from the presentation side (`Sheet`'s own `onDismissed`
+   * contract). It is why the caller keeps this component mounted with `open = false`
+   * for the length of the slide-out instead of unmounting it on the tap.
+   */
+  onDismissed?: () => void;
 };
 
 /**
@@ -57,6 +67,7 @@ export function LogAnotherWatchSheet({
   onClose,
   onRecheck,
   onSaved,
+  onDismissed,
 }: LogAnotherWatchSheetProps) {
   const [date, setDate] = useState<string | null>(today());
   // Whether the reader has touched the row at all. Untouched means the sheet's own
@@ -106,7 +117,15 @@ export function LogAnotherWatchSheet({
     setSaved({ eventId: result.watchEventId ?? '', count: result.watchCount ?? 2 });
   };
 
-  if (!open) return null;
+  /**
+   * **`visible={open}` rather than an early `return null`.**
+   *
+   * The caller mounts this component for as long as the sheet is on screen *or* sliding
+   * out, because the re-check hands over to the ranking sheet and that presentation may
+   * not be issued until this dismissal has finished. An early return would unmount the
+   * `Modal` on the tap, which is the unserialised swap — the screen renders perfectly
+   * and stops accepting touches.
+   */
 
   /**
    * The result beat. *Did it change your mind?* is the question, and **Keep is not a
@@ -116,7 +135,12 @@ export function LogAnotherWatchSheet({
    */
   if (saved) {
     return (
-      <Sheet visible onClose={close} label={`Saved, your ${ordinal(saved.count)} watch`}>
+      <Sheet
+        visible={open}
+        onClose={close}
+        onDismissed={onDismissed}
+        label={`Saved, your ${ordinal(saved.count)} watch`}
+      >
         <View style={styles.body}>
           <Text variant="headline">{`Saved · your ${ordinal(saved.count)} watch`}</Text>
           <Text variant="body">Did it change your mind?</Text>
@@ -131,8 +155,11 @@ export function LogAnotherWatchSheet({
               label="Re-check placement"
               onPress={() => {
                 track({ name: 'rewatch_decision', props: { choice: 'recheck' } });
+                // No `reset()` here. The caller closes this sheet and presents the
+                // ranking sheet only once iOS reports the dismissal finished, and
+                // resetting now would visibly flip the content back to the date row on
+                // the way out. Reopening resets instead (`open` false → true).
                 onRecheck(saved.eventId);
-                reset();
               }}
             />
           ) : null}
@@ -156,7 +183,7 @@ export function LogAnotherWatchSheet({
   }
 
   return (
-    <Sheet visible onClose={close} label="Log another watch">
+    <Sheet visible={open} onClose={close} onDismissed={onDismissed} label="Log another watch">
       <View style={styles.body}>
         <Text variant="headline">Log another watch</Text>
         <Text variant="body" tone="secondary">{title}</Text>

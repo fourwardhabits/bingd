@@ -270,8 +270,15 @@ export default function TitleScreen() {
    * that recorded no watch and no date (§C.3.2). The sheet below records the viewing
    * first, and hands the ranking sheet the event id only if the reader asks for the
    * re-check, so the two halves reach one feed activity rather than two (§K).
+   *
+   * **Three states rather than a boolean.** `leaving` is the sheet still on screen and
+   * sliding out after *Re-check placement*: the ranking sheet may not be presented until
+   * that dismissal has finished, so the phase keeps the component mounted long enough
+   * for `onDismissed` to arrive. See the mount site.
    */
-  const [rewatching, setRewatching] = useState(false);
+  const [rewatchPhase, setRewatchPhase] = useState<'closed' | 'open' | 'leaving'>('closed');
+  /** The watch event a pending re-check will re-rank, held across that dismissal. */
+  const pendingRecheck = useRef<string | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
@@ -286,12 +293,15 @@ export default function TitleScreen() {
   /** `Add to list…`, opened from the menu above. */
   const [addingToList, setAddingToList] = useState(false);
   /**
-   * Whether the menu was closed on its way to the Add-to-list sheet.
+   * Where the ⋯ menu was closed on its way to, or null for an ordinary close.
    *
    * A ref rather than state, so remembering the destination costs no render — see the
-   * `onDismissed` on the menu's `Sheet` for why the two are serialised on iOS at all.
+   * `onDismissed` on the menu's `Sheet` for why the hand-off is serialised on iOS at
+   * all. **Two destinations now**: `Add to list…` (Lists §P.4) and *Log another watch*
+   * (§J.3), which is why this is a named destination rather than one boolean each. A
+   * second boolean is how two of these come to be set at once.
    */
-  const listSheetPending = useRef(false);
+  const menuHandoff = useRef<'list' | 'rewatch' | null>(null);
   /** The people behind the Following score (§13), opened from the Scores section. */
   const [followingRatingsOpen, setFollowingRatingsOpen] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
@@ -1178,6 +1188,30 @@ export default function TitleScreen() {
    * The copy stays plain and serious. This is the one place in the app the playful
    * voice does not go, and the deletion behaviour behind it is untouched.
    */
+  /**
+   * Opens the ranking sheet on the watch the re-check was asked for.
+   *
+   * Its own function because two paths reach it — straight across on Android, and out of
+   * the rewatch sheet's `onDismissed` on iOS — and a second copy of the subject is how
+   * the two come to disagree about which watch they are re-ranking.
+   */
+  const openRecheck = () => {
+    const watchEventId = pendingRecheck.current;
+    pendingRecheck.current = null;
+    if (!watchEventId || !rankedBucket) return;
+    setRankedTitle(loggable);
+    setRankingSubject({
+      id: title.id,
+      title: title.title,
+      bucket: rankedBucket,
+      posterUri: posterUri(title.poster_path, 'card'),
+      // Only a film or a season is ever ranked; a series has no menu.
+      kind: title.kind === 'season' ? 'season' : 'movie',
+      mode: 'again',
+      watchEventId,
+    });
+  };
+
   const confirmRemoval = () => {
     setManaging(false);
     Alert.alert(
@@ -2103,42 +2137,51 @@ export default function TitleScreen() {
       />
       {/**
        * *Log another watch* (§J.3). Mounted beside `RankingSheet` rather than inside it,
-       * and it closes before the ranking sheet opens — two presented sheets at once is
-       * the iOS dead end this codebase has paid for before, and the re-check hand-off is
-       * a `setState` in the same tick, not a stack.
+       * and it is **fully dismissed before the ranking sheet is presented** — two
+       * presented sheets at once is the iOS dead end this codebase has paid for before,
+       * and so is a presentation issued while a dismissal is still animating.
+       *
+       * Hence `rewatchPhase` rather than a boolean, and `openRecheck` being called from
+       * `onDismissed` on iOS: the component stays mounted and invisible for the length
+       * of the slide-out so that callback can arrive at all. Android has no presentation
+       * to serialise against (`Sheet`'s contract) and goes straight across.
        */}
-      <LogAnotherWatchSheet
-        open={rewatching}
-        title={title.title}
-        mediaItemId={title.id}
-        // The exact ordinal, at any depth. This is the reader's own surface, and §B.2
-        // puts no ceiling on movement copy there — the reveal's "never a placement worse
-        // than #10" rule is about the *static reveal lines*, not about telling somebody
-        // where their own film sits. Null when the title is seen but unranked, which is
-        // the one case with no placement to re-check.
-        position={data.ranked?.position ?? null}
-        onClose={() => setRewatching(false)}
-        onSaved={() => {
-          invalidateAfterCollectionChange(queryClient, profile.id, title.id, {
-            category: data.ranked?.category,
-          });
-        }}
-        onRecheck={(watchEventId) => {
-          setRewatching(false);
-          if (!rankedBucket) return;
-          setRankedTitle(loggable);
-          setRankingSubject({
-            id: title.id,
-            title: title.title,
-            bucket: rankedBucket,
-            posterUri: posterUri(title.poster_path, 'card'),
-            // Only a film or a season is ever ranked; a series has no menu.
-            kind: title.kind === 'season' ? 'season' : 'movie',
-            mode: 'again',
-            watchEventId,
-          });
-        }}
-      />
+      {rewatchPhase !== 'closed' ? (
+        <LogAnotherWatchSheet
+          open={rewatchPhase === 'open'}
+          title={title.title}
+          mediaItemId={title.id}
+          // The exact ordinal, at any depth. This is the reader's own surface, and §B.2
+          // puts no ceiling on movement copy there — the reveal's "never a placement worse
+          // than #10" rule is about the *static reveal lines*, not about telling somebody
+          // where their own film sits. Null when the title is seen but unranked, which is
+          // the one case with no placement to re-check.
+          position={data.ranked?.position ?? null}
+          onClose={() => {
+            pendingRecheck.current = null;
+            setRewatchPhase('closed');
+          }}
+          onSaved={() => {
+            invalidateAfterCollectionChange(queryClient, profile.id, title.id, {
+              category: data.ranked?.category,
+            });
+          }}
+          onRecheck={(watchEventId) => {
+            pendingRecheck.current = watchEventId;
+            if (Platform.OS === 'ios') {
+              setRewatchPhase('leaving');
+            } else {
+              setRewatchPhase('closed');
+              openRecheck();
+            }
+          }}
+          onDismissed={() => {
+            if (rewatchPhase !== 'leaving') return;
+            setRewatchPhase('closed');
+            openRecheck();
+          }}
+        />
+      ) : null}
       <RankingSheet
         subject={rankingSubject}
         onClose={() => setRankingSubject(null)}
@@ -2209,16 +2252,18 @@ export default function TitleScreen() {
            * from the same presenter, React believes it succeeded, and what is left is a
            * transparent window that swallows every touch — the reproduced 2026-09-10
            * freeze (`Sheet.onDismissed`). This menu is on the audit's own list of
-           * unserialised swaps, and the row added above is a new one, so it waits.
+           * unserialised swaps, and both rows that leave it for another sheet are new —
+           * `Add to list…` (Lists §P.4) and *Log another watch* (§J.3) — so both wait.
            *
            * **Do not "simplify" this back into a pair of `setState` calls.** That is
            * exactly the shape of the bug, and the screen renders perfectly while it has
            * stopped accepting touches.
            */
           onDismissed={() => {
-            if (!listSheetPending.current) return;
-            listSheetPending.current = false;
-            setAddingToList(true);
+            const to = menuHandoff.current;
+            menuHandoff.current = null;
+            if (to === 'list') setAddingToList(true);
+            if (to === 'rewatch') setRewatchPhase('open');
           }}
         >
           <View style={styles.menu}>
@@ -2245,7 +2290,7 @@ export default function TitleScreen() {
                 // dismissing — the serialised handover `Sheet.onDismissed` documents.
                 // Android has no presentation to wait for and goes straight across.
                 if (Platform.OS === 'ios') {
-                  listSheetPending.current = true;
+                  menuHandoff.current = 'list';
                   setManaging(false);
                 } else {
                   setManaging(false);
@@ -2448,9 +2493,17 @@ export default function TitleScreen() {
                   onPress={
                     rankedBucket
                       ? () => {
-                          setManaging(false);
                           setActionError(null);
-                          setRewatching(true);
+                          // Serialised the same way `Add to list…` is: this row leaves
+                          // the menu for another modal, and on iOS the presentation
+                          // waits for this one's dismissal to finish.
+                          if (Platform.OS === 'ios') {
+                            menuHandoff.current = 'rewatch';
+                            setManaging(false);
+                          } else {
+                            setManaging(false);
+                            setRewatchPhase('open');
+                          }
                         }
                       : undefined
                   }
