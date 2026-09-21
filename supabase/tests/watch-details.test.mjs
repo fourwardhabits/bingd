@@ -274,13 +274,35 @@ describe('a historical feed post keeps its own viewing’s score', () => {
       ).rows[0].score,
     );
 
-  it('keeps watch 1 at its score and watch 2 at its own after a re-rank', async () => {
+  /** The score written into a watch's own ranking placement — what Watch History reads. */
+  const placementScore = async (item, kind, watchId = null) =>
+    Number(
+      (
+        await t.sql(
+          `select score from ranking_placements
+            where user_id = $1 and media_item_id = $2 and kind = $3::placement_kind
+              and ($4::uuid is null or watch_event_id = $4)
+            order by created_at limit 1`,
+          [user, item, kind, watchId],
+        )
+      ).rows[0].score,
+    );
+
+  const watchCount = async (item) =>
+    (
+      await t.sql(
+        `select count(*)::int as n from watch_events where user_id = $1 and media_item_id = $2`,
+        [user, item],
+      )
+    ).rows[0].n;
+
+  /** Watch 1 ranked `fine`, then a rewatch re-ranked `loved`: two opinions, two posts. */
+  const twoWatches = async (title) => {
     await anchors(3, 'loved');
     await anchors(3, 'fine');
-    const film = await movie('Heat');
+    const film = await movie(title);
     await t.rankToCompletion(film, 'fine', async (pivot) => pivot);
     const firstScore = await liveScore(film);
-
     const logged = await call(`log_rewatch($1, $2, current_date, 'today_default')`, [await op(), film]);
     await finish(
       await one(t.db, `select rank_again($1, 'loved', $2, true, $3) as r`, [
@@ -292,50 +314,55 @@ describe('a historical feed post keeps its own viewing’s score', () => {
     );
     const secondScore = await liveScore(film);
     assert.notEqual(secondScore, firstScore, 'the fixture did not move the score');
+    return { film, firstScore, secondScore, watch2: logged.watch_event_id };
+  };
+
+  it('keeps watch 1 at its score after watch 2 is re-ranked, and watch 2 at its own', async () => {
+    const { film, firstScore, secondScore } = await twoWatches('Heat');
 
     const [firstPost, secondPost] = await posts(film);
     const rows = await scores([firstPost.id, secondPost.id]);
     const byId = new Map(rows.map((r) => [r.event_id, r]));
 
     assert.equal(Number(byId.get(firstPost.id).score), firstScore, 'watch 1 took the new score');
-    // The latest viewing is not frozen: it keeps the live score the client already drew.
-    assert.equal(byId.get(secondPost.id).score, null, 'the latest viewing was frozen');
-    assert.equal(byId.get(secondPost.id).bucket, null);
-    assert.equal(secondScore > 0, true);
+    assert.equal(Number(byId.get(secondPost.id).score), secondScore, 'watch 2 lost its own score');
     assert.equal(byId.get(secondPost.id).watch_number, 2, 'the rewatch is not the 2nd watch');
     // No position or movement leaves the function.
     assert.deepEqual(Object.keys(rows[0]).sort(), ['bucket', 'event_id', 'score', 'watch_number']);
   });
 
-  it('lets a correction amend the latest viewing, never the one before', async () => {
-    await anchors(3, 'loved');
-    await anchors(3, 'fine');
-    const film = await movie('Corrected after the rewatch');
-    await t.rankToCompletion(film, 'fine', async (pivot) => pivot);
-    const firstScore = await liveScore(film);
+  it('lets a later pure re-rank change the current score and no watch\'s score', async () => {
+    const { film, firstScore, secondScore } = await twoWatches('Corrected after the rewatch');
+    const before = await watchCount(film);
 
-    const logged = await call(`log_rewatch($1, $2, current_date, 'today_default')`, [await op(), film]);
-    await finish(
-      await one(t.db, `select rank_again($1, 'fine', $2, true, $3) as r`, [
-        film,
-        await op(),
-        logged.watch_event_id,
-      ]),
-      film,
-    );
     // Update your rating — no new viewing — into another band.
     await finish(
-      await one(t.db, `select rank_rebucket($1, 'loved', $2) as r`, [film, await op()]),
+      await one(t.db, `select rank_rebucket($1, 'not_for_me', $2) as r`, [film, await op()]),
       film,
     );
-    const corrected = await liveScore(film);
+    const current = await liveScore(film);
+    assert.notEqual(current, secondScore, 'the correction did not move the current score');
 
-    const [firstPost, secondPost] = await posts(film);
+    // A pure re-rank creates no watch.
+    assert.equal(await watchCount(film), before, 'a correction logged a viewing');
+
+    const [firstPost, secondPost, ...more] = await posts(film);
+    assert.equal(more.length, 0, 'a correction posted');
     const byId = new Map((await scores([firstPost.id, secondPost.id])).map((r) => [r.event_id, r]));
     assert.equal(Number(byId.get(firstPost.id).score), firstScore, 'the correction reached watch 1');
-    // Watch 2 is the latest viewing, so it reads live — which is the corrected score.
-    assert.equal(byId.get(secondPost.id).score, null);
-    assert.ok(corrected > 0);
+    assert.equal(Number(byId.get(secondPost.id).score), secondScore, 'the correction reached watch 2');
+  });
+
+  it('agrees with the ledger row Watch History reads for each watch', async () => {
+    const { film, watch2 } = await twoWatches('One number per watch');
+    const [firstPost, secondPost] = await posts(film);
+    const byId = new Map((await scores([firstPost.id, secondPost.id])).map((r) => [r.event_id, r]));
+
+    assert.equal(Number(byId.get(firstPost.id).score), await placementScore(film, 'first'));
+    assert.equal(
+      Number(byId.get(secondPost.id).score),
+      await placementScore(film, 'rewatch', watch2),
+    );
   });
 
   it('returns nothing for a single-viewing title — its live score is its score', async () => {

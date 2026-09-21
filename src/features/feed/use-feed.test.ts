@@ -296,7 +296,12 @@ describe('the embedded profile', () => {
  * `supabase/tests/feed-score-is-current.test.mjs` proves the RPC's own arithmetic
  * against real rows.
  */
-describe('the score is the one its owner holds now', () => {
+/**
+ * Superseded 2026-09-21 (founder delta QA): a ranking card keeps the score it was posted
+ * with — the opinion at that watch — and the live read only decides whether a badge is
+ * drawn at all. The current score belongs to the title page, Collection and Search.
+ */
+describe('a ranking card keeps the score it was posted with', () => {
   /** `public_scores`' row for the fixture's (actor, title) pair. */
   const live = (over: Record<string, unknown> = {}) => ({
     user_id: 'user-1',
@@ -308,37 +313,31 @@ describe('the score is the one its owner holds now', () => {
     ...over,
   });
 
-  it('draws the live score over the payload snapshot after a rerank', async () => {
-    // The report, exactly. The event is the one written when the film was first placed
-    // at 8.7; the reader has since corrected the rating to 9.4 and no second event
-    // exists, because a correction is not a new ranking.
+  it('keeps the posted score after a later pure rerank', async () => {
+    // Posted at 8.7; the reader has since corrected the rating to 9.4. A correction is
+    // not a watch, so the card keeps the opinion it was posted with.
     mockFeedRows = [event()];
     mockScoreRows = [live({ score: 9.4, position: 2 })];
 
     const item = await only();
-    expect(item.score).toBe(9.4);
-    expect(item.position).toBe(2);
+    expect(item.score).toBe(8.7);
+    expect(item.bucket).toBe('loved');
   });
 
-  it('draws the live band, so a correction into another one re-tints the badge', async () => {
-    // A rebucket moves `rankings.bucket` and posts nothing either. Taking the live
-    // number beside the snapshotted band would print 5.2 in the *I liked it* tint.
+  it('keeps the posted band too, so a later rebucket does not re-tint an old card', async () => {
     mockFeedRows = [event()];
     mockScoreRows = [live({ bucket: 'fine', score: 5.2, position: 40 })];
 
     const item = await only();
-    expect(item.score).toBe(5.2);
-    expect(item.bucket).toBe('fine');
+    expect(item.score).toBe(8.7);
+    expect(item.bucket).toBe('loved');
   });
 
-  it('moves an untouched card when a later ranking re-scores its band', async () => {
-    // Nothing happened to this film at all. Something else was ranked into its band,
-    // the band grew, and every title in it took a new number — which is why a snapshot
-    // is stale far more often than the report's own reproduction suggests.
+  it('does not drift when a later ranking re-scores its band', async () => {
     mockFeedRows = [event()];
     mockScoreRows = [live({ score: 8.4 })];
 
-    expect((await only()).score).toBe(8.4);
+    expect((await only()).score).toBe(8.7);
   });
 
   it('asks once for the whole page, not once per card', async () => {
@@ -366,10 +365,11 @@ describe('the score is the one its owner holds now', () => {
       event(),
       event({ id: 'event-2', actor_id: 'friend', profiles: { ...profile, username: 'abi' } }),
     ];
-    mockScoreRows = [live({ score: 9.9 }), live({ user_id: 'friend', score: 2.1 })];
+    // Only the first pair is still ranked, so only its card keeps a badge.
+    mockScoreRows = [live({ score: 9.9 })];
 
     const items = await load();
-    expect(items.map((item) => item.score)).toEqual([9.9, 2.1]);
+    expect(items.map((item) => item.score)).toEqual([8.7, null]);
   });
 
   it('drops the badge when the actor no longer has the title ranked', async () => {
@@ -396,6 +396,15 @@ describe('the score is the one its owner holds now', () => {
     const item = await only();
     expect(item.score).toBe(8.7);
     expect(item.bucket).toBe('loved');
+  });
+
+  it('borrows the live score only for a post written before the snapshot existed', async () => {
+    mockFeedRows = [event({ payload: { position: 3, category: 'movies' } })];
+    mockScoreRows = [live({ score: 7.7, bucket: 'fine' })];
+
+    const item = await only();
+    expect(item.score).toBe(7.7);
+    expect(item.bucket).toBe('fine');
   });
 
   it('is null on an event written before the snapshot existed and never ranked since', async () => {
@@ -1384,47 +1393,58 @@ describe('follow stories', () => {
 });
 
 /**
- * **A post keeps its own viewing's score** (founder QA, 2026-09-21). Watch 1 at 8.0, watch 2
- * re-ranked to 8.5: the first card stays 8.0, the second reads the live 8.5 and says
- * "2nd watch". `supabase/tests/watch-details.test.mjs` proves the RPC against real rows.
+ * **Each post keeps its own watch's score** (founder delta QA, 2026-09-21): Watch 1 at 9.0,
+ * Watch 2 re-ranked to 8.3 — and a later pure rerank to 7.1 moves neither card, only the
+ * current score. `supabase/tests/watch-details.test.mjs` proves the RPC on real rows.
  */
 describe('a rewatch keeps each post at its own viewing', () => {
-  const live = {
+  const posted = (id: string, score: number, bucket: string, watch?: string) =>
+    event({
+      id,
+      payload: {
+        position: 1,
+        category: 'movies',
+        bucket,
+        score,
+        ...(watch ? { again: true, watch_event_id: watch } : {}),
+      },
+    });
+  // The current opinion, after a later Update your rating.
+  const current = {
     user_id: 'user-1',
     media_item_id: 'film-1',
     category: 'movies',
-    bucket: 'loved',
-    position: 1,
-    score: 8.5,
+    bucket: 'fine',
+    position: 4,
+    score: 7.1,
   };
 
-  it('freezes the superseded viewing and numbers the rewatch', async () => {
-    mockFeedRows = [event({ id: 'post-2' }), event({ id: 'post-1' })];
-    mockScoreRows = [live];
+  it('keeps Watch 1 at 9.0 and Watch 2 at 8.3 after a later rerank, and numbers the rewatch', async () => {
+    mockFeedRows = [posted('post-2', 8.3, 'loved', 'w2'), posted('post-1', 9.0, 'loved')];
+    mockScoreRows = [current];
     mockWatchScoreRows = [
-      { event_id: 'post-1', score: '8.0', bucket: 'fine', watch_number: null },
-      { event_id: 'post-2', score: null, bucket: null, watch_number: 2 },
+      { event_id: 'post-1', score: '9.0', bucket: 'loved', watch_number: null },
+      { event_id: 'post-2', score: '8.3', bucket: 'loved', watch_number: 2 },
     ];
 
     const items = await load();
     const byId = new Map(items.map((item) => [item.id, item]));
-    expect(byId.get('post-1')).toMatchObject({ score: 8, bucket: 'fine', watchNumber: null });
-    expect(byId.get('post-1')?.position).toBeNull();
-    expect(byId.get('post-2')).toMatchObject({ score: 8.5, bucket: 'loved', watchNumber: 2 });
+    expect(byId.get('post-1')).toMatchObject({ score: 9, bucket: 'loved', watchNumber: null });
+    expect(byId.get('post-2')).toMatchObject({ score: 8.3, bucket: 'loved', watchNumber: 2 });
     expect(rpcCalls.filter((call) => call.name === 'feed_watch_scores')).toHaveLength(1);
   });
 
-  it('keeps the live score, and no watch line, when the read fails', async () => {
-    mockFeedRows = [event()];
-    mockScoreRows = [live];
+  it('keeps the posted score, and no watch line, when the watch read fails', async () => {
+    mockFeedRows = [posted('post-2', 8.3, 'loved', 'w2')];
+    mockScoreRows = [current];
     mockWatchScoreRows = null;
 
-    expect(await only()).toMatchObject({ score: 8.5, watchNumber: null });
+    expect(await only()).toMatchObject({ score: 8.3, watchNumber: null });
   });
 
   it('does not duplicate posts', async () => {
-    mockFeedRows = [event({ id: 'post-2' }), event({ id: 'post-1' })];
-    mockWatchScoreRows = [{ event_id: 'post-2', score: null, bucket: null, watch_number: 2 }];
+    mockFeedRows = [posted('post-2', 8.3, 'loved', 'w2'), posted('post-1', 9.0, 'loved')];
+    mockWatchScoreRows = [{ event_id: 'post-2', score: '8.3', bucket: 'loved', watch_number: 2 }];
     expect(await load()).toHaveLength(2);
   });
 });

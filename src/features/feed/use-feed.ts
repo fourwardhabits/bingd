@@ -968,11 +968,29 @@ async function attachScores(items: FeedItem[]) {
   for (const item of items) {
     if (!item.mediaItemId) continue;
     const live = byPair.get(`${item.actorId}:${item.mediaItemId}`);
-    // All three together, from one row or from none. Taking the live score beside a
-    // snapshotted bucket would tint a corrected badge with the band it left.
-    item.score = live ? Number(live.score) : null;
-    item.bucket = live?.bucket ?? null;
-    item.position = live?.position ?? null;
+    // No longer ranked: the post still says "ranked", but no number stands behind it.
+    if (!live) {
+      item.score = null;
+      item.bucket = null;
+      item.position = null;
+      continue;
+    }
+    /**
+     * **Ranked: the post keeps the opinion it was posted with** (founder delta QA,
+     * 2026-09-21). `payload.score` is the score of the watch this post is about, written
+     * by the same finalize as its placement and never rewritten by a correction, so a
+     * later Update your rating — or a band that grew — cannot move an old card. This
+     * reverses the 20261002000100 "current score" rule for ranking cards; the current
+     * score lives on the title page, Collection and Search.
+     *
+     * Only a post written before the snapshot existed (no `payload.score`) borrows the
+     * live score, score and band together.
+     */
+    if (item.score === null || item.score === undefined) {
+      item.score = Number(live.score);
+      item.bucket = live.bucket;
+      item.position = live.position;
+    }
   }
 }
 
@@ -988,10 +1006,9 @@ type WatchScoreRow = {
  * **A post keeps its own viewing's score** (founder QA, 2026-09-21).
  *
  * Watch Heat (8.0), watch it again and re-rank it (8.5): the first post stays 8.0 and
- * the second reads 8.5. `public_scores` alone made both read 8.5. The server answers only
- * for titles with two or more viewings; a superseded viewing comes back with its frozen
- * score and band, the latest viewing with nulls (it keeps the live score above), and
- * both with the watch number the card prints.
+ * the second reads 8.5, and neither moves when the reader later updates their rating. The
+ * server answers only for titles with two or more viewings, with each post's own frozen
+ * score and band (20261015000100) and the watch number the card prints.
  *
  * Read in the same `Promise.all` as the live scores, so it costs no extra wait. A failed
  * read — or a backend without the function — changes nothing: the live score stands.
