@@ -443,7 +443,6 @@ function Body({
     if (savingDepth.current === 0) setSaving(false);
   };
   const [problem, setProblem] = useState<string | null>(null);
-  const [confirmRebucket, setConfirmRebucket] = useState<BucketId | null>(null);
 
   const people = useTaggablePeople(profile.id);
   const companions = useCompanions(profile.id, title.id);
@@ -656,33 +655,49 @@ function Body({
    * 2026-08-15, reversing PRD §11). Three cases have to stay distinct:
    *
    *   - not ranked yet: save, then hand off to the ranking sheet;
-   *   - ranked, same bucket: **ask, then re-rank inside that same bucket.** This used
-   *     to return without doing anything, on the reading that re-selecting what is
-   *     already chosen is not a change. The founder found what that reading costs on
-   *     the device: a Loved title, Change your rating, Loved — and the app does
-   *     nothing at all, with no message saying why. The bucket is indeed not the
-   *     change being asked for. The *position* is, and re-opening a rating already
-   *     given is the only way anybody has to say so. No `set_bucket` call is made,
-   *     which is what the old 55000 note was really about;
-   *   - ranked, different bucket: ask first, then move the band.
+   *   - ranked, same bucket: **re-rank inside that same bucket.** This used to return
+   *     without doing anything, on the reading that re-selecting what is already chosen
+   *     is not a change. The founder found what that reading costs on the device: a
+   *     Loved title, Change your rating, Loved — and the app does nothing at all, with
+   *     no message saying why. The bucket is indeed not the change being asked for. The
+   *     *position* is, and re-opening a rating already given is the only way anybody has
+   *     to say so. No `set_bucket` call is made, which is what the old 55000 note was
+   *     really about;
+   *   - ranked, different bucket: move the band, and re-run the comparisons in it.
    *
    * **Both ranked branches are reached from one row.** Since 2026-09-08 the Ranked menu
    * offers *Update your rating*, which lands here, and *Log another watch*, which does
    * not — the second and third cases above are the two halves of that one correction, and
    * the chooser is where the reader says which they meant.
    *
-   * Both confirm, because both re-run the comparisons and that is worth asking about.
-   * **Neither discards anything to begin**, and this comment said the opposite until
-   * 2026-09-08: `20260826000500` made the server run a session *over* the position the
-   * title holds, so the score, band and place survive until a new placement completes.
-   * What differs between the two is the call behind the confirmation and the sentence on
-   * it.
+   * ---------------------------------------------------------------------------
+   * **NO CONFIRMATION, AND IT MUST NOT COME BACK** (founder QA, 2026-09-21)
+   *
+   * Both ranked branches used to stop on a card — "Rank <title> again? You will compare it
+   * again. Nothing changes until you finish. [Re-rank] [Cancel]" — before handing off.
+   * The approved contract is that *Update your rating* goes **straight into the
+   * comparisons**: the band tap is the decision, and a second question about the same
+   * decision is a step the reader has already answered.
+   *
+   * The card was also protecting nothing. `20260826000500` runs the session *over* the
+   * position the title holds, so the score, band and place survive until a new placement
+   * completes: cancelling the comparisons — Close, back, a dropped connection — leaves the
+   * ranking exactly as it was. That is the only thing "Nothing changes until you finish"
+   * ever promised, and the comparison sheet keeps that promise by itself.
+   *
+   * No watch is recorded on either path: `rank_again(p_new_watch: false)` and
+   * `rank_rebucket` are corrections of the current watch. The rewatch is *Log another
+   * watch*, a different row with a different sheet (§J.3).
    */
   const choose = async (chosen: BucketId) => {
     if (saving) return;
 
     if (state.ranked) {
-      setConfirmRebucket(chosen);
+      setBucketEdit(chosen);
+      // One server call, made by the ranking sheet when it opens: `rank_rebucket` for a
+      // band change, `rank_again` with `p_new_watch: false` for the same band. Nothing is
+      // written here — writing the bucket first would only earn a 55000.
+      onRank?.(chosen, chosen === state.bucket ? 'rerank' : 'rebucket');
       return;
     }
 
@@ -826,28 +841,6 @@ function Body({
     endSaving();
     refresh();
     onRank?.(chosen, 'start');
-  };
-
-  /**
-   * Confirmed re-rank, in either direction.
-   *
-   * Nothing is written here. Each mode is one server call the ranking sheet makes when
-   * it opens — `rank_rebucket` for a band change, `rank_again` with `p_new_watch: false`
-   * for a re-rank inside the same band — and the sheet is what drives a session. Writing
-   * the bucket first would only earn a 55000.
-   *
-   * The same-band call was `rank_unrank` then `rank_start` when this comment was written,
-   * and that pair is exactly what `20260825000200` replaced with one atomic call and
-   * `20260826000500` made cost nothing until it succeeds. Neither mode gives up the
-   * position to begin any more.
-   */
-  const rebucket = () => {
-    const next = confirmRebucket;
-    if (!next || saving) return;
-
-    setConfirmRebucket(null);
-    setBucketEdit(next);
-    onRank?.(next, next === state.bucket ? 'rerank' : 'rebucket');
   };
 
   /**
@@ -1448,42 +1441,10 @@ function Body({
           </View>
         )}
 
-        {confirmRebucket ? (
-          <View style={styles.confirm}>
-            {/* Two sentences for two different acts. “Changing this” is untrue of a
-                re-rank in the same bucket — nothing about the rating changes — and a
-                confirmation that misdescribes what it is confirming is worse than none.
-                The second line is the same either way, because the consequence is.
-
-                **And the second line said the position was discarded, which stopped
-                being true on 2026-08-26** (`20260826000500`, corrected here 2026-09-08).
-                The server runs the session *over* the placement the title holds, so
-                cancelling, closing the sheet or losing the connection leaves the score,
-                the band and the place exactly as they were. Warning a reader they are
-                about to lose something they cannot lose is the founder's disappearing
-                score in another form — the fear survived the fix, in copy. What is
-                genuinely being asked for is the comparisons, so that is what it says. */}
-            <Text variant="callout">
-              {confirmRebucket === state.bucket
-                ? `Rank ${title.title} again?`
-                : `Changing this will re-rank ${title.title}.`}
-            </Text>
-            <Text variant="footnote" tone="secondary">
-              You will compare it again. Nothing changes until you finish.
-            </Text>
-            <View style={styles.confirmActions}>
-              <Button label="Re-rank" onPress={rebucket} />
-              <Button
-                label="Cancel"
-                kind="secondary"
-                onPress={() => {
-                  setConfirmRebucket(null);
-                  setBucketEdit(null);
-                }}
-              />
-            </View>
-          </View>
-        ) : null}
+        {/* There was a "Rank <title> again? / [Re-rank] [Cancel]" card here. It is gone on
+            the founder's contract (2026-09-21): a band tap on a ranked title goes straight
+            into the comparisons, and cancelling *those* is what leaves the ranking alone.
+            See `choose`. */}
 
         {/**
          * **Nothing is drawn while a save is succeeding** (founder, 2026-08-29).
@@ -1818,14 +1779,6 @@ const styles = StyleSheet.create({
   },
   rankedText: { flex: 1, gap: 2 },
   done: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
-  confirm: {
-    marginHorizontal: theme.layout.gutter,
-    padding: theme.space[3],
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.surface.sunken,
-    gap: theme.space[2],
-  },
-  confirmActions: { gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
   unavailable: {
     paddingHorizontal: theme.layout.gutter,
