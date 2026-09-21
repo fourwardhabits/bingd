@@ -17,21 +17,42 @@ import { theme } from '@/ui/tokens';
 /**
  * How long the resend control stays inert after a code has gone out.
  *
- * The founder's number. Long enough that a double-tap and an impatient second tap both
- * land inside it; short enough that somebody whose code genuinely did not arrive is not
- * left staring at a dead screen. It is a courtesy bound, not the security one — GoTrue's
- * own `over_email_send_rate_limit` is the real ceiling, and this exists so a reader meets
- * a countdown they can read instead of an error they cannot act on.
+ * ---------------------------------------------------------------------------
+ * IT MUST NOT BE SHORTER THAN THE SERVER'S `max_frequency`, AND IT WAS
+ * ---------------------------------------------------------------------------
+ *
+ * This existed so a reader would meet a countdown they can read instead of an error they
+ * cannot act on. At 30 seconds against production's `auth.email.max_frequency` of
+ * **60 seconds** it did the opposite: it went live at 0:30 and then handed every tap
+ * before 1:00 straight to `over_email_send_rate_limit`. The control was not merely
+ * failing to prevent the error, it was **inviting** it, in a thirty-second window it
+ * opened itself, with a label that promised the send would work.
+ *
+ * That is the 2026-09-21 01:23:57Z production incident: one successful send, one tap
+ * about 55 seconds later, one 429 reading "you can only request this after 5 seconds",
+ * and a new user told their signup had failed while the code sat in their inbox.
+ *
+ * So the number is the server's number. It is deliberately not a second less, and the
+ * refusal handler below re-arms from GoTrue's own remaining seconds, so the two clocks
+ * cannot drift apart again if `max_frequency` is ever changed in the dashboard.
+ *
+ * The server cooldown is an abuse control and is not to be lowered to make this button
+ * feel faster.
  */
-const RESEND_COOLDOWN_MS = 30_000;
+const RESEND_COOLDOWN_MS = 60_000;
 
 /** The iOS accessory bar's id. Native ids are strings and this is the only one here. */
 const KEYBOARD_ACCESSORY = 'verify-code-accessory';
 
-/** `0:29`, `0:05`. Seconds alone would read as a bare number beside a word. */
+/**
+ * `1:00`, `0:29`, `0:05`. Seconds alone would read as a bare number beside a word.
+ *
+ * The minute is computed rather than hardcoded as `0:`, which it was while the cooldown
+ * could not reach sixty seconds. A full minute rendered `0:60` on that version.
+ */
 const countdown = (ms: number) => {
-  const seconds = Math.max(0, Math.ceil(ms / 1000));
-  return `0:${String(seconds).padStart(2, '0')}`;
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
 /**
@@ -75,10 +96,18 @@ const countdown = (ms: number) => {
  */
 export default function VerifyScreen() {
   const router = useRouter();
-  const { email } = useLocalSearchParams<{ email?: string }>();
+  const { email, cooldown } = useLocalSearchParams<{ email?: string; cooldown?: string }>();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [resent, setResent] = useState(false);
+  /**
+   * What to say under the field, when there is something true to say.
+   *
+   * Two outcomes a single boolean used to flatten into one: a code that was genuinely
+   * just sent, and a refusal that means the *previous* code is still on its way. Saying
+   * "new code sent" when nothing was sent is how somebody stops trusting the screen and
+   * starts tapping.
+   */
+  const [notice, setNotice] = useState<'sent' | 'still-valid' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<TextInput>(null);
 
@@ -91,7 +120,15 @@ export default function VerifyScreen() {
    * screen appears invites the tap that earns `over_email_send_rate_limit`, which is a
    * dead end the reader cannot act on; a countdown is the same refusal said usefully.
    */
-  const [resendAt, setResendAt] = useState(() => Date.now() + RESEND_COOLDOWN_MS);
+  const [resendAt, setResendAt] = useState(() => {
+    // Arriving with a `cooldown` means the previous screen was refused rather than sent:
+    // a code for this address is already out and GoTrue said how much of its minute is
+    // left. Honour that instead of restarting a full one, so the button comes back when
+    // the server will actually accept it.
+    const remainder = Number(cooldown);
+    if (Number.isFinite(remainder) && remainder > 0) return Date.now() + (remainder + 1) * 1000;
+    return Date.now() + RESEND_COOLDOWN_MS;
+  });
   const [now, setNow] = useState(() => Date.now());
   /**
    * The concurrency guard, and a ref rather than state on purpose: two taps in one frame
@@ -161,17 +198,40 @@ export default function VerifyScreen() {
     // it — leaving it up would have the screen reporting a failure and a fresh send at
     // once.
     setError(null);
-    setResent(false);
+    setNotice(null);
     const result = await sendEmailCode(address);
     setBusy(false);
     sending.current = false;
     if (!result.ok) {
-      // Whatever GoTrue said, as `sendEmailCode` maps it — a rate limit or a closed
-      // signup, never anything about whether this address has an account.
+      /**
+       * **A cooldown refusal is not a failure, and must never be dressed as one.**
+       *
+       * `retryAfterSeconds` is only present when GoTrue refused because a code for this
+       * address went out successfully less than `max_frequency` ago. The person is
+       * holding a working code. Reporting "that did not work" to somebody whose code is
+       * in their inbox is what turned the 2026-09-21 incident into an abandoned signup.
+       *
+       * So the countdown is re-armed from the server's own number rather than from
+       * `RESEND_COOLDOWN_MS`, which keeps the button honest even if `max_frequency` is
+       * changed in the dashboard without anybody touching this file, and the screen says
+       * the reassuring true thing instead of an error.
+       */
+      if (result.retryAfterSeconds !== undefined) {
+        // The extra second covers GoTrue truncating its own remainder downwards: at a
+        // true 5.9s left it says "5", and coming back a tick early earns a second 429.
+        setResendAt(Date.now() + (result.retryAfterSeconds + 1) * 1000);
+        setNow(Date.now());
+        setError(null);
+        setNotice('still-valid');
+        return;
+      }
+      // Whatever GoTrue said, as `sendEmailCode` maps it — a closed signup or an
+      // exhausted project quota, never anything about whether this address has an
+      // account.
       setError(result.message ?? 'Could not send another code.');
       return;
     }
-    setResent(true);
+    setNotice('sent');
     // The field is cleared because the digits in it belong to a code that has just been
     // superseded, and focus returns so the next six go where they are typed.
     setCode('');
@@ -237,7 +297,13 @@ export default function VerifyScreen() {
             // but passing one would be claiming a bar that is never drawn.
             inputAccessoryViewID={Platform.OS === 'ios' ? KEYBOARD_ACCESSORY : undefined}
             error={error ?? undefined}
-            hint={resent ? 'New code sent. It can take a moment to arrive.' : undefined}
+            hint={
+              notice === 'sent'
+                ? 'New code sent. It can take a moment to arrive.'
+                : notice === 'still-valid'
+                  ? 'Your code is already on its way. Check your inbox, including spam.'
+                  : undefined
+            }
           />
           <Button
             label={busy ? 'Checking…' : 'Continue'}

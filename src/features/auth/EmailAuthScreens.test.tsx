@@ -155,10 +155,12 @@ describe('Sign in', () => {
    * somebody would fix rather than on a code screen for a code nobody sent.
    */
   it('stays put when the code could not be sent', async () => {
+    // A refusal with no `retryAfterSeconds`: nothing went out, so there is nothing to
+    // go and check, and the message belongs beside the field.
     mockAuth.sendCode.mockResolvedValue({
       ok: false,
       cancelled: false,
-      message: 'Too many emails just now. Wait a minute and try again.',
+      message: 'We cannot send codes right now. Try again in a few minutes.',
     });
     const view = await renderWithProviders(<SignInScreen />);
 
@@ -167,8 +169,40 @@ describe('Sign in', () => {
       fireEvent.press(view.getByText('Continue with email'));
     });
 
-    await waitFor(() => expect(view.getByText(/Too many emails/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/cannot send codes right now/)).toBeTruthy());
     expect(mockNav.pushed).toEqual([]);
+  });
+
+  /**
+   * **A cooldown is a code that already arrived, so it moves forward.**
+   *
+   * `retryAfterSeconds` is only present when GoTrue refused *because the previous send
+   * succeeded*. Holding somebody on the email form and telling them it failed, while the
+   * code sits in their inbox, is how the 2026-09-21 production incident ended as an
+   * abandoned signup.
+   */
+  it('goes on to the code screen when the refusal means a code is already out', async () => {
+    mockAuth.sendCode.mockResolvedValue({
+      ok: false,
+      cancelled: false,
+      message: 'You just asked for a code. Try again in 5 seconds.',
+      retryAfterSeconds: 5,
+    });
+    const view = await renderWithProviders(<SignInScreen />);
+
+    await typeInto(view, 'Email', 'ada@bingd.app');
+    await act(async () => {
+      fireEvent.press(view.getByText('Continue with email'));
+    });
+
+    await waitFor(() => expect(mockNav.pushed).toHaveLength(1));
+    expect(mockNav.pushed[0]).toEqual({
+      pathname: '/(auth)/verify',
+      // The server's remaining seconds ride along, so the next screen's countdown is
+      // the server's clock rather than a fresh guess at a full minute.
+      params: { email: 'ada@bingd.app', cooldown: '5' },
+    });
+    expect(view.queryByText(/did not work/i)).toBeNull();
   });
 
   it('signs in with Apple and lets routing move the user', async () => {
@@ -339,7 +373,9 @@ describe('The code screen', () => {
 
     // Named with the wait in it: a disabled button with no explanation is
     // indistinguishable from a broken one.
-    expect(view.getByText(/^Resend code in 0:\d\d$/)).toBeTruthy();
+    // `1:00` on arrival: the client cooldown is the server's `max_frequency`, so the
+    // minute is real and the label has to be able to render one.
+    expect(view.getByText(/^Resend code in \d:\d\d$/)).toBeTruthy();
 
     await act(async () => {
       fireEvent.press(view.getByText(/^Resend code in/));
@@ -355,7 +391,7 @@ describe('The code screen', () => {
       const view = await renderWithProviders(<VerifyScreen />);
 
       await act(async () => {
-        jest.advanceTimersByTime(31_000);
+        jest.advanceTimersByTime(61_000);
       });
 
       await act(async () => {
@@ -380,7 +416,7 @@ describe('The code screen', () => {
       const view = await renderWithProviders(<VerifyScreen />);
 
       await act(async () => {
-        jest.advanceTimersByTime(31_000);
+        jest.advanceTimersByTime(61_000);
       });
 
       // Two presses inside one frame. Both read the same render's state, which is why
@@ -414,7 +450,7 @@ describe('The code screen', () => {
       expect(view.getByText(/That code did not work/)).toBeTruthy();
 
       await act(async () => {
-        jest.advanceTimersByTime(31_000);
+        jest.advanceTimersByTime(61_000);
       });
       await act(async () => {
         fireEvent.press(view.getByText('Resend code'));
@@ -430,6 +466,52 @@ describe('The code screen', () => {
     }
   });
 
+  /**
+   * **The 2026-09-21 incident, pinned.**
+   *
+   * One successful send, one Resend tap about 55 seconds later, and GoTrue refusing with
+   * "you can only request this after 5 seconds" because its per-address `max_frequency`
+   * is a full minute. The old screen showed that as an error on the code field, so a new
+   * user read "your signup failed" while holding a working code.
+   *
+   * Two things have to be true now: no error, and a countdown re-armed from the server's
+   * own remainder rather than from a fresh client-side minute.
+   */
+  it('treats a cooldown refusal as a code already sent, not a failure', async () => {
+    jest.useFakeTimers();
+    try {
+      mockParams = { email: 'ada@bingd.app' };
+      mockAuth.sendCode.mockResolvedValue({
+        ok: false,
+        cancelled: false,
+        message: 'You just asked for a code. Try again in 5 seconds.',
+        retryAfterSeconds: 5,
+      });
+      const view = await renderWithProviders(<VerifyScreen />);
+
+      await act(async () => {
+        jest.advanceTimersByTime(61_000);
+      });
+      await act(async () => {
+        fireEvent.press(view.getByText('Resend code'));
+      });
+
+      // Not an error, and not the lie that a new code went out.
+      expect(view.queryByText(/cannot send/i)).toBeNull();
+      expect(view.queryByText(/New code sent/)).toBeNull();
+      expect(view.getByText(/already on its way/)).toBeTruthy();
+
+      // Re-armed to the server's 5 seconds, not to a fresh 60.
+      expect(view.getByText(/^Resend code in 0:0\d$/)).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(7_000);
+      });
+      expect(view.getByText('Resend code')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('says what went wrong on a refused resend, and comes back', async () => {
     jest.useFakeTimers();
     try {
@@ -437,12 +519,12 @@ describe('The code screen', () => {
       mockAuth.sendCode.mockResolvedValue({
         ok: false,
         cancelled: false,
-        message: 'Too many emails just now. Wait a minute and try again.',
+        message: 'We cannot send codes right now. Try again in a few minutes.',
       });
       const view = await renderWithProviders(<VerifyScreen />);
 
       await act(async () => {
-        jest.advanceTimersByTime(31_000);
+        jest.advanceTimersByTime(61_000);
       });
       await act(async () => {
         fireEvent.press(view.getByText('Resend code'));
@@ -450,14 +532,14 @@ describe('The code screen', () => {
 
       // Whatever GoTrue said, as `sendEmailCode` maps it — and nothing about whether
       // this address has an account.
-      expect(view.getByText(/Too many emails/)).toBeTruthy();
+      expect(view.getByText(/cannot send codes right now/)).toBeTruthy();
       expect(view.queryByText(/no account/i)).toBeNull();
 
       // The screen is not permanently disabled by one failure: the same countdown runs
       // and the control comes back.
       expect(view.getByText(/^Resend code in/)).toBeTruthy();
       await act(async () => {
-        jest.advanceTimersByTime(31_000);
+        jest.advanceTimersByTime(61_000);
       });
       expect(view.getByText('Resend code')).toBeTruthy();
     } finally {

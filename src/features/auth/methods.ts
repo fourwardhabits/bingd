@@ -21,7 +21,23 @@ import { announceLocalSignOut, authStorageKey, supabase } from '@/lib/supabase';
  * cold start as after a sign-in (auth.md §4).
  */
 
-export type SignInOutcome = { ok: true } | { ok: false; cancelled: boolean; message?: string };
+export type SignInOutcome =
+  | { ok: true }
+  | {
+      ok: false;
+      cancelled: boolean;
+      message?: string;
+      /**
+       * Seconds GoTrue says are left on the **per-address** send cooldown, when that is
+       * what refused the request.
+       *
+       * Its presence means something a bare message cannot: a code for this address was
+       * sent successfully within the last minute and is still valid. That is not a
+       * failed sign-in, and a screen that has this number can re-arm its own countdown
+       * against the server's clock rather than guessing at one.
+       */
+      retryAfterSeconds?: number;
+    };
 
 const cancelled: SignInOutcome = { ok: false, cancelled: true };
 
@@ -109,19 +125,73 @@ const EMAIL_OTP_TYPE = 'email' as const;
  * mistyped address mints a permanent, profile-less `auth.users` row that nothing prunes
  * (`docs/architecture/auth.md` §8, still open).
  */
+/**
+ * The two different failures GoTrue reports under one error code, told apart.
+ *
+ * `over_email_send_rate_limit` is returned for **both** of these, and they are not the
+ * same event and do not have the same recovery:
+ *
+ *   1. **The per-address cooldown** (`smtp_max_frequency`, 60s by default). One address
+ *      asked for a second code too soon. Waiting is the fix, and GoTrue says how long in
+ *      its own message: *"For security purposes, you can only request this after N
+ *      seconds."*
+ *   2. **The project's hourly email quota** (`rate_limit_email_sent`). Every address
+ *      shares it, so this arrives on somebody's genuine **first** attempt, caused by
+ *      other people's sign-ins. Its message is *"Email rate limit exceeded"*. Waiting a
+ *      minute does not fix it and telling somebody it will is how a new user is sent
+ *      round a loop that cannot succeed.
+ *
+ * One line of copy for both said "Too many emails just now. Wait a minute and try
+ * again.", which is correct for (1), wrong for (2), and reads as the user's fault in
+ * both. The seconds are parsed off the message because the code cannot carry them.
+ */
+const COOLDOWN_SECONDS = /after (\d+) seconds?/i;
+
+/**
+ * The seconds left on the per-address cooldown, or `null` when this refusal is not one.
+ *
+ * GoTrue computes the number as `sent_at + max_frequency - now` and truncates it, so it
+ * is the **remaining** time and not the elapsed time. Reading it as elapsed is how a
+ * 55-second gap gets mistaken for a double submit.
+ */
+export function cooldownSeconds(message: string): number | null {
+  const seconds = COOLDOWN_SECONDS.exec(message)?.[1];
+  return seconds ? Number(seconds) : null;
+}
+
+export function rateLimitMessage(message: string): string {
+  const seconds = cooldownSeconds(message);
+  if (seconds !== null) return `You just asked for a code. Try again in ${seconds} seconds.`;
+  // No countdown in the message means it is not the per-address cooldown: the project
+  // has spent its hourly allowance, which is nothing this person did and nothing they
+  // can wait out in a minute. Say so, and point at the two ways in that send no email.
+  return 'We cannot send codes right now. Try again in a few minutes, or continue with Apple or Google.';
+}
+
 export async function sendEmailCode(email: string): Promise<SignInOutcome> {
   const { error } = await supabase.auth.signInWithOtp({
     email: email.trim(),
     options: { shouldCreateUser: true },
   });
   if (error) {
+    // Carried out separately from the copy, because it is the fact the screens act on:
+    // a cooldown refusal means the previous send *worked*.
+    const retryAfterSeconds =
+      error.code === 'over_email_send_rate_limit'
+        ? (cooldownSeconds(error.message) ?? undefined)
+        : undefined;
     const message =
       error.code === 'over_email_send_rate_limit'
-        ? 'Too many emails just now. Wait a minute and try again.'
-        : error.code === 'signup_disabled'
-          ? 'New accounts are not being accepted right now.'
-          : error.message;
-    return { ok: false, cancelled: false, message };
+        ? rateLimitMessage(error.message)
+        : // A different limit with a different cause: too many requests from this device
+          // or address, counted across every auth endpoint rather than against email.
+          // It fell through to GoTrue's raw wording before, which names the endpoint.
+          error.code === 'over_request_rate_limit'
+          ? 'Too many attempts from this device. Wait a minute and try again.'
+          : error.code === 'signup_disabled'
+            ? 'New accounts are not being accepted right now.'
+            : error.message;
+    return { ok: false, cancelled: false, message, retryAfterSeconds };
   }
   return { ok: true };
 }
