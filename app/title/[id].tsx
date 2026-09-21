@@ -302,6 +302,19 @@ export default function TitleScreen() {
    * second boolean is how two of these come to be set at once.
    */
   const menuHandoff = useRef<'list' | 'rewatch' | null>(null);
+  /**
+   * The menu is closed but still on screen, on its way to another sheet.
+   *
+   * **A `Sheet` that is unmounted never reports its dismissal.** `onDismissed` is a
+   * `Modal` callback and this menu is mounted conditionally, so closing it by dropping
+   * `managing` to false tore the modal out of the tree and took the hand-off waiting on
+   * that callback with it. Measured rather than reasoned about: with the menu unmounted on
+   * the tap, `Add to list…` opened **nothing at all** on iOS, and so did *Log another
+   * watch*. Keeping it mounted and merely invisible for the length of the slide-out is
+   * what lets the callback arrive; `Sheet` renders no modal host once `visible` is false
+   * and the dismissal has finished.
+   */
+  const [menuLeaving, setMenuLeaving] = useState(false);
   /** The people behind the Following score (§13), opened from the Scores section. */
   const [followingRatingsOpen, setFollowingRatingsOpen] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
@@ -2240,9 +2253,12 @@ export default function TitleScreen() {
        * a title between bands, and it is granted, tested and load-bearing. What has
        * gone is one row in one sheet.
        */}
-      {managing ? (
+      {/* Mounted while it is open **and** while it is dismissing on its way to another
+          sheet: an unmounted `Modal` sends no `onDismiss`, and the hand-off below waits
+          for exactly that. `visible` carries open-or-closed instead. */}
+      {managing || menuLeaving ? (
         <Sheet
-          visible
+          visible={managing}
           onClose={() => setManaging(false)}
           label={`Options for ${displayTitle ?? title.title}`}
           /**
@@ -2262,6 +2278,7 @@ export default function TitleScreen() {
           onDismissed={() => {
             const to = menuHandoff.current;
             menuHandoff.current = null;
+            setMenuLeaving(false);
             if (to === 'list') setAddingToList(true);
             if (to === 'rewatch') setRewatchPhase('open');
           }}
@@ -2291,6 +2308,7 @@ export default function TitleScreen() {
                 // Android has no presentation to wait for and goes straight across.
                 if (Platform.OS === 'ios') {
                   menuHandoff.current = 'list';
+                  setMenuLeaving(true);
                   setManaging(false);
                 } else {
                   setManaging(false);
@@ -2499,6 +2517,7 @@ export default function TitleScreen() {
                           // waits for this one's dismissal to finish.
                           if (Platform.OS === 'ios') {
                             menuHandoff.current = 'rewatch';
+                            setMenuLeaving(true);
                             setManaging(false);
                           } else {
                             setManaging(false);

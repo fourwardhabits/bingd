@@ -3395,4 +3395,29 @@ describe('Add to list', () => {
     expect(view.queryByLabelText(/add to list/i)).toBeNull();
     expect(view.queryByText(/add to list/i)).toBeNull();
   });
+
+  /**
+   * **The hand-off actually arrives**, which is the one thing the ordering tests above
+   * cannot say for each other.
+   *
+   * The row closes the menu and waits for `Sheet`'s `onDismissed` before presenting the
+   * Add-to-list sheet, because a presentation issued mid-dismissal is refused by UIKit and
+   * leaves a screen that renders perfectly and takes no touches. That waiting is only safe
+   * if the callback can arrive at all — and a `Sheet` that is **unmounted** rather than
+   * made invisible never sends one. Before `menuLeaving` kept this menu mounted for its
+   * slide-out, the row opened nothing whatsoever, and no existing test could see it: the
+   * others assert that the row is present, in the right order, and stop there.
+   *
+   * `refused` is what stops this passing on a dismissal no device would send.
+   */
+  it('opens the Add-to-list sheet after the menu has finished dismissing', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Add to list…'));
+
+    await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
+    // And the menu is gone rather than sitting underneath it.
+    expect(view.queryByLabelText('Add to list…')).toBeNull();
+    expect(globalThis.__modalShows.refused).toBe(0);
+  });
 });
