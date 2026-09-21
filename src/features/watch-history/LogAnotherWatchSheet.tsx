@@ -1,93 +1,103 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { useCurrentProfile } from '@/features/auth';
+import { CompanionPicker } from '@/features/collection/CompanionPicker';
 import { formatWatchDate, today } from '@/features/collection/dates';
+import { taggableWith, useTaggablePeople } from '@/features/collection/use-companions';
 import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
-import { Button, Sheet, SheetRow, Text } from '@/ui/components';
+import {
+  BucketChoices,
+  Button,
+  Field,
+  Sheet,
+  SheetRow,
+  Text,
+  type BucketChoicesProps,
+} from '@/ui/components';
 
 import { logRewatch, newOperationId } from './writes';
 import type { WatchBasis } from './watch-history';
+
+type BucketId = Parameters<BucketChoicesProps['onSelect']>[0];
+
+/** The same ceiling `set_watch_tags` and `log_rewatch_with_details` enforce. */
+const MAX_COMPANIONS = 10;
 
 export type LogAnotherWatchSheetProps = {
   open: boolean;
   title: string;
   mediaItemId: string;
-  /** Null when the title is seen but unranked — there is then no placement to re-check. */
-  position: number | null;
   onClose: () => void;
-  /** The reader chose *Re-check placement*. The caller opens the ranking sheet. */
-  onRecheck: (watchEventId: string) => void;
+  /**
+   * The watch is saved and the reader chose how it felt this time. The caller opens the
+   * comparisons for that band, tied to this viewing.
+   */
+  onRank: (watchEventId: string, bucket: BucketId) => void;
   onSaved: () => void;
   /**
-   * iOS has finished dismissing this sheet, forwarded straight from `Sheet`.
-   *
-   * The caller needs it because the re-check hands over to *another* modal: the ranking
-   * sheet cannot be presented until this one has finished going away, which is the
-   * unserialised-swap freeze from the presentation side (`Sheet`'s own `onDismissed`
-   * contract). It is why the caller keeps this component mounted with `open = false`
-   * for the length of the slide-out instead of unmounting it on the tap.
+   * iOS has finished dismissing this sheet, forwarded straight from `Sheet`. The caller
+   * needs it because the hand-off to the comparisons is to *another* modal, which may not be
+   * presented until this one has finished going away (`Sheet`'s own `onDismissed`
+   * contract). It is why the caller keeps this mounted with `open = false` for the length
+   * of the slide-out instead of unmounting it on the tap.
    */
   onDismissed?: () => void;
 };
 
 /**
- * *Log another watch* — **the act, and then the optional second half** (§J.3).
+ * *Log another watch* — **the viewing, then the ordinary ranking entry** (founder QA,
+ * 2026-09-21).
  *
  * ---------------------------------------------------------------------------
- * WHAT THIS REPLACES, AND WHY THE ORDER IS THE WHOLE FIX
+ * THE CONTRACT THIS REPLACES, AND WHY
  *
- * On main, *Log another watch* is `rankAgain(newWatch: true)`: a forced full re-rank
- * that records **no watch and no date** (§C.3.2). A reader who wanted to say "I watched
- * Heat again last night" was made to answer six comparisons, and at the end of it the
- * app knew nothing about the viewing — only that a ranking had been re-done.
+ * It used to save the watch and then ask *Did it change your mind?* with *Re-check
+ * placement* and *Keep at #7*. The founder retired that: it assumed the band the title had
+ * last time was still right, and it ignored that other titles may have entered the ranking
+ * since. So now:
  *
- * So: the watch first, and it is complete on its own. Save and close, and the viewing is
- * recorded. The re-check is offered afterwards, costs about two comparisons when nothing
- * changed (§F.3), and reaches the **same** feed activity rather than a second one (§K).
+ *   1. **The viewing's details** — when, who with, a note — and *Save watch*. Once that
+ *      succeeds the viewing exists, whatever happens next.
+ *   2. **The normal ranking entry** — *How was it?* with the three bands and nothing
+ *      preselected. A band opens the ordinary comparisons for it, tied to this viewing, so
+ *      the placement and the feed post both belong to it.
  *
- * ---------------------------------------------------------------------------
- * THE WHEN ROW IS THREE CHOICES, AND TODAY IS ONE TAP
+ * Closing at step 2, backing out of the comparisons, or killing the app leaves the watch
+ * saved and the ranking exactly as it was: the comparison session runs *over* the existing
+ * placement and commits only when it finishes (20260826000500). No new ranking algorithm —
+ * this is `rank_again` with the chosen band and the viewing's id, which the server already
+ * supports into a different band (`correction-is-not-a-ranking.test.mjs`).
  *
- * Today · Earlier · Pick a date, defaulting to Today (§D.6 path 1). *Earlier* is the only
- * new word in the vocabulary, and it replaces "I don't remember" — a viewing whose timing
- * nobody recorded is an answer, not a failure to finish.
- *
- * The basis follows the tap and is never inferred: `today_default` when the sheet offered
- * Today and the reader kept it, `reader` when they chose, `none` for *Earlier*. That
- * distinction is what §C.3.8 was missing and what §M.7's later cleanup needs in order to
- * find a fabricated date at all.
+ * The details are private, like the date: a viewing's note and companions are diary lines
+ * the owner alone can read. The title-level note (the review) is not written from here.
  */
 export function LogAnotherWatchSheet({
   open,
   title,
   mediaItemId,
-  position,
   onClose,
-  onRecheck,
+  onRank,
   onSaved,
   onDismissed,
 }: LogAnotherWatchSheetProps) {
+  const profile = useCurrentProfile();
+  const people = useTaggablePeople(profile.id);
+
   const [date, setDate] = useState<string | null>(today());
-  // Whether the reader has touched the row at all. Untouched means the sheet's own
-  // default is what stands, which is exactly what `today_default` records.
+  // Whether the reader touched the date at all: untouched means the sheet's own default
+  // stands, which is exactly what `today_default` records.
   const [chosen, setChosen] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [companions, setCompanions] = useState<string[]>([]);
+  const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{ eventId: string; count: number } | null>(null);
-
-  const reset = () => {
-    setDate(today());
-    setChosen(false);
-    setPicking(false);
-    setSaved(null);
-    setError(null);
-  };
+  const [savedEvent, setSavedEvent] = useState<string | null>(null);
 
   const close = () => {
-    reset();
     onClose();
   };
 
@@ -95,6 +105,11 @@ export function LogAnotherWatchSheet({
     if (date === null) return 'none';
     return chosen ? 'reader' : 'today_default';
   })();
+
+  const toggleCompanion = (id: string) =>
+    setCompanions((current) =>
+      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
+    );
 
   const save = async () => {
     setSaving(true);
@@ -104,79 +119,41 @@ export function LogAnotherWatchSheet({
       mediaItemId,
       watchedOn: date,
       basis,
+      note: note.trim() ? note.trim() : null,
+      companionIds: companions,
     });
     setSaving(false);
 
-    if (result.outcome === 'failed') {
-      setError(result.message);
+    if (result.outcome === 'failed' || !result.watchEventId) {
+      setError(result.outcome === 'failed' ? result.message : 'Could not save this watch.');
       return;
     }
 
     track({ name: 'watch_logged', props: { kind: 'rewatch', basis, surface: 'title' } });
     onSaved();
-    setSaved({ eventId: result.watchEventId ?? '', count: result.watchCount ?? 2 });
+    setSavedEvent(result.watchEventId);
   };
 
   /**
-   * **`visible={open}` rather than an early `return null`.**
-   *
-   * The caller mounts this component for as long as the sheet is on screen *or* sliding
-   * out, because the re-check hands over to the ranking sheet and that presentation may
-   * not be issued until this dismissal has finished. An early return would unmount the
-   * `Modal` on the tap, which is the unserialised swap — the screen renders perfectly
-   * and stops accepting touches.
+   * Step 2: the ordinary ranking entry. The same prompt and the same three bands the first
+   * log uses, with **nothing selected** — the band is asked again, not assumed.
    */
-
-  /**
-   * The result beat. *Did it change your mind?* is the question, and **Keep is not a
-   * button** — it is what closing does, because the act is already complete. Making the
-   * reader choose between two buttons would say the viewing is not saved until they
-   * answer, which is the thing this sheet exists to stop being true.
-   */
-  if (saved) {
+  if (savedEvent) {
     return (
-      <Sheet
-        visible={open}
-        onClose={close}
-        onDismissed={onDismissed}
-        label={`Saved, your ${ordinal(saved.count)} watch`}
-      >
+      <Sheet visible={open} onClose={close} onDismissed={onDismissed} label={`How was ${title}?`}>
         <View style={styles.body}>
-          <Text variant="headline">{`Saved · your ${ordinal(saved.count)} watch`}</Text>
-          <Text variant="body">Did it change your mind?</Text>
-          {position !== null ? (
-            <Text variant="caption" tone="tertiary">
-              {`${title} is #${position} in your ranking.`}
-            </Text>
-          ) : null}
-
-          {position !== null ? (
-            <Button
-              label="Re-check placement"
-              onPress={() => {
-                track({ name: 'rewatch_decision', props: { choice: 'recheck' } });
-                // No `reset()` here. The caller closes this sheet and presents the
-                // ranking sheet only once iOS reports the dismissal finished, and
-                // resetting now would visibly flip the content back to the date row on
-                // the way out. Reopening resets instead (`open` false → true).
-                onRecheck(saved.eventId);
-              }}
-            />
-          ) : null}
-
-          <Button
-            label={position === null ? 'Done' : `Keep at #${position}`}
-            kind="secondary"
-            onPress={() => {
-              track({ name: 'rewatch_decision', props: { choice: 'keep' } });
-              close();
+          <Text variant="caption" tone="tertiary">
+            Watch saved
+          </Text>
+          <Text variant="title2">How was it?</Text>
+          <BucketChoices
+            selected={null}
+            onSelect={(bucket) => {
+              track({ name: 'rewatch_decision', props: { choice: 'recheck' } });
+              onRank(savedEvent, bucket);
             }}
+            testID="rewatch-bucket-choices"
           />
-          {position !== null ? (
-            <Text variant="caption" tone="tertiary" style={styles.hint}>
-              A re-check is usually two comparisons.
-            </Text>
-          ) : null}
         </View>
       </Sheet>
     );
@@ -186,7 +163,9 @@ export function LogAnotherWatchSheet({
     <Sheet visible={open} onClose={close} onDismissed={onDismissed} label="Log another watch">
       <View style={styles.body}>
         <Text variant="headline">Log another watch</Text>
-        <Text variant="body" tone="secondary">{title}</Text>
+        <Text variant="body" tone="secondary">
+          {title}
+        </Text>
 
         <SheetRow
           icon="calendar-outline"
@@ -196,7 +175,6 @@ export function LogAnotherWatchSheet({
           expanded={picking}
           onPress={() => setPicking((was) => !was)}
         />
-
         {picking ? (
           <WatchDatePicker
             value={date}
@@ -214,6 +192,26 @@ export function LogAnotherWatchSheet({
           />
         ) : null}
 
+        <Text variant="footnote" tone="secondary">
+          Watched with
+        </Text>
+        <CompanionPicker
+          people={taggableWith(people.data ?? [], [])}
+          selected={companions}
+          onToggle={toggleCompanion}
+          max={MAX_COMPANIONS}
+          loading={people.isPending}
+        />
+
+        <Field
+          label="Note"
+          hint="Only you can see notes on a watch."
+          value={note}
+          onChangeText={setNote}
+          maxLength={1000}
+          multiline
+        />
+
         {error ? (
           <Text variant="caption" tone="action" testID="rewatch-error">
             {error}
@@ -226,23 +224,6 @@ export function LogAnotherWatchSheet({
   );
 }
 
-/** "3rd", for the confirmation line. Small enough not to earn a library. */
-function ordinal(n: number): string {
-  const rest = n % 100;
-  if (rest >= 11 && rest <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1:
-      return `${n}st`;
-    case 2:
-      return `${n}nd`;
-    case 3:
-      return `${n}rd`;
-    default:
-      return `${n}th`;
-  }
-}
-
 const styles = StyleSheet.create({
   body: { padding: theme.layout.gutter, gap: theme.space[3] },
-  hint: { textAlign: 'center' },
 });

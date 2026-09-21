@@ -103,13 +103,30 @@ export async function logRewatch(input: {
   mediaItemId: string;
   watchedOn: string | null;
   basis: Exclude<WatchBasis, 'diary'>;
+  /**
+   * The viewing's own details (20261014000100). Private to the owner, like the date, and
+   * saved in the same transaction as the viewing, so a watch is never recorded without the
+   * lines the reader typed. The title-level note — the review — is not touched.
+   */
+  note?: string | null;
+  companionIds?: string[];
 }): Promise<WriteResult & { watchEventId?: string; watchCount?: number; posted?: boolean }> {
-  const { data, error } = await supabase.rpc('log_rewatch', {
-    p_operation_id: input.operationId,
-    p_media_item_id: input.mediaItemId,
-    p_watched_on: input.watchedOn,
-    p_basis: input.basis,
-  });
+  const detailed = input.note !== undefined || input.companionIds !== undefined;
+  const { data, error } = detailed
+    ? await supabase.rpc('log_rewatch_with_details', {
+        p_operation_id: input.operationId,
+        p_media_item_id: input.mediaItemId,
+        p_watched_on: input.watchedOn,
+        p_basis: input.basis,
+        p_note: input.note ?? null,
+        p_companion_ids: input.companionIds ?? null,
+      })
+    : await supabase.rpc('log_rewatch', {
+        p_operation_id: input.operationId,
+        p_media_item_id: input.mediaItemId,
+        p_watched_on: input.watchedOn,
+        p_basis: input.basis,
+      });
 
   if (error) return interpret(error);
   const row = data as
@@ -121,6 +138,26 @@ export async function logRewatch(input: {
     watchCount: row?.watch_count,
     posted: row?.posted,
   };
+}
+
+/**
+ * One viewing's note and companions, from the edit pencil on a Watch History row.
+ * `companionIds` undefined leaves the companions alone; an empty array clears them.
+ */
+export async function setWatchDetails(input: {
+  operationId: string;
+  watchEventId: string;
+  note: string | null;
+  companionIds?: string[];
+}): Promise<WriteResult> {
+  const { data, error } = await supabase.rpc('set_watch_details', {
+    p_operation_id: input.operationId,
+    p_watch_event_id: input.watchEventId,
+    p_note: input.note,
+    p_companion_ids: input.companionIds ?? null,
+  });
+
+  return error ? interpret(error) : statusOf(data);
 }
 
 /** One row's date, changed or cleared. It never creates a viewing (§D.5). */

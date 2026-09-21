@@ -3139,18 +3139,42 @@ describe('adjusting a ranking versus watching it again', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('set_watch_date', expect.anything());
   });
 
-  it('records a watch from Log another watch, and only from there', async () => {
+  /**
+   * **The approved rewatch flow** (founder QA, 2026-09-21): the viewing's details, Save, then
+   * the ORDINARY ranking entry — *How was it?* with nothing preselected — then comparisons
+   * in whichever band was chosen, tied to the viewing. No *Re-check placement*, no *Keep at
+   * #X*, and no assumption that the band the title had last time is still right.
+   */
+  it('records a watch, then asks How was it? afresh and ranks in the band chosen', async () => {
+    mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
     const view = await openMenu();
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
     await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    // The details the viewing carries, on the sheet before anything is saved.
+    expect(view.getByText('When?')).toBeTruthy();
+    expect(view.getByText('Watched with')).toBeTruthy();
+    expect(view.getByLabelText(/Note/)).toBeTruthy();
     await fireEvent.press(view.getByText('Save watch'));
 
+    // Saved in one call, details included, before any comparison.
     await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('log_rewatch', expect.anything()),
+      expect(mockRpc).toHaveBeenCalledWith('log_rewatch_with_details', expect.anything()),
     );
-    // The watch is the act; no comparison started behind it.
     expect(againCalls()).toHaveLength(0);
+
+    // The ordinary ranking entry, with no band preselected.
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(view.queryByText(/Re-check placement/)).toBeNull();
+    expect(view.queryByText(/Keep at #/)).toBeNull();
+    expect(view.queryByText(/Did it change your mind/)).toBeNull();
+
+    // The fixture is Loved; choosing a DIFFERENT band re-ranks there, on this viewing.
+    await fireEvent.press(view.getByText('It was fine'));
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(
+      expect.objectContaining({ p_bucket: 'fine', p_watch_event_id: 'event-2' }),
+    );
   });
 });
 

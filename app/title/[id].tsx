@@ -277,8 +277,11 @@ export default function TitleScreen() {
    * for `onDismissed` to arrive. See the mount site.
    */
   const [rewatchPhase, setRewatchPhase] = useState<'closed' | 'open' | 'leaving'>('closed');
-  /** The watch event a pending re-check will re-rank, held across that dismissal. */
-  const pendingRecheck = useRef<string | null>(null);
+  /**
+   * The viewing just saved and the band the reader chose for it, held across the sheet's
+   * dismissal so the comparisons open for exactly that pair.
+   */
+  const pendingRecheck = useRef<{ watchEventId: string; bucket: RankingSubject['bucket'] } | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
@@ -1202,26 +1205,31 @@ export default function TitleScreen() {
    * voice does not go, and the deletion behaviour behind it is untouched.
    */
   /**
-   * Opens the ranking sheet on the watch the re-check was asked for.
+   * Opens the comparisons for the band the reader chose, on the viewing they just saved.
    *
    * Its own function because two paths reach it — straight across on Android, and out of
    * the rewatch sheet's `onDismissed` on iOS — and a second copy of the subject is how
    * the two come to disagree about which watch they are re-ranking.
+   *
+   * **The band is the one chosen in the sheet, not the one the title had** (founder QA,
+   * 2026-09-21): a second viewing can change how somebody feels about a film, and the
+   * ranking entry after a rewatch is the ordinary *How was it?*, asked again. `rank_again`
+   * opens the session over the existing placement in whichever band it is given.
    */
   const openRecheck = () => {
-    const watchEventId = pendingRecheck.current;
+    const pending = pendingRecheck.current;
     pendingRecheck.current = null;
-    if (!watchEventId || !rankedBucket) return;
+    if (!pending) return;
     setRankedTitle(loggable);
     setRankingSubject({
       id: title.id,
       title: title.title,
-      bucket: rankedBucket,
+      bucket: pending.bucket,
       posterUri: posterUri(title.poster_path, 'card'),
       // Only a film or a season is ever ranked; a series has no menu.
       kind: title.kind === 'season' ? 'season' : 'movie',
       mode: 'again',
-      watchEventId,
+      watchEventId: pending.watchEventId,
     });
   };
 
@@ -2164,12 +2172,6 @@ export default function TitleScreen() {
           open={rewatchPhase === 'open'}
           title={title.title}
           mediaItemId={title.id}
-          // The exact ordinal, at any depth. This is the reader's own surface, and §B.2
-          // puts no ceiling on movement copy there — the reveal's "never a placement worse
-          // than #10" rule is about the *static reveal lines*, not about telling somebody
-          // where their own film sits. Null when the title is seen but unranked, which is
-          // the one case with no placement to re-check.
-          position={data.ranked?.position ?? null}
           onClose={() => {
             pendingRecheck.current = null;
             setRewatchPhase('closed');
@@ -2179,8 +2181,8 @@ export default function TitleScreen() {
               category: data.ranked?.category,
             });
           }}
-          onRecheck={(watchEventId) => {
-            pendingRecheck.current = watchEventId;
+          onRank={(watchEventId, bucket) => {
+            pendingRecheck.current = { watchEventId, bucket };
             if (Platform.OS === 'ios') {
               setRewatchPhase('leaving');
             } else {
