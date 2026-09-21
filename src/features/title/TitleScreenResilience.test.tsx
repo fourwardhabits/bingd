@@ -938,9 +938,10 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
     await fireEvent.press(view.getByText('Update your rating'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
+    // One tap, straight into the comparisons (founder QA, 2026-09-21): the band is the
+    // decision, and the "Rank <title> again? [Re-rank]" card that sat here is gone.
     await fireEvent.press(view.getByText('I liked it'));
-    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
-    await fireEvent.press(view.getByText('Re-rank'));
+    expect(view.queryByText('Re-rank')).toBeNull();
 
     // `rank_again` with `p_new_watch: false` — the session runs over the position the
     // title already holds, and `_rank_finalize` posts `title_ranked` only `if p_new_watch

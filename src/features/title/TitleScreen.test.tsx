@@ -2881,10 +2881,10 @@ describe('adjusting a ranking versus watching it again', () => {
    * **The same-watch correction, taken the way a reader now takes it.**
    *
    * *Update your rating* opens the log sheet's band chooser; re-choosing the band the
-   * title already has is the correction — `LogSheet` confirms it, because the position is
-   * re-derived either way, and then calls `rankAgain(newWatch: false)`. That is the exact
-   * call the retired *Rank it again* row made in one tap, which is what makes this a
-   * consolidated entry point rather than a lost capability.
+   * title already has is the correction, and it goes **straight into the comparisons** —
+   * `rankAgain(newWatch: false)` on the tap, with no confirmation card between (founder QA,
+   * 2026-09-21). That is the exact call the retired *Rank it again* row made in one tap,
+   * which is what makes this a consolidated entry point rather than a lost capability.
    *
    * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
    */
@@ -2892,8 +2892,14 @@ describe('adjusting a ranking versus watching it again', () => {
     await fireEvent.press(view.getByLabelText('Update your rating'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByText('I liked it'));
-    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
-    await fireEvent.press(view.getByText('Re-rank'));
+  };
+
+  /** The card that used to sit between the band tap and the comparisons, in every form. */
+  const expectNoRerankConfirmation = (view: Awaited<ReturnType<typeof openMenu>>) => {
+    expect(view.queryByText(/again\?/)).toBeNull();
+    expect(view.queryByText(/Changing this will re-rank/)).toBeNull();
+    expect(view.queryByText(/Nothing changes until you finish/)).toBeNull();
+    expect(view.queryByText('Re-rank')).toBeNull();
   };
 
   /** Every `rank_again` call the screen made, with its arguments. */
@@ -3095,9 +3101,8 @@ describe('adjusting a ranking versus watching it again', () => {
 
     await fireEvent.press(view.getByLabelText('Update your rating'));
     await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
+    // One tap, and the comparisons open: there is no confirmation to press.
     await fireEvent.press(view.getByText('It was fine'));
-    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
-    await fireEvent.press(view.getByText('Re-rank'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
@@ -3105,7 +3110,46 @@ describe('adjusting a ranking versus watching it again', () => {
         expect.objectContaining({ p_bucket: 'fine' }),
       ),
     );
+    expectNoRerankConfirmation(view);
     // A band change is its own call; it never routes through the rewatch one.
+    expect(againCalls()).toHaveLength(0);
+  });
+
+  /**
+   * **The contract, as the founder stated it after device QA (2026-09-21).**
+   *
+   *   Update your rating → the comparisons, immediately, and NO watch event.
+   *   Log another watch  → a separate sheet, and a watch event.
+   *
+   * The first half used to stop on "Rank <title> again? … [Re-rank] [Cancel]". Both
+   * halves are asserted together so that neither can drift toward the other.
+   */
+  it('goes straight into the comparisons, and records no watch, from Update your rating', async () => {
+    const view = await openMenu();
+
+    await correctTheRating(view);
+
+    // The session opened on the band tap itself.
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
+    expectNoRerankConfirmation(view);
+    // None of the calls that record a viewing was made.
+    expect(mockRpc).not.toHaveBeenCalledWith('log_rewatch', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('log_title', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('set_watch_date', expect.anything());
+  });
+
+  it('records a watch from Log another watch, and only from there', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Log another watch'));
+    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    await fireEvent.press(view.getByText('Save watch'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('log_rewatch', expect.anything()),
+    );
+    // The watch is the act; no comparison started behind it.
     expect(againCalls()).toHaveLength(0);
   });
 });

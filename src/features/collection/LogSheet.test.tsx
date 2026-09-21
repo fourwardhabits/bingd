@@ -577,7 +577,24 @@ describe('a title that is already ranked', () => {
     stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, { bucket: 'loved' });
   });
 
-  it('asks before re-ranking when the bucket it already has is tapped again', async () => {
+  /**
+   * **No confirmation, in either direction** (founder QA, 2026-09-21).
+   *
+   * A band tap on a ranked title used to stop on "Rank <title> again? … [Re-rank]
+   * [Cancel]". The approved contract is that *Update your rating* goes straight into the
+   * comparisons — so each test below asserts the hand-off happened on the tap itself,
+   * and `expectNoConfirmation` pins that none of the card's words or buttons exist, so it
+   * cannot come back without turning these red.
+   */
+  const expectNoConfirmation = (sheet: Awaited<ReturnType<typeof open>>) => {
+    expect(sheet.queryByText(/again\?/)).toBeNull();
+    expect(sheet.queryByText(/Changing this will re-rank/)).toBeNull();
+    expect(sheet.queryByText(/Nothing changes until you finish/)).toBeNull();
+    expect(sheet.queryByRole('button', { name: 'Re-rank' })).toBeNull();
+    expect(sheet.queryByRole('button', { name: 'Cancel' })).toBeNull();
+  };
+
+  it('goes straight into the comparisons when the bucket it already has is tapped', async () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
@@ -585,34 +602,36 @@ describe('a title that is already ranked', () => {
       expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
     );
     await fireEvent.press(sheet.bucket('I liked it'));
-
-    // Its own sentence: nothing about the rating is changing, so “Changing this”
-    // would be describing an act that is not happening.
-    expect(sheet.getByText('Rank Film A again?')).toBeTruthy();
-    expect(sheet.queryByText(/Changing this/)).toBeNull();
-    // Still nothing written, and still nothing handed off, until it is confirmed.
-    expect(onRank).not.toHaveBeenCalled();
-    expect(callsTo('log_title')).toHaveLength(0);
-  });
-
-  it('confirming a same-bucket tap hands off in rerank mode, bucket unchanged', async () => {
-    const onRank = jest.fn();
-    const sheet = await open(filmA, { onRank });
-
-    await waitFor(() =>
-      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
-    );
-    await fireEvent.press(sheet.bucket('I liked it'));
-    await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
 
     // The bucket it went in with is the bucket it comes out with. Only the mode differs
     // from a band change, because only the opening RPC does.
+    expect(onRank).toHaveBeenCalledTimes(1);
     expect(onRank).toHaveBeenCalledWith('loved', 'rerank');
-    expect(callsTo('log_title')).toHaveLength(0);
-    expect(callsTo('rank_rebucket')).toHaveLength(0);
+    expectNoConfirmation(sheet);
   });
 
-  it('cancelling a same-bucket tap leaves the ranking alone', async () => {
+  it('goes straight into the comparisons when a different bucket is tapped', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
+    await fireEvent.press(sheet.bucket('It was fine'));
+
+    expect(onRank).toHaveBeenCalledTimes(1);
+    expect(onRank).toHaveBeenCalledWith('fine', 'rebucket');
+    expectNoConfirmation(sheet);
+  });
+
+  /**
+   * **A re-rank records no watch and writes nothing from this sheet.** The session's one
+   * server call belongs to the ranking sheet (`rank_again(p_new_watch: false)` or
+   * `rank_rebucket`), and the database suite asserts that neither creates a watch event.
+   * What is pinned here is that the tap itself sends nothing at all — in particular none
+   * of the three calls that *would* record a viewing.
+   */
+  it('writes nothing and records no watch on the way into a re-rank', async () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
@@ -620,56 +639,14 @@ describe('a title that is already ranked', () => {
       expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
     );
     await fireEvent.press(sheet.bucket('I liked it'));
-    await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
-
-    expect(onRank).not.toHaveBeenCalled();
-    expect(mockRpc).not.toHaveBeenCalled();
-    expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true);
-  });
-
-  it('asks before re-ranking when a different bucket is tapped', async () => {
-    const onRank = jest.fn();
-    const sheet = await open(filmA, { onRank });
-
-    await waitFor(() =>
-      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
-    );
     await fireEvent.press(sheet.bucket('It was fine'));
 
-    expect(sheet.getByText('Changing this will re-rank Film A.')).toBeTruthy();
-    // Nothing has happened yet — the prompt is the whole point.
-    expect(onRank).not.toHaveBeenCalled();
     expect(callsTo('log_title')).toHaveLength(0);
-  });
-
-  it('cancelling leaves the ranking and the bucket alone', async () => {
-    const onRank = jest.fn();
-    const sheet = await open(filmA, { onRank });
-
-    await waitFor(() =>
-      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
-    );
-    await fireEvent.press(sheet.bucket('It was fine'));
-    await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
-
-    expect(onRank).not.toHaveBeenCalled();
-    expect(mockRpc).not.toHaveBeenCalled();
-    expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true);
-  });
-
-  it('confirming hands off in rebucket mode without writing the bucket first', async () => {
-    const onRank = jest.fn();
-    const sheet = await open(filmA, { onRank });
-
-    await waitFor(() =>
-      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
-    );
-    await fireEvent.press(sheet.bucket('It was fine'));
-    await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
-
-    expect(onRank).toHaveBeenCalledWith('fine', 'rebucket');
+    expect(callsTo('log_rewatch')).toHaveLength(0);
+    expect(callsTo('set_watch_date')).toHaveLength(0);
     // set_bucket would have earned a 55000; rank_rebucket does the bucket change itself.
-    expect(callsTo('log_title')).toHaveLength(0);
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_rebucket')).toHaveLength(0);
   });
 
   /** Editing anything other than the bucket must not touch the ranking. */
@@ -1702,8 +1679,8 @@ describe('ranking a title that was already seen', () => {
       expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
     );
 
+    // One tap: the band is the decision, and there is no confirmation to press.
     await fireEvent.press(sheet.bucket('I liked it'));
-    await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
     await settle();
 
     expect(onRank).toHaveBeenCalledWith('loved', 'rerank');
