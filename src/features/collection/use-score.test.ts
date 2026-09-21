@@ -256,3 +256,58 @@ describe('useMyScores — every ranked title, and only ranked titles', () => {
     expect(result.current.data!.size).toBe(3);
   });
 });
+
+/**
+ * **One current score across surfaces, at every step of the lifecycle** (founder release
+ * check, 2026-09-21): Watch 1 → Watch 2 → pure rerank → Watch 3 → second pure rerank.
+ * Each step leaves the `rankings` table in a new state; at each, the title page
+ * (`useTitleScore`), Collection (`watchedItems`, which is `scoreFor` over the category's
+ * band sizes) and Search / list rows (`useMyScores`) must print the same number for the
+ * title being moved and for every title around it. The history side of the same lifecycle
+ * is `supabase/tests/watch-details.test.mjs`.
+ */
+describe('the title page, Collection and Search agree at every lifecycle step', () => {
+  // The title under test moves between bands; eight neighbours hold the bands steady.
+  const neighbours = rankings(3, 3, 2);
+  const state = (bucket: 'loved' | 'fine' | 'not_for_me', slot: number) => {
+    const others = neighbours.map((row) => ({ ...row }));
+    const film = { user_id: USER, category: 'movies', media_item_id: 'film-x', bucket, position: 0 };
+    // Insert inside its band at `slot`, then renumber, as a finalize leaves the table.
+    const order = ['loved', 'fine', 'not_for_me'] as const;
+    const rows = order.flatMap((b) => {
+      const band = others.filter((row) => row.bucket === b);
+      if (b === bucket) band.splice(Math.min(slot, band.length), 0, film);
+      return band;
+    });
+    rows.forEach((row, i) => (row.position = i + 1));
+    return rows;
+  };
+
+  it.each([
+    ['Watch 1 ranked', state('fine', 1)],
+    ['Watch 2 re-ranked', state('loved', 2)],
+    ['pure rerank 1', state('not_for_me', 0)],
+    ['Watch 3 re-ranked', state('fine', 3)],
+    ['pure rerank 2', state('loved', 0)],
+  ])('%s', async (_label, rows) => {
+    seed(rows);
+    const film = rows.find((row) => row.media_item_id === 'film-x')!;
+    const { result } = await renderHookWithProviders(() => ({
+      mine: useMyScores(USER),
+      page: useTitleScore(USER, 'movies', { position: film.position, bucket: film.bucket }),
+    }));
+    await waitFor(() => {
+      expect(result.current.mine.data).toBeDefined();
+      expect(result.current.page.score).not.toBeNull();
+    });
+
+    const sizes = { loved: 0, fine: 0, not_for_me: 0 };
+    for (const row of rows) sizes[row.bucket] += 1;
+    for (const row of rows) {
+      const collection = scoreFor(row.bucket, row.position, sizes);
+      expect(result.current.mine.data!.get(row.media_item_id)?.score).toBe(collection);
+    }
+    expect(result.current.page.score).toBe(scoreFor(film.bucket, film.position, sizes));
+    expect(result.current.mine.data!.get('film-x')?.score).toBe(result.current.page.score);
+  });
+});
