@@ -1,8 +1,8 @@
 # #196 final sign-off — founder delta QA (2026-09-21, third pass)
 
 **Only what changed since update `01a0c5c8`.** Same Android preview APK (`d84c78b3`), no
-reinstall. Open twice, Settings ▸ About: the update id must start with the prefix in the
-handoff. **Backend:** staging, now at `20261017000100`.
+reinstall. Open twice, Settings ▸ About: the update id must start with **`01a0c63c`** (group
+`52c3aa28-bbfd-438e-97f0-22fb89da4ff5`, from `0cc60b8`). **Backend:** staging, now at `20261017000100`.
 
 1. **Rerank rule.** A film with two watches: note both scores in Watch History. ⋯ ▸
    Update your rating to a different band. Watch History: **Watch 1 unchanged, Watch 2 =
