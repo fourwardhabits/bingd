@@ -48,8 +48,6 @@ import {
 } from '@/features/lists/use-lists';
 import { visibilityChangeDialog } from '@/features/lists/VisibilityPicker';
 import {
-  addListToWatchlist,
-  bulkWatchlistMessage,
   deleteList,
   moveListItem,
   removeListItem,
@@ -155,9 +153,7 @@ export default function ListScreen() {
   const [editing, setEditing] = useState(false);
   const [addingTitles, setAddingTitles] = useState(false);
   const [reporting, setReporting] = useState(false);
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [watchlistBusy, setWatchlistBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   /**
    * Where the ⋯ was going when it closed.
@@ -357,7 +353,7 @@ export default function ListScreen() {
   };
 
   // -------------------------------------------------------------------------
-  // The Watchlist, one title and all of them
+  // The Watchlist, one title at a time (each row carries its own bookmark)
   // -------------------------------------------------------------------------
 
   const toggleWatchlist = async (mediaItemId: string, present: boolean) => {
@@ -374,28 +370,6 @@ export default function ListScreen() {
     }
     // Only an add is an event, and only after the server said yes.
     if (!present) track({ name: 'watchlist_added', props: { surface: 'list' } });
-    if (listId) void queryClient.invalidateQueries({ queryKey: queryKeys.listItems(listId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
-  };
-
-  const addAllUnseen = async () => {
-    if (!view) return;
-    setBulkBusy(true);
-    const result = await addListToWatchlist({ operationId: newOperationId(), listId: view.id });
-    setBulkBusy(false);
-
-    if (result.outcome === 'failed') {
-      Alert.alert('Could not add these', result.message);
-      if (result.changed) refetchAll();
-      return;
-    }
-    if (result.outcome !== 'ok') return;
-
-    track({
-      name: 'list_watchlist_bulk_added',
-      props: { added: result.added, skipped_seen: result.skippedSeen },
-    });
-    setNotice(bulkWatchlistMessage(result));
     if (listId) void queryClient.invalidateQueries({ queryKey: queryKeys.listItems(listId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
   };
@@ -547,7 +521,6 @@ export default function ListScreen() {
   }
 
   const owner = view.owner;
-  const unseenCount = ordered.filter((row) => row.seen === false && !row.watchlisted).length;
   const canShare = view.shareableByViewer || (view.isOwner && view.visibility === 'private');
   const watched =
     progress.data && progress.data.total > 0
@@ -601,7 +574,7 @@ export default function ListScreen() {
                 ) : null}
 
                 {view.description ? (
-                  <Text variant="body" tone="secondary">
+                  <Text variant="bodySecondary" tone="secondary" testID="list-description">
                     {view.description}
                   </Text>
                 ) : null}
@@ -663,28 +636,6 @@ export default function ListScreen() {
                       </View>
                     ) : null}
                   </View>
-                ) : null}
-
-                {unseenCount > 0 ? (
-                  <Button
-                    // "my Watchlist", not "Watchlist": on somebody else's list the bare
-                    // noun is ambiguous about whose it is (§H).
-                    label={bulkBusy ? 'Adding…' : `Add ${unseenCount} unseen to my Watchlist`}
-                    kind="secondary"
-                    onPress={() => void addAllUnseen()}
-                    disabled={bulkBusy}
-                  />
-                ) : null}
-
-                {notice ? (
-                  <Text
-                    variant="footnote"
-                    tone="secondary"
-                    accessibilityRole="alert"
-                    accessibilityLiveRegion="polite"
-                  >
-                    {notice}
-                  </Text>
                 ) : null}
 
                 <Divider />

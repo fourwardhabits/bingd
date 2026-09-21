@@ -123,6 +123,10 @@ export type ListMembership = {
   itemCount: number;
   visibility: ListVisibility;
   contains: boolean;
+  /** For recognising the list in the picker. Null when it has none. */
+  description: string | null;
+  /** Up to four poster URIs, for the same cover every list card draws. */
+  posterUris: string[];
 };
 
 export type ListProgress = { seen: number; total: number };

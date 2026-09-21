@@ -34,6 +34,8 @@ type Row = {
   visibility: 'private' | 'link' | 'public';
   contains: boolean;
   updated_at: string;
+  description?: string | null;
+  posters?: string[];
 };
 
 let mockRows: Row[] = [];
@@ -219,5 +221,34 @@ describe('with no lists at all', () => {
 
     await waitFor(() => view.getByText('Best breakup movies'));
     expect(view.queryByText('Will add: Past Lives')).toBeNull();
+  });
+});
+
+/**
+ * The picker jogs the memory (founder QA, 2026-09-21): each list shows the cover every
+ * list card draws, its name, and a one-line description when it has one.
+ */
+describe('recognising the list', () => {
+  beforeEach(() => {
+    mockRows = [
+      {
+        ...list('a', 'Movie night'),
+        description: 'Things to watch with the family on Fridays, nothing too long, nothing scary.',
+        posters: ['/p1.jpg', '/p2.jpg', '/p3.jpg', '/p4.jpg'],
+      },
+      { ...list('b', 'Empty one'), description: null, posters: [] },
+    ];
+  });
+
+  it('draws each list cover, name and a one-line description', async () => {
+    const screen = await open();
+    await waitFor(() => screen.getByText('Movie night'));
+
+    expect(screen.queryAllByTestId('list-cover', { includeHiddenElements: true })).toHaveLength(2);
+    const description = screen.getByTestId('membership-description-a');
+    expect(description.props.numberOfLines).toBe(1);
+    // A list without a description falls back to its count and visibility.
+    expect(screen.queryByTestId('membership-description-b')).toBeNull();
+    screen.getByText('8 titles');
   });
 });

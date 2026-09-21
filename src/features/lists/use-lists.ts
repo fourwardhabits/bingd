@@ -266,6 +266,9 @@ type MembershipRow = {
   item_count: number;
   visibility: ListVisibility;
   contains: boolean;
+  // 20261017000100. Absent on a backend that predates it, which reads as none.
+  description?: string | null;
+  posters?: string[] | null;
 };
 
 /** The Add-to-list sheet's rows: the caller's lists, with a flag for one title. */
@@ -284,6 +287,8 @@ export function useMyListsForTitle(mediaItemId: string | null | undefined, enabl
         itemCount: row.item_count ?? 0,
         visibility: row.visibility,
         contains: Boolean(row.contains),
+        description: row.description?.trim() ? row.description.trim() : null,
+        posterUris: POSTERS(row.posters),
       }));
     },
   });

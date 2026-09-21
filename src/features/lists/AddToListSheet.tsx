@@ -11,6 +11,7 @@ import { Sheet, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { ChipDot, VisibilityChip } from './ListChips';
+import { ListCover } from './ListCover';
 import { NewListSheet } from './NewListSheet';
 import { useMyListsForTitle } from './use-lists';
 import { addListItem, removeListItem } from './writes';
@@ -289,6 +290,9 @@ export function AddToListSheet({
   );
 }
 
+/** The picker's cover: large enough to recognise, small enough to keep rows compact. */
+const COVER = 44;
+
 function MembershipRow({
   list,
   busy,
@@ -308,17 +312,33 @@ function MembershipRow({
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
+      {/* The same cover every list card draws, so the list is recognised before it is
+          read (founder QA, 2026-09-21). */}
+      <ListCover posterUris={list.posterUris} size={COVER} />
+
       <View style={styles.rowLines}>
         <Text variant="callout" numberOfLines={1}>
           {list.title}
         </Text>
-        <View style={styles.rowFacts}>
-          <Text variant="footnote" tone="tertiary">
-            {list.itemCount}
+        {list.description ? (
+          // One line, truncated: enough to jog the memory without making rows grow.
+          <Text
+            variant="footnote"
+            tone="secondary"
+            numberOfLines={1}
+            testID={`membership-description-${list.id}`}
+          >
+            {list.description}
           </Text>
-          <ChipDot />
-          <VisibilityChip visibility={list.visibility} />
-        </View>
+        ) : (
+          <View style={styles.rowFacts}>
+            <Text variant="footnote" tone="tertiary">
+              {titleCountLabel(list.itemCount)}
+            </Text>
+            <ChipDot />
+            <VisibilityChip visibility={list.visibility} />
+          </View>
+        )}
       </View>
 
       <Ionicons

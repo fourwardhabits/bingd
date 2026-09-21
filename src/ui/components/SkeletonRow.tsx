@@ -9,21 +9,10 @@ export type SkeletonRowProps = {
 };
 
 /**
- * Placeholder rows matching the compact row's geometry (design-system.md §8).
- *
- * A list is the one loading state where the app already knows the shape of what
- * is coming, and a spinner throws that away — the content arrives and the whole
- * screen relayouts under the user's eyes. Skeletons keep the page still.
- *
- * Not the word "Loading…" either. Text where content is about to be reads as a
- * message about the content rather than as an absence of it.
- *
- * React Native's own Animated rather than Reanimated. This is one interpolated
- * opacity on a loop, which the native driver runs off the JS thread just as
- * well, and Reanimated would make the worklets runtime a dependency of every
- * screen that can show a loading state.
+ * The one skeleton pulse, shared by every skeleton shape (rows here, the poster grid in
+ * `SkeletonGrid`), so every loading state in the app breathes at the same rate.
  */
-export function SkeletonRow({ count = 6 }: SkeletonRowProps) {
+export function useSkeletonPulse(): Animated.Value {
   // Lazy useState rather than useRef: the value is read during render to build
   // the style, and React Compiler rightly refuses a ref read there.
   const [pulse] = useState(() => new Animated.Value(0.6));
@@ -58,6 +47,26 @@ export function SkeletonRow({ count = 6 }: SkeletonRowProps) {
     return () => loop.stop();
   }, [pulse, reducedMotion]);
 
+  return pulse;
+}
+
+/**
+ * Placeholder rows matching the compact row's geometry (design-system.md §8).
+ *
+ * A list is the one loading state where the app already knows the shape of what
+ * is coming, and a spinner throws that away — the content arrives and the whole
+ * screen relayouts under the user's eyes. Skeletons keep the page still.
+ *
+ * Not the word "Loading…" either. Text where content is about to be reads as a
+ * message about the content rather than as an absence of it.
+ *
+ * React Native's own Animated rather than Reanimated. This is one interpolated
+ * opacity on a loop, which the native driver runs off the JS thread just as
+ * well, and Reanimated would make the worklets runtime a dependency of every
+ * screen that can show a loading state.
+ */
+export function SkeletonRow({ count = 6 }: SkeletonRowProps) {
+  const pulse = useSkeletonPulse();
   const shimmer = { opacity: pulse };
 
   return (

@@ -275,23 +275,13 @@ describe("somebody else's list", () => {
     expect(screen.queryByText(/%/)).toBeNull();
   });
 
-  it('says "my Watchlist" on the bulk button', async () => {
+  it('has no bulk Add-unseen-to-Watchlist button; each unranked row carries its own', async () => {
+    // Founder QA 2026-09-21: the bulk action is gone from the page (the primitive stays).
     const screen = await open();
 
-    // §H: on somebody else's list the bare noun is ambiguous about whose it is.
-    await waitFor(() => screen.getByRole('button', { name: /to my Watchlist$/ }));
-  });
-
-  it('reports what the bulk add actually did', async () => {
-    const screen = await open();
-    await waitFor(() => screen.getByRole('button', { name: /to my Watchlist$/ }));
-    await fireEvent.press(screen.getByRole('button', { name: /to my Watchlist$/ }));
-
-    await waitFor(() => screen.getByText("Added 9 to your Watchlist. 5 you've seen were skipped."));
-    expect(mockTracked).toContainEqual({
-      name: 'list_watchlist_bulk_added',
-      props: { added: 9, skipped_seen: 5 },
-    });
+    await waitFor(() => screen.getByText('Film a'));
+    expect(screen.queryByRole('button', { name: /unseen to my Watchlist$/ })).toBeNull();
+    screen.getByLabelText('Add Film a to Watchlist');
   });
 
   it('offers no Share when the server says it is not shareable', async () => {

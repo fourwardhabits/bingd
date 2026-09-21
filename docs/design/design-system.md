@@ -769,6 +769,10 @@ moves when the reader later updates their rating. The current score is the title
 Collection, Search and list rows, all refreshed by one path
 (`invalidateAfterCollectionChange`).
 
+**Secondary prose uses `bodySecondary` (15/22), one step below `body`.** A list's description and a watch's note are writing that sits under a title or date, not the page's subject; they use this token, never a one-off size. Titles, dates, actions and controls keep their own tokens.
+
+**Every first load shows the loading language.** A screen whose header is up while its first request is pending draws the standard skeleton (`SkeletonRow` / `SkeletonTile`), never an empty area.
+
 **Row edit affordances are small text** (`Edit`, optionally with a small pencil), never a
 large bare glyph. Destructive row actions on an owned list are revealed by a horizontal
 swipe (`SwipeToRemove`, horizontally dominant moves only, never during a drag) and confirmed

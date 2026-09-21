@@ -106,7 +106,7 @@ export function WatchRow({
           ) : null}
           {note ? (
             <Text
-              variant="body"
+              variant="bodySecondary"
               tone="secondary"
               numberOfLines={longNote && !expanded ? 3 : undefined}
               testID={`watch-note-${event.id}`}
