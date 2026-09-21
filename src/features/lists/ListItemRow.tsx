@@ -1,6 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View, type AccessibilityActionEvent } from 'react-native';
 
+import { TitleRowActions } from '@/features/collection/TitleRowActions';
+import type { Bucket } from '@/features/collection/score';
 import { Poster, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -14,23 +15,22 @@ export type ListItemRowProps = {
   showNumber: boolean;
   onPress: () => void;
   /**
-   * Toggles the viewer's own Watchlist. Absent on the edit screen, where the row's
-   * controls are about the *list* rather than about the reader.
-   */
-  onToggleWatchlist?: () => void;
-  busy?: boolean;
-  /**
    * The number drawn when the list is numbered. Defaults to the server's ordinal; the
    * list page passes the row's place in the order it is drawing, so the numbers follow
    * a drag the moment it lands rather than when the refetch does.
    */
   number?: number;
+  /** The reader's own score, when they have this title ranked (`useMyScores`). */
+  score?: { score: number; bucket: Bucket } | null;
+  /** Opens the ordinary log sheet — the score, the Rank ring and the `+` all do. */
+  onRank?: () => void;
+  /** Toggles the reader's own Watchlist. */
+  onToggleWatchlist?: () => void;
+  busy?: boolean;
   /** The owner's lift for drag-to-reorder. Absent for a viewer. */
   onLongPress?: () => void;
   onPressOut?: () => void;
-  /** The owner's per-row ⋯ (*Remove from list*). Absent for a viewer. */
-  onMore?: () => void;
-  /** The same moves as the drag, reachable without it (owner only). */
+  /** The same moves as the drag, and Remove, reachable without either gesture. */
   accessibilityActions?: { name: string; label: string }[];
   onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
 };
@@ -39,132 +39,101 @@ export type ListItemRowProps = {
  * One title on a list.
  *
  * ---------------------------------------------------------------------------
- * THE TRAILING CONTROL IS ONE OF TWO THINGS, AND NEVER THREE
+ * THE TRAILING ACTIONS ARE THE SHARED COMPACT-ROW CONTRACT
  *
- * **Seen** is a tick and it is **inert**. There is nothing useful to offer somebody
- * about a title they have already watched from inside a list, and a control that did
- * something there would have to mean "log it again", which belongs on the title page.
- *
- * **Unseen** is the ordinary bookmark — the one-title Watchlist add, the same control
- * with the same meaning as everywhere else in the app.
+ * `TitleRowActions`, exactly as Search draws it (founder QA, 2026-09-21): the reader's own
+ * score circle when they have it ranked; otherwise the Rank/log action and the one-tap
+ * Watchlist. These are the *reader's* state, never the owner's — §F.11 still holds: a list
+ * never shows its owner's scores, positions, buckets, dates or notes.
  *
  * ---------------------------------------------------------------------------
- * THERE IS NEVER A SCORE HERE
+ * THE NUMBER TAKES THE POSTER'S ANCHOR, IT DOES NOT PUSH THE ROW
  *
- * Not the owner's, not the viewer's, not the community's. §F.11 is blunt about it: a
- * list never exposes the owner's scores, positions, buckets, watch dates or notes. A
- * curated list is a statement about what belongs together, and a column of numbers down
- * the side would quietly turn it into a ranking the owner did not make.
+ * A numbered list used to insert a number column in front of the poster, so switching
+ * Numbered on slid every poster and title to the right. Now the number is a small plate
+ * centred on the poster's own centre line, sitting on its lower edge: the poster, the
+ * title and the trailing actions are at the same x whether Numbered is on or off, and a
+ * 1-, 2- or 3-digit number grows symmetrically about that line (design-system.md §12).
  */
 export function ListItemRow({
   item,
   showNumber,
   onPress,
+  number,
+  score = null,
+  onRank,
   onToggleWatchlist,
   busy = false,
-  number,
   onLongPress,
   onPressOut,
-  onMore,
   accessibilityActions,
   onAccessibilityAction,
 }: ListItemRowProps) {
-  const shown = number ?? item.ordinal;
   const detail = [item.year, KIND_LABEL[item.kind]].filter(Boolean).join(' · ');
-  const seen = item.seen === true;
+  const shown = number ?? item.ordinal;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={[
-        showNumber ? `${shown}.` : null,
-        item.name,
-        detail,
-        seen ? 'Seen' : null,
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      onPressOut={onPressOut}
-      delayLongPress={350}
-      accessibilityActions={accessibilityActions}
-      onAccessibilityAction={onAccessibilityAction}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-    >
-      {showNumber ? (
-        <Text
-          variant="ordinal"
-          tone="tertiary"
-          style={styles.ordinal}
-          // Spoken as part of the row's own label above, so it is not met twice.
-          accessibilityElementsHidden
-        >
-          {shown}
-        </Text>
-      ) : null}
+    <View style={styles.row}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={[
+          showNumber ? `${shown}.` : null,
+          item.name,
+          detail,
+          score ? null : item.seen === true ? 'Seen' : null,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        onPressOut={onPressOut}
+        delayLongPress={350}
+        accessibilityActions={accessibilityActions}
+        onAccessibilityAction={onAccessibilityAction}
+        style={({ pressed }) => [styles.main, pressed && styles.pressed]}
+      >
+        <View style={styles.posterAnchor} testID={`list-poster-anchor-${item.mediaItemId}`}>
+          <Poster uri={item.posterUri} title={item.name} size="row" />
+          {showNumber ? (
+            <View style={styles.numberPlate} testID={`list-number-${item.mediaItemId}`}>
+              <Text
+                variant="caption"
+                tone="inverse"
+                style={styles.numberText}
+                // Spoken as part of the row's own label above, so it is not met twice.
+                accessibilityElementsHidden
+              >
+                {shown}
+              </Text>
+            </View>
+          ) : null}
+        </View>
 
-      <Poster uri={item.posterUri} title={item.name} size="row" />
-
-      <View style={styles.lines}>
-        <Text variant="callout" numberOfLines={2}>
-          {item.name}
-        </Text>
-        {detail ? (
-          <Text variant="footnote" tone="tertiary">
-            {detail}
+        <View style={styles.lines}>
+          <Text variant="callout" numberOfLines={2}>
+            {item.name}
           </Text>
-        ) : null}
-      </View>
+          {detail ? (
+            <Text variant="footnote" tone="tertiary">
+              {detail}
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
 
-      {seen ? (
-        <Ionicons
-          name="checkmark"
-          size={theme.layout.icon.md}
-          color={theme.text.tertiary}
-          // Inert, and said in the row's label. A tick that is in the tree twice reads
-          // as a control the reader then cannot find.
-          accessibilityElementsHidden
+      {onRank && onToggleWatchlist && item.seen !== null ? (
+        <TitleRowActions
+          name={item.name}
+          kind={item.kind}
+          score={score}
+          watched={item.seen === true}
+          saved={item.watchlisted}
+          busy={busy}
+          onRank={onRank}
+          onToggleWatchlist={onToggleWatchlist}
         />
-      ) : onToggleWatchlist && item.watchlisted !== null ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: item.watchlisted, disabled: busy }}
-          accessibilityLabel={
-            item.watchlisted ? `Remove ${item.name} from your Watchlist` : `Save ${item.name}`
-          }
-          disabled={busy}
-          hitSlop={theme.space[2]}
-          onPress={onToggleWatchlist}
-        >
-          <Ionicons
-            name={item.watchlisted ? 'bookmark' : 'bookmark-outline'}
-            size={theme.layout.icon.md}
-            color={item.watchlisted ? theme.semantic.action : theme.text.secondary}
-          />
-        </Pressable>
-      ) : (
-        // An anonymous reader, or the edit screen. A fixed box so the rows stay
-        // aligned whether or not a control is drawn.
-        <View style={styles.spacer} />
-      )}
-
-      {onMore ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Options for ${item.name}`}
-          hitSlop={theme.space[2]}
-          onPress={onMore}
-          testID={`list-item-more-${item.mediaItemId}`}
-        >
-          <Ionicons
-            name="ellipsis-horizontal"
-            size={theme.layout.icon.md}
-            color={theme.text.tertiary}
-          />
-        </Pressable>
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 
@@ -176,11 +145,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[2],
     minHeight: theme.layout.minTapTarget,
+    // Opaque, so a row slid aside to reveal Remove does not show the action through it.
+    backgroundColor: theme.surface.base,
   },
-  // Wide enough for three digits, so a list of 100+ does not shift its posters at the
-  // hundredth row.
-  ordinal: { minWidth: 28, textAlign: 'right' },
+  main: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
+  // The poster's own box: the number plate is positioned against it, so it can never
+  // widen the row.
+  posterAnchor: { width: theme.poster.row.width, height: theme.poster.row.height },
+  numberPlate: {
+    position: 'absolute',
+    bottom: 3,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  numberText: {
+    minWidth: 18,
+    paddingHorizontal: 4,
+    borderRadius: theme.radius.control,
+    overflow: 'hidden',
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+    backgroundColor: theme.semantic.action,
+  },
   lines: { flex: 1, gap: 2 },
-  spacer: { width: theme.layout.icon.md },
   pressed: { opacity: 0.7 },
 });

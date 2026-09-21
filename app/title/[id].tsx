@@ -52,6 +52,7 @@ import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
 import { TitleActions } from '@/features/title/TitleActions';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
+import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
@@ -2792,20 +2793,7 @@ function formatDate(date: string | null) {
  * Two things that used to depend on the lift are now stated on their own terms, below:
  * the collapsed band's height, and where the recommendation callout sits.
  */
-/**
- * How much warm band sits *below the navigation* when a title has no artwork at all.
- *
- * The seed catalogue ships without posters or backdrops, so this is a real state and not
- * a failure one — it draws no grey box and never a poster stretched to fill. The bar's
- * height is added to it at the call site, because the navigation overlays the band and a
- * band shorter than the bar would put the identity block under the back control.
- *
- * 56 is what shipped as the poster's lift and is kept as the band's own number now that
- * nothing overlaps it: it is enough Parchment to read as a deliberate surface rather than
- * as a hairline, and short enough that a title with no artwork does not spend a third of
- * the screen saying so.
- */
-const HERO_COLLAPSED_BAND = 56;
+// HERO_COLLAPSED_BAND and REVEAL_WINDOW live in use-hero-reveal, shared with the list page.
 
 /**
  * How far the poster sits below the top of the identity row, so its top rule meets the
@@ -2823,15 +2811,6 @@ const HERO_COLLAPSED_BAND = 56;
 const NO_RECOMMENDATIONS: TitleRecommendation[] = [];
 
 const TITLE_CAP_OFFSET = theme.space[1];
-/**
- * Over how many points the navigation finishes becoming a header.
- *
- * The last stretch of the hero's own height, so the ground has arrived by the time the
- * artwork has. Short enough that the transition reads as a response to the scroll rather
- * than as a slow dissolve, long enough that it is a fade and not a switch — which is the
- * whole of the founder's objection to the boolean it replaces.
- */
-const REVEAL_WINDOW = 96;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },

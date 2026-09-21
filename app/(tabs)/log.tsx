@@ -10,6 +10,7 @@ import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useMyScores, type MyScore } from '@/features/collection/use-score';
+import { TitleRowActions } from '@/features/collection/TitleRowActions';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
@@ -39,7 +40,6 @@ import {
   Chip,
   EmptyState,
   Screen,
-  ScoreBadge,
   SearchField,
   SectionHeader,
   SkeletonRow,
@@ -1152,6 +1152,10 @@ function Results({
                   )
                 }
                 /**
+                 * **Now `TitleRowActions`, shared with list rows** (founder QA, 2026-09-21):
+                 * a ranked title shows its score circle alone; an unranked one shows the
+                 * Rank/log action and the one-tap Watchlist. The history below still holds.
+                 *
                  * **Ranking state first, Watchlist second** (founder, 2026-09-06).
                  *
                  * The order was bookmark then `+`, and the founder's own use case is what
@@ -1187,69 +1191,16 @@ function Results({
                  * children of `trailing`, outside `TitleRow`'s own press target.
                  */
                 trailing={
-                  <View style={styles.rowActions}>
-                    {title.kind !== 'series' && myScore ? (
-                      <ScoreBadge
-                        score={myScore.score}
-                        bucket={myScore.bucket}
-                        size="sm"
-                        onPress={() => onOpenLog(title)}
-                      />
-                    ) : title.kind !== 'series' && isWatched ? (
-                      <ScoreBadge size="sm" onPress={() => onOpenLog(title)} />
-                    ) : (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Log ${title.title}`}
-                        onPress={() => onOpenLog(title)}
-                        hitSlop={theme.space[2]}
-                        style={styles.rowAction}
-                      >
-                        <Ionicons
-                          name="add-circle"
-                          size={theme.layout.icon.lg}
-                          color={theme.semantic.action}
-                        />
-                      </Pressable>
-                    )}
-
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{
-                        selected: saved.has(title.id),
-                        disabled: watchlistBusy === title.id,
-                      }}
-                      accessibilityLabel={
-                        saved.has(title.id)
-                          ? `Remove ${title.title} from Watchlist`
-                          : `Add ${title.title} to Watchlist`
-                      }
-                      // `void`, not a returned promise: a `Pressable` handler that
-                      // returns one makes the press itself await the whole write, which
-                      // is a hang in a test and a swallowed rejection in the app.
-                      onPress={() => void onToggleWatchlist(title)}
-                      // The write is guarded in `toggleWatchlist` as well; this stops the
-                      // second tap ever reaching it, which is the difference between a
-                      // refused duplicate and one that was never made.
-                      disabled={watchlistBusy === title.id}
-                      hitSlop={theme.space[3]}
-                      style={({ pressed }) => [
-                        styles.rowAction,
-                        pressed && styles.rowActionPressed,
-                      ]}
-                    >
-                      {/* Filled maroon when saved, outlined otherwise — the app's one
-                          watchlist treatment, the same pair `ActivityRow` draws. The icon
-                          swaps in place, so nothing on the row moves while it writes. */}
-                      <Ionicons
-                        name={saved.has(title.id) ? 'bookmark' : 'bookmark-outline'}
-                        size={theme.layout.icon.md}
-                        color={
-                          saved.has(title.id) ? theme.semantic.action : theme.text.secondary
-                        }
-                      />
-                    </Pressable>
-                  </View>
+                  <TitleRowActions
+                    name={title.title}
+                    kind={title.kind === 'series' ? 'series' : title.kind === 'season' ? 'season' : 'movie'}
+                    score={myScore}
+                    watched={isWatched}
+                    saved={saved.has(title.id)}
+                    busy={watchlistBusy === title.id}
+                    onRank={() => onOpenLog(title)}
+                    onToggleWatchlist={() => onToggleWatchlist(title)}
+                  />
                 }
                 onPress={() => onOpenTitle(title)}
               />
@@ -1428,9 +1379,6 @@ const styles = StyleSheet.create({
    * from making Search rows taller than Collection's. The controls carry their 44pt
    * targets in `hitSlop`, which costs no layout at all.
    */
-  rowActions: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
-  rowAction: { alignItems: 'center', justifyContent: 'center' },
-  rowActionPressed: { opacity: 0.6 },
   // The field's own row under the brand row — the cross-tab second-row position the
   // category selector holds elsewhere. Gutter-aligned with the content below it.
   searchRow: {

@@ -288,3 +288,42 @@ export function useMyListsForTitle(mediaItemId: string | null | undefined, enabl
     },
   });
 }
+
+/**
+ * The artwork a list's hero borrows: its **first title's** backdrop, falling back the way
+ * the title page does (`heroArtwork`) — the series' key art for a season, then a blurred
+ * poster, then the plain collapsed band (founder QA, 2026-09-21).
+ *
+ * A plain read of one `media_items` row, which is public catalogue data; it carries
+ * nothing about the list's owner.
+ */
+export function useListHero(firstMediaItemId: string | null) {
+  return useQuery({
+    queryKey: ['list-hero', firstMediaItemId],
+    enabled: Boolean(firstMediaItemId),
+    staleTime: 10 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('media_items')
+        .select('backdrop_path, poster_path, parent:parent_id(backdrop_path, poster_path)')
+        .eq('id', firstMediaItemId as string)
+        .maybeSingle();
+      if (error) throw error;
+      const row = data as {
+        backdrop_path: string | null;
+        poster_path: string | null;
+        parent:
+          | { backdrop_path: string | null; poster_path: string | null }
+          | { backdrop_path: string | null; poster_path: string | null }[]
+          | null;
+      } | null;
+      const parent = Array.isArray(row?.parent) ? row?.parent[0] : row?.parent;
+      return {
+        backdropPath: row?.backdrop_path ?? null,
+        posterPath: row?.poster_path ?? null,
+        parentBackdropPath: parent?.backdrop_path ?? null,
+        parentPosterPath: parent?.poster_path ?? null,
+      };
+    },
+  });
+}

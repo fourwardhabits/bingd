@@ -13,7 +13,6 @@ import {
 import {
   Alert,
   Animated,
-  FlatList,
   Platform,
   Pressable,
   Share,
@@ -22,13 +21,18 @@ import {
   type ViewProps,
 } from 'react-native';
 
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { useCurrentProfile } from '@/features/auth';
+import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
+import { useMyScores } from '@/features/collection/use-score';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { AddTitlesSheet } from '@/features/lists/AddTitlesSheet';
 import { EditListSheet } from '@/features/lists/EditListSheet';
 import { ChipDot, VisibilityChip } from '@/features/lists/ListChips';
 import { ListItemRow } from '@/features/lists/ListItemRow';
 import { reorder, shiftFor, targetIndex } from '@/features/lists/reorder';
+import { SwipeToRemove } from '@/features/lists/SwipeToRemove';
 import { listShareMessage, listUrl } from '@/features/lists/share';
 import {
   titleCountLabel,
@@ -36,7 +40,12 @@ import {
   VISIBILITY_CHIP,
   type ListItem,
 } from '@/features/lists/types';
-import { useListItems, useListProgress, useListView } from '@/features/lists/use-lists';
+import {
+  useListHero,
+  useListItems,
+  useListProgress,
+  useListView,
+} from '@/features/lists/use-lists';
 import { visibilityChangeDialog } from '@/features/lists/VisibilityPicker';
 import {
   addListToWatchlist,
@@ -47,6 +56,10 @@ import {
   updateList,
 } from '@/features/lists/writes';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
+import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
+import { TitleTopBar } from '@/features/title/TitleTopBar';
+import { useHeroReveal } from '@/features/title/use-hero-reveal';
+import { heroArtwork } from '@/lib/hero';
 import { track, type ListOpenSurface } from '@/lib/analytics';
 import { queryKeys } from '@/lib/query';
 import { hapticDecision } from '@/ui/haptics';
@@ -60,6 +73,7 @@ import {
   SheetRow,
   SkeletonRow,
   Text,
+  TitleHero,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -128,7 +142,16 @@ export default function ListScreen() {
   const progress = useListProgress(listId, Boolean(list.data));
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [rowMenu, setRowMenu] = useState<ListItem | null>(null);
+  /** The one row slid open to show Remove, if any. */
+  const [swiped, setSwiped] = useState<string | null>(null);
+  // The ordinary log → rank flow, opened from a row's Rank/log action — the same pair of
+  // sheets Search mounts, so a list is not a second ranking path.
+  const [logging, setLogging] = useState<LoggableTitle | null>(null);
+  const [ranking, setRanking] = useState<RankingSubject | null>(null);
+  const [ranked, setRanked] = useState<LoggableTitle | null>(null);
+  const [placement, setPlacement] = useState<PostRank | null>(null);
+  const celebrate = useCelebrationHandoff();
+  const myScores = useMyScores(profile.id);
   const [editing, setEditing] = useState(false);
   const [addingTitles, setAddingTitles] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -161,6 +184,18 @@ export default function ListScreen() {
     return localOrder.ids.map((rowId) => byId.get(rowId)).filter((row): row is ListItem => Boolean(row));
   }, [localOrder, rows, items.data]);
   const [moving, setMoving] = useState(false);
+
+  // The first title's artwork, the title page's own fallback chain (`heroArtwork`).
+  const heroSource = useListHero(ordered[0]?.mediaItemId ?? null);
+  const hero = heroArtwork(
+    heroSource.data ?? {
+      backdropPath: null,
+      posterPath: null,
+      parentBackdropPath: null,
+      parentPosterPath: null,
+    },
+  );
+  const reveal = useHeroReveal(Boolean(hero.uri));
 
   const view = list.data ?? null;
 
@@ -409,6 +444,29 @@ export default function ListScreen() {
     refetchAll();
   };
 
+  const openLog = (item: ListItem) => {
+    // A series is not loggable — its seasons are (AD-1); the title page offers them.
+    if (item.kind === 'series') {
+      router.push(`/title/${item.mediaItemId}`);
+      return;
+    }
+    setLogging({
+      id: item.mediaItemId,
+      title: item.name,
+      year: item.year,
+      posterUri: item.posterUri,
+      kind: item.kind,
+    });
+  };
+
+  const endLog = () => {
+    setLogging(null);
+    setPlacement(null);
+    celebrate();
+    // The rows draw the reader's seen / saved state, so they refetch with the rest.
+    refetchAll();
+  };
+
   // Drag state. The gesture is the core responder system on the list's container: once a
   // row has been lifted, the container claims the next move (capture phase, so it wins over
   // the row's own press and the scroller), follows the finger, and commits on release.
@@ -498,38 +556,40 @@ export default function ListScreen() {
   const numbered = view.orderStyle === 'ranked';
 
   return (
-    <Screen includeBottomInset>
-      <Stack.Screen
-        options={{
-          title: view.title,
-          headerRight: () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`More options for ${view.title}`}
-              hitSlop={theme.space[2]}
-              onPress={() => setMenuOpen(true)}
-            >
-              <Ionicons
-                name="ellipsis-horizontal"
-                size={theme.layout.icon.md}
-                color={theme.text.primary}
-              />
-            </Pressable>
-          ),
-        }}
+    <Screen includeBottomInset edges={[]}>
+      {/* The route keeps its title for the back label of whatever is pushed on top; the
+          bar itself is drawn by the page over the hero, exactly as on a title page. */}
+      <Stack.Screen options={{ title: view.title, headerShown: false }} />
+      <TitleTopBar
+        progress={reveal.progress}
+        revealed={reveal.revealed}
+        onBack={() => router.back()}
+        onMore={() => setMenuOpen(true)}
+        title={view.title}
       />
 
       <LiftedRow.Provider value={drag?.from ?? null}>
         <View style={styles.fill} {...(view.isOwner ? dragHandlers : {})}>
-          <FlatList
+          <Animated.FlatList
             data={ordered}
+            onScroll={reveal.onScroll}
+            scrollEventThrottle={16}
             keyExtractor={(row) => row.mediaItemId}
             contentContainerStyle={styles.list}
             scrollEnabled={drag === null}
             CellRendererComponent={LiftableCell}
             ListHeaderComponent={
+              <View>
+              <TitleHero
+                uri={hero.uri}
+                blurred={hero.treatment === 'poster'}
+                collapsedHeight={reveal.collapsedHero}
+                topInset={reveal.topInset}
+              />
               <View style={styles.header}>
-                <Text variant="title1">{view.title}</Text>
+                <Text variant="title1" testID="list-large-title">
+                  {view.title}
+                </Text>
 
                 {!view.isOwner && owner ? (
                   <Attribution
@@ -581,14 +641,28 @@ export default function ListScreen() {
                   </View>
                 ) : null}
 
-                {canShare ? <Button label="Share list" onPress={shareOrAsk} /> : null}
-
-                {view.isOwner ? (
-                  <Button
-                    label="Add titles"
-                    kind="secondary"
-                    onPress={() => setAddingTitles(true)}
-                  />
+                {/* One action row, the Profile pattern (`ProfileActions`): two equal
+                    halves, the secondary act leading and the Maroon fill on the
+                    trailing one. `fit` keeps a two-word label on one line on a
+                    320pt phone. */}
+                {view.isOwner || canShare ? (
+                  <View style={styles.actionRow} testID="list-actions">
+                    {view.isOwner ? (
+                      <View style={styles.half}>
+                        <Button
+                          label="Add titles"
+                          kind="secondary"
+                          fit
+                          onPress={() => setAddingTitles(true)}
+                        />
+                      </View>
+                    ) : null}
+                    {canShare ? (
+                      <View style={styles.half}>
+                        <Button label="Share list" fit onPress={shareOrAsk} />
+                      </View>
+                    ) : null}
+                  </View>
                 ) : null}
 
                 {unseenCount > 0 ? (
@@ -614,6 +688,7 @@ export default function ListScreen() {
                 ) : null}
 
                 <Divider />
+              </View>
               </View>
             }
             ListEmptyComponent={
@@ -650,6 +725,13 @@ export default function ListScreen() {
                   }
                   testID={`list-row-${item.mediaItemId}`}
                 >
+                  <SwipeToRemove
+                    name={item.name}
+                    locked={!view.isOwner || drag !== null}
+                    open={swiped === item.mediaItemId}
+                    onOpenChange={(open) => setSwiped(open ? item.mediaItemId : null)}
+                    onRemove={() => void removeItem(item)}
+                  >
                   <ListItemRow
                     item={item}
                     showNumber={numbered}
@@ -659,6 +741,8 @@ export default function ListScreen() {
                     onPress={() => {
                       if (drag === null) router.push(`/title/${item.mediaItemId}`);
                     }}
+                    score={myScores.data?.get(item.mediaItemId) ?? null}
+                    onRank={() => openLog(item)}
                     onToggleWatchlist={() =>
                       void toggleWatchlist(item.mediaItemId, item.watchlisted === true)
                     }
@@ -671,7 +755,6 @@ export default function ListScreen() {
                           }
                         : undefined
                     }
-                    onMore={view.isOwner ? () => setRowMenu(item) : undefined}
                     accessibilityActions={
                       view.isOwner
                         ? [
@@ -706,6 +789,7 @@ export default function ListScreen() {
                         : undefined
                     }
                   />
+                  </SwipeToRemove>
                 </Animated.View>
               );
             }}
@@ -752,21 +836,42 @@ export default function ListScreen() {
         </Sheet>
       ) : null}
 
-      {rowMenu ? (
-        <Sheet visible onClose={() => setRowMenu(null)} label={`Options for ${rowMenu.name}`}>
-          <View style={styles.menu}>
-            <SheetRow
-              icon="remove-circle-outline"
-              label="Remove from list"
-              onPress={() => {
-                const target = rowMenu;
-                setRowMenu(null);
-                void removeItem(target);
-              }}
-            />
-          </View>
-        </Sheet>
-      ) : null}
+      <LogSheet
+        title={logging}
+        onClose={endLog}
+        onDone={endLog}
+        surface="list"
+        postRank={placement}
+        onRank={(bucket, mode) => {
+          if (!logging) return;
+          setRanking({
+            id: logging.id,
+            title: logging.title,
+            bucket,
+            posterUri: logging.posterUri,
+            kind: logging.kind,
+            mode,
+          });
+          setRanked(logging);
+          setLogging(null);
+        }}
+      />
+
+      <RankingSheet
+        subject={ranking}
+        onClose={() => {
+          setRanking(null);
+          invalidateAfterCollectionChange(queryClient, profile.id, ranked?.id ?? '', {});
+          refetchAll();
+        }}
+        onFinishLog={(result) => {
+          setRanking(null);
+          if (!ranked) return;
+          setPlacement(result);
+          setLogging(ranked);
+        }}
+        surface="list"
+      />
 
       {editing ? (
         <EditListSheet
@@ -889,6 +994,8 @@ const styles = StyleSheet.create({
   },
   attributionName: { flex: 1 },
   menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
+  actionRow: { flexDirection: 'row', gap: theme.space[2] },
+  half: { flex: 1 },
   pressed: { opacity: 0.7 },
   lifted: {
     backgroundColor: theme.surface.raised,

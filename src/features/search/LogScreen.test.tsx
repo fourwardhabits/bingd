@@ -2035,7 +2035,11 @@ describe('the leading action is the reader’s own ranking state', () => {
 });
 
 describe('the two controls are independent', () => {
-  it('saves to the watchlist without touching the ranking state', async () => {
+  /**
+   * The compact-row contract (founder QA, 2026-09-21; TitleRowActions): a ranked title
+   * shows its score circle and nothing else — no bookmark beside a title already rated.
+   */
+  it('shows a ranked title its score circle alone, with no Watchlist control', async () => {
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'loved' }];
     tableRows.rankings = [
       {
@@ -2048,13 +2052,19 @@ describe('the two controls are independent', () => {
     ];
     const view = await search('inception');
 
+    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+    expect(view.queryByLabelText('Add Inception to Watchlist')).toBeNull();
+    expect(view.queryByLabelText('Log Inception')).toBeNull();
+  });
+
+  it('saves an unranked title to the watchlist without touching the ranking state', async () => {
+    const view = await search('inception');
+
     await waitFor(() => expect(view.getByLabelText('Add Inception to Watchlist')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
 
-    // The score is still the score. A watchlist write is not a ranking write, and the
-    // two controls sharing a row must not mean sharing an outcome.
-    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
-    expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything());
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()));
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
   });
 
   it('offers the watchlist on a title that has never been ranked', async () => {

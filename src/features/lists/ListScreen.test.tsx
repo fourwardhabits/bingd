@@ -1,5 +1,5 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Alert, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -67,6 +67,8 @@ type Item = {
   viewer_watchlisted: boolean | null;
 };
 
+/** Plain table reads: `rankings` for the reader's own scores, `media_items` for the hero. */
+const mockTables: Record<string, unknown[]> = { rankings: [], media_items: [] };
 let mockView: View | null = null;
 let mockItems: Item[] = [];
 let mockProgress: { seen: number; total: number } | null = null;
@@ -91,6 +93,18 @@ jest.mock('@/lib/supabase', () => ({
         default:
           return Promise.resolve({ data: { status: 'ok' }, error: null });
       }
+    },
+    from: (table: string) => {
+      const rows = () => mockTables[table] ?? [];
+      const chain: Record<string, unknown> = {
+        maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        then: (resolve: (value: unknown) => unknown) =>
+          Promise.resolve({ data: rows(), error: null }).then(resolve),
+      };
+      for (const method of ['select', 'eq', 'in', 'gt', 'lt', 'gte', 'order', 'limit', 'or']) {
+        chain[method] = () => chain;
+      }
+      return chain;
     },
   },
   startSessionRefresh: () => () => {},
@@ -166,6 +180,8 @@ const view = (over: Partial<View> = {}): View => ({
 });
 
 beforeEach(() => {
+  mockTables.rankings = [];
+  mockTables.media_items = [];
   mockView = null;
   mockItems = [];
   mockProgress = null;
@@ -348,15 +364,25 @@ describe('your own list', () => {
     expect(screen.queryByText(/You’ve seen/)).toBeNull();
   });
 
-  it('makes Share list the primary action and Add titles the secondary one', async () => {
+  it('puts Add titles and Share list side by side, Share list trailing', async () => {
     const screen = await open();
 
     await waitFor(() => screen.getByRole('button', { name: 'Share list' }));
-    const texts = screen
-      .queryAllByText(/./)
-      .map((node) => String(node.props.children))
-      .filter(Boolean);
-    expect(texts.indexOf('Share list')).toBeLessThan(texts.indexOf('Add titles'));
+    // One row, the Profile pattern: the secondary act leads, the Maroon fill trails.
+    const row = screen.getByTestId('list-actions');
+    const labels = screen
+      .queryAllByText(/^(Add titles|Share list)$/)
+      .map((node) => String(node.props.children));
+    expect(labels).toEqual(['Add titles', 'Share list']);
+    expect(row).toBeTruthy();
+  });
+
+  it('names the list in the page, not in the bar, until the large title scrolls away', async () => {
+    const screen = await open();
+
+    await waitFor(() => screen.getByTestId('list-large-title'));
+    // The compact bar title is not drawn while the large one is on screen.
+    expect(screen.getAllByText('Best breakup movies')).toHaveLength(1);
   });
 
   it('opens the settings from the visibility in the metadata', async () => {
@@ -484,8 +510,8 @@ describe('a list row', () => {
     mockItems = [item('a')];
     const screen = await open();
 
-    await waitFor(() => screen.getByLabelText('Save Film a'));
-    await fireEvent.press(screen.getByLabelText('Save Film a'));
+    await waitFor(() => screen.getByLabelText('Add Film a to Watchlist'));
+    await fireEvent.press(screen.getByLabelText('Add Film a to Watchlist'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
@@ -535,17 +561,46 @@ describe('the owner menus', () => {
     expect(screen.queryByLabelText('Who can see it')).toBeNull();
   });
 
-  it('removes one title from its row menu', async () => {
+  /**
+   * Swipe left, then tap Remove (founder QA, 2026-09-21). There is no permanent ⋯ on a
+   * row any more, and the swipe alone never removes anything.
+   */
+  it('removes one title by swiping its row open and tapping Remove', async () => {
     const screen = await open();
-    await waitFor(() => screen.getByLabelText('Options for Film b'));
-    await fireEvent.press(screen.getByLabelText('Options for Film b'));
-    await waitFor(() => screen.getByLabelText('Remove from list'));
-    await fireEvent.press(screen.getByLabelText('Remove from list'));
+    await waitFor(() => screen.getByText('Film b'));
+    expect(screen.queryByLabelText('Options for Film b')).toBeNull();
+
+    const row = screen.getByTestId('swipe-row-Film b');
+    const at = (x: number, y = 100) => ({ nativeEvent: { pageX: x, pageY: y } });
+    await fireEvent(row, 'touchStart', at(300));
+    expect(row.props.onMoveShouldSetResponder(at(290, 100))).toBe(false); // under the slop
+    expect(row.props.onMoveShouldSetResponder(at(300, 160))).toBe(false); // a scroll
+    expect(row.props.onMoveShouldSetResponder(at(250, 104))).toBe(true); // a swipe
+    await fireEvent(row, 'responderMove', at(160, 104));
+    await fireEvent(row, 'responderRelease', at(160, 104));
+
+    // Nothing is removed by the swipe itself.
+    expect(mockRpc).not.toHaveBeenCalledWith('remove_list_item', expect.anything());
+    await fireEvent.press(screen.getByLabelText('Remove Film b from list'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
         'remove_list_item',
         expect.objectContaining({ p_list_id: 'list-1', p_media_item_id: 'b' }),
+      ),
+    );
+  });
+
+  it('keeps Remove reachable without the gesture, as an accessibility action', async () => {
+    const screen = await open();
+    await waitFor(() => screen.getByText('Film b'));
+    await fireEvent(screen.getByLabelText(/^Film b /), 'accessibilityAction', {
+      nativeEvent: { actionName: 'remove' },
+    });
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'remove_list_item',
+        expect.objectContaining({ p_media_item_id: 'b' }),
       ),
     );
   });
@@ -611,5 +666,69 @@ describe('reordering a numbered list', () => {
     const screen = await open();
     await waitFor(() => screen.getByText('Film a'));
     expect(screen.queryByLabelText(/^1\. Film a /)).toBeNull();
+  });
+});
+
+/**
+ * The compact-row contract on a list (founder QA, 2026-09-21; TitleRowActions): the
+ * reader's own score circle when they have the title ranked, otherwise the Rank/log
+ * action and the one-tap Watchlist. Never the owner's score.
+ */
+describe('a list row\'s trailing actions', () => {
+  beforeEach(() => {
+    mockView = view();
+    mockProgress = { seen: 1, total: 2 };
+  });
+
+  it('shows the reader their own score circle, and no bookmark, on a title they ranked', async () => {
+    mockItems = [item('a', { viewer_seen: true })];
+    mockTables.rankings = [{ media_item_id: 'a', bucket: 'loved', position: 1, category: 'movies' }];
+    const screen = await open();
+
+    await waitFor(() => screen.getByLabelText(/^10\.0 out of 10/));
+    expect(screen.queryByLabelText('Add Film a to Watchlist')).toBeNull();
+  });
+
+  it('shows Log and the Watchlist on a title the reader has not logged', async () => {
+    mockItems = [item('a')];
+    const screen = await open();
+
+    await waitFor(() => screen.getByLabelText('Log Film a'));
+    screen.getByLabelText('Add Film a to Watchlist');
+  });
+});
+
+/**
+ * Numbered: the number sits on the poster's own anchor, so a row does not move when
+ * Numbered toggles (founder QA, 2026-09-21).
+ */
+describe('a numbered row keeps its geometry', () => {
+  beforeEach(() => {
+    mockProgress = { seen: 0, total: 1 };
+    mockItems = [item('a')];
+  });
+
+  it('draws the number inside the poster box, not in a column before it', async () => {
+    mockView = view({ order_style: 'ranked' });
+    const screen = await open();
+    await waitFor(() => screen.getByText('Film a'));
+
+    const anchor = screen.getByTestId('list-poster-anchor-a');
+    const plate = screen.getByTestId('list-number-a');
+    // The plate is a child of the poster's own box, positioned against it.
+    expect(within(anchor).getByTestId('list-number-a')).toBe(plate);
+    const style = StyleSheet.flatten(plate.props.style) as Record<string, unknown>;
+    expect(style.position).toBe('absolute');
+    expect(style).toMatchObject({ left: 0, right: 0, alignItems: 'center' });
+  });
+
+  it('keeps the poster box the same size when the list is not numbered', async () => {
+    mockView = view({ order_style: 'unranked' });
+    const screen = await open();
+    await waitFor(() => screen.getByText('Film a'));
+
+    expect(screen.queryByTestId('list-number-a')).toBeNull();
+    const style = StyleSheet.flatten(screen.getByTestId('list-poster-anchor-a').props.style);
+    expect(style).toMatchObject({ width: 38, height: 57 });
   });
 });
