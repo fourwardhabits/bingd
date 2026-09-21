@@ -48,17 +48,15 @@ describe('titleCountLabel', () => {
 });
 
 describe('the visibility vocabulary', () => {
-  it('uses the picker’s own words, shortened, for the chips', () => {
-    // §I: the chip has to be recognisable as the choice that was made, which is only
-    // possible if it speaks the picker's language.
+  it('uses the picker’s own words for the chips: Only you / Anyone with the link / Public', () => {
+    // §I, and founder QA 2026-09-21: the chip has to be recognisable as the choice that
+    // was made, so it is the picker's own words, unshortened.
     expect(VISIBILITY_CHIP).toEqual({
       private: 'Only you',
-      link: 'Link',
-      public: 'Profile',
+      link: 'Anyone with the link',
+      public: 'Public',
     });
-    expect(VISIBILITY_OPTION.private).toBe('Only you');
-    expect(VISIBILITY_OPTION.link).toBe('Anyone with the link');
-    expect(VISIBILITY_OPTION.public).toBe('On your profile');
+    expect(VISIBILITY_OPTION).toEqual(VISIBILITY_CHIP);
   });
 });
 

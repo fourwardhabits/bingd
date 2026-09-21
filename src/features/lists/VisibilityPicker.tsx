@@ -22,7 +22,53 @@ export function linkConsentBody(profilePrivate: boolean): string {
     : first;
 }
 
-export const LINK_CONSENT_TITLE = 'Anyone with this link can view this list.';
+/**
+ * The confirmation for a change of who can see a list — **a question as the title, the
+ * consequence as the body, and the act as the button** (founder QA, 2026-09-21).
+ *
+ * The old prompt had the same sentence as its title and its body, and a button that
+ * named nothing the title asked. Each target now gets its own:
+ *
+ *   link     Make this list link-only?   Anyone with this link will be able to view the
+ *                                        list. It won't appear as a public list on your
+ *                                        profile.                     Cancel / Make link-only
+ *   public   Make this list public?      It will appear on your profile, and anyone who
+ *                                        can see your profile can view it.
+ *                                                                        Cancel / Make public
+ *   private  Make this list private?     Only you will be able to see it. Anyone you sent
+ *                                        the link to will lose access.  Cancel / Make private
+ *
+ * A private-profile owner making a list link-only also hears the reassuring fact
+ * (`linkConsentBody`): the link grants this list and nothing else about the account.
+ */
+export function visibilityChangeDialog(
+  to: ListVisibility,
+  profilePrivate: boolean,
+): { title: string; body: string; confirm: string } {
+  switch (to) {
+    case 'link':
+      return {
+        title: 'Make this list link-only?',
+        body:
+          "Anyone with this link will be able to view the list. It won't appear as a public list on your profile." +
+          (profilePrivate ? "\nThey won't see your profile, ratings or other lists." : ''),
+        confirm: 'Make link-only',
+      };
+    case 'public':
+      return {
+        title: 'Make this list public?',
+        body: 'It will appear on your profile, and anyone who can see your profile can view it.',
+        confirm: 'Make public',
+      };
+    case 'private':
+    default:
+      return {
+        title: 'Make this list private?',
+        body: 'Only you will be able to see it. Anyone you sent the link to will lose access.',
+        confirm: 'Make private',
+      };
+  }
+}
 
 export type VisibilityPickerProps = {
   value: ListVisibility;

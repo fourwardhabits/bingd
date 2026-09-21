@@ -216,16 +216,22 @@ describe("somebody else's list", () => {
     mockProgress = { seen: 5, total: 14 };
   });
 
-  it('attributes it, without saying which mode it is in', async () => {
+  it('attributes it, and says what the Share control already implied', async () => {
     const screen = await open();
 
     await waitFor(() => screen.getByText('Best breakup movies'));
     screen.getByText('Maya Chen · @maya');
-    // A viewer is deliberately not told whether they are reading a public or a
-    // link-only list.
-    for (const chip of ['Only you', 'Link', 'Profile']) {
-      expect(screen.queryByText(chip)).toBeNull();
-    }
+    // Founder QA 2026-09-21: "X/N watched · Public/Link · Updated …". A viewer's
+    // shareable_by_viewer is true exactly when the list is public, and Share has always
+    // followed it, so the word discloses nothing new. Never "Only you" to a viewer.
+    screen.getByText('Anyone with the link');
+    expect(screen.queryByText('Only you')).toBeNull();
+  });
+
+  it('says Public on a public list', async () => {
+    mockView = view({ shareable_by_viewer: true });
+    const screen = await open();
+    await waitFor(() => screen.getByText('Public'));
   });
 
   it('marks a private owner with a lock, and still leads to the locked shell', async () => {
@@ -244,10 +250,11 @@ describe("somebody else's list", () => {
     );
   });
 
-  it('shows the progress line as plain text, and never as a bar', async () => {
+  it('shows the progress in the metadata as plain text, and never as a bar', async () => {
     const screen = await open();
 
-    await waitFor(() => screen.getByText(/You’ve seen 5 of 14/));
+    await waitFor(() => screen.getByText('5/14 watched'));
+    expect(screen.queryByText(/You’ve seen/)).toBeNull();
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.queryByText(/%/)).toBeNull();
   });
@@ -275,7 +282,15 @@ describe("somebody else's list", () => {
     const screen = await open();
 
     await waitFor(() => screen.getByText('Best breakup movies'));
-    expect(screen.queryByLabelText(/^Share /)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Share list' })).toBeNull();
+  });
+
+  it('gives a viewer no reorder, no remove and no row menu', async () => {
+    const screen = await open();
+
+    await waitFor(() => screen.getByText('Film a'));
+    expect(screen.queryByLabelText('Options for Film a')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add titles' })).toBeNull();
   });
 
   it('offers Report rather than Edit', async () => {
@@ -285,7 +300,7 @@ describe("somebody else's list", () => {
     await fireEvent.press(screen.getByLabelText('More options for Best breakup movies'));
 
     await waitFor(() => screen.getByLabelText('Report list'));
-    expect(screen.queryByLabelText('Edit list')).toBeNull();
+    expect(screen.queryByLabelText('Edit list settings')).toBeNull();
     expect(screen.queryByLabelText('Delete list')).toBeNull();
   });
 
@@ -323,20 +338,44 @@ describe('your own list', () => {
     mockProgress = { seen: 4, total: 12 };
   });
 
-  it('shows the progress line too, which is the reason to reopen it', async () => {
+  it('reads "4/12 watched · Only you · Updated …" in one metadata line', async () => {
     const screen = await open();
 
     // §Q.5: the headline utility list is the one somebody made for themselves.
-    await waitFor(() => screen.getByText(/You’ve seen 4 of 12/));
+    await waitFor(() => screen.getByText('4/12 watched'));
+    screen.getByText('Only you');
+    screen.getByText(/^Updated /);
+    expect(screen.queryByText(/You’ve seen/)).toBeNull();
   });
 
-  it('suppresses the progress line on an empty list', async () => {
+  it('makes Share list the primary action and Add titles the secondary one', async () => {
+    const screen = await open();
+
+    await waitFor(() => screen.getByRole('button', { name: 'Share list' }));
+    const texts = screen
+      .queryAllByText(/./)
+      .map((node) => String(node.props.children))
+      .filter(Boolean);
+    expect(texts.indexOf('Share list')).toBeLessThan(texts.indexOf('Add titles'));
+  });
+
+  it('opens the settings from the visibility in the metadata', async () => {
+    const screen = await open();
+
+    await waitFor(() => screen.getByLabelText(/^Who can see it: Only you/));
+    await fireEvent.press(screen.getByLabelText(/^Who can see it: Only you/));
+    await waitFor(() => screen.getByText('Edit list settings'));
+  });
+
+  it('counts titles instead of progress on an empty list', async () => {
     mockProgress = { seen: 0, total: 0 };
     mockItems = [];
+    mockView = { ...mockView!, item_count: 0 };
     const screen = await open();
 
     await waitFor(() => screen.getByText('Best breakup movies'));
-    expect(screen.queryByText(/You’ve seen/)).toBeNull();
+    expect(screen.queryByText(/watched$/)).toBeNull();
+    screen.getByText('No titles yet');
   });
 
   it('puts Add titles below the progress and bulk block', async () => {
@@ -360,16 +399,20 @@ describe('your own list', () => {
     await waitFor(() => screen.getByText('Only you'));
   });
 
-  it('asks before turning a private list into a link', async () => {
+  it('asks before turning a private list into a link, with a question and a distinct body', async () => {
     const screen = await open();
 
-    await waitFor(() => screen.getByLabelText('Share Best breakup movies'));
-    await fireEvent.press(screen.getByLabelText('Share Best breakup movies'));
+    await waitFor(() => screen.getByRole('button', { name: 'Share list' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Share list' }));
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    expect(alertSpy.mock.calls.at(-1)?.[0]).toBe(
-      'Anyone with this link can view this list.',
+    const [title, body, actions] = alertSpy.mock.calls.at(-1) ?? [];
+    expect(title).toBe('Make this list link-only?');
+    expect(body).toBe(
+      "Anyone with this link will be able to view the list. It won't appear as a public list on your profile.",
     );
+    expect(body).not.toBe(title);
+    expect((actions as { text: string }[]).map((a) => a.text)).toEqual(['Cancel', 'Make link-only']);
     // The reassurance is absent on a public profile, where it would be a promise the
     // product is not making.
     expect(alertSpy.mock.calls.at(-1)?.[1]).not.toContain("They won't see your profile");
@@ -381,8 +424,8 @@ describe('your own list', () => {
     mockProfile.visibility = 'private';
     const screen = await open();
 
-    await waitFor(() => screen.getByLabelText('Share Best breakup movies'));
-    await fireEvent.press(screen.getByLabelText('Share Best breakup movies'));
+    await waitFor(() => screen.getByRole('button', { name: 'Share list' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Share list' }));
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalled());
     expect(alertSpy.mock.calls.at(-1)?.[1]).toContain("They won't see your profile");
@@ -461,5 +504,112 @@ describe('a list row', () => {
     // §F.11. A column of numbers would quietly turn curation into a ranking the owner
     // did not make.
     expect(screen.queryByText(/\d\.\d/)).toBeNull();
+  });
+});
+
+/**
+ * The owner's ⋯ and the row's ⋯ (founder QA, 2026-09-21): *Edit list settings*, *Share*,
+ * *Delete list*; and *Remove from list* per title.
+ */
+describe('the owner menus', () => {
+  beforeEach(() => {
+    mockView = view({
+      is_owner: true,
+      shareable_by_viewer: true,
+      visibility: 'link',
+      hidden: false,
+      owner: null,
+    });
+    mockItems = [item('a'), item('b', { position: 2, ordinal: 2 })];
+    mockProgress = { seen: 0, total: 2 };
+  });
+
+  it('offers Edit list settings, Share and Delete list', async () => {
+    const screen = await open();
+    await waitFor(() => screen.getByText('Best breakup movies'));
+    await fireEvent.press(screen.getByLabelText('More options for Best breakup movies'));
+
+    await waitFor(() => screen.getByLabelText('Edit list settings'));
+    screen.getByLabelText('Share');
+    screen.getByLabelText('Delete list');
+    expect(screen.queryByLabelText('Who can see it')).toBeNull();
+  });
+
+  it('removes one title from its row menu', async () => {
+    const screen = await open();
+    await waitFor(() => screen.getByLabelText('Options for Film b'));
+    await fireEvent.press(screen.getByLabelText('Options for Film b'));
+    await waitFor(() => screen.getByLabelText('Remove from list'));
+    await fireEvent.press(screen.getByLabelText('Remove from list'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'remove_list_item',
+        expect.objectContaining({ p_list_id: 'list-1', p_media_item_id: 'b' }),
+      ),
+    );
+  });
+});
+
+/**
+ * Reorder on the list's own page (founder QA, 2026-09-21). The drag is a long-press lift
+ * and a finger; the same moves are accessibility actions on each row, which is how they
+ * are driven here. The arithmetic of the drag itself is `reorder.test.ts`.
+ */
+describe('reordering a numbered list', () => {
+  beforeEach(() => {
+    mockView = view({
+      is_owner: true,
+      shareable_by_viewer: false,
+      visibility: 'private',
+      hidden: false,
+      order_style: 'ranked',
+      owner: null,
+    });
+    mockItems = [
+      item('a'),
+      item('b', { position: 2, ordinal: 2 }),
+      item('c', { position: 3, ordinal: 3 }),
+    ];
+    mockProgress = { seen: 0, total: 3 };
+  });
+
+  const rowLabel = (screen: Awaited<ReturnType<typeof open>>, id: string) =>
+    screen.getByLabelText(new RegExp(`^\\d+\\. Film ${id} `));
+
+  it('commits one move naming one title and its new index, and renumbers at once', async () => {
+    const screen = await open();
+    await waitFor(() => screen.getByText('Film a'));
+
+    await fireEvent(rowLabel(screen, 'a'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'moveToBottom' },
+    });
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'move_list_item',
+        expect.objectContaining({ p_list_id: 'list-1', p_media_item_id: 'a', p_to_index: 2 }),
+      ),
+    );
+    // The numbers follow the drawn order: Film a is now third, before any refetch.
+    await waitFor(() => screen.getByLabelText(/^3\. Film a /));
+    screen.getByLabelText(/^1\. Film b /);
+  });
+
+  it('offers no move up on the first row and no move down on the last', async () => {
+    const screen = await open();
+    await waitFor(() => screen.getByText('Film a'));
+
+    const first = rowLabel(screen, 'a').props.accessibilityActions.map((a: { name: string }) => a.name);
+    const last = rowLabel(screen, 'c').props.accessibilityActions.map((a: { name: string }) => a.name);
+    expect(first).not.toContain('moveUp');
+    expect(last).not.toContain('moveDown');
+  });
+
+  it('numbers only a numbered list', async () => {
+    mockView = { ...mockView!, order_style: 'unranked' };
+    const screen = await open();
+    await waitFor(() => screen.getByText('Film a'));
+    expect(screen.queryByLabelText(/^1\. Film a /)).toBeNull();
   });
 });

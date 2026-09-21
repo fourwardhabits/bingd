@@ -22,16 +22,16 @@ export type ListOrderStyle = 'ranked' | 'unranked';
  */
 export const VISIBILITY_CHIP: Record<ListVisibility, string> = {
   private: 'Only you',
-  link: 'Link',
-  public: 'Profile',
+  link: 'Anyone with the link',
+  public: 'Public',
 };
 
-/** The picker's full option labels, of which the chips above are the short forms. */
-export const VISIBILITY_OPTION: Record<ListVisibility, string> = {
-  private: 'Only you',
-  link: 'Anyone with the link',
-  public: 'On your profile',
-};
+/**
+ * The picker's option labels — the same three words as the chip (founder QA, 2026-09-21:
+ * Only you / Anyone with the link / Public), so the metadata line and the choice that set
+ * it cannot be read as two different things.
+ */
+export const VISIBILITY_OPTION: Record<ListVisibility, string> = VISIBILITY_CHIP;
 
 export const VISIBILITY_ICON: Record<
   ListVisibility,

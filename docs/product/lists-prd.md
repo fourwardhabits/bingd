@@ -1232,3 +1232,65 @@ reviewed 2026-09-19 against current product behaviour. The two findings that dec
 **every product that puts lists on the profile has no separate library tab**, and
 **Spotify — the one product that shares bingd's split — manages in Library and displays on
 the profile.**
+
+---
+
+## R. Founder delta QA, 2026-09-21 — what changed, and the Feed direction
+
+### R.1 Decisions that supersede earlier sections
+
+These reverse or amend §G, §H, §I and §Q.6 for the #196 candidate. Where they disagree,
+this section wins.
+
+1. **Collection entry (supersedes §Q.6.1, §Q.2).** Lists is the third option of
+   Collection's selector — **Movies / TV / Lists** — and a first-class mode, remembered
+   under the same device preference as Movies/TV. It is still not a segment and not a
+   bottom tab: in Lists mode the Watched/Watchlist/Unranked tabs are not drawn, because a
+   list mixes media. The `My lists ›` link is gone. Profile keeps its public Lists shelf
+   and `Manage ›` still pushes `/lists`. `my_lists_opened.entry = collection` now means
+   the mode was opened.
+2. **Covers (supersedes the always-2×2 rule).** No posters → neutral placeholder with a
+   list glyph; 1–3 → the first poster, full cover; 4+ → the 2×2 mosaic of the first four.
+   One component (`ListCover`) for My lists, the Profile shelf and all-lists-by.
+3. **List page (supersedes §H's header and §Q.6.4's progress line).** Primary **Share
+   list**, secondary **Add titles**. One metadata line: owner `3/3 watched · Only you ·
+   Updated today`; viewer `X/N watched · Public | Anyone with the link · Updated …`. The
+   viewer's word is derived from `shareable_by_viewer`, which is true for a viewer exactly
+   when the list is public, so it discloses nothing the Share control did not. The
+   "You've seen X of N" line is removed. Tapping the owner's visibility opens settings.
+4. **Privacy words.** Only you / Anyone with the link / Public, identical in the chip,
+   the picker and the metadata.
+5. **Visibility dialogs.** A question as the title, the consequence as the body, the act
+   as the button — *Make this list link-only?* / *Make this list public?* / *Make this
+   list private?* (`visibilityChangeDialog`). Used by Share-on-private and by saving a
+   changed visibility in settings.
+6. **Owner ⋯:** Edit list settings (title, description, Numbered, privacy — no ordering,
+   no delete), Share, Delete list (its own confirmation).
+7. **Reorder (supersedes §Q.6.5 "no long-press" for the list page only).** Long-press a
+   row on the list's own page to lift it, drag, drop. The rows between make room as the
+   lifted row crosses their middle; the drop commits one `move_list_item` (one title, its
+   new index; last-move-wins, as before). Core RN responder system + `Animated`; no new
+   dependency, no new binary. The same moves are accessibility actions on each row.
+   Collection rows still have no long-press (§Q.7 unchanged).
+8. **Numbers** on a numbered list follow the drawn order, on the main page, the public
+   page and the link page, and update the moment a drop lands.
+9. **Remove a title:** per-row ⋯ → *Remove from list* (owner only).
+
+### R.2 Future list Feed events — direction only, NOT built
+
+Nothing here is implemented; `list_created` / `list_added` stay writer-less (§D). When
+lists ever reach the Feed, the rules are:
+
+- **Private (Only you): never** produces a Feed event, of any kind, at any time.
+- **Link-only: never automatically.** A link is a share the owner handed to specific
+  people; broadcasting it would turn every link into a public list.
+- **Public: exactly one event, when the list first becomes public** (created public, or
+  changed to public for the first time). Not again on a later private → public flip, and
+  never retracted-and-reposted by toggling.
+- **No per-title posts.** Adding titles to a list never writes an event; a list is one
+  thing in the Feed, not a stream of additions.
+- **Later, an explicit "Share to Feed"** action may let the owner post a public list
+  deliberately (for example after adding a batch). It would be a user act with its own
+  button, never a side effect of an edit.
+- The Feed card would carry only what the public list page shows (title, cover, count,
+  owner) and would follow `can_i_view` like every other event.

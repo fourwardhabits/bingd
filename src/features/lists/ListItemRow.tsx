@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, type AccessibilityActionEvent } from 'react-native';
 
 import { Poster, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -19,6 +19,20 @@ export type ListItemRowProps = {
    */
   onToggleWatchlist?: () => void;
   busy?: boolean;
+  /**
+   * The number drawn when the list is numbered. Defaults to the server's ordinal; the
+   * list page passes the row's place in the order it is drawing, so the numbers follow
+   * a drag the moment it lands rather than when the refetch does.
+   */
+  number?: number;
+  /** The owner's lift for drag-to-reorder. Absent for a viewer. */
+  onLongPress?: () => void;
+  onPressOut?: () => void;
+  /** The owner's per-row ⋯ (*Remove from list*). Absent for a viewer. */
+  onMore?: () => void;
+  /** The same moves as the drag, reachable without it (owner only). */
+  accessibilityActions?: { name: string; label: string }[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
 };
 
 /**
@@ -48,7 +62,14 @@ export function ListItemRow({
   onPress,
   onToggleWatchlist,
   busy = false,
+  number,
+  onLongPress,
+  onPressOut,
+  onMore,
+  accessibilityActions,
+  onAccessibilityAction,
 }: ListItemRowProps) {
+  const shown = number ?? item.ordinal;
   const detail = [item.year, KIND_LABEL[item.kind]].filter(Boolean).join(' · ');
   const seen = item.seen === true;
 
@@ -56,7 +77,7 @@ export function ListItemRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={[
-        showNumber ? `${item.ordinal}.` : null,
+        showNumber ? `${shown}.` : null,
         item.name,
         detail,
         seen ? 'Seen' : null,
@@ -64,6 +85,11 @@ export function ListItemRow({
         .filter(Boolean)
         .join(' ')}
       onPress={onPress}
+      onLongPress={onLongPress}
+      onPressOut={onPressOut}
+      delayLongPress={350}
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={onAccessibilityAction}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       {showNumber ? (
@@ -74,7 +100,7 @@ export function ListItemRow({
           // Spoken as part of the row's own label above, so it is not met twice.
           accessibilityElementsHidden
         >
-          {item.ordinal}
+          {shown}
         </Text>
       ) : null}
 
@@ -122,6 +148,22 @@ export function ListItemRow({
         // aligned whether or not a control is drawn.
         <View style={styles.spacer} />
       )}
+
+      {onMore ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Options for ${item.name}`}
+          hitSlop={theme.space[2]}
+          onPress={onMore}
+          testID={`list-item-more-${item.mediaItemId}`}
+        >
+          <Ionicons
+            name="ellipsis-horizontal"
+            size={theme.layout.icon.md}
+            color={theme.text.tertiary}
+          />
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }

@@ -1,7 +1,7 @@
 import { renderWithProviders } from '@/test-utils/render';
 
 import { ListRow } from './ListRow';
-import { ListCover } from './ListCover';
+import { coverLayout, ListCover } from './ListCover';
 import type { MyListSummary } from './types';
 
 /**
@@ -63,8 +63,8 @@ describe('the row', () => {
     // the three words are the picker's own, so the chip is recognisable as the choice.
     for (const [visibility, word] of [
       ['private', 'Only you'],
-      ['link', 'Link'],
-      ['public', 'Profile'],
+      ['link', 'Anyone with the link'],
+      ['public', 'Public'],
     ] as const) {
       const view = await open(summary({ visibility }));
       view.getByText(word);
@@ -74,7 +74,7 @@ describe('the row', () => {
   it('says a moderation-hidden list is hidden, in place of its mode', async () => {
     const view = await open(summary({ visibility: 'public', hidden: true }));
     view.getByText('Hidden');
-    expect(view.queryByText('Profile')).toBeNull();
+    expect(view.queryByText('Public')).toBeNull();
   });
 
   it('carries no controls at all', async () => {
@@ -85,29 +85,36 @@ describe('the row', () => {
 
   it('is spoken as one sentence rather than as four results', async () => {
     const view = await open(summary({ orderStyle: 'ranked', visibility: 'link' }));
-    view.getByLabelText('Best breakup movies. 14 titles. Numbered. Link. Updated Sep 12');
+    view.getByLabelText('Best breakup movies. 14 titles. Numbered. Anyone with the link. Updated Sep 12');
   });
 });
 
-describe('the cover', () => {
-  it('always draws four cells, so a short list reads as short', async () => {
-    const view = await renderWithProviders(
-      <ListCover posterUris={['https://x/1.jpg']} size={64} />,
-    );
-    expect(hidden(view, 'list-cover-poster')).toHaveLength(1);
-    expect(hidden(view, 'list-cover-empty')).toHaveLength(3);
+describe('the cover (founder QA, 2026-09-21)', () => {
+  const uris = (n: number) => Array.from({ length: n }, (_, i) => `https://x/${i + 1}.jpg`);
+
+  it('picks the layout from the poster count', () => {
+    expect(coverLayout(0)).toBe('empty');
+    expect(coverLayout(1)).toBe('single');
+    expect(coverLayout(3)).toBe('single');
+    expect(coverLayout(4)).toBe('mosaic');
+    expect(coverLayout(9)).toBe('mosaic');
   });
 
-  it('takes at most four, whatever it is handed', async () => {
-    const view = await renderWithProviders(
-      <ListCover posterUris={['1', '2', '3', '4', '5'].map((n) => `https://x/${n}.jpg`)} size={64} />,
-    );
+  it('draws one to three posters as the first poster, full cover', async () => {
+    const view = await renderWithProviders(<ListCover posterUris={uris(3)} size={64} />);
+    expect(hidden(view, 'list-cover-poster')).toHaveLength(1);
+    expect(hidden(view, 'list-cover-empty')).toHaveLength(0);
+  });
+
+  it('draws four or more as a 2×2 mosaic of the first four', async () => {
+    const view = await renderWithProviders(<ListCover posterUris={uris(5)} size={64} />);
     expect(hidden(view, 'list-cover-poster')).toHaveLength(4);
   });
 
-  it('draws the empty frame for a list with nothing in it', async () => {
+  it('draws a neutral placeholder for a list with nothing in it', async () => {
     const view = await renderWithProviders(<ListCover posterUris={[]} size={64} />);
-    expect(hidden(view, 'list-cover-empty')).toHaveLength(4);
+    expect(hidden(view, 'list-cover-empty')).toHaveLength(1);
+    expect(hidden(view, 'list-cover-poster')).toHaveLength(0);
     // Still a shape: a transparent square would leave the row's lines unattached.
     expect(hidden(view, 'list-cover')).toHaveLength(1);
   });

@@ -132,8 +132,8 @@ describe('the three states', () => {
     const view = await open();
 
     await waitFor(() => view.getByText('Oscar catch-up'));
-    view.getByText('Link');
-    view.getByText('Profile');
+    view.getByText('Anyone with the link');
+    view.getByText('Public');
     // Three lists carry a `Numbered`-less state; the two ranked ones carry it.
     expect(view.queryAllByText('Numbered')).toHaveLength(2);
   });

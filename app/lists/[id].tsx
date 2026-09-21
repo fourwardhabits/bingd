@@ -1,8 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Platform, Pressable, Share, StyleSheet, View } from 'react-native';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  Alert,
+  Animated,
+  FlatList,
+  Platform,
+  Pressable,
+  Share,
+  StyleSheet,
+  View,
+  type ViewProps,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
@@ -10,14 +28,28 @@ import { AddTitlesSheet } from '@/features/lists/AddTitlesSheet';
 import { EditListSheet } from '@/features/lists/EditListSheet';
 import { ChipDot, VisibilityChip } from '@/features/lists/ListChips';
 import { ListItemRow } from '@/features/lists/ListItemRow';
+import { reorder, shiftFor, targetIndex } from '@/features/lists/reorder';
 import { listShareMessage, listUrl } from '@/features/lists/share';
-import { titleCountLabel, updatedLabel } from '@/features/lists/types';
+import {
+  titleCountLabel,
+  updatedLabel,
+  VISIBILITY_CHIP,
+  type ListItem,
+} from '@/features/lists/types';
 import { useListItems, useListProgress, useListView } from '@/features/lists/use-lists';
-import { LINK_CONSENT_TITLE, linkConsentBody } from '@/features/lists/VisibilityPicker';
-import { addListToWatchlist, bulkWatchlistMessage, updateList } from '@/features/lists/writes';
+import { visibilityChangeDialog } from '@/features/lists/VisibilityPicker';
+import {
+  addListToWatchlist,
+  bulkWatchlistMessage,
+  deleteList,
+  moveListItem,
+  removeListItem,
+  updateList,
+} from '@/features/lists/writes';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { track, type ListOpenSurface } from '@/lib/analytics';
 import { queryKeys } from '@/lib/query';
+import { hapticDecision } from '@/ui/haptics';
 import {
   Avatar,
   Button,
@@ -38,31 +70,51 @@ const SURFACES: readonly ListOpenSurface[] = [
   'title_menu',
 ];
 
+/** A row not measured yet counts as this tall while it is dragged past. */
+const ROW_FALLBACK = 72;
+
+/** What the list's ⋯ was closed on its way to, run once iOS has finished dismissing it. */
+type MenuIntent = 'settings' | 'share' | 'delete' | 'report';
+
+/** The row being lifted, for the cell wrapper that raises it above its neighbours. */
+const LiftedRow = createContext<number | null>(null);
+
 /**
  * `https://bingd.app/lists/<id>` — one list, for whoever may read it.
  *
  * ---------------------------------------------------------------------------
- * ONE SCREEN, TWO READERS
+ * ONE SCREEN, TWO READERS (founder QA, 2026-09-21)
  *
- * The owner gets Edit, Share, Who can see it and Delete, an `Add titles` button, and a
- * visibility chip. A viewer gets attribution, a Share control **only when the list is
- * public**, and Report. Everything else — the progress line, the seen marks, the
- * bookmarks, the bulk add — is identical, because all of it is about *the reader*.
+ * The header reads **what → where you are → what you can do**: the name, attribution for
+ * a viewer, the description, then one metadata line — `3/3 watched · Only you · Updated
+ * today` — and then the actions: **Share list** as the primary control and **Add titles**
+ * as the secondary one for the owner. The separate "You've seen…" line is gone; the
+ * watched count lives in the metadata.
+ *
+ * The owner's ⋯ holds *Edit list settings*, *Share* and *Delete list*. The visibility in
+ * the metadata line opens the settings too, because tapping the thing you want to change
+ * is the shortest path to changing it.
+ *
+ * A viewer sees `Public` or `Anyone with the link` in the same slot. That discloses
+ * nothing the screen did not already: `shareable_by_viewer` is true for a viewer exactly
+ * when the list is public, and the Share control has always followed it.
  *
  * ---------------------------------------------------------------------------
- * THE HEADER READS TOP TO BOTTOM AS WHAT → HOW YOU ARE DOING → WHAT YOU CAN DO
+ * THE ORDER IS CHANGED WHERE IT IS READ
  *
- * Name, attribution, description, facts, progress, then the actions. **`Add titles`
- * sits below the progress and bulk block, not above it** (§H): it puts the owner's two
- * actions next to each other instead of separating them with a stat line.
+ * The owner long-presses a row to lift it, drags, and drops; the rows between make room
+ * as it passes their middle, and the drop commits one `move_list_item` naming one title
+ * and its new index — last-move-wins across devices, as every move always was (§E). The
+ * numbers on a numbered list follow the drawn order, so they update the moment the row
+ * lands. The same moves are accessibility actions on each row. It is core React Native —
+ * the gesture responder system and `Animated` — and needs no new native code.
  *
  * ---------------------------------------------------------------------------
  * EVERY REFUSAL IS THE SAME SCREEN
  *
  * `useListView` resolves `null` for private, deleted, hidden, suspended, blocked and
  * "no such uuid" alike, and this draws one unavailable state for all of them. It never
- * says which — §F is explicit that ❌ is one answer, and a screen that distinguished
- * them would be the oracle the whole model is written to avoid.
+ * says which — §F is explicit that ❌ is one answer.
  */
 export default function ListScreen() {
   const router = useRouter();
@@ -76,6 +128,7 @@ export default function ListScreen() {
   const progress = useListProgress(listId, Boolean(list.data));
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [rowMenu, setRowMenu] = useState<ListItem | null>(null);
   const [editing, setEditing] = useState(false);
   const [addingTitles, setAddingTitles] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -84,20 +137,30 @@ export default function ListScreen() {
   const [notice, setNotice] = useState<string | null>(null);
 
   /**
-   * Whether the options sheet was closed on its way to the report sheet.
+   * Where the ⋯ was going when it closed.
    *
-   * A ref rather than state: iOS will not present a sheet while it is dismissing
-   * another from the same presenter, and the result is a transparent window that
-   * swallows every touch (`Sheet.onDismissed`, and the reproduced 2026-09-10 freeze).
-   * So the menu closes, this remembers where it was going, and `onDismissed` opens the
-   * report sheet once UIKit has finished. Android fires no dismissal and goes straight
-   * across, which is correct rather than a gap — an Android modal is a view in the same
-   * window and has no presentation to serialise against.
+   * iOS will not present a sheet — or an alert, or the share sheet — while it is
+   * dismissing another from the same presenter, and the result is a transparent window
+   * that swallows every touch (`Sheet.onDismissed`, the 2026-09-10 freeze). So the menu
+   * closes, this remembers the intent, and `onDismissed` runs it once UIKit has finished.
+   * Android has no presentation to serialise against and goes straight across.
    */
-  const reportPending = useRef(false);
+  const menuIntent = useRef<MenuIntent | null>(null);
 
   const rows = useMemo(() => items.data?.pages.flat() ?? [], [items.data]);
   const presentIds = useMemo(() => new Set(rows.map((row) => row.mediaItemId)), [rows]);
+
+  /**
+   * The order a drop produced, until the refetch that confirms it arrives. Tagged with the
+   * data it was computed from, so the next read replaces it without an effect.
+   */
+  const [localOrder, setLocalOrder] = useState<{ basis: unknown; ids: string[] } | null>(null);
+  const ordered = useMemo(() => {
+    if (!localOrder || localOrder.basis !== items.data) return rows;
+    const byId = new Map(rows.map((row) => [row.mediaItemId, row]));
+    return localOrder.ids.map((rowId) => byId.get(rowId)).filter((row): row is ListItem => Boolean(row));
+  }, [localOrder, rows, items.data]);
+  const [moving, setMoving] = useState(false);
 
   const view = list.data ?? null;
 
@@ -115,8 +178,7 @@ export default function ListScreen() {
         is_owner: view.isOwner,
         relation: view.isOwner ? 'self' : 'other',
         // Only the owner is told which of the two modes a non-private list is in, so
-        // only the owner can report it. `undefined` is dropped by `sanitize`, which is
-        // how "not known" is said here rather than by inventing a value.
+        // only the owner can report it. `undefined` is dropped by `sanitize`.
         visibility_class:
           view.isOwner && view.visibility && view.visibility !== 'private'
             ? view.visibility
@@ -138,7 +200,13 @@ export default function ListScreen() {
   // Sharing
   // -------------------------------------------------------------------------
 
-  const share = async (visibility: 'link' | 'public', isOwner: boolean, itemCount: number, title: string, targetId: string) => {
+  const share = async (
+    visibility: 'link' | 'public',
+    isOwner: boolean,
+    itemCount: number,
+    title: string,
+    targetId: string,
+  ) => {
     track({ name: 'list_shared', props: { visibility, item_count: itemCount, is_owner: isOwner } });
     try {
       await Share.share({
@@ -151,21 +219,20 @@ export default function ListScreen() {
   };
 
   /**
-   * Share on a **private** list is a consent gate, not a share (§F.5).
-   *
-   * The person asked to share; converting the list to link-only is a consequence they
-   * did not name, so it is confirmed before it happens. The second line appears only
-   * for a private-profile owner, where it is the true and reassuring fact.
+   * Share on a **private** list is a consent gate, not a share (§F.5): converting it to
+   * link-only is a consequence the person did not name, so it is asked first — with a
+   * question for a title and the consequence as the body (`visibilityChangeDialog`).
    */
   const shareOrAsk = () => {
     if (!view) return;
     const current = view;
 
     if (current.isOwner && current.visibility === 'private') {
-      Alert.alert(LINK_CONSENT_TITLE, linkConsentBody(profile.visibility === 'private'), [
+      const dialog = visibilityChangeDialog('link', profile.visibility === 'private');
+      Alert.alert(dialog.title, dialog.body, [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Make link-only',
+          text: dialog.confirm,
           onPress: () => {
             void (async () => {
               const result = await updateList({
@@ -209,6 +276,51 @@ export default function ListScreen() {
     );
   };
 
+  const confirmDelete = () => {
+    if (!view) return;
+    const current = view;
+    Alert.alert(
+      `Delete "${current.title}"?`,
+      'This cannot be undone, and the link stops working for everybody who has it.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              const result = await deleteList({ operationId: newOperationId(), listId: current.id });
+              if (result.outcome === 'failed') {
+                Alert.alert('Could not delete this list', result.message);
+                if (result.changed) refetchAll();
+                return;
+              }
+              refetchAll();
+              router.back();
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const runIntent = (intent: MenuIntent) => {
+    if (intent === 'settings') setEditing(true);
+    else if (intent === 'share') shareOrAsk();
+    else if (intent === 'delete') confirmDelete();
+    else setReporting(true);
+  };
+
+  const fromMenu = (intent: MenuIntent) => {
+    if (Platform.OS === 'ios') {
+      menuIntent.current = intent;
+      setMenuOpen(false);
+    } else {
+      setMenuOpen(false);
+      runIntent(intent);
+    }
+  };
+
   // -------------------------------------------------------------------------
   // The Watchlist, one title and all of them
   // -------------------------------------------------------------------------
@@ -225,9 +337,7 @@ export default function ListScreen() {
       Alert.alert('Could not update watchlist', result.message);
       return;
     }
-    // Only an add is an event, and only after the server said yes. A removal is not a
-    // `watchlist_added`, and the per-title event stays separate from the bulk one so
-    // that one tap adding nine titles cannot read as nine deliberate saves.
+    // Only an add is an event, and only after the server said yes.
     if (!present) track({ name: 'watchlist_added', props: { surface: 'list' } });
     if (listId) void queryClient.invalidateQueries({ queryKey: queryKeys.listItems(listId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
@@ -253,6 +363,103 @@ export default function ListScreen() {
     setNotice(bulkWatchlistMessage(result));
     if (listId) void queryClient.invalidateQueries({ queryKey: queryKeys.listItems(listId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
+  };
+
+  // -------------------------------------------------------------------------
+  // The owner's order: move and remove
+  // -------------------------------------------------------------------------
+
+  const commitMove = async (from: number, to: number) => {
+    if (!view || moving || from === to) return;
+    const item = ordered[from];
+    if (!item) return;
+    setLocalOrder({
+      basis: items.data,
+      ids: reorder(
+        ordered.map((row) => row.mediaItemId),
+        from,
+        to,
+      ),
+    });
+    setMoving(true);
+    const result = await moveListItem({
+      operationId: newOperationId(),
+      listId: view.id,
+      mediaItemId: item.mediaItemId,
+      // Zero-based over the whole list, which is what the server clamps against. The rows
+      // are read from the top in pages, so a row's index here is its index there.
+      toIndex: to,
+    });
+    setMoving(false);
+    if (result.outcome === 'failed') {
+      setLocalOrder(null);
+      Alert.alert('Could not move this', result.message);
+    }
+    refetchAll();
+  };
+
+  const removeItem = async (item: ListItem) => {
+    if (!view) return;
+    const result = await removeListItem({
+      operationId: newOperationId(),
+      listId: view.id,
+      mediaItemId: item.mediaItemId,
+    });
+    if (result.outcome === 'failed') Alert.alert('Could not remove this', result.message);
+    refetchAll();
+  };
+
+  // Drag state. The gesture is the core responder system on the list's container: once a
+  // row has been lifted, the container claims the next move (capture phase, so it wins over
+  // the row's own press and the scroller), follows the finger, and commits on release.
+  const [drag, setDrag] = useState<{ from: number; to: number; height: number } | null>(null);
+  const [dy] = useState(() => new Animated.Value(0));
+  const dragRef = useRef<{
+    from: number;
+    to: number;
+    height: number;
+    startY: number | null;
+  } | null>(null);
+  const heights = useRef<number[]>([]);
+
+  const endDrag = () => {
+    const current = dragRef.current;
+    dragRef.current = null;
+    setDrag(null);
+    dy.setValue(0);
+    if (current && current.startY !== null && current.to !== current.from) {
+      void commitMove(current.from, current.to);
+    }
+  };
+
+  const startDrag = (index: number) => {
+    if (moving) return;
+    const height = heights.current[index] ?? ROW_FALLBACK;
+    dragRef.current = { from: index, to: index, height, startY: null };
+    setDrag({ from: index, to: index, height });
+    hapticDecision();
+  };
+
+  const dragHandlers: ViewProps = {
+    onMoveShouldSetResponderCapture: () => dragRef.current !== null,
+    onMoveShouldSetResponder: () => dragRef.current !== null,
+    onResponderGrant: (event) => {
+      if (dragRef.current) dragRef.current.startY = event.nativeEvent.pageY;
+    },
+    onResponderMove: (event) => {
+      const current = dragRef.current;
+      if (!current || current.startY === null) return;
+      const moved = event.nativeEvent.pageY - current.startY;
+      dy.setValue(moved);
+      const next = targetIndex(heights.current, ordered.length, current.from, moved, ROW_FALLBACK);
+      if (next !== current.to) {
+        current.to = next;
+        setDrag({ from: current.from, to: next, height: current.height });
+      }
+    },
+    onResponderTerminationRequest: () => false,
+    onResponderRelease: () => endDrag(),
+    onResponderTerminate: () => endDrag(),
   };
 
   // -------------------------------------------------------------------------
@@ -282,8 +489,13 @@ export default function ListScreen() {
   }
 
   const owner = view.owner;
-  const unseenCount = rows.filter((row) => row.seen === false && !row.watchlisted).length;
+  const unseenCount = ordered.filter((row) => row.seen === false && !row.watchlisted).length;
   const canShare = view.shareableByViewer || (view.isOwner && view.visibility === 'private');
+  const watched =
+    progress.data && progress.data.total > 0
+      ? `${progress.data.seen}/${progress.data.total} watched`
+      : titleCountLabel(view.itemCount);
+  const numbered = view.orderStyle === 'ranked';
 
   return (
     <Screen includeBottomInset>
@@ -291,165 +503,219 @@ export default function ListScreen() {
         options={{
           title: view.title,
           headerRight: () => (
-            <View style={styles.headerActions}>
-              {canShare ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Share ${view.title}`}
-                  hitSlop={theme.space[2]}
-                  onPress={shareOrAsk}
-                >
-                  <Ionicons
-                    name="share-outline"
-                    size={theme.layout.icon.md}
-                    color={theme.text.primary}
-                  />
-                </Pressable>
-              ) : null}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`More options for ${view.title}`}
-                hitSlop={theme.space[2]}
-                onPress={() => setMenuOpen(true)}
-              >
-                <Ionicons
-                  name="ellipsis-horizontal"
-                  size={theme.layout.icon.md}
-                  color={theme.text.primary}
-                />
-              </Pressable>
-            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`More options for ${view.title}`}
+              hitSlop={theme.space[2]}
+              onPress={() => setMenuOpen(true)}
+            >
+              <Ionicons
+                name="ellipsis-horizontal"
+                size={theme.layout.icon.md}
+                color={theme.text.primary}
+              />
+            </Pressable>
           ),
         }}
       />
 
-      <FlatList
-        data={rows}
-        keyExtractor={(row) => row.mediaItemId}
-        contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          <View style={styles.header}>
-            <Text variant="title1">{view.title}</Text>
+      <LiftedRow.Provider value={drag?.from ?? null}>
+        <View style={styles.fill} {...(view.isOwner ? dragHandlers : {})}>
+          <FlatList
+            data={ordered}
+            keyExtractor={(row) => row.mediaItemId}
+            contentContainerStyle={styles.list}
+            scrollEnabled={drag === null}
+            CellRendererComponent={LiftableCell}
+            ListHeaderComponent={
+              <View style={styles.header}>
+                <Text variant="title1">{view.title}</Text>
 
-            {!view.isOwner && owner ? (
-              <Attribution
-                owner={owner}
-                // A private owner's attribution still leads to their profile route,
-                // which renders the existing locked shell — identity plus a follow
-                // request. The list adds no path around it; the server answers every
-                // profile read with `can_view_profile` exactly as it does today (§F.2).
-                onPress={() => router.push(`/u/${owner.username}`)}
-              />
-            ) : null}
+                {!view.isOwner && owner ? (
+                  <Attribution
+                    owner={owner}
+                    // A private owner's attribution still leads to their profile route,
+                    // which renders the existing locked shell (§F.2).
+                    onPress={() => router.push(`/u/${owner.username}`)}
+                  />
+                ) : null}
 
-            {view.description ? (
-              <Text variant="body" tone="secondary">
-                {view.description}
-              </Text>
-            ) : null}
-
-            <View style={styles.facts}>
-              <Text variant="footnote" tone="secondary">
-                {titleCountLabel(view.itemCount)}
-              </Text>
-              {view.orderStyle === 'ranked' ? (
-                <>
-                  <ChipDot />
-                  <Text variant="footnote" tone="secondary">
-                    Numbered
+                {view.description ? (
+                  <Text variant="body" tone="secondary">
+                    {view.description}
                   </Text>
-                </>
-              ) : null}
-              {view.isOwner && view.visibility ? (
-                <>
+                ) : null}
+
+                <View style={styles.facts} testID="list-metadata">
+                  <Text variant="footnote" tone="secondary">
+                    {watched}
+                  </Text>
                   <ChipDot />
-                  <VisibilityChip visibility={view.visibility} hidden={view.hidden} />
-                </>
-              ) : null}
-              <ChipDot />
-              <Text variant="footnote" tone="tertiary">
-                {updatedLabel(view.updatedAt)}
-              </Text>
-            </View>
+                  {view.isOwner && view.visibility ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Who can see it: ${
+                        view.hidden ? 'Hidden' : VISIBILITY_CHIP[view.visibility]
+                      }. Opens list settings`}
+                      hitSlop={theme.space[2]}
+                      onPress={() => setEditing(true)}
+                    >
+                      <VisibilityChip visibility={view.visibility} hidden={view.hidden} />
+                    </Pressable>
+                  ) : (
+                    <Text variant="footnote" tone="secondary">
+                      {view.shareableByViewer ? VISIBILITY_CHIP.public : VISIBILITY_CHIP.link}
+                    </Text>
+                  )}
+                  <ChipDot />
+                  <Text variant="footnote" tone="tertiary">
+                    {updatedLabel(view.updatedAt)}
+                  </Text>
+                </View>
 
-            {view.hidden ? (
-              <View style={styles.banner} accessibilityRole="alert">
-                <Text variant="footnote" tone="secondary">
-                  This list is hidden while it is reviewed. Only you can see it.
-                </Text>
+                {view.hidden ? (
+                  <View style={styles.banner} accessibilityRole="alert">
+                    <Text variant="footnote" tone="secondary">
+                      This list is hidden while it is reviewed. Only you can see it.
+                    </Text>
+                  </View>
+                ) : null}
+
+                {canShare ? <Button label="Share list" onPress={shareOrAsk} /> : null}
+
+                {view.isOwner ? (
+                  <Button
+                    label="Add titles"
+                    kind="secondary"
+                    onPress={() => setAddingTitles(true)}
+                  />
+                ) : null}
+
+                {unseenCount > 0 ? (
+                  <Button
+                    // "my Watchlist", not "Watchlist": on somebody else's list the bare
+                    // noun is ambiguous about whose it is (§H).
+                    label={bulkBusy ? 'Adding…' : `Add ${unseenCount} unseen to my Watchlist`}
+                    kind="secondary"
+                    onPress={() => void addAllUnseen()}
+                    disabled={bulkBusy}
+                  />
+                ) : null}
+
+                {notice ? (
+                  <Text
+                    variant="footnote"
+                    tone="secondary"
+                    accessibilityRole="alert"
+                    accessibilityLiveRegion="polite"
+                  >
+                    {notice}
+                  </Text>
+                ) : null}
+
+                <Divider />
               </View>
-            ) : null}
-
-            {/* Plain text, one line, no bar (§K, §Q.5). Suppressed on an empty list:
-                "You've seen 0 of 0" is a fact about nothing. */}
-            {progress.data && progress.data.total > 0 ? (
-              <Text variant="callout" tone="secondary">
-                You&rsquo;ve seen {progress.data.seen} of {progress.data.total}
-              </Text>
-            ) : null}
-
-            {unseenCount > 0 ? (
-              <Button
-                // "my Watchlist", not "Watchlist". On somebody else's list the bare
-                // noun is genuinely ambiguous about whose it is, and the one word also
-                // restates the boundary in the place a reader is standing (§H).
-                label={bulkBusy ? 'Adding…' : `Add ${unseenCount} unseen to my Watchlist`}
-                kind="secondary"
-                onPress={() => void addAllUnseen()}
-                disabled={bulkBusy}
-              />
-            ) : null}
-
-            {view.isOwner ? (
-              <Button label="Add titles" onPress={() => setAddingTitles(true)} />
-            ) : null}
-
-            {notice ? (
-              <Text
-                variant="footnote"
-                tone="secondary"
-                accessibilityRole="alert"
-                accessibilityLiveRegion="polite"
-              >
-                {notice}
-              </Text>
-            ) : null}
-
-            <Divider />
-          </View>
-        }
-        ListEmptyComponent={
-          items.isPending ? (
-            <SkeletonRow count={4} />
-          ) : (
-            <EmptyState
-              kind="nothingYet"
-              compact
-              title={view.isOwner ? 'Nothing on this list yet' : 'This list is empty'}
-              body={
-                view.isOwner
-                  ? 'Add the first title and it will show up here.'
-                  : 'There is nothing here to see yet.'
-              }
-            />
-          )
-        }
-        renderItem={({ item }) => (
-          <ListItemRow
-            item={item}
-            showNumber={view.orderStyle === 'ranked'}
-            busy={watchlistBusy === item.mediaItemId}
-            onPress={() => router.push(`/title/${item.mediaItemId}`)}
-            onToggleWatchlist={() =>
-              void toggleWatchlist(item.mediaItemId, item.watchlisted === true)
             }
+            ListEmptyComponent={
+              items.isPending ? (
+                <SkeletonRow count={4} />
+              ) : (
+                <EmptyState
+                  kind="nothingYet"
+                  compact
+                  title={view.isOwner ? 'Nothing on this list yet' : 'This list is empty'}
+                  body={
+                    view.isOwner
+                      ? 'Add the first title and it will show up here.'
+                      : 'There is nothing here to see yet.'
+                  }
+                />
+              )
+            }
+            renderItem={({ item, index }) => {
+              const lifted = drag !== null && drag.from === index;
+              const shift = drag && !lifted ? shiftFor(index, drag.from, drag.to, drag.height) : 0;
+              const last = ordered.length - 1;
+              return (
+                <Animated.View
+                  onLayout={(event) => {
+                    heights.current[index] = event.nativeEvent.layout.height;
+                  }}
+                  style={
+                    lifted
+                      ? [styles.lifted, { transform: [{ translateY: dy }] }]
+                      : shift
+                        ? { transform: [{ translateY: shift }] }
+                        : undefined
+                  }
+                  testID={`list-row-${item.mediaItemId}`}
+                >
+                  <ListItemRow
+                    item={item}
+                    showNumber={numbered}
+                    // The drawn order's number, so a drop renumbers at once (§15).
+                    number={index + 1}
+                    busy={watchlistBusy === item.mediaItemId}
+                    onPress={() => {
+                      if (drag === null) router.push(`/title/${item.mediaItemId}`);
+                    }}
+                    onToggleWatchlist={() =>
+                      void toggleWatchlist(item.mediaItemId, item.watchlisted === true)
+                    }
+                    onLongPress={view.isOwner ? () => startDrag(index) : undefined}
+                    onPressOut={
+                      view.isOwner
+                        ? () => {
+                            // A lift released without moving is not a drop.
+                            if (dragRef.current && dragRef.current.startY === null) endDrag();
+                          }
+                        : undefined
+                    }
+                    onMore={view.isOwner ? () => setRowMenu(item) : undefined}
+                    accessibilityActions={
+                      view.isOwner
+                        ? [
+                            ...(index > 0 ? [{ name: 'moveUp', label: 'Move up' }] : []),
+                            ...(index < last ? [{ name: 'moveDown', label: 'Move down' }] : []),
+                            ...(index > 0 ? [{ name: 'moveToTop', label: 'Move to top' }] : []),
+                            ...(index < last
+                              ? [{ name: 'moveToBottom', label: 'Move to bottom' }]
+                              : []),
+                            { name: 'remove', label: 'Remove from list' },
+                          ]
+                        : undefined
+                    }
+                    onAccessibilityAction={
+                      view.isOwner
+                        ? (event) => {
+                            switch (event.nativeEvent.actionName) {
+                              case 'moveUp':
+                                return void commitMove(index, index - 1);
+                              case 'moveDown':
+                                return void commitMove(index, index + 1);
+                              case 'moveToTop':
+                                return void commitMove(index, 0);
+                              case 'moveToBottom':
+                                return void commitMove(index, last);
+                              case 'remove':
+                                return void removeItem(item);
+                              default:
+                                return undefined;
+                            }
+                          }
+                        : undefined
+                    }
+                  />
+                </Animated.View>
+              );
+            }}
+            onEndReachedThreshold={0.5}
+            onEndReached={() => {
+              if (items.hasNextPage && !items.isFetchingNextPage) void items.fetchNextPage();
+            }}
           />
-        )}
-        onEndReachedThreshold={0.5}
-        onEndReached={() => {
-          if (items.hasNextPage && !items.isFetchingNextPage) void items.fetchNextPage();
-        }}
-      />
+        </View>
+      </LiftedRow.Provider>
 
       {menuOpen ? (
         <Sheet
@@ -457,68 +723,47 @@ export default function ListScreen() {
           onClose={() => setMenuOpen(false)}
           label={`Options for ${view.title}`}
           onDismissed={() => {
-            if (!reportPending.current) return;
-            reportPending.current = false;
-            setReporting(true);
+            const intent = menuIntent.current;
+            menuIntent.current = null;
+            if (intent) runIntent(intent);
           }}
         >
           <View style={styles.menu}>
             {view.isOwner ? (
               <>
                 <SheetRow
-                  icon="create-outline"
-                  label="Edit list"
-                  onPress={() => {
-                    setMenuOpen(false);
-                    setEditing(true);
-                  }}
+                  icon="settings-outline"
+                  label="Edit list settings"
+                  onPress={() => fromMenu('settings')}
                 />
                 {canShare ? (
-                  <SheetRow
-                    icon="share-outline"
-                    label="Share"
-                    onPress={() => {
-                      setMenuOpen(false);
-                      shareOrAsk();
-                    }}
-                  />
+                  <SheetRow icon="share-outline" label="Share" onPress={() => fromMenu('share')} />
                 ) : null}
-                {/* Who can see it opens the same editor. Two rows to one place, because
-                    the two intentions arrive separately — "fix the title" and "change
-                    who sees this" — and a person holding the second should not have to
-                    recognise it as a case of the first. */}
-                <SheetRow
-                  icon="eye-outline"
-                  label="Who can see it"
-                  onPress={() => {
-                    setMenuOpen(false);
-                    setEditing(true);
-                  }}
-                />
                 <SheetRow
                   icon="trash-outline"
                   label="Delete list"
-                  onPress={() => {
-                    setMenuOpen(false);
-                    setEditing(true);
-                  }}
+                  onPress={() => fromMenu('delete')}
                 />
               </>
             ) : (
-              <SheetRow
-                icon="flag-outline"
-                label="Report list"
-                onPress={() => {
-                  if (Platform.OS === 'ios') {
-                    reportPending.current = true;
-                    setMenuOpen(false);
-                  } else {
-                    setMenuOpen(false);
-                    setReporting(true);
-                  }
-                }}
-              />
+              <SheetRow icon="flag-outline" label="Report list" onPress={() => fromMenu('report')} />
             )}
+          </View>
+        </Sheet>
+      ) : null}
+
+      {rowMenu ? (
+        <Sheet visible onClose={() => setRowMenu(null)} label={`Options for ${rowMenu.name}`}>
+          <View style={styles.menu}>
+            <SheetRow
+              icon="remove-circle-outline"
+              label="Remove from list"
+              onPress={() => {
+                const target = rowMenu;
+                setRowMenu(null);
+                void removeItem(target);
+              }}
+            />
           </View>
         </Sheet>
       ) : null}
@@ -526,15 +771,9 @@ export default function ListScreen() {
       {editing ? (
         <EditListSheet
           list={view}
-          items={rows}
           profilePrivate={profile.visibility === 'private'}
           onClose={() => setEditing(false)}
           onChanged={refetchAll}
-          onDeleted={() => {
-            setEditing(false);
-            refetchAll();
-            router.back();
-          }}
         />
       ) : null}
 
@@ -565,15 +804,30 @@ export default function ListScreen() {
 }
 
 /**
+ * A FlatList cell that rises above its neighbours while its row is lifted. Each cell is
+ * its own view, so the row's own `zIndex` cannot reach past the cell it sits in.
+ */
+function LiftableCell({
+  index,
+  style,
+  children,
+  ...rest
+}: ViewProps & { index: number; children?: ReactNode }) {
+  const lifted = useContext(LiftedRow);
+  return (
+    <View {...rest} style={[style, lifted === index ? styles.liftedCell : null]}>
+      {children}
+    </View>
+  );
+}
+
+/**
  * Who a list belongs to.
  *
  * A **lock glyph** when the viewer cannot see the owner's profile, which is the limited
- * identity of §F.2: avatar, display name and handle, and nothing else. The chevron still
- * opens the profile route, where a non-approved viewer meets the existing locked shell
- * rather than a dead end — and the list adds no path around it.
- *
- * There is deliberately no "more lists by…" anywhere on this screen. Holding a link
- * grants one list.
+ * identity of §F.2: avatar, display name and handle, and nothing else. There is
+ * deliberately no "more lists by…" anywhere on this screen. Holding a link grants one
+ * list.
  */
 function Attribution({
   owner,
@@ -613,6 +867,7 @@ function Attribution({
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
   loading: { paddingTop: theme.space[4] },
   list: { paddingBottom: theme.space[8] },
   header: {
@@ -620,7 +875,6 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
     gap: theme.space[3],
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: theme.space[4] },
   facts: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: theme.space[1] },
   banner: {
     padding: theme.space[3],
@@ -636,4 +890,9 @@ const styles = StyleSheet.create({
   attributionName: { flex: 1 },
   menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
   pressed: { opacity: 0.7 },
+  lifted: {
+    backgroundColor: theme.surface.raised,
+    ...theme.elevation.e2,
+  },
+  liftedCell: { zIndex: 10, elevation: 10 },
 });
