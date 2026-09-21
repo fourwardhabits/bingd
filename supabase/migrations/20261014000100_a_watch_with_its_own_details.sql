@@ -198,6 +198,9 @@ declare
   v_result jsonb;
   v_event  uuid;
 begin
+  -- log_rewatch calls the guard too; calling it here as well keeps this writer honest on
+  -- its own (moderation.test.mjs reads each client-callable body for it).
+  perform assert_can_write();
   v_result := log_rewatch(p_operation_id, p_media_item_id, p_watched_on, p_basis);
   v_event := nullif(v_result ->> 'watch_event_id', '')::uuid;
 

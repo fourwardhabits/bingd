@@ -523,6 +523,10 @@ describe('the guard is wired in, not merely present', () => {
     // activity they could already read. Every act a score leads to (`rank_start`,
     // `rank_again`, `set_bucket`) calls the guard itself.
     'public_scores',
+    // 20261014000100. A feed card's own viewing's score and watch number: a stable read
+    // that writes nothing, filtered by can_i_view(actor) exactly as the feed is, so a
+    // suspended caller learns nothing about activity it could not already read.
+    'feed_watch_scores',
     // 20260913000100. The same read as community_score over the whole catalogue: a
     // stable aggregate that writes nothing and takes no subject, so a suspended caller
     // learns nothing it could not learn by asking community_score title by title — and

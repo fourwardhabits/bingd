@@ -96,6 +96,9 @@ const FILES = [
   '20261010000100_a_list_is_a_set_of_titles_you_chose.sql',
   '20261011000100_a_position_two_devices_agree_on.sql',
   '20261012000100_a_read_of_your_own_that_asks_nobody.sql',
+  // Founder delta QA 2026-09-21: the goals FK (PGRST200), per-watch details and
+  // feed_watch_scores. 20261013000100 is reserved by #197 and is not part of this cutover.
+  '20261014000100_a_watch_with_its_own_details.sql',
 ];
 
 /** The head every one of these expects to find, and nothing else. */

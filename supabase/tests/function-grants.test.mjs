@@ -211,6 +211,19 @@ const ALLOWED = {
   'log_rewatch(uuid,uuid,date,watch_date_basis)': ['authenticated'],
   'edit_watch_event(uuid,uuid,date,watch_date_basis)': ['authenticated'],
   'delete_watch_event(uuid,uuid)': ['authenticated'],
+  // 20261014000100 (founder delta QA, 2026-09-21). A viewing's own note and companions:
+  // the rewatch writer with details (log_rewatch plus the details in one transaction) and
+  // the Watch History pencil. Both definer writers that establish ownership of the viewing
+  // and call assert_can_write; companions follow _can_tag, like set_watch_tags. The
+  // details are owner-only reads (RLS through watch_events), never on any public surface.
+  'log_rewatch_with_details(uuid,uuid,date,watch_date_basis,text,uuid[])': ['authenticated'],
+  'set_watch_details(uuid,uuid,text,uuid[])': ['authenticated'],
+  // The same migration. A feed card's own viewing's score, for title_ranked posts on a
+  // title with two or more viewings: a definer read filtered by can_i_view(actor) — the
+  // predicate feed_events_read applies to the activity the caller is already drawing — and
+  // returning only score, band and the watch number. No position, no movement, no date.
+  // Not anon, by public_scores' rule: the signed-out web pages render no activity.
+  'feed_watch_scores(uuid[])': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's
