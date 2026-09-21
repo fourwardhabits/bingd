@@ -7,6 +7,22 @@
     "mailer_otp_exp": 600
   },
 
+  "limits": {
+    "//": "VERIFIED, NEVER APPLIED. Abuse and capacity controls the client depends on, recorded as production had them when read on 2026-09-21 (`supabase config diff`: auth.email.max_frequency 1m0s, auth.rate_limit.email_sent 30). check-auth-config.mjs fails on a difference and --apply refuses to write these: they are founder decisions made in the dashboard, and a repair script that quietly put one back would undo a deliberate raise. To change one, change it in the dashboard AND here (and anything under clientDependsOn) in one reviewed change. The 2026-09-21 signup incident was a client built for a 30-second cooldown against a server enforcing 60, with nothing written down for either to be checked against.",
+    "smtp_max_frequency": {
+      "value": 60,
+      "unit": "seconds between two emails to one address",
+      "clientDependsOn": "app/(auth)/verify.tsx RESEND_COOLDOWN_MS (asserted equal in config/auth-templates.test.mjs)",
+      "onDrift": "The Resend code countdown no longer matches the server. Shorter than the server: the button goes live and every tap before the server's time is refused with over_email_send_rate_limit (the verify screen now re-arms from GoTrue's remaining seconds, so it recovers, but the button still promises a send it cannot make). Longer: people wait for nothing."
+    },
+    "rate_limit_email_sent": {
+      "value": 30,
+      "unit": "auth emails per hour, whole project",
+      "clientDependsOn": "src/features/auth/methods.ts: an over_email_send_rate_limit with no seconds in it is read as this ceiling and answered with 'try again in a few minutes, or continue with Apple or Google'",
+      "onDrift": "Capacity changed without a record. Raising it needs the email provider's own quota to carry the new number (Resend's free plan stops at 100 a day); lowering it blocks more first sign-ins. Either way, update this value in the same change."
+    }
+  },
+
   "//flow": "ONE client call reaches BOTH of these. sendEmailCode calls signInWithOtp with shouldCreateUser: true, and GoTrue picks the template by the address: no account yet -> Confirm signup, account already -> Magic Link. Both are exercised in ordinary use, both must be right, and both codes are verified with the same EmailOtpType ('email') -- which is why verifiedAs is identical below and is not a per-template choice any more.",
 
   "templates": [
