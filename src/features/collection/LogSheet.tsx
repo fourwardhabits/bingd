@@ -1725,7 +1725,7 @@ function Body({
  * Separate so the sheet's own layout stays readable, and because the note is the one
  * control here that is a text field rather than a row.
  */
-function NoteInput({
+export function NoteInput({
   value,
   label,
   onChangeText,

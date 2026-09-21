@@ -46,16 +46,30 @@ const event = (id: string, watchedOn: string, recordedAt: string) => ({
   recordedAt,
 });
 
-const placement = (id: string, createdAt: string, position: number, watchEventId: string | null = null) => ({
+const placement = (
+  id: string,
+  createdAt: string,
+  score: number,
+  kind = 'first',
+  watchEventId: string | null = null,
+) => ({
   id,
-  kind: 'initial',
+  kind,
   outcome: 'placed',
-  position,
+  position: 4,
   categorySize: 11,
   fromPosition: null,
-  score: 8,
+  score,
+  bucket: 'loved',
   watchEventId,
   createdAt,
+});
+
+const post = (createdAt: string, score: number, watchEventId: string | null = null) => ({
+  createdAt,
+  score,
+  bucket: 'loved',
+  watchEventId,
 });
 
 beforeEach(() => {
@@ -63,19 +77,24 @@ beforeEach(() => {
   mockDetails.mockClear();
 });
 
-describe('Watch History — one row per viewing (founder QA, 2026-09-21)', () => {
-  it('has no second logging flow and collapses the ledger to one placement per viewing', async () => {
+describe('Watch History — a historical feed of this title (founder QA, 2026-09-21)', () => {
+  it('shows each watch with the score it had then, never the current one or #X of Y', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
-        count: 1,
-        events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
+        count: 2,
+        events: [
+          event('w1', '2026-09-01', '2026-09-01T10:00:00Z'),
+          event('w2', '2026-09-20', '2026-09-20T10:00:00Z'),
+        ],
         details: new Map(),
         placements: [
-          placement('p3', '2026-09-10T10:00:00Z', 4),
-          placement('p2', '2026-09-05T10:00:00Z', 5),
-          placement('p1', '2026-09-01T10:01:00Z', 8),
+          // A later pure rerank — the current score is 6.1 now.
+          placement('fix', '2026-09-21T10:00:00Z', 6.1, 'correction'),
+          placement('again', '2026-09-20T10:02:00Z', 8.3, 'rewatch', 'w2'),
+          placement('first', '2026-09-01T10:01:00Z', 9.0),
         ],
+        posts: [post('2026-09-01T10:01:00Z', 9.0), post('2026-09-20T10:00:01Z', 8.3, 'w2')],
       },
     });
     const view = await renderWithProviders(<WatchHistoryScreen />);
@@ -83,13 +102,15 @@ describe('Watch History — one row per viewing (founder QA, 2026-09-21)', () =>
     expect(view.queryByText('Add a past watch')).toBeNull();
     expect(view.queryByText('Log another watch')).toBeNull();
     expect(view.getByTestId('watch-date-w1').props.children).toMatch(/\(First watch\)$/);
-    expect(view.getAllByText(/^#\d+ of \d+$/)).toHaveLength(1);
-    expect(view.getByTestId('watch-placement-w1').props.children).toBe('#4 of 11');
-    expect(view.queryByText(/Moved from/)).toBeNull();
-    expect(view.queryByText(/Placed #/)).toBeNull();
+    expect(view.getByTestId('watch-date-w2').props.children).not.toMatch(/First watch/);
+    expect(view.getByTestId('watch-score-w1')).toBeTruthy();
+    expect(view.getByLabelText(/^9\.0 out of 10/)).toBeTruthy();
+    expect(view.getByLabelText(/^8\.3 out of 10/)).toBeTruthy();
+    expect(view.queryByLabelText(/^6\.1 out of 10/)).toBeNull();
+    expect(view.queryByText(/^#\d+ of \d+$/)).toBeNull();
   });
 
-  it('draws each viewing with its own placement, companions and note', async () => {
+  it('draws the companions and the note under the watch that has them', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
@@ -107,23 +128,20 @@ describe('Watch History — one row per viewing (founder QA, 2026-09-21)', () =>
             },
           ],
         ]),
-        placements: [
-          placement('again', '2026-09-20T10:02:00Z', 2, 'w2'),
-          placement('first', '2026-09-01T10:01:00Z', 8),
-        ],
+        placements: [],
+        posts: [],
       },
     });
     const view = await renderWithProviders(<WatchHistoryScreen />);
 
-    expect(view.getByTestId('watch-placement-w1').props.children).toBe('#8 of 11');
-    expect(view.getByTestId('watch-placement-w2').props.children).toBe('#2 of 11');
     expect(view.getByTestId('watch-with-w2').props.children).toBe('With Alex');
     expect(view.getByTestId('watch-note-w2').props.children).toBe('Better the second time.');
-    expect(view.getByTestId('watch-date-w2').props.children).not.toMatch(/First watch/);
     expect(view.queryByTestId('watch-note-w1')).toBeNull();
+    // A title never ranked has no score to draw.
+    expect(view.queryByTestId('watch-score-w1')).toBeNull();
   });
 
-  it('edits a viewing from its pencil, writing only what changed', async () => {
+  it('edits a watch from its small Edit action, through the log sheet\'s own rows', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
@@ -131,19 +149,24 @@ describe('Watch History — one row per viewing (founder QA, 2026-09-21)', () =>
         events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
         details: new Map(),
         placements: [],
+        posts: [],
       },
     });
     const view = await renderWithProviders(<WatchHistoryScreen />);
 
     await fireEvent.press(view.getByTestId('watch-edit-w1'));
-    await fireEvent.changeText(view.getByLabelText('Note'), '  With popcorn.  ');
+    // The same rows as the log sheet, closed until opened.
+    expect(view.getByLabelText(/Who I watched with/)).toBeTruthy();
+    expect(view.getByLabelText(/Watch date/)).toBeTruthy();
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), '  With popcorn.  ');
     await fireEvent.press(view.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
     expect(mockDetails).toHaveBeenCalledWith(
       expect.objectContaining({ watchEventId: 'w1', note: 'With popcorn.', companionIds: [] }),
     );
-    // The date was not touched, so it is not rewritten.
+    // The date was not touched, so it is not rewritten, and nothing is re-ranked.
     expect(mockEdit).not.toHaveBeenCalled();
   });
 });

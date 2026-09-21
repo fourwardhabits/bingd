@@ -2180,8 +2180,10 @@ export default function TitleScreen() {
       {rewatchPhase !== 'closed' ? (
         <LogAnotherWatchSheet
           open={rewatchPhase === 'open'}
-          title={title.title}
+          title={displayTitle ?? title.title}
           mediaItemId={title.id}
+          posterUri={posterUri(title.poster_path, 'card') ?? posterUri(parent?.poster_path ?? null, 'card')}
+          subtitle={year ? String(year) : null}
           onClose={() => {
             pendingRecheck.current = null;
             setRewatchPhase('closed');

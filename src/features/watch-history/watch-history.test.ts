@@ -5,7 +5,7 @@ import {
   labelFor,
   movementDirection,
   movementSentence,
-  placementsByWatch,
+  scoresByWatch,
   watchCountLabel,
   type WatchEvent,
 } from './watch-history';
@@ -157,7 +157,7 @@ describe('movementDirection', () => {
   });
 });
 
-describe('placementsByWatch — one displayed placement per viewing (founder QA, 2026-09-21)', () => {
+describe('scoresByWatch — the opinion held at each watch (founder delta QA, 2026-09-21)', () => {
   const watch = (id: string, recordedAt: string, watchedOn: string | null = null): WatchEvent => ({
     id,
     watchedOn,
@@ -166,48 +166,77 @@ describe('placementsByWatch — one displayed placement per viewing (founder QA,
     recordedAt,
   });
   const placed = (
-    id: string,
+    kind: string,
     createdAt: string,
-    position: number,
+    score: number,
     watchEventId: string | null = null,
-  ) => ({ id, createdAt, position, categorySize: 11, score: 8, watchEventId });
+  ) => ({ kind, createdAt, score, bucket: 'loved', watchEventId });
+  const post = (createdAt: string, score: number, watchEventId: string | null = null) => ({
+    createdAt,
+    score,
+    bucket: 'loved',
+    watchEventId,
+  });
 
-  it('collapses a single viewing with three ledger rows to the newest one', () => {
-    const shown = placementsByWatch(
-      [watch('w1', '2026-09-01T10:00:00Z')],
+  const w1 = watch('w1', '2026-09-01T10:00:00Z');
+  const w2 = watch('w2', '2026-09-10T10:00:00Z');
+  const w3 = watch('w3', '2026-09-20T10:00:00Z');
+
+  it('reads Watch 1 → 9.0, Watch 2 → 8.3, Watch 3 → 8.3, exactly as the Feed does', () => {
+    const shown = scoresByWatch(
+      [w1, w2, w3],
       [
-        placed('p1', '2026-09-01T10:01:00Z', 8),
-        placed('p2', '2026-09-05T10:00:00Z', 5),
-        placed('p3', '2026-09-10T10:00:00Z', 4),
+        placed('first', '2026-09-01T10:01:00Z', 9.0),
+        placed('rewatch', '2026-09-10T10:02:00Z', 8.3, 'w2'),
+        placed('rewatch', '2026-09-20T10:02:00Z', 8.3, 'w3'),
+      ],
+      [
+        post('2026-09-01T10:01:00Z', 9.0),
+        post('2026-09-10T10:00:01Z', 8.3, 'w2'),
+        post('2026-09-20T10:00:01Z', 8.3, 'w3'),
       ],
     );
-    expect(shown.size).toBe(1);
-    expect(shown.get('w1')?.id).toBe('p3');
+    expect([...['w1', 'w2', 'w3']].map((id) => shown.get(id)?.score)).toEqual([9.0, 8.3, 8.3]);
   });
 
-  it('gives each viewing its own span, and a correction after the rewatch updates only the rewatch', () => {
-    const shown = placementsByWatch(
-      [watch('w1', '2026-09-01T10:00:00Z'), watch('w2', '2026-09-20T10:00:00Z')],
+  it('lets a later pure rerank change no watch — not the first, not the latest', () => {
+    const shown = scoresByWatch(
+      [w1, w2],
       [
-        placed('first', '2026-09-01T10:01:00Z', 8),
-        placed('fix-1', '2026-09-02T10:00:00Z', 7),
-        placed('again', '2026-09-20T10:02:00Z', 2, 'w2'),
-        placed('fix-2', '2026-09-21T10:00:00Z', 3),
+        placed('first', '2026-09-01T10:01:00Z', 9.0),
+        placed('correction', '2026-09-05T10:00:00Z', 8.7),
+        placed('rewatch', '2026-09-10T10:02:00Z', 8.3, 'w2'),
+        placed('correction', '2026-09-15T10:00:00Z', 6.1),
       ],
+      [post('2026-09-01T10:01:00Z', 9.0), post('2026-09-10T10:00:01Z', 8.3, 'w2')],
     );
-    expect(shown.get('w1')?.id).toBe('fix-1');
-    expect(shown.get('w2')?.id).toBe('fix-2');
+    expect(shown.get('w1')?.score).toBe(9.0);
+    expect(shown.get('w2')?.score).toBe(8.3);
   });
 
-  it('shows the inherited placement on a viewing that was never ranked', () => {
-    const shown = placementsByWatch(
-      [watch('w1', '2026-09-01T10:00:00Z'), watch('w2', '2026-09-20T10:00:00Z')],
-      [placed('first', '2026-09-01T10:01:00Z', 8)],
+  it('uses the watch\'s own ranking when a backdated rewatch posted nothing', () => {
+    const shown = scoresByWatch(
+      [w1, w2],
+      [
+        placed('first', '2026-09-01T10:01:00Z', 9.0),
+        placed('rewatch', '2026-09-10T10:02:00Z', 7.5, 'w2'),
+      ],
+      [post('2026-09-01T10:01:00Z', 9.0)],
     );
-    expect(shown.get('w2')?.id).toBe('first');
+    expect(shown.get('w2')?.score).toBe(7.5);
   });
 
-  it('leaves a viewing with no placement at all unmapped', () => {
-    expect(placementsByWatch([watch('w1', '2026-09-01T10:00:00Z')], []).size).toBe(0);
+  it('gives a rewatch never re-ranked the opinion held when it was logged', () => {
+    const shown = scoresByWatch(
+      [w1, w2],
+      [placed('first', '2026-09-01T10:01:00Z', 9.0), placed('correction', '2026-09-05T10:00:00Z', 8.7)],
+      [post('2026-09-01T10:01:00Z', 9.0)],
+    );
+    expect(shown.get('w1')?.score).toBe(9.0);
+    expect(shown.get('w2')?.score).toBe(8.7);
+  });
+
+  it('has no score for a title that was never ranked', () => {
+    expect(scoresByWatch([w1, w2], [], []).size).toBe(0);
   });
 });

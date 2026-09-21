@@ -1,18 +1,18 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { CompanionPicker } from '@/features/collection/CompanionPicker';
-import { formatWatchDate, today } from '@/features/collection/dates';
+import { formatWatchDate } from '@/features/collection/dates';
+import type { Bucket } from '@/features/collection/score';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
-import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
 import { theme } from '@/ui/tokens';
-import { Button, Field, SheetRow, Text } from '@/ui/components';
+import { Button, ScoreBadge, Text } from '@/ui/components';
 
-import { isFromDiary, type WatchEvent, type WatchRowLabel } from './watch-history';
+import { WatchDetailsRows } from './WatchDetailsRows';
+import { isFromDiary, type WatchEvent, type WatchRowLabel, type WatchScore } from './watch-history';
 
-/** The same ceiling `set_watch_details` enforces through `watch_tags.max_per_watch`. */
-const MAX_COMPANIONS = 10;
+/** A note longer than this opens collapsed to three lines, with More. */
+const NOTE_PREVIEW = 140;
 
 export type WatchEdit = {
   /** Present only when the date was changed; null clears it. */
@@ -24,8 +24,8 @@ export type WatchEdit = {
 export type WatchRowProps = {
   event: WatchEvent;
   label: WatchRowLabel;
-  /** Where the title stood after this viewing, collapsed from the ledger (`placementsByWatch`). */
-  placement?: { position: number; categorySize: number };
+  /** The opinion held at THIS watch (`scoresByWatch`) — never the current score. */
+  score?: WatchScore | null;
   note?: string | null;
   companions?: Person[];
   /** The reader's mutual follows, for the editor's picker. */
@@ -42,24 +42,24 @@ export type WatchRowProps = {
 };
 
 /**
- * One viewing, drawn like a feed row (founder QA, 2026-09-21).
+ * One watch, as a line in this title's own historical feed (founder QA, 2026-09-21).
  *
- * The date leads — *Sep 21, 2026 (First watch)* — with where the title stood after that
- * viewing on the right, *#4 of 11*, and the viewing's own details underneath when there are
- * any: who it was watched with and the note. There is no movement line here; each row
- * already carries its placement, so *Moved from…* belongs to the ranking's reveal alone.
+ * **Left:** the date as the label — *(First watch)* on the earliest dated one only — then who
+ * it was watched with and the watch's note, with More for a long one. **Right:** the
+ * reader's score AT this watch, in the app's one score circle. Not the current score: a
+ * later Update your rating moves the title page, never this row (`scoresByWatch`). No
+ * poster (the reader is inside the title) and no `#X of Y` (the ledger keeps it; it is not
+ * a historical opinion).
  *
- * ---------------------------------------------------------------------------
- * **EDITED INLINE, AND THAT IS A STRUCTURAL DECISION** (§J.2)
- *
- * The pencil opens the editor in place — date, companions, note — rather than a sheet: a
- * row action inside a presented sheet is a view other sheets cannot then stack on, and the
- * ranking flow stacks sheets. So there is no modal here, at any depth.
+ * **Edit** is a small text action, and editing reuses the log sheet's own rows
+ * (`WatchDetailsRows`) inline — no modal, so the ranking flow's sheets can still stack.
+ * Editing a watch never touches the current ranking; that changes through Update your
+ * rating.
  */
 export function WatchRow({
   event,
   label,
-  placement,
+  score = null,
   note,
   companions = [],
   people,
@@ -72,14 +72,15 @@ export function WatchRow({
   onRemove,
   busy = false,
 }: WatchRowProps) {
+  const [expanded, setExpanded] = useState(false);
   const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : 'Earlier';
-  // "First watch" only when it is first *and* dated (§D.2). The undated viewing reads
-  // *Earlier*, which is the same word the When row uses for the choice that produces it.
+  // "First watch" only when it is first *and* dated (§D.2).
   const primary = label === 'first' ? `${dateLabel} (First watch)` : dateLabel;
   const source = isFromDiary(event) ? 'From Letterboxd' : null;
   const withLine = companions.length
     ? `With ${companions.map((person) => person.name).join(', ')}`
     : null;
+  const longNote = Boolean(note && note.length > NOTE_PREVIEW);
 
   return (
     <View style={styles.row} testID={`watch-row-${event.id}`}>
@@ -104,30 +105,49 @@ export function WatchRow({
             </Text>
           ) : null}
           {note ? (
-            <Text variant="body" tone="secondary" testID={`watch-note-${event.id}`}>
+            <Text
+              variant="body"
+              tone="secondary"
+              numberOfLines={longNote && !expanded ? 3 : undefined}
+              testID={`watch-note-${event.id}`}
+            >
               {note}
             </Text>
           ) : null}
+          {longNote ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setExpanded((was) => !was)}
+              hitSlop={theme.space[2]}
+            >
+              <Text variant="footnote" tone="action">
+                {expanded ? 'Less' : 'More'}
+              </Text>
+            </Pressable>
+          ) : null}
+
+          {editing ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Edit this watch, ${dateLabel}`}
+              hitSlop={theme.space[2]}
+              onPress={onEdit}
+              style={styles.edit}
+              testID={`watch-edit-${event.id}`}
+            >
+              <Ionicons name="pencil" size={11} color={theme.semantic.action} />
+              <Text variant="caption" tone="action">
+                Edit
+              </Text>
+            </Pressable>
+          )}
         </View>
 
-        <View style={styles.side}>
-          {placement ? (
-            <Text
-              variant="ordinal"
-              tone="secondary"
-              testID={`watch-placement-${event.id}`}
-            >{`#${placement.position} of ${placement.categorySize}`}</Text>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Edit this watch"
-            hitSlop={12}
-            onPress={editing ? onDismissEdit : onEdit}
-            testID={`watch-edit-${event.id}`}
-          >
-            <Ionicons name="pencil" size={16} color={theme.text.tertiary} />
-          </Pressable>
-        </View>
+        {score ? (
+          <View testID={`watch-score-${event.id}`}>
+            <ScoreBadge score={score.score} bucket={score.bucket as Bucket | null} size="sm" />
+          </View>
+        ) : null}
       </View>
 
       {editing ? (
@@ -175,14 +195,8 @@ function WatchEditor({
   onRemove: () => void;
 }) {
   const [date, setDate] = useState(event.watchedOn);
-  const [picking, setPicking] = useState(false);
   const [draft, setDraft] = useState(note ?? '');
   const [selected, setSelected] = useState(() => companions.map((person) => person.id));
-
-  const toggle = (id: string) =>
-    setSelected((current) =>
-      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
-    );
 
   const save = () => {
     const edit: WatchEdit = {};
@@ -198,61 +212,28 @@ function WatchEditor({
 
   return (
     <View style={styles.editor} testID={`watch-editor-${event.id}`}>
-      <SheetRow
-        icon="calendar-outline"
-        label="When?"
-        value={date === null ? 'Earlier' : formatWatchDate(date)}
-        expanded={picking}
-        onPress={() => setPicking((was) => !was)}
-      />
-      {picking ? (
-        <WatchDatePicker
-          value={date}
-          anchor={date ?? today()}
-          onChange={(iso) => {
-            setDate(iso);
-            setPicking(false);
-          }}
-          // *Date not recorded* is an allowed answer here, exactly as *Earlier* is in the
-          // log sheet (§J.2). Forgetting when is a state, not a failure to finish.
-          onClear={() => {
-            setDate(null);
-            setPicking(false);
-          }}
-        />
-      ) : null}
-
-      <Text variant="footnote" tone="secondary">
-        Watched with
-      </Text>
-      <CompanionPicker
+      <WatchDetailsRows
+        date={date}
+        onDate={setDate}
         people={taggableWith(people, companions)}
-        selected={selected}
-        onToggle={toggle}
-        max={MAX_COMPANIONS}
-        loading={peopleLoading}
-      />
-
-      <Field
-        label="Note"
-        hint="Only you can see notes on a watch."
-        value={draft}
-        onChangeText={setDraft}
-        maxLength={1000}
-        multiline
+        peopleLoading={peopleLoading}
+        companionIds={selected}
+        onToggleCompanion={(id) =>
+          setSelected((current) =>
+            current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
+          )
+        }
+        note={draft}
+        onNote={setDraft}
       />
 
       <View style={styles.actions}>
-        <Button label="Cancel" kind="secondary" onPress={onCancel} />
-        <Button label="Save" disabled={busy} onPress={save} />
+        <Button label="Cancel" kind="secondary" size="sm" onPress={onCancel} />
+        <Button label="Save" size="sm" disabled={busy} onPress={save} />
       </View>
 
-      {/**
-       * **The only watch says something different, because the server refuses it.**
-       *
-       * `delete_watch_event` raises `P0001 last_watch` rather than leaving a collection row
-       * with no viewing behind it (§D.0). The row says what the reader actually means.
-       */}
+      {/* The only watch says something different, because the server refuses it
+          (`P0001 last_watch`): the reader means the title should leave the collection. */}
       <Pressable
         accessibilityRole="button"
         disabled={busy}
@@ -260,7 +241,7 @@ function WatchEditor({
         style={styles.remove}
         testID={`watch-remove-${event.id}`}
       >
-        <Text variant="body" tone="action">
+        <Text variant="footnote" tone="action">
           {onlyWatch ? 'Remove from collection…' : 'Remove this watch'}
         </Text>
       </Pressable>
@@ -275,8 +256,20 @@ const styles = StyleSheet.create({
   },
   main: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[3] },
   body: { flex: 1, gap: theme.space[1] },
-  side: { alignItems: 'flex-end', gap: theme.space[2] },
-  editor: { marginTop: theme.space[3], gap: theme.space[3] },
-  actions: { flexDirection: 'row', gap: theme.space[3], justifyContent: 'flex-end' },
-  remove: { paddingVertical: theme.space[1] },
+  edit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+    alignSelf: 'flex-start',
+    paddingTop: theme.space[1],
+  },
+  // Pulled out to the screen's edges so the log sheet's rows sit at their own gutters.
+  editor: { marginTop: theme.space[3], marginHorizontal: -theme.layout.gutter, gap: theme.space[3] },
+  actions: {
+    flexDirection: 'row',
+    gap: theme.space[3],
+    justifyContent: 'flex-end',
+    paddingHorizontal: theme.layout.gutter,
+  },
+  remove: { paddingVertical: theme.space[1], paddingHorizontal: theme.layout.gutter },
 });

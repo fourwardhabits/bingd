@@ -810,8 +810,10 @@ describe('a title this user has ranked', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
-    expect(view.getByText('Log another watch')).toBeTruthy();
+    // The log sheet in rewatch mode: the title's own header, and How was it?.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+    expect(view.getByText('How was it?')).toBeTruthy();
+    expect(view.getAllByText('Inception').length).toBeGreaterThan(0);
   });
 
   /**
@@ -2957,9 +2959,10 @@ describe('adjusting a ranking versus watching it again', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    // The sheet, whose first control is the watch — not a comparison.
-    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    // The sheet opens on the bands; nothing is saved or ranked until one is chosen.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
     expect(againCalls().length).toBe(0);
+    expect(mockRpc).not.toHaveBeenCalledWith('log_rewatch_with_details', expect.anything());
   });
 
   it('never unranks and restarts, in either intent', async () => {
@@ -3021,9 +3024,9 @@ describe('adjusting a ranking versus watching it again', () => {
      * cost nothing, and the property is stronger than it was: no session exists yet at
      * all, because the re-check is offered only after the viewing is saved.
      */
-    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
     expect(againCalls().length).toBe(0);
-    expect(view.queryAllByText('Save watch')).toHaveLength(1);
+    expect(view.queryAllByTestId('rewatch-bucket-choices')).toHaveLength(1);
   });
 
   it('holds for a season, which is the shape the founder reported', async () => {
@@ -3150,27 +3153,24 @@ describe('adjusting a ranking versus watching it again', () => {
     const view = await openMenu();
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
-    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
-    // The details the viewing carries, on the sheet before anything is saved.
-    expect(view.getByText('When?')).toBeTruthy();
-    expect(view.getByText('Watched with')).toBeTruthy();
-    expect(view.getByLabelText(/Note/)).toBeTruthy();
-    await fireEvent.press(view.getByText('Save watch'));
 
-    // Saved in one call, details included, before any comparison.
+    // The log sheet's layout: How was it? on top, nothing preselected, then the same
+    // optional rows as the ordinary log, all closed.
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(view.getByLabelText(/Who I watched with/)).toBeTruthy();
+    expect(view.getByLabelText(/^Note/)).toBeTruthy();
+    expect(view.getByLabelText(/Watch date/)).toBeTruthy();
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+    expect(view.queryByText(/Re-check placement/)).toBeNull();
+    expect(view.queryByText(/Keep at #/)).toBeNull();
+    expect(view.queryByText('Save watch')).toBeNull();
+
+    // Choosing a band saves the watch (details in the same call), then ranks. The
+    // fixture is Loved; a DIFFERENT band re-ranks there, on this viewing.
+    await fireEvent.press(view.getByText('It was fine'));
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('log_rewatch_with_details', expect.anything()),
     );
-    expect(againCalls()).toHaveLength(0);
-
-    // The ordinary ranking entry, with no band preselected.
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
-    expect(view.queryByText(/Re-check placement/)).toBeNull();
-    expect(view.queryByText(/Keep at #/)).toBeNull();
-    expect(view.queryByText(/Did it change your mind/)).toBeNull();
-
-    // The fixture is Loved; choosing a DIFFERENT band re-ranks there, on this viewing.
-    await fireEvent.press(view.getByText('It was fine'));
     await waitFor(() => expect(againCalls().length).toBe(1));
     expect(againCalls()[0]![1]).toEqual(
       expect.objectContaining({ p_bucket: 'fine', p_watch_event_id: 'event-2' }),

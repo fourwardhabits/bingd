@@ -5,7 +5,7 @@ import { avatarUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
-import { inWatchOrder, type WatchEvent } from './watch-history';
+import { inWatchOrder, type WatchEvent, type WatchPost } from './watch-history';
 
 /**
  * One title's watch history, and the placements that are not tied to a viewing.
@@ -24,6 +24,7 @@ export type Placement = {
   categorySize: number;
   fromPosition: number | null;
   score: number;
+  bucket: string | null;
   watchEventId: string | null;
   createdAt: string;
 };
@@ -33,6 +34,12 @@ export type WatchDetails = { note: string | null; companions: Person[] };
 
 export type WatchHistory = {
   events: WatchEvent[];
+  /**
+   * The reader's own `title_ranked` posts for this title: each one's frozen
+   * `payload.score` is a watch's historical score, the number the Feed shows
+   * (`scoresByWatch`).
+   */
+  posts: WatchPost[];
   /** Keyed by viewing id. Empty against a backend that predates the details. */
   details: Map<string, WatchDetails>;
   placements: Placement[];
@@ -90,7 +97,13 @@ type PlacementRow = {
   category_size: number;
   from_position: number | null;
   score: number | string;
+  bucket: string | null;
   watch_event_id: string | null;
+  created_at: string;
+};
+
+type PostRow = {
+  payload: { score?: number | string | null; bucket?: string | null; watch_event_id?: string | null } | null;
   created_at: string;
 };
 
@@ -99,15 +112,23 @@ export function useWatchHistory(userId: string, mediaItemId: string) {
     queryKey: queryKeys.watchHistory(userId, mediaItemId),
     enabled: Boolean(userId && mediaItemId),
     queryFn: async (): Promise<WatchHistory> => {
-      const [detailed, placements] = await Promise.all([
+      const [detailed, placements, posts] = await Promise.all([
         readEvents(mediaItemId, DETAIL_COLUMNS),
         supabase
           .from('ranking_placements')
           .select(
-            'id, kind, outcome, position, category_size, from_position, score, watch_event_id, created_at',
+            'id, kind, outcome, position, category_size, from_position, score, bucket, watch_event_id, created_at',
           )
           .eq('media_item_id', mediaItemId)
           .order('created_at', { ascending: false }),
+        // Owner-readable like every feed row (`can_i_view` is true for yourself).
+        supabase
+          .from('feed_events')
+          .select('payload, created_at')
+          .eq('actor_id', userId)
+          .eq('media_item_id', mediaItemId)
+          .eq('type', 'title_ranked')
+          .order('created_at', { ascending: true }),
       ]);
 
       const events = missingDetails(detailed.error)
@@ -156,9 +177,22 @@ export function useWatchHistory(userId: string, mediaItemId: string) {
           // `numeric(3,1)` arrives as a string through PostgREST on some paths and a
           // number on others. Coerced once, here, rather than at four call sites.
           score: Number(row.score),
+          bucket: row.bucket ?? null,
           watchEventId: row.watch_event_id,
           createdAt: row.created_at,
         })),
+        // A failed post read degrades to the ledger alone rather than failing the screen.
+        posts: posts.error
+          ? []
+          : ((posts.data ?? []) as PostRow[]).map((row) => {
+              const score = row.payload?.score;
+              return {
+                watchEventId: row.payload?.watch_event_id ?? null,
+                score: score === null || score === undefined ? null : Number(score),
+                bucket: row.payload?.bucket ?? null,
+                createdAt: row.created_at,
+              };
+            }),
         count: mapped.length,
       };
     },

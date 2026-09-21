@@ -14,7 +14,7 @@ import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
 import {
   groupByYear,
   labelFor,
-  placementsByWatch,
+  scoresByWatch,
   type WatchEvent,
 } from '@/features/watch-history/watch-history';
 import { useWatchHistory, type Placement } from '@/features/watch-history/use-watch-history';
@@ -88,14 +88,14 @@ export default function WatchHistoryScreen() {
   const placements = useMemo(() => history.data?.placements ?? EMPTY_PLACEMENTS, [history.data]);
 
   /**
-   * One placement per viewing, collapsed from the append-only ledger (founder QA,
-   * 2026-09-21). A correction updates the latest viewing's number rather than adding a
-   * line under it, and nothing is listed that is not a viewing. `placementsByWatch` holds
-   * the rule and its tests.
+   * The opinion held at each watch (founder delta QA, 2026-09-21): the same frozen number
+   * the Feed shows for that watch, never the current score. A pure Update your rating
+   * changes the title page and no row here. `scoresByWatch` holds the rule and its tests.
    */
-  const shownPlacement = useMemo(
-    () => placementsByWatch(events, placements),
-    [events, placements],
+  const posts = history.data?.posts;
+  const shownScore = useMemo(
+    () => scoresByWatch(events, placements, posts ?? []),
+    [events, placements, posts],
   );
 
   /**
@@ -223,7 +223,7 @@ export default function WatchHistoryScreen() {
           const group = groups.find((candidate) => candidate.events.includes(item));
           const first = group?.events[0]?.id === item.id;
           const showYear = first && group?.year !== null && groups.filter((g) => g.year !== null).length > 1;
-          const placement = shownPlacement.get(item.id);
+          const score = shownScore.get(item.id) ?? null;
           const details = history.data?.details.get(item.id);
 
           return (
@@ -236,7 +236,7 @@ export default function WatchHistoryScreen() {
               <WatchRow
                 event={item}
                 label={labelOf(item)}
-                placement={placement}
+                score={score}
                 note={details?.note}
                 companions={details?.companions}
                 people={people.data ?? EMPTY_PEOPLE}
