@@ -21,11 +21,18 @@ Items marked **(2nd account)** need a second signed-in device or a sign-out.
 
 ## Before you start
 
-**Which build.** A **preview** build (`app.bingd.preview`, the plum icon, installs beside
-the shipped app) against staging. Not the beta and not the production app: the beta talks to
-production, where none of these migrations exist, and every write would fail with a missing
-function. If the preview build on your device predates 2026-09-11, it cannot take this
-code — see the release note in the integration report.
+**Which build.** The Android **preview** app — package `app.bingd.preview`, labelled
+**"bingd preview"**, installed beside the shipped app — against staging. Its icon is the
+**same beige mark** as production (the plum preview icon is on a branch that has not merged),
+so tell them apart by the label. Not the beta and not the production app: those talk to
+production, where none of these migrations exist.
+
+**Step 0 — confirm the code, before anything else.** Open the preview app twice (the second
+launch applies a freshly downloaded update), then Settings ▸ About. The update id and the
+runtime shown there must match the ones in the QA handoff. If they do not, you are testing an
+older candidate and every finding below is unreliable.
+
+**Sign in with the six-digit email code.** Google and Apple are switched off on staging.
 
 **What the account needs**, and it is worth five minutes to arrange:
 
@@ -119,6 +126,11 @@ width, so that is where it breaks if it breaks.
 ## 7. Rerank versus rewatch — the distinction, in your own words
 
 From ⋯, use *Update your rating* on one film and *Log another watch* on another.
+
+*Update your rating* → tap a band → **the comparisons open immediately.** There is **no**
+"Rank <title> again? … [Re-rank] [Cancel]" card any more (founder QA, 2026-09-21); if you see
+it, you are on an old candidate. Closing or backing out of the comparisons leaves the ranking
+exactly where it was.
 
 Afterwards: the corrected film's **watch count has not moved** and its history shows no new
 viewing. The rewatched film's has.

@@ -32,8 +32,34 @@ import { createTestDb, createTestDbBefore } from './harness.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
 
+/**
+ * `origin/main` must exist before anything is read from it, and in CI it does not.
+ *
+ * `actions/checkout` clones at depth 1 with only the ref being built, so `origin/main` is
+ * "not a valid object name" there — and this suite, green on every developer machine, was
+ * red in release gate run 35562734407 for that reason alone. It fetches exactly that one
+ * ref when it is missing, and **fails loudly if it cannot**: skipping would turn the one
+ * check that installed clients keep working into a check that silently never runs where
+ * it matters most.
+ */
+function ensureOriginMain() {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', 'origin/main^{commit}'], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+  } catch {
+    execFileSync(
+      'git',
+      ['fetch', '--no-tags', '--depth=1', 'origin', '+refs/heads/main:refs/remotes/origin/main'],
+      { cwd: root, stdio: 'ignore' },
+    );
+  }
+}
+
 /** Every file under src/ and app/ as it stood on origin/main. */
 function legacyClientSources() {
+  ensureOriginMain();
   const files = execFileSync(
     'git',
     ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'src', 'app'],
