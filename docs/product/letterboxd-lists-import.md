@@ -1,7 +1,9 @@
 # Letterboxd → bingd Lists import (T6c)
 
 **Status: DESIGN, not built.** A read-only analysis from 2026-09-21, revised the same day to
-match the Lists terminology and behaviour after the #196 founder QA pass. Nothing in this
+match the Lists terminology and behaviour after the #196 founder QA pass. It was then
+**reconciled against a real Letterboxd export that contains lists** (2026-09-21 22:08 UTC;
+scrubbed fixture at `src/features/import/__fixtures__/real-list-export.ts`). Nothing in this
 document is implemented except **T6c-0**, the archive member-count fix, which is PR #200.
 
 **Depends on:** the Letterboxd importer (production since 2026-09-14,
@@ -23,45 +25,106 @@ Imported lists produce **no Feed events**.
 
 ## 0. What the audit found first
 
-1. **No real Letterboxd list file exists anywhere in this repository.** The founder's export
-   (`src/features/import/__fixtures__/real-export.ts`) has no `lists/` folder, only
-   `likes/lists.csv`, because that account has no lists. None of the list file's columns
-   can be confirmed from real data, and this document assumes none of them (§1).
-2. **The shipped importer probably refuses exports from people with many lists.**
-   `archive.ts` refused any archive with more than 50 members, and a base export already has
-   16. Letterboxd is reported to write one CSV per list, so an account with about 34 lists
-   was refused as "That file is too big" and could not import its watched history at all.
-   **Fixed in PR #200 (T6c-0):** the limit is now 1,000, and the listing stops at the limit
-   plus one. The byte caps, which are the real protection against zip bombs, are unchanged.
-   List files are still never read.
+1. **The list format is now known from real bytes.** The first draft had no list file to work
+   from, because the 2026-09-10 export came from an account with no lists. On 2026-09-21
+   the founder exported an account with two lists. §1 separates what that export confirms
+   from what it cannot show.
+2. **The shipped importer refused exports from people with many lists.** `archive.ts`
+   refused any archive with more than 50 members, and a base export already has 16. The
+   real export confirms **one CSV per list** (`lists/<name>.csv`), so an account with about
+   34 lists was refused as "That file is too big" and could not import its watched history
+   at all. **Fixed in PR #200 (T6c-0):** the limit is now 1,000, and the listing stops at the
+   limit plus one. The byte caps, which are the real protection against zip bombs, are
+   unchanged. List files are still never read.
 3. **A new import row kind added the obvious way would be written to the Watchlist.**
    `_import_apply_batch` reads `if kind = 'watched' … else <insert into watchlist>`. Its
    latest body is #196's `20261003000100` (T1), not `20260917000300`. `_import_settle`'s
    `unmatched` and `ambiguous` counts ignore the kind as well. §9 makes pinning this the first
    requirement.
+4. **A list whose name matches a history file shares that file's name.** A list named
+   "Watched" would export as `lists/watched.csv`. That path is two segments, which is the
+   "root or one wrapper folder" shape `archive.ts`'s rule accepts. Today the importer still
+   picks the root `watched.csv`, but only because `inspect` takes the **first** match in
+   listing order, and the real export stores root files before `lists/`. That makes it
+   correct by order, not by rule.
+   - **Risk:** if an export ever stored `lists/` first, the list file would be taken as the
+     history. Its three-section shape has no `Name`/`Year` header, so the likely result is
+     an "empty export" refusal rather than wrong data.
+   - **What T6c-3 should do** (it changes current behaviour, so not before then): never
+     accept `lists` as a wrapper folder, and prefer a root-level match.
 
 ---
 
 ## 1. What the Letterboxd export can do
 
-| Question | Status | Evidence |
+**Evidence.** The founder's export of 2026-09-21 22:08 UTC: a 4,486-byte ZIP, 18 members,
+two lists. The scrubbed copy is `src/features/import/__fixtures__/real-list-export.ts`, and
+`real-list-export.test.ts` pins the structure. What follows is read from the bytes. Anything
+not in the bytes is marked as such rather than inferred.
+
+### 1a. The file, exactly
+
+One file per list, at `lists/<name>.csv`, with **CRLF** line endings and **no BOM**. Here is
+one real list, with the account-identifying values scrubbed:
+
+```
+Letterboxd list export v7
+Date,Name,Tags,URL,Description
+2026-09-22,Fixtureone,,https://boxd.it/LSTa1,
+
+Position,Name,Year,URL,Description
+1,Free Solo,2018,https://boxd.it/iEEq,
+2,The Joke,1969,https://boxd.it/3A8q,
+3,A Joke,1966,https://boxd.it/tLI2,
+4,Ali: Fear Eats the Soul,1974,https://boxd.it/2aRi,
+```
+
+| Section | Line(s) | Content |
 |---|---|---|
-| Are lists exported? | **Likely.** Letterboxd's own *Importing data* page says the ZIP contains "CSVs of your profile, films, reviews, lists and more". | `letterboxd-import.md` §4; PRD §12 ("each custom list"), a secondary source |
-| File path and shape | **Not verified** | No file in the repo |
-| List name, description, tags | **Not verified** | — |
-| Item order | **Not verified.** Letterboxd offers a "List Order" sort even on unranked lists, so the order is real data. | `research/appendix/A1-…` §3 |
-| Ranked / numbered state | **Not verified.** Letterboxd lists can be ranked or unranked. | A1 §3 |
-| Visibility | **Not verified.** Letterboxd has four modes: public, anyone with the link, friends, private. | A1 §3 |
-| Identifiers for matching | **Not verified for list files.** History files carry `Name`, `Year` and a `boxd.it` URI, with no TMDB or IMDb id. | Fixture |
-| `likes/lists.csv` | Present, and records **other people's** lists the person liked. **Never imported.** | Fixture listing |
-| TV | Letterboxd has no TV, so list items are movies. The SQL matcher is `kind = 'movie'`. | A2; `_import_match_batch` |
+| Preamble | 1 | `Letterboxd list export v7`: one field, no commas |
+| List header | 2 | `Date,Name,Tags,URL,Description` |
+| List row | 3 | one row. `URL` is the list's `https://boxd.it/<code>` short link |
+| Separator | 4 | an empty line |
+| Item header | 5 | `Position,Name,Year,URL,Description` |
+| Item rows | 6… | one per film. `Position` is 1..N and contiguous in file order. `URL` is the **film's** `https://boxd.it/<code>` URI |
 
-The design reads headers rather than assuming a shape, and each unknown has a safe default:
+The archive stores no wrapper folder and no directory entries. Member order is the 16 base
+files, then `lists/`.
 
-- **Order** is always the file's row order.
-- **Numbered** is set only if the real export shows a ranked field.
-- **Visibility** is the import-level choice (§3).
-- **Tags and per-item notes** are never imported.
+**The existing `parseCsv` cannot read this file.** It takes line 1 as the header. T6c-3 needs
+a section-aware reader on the existing tokenizer: check the preamble, read one metadata
+record, skip the blank record, then read the item header and rows.
+
+### 1b. What this export confirms, rules out, and leaves open
+
+| Question | Finding |
+|---|---|
+| Are lists exported? | **CONFIRMED PRESENT.** One CSV per list under `lists/` |
+| File path | **CONFIRMED PRESENT:** `lists/<name>.csv`. Both real names were one word, and each file was that word in lower case. The rule for multi-word, punctuated or duplicate names is **STILL UNKNOWN**. |
+| Format version | **CONFIRMED PRESENT:** `Letterboxd list export v7`, in the preamble |
+| List name | **CONFIRMED PRESENT:** `Name` in the list row |
+| List created date | **CONFIRMED PRESENT:** `Date`, `2026-09-22` for an export taken on 2026-09-21 UTC, the same next-day timezone stamp as `real-export.ts`. **Not used.** |
+| List tags | **Column CONFIRMED PRESENT, empty in both lists.** The format of a non-empty value (separator, quoting) is **STILL UNKNOWN**. |
+| List description | **Column CONFIRMED PRESENT, empty in both lists.** Multi-line, quoted, HTML or Markdown content is **STILL UNKNOWN**. |
+| Canonical list URL | **CONFIRMED PRESENT:** a `https://boxd.it/<code>` short link, not a `letterboxd.com/<user>/list/<slug>/` URL. Whether it survives a rename is **STILL UNKNOWN**. |
+| Item order | **CONFIRMED PRESENT:** `Position`, 1..N, matching file row order |
+| Item name, year | **CONFIRMED PRESENT:** `Name`, `Year` |
+| Item URL | **CONFIRMED PRESENT:** the film's `boxd.it` URI, **the same identifier `watched.csv` uses**. *Free Solo* is `boxd.it/iEEq` in both. |
+| TMDB / IMDb id, original title | **CONFIRMED ABSENT IN THIS EXPORT** |
+| Per-item note | **Column CONFIRMED PRESENT** (item `Description`), **empty in every row**. Its content format is **STILL UNKNOWN**. |
+| Ranked / numbered state | **CONFIRMED ABSENT IN THIS EXPORT.** No column, no preamble marker, no other file. Both lists carry `Position` either way. Whether `Position` is also written for an unranked list, and so whether ranked state can be told apart at all, is **STILL UNKNOWN**: it depends on how the founder had these two lists set. |
+| Visibility | **CONFIRMED ABSENT IN THIS EXPORT.** No column anywhere. Whether a **private** list is exported at all is **STILL UNKNOWN** until the founder confirms each list's setting. |
+| Deleted lists | **CONFIRMED ABSENT IN THIS EXPORT.** No `deleted/lists*` member, and `deleted/` holds only `diary`, `reviews` and `comments`. Whether a deleted list would ever appear is **STILL UNKNOWN** unless a list was deleted before this export. |
+| `likes/lists.csv` | **CONFIRMED PRESENT**, header `Date,Content`, empty here. It records **other people's** lists the person liked. **Never imported.** |
+| TV | Letterboxd has no TV, so list items are movies. The SQL matcher is `kind = 'movie'`. |
+
+**Nothing about the product defaults changes because this export lacks a field:**
+
+- **Order** is always the file order and `Position`.
+- **Numbered** defaults **off**. It maps from Letterboxd only if a later export proves a ranked
+  field exists.
+- **Visibility** is the import-level choice (§3), with Only you as the default.
+- **Tags, the list date and per-item notes** are never imported.
 
 ---
 
@@ -69,12 +132,14 @@ The design reads headers rather than assuming a shape, and each unknown has a sa
 
 | Letterboxd | bingd | Rule |
 |---|---|---|
-| List name | `lists.title` | Trimmed and cut to 100 characters (the `lists_title_length` check). An empty name becomes "Untitled list". Cuts are reported. |
-| Description | `lists.description` | Plain text. HTML is stripped only if the real file turns out to contain it. Cut to 1,000 characters with "…". |
-| Item order | `list_items.position` = the Letterboxd position, or the row index if there is none | This order is the list's **manual order**. Gaps are allowed, because readers number items 1..N at read time. |
-| Ranked / numbered flag, **only if the real export proves the field exists** | `order_style = 'ranked'`, shown as **Numbered** | Otherwise `order_style = 'unranked'`. Numbered is never assumed. |
-| Item name, year, URI | an `import_rows` entry of new kind `list` | The existing matcher, unchanged (§4) |
-| Tags, per-item notes, list dates | not stored, not sent | Lists v1 has no field for them. |
+| List `Name` | `lists.title` | Trimmed and cut to 100 characters (the `lists_title_length` check). An empty name becomes "Untitled list". Cuts are reported. |
+| List `Description` | `lists.description` | Plain text. HTML is stripped only if a later export shows it. Cut to 1,000 characters with "…". |
+| List `URL` (`boxd.it`) | `imported_lists.source_key_hash` | The idempotency key (§5), stored only as a hash |
+| Item `Position` | `list_items.position` | This order is the list's **manual order**. If `Position` is ever missing or not a number, the row index is used. Gaps are allowed, because readers number items 1..N at read time. |
+| Ranked / numbered flag | none: **the field does not exist in this export** | `order_style = 'unranked'`, so **Numbered is off**. It maps to `ranked` only if a later export proves such a field exists. `Position` alone never turns Numbered on. |
+| Item `Name`, `Year`, `URL` | an `import_rows` entry of new kind `list` | The existing matcher, unchanged (§4) |
+| List `Tags`, list `Date` | not stored, not sent | Lists v1 has no field for them. |
+| Item `Description` (per-item note) | **not stored, not sent** | It **never** becomes a bingd note, review, `user_media.note` or watch detail. Lists v1 has no per-item note, and turning it into anything else would invent the person's own writing somewhere they didn't put it. |
 | — | `lists.source = 'imported'` | Already exists, and exempt from the 100-list in-app ceiling (PRD §12) |
 
 **Numbered is a way of displaying the order, not a second order.** In Lists v1 the manual
@@ -95,8 +160,8 @@ Lists v1 has three visibility levels, and this document uses only their labels:
 | **Anyone with the link** | Anyone holding the URL. It works on a private profile too, as an exception for that one list (`_list_readable`). |
 | **Public** | Readable by anyone who can see the owner's profile. **A Public list may also appear on the owner's profile, but appearing there is not what Public means.** |
 
-**If the real export shows no visibility field**, the person chooses once for every imported
-list:
+**The real export has no visibility field** (§1b), so this is the design that ships. The
+person chooses once for every imported list:
 
 - One picker on the preview, using `VisibilityPicker` and the three labels above.
 - **Only you is the default.**
@@ -105,9 +170,9 @@ list:
 - The summary says: "12 lists added · Only you. You can change any list later."
 - Nobody edits lists one at a time.
 
-**If the real export shows a reliable visibility field**, each list gets the stricter of its
-Letterboxd visibility and the import-level choice. An import never makes a list more visible
-than it was on Letterboxd:
+**Reserved for a future export that has a reliable visibility field.** None exists today.
+Each list would get the stricter of its Letterboxd visibility and the import-level choice,
+so an import never makes a list more visible than it was on Letterboxd:
 
 | Letterboxd | bingd |
 |---|---|
@@ -128,10 +193,12 @@ than it was on Letterboxd:
 - **The importer's privacy promise changes.** It currently says every custom list is never
   extracted. That becomes "extracted only when the person turns Lists on".
   - Before that, only list file **names** are read from the central directory, to count them.
-  - Only `<wrapper>/lists/<name>.csv` is ever read.
+  - Only `lists/<name>.csv` is ever read, at the root or under the export's single wrapper
+    folder.
   - `likes/`, `deleted/` and `orphaned/` stay unread.
-  - Only name, year, URI and position leave the device. Tags and per-item notes are never
-    sent.
+  - Only the list name, description and URL, and each item's name, year, film URI and
+    position, leave the device. The list URL is hashed on arrival. Tags, the list date and
+    per-item notes are never sent.
 
 ---
 
@@ -146,8 +213,14 @@ than it was on Letterboxd:
   - then the **TMDB** tier.
 - **No double staging.** When a correlation is already a watched or watchlist row in the
   same job, the list entry uses that row's result and no second row is staged.
-- **List rows read the trusted mapping only when the item URI has the same `boxd.it` form as
-  the history files.**
+- **List rows can read the trusted mapping.** The real export confirms that an item's `URL` is
+  the film's `boxd.it` URI, the same identifier `watched.csv` uses (*Free Solo* is `iEEq` in
+  both). T0 keys on exactly that. The client still stages a list item's URI only if it has
+  that `https://boxd.it/<code>` shape, in case a later format changes.
+- **Real matching cases in the fixture:**
+  - three *Batman* rows (1989, 1943, 1966), which exercise the exact-year rule;
+  - *The Joke* (1969) beside *A Joke* (1966), which are distinct names because
+    `media_squash` keeps articles.
 - **List rows never write `letterboxd_match_claims`.** The shared mapping's protection is
   therefore exactly what it is today.
 
@@ -201,14 +274,18 @@ Awards, profile counts and leaderboards don't move. The list's "seen" flag
 
 It is unique on (`user_id`, `source`, `source_key_hash`).
 
-- **The key** is the list's own URL from the file if the file has one, otherwise its file
-  name. Only the hash is stored, because a Letterboxd list URL contains the username.
+- **The key is the list row's `URL`**, a `https://boxd.it/<code>` short link that **is present
+  in the real export**. The file name is the fallback only if a row has no URL. Only the hash
+  is stored, because the short link resolves to the owner's list page and so identifies the
+  account.
 - **A re-import skips lists that are already there** ("Already in bingd, left as is").
   Anything changed in bingd — order, removals, Numbered, visibility — is never overwritten.
 - **A deleted bingd list** takes its mapping with it, so a re-import recreates it. To keep it
   gone, untick it in *Choose lists*.
-- **A list renamed on Letterboxd** whose file has no URL imports as a new list. This is a
-  documented limit.
+- **A list renamed on Letterboxd.** If its `boxd.it` short link stays the same across the
+  rename, which looks likely because short links are ID-based but is **not yet shown**, a
+  re-import recognises it. Otherwise it imports as a new list. The file name changes with
+  the name, so it is never the primary key.
 - **Within one job:** unique per (job, list key) and per (job, list key, position), so
   resending a page changes nothing. `import_jobs_one_live` already rules out two imports at
   once for one account.
@@ -284,17 +361,17 @@ This is a **separate T6c**, not part of T6 or T6b.
 | Step | What | Depends on |
 |---|---|---|
 | **T6c-0** | Archive member count 50 → 1,000; the listing stops at the limit plus one. Client only, OTA. | **PR #200** |
-| **T6c-1** | A real export with lists (§10). Commit a scrubbed fixture that leaves out `profile.csv`. Settle every "Not verified" row in §1. | the founder |
+| **T6c-1** | A real export with lists, and a scrubbed fixture that leaves out `profile.csv` | **Done, 2026-09-21:** `real-list-export.ts` plus its test (§1). The questions in §10 are still open. |
 | **T6c-2** | Backend (§9), behind `import.lists_enabled = false` | #196 on production |
-| **T6c-3** | Client: the list-file path rule, a section-aware CSV reader on the existing tokenizer, preview and summary. OTA. | T6c-1, T6c-2 |
+| **T6c-3** | Client work, OTA-deliverable: the `lists/<name>.csv` path rule, which never takes `lists` as a wrapper folder and prefers a root match (§0 item 4); a section-aware reader for the v7 format on the existing tokenizer (§1a); preview and summary | T6c-2 |
 | **T6c-4** | Repair for list entries | T6b |
 
 ---
 
 ## 9. Migrations and API likely needed
 
-**One migration.** `20261014000100` is now taken on #196, so use the next free number at
-build time, checked on both projects. It must rebuild each function from its **latest**
+**One migration.** #196 now reaches `20261015000100` on staging, so use the next free number
+at build time, checked on both projects. It must rebuild each function from its **latest**
 definition:
 
 - `_import_apply_batch` from `20261003000100`;
@@ -338,20 +415,34 @@ because the provider tier doesn't look at the row kind; confirm that during the 
 
 ## 10. What's needed from the founder
 
-No product decision is left open that a default can't cover. The one thing that can't be done
-without the founder is **T6c-1**. On Letterboxd, make:
+No product decision is left open that a default can't cover. The 2026-09-21 export settled
+the format: file layout, columns, film URIs and ordering (§1b). **None of what is still open
+blocks T6c-2**, because every open question has a safe default already in this document.
 
-- a small **ranked** list that includes a remake title (e.g. *Hamlet*);
-- an **unranked** list;
-- a **private** list;
-- a list shared with **anyone with the link**;
-- a list with a multi-line description containing a link, with per-item notes and tags;
-- a list whose name has a comma and an emoji;
-- one **deleted** list.
+**1. Two quick answers about the export already taken**
 
-Then export again. That answers every "Not verified" row in §1:
+- Were the two lists in that export (`fixtureone` and `fixturetwo` in the fixture) **ranked**
+  or **unranked** on Letterboxd? If one was each,
+  `Position` is written for unranked lists too, so ranked state can't be told from the file.
+  Numbered then stays off permanently.
+- What was each list's **visibility**? If one was private, private lists are exported, and
+  the one import-level picker is the right design.
+- Was a list **deleted** before exporting? If so, deleted lists are left out of the export.
 
-- If the export has a ranked field, it maps to Numbered (§2).
-- If the export has a reliable visibility field, it maps as in §3.
-- If it has neither, the defaults stand: manual order kept, not Numbered, and the one
-  import-level visibility choice with Only you as the default.
+**2. One more export, only to pin the formats nobody has seen yet**
+
+- a list with **tags**;
+- a **multi-line description** containing a link, a comma and a quote;
+- **per-item notes**;
+- a **multi-word name with punctuation**, to learn the file-name rule;
+- two lists with the **same name**;
+- one list **renamed** since the first export, to check whether its `boxd.it` link survives.
+
+**Whatever these show, the defaults stand:**
+
+- the manual order from `Position`;
+- Numbered off unless a real field says ranked;
+- one import-level visibility choice, Only you by default;
+- tags, the list date and per-item notes never imported;
+- nothing written about the person: no Collection membership, watch, date, ranking or
+  Watchlist entry.
