@@ -29,8 +29,8 @@ jest.mock('@/features/watch-history/use-watch-history', () => ({
   useWatchHistory: () => mockHistory(),
 }));
 
-const mockEdit = jest.fn(() => Promise.resolve({ outcome: 'ok' }));
-const mockDetails = jest.fn(() => Promise.resolve({ outcome: 'ok' }));
+const mockEdit = jest.fn((_input: unknown) => Promise.resolve({ outcome: 'ok' }));
+const mockDetails = jest.fn((_input: unknown) => Promise.resolve({ outcome: 'ok' }));
 jest.mock('@/features/watch-history/writes', () => ({
   deleteWatchEvent: jest.fn(() => Promise.resolve({ outcome: 'ok' })),
   editWatchEvent: (input: unknown) => mockEdit(input),

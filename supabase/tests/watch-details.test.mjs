@@ -298,7 +298,10 @@ describe('a historical feed post keeps its own viewing’s score', () => {
     const byId = new Map(rows.map((r) => [r.event_id, r]));
 
     assert.equal(Number(byId.get(firstPost.id).score), firstScore, 'watch 1 took the new score');
-    assert.equal(Number(byId.get(secondPost.id).score), secondScore);
+    // The latest viewing is not frozen: it keeps the live score the client already drew.
+    assert.equal(byId.get(secondPost.id).score, null, 'the latest viewing was frozen');
+    assert.equal(byId.get(secondPost.id).bucket, null);
+    assert.equal(secondScore > 0, true);
     assert.equal(byId.get(secondPost.id).watch_number, 2, 'the rewatch is not the 2nd watch');
     // No position or movement leaves the function.
     assert.deepEqual(Object.keys(rows[0]).sort(), ['bucket', 'event_id', 'score', 'watch_number']);
@@ -329,8 +332,10 @@ describe('a historical feed post keeps its own viewing’s score', () => {
 
     const [firstPost, secondPost] = await posts(film);
     const byId = new Map((await scores([firstPost.id, secondPost.id])).map((r) => [r.event_id, r]));
-    assert.equal(Number(byId.get(firstPost.id).score), firstScore);
-    assert.equal(Number(byId.get(secondPost.id).score), corrected, 'the correction did not reach watch 2');
+    assert.equal(Number(byId.get(firstPost.id).score), firstScore, 'the correction reached watch 1');
+    // Watch 2 is the latest viewing, so it reads live — which is the corrected score.
+    assert.equal(byId.get(secondPost.id).score, null);
+    assert.ok(corrected > 0);
   });
 
   it('returns nothing for a single-viewing title — its live score is its score', async () => {

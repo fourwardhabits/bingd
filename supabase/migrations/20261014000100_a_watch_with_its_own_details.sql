@@ -265,6 +265,12 @@ grant execute on function set_watch_details(uuid, uuid, text, uuid[]) to authent
 --   first / legacy post (no watch id)
 --       the latest placement made before the NEXT viewing was logged.
 --
+-- Only a SUPERSEDED viewing's post is frozen. The latest viewing's post keeps the live score
+-- (score and bucket come back null and the client keeps what `public_scores` drew), so a
+-- correction still reflows the current card exactly as 20261002000100 decided; it is the
+-- older cards that stop moving. `watch_number` comes back for every mapped post so the card
+-- can say "2nd watch".
+--
 -- Rows come back only for titles with two or more viewings and a post that maps to one; a
 -- single-viewing title's live score IS its viewing's score, and a legacy post that maps to
 -- nothing keeps the live score the client already draws — the safe fallback. Only the score
@@ -354,8 +360,9 @@ begin
           on w.id = ev.payload_watch and w.user_id = ev.actor_id
     )
     select a.id,
-           sp.score,
-           sp.bucket,
+           -- Frozen only once a later viewing exists; the latest viewing stays live.
+           case when a.next_at is not null then sp.score end,
+           case when a.next_at is not null then sp.bucket end,
            -- The viewing's ordinal in Watch History's own order (undated first, then by
            -- date, then by recording), so "2nd watch" on a card and on the history screen
            -- are the same number. Null for a post that names no viewing.
@@ -368,8 +375,8 @@ begin
                      where w3.user_id = a.actor_id and w3.media_item_id = a.media_item_id) o
              where o.id = a.watch_id)
       from anchored a
-     cross join lateral _watch_span_placement(
-       a.actor_id, a.media_item_id, a.watch_id, a.watch_at, a.next_at) sp
+      left join lateral _watch_span_placement(
+       a.actor_id, a.media_item_id, a.watch_id, a.watch_at, a.next_at) sp on true
      -- A post that names no viewing and has no later one keeps the live score: nothing
      -- has superseded its viewing, so the live score is its score.
      where a.watch_id is not null or a.next_at is not null;
@@ -377,7 +384,7 @@ end;
 $$;
 
 comment on function feed_watch_scores(uuid[]) is
-  'For watch-backed title_ranked posts on titles with two or more viewings: the score and band of the post''s OWN viewing, from the placement ledger (its placements, plus corrections made before the next viewing), and its watch number. A post that maps to no superseded viewing returns no row and the client keeps the live score. Returns no position or movement. Visibility is the feed''s own can_i_view.';
+  'For watch-backed title_ranked posts on titles with two or more viewings: the watch number, and — once a later viewing supersedes it — the score and band of the post''s OWN viewing, from the placement ledger (its placements, plus corrections made before the next viewing). The latest viewing''s score and band are null so the client keeps the live score. Returns no position or movement. Visibility is the feed''s own can_i_view.';
 
 grant execute on function feed_watch_scores(uuid[]) to authenticated;
 

@@ -20,6 +20,8 @@ let mockFollowPeopleError: unknown = null;
  */
 let mockScoreRows: unknown[] | null = [];
 let mockScoreError: unknown = null;
+/** `feed_watch_scores`' answer (20261014000100); `null` is a failed read. */
+let mockWatchScoreRows: unknown[] | null = [];
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 /**
  * Every `.order()` the feed asks for, per table.
@@ -70,6 +72,13 @@ jest.mock('@/lib/supabase', () => ({
           data: mockFollowPeopleError ? null : mockFollowPeopleRows,
           error: mockFollowPeopleError,
         });
+      }
+      if (name === 'feed_watch_scores') {
+        return Promise.resolve(
+          mockWatchScoreRows
+            ? { data: mockWatchScoreRows, error: null }
+            : { data: null, error: { code: 'PGRST202', message: 'no such function' } },
+        );
       }
       if (name === 'public_scores') {
         return Promise.resolve({
@@ -202,6 +211,7 @@ const only = async () => {
 };
 
 beforeEach(() => {
+  mockWatchScoreRows = [];
   mockFeedRows = [];
   mockNoteRows = [];
   mockNoteError = null;
@@ -1370,5 +1380,51 @@ describe('follow stories', () => {
 
     // The dropped row's own timestamp, which is the boundary the server was given.
     expect(mockFeedReads[1]?.or).toContain('2026-08-01T00:00:00Z');
+  });
+});
+
+/**
+ * **A post keeps its own viewing's score** (founder QA, 2026-09-21). Watch 1 at 8.0, watch 2
+ * re-ranked to 8.5: the first card stays 8.0, the second reads the live 8.5 and says
+ * "2nd watch". `supabase/tests/watch-details.test.mjs` proves the RPC against real rows.
+ */
+describe('a rewatch keeps each post at its own viewing', () => {
+  const live = {
+    user_id: 'user-1',
+    media_item_id: 'film-1',
+    category: 'movies',
+    bucket: 'loved',
+    position: 1,
+    score: 8.5,
+  };
+
+  it('freezes the superseded viewing and numbers the rewatch', async () => {
+    mockFeedRows = [event({ id: 'post-2' }), event({ id: 'post-1' })];
+    mockScoreRows = [live];
+    mockWatchScoreRows = [
+      { event_id: 'post-1', score: '8.0', bucket: 'fine', watch_number: null },
+      { event_id: 'post-2', score: null, bucket: null, watch_number: 2 },
+    ];
+
+    const items = await load();
+    const byId = new Map(items.map((item) => [item.id, item]));
+    expect(byId.get('post-1')).toMatchObject({ score: 8, bucket: 'fine', watchNumber: null });
+    expect(byId.get('post-1')?.position).toBeNull();
+    expect(byId.get('post-2')).toMatchObject({ score: 8.5, bucket: 'loved', watchNumber: 2 });
+    expect(rpcCalls.filter((call) => call.name === 'feed_watch_scores')).toHaveLength(1);
+  });
+
+  it('keeps the live score, and no watch line, when the read fails', async () => {
+    mockFeedRows = [event()];
+    mockScoreRows = [live];
+    mockWatchScoreRows = null;
+
+    expect(await only()).toMatchObject({ score: 8.5, watchNumber: null });
+  });
+
+  it('does not duplicate posts', async () => {
+    mockFeedRows = [event({ id: 'post-2' }), event({ id: 'post-1' })];
+    mockWatchScoreRows = [{ event_id: 'post-2', score: null, bucket: null, watch_number: 2 }];
+    expect(await load()).toHaveLength(2);
   });
 });
