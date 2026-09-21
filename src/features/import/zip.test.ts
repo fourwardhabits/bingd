@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from 'fflate';
 
-import { inspect, readWanted } from './archive';
+import { DEFAULT_LIMITS, inspect, readWanted } from './archive';
 import { parseCsv } from './csv';
 import { DamagedZipError, looksLikeZip, NotAZipError, zipSource } from './zip';
 
@@ -188,6 +188,39 @@ describe('zipSource', () => {
 
     expect(source.list().map((e) => e.path)).toEqual(['1.csv', '1.csv']);
     expect(source.readEntry('1.csv')).toBe('first');
+  });
+
+  it('stops listing one member past the limit, however many the directory holds', () => {
+    // The member cap bounds the listing only if the walk stops. One past the limit is
+    // exactly enough for `inspect` to refuse, and nothing more is recorded.
+    const files = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`lists/l${i}.csv`, 'Position,Name\n']),
+    );
+    const source = zipSource(build({ 'watched.csv': WATCHED, ...files }), { maxEntries: 10 });
+
+    expect(source.list()).toHaveLength(11);
+    expect(inspect(source, { ...DEFAULT_LIMITS, maxEntries: 10 })).toEqual({
+      ok: false,
+      reason: 'too_many_entries',
+    });
+  });
+
+  it('does not treat stopping early as damage', () => {
+    // The sentinel that ends the walk must not surface as DamagedZipError, which would tell
+    // somebody their export is broken when it is merely large.
+    const files = Object.fromEntries(
+      Array.from({ length: 5 }, (_, i) => [`lists/l${i}.csv`, 'x']),
+    );
+    expect(() =>
+      zipSource(build({ 'watched.csv': WATCHED, ...files }), { maxEntries: 2 }).list(),
+    ).not.toThrow();
+  });
+
+  it('lists everything when the archive is within the limit', () => {
+    const source = zipSource(build({ 'watched.csv': WATCHED, 'lists/a.csv': 'x' }), {
+      maxEntries: 2,
+    });
+    expect(source.list().map((e) => e.path)).toEqual(['watched.csv', 'lists/a.csv']);
   });
 });
 

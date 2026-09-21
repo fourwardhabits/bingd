@@ -90,7 +90,7 @@ export function readArchive(
   { now, limits = DEFAULT_LIMITS }: { now?: Date; limits?: ArchiveLimits } = {},
 ): ReadResult {
   try {
-    const source = zipSource(bytes);
+    const source = zipSource(bytes, { maxEntries: limits.maxEntries });
 
     // The bounds run here, on sizes the archive declares, before a byte is inflated.
     const inspection = inspect(source, limits);
