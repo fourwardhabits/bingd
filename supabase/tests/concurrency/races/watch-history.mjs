@@ -222,10 +222,22 @@ export default function suite() {
       const rows = await events(db, user, film);
       assert.equal(rows.length, 3, 'the original seen event plus two viewings');
 
+      /**
+       * **Sorted by time, not by how a `Date` prints.**
+       *
+       * `pg` hands a `date` column back as a JS `Date`, and a bare `.sort()` compares the
+       * *strings* those coerce to — which begin with the weekday. "Mon Sep 21" sorts before
+       * "Sun Sep 20", so `.at(-1)` returned the EARLIER date and the assertion failed
+       * against a cache that was perfectly correct. It depended on which two weekdays the
+       * run straddled: green here on a Saturday and Sunday, red in CI at 02:23 UTC on the
+       * Monday (release gate run 35553594491).
+       *
+       * A comparator fixes it, and comparing `getTime()` says the intent out loud.
+       */
       const max = rows
         .map((r) => r.watched_on)
         .filter(Boolean)
-        .sort()
+        .sort((a, b) => a.getTime() - b.getTime())
         .at(-1);
       assert.equal(
         String(await cached(db, user, film)),
