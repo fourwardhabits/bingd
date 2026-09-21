@@ -976,12 +976,11 @@ async function attachScores(items: FeedItem[]) {
       continue;
     }
     /**
-     * **Ranked: the post keeps the opinion it was posted with** (founder delta QA,
-     * 2026-09-21). `payload.score` is the score of the watch this post is about, written
-     * by the same finalize as its placement and never rewritten by a correction, so a
-     * later Update your rating — or a band that grew — cannot move an old card. This
-     * reverses the 20261002000100 "current score" rule for ranking cards; the current
-     * score lives on the title page, Collection and Search.
+     * **Ranked: the post shows its own watch's score** (founder delta QA, 2026-09-21).
+     * `payload.score` is the score of the watch this post is about. The server keeps the
+     * MOST RECENT watch's post in step with a pure Update your rating
+     * (20261016000100) and leaves every earlier watch's post frozen, so this reads the
+     * payload and never the live score — a band that grew cannot move any card.
      *
      * Only a post written before the snapshot existed (no `payload.score`) borrows the
      * live score, score and band together.

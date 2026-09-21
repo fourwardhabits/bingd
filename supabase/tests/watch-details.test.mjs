@@ -331,26 +331,81 @@ describe('a historical feed post keeps its own viewing’s score', () => {
     assert.deepEqual(Object.keys(rows[0]).sort(), ['bucket', 'event_id', 'score', 'watch_number']);
   });
 
-  it('lets a later pure re-rank change the current score and no watch\'s score', async () => {
-    const { film, firstScore, secondScore } = await twoWatches('Corrected after the rewatch');
-    const before = await watchCount(film);
+  const postScores = async (film) =>
+    Promise.all(
+      (await posts(film)).map(async (p) => {
+        const row = (await scores([p.id]))[0];
+        return row ? Number(row.score) : Number(p.payload.score);
+      }),
+    );
 
-    // Update your rating — no new viewing — into another band.
-    await finish(
-      await one(t.db, `select rank_rebucket($1, 'not_for_me', $2) as r`, [film, await op()]),
+  const correct = async (film, bucket) =>
+    finish(
+      await one(t.db, `select rank_rebucket($1, $2, $3) as r`, [film, bucket, await op()]),
       film,
     );
-    const current = await liveScore(film);
-    assert.notEqual(current, secondScore, 'the correction did not move the current score');
 
-    // A pure re-rank creates no watch.
-    assert.equal(await watchCount(film), before, 'a correction logged a viewing');
+  const rewatch = async (film, bucket) => {
+    const logged = await call(`log_rewatch($1, $2, current_date, 'today_default')`, [await op(), film]);
+    await finish(
+      await one(t.db, `select rank_again($1, $2, $3, true, $4) as r`, [
+        film,
+        bucket,
+        await op(),
+        logged.watch_event_id,
+      ]),
+      film,
+    );
+    return logged.watch_event_id;
+  };
 
-    const [firstPost, secondPost, ...more] = await posts(film);
+  /**
+   * The founder's canonical rule (2026-09-21), end to end:
+   * Watch 1 → Watch 2 → pure rerank → Watch 3 → second pure rerank.
+   */
+  it('moves only the latest watch on a pure rerank, and freezes it once another is logged', async () => {
+    const { film, firstScore, secondScore } = await twoWatches('Latest follows, earlier freezes');
+
+    // Pure rerank 1: the latest watch (2) follows; watch 1 stays; nothing is created.
+    await correct(film, 'not_for_me');
+    const afterFirstFix = await liveScore(film);
+    assert.notEqual(afterFirstFix, secondScore, 'the correction did not move the current score');
+    assert.equal(await watchCount(film), 2, 'a correction logged a viewing');
+    let scoresNow = await postScores(film);
+    assert.equal(scoresNow.length, 2, 'a correction posted');
+    assert.equal(scoresNow[0], firstScore, 'watch 1 moved');
+    assert.equal(scoresNow[1], afterFirstFix, 'watch 2 did not follow the correction');
+
+    // Watch 3: a real watch, one new post; watch 2 is now frozen at the corrected score.
+    await rewatch(film, 'fine');
+    const thirdScore = await liveScore(film);
+    assert.equal(await watchCount(film), 3);
+    scoresNow = await postScores(film);
+    assert.equal(scoresNow.length, 3);
+    assert.deepEqual(scoresNow.slice(0, 2), [firstScore, afterFirstFix]);
+    assert.equal(scoresNow[2], thirdScore);
+
+    // Pure rerank 2: only watch 3 follows.
+    await correct(film, 'loved');
+    const afterSecondFix = await liveScore(film);
+    assert.equal(await watchCount(film), 3, 'the second correction logged a viewing');
+    scoresNow = await postScores(film);
+    assert.equal(scoresNow.length, 3, 'the second correction posted');
+    assert.deepEqual(scoresNow, [firstScore, afterFirstFix, afterSecondFix]);
+  });
+
+  it('moves the one post of a single-watch title on a pure rerank', async () => {
+    await anchors(3, 'loved');
+    await anchors(3, 'fine');
+    const film = await movie('Seen once, then corrected');
+    await t.rankToCompletion(film, 'fine', async (pivot) => pivot);
+
+    await correct(film, 'loved');
+    const [post, ...more] = await posts(film);
     assert.equal(more.length, 0, 'a correction posted');
-    const byId = new Map((await scores([firstPost.id, secondPost.id])).map((r) => [r.event_id, r]));
-    assert.equal(Number(byId.get(firstPost.id).score), firstScore, 'the correction reached watch 1');
-    assert.equal(Number(byId.get(secondPost.id).score), secondScore, 'the correction reached watch 2');
+    assert.equal(Number(post.payload.score), await liveScore(film));
+    assert.equal(post.payload.bucket, 'loved');
+    assert.equal(await watchCount(film), 1);
   });
 
   it('agrees with the ledger row Watch History reads for each watch', async () => {

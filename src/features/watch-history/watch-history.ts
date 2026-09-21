@@ -161,25 +161,26 @@ export function movementSentence(movement: Movement, position: number): string |
 }
 
 /**
- * **The score of each watch — the opinion the reader held AT that watch** (founder delta QA,
- * 2026-09-21). Watch 1 → 9.0, Watch 2 → 8.3, Watch 3 → 8.3: exactly what the Feed shows.
+ * **The score of each watch** — the founder's canonical rule (2026-09-21):
  *
- * A pure Update your rating creates no watch and changes **no** watch's score; the current
- * score (title page, Collection, Search) is what moves. The placement ledger stays
- * append-only — this only reads it.
+ *   · the MOST RECENTLY LOGGED watch follows a pure Update your rating;
+ *   · every earlier watch is frozen at what it was when the next one was logged.
  *
- * The rule, in order, and why each source agrees with the Feed:
+ * Watch 1 → 3.4, Watch 2 → 3.5, pure rerank → 4.1 gives Watch 1 = 3.4, Watch 2 = 4.1; log
+ * Watch 3 and Watch 2 stays at 4.1 while the next rerank moves Watch 3. A rerank creates no
+ * watch. The placement ledger stays append-only; this only reads it.
  *
- *   1. **The watch's own post.** A `title_ranked` post naming the watch carries
- *      `payload.score`, written by the finalize that placed it and never touched by a
- *      correction (20261015000100). This IS the Feed's number.
- *   2. **The watch's own ranking.** A `rewatch` placement tied to the watch — a backdated
- *      rewatch posts nothing, but its ranking still recorded the score.
- *   3. **The first watch's first ranking.** The earliest watch (in recording order) takes
- *      the first post that names no watch — the first ranking's post — or else the earliest
- *      `first` / `import` / `backfill` / `manual` placement.
- *   4. **Otherwise, the opinion held when it was logged.** A rewatch never re-ranked keeps
- *      the latest placement made before it was recorded, or the previous watch's score.
+ * In order, and why each source agrees with the Feed:
+ *
+ *   1. **The watch's own post.** A `title_ranked` post naming the watch — or, for the first
+ *      watch logged, the first ranking's post, which names none — carries `payload.score`:
+ *      written by the finalize that placed it, kept in step with corrections while its
+ *      watch is the latest (20261016000100), and frozen after. This IS the Feed's number.
+ *   2. **Otherwise the watch's span of the ledger.** The latest placement tied to the watch,
+ *      or tied to no watch (a correction, or the first ranking), made from the moment it was
+ *      logged until the next watch was logged — open-ended for the latest watch.
+ *   3. **Otherwise the opinion held when it was logged**: the latest placement before it, or
+ *      the previous watch's score.
  *
  * A title never ranked has no scores at all, and a watch that maps to none draws no circle.
  */
@@ -200,7 +201,6 @@ export type WatchPost = {
   createdAt: string;
 };
 
-const FIRST_KINDS = new Set(['first', 'import', 'backfill', 'manual']);
 const byTime = <T extends { createdAt: string }>(a: T, b: T) =>
   a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;
 
@@ -216,34 +216,36 @@ export function scoresByWatch(
   const scored = [...posts].filter((post) => post.score !== null).sort(byTime);
   const result = new Map<string, WatchScore>();
 
-  // 1. The watch's own post.
-  for (const post of scored) {
-    if (post.watchEventId && byRecording.some((event) => event.id === post.watchEventId)) {
-      result.set(post.watchEventId, { score: post.score as number, bucket: post.bucket });
-    }
-  }
-
-  // 2. The watch's own ranking (the latest one tied to it).
-  for (const event of byRecording) {
-    if (result.has(event.id)) continue;
-    const own = ledger.filter((p) => p.watchEventId === event.id && p.kind === 'rewatch').at(-1);
-    if (own) result.set(event.id, { score: own.score, bucket: own.bucket ?? null });
-  }
-
-  // 3. The first watch's first ranking.
-  const first = byRecording[0];
-  if (first && !result.has(first.id)) {
-    const post = scored.find((candidate) => candidate.watchEventId === null);
-    const placement = ledger.find((candidate) => FIRST_KINDS.has(candidate.kind));
-    if (post) result.set(first.id, { score: post.score as number, bucket: post.bucket });
-    else if (placement) {
-      result.set(first.id, { score: placement.score, bucket: placement.bucket ?? null });
-    }
-  }
-
-  // 4. Otherwise, the opinion held when it was logged.
   byRecording.forEach((event, index) => {
-    if (result.has(event.id)) return;
+    // 1. The watch's own post (the latest one, if a title was ranked twice over).
+    const own = scored
+      .filter(
+        (post) =>
+          post.watchEventId === event.id || (index === 0 && post.watchEventId === null),
+      )
+      .at(-1);
+    if (own) {
+      result.set(event.id, { score: own.score as number, bucket: own.bucket });
+      return;
+    }
+
+    // 2. The watch's span of the ledger.
+    const until = byRecording[index + 1]?.recordedAt ?? null;
+    const span = ledger
+      .filter(
+        (p) =>
+          p.watchEventId === event.id ||
+          (p.watchEventId === null &&
+            p.createdAt >= event.recordedAt &&
+            (until === null || p.createdAt < until)),
+      )
+      .at(-1);
+    if (span) {
+      result.set(event.id, { score: span.score, bucket: span.bucket ?? null });
+      return;
+    }
+
+    // 3. The opinion held when it was logged.
     const held = ledger.filter((p) => p.createdAt < event.recordedAt).at(-1);
     if (held) {
       result.set(event.id, { score: held.score, bucket: held.bucket ?? null });

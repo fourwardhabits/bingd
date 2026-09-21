@@ -199,19 +199,57 @@ describe('scoresByWatch — the opinion held at each watch (founder delta QA, 20
     expect([...['w1', 'w2', 'w3']].map((id) => shown.get(id)?.score)).toEqual([9.0, 8.3, 8.3]);
   });
 
-  it('lets a later pure rerank change no watch — not the first, not the latest', () => {
+  /**
+   * The canonical lifecycle (founder, 2026-09-21): Watch 1 → Watch 2 → pure rerank →
+   * Watch 3 → second pure rerank. The server keeps the latest watch's post in step with a
+   * correction (20261016000100); these fixtures are the posts as it leaves them.
+   */
+  it('moves only the latest watch on a pure rerank, and freezes it once another is logged', () => {
+    const ledger = [
+      placed('first', '2026-09-01T10:01:00Z', 3.4),
+      placed('rewatch', '2026-09-10T10:02:00Z', 3.5, 'w2'),
+      placed('correction', '2026-09-15T10:00:00Z', 4.1),
+    ];
+    // After the first rerank: Watch 2's post followed it.
+    const afterFirst = scoresByWatch(
+      [w1, w2],
+      ledger,
+      [post('2026-09-01T10:01:00Z', 3.4), post('2026-09-10T10:00:01Z', 4.1, 'w2')],
+    );
+    expect(afterFirst.get('w1')?.score).toBe(3.4);
+    expect(afterFirst.get('w2')?.score).toBe(4.1);
+
+    // Watch 3, then a second rerank: Watch 3 follows, Watch 2 stays at 4.1.
+    const afterSecond = scoresByWatch(
+      [w1, w2, w3],
+      [
+        ...ledger,
+        placed('rewatch', '2026-09-20T10:02:00Z', 5.0, 'w3'),
+        placed('correction', '2026-09-25T10:00:00Z', 6.2),
+      ],
+      [
+        post('2026-09-01T10:01:00Z', 3.4),
+        post('2026-09-10T10:00:01Z', 4.1, 'w2'),
+        post('2026-09-20T10:00:01Z', 6.2, 'w3'),
+      ],
+    );
+    expect(['w1', 'w2', 'w3'].map((id) => afterSecond.get(id)?.score)).toEqual([3.4, 4.1, 6.2]);
+  });
+
+  it('lets a latest watch with no post follow a correction through the ledger', () => {
+    // A backdated rewatch posts nothing; its span is open, so a correction reaches it —
+    // and the earlier watch's closed span does not.
     const shown = scoresByWatch(
       [w1, w2],
       [
-        placed('first', '2026-09-01T10:01:00Z', 9.0),
-        placed('correction', '2026-09-05T10:00:00Z', 8.7),
-        placed('rewatch', '2026-09-10T10:02:00Z', 8.3, 'w2'),
-        placed('correction', '2026-09-15T10:00:00Z', 6.1),
+        placed('first', '2026-09-01T10:01:00Z', 3.4),
+        placed('rewatch', '2026-09-10T10:02:00Z', 3.5, 'w2'),
+        placed('correction', '2026-09-15T10:00:00Z', 4.1),
       ],
-      [post('2026-09-01T10:01:00Z', 9.0), post('2026-09-10T10:00:01Z', 8.3, 'w2')],
+      [post('2026-09-01T10:01:00Z', 3.4)],
     );
-    expect(shown.get('w1')?.score).toBe(9.0);
-    expect(shown.get('w2')?.score).toBe(8.3);
+    expect(shown.get('w1')?.score).toBe(3.4);
+    expect(shown.get('w2')?.score).toBe(4.1);
   });
 
   it('uses the watch\'s own ranking when a backdated rewatch posted nothing', () => {
