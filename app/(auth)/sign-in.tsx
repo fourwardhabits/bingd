@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import {
@@ -48,6 +48,21 @@ export default function SignInScreen() {
   const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
 
+  /**
+   * The concurrency guard, and a ref rather than state for the reason `verify.tsx`
+   * already records on its Resend control: two activations in one frame both read the
+   * same render's `busy`, so `disabled` cannot refuse the second. Only a value that
+   * changes synchronously can.
+   *
+   * It was missing here, and this screen has **two** ways to fire the same send — the
+   * button and the keyboard's Go key — so the second one costs a real email at GoTrue.
+   * The first send succeeds, the second lands inside the 60-second per-address cooldown
+   * and comes back `over_email_send_rate_limit`, and what the person sees is a rate
+   * limit on what was, to them, one attempt. The code they were told did not send is
+   * already in their inbox.
+   */
+  const sending = useRef(false);
+
   // Asked rather than assumed from the platform: the entitlement can be missing
   // from a build, and a button that always fails is worse than no button.
   useEffect(() => {
@@ -63,12 +78,30 @@ export default function SignInScreen() {
    * address has an account.
    */
   const submitEmail = async () => {
+    if (sending.current) return;
+    sending.current = true;
     setBusy('email');
     setError(null);
     const result = await sendEmailCode(email);
+    sending.current = false;
     setBusy(null);
-    if (result.ok) {
-      router.push({ pathname: '/(auth)/verify', params: { email: email.trim() } });
+    /**
+     * A cooldown refusal is a code that already went out, so it moves forward.
+     *
+     * `retryAfterSeconds` is only set when GoTrue refused because this address was sent
+     * a working code less than a minute ago. Stopping here would leave somebody on the
+     * email form being told their signup failed while the code sits in their inbox,
+     * which is the failure mode the 2026-09-21 incident ended in. The remaining seconds
+     * ride along so the next screen's countdown is the server's, not a guess.
+     */
+    if (result.ok || result.retryAfterSeconds !== undefined) {
+      router.push({
+        pathname: '/(auth)/verify',
+        params: {
+          email: email.trim(),
+          ...(result.ok ? {} : { cooldown: String(result.retryAfterSeconds) }),
+        },
+      });
     } else {
       setError(result.message ?? 'That did not work. Try again.');
     }
