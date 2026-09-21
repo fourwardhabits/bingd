@@ -318,6 +318,30 @@ describe('C. a public list', () => {
     assert.equal(await listView(follower, id), null);
     assert.deepEqual(await profileLists(follower, owner), []);
   });
+
+  /**
+   * **A suspended owner's LINK list closes too — and only the suspension branch does it.**
+   *
+   * The test above uses a *public* list, and for public the suspension branch in
+   * `_list_readable` is redundant: the final `else can_view_profile(...)` independently
+   * refuses a suspended owner. So deleting the suspension branch left that test green,
+   * and the corrected mutation check reported it SURVIVED.
+   *
+   * A link list is the case that matters. `when visibility = 'link' then true` returns
+   * **before** `can_view_profile` is ever reached — deliberately, because link-only is an
+   * object-level share that does not consult the profile. That makes the suspension
+   * branch the **only** thing standing between a suspended account and every link it ever
+   * handed out. This test is what makes that branch load-bearing in the suite.
+   */
+  it('closes a suspended owner’s link-only list, which only the suspension branch can do', async () => {
+    const id = await mkList(owner, 'link');
+    await addItem(id, movie);
+    assert.notEqual(await listView(null, id), null, 'the link list was not open to begin with');
+
+    await setStatus(owner, 'suspended');
+    assert.deepEqual(await readers(null, id), ALL_CLOSED, 'a suspended owner’s link list leaked');
+    assert.equal(await listView(stranger, id), null);
+  });
 });
 
 // ===========================================================================
