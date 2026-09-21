@@ -2,179 +2,268 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { CompanionPicker } from '@/features/collection/CompanionPicker';
 import { formatWatchDate, today } from '@/features/collection/dates';
+import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
 import { theme } from '@/ui/tokens';
-import { Text } from '@/ui/components';
+import { Button, Field, SheetRow, Text } from '@/ui/components';
 
-import {
-  isFromDiary,
-  movementDirection,
-  movementSentence,
-  type WatchEvent,
-  type WatchRowLabel,
-} from './watch-history';
+import { isFromDiary, type WatchEvent, type WatchRowLabel } from './watch-history';
+
+/** The same ceiling `set_watch_details` enforces through `watch_tags.max_per_watch`. */
+const MAX_COMPANIONS = 10;
+
+export type WatchEdit = {
+  /** Present only when the date was changed; null clears it. */
+  watchedOn?: string | null;
+  /** Present only when the note or the companions changed. */
+  details?: { note: string | null; companionIds: string[] };
+};
 
 export type WatchRowProps = {
   event: WatchEvent;
   label: WatchRowLabel;
-  /** The private movement this viewing produced, if it produced one (§E.2). */
-  movement?: { outcome: 'placed' | 'moved' | 'unchanged' | 'kept'; fromPosition: number | null };
-  position?: number;
-  /** Whether this is the title's only viewing, which changes what ⋯ offers. */
+  /** Where the title stood after this viewing, collapsed from the ledger (`placementsByWatch`). */
+  placement?: { position: number; categorySize: number };
+  note?: string | null;
+  companions?: Person[];
+  /** The reader's mutual follows, for the editor's picker. */
+  people: Person[];
+  peopleLoading?: boolean;
+  /** Whether this is the title's only viewing, which changes what removing it means. */
   onlyWatch: boolean;
   editing: boolean;
   onEdit: () => void;
   onDismissEdit: () => void;
-  onChangeDate: (iso: string | null) => void;
+  onSave: (edit: WatchEdit) => void;
   onRemove: () => void;
   busy?: boolean;
 };
 
 /**
- * One viewing.
+ * One viewing, drawn like a feed row (founder QA, 2026-09-21).
+ *
+ * The date leads — *Sep 21, 2026 (First watch)* — with where the title stood after that
+ * viewing on the right, *#4 of 11*, and the viewing's own details underneath when there are
+ * any: who it was watched with and the note. There is no movement line here; each row
+ * already carries its placement, so *Moved from…* belongs to the ranking's reveal alone.
  *
  * ---------------------------------------------------------------------------
- * **THE DATE IS EDITED INLINE, AND THAT IS A STRUCTURAL DECISION** (§J.2)
+ * **EDITED INLINE, AND THAT IS A STRUCTURAL DECISION** (§J.2)
  *
- * A pushed screen has the room for a date grid to open in place, and using it keeps the
- * iOS two-modal rule out of this surface entirely: a row action inside a presented sheet
- * is a view other sheets cannot then stack on, and the ranking flow stacks sheets. The
- * whole reason §J.2 rejected a bottom sheet for this screen — Revision 2 proposed one —
- * is that a history is a list with row-level actions and a keyboard-adjacent date field,
- * which is a screen's job.
- *
- * So there is no modal here, at any depth. ⋯ toggles the row open; the grid appears
- * under it; tapping a date writes and closes.
+ * The pencil opens the editor in place — date, companions, note — rather than a sheet: a
+ * row action inside a presented sheet is a view other sheets cannot then stack on, and the
+ * ranking flow stacks sheets. So there is no modal here, at any depth.
  */
 export function WatchRow({
   event,
   label,
-  movement,
-  position,
+  placement,
+  note,
+  companions = [],
+  people,
+  peopleLoading = false,
   onlyWatch,
   editing,
   onEdit,
   onDismissEdit,
-  onChangeDate,
+  onSave,
   onRemove,
   busy = false,
 }: WatchRowProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-
+  const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : 'Earlier';
   // "First watch" only when it is first *and* dated (§D.2). The undated viewing reads
   // *Earlier*, which is the same word the When row uses for the choice that produces it.
-  const title =
-    label === 'earlier' ? 'Earlier' : label === 'first' ? 'First watch' : 'Rewatch';
-
-  const dateLabel = event.watchedOn ? formatWatchDate(event.watchedOn) : null;
-  const source = isFromDiary(event) ? 'Letterboxd' : null;
-
-  const detail =
-    label === 'earlier'
-      ? 'Date not recorded'
-      : [source && `from ${source}`].filter(Boolean).join(' · ') || null;
-
-  const moved =
-    movement && position !== undefined ? movementSentence(movement, position) : null;
-  const direction =
-    movement && position !== undefined ? movementDirection(movement, position) : null;
+  const primary = label === 'first' ? `${dateLabel} (First watch)` : dateLabel;
+  const source = isFromDiary(event) ? 'From Letterboxd' : null;
+  const withLine = companions.length
+    ? `With ${companions.map((person) => person.name).join(', ')}`
+    : null;
 
   return (
     <View style={styles.row} testID={`watch-row-${event.id}`}>
       <View style={styles.main}>
-        <Text variant="caption" tone="tertiary" style={styles.date}>
-          {dateLabel ?? 'Earlier'}
-        </Text>
-
         <View style={styles.body}>
-          <Text variant="body">
-            {title}
-            {detail ? <Text variant="body" tone="tertiary">{` · ${detail}`}</Text> : null}
+          <Text variant="headline" testID={`watch-date-${event.id}`}>
+            {primary}
           </Text>
-
-          {/**
-           * **Private, and exact at any depth** (§B.2, §E.2). `Moved from #118 → #72`
-           * appears here and on the reveal and nowhere else — the feed payload carries no
-           * ordinal at all, so there is no public counterpart of this line to keep in
-           * step with.
-           */}
-          {moved ? (
-            <Text variant="caption" tone="secondary" testID={`watch-movement-${event.id}`}>
-              {moved}
-              {direction ? (direction === 'up' ? '  ↑' : '  ↓') : ''}
+          {label === 'earlier' ? (
+            <Text variant="footnote" tone="tertiary">
+              Date not recorded
+            </Text>
+          ) : null}
+          {source ? (
+            <Text variant="footnote" tone="tertiary">
+              {source}
+            </Text>
+          ) : null}
+          {withLine ? (
+            <Text variant="footnote" tone="secondary" testID={`watch-with-${event.id}`}>
+              {withLine}
+            </Text>
+          ) : null}
+          {note ? (
+            <Text variant="body" tone="secondary" testID={`watch-note-${event.id}`}>
+              {note}
             </Text>
           ) : null}
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Watch options"
-          hitSlop={12}
-          onPress={() => setMenuOpen((open) => !open)}
-          style={styles.more}
-        >
-          <Ionicons name="ellipsis-horizontal" size={18} color={theme.text.tertiary} />
-        </Pressable>
+        <View style={styles.side}>
+          {placement ? (
+            <Text
+              variant="ordinal"
+              tone="secondary"
+              testID={`watch-placement-${event.id}`}
+            >{`#${placement.position} of ${placement.categorySize}`}</Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Edit this watch"
+            hitSlop={12}
+            onPress={editing ? onDismissEdit : onEdit}
+            testID={`watch-edit-${event.id}`}
+          >
+            <Ionicons name="pencil" size={16} color={theme.text.tertiary} />
+          </Pressable>
+        </View>
       </View>
 
-      {menuOpen ? (
-        <View style={styles.menu}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              setMenuOpen(false);
-              onEdit();
-            }}
-            style={styles.menuItem}
-          >
-            <Text variant="body" tone="action">
-              Change date
-            </Text>
-          </Pressable>
-
-          {/**
-           * **The only watch says something different, because the server refuses it.**
-           *
-           * `delete_watch_event` raises `P0001 last_watch` rather than leaving a
-           * collection row with no viewing behind it (§D.0). Offering *Remove this watch*
-           * and then showing an error would be a control that exists to fail; the row
-           * says what the reader actually means instead.
-           */}
-          <Pressable
-            accessibilityRole="button"
-            disabled={busy}
-            onPress={() => {
-              setMenuOpen(false);
-              onRemove();
-            }}
-            style={styles.menuItem}
-          >
-            <Text variant="body" tone="action">
-              {onlyWatch ? 'Remove from collection…' : 'Remove this watch'}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
-
       {editing ? (
-        <View style={styles.editor}>
-          <WatchDatePicker
-            value={event.watchedOn}
-            anchor={event.watchedOn ?? today()}
-            onChange={(iso) => {
-              onChangeDate(iso);
-              onDismissEdit();
-            }}
-            // *Date not recorded* is an allowed answer here, exactly as *Earlier* is in
-            // the log sheet (§J.2). Forgetting when is a state, not a failure to finish.
-            onClear={() => {
-              onChangeDate(null);
-              onDismissEdit();
-            }}
-          />
-        </View>
+        <WatchEditor
+          event={event}
+          note={note ?? null}
+          companions={companions}
+          people={people}
+          peopleLoading={peopleLoading}
+          onlyWatch={onlyWatch}
+          busy={busy}
+          onCancel={onDismissEdit}
+          onSave={(edit) => {
+            onSave(edit);
+            onDismissEdit();
+          }}
+          onRemove={onRemove}
+        />
       ) : null}
+    </View>
+  );
+}
+
+function WatchEditor({
+  event,
+  note,
+  companions,
+  people,
+  peopleLoading,
+  onlyWatch,
+  busy,
+  onCancel,
+  onSave,
+  onRemove,
+}: {
+  event: WatchEvent;
+  note: string | null;
+  companions: Person[];
+  people: Person[];
+  peopleLoading: boolean;
+  onlyWatch: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (edit: WatchEdit) => void;
+  onRemove: () => void;
+}) {
+  const [date, setDate] = useState(event.watchedOn);
+  const [picking, setPicking] = useState(false);
+  const [draft, setDraft] = useState(note ?? '');
+  const [selected, setSelected] = useState(() => companions.map((person) => person.id));
+
+  const toggle = (id: string) =>
+    setSelected((current) =>
+      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
+    );
+
+  const save = () => {
+    const edit: WatchEdit = {};
+    if (date !== event.watchedOn) edit.watchedOn = date;
+    const nextNote = draft.trim() ? draft.trim() : null;
+    const before = companions.map((person) => person.id).sort().join(',');
+    const after = [...selected].sort().join(',');
+    if (nextNote !== (note ?? null) || before !== after) {
+      edit.details = { note: nextNote, companionIds: selected };
+    }
+    onSave(edit);
+  };
+
+  return (
+    <View style={styles.editor} testID={`watch-editor-${event.id}`}>
+      <SheetRow
+        icon="calendar-outline"
+        label="When?"
+        value={date === null ? 'Earlier' : formatWatchDate(date)}
+        expanded={picking}
+        onPress={() => setPicking((was) => !was)}
+      />
+      {picking ? (
+        <WatchDatePicker
+          value={date}
+          anchor={date ?? today()}
+          onChange={(iso) => {
+            setDate(iso);
+            setPicking(false);
+          }}
+          // *Date not recorded* is an allowed answer here, exactly as *Earlier* is in the
+          // log sheet (§J.2). Forgetting when is a state, not a failure to finish.
+          onClear={() => {
+            setDate(null);
+            setPicking(false);
+          }}
+        />
+      ) : null}
+
+      <Text variant="footnote" tone="secondary">
+        Watched with
+      </Text>
+      <CompanionPicker
+        people={taggableWith(people, companions)}
+        selected={selected}
+        onToggle={toggle}
+        max={MAX_COMPANIONS}
+        loading={peopleLoading}
+      />
+
+      <Field
+        label="Note"
+        hint="Only you can see notes on a watch."
+        value={draft}
+        onChangeText={setDraft}
+        maxLength={1000}
+        multiline
+      />
+
+      <View style={styles.actions}>
+        <Button label="Cancel" kind="secondary" onPress={onCancel} />
+        <Button label="Save" disabled={busy} onPress={save} />
+      </View>
+
+      {/**
+       * **The only watch says something different, because the server refuses it.**
+       *
+       * `delete_watch_event` raises `P0001 last_watch` rather than leaving a collection row
+       * with no viewing behind it (§D.0). The row says what the reader actually means.
+       */}
+      <Pressable
+        accessibilityRole="button"
+        disabled={busy}
+        onPress={onRemove}
+        style={styles.remove}
+        testID={`watch-remove-${event.id}`}
+      >
+        <Text variant="body" tone="action">
+          {onlyWatch ? 'Remove from collection…' : 'Remove this watch'}
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -185,16 +274,9 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[3],
   },
   main: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[3] },
-  // A fixed column, so the labels line up down the list rather than stepping in and out
-  // with the width of "Yesterday" against "Mar 3".
-  date: { width: 72 },
   body: { flex: 1, gap: theme.space[1] },
-  more: { paddingLeft: theme.space[2] },
-  menu: {
-    marginTop: theme.space[2],
-    marginLeft: 72 + theme.space[3],
-    gap: theme.space[2],
-  },
-  menuItem: { paddingVertical: theme.space[1] },
-  editor: { marginTop: theme.space[2] },
+  side: { alignItems: 'flex-end', gap: theme.space[2] },
+  editor: { marginTop: theme.space[3], gap: theme.space[3] },
+  actions: { flexDirection: 'row', gap: theme.space[3], justifyContent: 'flex-end' },
+  remove: { paddingVertical: theme.space[1] },
 });

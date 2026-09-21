@@ -2532,3 +2532,46 @@ describe('when the recall sheet is opened from a comparison', () => {
     expect(sheet.getByLabelText('Details about …').props.accessibilityHint).toBeUndefined();
   });
 });
+
+/**
+ * A re-ranking says where it went (founder QA, 2026-09-21): *Moved from #8 → #2* or
+ * *Still #2*, in the placement's own line, from the `movement` the server returns.
+ */
+describe('the reveal after a re-ranking', () => {
+  const moved = (outcome: string, from: number, position: number) => ({
+    data: {
+      ...placement.data,
+      position,
+      movement: { outcome, from_position: from, from_score: 8, kind: 'rerank' },
+    },
+    error: null,
+  });
+
+  it('shows Moved from #8 → #2 when the placement changed, even outside the top ten', async () => {
+    answering(comparison(), moved('moved', 18, 12));
+    const sheet = await openSheet({ subject: { ...subject, mode: 'rerank' as const } });
+    await fireEvent.press(await sheet.ready('Film P'));
+    expect(
+      (await sheet.findByTestId('reveal-movement', { includeHiddenElements: true })).props
+        .children,
+    ).toBe('Moved from #18 → #12');
+  });
+
+  it('shows Still #3 when it held', async () => {
+    answering(comparison(), moved('unchanged', 3, 3));
+    const sheet = await openSheet({ subject: { ...subject, mode: 'rerank' as const } });
+    await fireEvent.press(await sheet.ready('Film P'));
+    expect(
+      (await sheet.findByTestId('reveal-movement', { includeHiddenElements: true })).props
+        .children,
+    ).toBe('Still #3');
+  });
+
+  it('draws no movement on a first ranking', async () => {
+    answering(comparison(), placement);
+    const sheet = await openSheet();
+    await fireEvent.press(await sheet.ready('Film P'));
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    expect(sheet.queryByTestId('reveal-movement', { includeHiddenElements: true })).toBeNull();
+  });
+});

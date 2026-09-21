@@ -5,6 +5,7 @@ import {
   labelFor,
   movementDirection,
   movementSentence,
+  placementsByWatch,
   watchCountLabel,
   type WatchEvent,
 } from './watch-history';
@@ -132,8 +133,9 @@ describe('movementSentence — private, and exact at any depth (§E.2)', () => {
     expect(movementSentence({ outcome: 'unchanged', fromPosition: 312 }, 312)).toBe('Still #312');
   });
 
-  it('says Kept at #N when the reader skipped out', () => {
-    expect(movementSentence({ outcome: 'kept', fromPosition: 57 }, 57)).toBe('Kept at #57');
+  it('says Still #N when the reader skipped out, and when a band change keeps the ordinal', () => {
+    expect(movementSentence({ outcome: 'kept', fromPosition: 57 }, 57)).toBe('Still #57');
+    expect(movementSentence({ outcome: 'moved', fromPosition: 4 }, 4)).toBe('Still #4');
   });
 
   it('says nothing about a first placement, which moved from nowhere', () => {
@@ -152,5 +154,60 @@ describe('movementDirection', () => {
     expect(movementDirection({ outcome: 'unchanged', fromPosition: 33 }, 33)).toBeNull();
     expect(movementDirection({ outcome: 'kept', fromPosition: 57 }, 57)).toBeNull();
     expect(movementDirection({ outcome: 'placed', fromPosition: null }, 1)).toBeNull();
+  });
+});
+
+describe('placementsByWatch — one displayed placement per viewing (founder QA, 2026-09-21)', () => {
+  const watch = (id: string, recordedAt: string, watchedOn: string | null = null): WatchEvent => ({
+    id,
+    watchedOn,
+    basis: 'reader',
+    importRef: null,
+    recordedAt,
+  });
+  const placed = (
+    id: string,
+    createdAt: string,
+    position: number,
+    watchEventId: string | null = null,
+  ) => ({ id, createdAt, position, categorySize: 11, score: 8, watchEventId });
+
+  it('collapses a single viewing with three ledger rows to the newest one', () => {
+    const shown = placementsByWatch(
+      [watch('w1', '2026-09-01T10:00:00Z')],
+      [
+        placed('p1', '2026-09-01T10:01:00Z', 8),
+        placed('p2', '2026-09-05T10:00:00Z', 5),
+        placed('p3', '2026-09-10T10:00:00Z', 4),
+      ],
+    );
+    expect(shown.size).toBe(1);
+    expect(shown.get('w1')?.id).toBe('p3');
+  });
+
+  it('gives each viewing its own span, and a correction after the rewatch updates only the rewatch', () => {
+    const shown = placementsByWatch(
+      [watch('w1', '2026-09-01T10:00:00Z'), watch('w2', '2026-09-20T10:00:00Z')],
+      [
+        placed('first', '2026-09-01T10:01:00Z', 8),
+        placed('fix-1', '2026-09-02T10:00:00Z', 7),
+        placed('again', '2026-09-20T10:02:00Z', 2, 'w2'),
+        placed('fix-2', '2026-09-21T10:00:00Z', 3),
+      ],
+    );
+    expect(shown.get('w1')?.id).toBe('fix-1');
+    expect(shown.get('w2')?.id).toBe('fix-2');
+  });
+
+  it('shows the inherited placement on a viewing that was never ranked', () => {
+    const shown = placementsByWatch(
+      [watch('w1', '2026-09-01T10:00:00Z'), watch('w2', '2026-09-20T10:00:00Z')],
+      [placed('first', '2026-09-01T10:01:00Z', 8)],
+    );
+    expect(shown.get('w2')?.id).toBe('first');
+  });
+
+  it('leaves a viewing with no placement at all unmapped', () => {
+    expect(placementsByWatch([watch('w1', '2026-09-01T10:00:00Z')], []).size).toBe(0);
   });
 });

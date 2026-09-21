@@ -142,20 +142,70 @@ export type Movement = {
 export function movementSentence(movement: Movement, position: number): string | null {
   switch (movement.outcome) {
     case 'moved':
-      return movement.fromPosition === null
-        ? null
+      if (movement.fromPosition === null) return null;
+      // A change of band can land on the same ordinal; "Moved from #4 → #4" says nothing.
+      return movement.fromPosition === position
+        ? `Still #${position}`
         : `Moved from #${movement.fromPosition} → #${position}`;
-    // Both neighbours were checked and both held.
+    // Both neighbours were checked and both held — or the reader skipped out, so nothing
+    // moved it. Either way the reader's answer is the same one: it stayed (founder QA,
+    // 2026-09-21: "a clear Still #X").
     case 'unchanged':
-      return `Still #${position}`;
-    // The reader skipped out, so nothing moved it.
     case 'kept':
-      return `Kept at #${position}`;
+      return `Still #${position}`;
     case 'placed':
       return null;
     default:
       return null;
   }
+}
+
+/**
+ * The placement a Watch History row shows: **one per viewing** (founder QA, 2026-09-21).
+ *
+ * The ledger stays append-only; this collapses it for display. A viewing's span runs from
+ * its recording to the next viewing's recording (the order the ledger was written in), and
+ * within it the newest placement tied to this viewing — or tied to none, which is a
+ * correction or a refine — is the one shown. So a correction updates the latest viewing's
+ * number instead of adding a line, and a viewing that was never re-ranked shows the
+ * placement it inherited. Mirrors `_watch_span_placement` (20261014000100), which the feed
+ * uses for the same question.
+ */
+export type LedgerPlacement = {
+  id: string;
+  position: number;
+  categorySize: number;
+  score: number;
+  watchEventId: string | null;
+  createdAt: string;
+};
+
+export function placementsByWatch<P extends LedgerPlacement>(
+  events: readonly WatchEvent[],
+  placements: readonly P[],
+): Map<string, P> {
+  const byRecording = [...events].sort((a, b) =>
+    a.recordedAt < b.recordedAt ? -1 : a.recordedAt > b.recordedAt ? 1 : a.id < b.id ? -1 : 1,
+  );
+  const newestFirst = [...placements].sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+  );
+  const result = new Map<string, P>();
+
+  byRecording.forEach((event, index) => {
+    const from = event.recordedAt;
+    const until = byRecording[index + 1]?.recordedAt ?? null;
+    const own = newestFirst.find(
+      (p) =>
+        p.watchEventId === event.id ||
+        (p.watchEventId === null && p.createdAt >= from && (until === null || p.createdAt < until)),
+    );
+    const carried = newestFirst.find((p) => p.createdAt < from);
+    const shown = own ?? carried;
+    if (shown) result.set(event.id, shown);
+  });
+
+  return result;
 }
 
 /** Which way the arrow points beside a movement, or null when there is none. */

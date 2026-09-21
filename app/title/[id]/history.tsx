@@ -1,22 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useCurrentProfile } from '@/features/auth/session';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import { useTaggablePeople, type Person } from '@/features/collection/use-companions';
 import { track } from '@/lib/analytics';
-import { supabase } from '@/lib/supabase';
 import { theme } from '@/ui/tokens';
-import { Button, LoadingScreen, Screen, Text } from '@/ui/components';
+import { LoadingScreen, Screen, Text } from '@/ui/components';
 
-import { WatchRow } from '@/features/watch-history/WatchRow';
-import { groupByYear, labelFor, type WatchEvent } from '@/features/watch-history/watch-history';
+import { WatchRow, type WatchEdit } from '@/features/watch-history/WatchRow';
+import {
+  groupByYear,
+  labelFor,
+  placementsByWatch,
+  type WatchEvent,
+} from '@/features/watch-history/watch-history';
 import { useWatchHistory, type Placement } from '@/features/watch-history/use-watch-history';
 import {
   deleteWatchEvent,
   editWatchEvent,
   newOperationId,
+  setWatchDetails,
 } from '@/features/watch-history/writes';
 
 /**
@@ -36,34 +42,37 @@ import {
  * first.
  *
  * **Not a sheet** (§J.2). Revision 2 proposed one. A history reaches ten, twenty or more
- * entries, each with a date, sometimes a movement line, and a ⋯ that edits or removes
- * it — a list with row-level actions and a header summary, which is a screen's job. A
- * sheet caps at a fraction of the viewport, competes with the keyboard during an inline
- * date edit, and on iOS puts row actions inside a presented view that other sheets
- * cannot then stack on.
+ * entries, each with a date, a placement, and a pencil that edits it — a list with
+ * row-level actions and a header summary, which is a screen's job. A sheet caps at a
+ * fraction of the viewport, competes with the keyboard during an inline edit, and on iOS
+ * puts row actions inside a presented view that other sheets cannot then stack on.
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS SCREEN OWNS
  *
  * The watch events, their known dates, the undated historical viewing where there is
- * one, the rewatch count, **the private movement line**, and editing or removing an
- * individual watch. Notes stay title-level — there is no per-watch note here or anywhere
- * (§D.4).
+ * one, the rewatch count, the placement after each viewing, each viewing's own private
+ * details (who with, a note — 20261014000100; the title-level review is untouched), and
+ * editing or removing an individual watch.
+ *
+ * **It is not a second logging flow** (founder QA, 2026-09-21). *Add a past watch* and
+ * *Log another watch* are gone from here: a new viewing is logged from the title page,
+ * where the ranking it hands off to lives, and a past viewing is simply one with a date.
  */
 /** Stable empties, so a pending query does not look like new data every render. */
 const EMPTY_EVENTS: WatchEvent[] = [];
 const EMPTY_PLACEMENTS: Placement[] = [];
+const EMPTY_PEOPLE: Person[] = [];
 
 export default function WatchHistoryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const mediaItemId = String(id ?? '');
   const profile = useCurrentProfile();
-  const router = useRouter();
-  const navigation = useNavigation();
   const queryClient = useQueryClient();
 
   const userId = profile.id;
   const history = useWatchHistory(userId, mediaItemId);
+  const people = useTaggablePeople(userId);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,26 +88,14 @@ export default function WatchHistoryScreen() {
   const placements = useMemo(() => history.data?.placements ?? EMPTY_PLACEMENTS, [history.data]);
 
   /**
-   * The movement to show beside a viewing, keyed by the event that prompted it.
-   *
-   * A placement links to the viewing it was a re-check *of* (`watch_event_id`), so the
-   * line lands on the row it is about rather than at the top of the screen. Placements
-   * with no viewing behind them — a first ranking, a correction, a refine — are listed
-   * separately below, which is what §J.2's wireframe shows as *Placed #18 of 34*.
+   * One placement per viewing, collapsed from the append-only ledger (founder QA,
+   * 2026-09-21). A correction updates the latest viewing's number rather than adding a
+   * line under it, and nothing is listed that is not a viewing. `placementsByWatch` holds
+   * the rule and its tests.
    */
-  const movementByEvent = useMemo(() => {
-    const map = new Map<string, Placement>();
-    for (const placement of placements) {
-      if (!placement.watchEventId) continue;
-      // The newest wins, and the list arrives newest-first, so the first one seen is it.
-      if (!map.has(placement.watchEventId)) map.set(placement.watchEventId, placement);
-    }
-    return map;
-  }, [placements]);
-
-  const unattached = useMemo(
-    () => placements.filter((placement) => !placement.watchEventId),
-    [placements],
+  const shownPlacement = useMemo(
+    () => placementsByWatch(events, placements),
+    [events, placements],
   );
 
   /**
@@ -137,20 +134,41 @@ export default function WatchHistoryScreen() {
   const reconcile = () =>
     invalidateAfterCollectionChange(queryClient, userId, mediaItemId, {});
 
-  const changeDate = async (eventId: string, iso: string | null) => {
+  const saveEdit = async (eventId: string, edit: WatchEdit) => {
+    if (edit.watchedOn === undefined && !edit.details) return;
     setBusy(true);
     setError(null);
-    const result = await editWatchEvent({
-      operationId: newOperationId(),
-      watchEventId: eventId,
-      watchedOn: iso,
-      // The reader is looking at this row and typed into it. Nothing here is defaulted,
-      // so nothing here is `today_default` (§D.6 path 13).
-      basis: iso === null ? 'none' : 'reader',
-    });
+    const results = [];
+    if (edit.watchedOn !== undefined) {
+      results.push(
+        await editWatchEvent({
+          operationId: newOperationId(),
+          watchEventId: eventId,
+          watchedOn: edit.watchedOn,
+          // The reader is looking at this row and typed into it. Nothing here is defaulted,
+          // so nothing here is `today_default` (§D.6 path 13).
+          basis: edit.watchedOn === null ? 'none' : 'reader',
+        }),
+      );
+    }
+    if (edit.details) {
+      results.push(
+        await setWatchDetails({
+          operationId: newOperationId(),
+          watchEventId: eventId,
+          note: edit.details.note,
+          companionIds: edit.details.companionIds,
+        }),
+      );
+    }
     setBusy(false);
     reconcile();
-    if (result.outcome === 'failed') setError(result.message);
+    for (const result of results) {
+      if (result.outcome === 'failed') {
+        setError(result.message);
+        break;
+      }
+    }
   };
 
   const remove = async (eventId: string, onlyWatch: boolean) => {
@@ -165,50 +183,16 @@ export default function WatchHistoryScreen() {
     setError(null);
     const result = await deleteWatchEvent({ operationId: newOperationId(), watchEventId: eventId });
     setBusy(false);
+    setEditingId(null);
     reconcile();
     if (result.outcome === 'failed') {
       setError(result.lastWatch ? 'A title in your collection has at least one watch.' : result.message);
     }
   };
 
-  const addPastWatch = async () => {
-    // *Add a past watch* opens the same inline date field the rows use (§J.2). It creates
-    // the viewing undated and immediately opens its editor, so the reader answers the
-    // date on the row they are about to keep — rather than in a dialogue that decides it
-    // before the row exists.
-    setBusy(true);
-    setError(null);
-    const { data, error: rpcError } = await supabase.rpc('log_rewatch', {
-      p_operation_id: newOperationId(),
-      p_media_item_id: mediaItemId,
-      p_watched_on: null,
-      p_basis: 'none',
-    });
-    setBusy(false);
-    reconcile();
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
-    }
-    const created = (data as { watch_event_id?: string } | null)?.watch_event_id;
-    if (created) {
-      // `past`, which is the third kind the event declares: not a first log and not a
-      // rewatch the reader has just had, but a viewing they are adding to a history
-      // after the fact. It starts undated by construction, and the row's inline editor
-      // opens on it immediately so the reader dates it where they can see it.
-      track({ name: 'watch_logged', props: { kind: 'past', basis: 'none', surface: 'title' } });
-      setEditingId(created);
-    }
-  };
-
   if (history.isPending) return <LoadingScreen message="Loading your watch history" />;
 
   const count = events.length;
-  // The screen's own header says where the title sits now. `use-log-state` reports only
-  // WHETHER it is ranked, so the live ordinal comes from the newest placement — the row
-  // that says where it landed, and the ledger is append-only so the newest is current by
-  // construction.
-  const position = placements[0]?.position ?? null;
 
   return (
     <Screen includeBottomInset>
@@ -219,16 +203,12 @@ export default function WatchHistoryScreen() {
         // A sixty-watch history is an ordinary scroll, which is the point of a screen
         // rather than a sheet (§J.2).
         removeClippedSubviews
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={styles.header}>
             <Text variant="title2" testID="watch-history-summary">
               {count === 1 ? 'Watched once' : `Watched ${count} times`}
             </Text>
-            {position !== null ? (
-              <Text variant="caption" tone="tertiary">
-                {`#${position} in your ranking`}
-              </Text>
-            ) : null}
             {error ? (
               <Text variant="caption" tone="action" testID="watch-history-error">
                 {error}
@@ -243,7 +223,8 @@ export default function WatchHistoryScreen() {
           const group = groups.find((candidate) => candidate.events.includes(item));
           const first = group?.events[0]?.id === item.id;
           const showYear = first && group?.year !== null && groups.filter((g) => g.year !== null).length > 1;
-          const placement = movementByEvent.get(item.id);
+          const placement = shownPlacement.get(item.id);
+          const details = history.data?.details.get(item.id);
 
           return (
             <View>
@@ -255,20 +236,16 @@ export default function WatchHistoryScreen() {
               <WatchRow
                 event={item}
                 label={labelOf(item)}
-                movement={
-                  placement
-                    ? {
-                        outcome: placement.outcome as 'placed' | 'moved' | 'unchanged' | 'kept',
-                        fromPosition: placement.fromPosition,
-                      }
-                    : undefined
-                }
-                position={placement?.position}
+                placement={placement}
+                note={details?.note}
+                companions={details?.companions}
+                people={people.data ?? EMPTY_PEOPLE}
+                peopleLoading={people.isPending}
                 onlyWatch={count <= 1}
                 editing={editingId === item.id}
                 onEdit={() => setEditingId(item.id)}
                 onDismissEdit={() => setEditingId(null)}
-                onChangeDate={(iso) => void changeDate(item.id, iso)}
+                onSave={(edit) => void saveEdit(item.id, edit)}
                 onRemove={() => void remove(item.id, count <= 1)}
                 busy={busy}
               />
@@ -276,50 +253,6 @@ export default function WatchHistoryScreen() {
             </View>
           );
         }}
-        ListFooterComponent={
-          <View style={styles.footer}>
-            {/**
-             * Placements not tied to a viewing: a first ranking, a correction, a refine.
-             * §J.2's *Placed #18 of 34 · Mar 2025* — true about **then**, which is why
-             * the ordinal here is the one that placement recorded rather than the live
-             * one the movement lines above use (§E.2's two forms, both stored).
-             */}
-            {unattached.length ? (
-              <View style={styles.placements}>
-                {unattached.map((placement) => (
-                  <Text key={placement.id} variant="caption" tone="tertiary">
-                    {placement.kind === 'refine'
-                      ? `Refined · Still #${placement.position}`
-                      : `Placed #${placement.position} of ${placement.categorySize}`}
-                    {' · '}
-                    {new Date(placement.createdAt).toLocaleDateString(undefined, {
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                  </Text>
-                ))}
-              </View>
-            ) : null}
-
-            <Button
-              label="Add a past watch"
-              kind="secondary"
-              disabled={busy}
-              onPress={() => void addPastWatch()}
-            />
-            <Button
-              label="Log another watch"
-              disabled={busy}
-              onPress={() => {
-                // Back to the title page, where the rewatch sheet lives with the ranking
-                // machinery it hands off to. Opening a second sheet from here is the
-                // iOS two-modal dead end this screen exists to avoid.
-                navigation.goBack();
-                router.setParams({ rewatch: '1' });
-              }}
-            />
-          </View>
-        }
       />
     </Screen>
   );
@@ -342,9 +275,4 @@ const styles = StyleSheet.create({
     backgroundColor: theme.border.hairline,
     marginHorizontal: theme.layout.gutter,
   },
-  footer: {
-    padding: theme.layout.gutter,
-    gap: theme.space[3],
-  },
-  placements: { gap: theme.space[1], paddingBottom: theme.space[3] },
 });

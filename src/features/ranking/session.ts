@@ -114,6 +114,18 @@ export type Placed = {
    * was never invited.
    */
   activated: boolean;
+  /**
+   * Where the title was before this placement, from the server's own response
+   * (`movement`, 20261004000100). Null on a first ranking and on a backend that predates
+   * it. The reveal turns it into *Moved from #8 → #2* or *Still #2* (founder QA,
+   * 2026-09-21) — the reader's own call is the only place movement appears.
+   */
+  movement: PlacedMovement | null;
+};
+
+export type PlacedMovement = {
+  outcome: 'moved' | 'unchanged' | 'kept';
+  fromPosition: number;
 };
 
 export type SessionEnded = { state: 'ended' };
@@ -159,6 +171,15 @@ type RankResponse = {
   cancelled?: boolean;
   skipped?: boolean;
   pivot_card?: ComparisonCard | null;
+  movement?: { outcome?: string; from_position?: number | null } | null;
+};
+
+/** The movement, only when there was somewhere to move from. */
+const movementOf = (data: RankResponse): PlacedMovement | null => {
+  const m = data.movement;
+  if (!m || typeof m.from_position !== 'number') return null;
+  if (m.outcome !== 'moved' && m.outcome !== 'unchanged' && m.outcome !== 'kept') return null;
+  return { outcome: m.outcome, fromPosition: m.from_position };
 };
 
 /**
@@ -242,6 +263,7 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
       // safe direction: an event never sent is an undercount, and one sent on a guess
       // is a number that looks like growth and is not.
       activated: Boolean(data.activated),
+      movement: movementOf(data),
     };
   }
 

@@ -86,6 +86,8 @@ describe('reading the server\u2019s answer', () => {
       // `invite_activated` from this flag, and a truthy undefined would be a growth
       // event fired on a missing field.
       activated: false,
+      // No movement on a first ranking, and none from a backend that predates 20261004000100.
+      movement: null,
     });
   });
 
