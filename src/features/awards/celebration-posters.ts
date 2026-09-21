@@ -103,11 +103,16 @@ function withinAsOf(watchedOn: string | null | undefined, asOf: string | null): 
  * **Then the collection, to fill.** An award about invites or comments has no titles of
  * its own, and a title award at its first tier may have fewer than the grid holds. Both
  * fall through to the reader's collection as of the unlock — which is still *their*
- * wall, just not the award's. Never a duplicate: nine cells showing the same three
- * posters three times is worse than six cells.
+ * wall, just not the award's.
  *
- * **No fake posters.** A collection too small for the grid renders a smaller wall, and
- * the component draws what it is given.
+ * **No fake posters, and no empty cells** (reversed 2026-09-21, founder QA). This used to
+ * say "never a duplicate: nine cells showing the same three posters three times is worse
+ * than six cells", and to leave a small collection a smaller wall. The wall was never
+ * smaller: `CelebrationBackdrop` sizes it to whole rows so it covers the screen, and the
+ * missing cells were a gray block behind the card — at five ranked titles, the smallest
+ * collection that can earn anything, the screen looked unfinished. So the reader's own
+ * posters are **tiled to fill every cell** (`tileWall`): repeats, but never the same poster
+ * beside itself where the count allows it, and never artwork they do not own.
  */
 export function celebrationGrid({
   contributing,
@@ -191,6 +196,60 @@ export function celebrationGrid({
   return {
     columns,
     rows,
-    posters: [...primary, ...fill].slice(0, columns * rows),
+    posters: tileWall([...primary, ...fill], columns, rows),
   };
+}
+
+/**
+ * Every cell of a `columns × rows` wall, from however many distinct posters there are.
+ *
+ * - **Enough posters:** the first `columns × rows`, in the order given, with no repeats —
+ *   unchanged from before, which is why a collection of ten or more looks exactly as it did.
+ * - **Too few:** the posters are walked cyclically in their given (stable, per-award) order,
+ *   and each cell takes the next one that is not the same as the cell to its **left** or the
+ *   cell **above** it. With two or more posters that is always possible, so no poster ever
+ *   sits directly beside or beneath itself; with one, the only honest wall is that poster.
+ *   The first `n` cells are the `n` distinct posters in order, so the award's own titles
+ *   still lead.
+ * - **None at all:** nothing, and the screen draws no wall (`celebrate.tsx`).
+ *
+ * Deterministic: the same posters in the same order give the same wall, which keeps the
+ * "same wall every time" rule the order above is built for. A repeated cell's `key` carries
+ * a `~n` suffix, so every cell has a unique key while the first occurrence keeps the title id.
+ */
+export function tileWall(
+  unique: readonly CelebrationPoster[],
+  columns: number,
+  rows: number,
+): CelebrationPoster[] {
+  const cells = columns * rows;
+  if (unique.length === 0) return [];
+  if (unique.length >= cells) return unique.slice(0, cells);
+
+  const source: number[] = []; // index into `unique` for each cell
+  const out: CelebrationPoster[] = [];
+  const uses = new Map<string, number>();
+  let next = 0;
+
+  for (let cell = 0; cell < cells; cell += 1) {
+    const left = cell % columns === 0 ? -1 : (source[cell - 1] ?? -1);
+    const above = cell < columns ? -1 : (source[cell - columns] ?? -1);
+
+    let pick = next % unique.length;
+    for (let step = 0; step < unique.length; step += 1) {
+      const candidate = (next + step) % unique.length;
+      if (candidate !== left && candidate !== above) {
+        pick = candidate;
+        break;
+      }
+    }
+
+    const poster = unique[pick] as CelebrationPoster;
+    const count = uses.get(poster.key) ?? 0;
+    uses.set(poster.key, count + 1);
+    source.push(pick);
+    out.push(count === 0 ? poster : { ...poster, key: `${poster.key}~${count}` });
+    next = pick + 1;
+  }
+  return out;
 }
