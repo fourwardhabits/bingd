@@ -99,6 +99,8 @@ const FILES = [
   // Founder delta QA 2026-09-21: the goals FK (PGRST200), per-watch details and
   // feed_watch_scores. 20261013000100 is reserved by #197 and is not part of this cutover.
   '20261014000100_a_watch_with_its_own_details.sql',
+  // A watch keeps the opinion it had: feed_watch_scores returns each post's frozen score.
+  '20261015000100_a_watch_keeps_the_opinion_it_had.sql',
 ];
 
 /** The head every one of these expects to find, and nothing else. */
