@@ -1027,7 +1027,35 @@ export type AnalyticsEvent =
    * not a tier. Its own event rather than a property on `list_created`, because a
    * refusal is not a creation and folding it in would inflate the creation count.
    */
-  | { name: 'list_limit_reached'; props?: undefined };
+  | { name: 'list_limit_reached'; props?: undefined }
+  /**
+   * One Refine target finished (T5, epic §P): the server answered `placed` for a `refine`
+   * session. `outcome` is the ledger's word; `reason` is why it was offered. Together they
+   * answer §P's "is Refine worth it?" — moved per answer, by the evidence that chose it.
+   */
+  | {
+      name: 'refine_target_outcome';
+      props: {
+        outcome: 'moved' | 'unchanged' | 'kept';
+        reason: string;
+        comparisons: number;
+        medium: 'movies' | 'tv';
+      };
+    }
+  /**
+   * A Refine sitting ended. `ended_by`: `done` (the checkpoint's Done), `exhausted` (the
+   * server had nothing else worth a look) or `close` (left mid-round).
+   */
+  | {
+      name: 'refine_session_ended';
+      props: {
+        targets: number;
+        moved: number;
+        comparisons: number;
+        ended_by: 'done' | 'exhausted' | 'close';
+        medium: 'movies' | 'tv';
+      };
+    };
 
 /**
  * Which of the two support rows. Spelled here rather than imported from `lib/support`,
@@ -1115,6 +1143,10 @@ export const ANALYTICS_EVENTS = [
   'watch_history_opened',
   'ranking_started',
   'ranking_completed',
+  // T5 Refine (epic §P). Deliberately NOT `ranking_completed` with a fifth mode: that event
+  // is read as "a title got a position", and a refine that confirms one is not that.
+  'refine_target_outcome',
+  'refine_session_ended',
   'watchlist_added',
   'follow_created',
   'recommendation_sent',
@@ -1271,6 +1303,15 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'basis',
   'choice',
   'watch_count',
+  /**
+   * Refine's (T5). `reason` is one of five closed words about ranking evidence; `targets`,
+   * `moved` and `comparisons` are small counts for one sitting; `ended_by` is three words.
+   * None of them names a title or a position.
+   */
+  'reason',
+  'targets',
+  'moved',
+  'ended_by',
   /**
    * Which of the two media the reader is on — `movies` or `tv` (2026-09-11, Similar).
    *

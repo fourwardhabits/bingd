@@ -41,6 +41,10 @@ const CODES = {
    */
   serializationFailure: '40001',
   unauthenticated: '28000',
+  /** `refine_start` while Refine is switched off (T5, `ranking.refine_enabled`). */
+  featureOff: '0A000',
+  /** `refine_start` past the day's ceiling (T5, `ranking.refine_daily_targets`). */
+  restedForToday: '53400',
 } as const;
 
 /** One comparison to put on screen: the subject against an incumbent. */
@@ -231,6 +235,14 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
       };
     case CODES.unauthenticated:
       return { state: 'failed', message: 'Your session expired. Sign in again.', restart: false };
+    case CODES.featureOff:
+      return { state: 'failed', message: 'Refining is not available right now.', restart: true };
+    case CODES.restedForToday:
+      return {
+        state: 'failed',
+        message: 'That is plenty of refining for today. Your rankings are saved.',
+        restart: true,
+      };
     case CODES.serializationFailure:
       // Definitely nothing written, and the session row is untouched — so the answer is
       // to ask again, not to start over. The database's own wording names a transaction
@@ -428,6 +440,18 @@ export const rankAgain = (
     },
     mediaItemId,
   );
+
+/**
+ * Opens (or resumes) Refine's session for one title that is **already ranked** (T5).
+ *
+ * Answers in the same shape as every opening above, and the comparisons that follow go
+ * through `rankAnswer` / `rankSkip` / `rankBack` / `rankCancel` exactly as a correction's
+ * do — Refine is not a second ranking algorithm, it is a session of kind `refine` searched
+ * from where the title already sits. The server chooses the bucket (the one it already
+ * has) and the tolerance (by its position), so the client sends only the title.
+ */
+export const refineStart = (mediaItemId: string, operationId: string) =>
+  call('refine_start', { p_media_item_id: mediaItemId, p_operation_id: operationId }, mediaItemId);
 
 export const rankAnswer = (
   sessionId: string,

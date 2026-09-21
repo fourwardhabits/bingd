@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -20,6 +21,7 @@ import {
   watchedItems,
   watchlistItems,
 } from '@/features/collection/watched-rows';
+import { useRefineAvailability, useRefineQuiet } from '@/features/ranking/use-refine';
 import { readPref, writePref } from '@/lib/prefs';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
@@ -497,6 +499,10 @@ export default function CollectionScreen() {
         </View>
       ) : null}
 
+      {!inLists && active === 'watched' && !showNudge ? (
+        <RefineEntry userId={profile.id} medium={medium} />
+      ) : null}
+
       {!inLists && active === 'watched' ? (
         <Watched userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
@@ -684,6 +690,47 @@ function Unranked({
   );
 }
 
+/**
+ * `Refine rankings ›` (T5, epic §H.1) — the whole entry point, and deliberately this small.
+ *
+ * **Conditional, never a standing call to action.** It is drawn only when the server says
+ * Refine is on and has a title worth a second look in THIS medium (`ready`): at least 20
+ * ranked and one candidate over the threshold. Otherwise nothing is drawn — no disabled
+ * row, no count, no badge. And it rests for a week after a finished sitting
+ * (`useRefineQuiet`), so the list does not re-offer the thing somebody just did.
+ *
+ * One line of action text on the Watched segment only, because Refine is about the ranked
+ * list and Watched is where that list is. Not a card (the unranked nudge is the one card
+ * this screen has, and the two never show together: unranked titles come first), not a
+ * segment, not the title row (`My lists ›` has its trailing half).
+ */
+function RefineEntry({ userId, medium }: { userId: string; medium: Medium }) {
+  const router = useRouter();
+  const status = useRefineAvailability(userId, medium);
+  const quiet = useRefineQuiet(userId, medium);
+  if (status.data !== 'ready' || quiet !== false) return null;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Refine rankings"
+      accessibilityHint="Compare a few titles you have already ranked to make their order more accurate"
+      hitSlop={theme.space[2]}
+      onPress={() => router.push(`/refine?medium=${medium}`)}
+      style={({ pressed }) => [styles.refine, pressed && styles.refinePressed]}
+      testID="collection-refine-entry"
+    >
+      <Text variant="footnote" tone="action">
+        Refine rankings
+      </Text>
+      <Ionicons
+        name="chevron-forward"
+        size={theme.layout.icon.sm}
+        color={theme.semantic.action}
+      />
+    </Pressable>
+  );
+}
+
 function Loading() {
   return (
     <View style={styles.body}>
@@ -704,6 +751,16 @@ const styles = StyleSheet.create({
    */
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   titleRowSelector: { flexShrink: 1 },
+  refine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.layout.gutter,
+  },
+  refinePressed: { opacity: 0.7 },
+
   // A column now. As a row it put the copy and the dismissal at opposite edges,
   // which is what made them read as unrelated to each other.
   nudge: {
