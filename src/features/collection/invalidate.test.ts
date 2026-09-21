@@ -48,6 +48,7 @@ const invalidatedBy = (
 };
 
 const KEYS = {
+  myScores: ['my-scores', USER],
   rankedMovies: ['rankings', USER, 'movies'],
   rankedSeasons: ['rankings', USER, 'tv_seasons'],
   collection: ['collection', USER],
@@ -106,6 +107,16 @@ describe('after a ranking completes', () => {
     invalidatedBy(all, (client) =>
       invalidateAfterCollectionChange(client, USER, TITLE, { category: 'movies' }),
     );
+
+  /**
+   * **Search's score badge** (founder QA, 2026-09-21). A just-ranked Black Panther showed
+   * the dashed Rank badge in Search, because the score map it reads was never refreshed
+   * after a ranking: the title was logged, so it was not a +, and it was missing from the
+   * stale map, so it was not a score.
+   */
+  it('refreshes the reader’s own scores, which Search draws its row badge from', async () => {
+    expect(has(touched(), KEYS.myScores)).toBe(true);
+  });
 
   it('refreshes the Feed — the one that was missing', async () => {
     expect(has(touched(), KEYS.feed)).toBe(true);

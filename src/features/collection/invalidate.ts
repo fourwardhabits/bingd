@@ -53,6 +53,12 @@ export function invalidateAfterCollectionChange(
   // log or an unlog moves them as surely as a ranking does.
   invalidate(queryKeys.profileStats(userId));
 
+  // The reader's score for every ranked title, which Search's row badge reads. It was
+  // never invalidated here, so a title ranked a moment ago was still "logged but
+  // unscored" in Search and drew the dashed Rank badge until the cache aged out
+  // (founder QA, 2026-09-21 — Black Panther).
+  invalidate(queryKeys.myScores(userId));
+
   // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
   // date-ordered read with a key of its own. Same reason as the line above: the trigger
   // in `20260815040000` takes a title off the watchlist the moment it is logged or

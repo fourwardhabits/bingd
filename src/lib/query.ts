@@ -15,6 +15,12 @@ export const queryKeys = {
   myProfile: (userId: string) => ['my-profile', userId] as const,
   collection: (userId: string) => ['collection', userId] as const,
   rankings: (userId: string, category: string) => ['rankings', userId, category] as const,
+  /**
+   * The reader's own score for every ranked title — Search's row badges read it.
+   * A named key, so the post-ranking invalidation cannot forget it again (founder QA,
+   * 2026-09-21: a just-ranked Black Panther showed the dashed Rank badge in Search).
+   */
+  myScores: (userId: string) => ['my-scores', userId] as const,
   // The feed is an infinite query (feed pagination, 2026-09-04): its cursor is a *page
   // param*, which React Query stores inside the entry itself. A cursor in the key as well
   // would give every page its own cache entry, and the list would be one page long.
