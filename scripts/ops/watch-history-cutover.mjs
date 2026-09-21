@@ -1,5 +1,5 @@
 /**
- * The Watch History + Lists cutover: one transaction, one gate, one flag flip.
+ * The Watch History + Lists cutover: one invocation, one gate, one flag flip.
  *
  * ---------------------------------------------------------------------------
  * WHY THIS EXISTS, WHICH IS NOT "db push WAS INCONVENIENT"
@@ -16,18 +16,17 @@
  * that transitional state. So the apply and the flip are **one operation**, and this tool
  * is what makes that a mechanism rather than a promise:
  *
- *   - all six files applied in ONE transaction, with their history rows,
+ *   - all six files applied by one `db push`, in version order,
  *   - `set constraints all immediate`, so T1's deferred placeholder trigger has fired,
  *   - both invariant asserts run,
  *   - the §D.7 cache-move enumeration and the §M.5 repoint diff computed,
- *   - an automated direction gate that ABORTS the whole thing on a wrong-way delta,
- *   - and the flag flipped, all before COMMIT.
+ *   - an automated direction gate that RAISES on a wrong-way delta,
+ *   - and the board flag flipped — all in one invocation, with no human step between the
+ *     migration and the flip, which is what keeps the window seconds wide rather than as
+ *     long as somebody takes to read a runbook.
  *
- * Nothing observes T1 without the board flag, because nothing observes anything until the
- * commit. If any step raises, the database is exactly where it started — which the
- * Supabase CLI cannot give you: it splits each file into statements and runs them outside
- * a transaction (`apply-staging-migrations.mjs` records that at length), so a failure
- * halfway through T1's backfill would leave the window open with no way back.
+ * It was written to do all of that in a single transaction. It cannot, and the reason is
+ * measured rather than assumed: see the block above the apply.
  *
  * ---------------------------------------------------------------------------
  * THE TWO FLAGS ARE NOT THE SAME DECISION
@@ -41,7 +40,6 @@
  * release operation**, and the middle step is a publish rather than a statement, which is
  * why this tool has a `--only-flags` mode for the third step:
  *
- *     node scripts/ops/watch-history-cutover.mjs --target staging  --rehearse
  *     node scripts/ops/watch-history-cutover.mjs --target staging  --apply
  *     ... publish the OTA on that lane ...
  *     node scripts/ops/watch-history-cutover.mjs --target staging  --only-flags --flags goals --apply
@@ -62,13 +60,11 @@
  * `--target`.
  *
  *   node scripts/ops/watch-history-cutover.mjs --target staging               # plan only
- *   node scripts/ops/watch-history-cutover.mjs --target staging --rehearse    # + rolled back
+ *   node scripts/ops/watch-history-cutover.mjs --target staging --report      # invariants + diff
  *   node scripts/ops/watch-history-cutover.mjs --target production --apply
  *
- * `--per-file` applies each file in its own transaction instead of all six in one, for the
- * case where the Management API refuses the bundle's size. It is strictly weaker — a
- * failure then leaves earlier files applied — and it still flips the flag in the last
- * transaction, so the window stays closed.
+ * The apply is `db push`, and the window is closed by ordering rather than by a
+ * transaction. The block above the apply says why, with the measurement that settled it.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -131,23 +127,42 @@ if (which === 'none' && !has('--allow-window')) {
 const flagKeys = FLAGS[which];
 const flagValue = has('--off') ? 'false' : 'true';
 
-const mode = has('--apply') ? 'apply' : has('--rehearse') ? 'rehearse' : 'plan';
+const mode = has('--apply') ? 'apply' : has('--report') ? 'report' : 'plan';
 const onlyFlags = has('--only-flags');
-const perFile = has('--per-file');
 if (onlyFlags && flagKeys.length === 0) die('--only-flags needs --flags board, goals or all.');
 
 // ---------------------------------------------------------------------------
 // The CLI, and the scratch link it needs
 // ---------------------------------------------------------------------------
 
-const cli = (argv, { cwd } = {}) =>
-  execFileSync('npx', ['supabase@latest', ...argv], {
-    encoding: 'utf8',
-    shell: true,
-    cwd,
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+/**
+ * The CLI, with the database's own message kept.
+ *
+ * `execFileSync` throws an Error whose `message` is the command line, and the thing an
+ * operator needs — `ERROR: 42P01: relation … does not exist`, and the line it was on —
+ * arrives on stdout. Re-raising with that text is the difference between a usable refusal
+ * and a stack trace about child_process.
+ */
+const cli = (argv, { cwd } = {}) => {
+  try {
+    return execFileSync('npx', ['supabase@latest', ...argv], {
+      encoding: 'utf8',
+      shell: true,
+      cwd,
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    const out = String(e.stdout ?? '');
+    let detail = out;
+    try {
+      detail = JSON.parse(out.slice(out.indexOf('{'))).error?.message ?? out;
+    } catch {
+      /* not JSON; the raw output is the best there is */
+    }
+    throw new Error(detail.replace(/\\n/g, '\n').trim() || e.message);
+  }
+};
 
 let workdir = option('--workdir');
 if (!workdir) {
@@ -208,7 +223,7 @@ console.log(`target   : ${ref} (${REF_NAMES[ref] ?? target})`);
 console.log(`env      : ${before.env}`);
 console.log(`applied  : ${before.applied}, head ${before.head}`);
 console.log(`flags    : ${JSON.stringify(before.flags)}`);
-console.log(`mode     : ${mode}${onlyFlags ? ' (flags only)' : ''}${perFile ? ' per-file' : ''}`);
+console.log(`mode     : ${mode}${onlyFlags ? ' (flags only)' : ''}`);
 console.log(`will set : ${flagKeys.length ? `${flagKeys.join(', ')} = ${flagValue}` : 'no flag'}\n`);
 
 if (before.env !== expectedEnv) {
@@ -319,20 +334,27 @@ select jsonb_build_object(
   'diary_events',      (select count(*) from watch_events where basis = 'diary'),
   'repoint',    (select coalesce(jsonb_agg(to_jsonb(d) order by d.user_id, d.metric), '[]'::jsonb)
                    from watch_history_repoint_diff() d),
-  'cache_moved', (select coalesce(jsonb_agg(jsonb_build_object(
-                     'user_id', um.user_id, 'titles', count(*),
-                     'explained', count(*) filter (where exists (
-                        select 1 from watch_events we
-                         where we.user_id = um.user_id and we.media_item_id = um.media_item_id
-                           and we.basis = 'diary' and we.watched_on = um.watched_on)))), '[]'::jsonb)
-                   from user_media um
-                   join media_items m on m.id = um.media_item_id
-                  where rankable_category(m.kind) is not null
-                    and um.source = 'in_app' and um.watched_on is not null
-                    and exists (select 1 from watch_events we
-                                 where we.user_id = um.user_id and we.media_item_id = um.media_item_id
-                                   and we.basis = 'unattributed' and we.watched_on < um.watched_on)
-                  group by um.user_id)
+  'cache_moved', (select coalesce(jsonb_agg(to_jsonb(moved) order by moved.titles desc), '[]'::jsonb)
+                    from (
+                      select um.user_id,
+                             count(*)::int as titles,
+                             count(*) filter (where exists (
+                               select 1 from watch_events we
+                                where we.user_id = um.user_id
+                                  and we.media_item_id = um.media_item_id
+                                  and we.basis = 'diary'
+                                  and we.watched_on = um.watched_on))::int as explained
+                        from user_media um
+                        join media_items m on m.id = um.media_item_id
+                       where rankable_category(m.kind) is not null
+                         and um.source = 'in_app' and um.watched_on is not null
+                         and exists (select 1 from watch_events we
+                                      where we.user_id = um.user_id
+                                        and we.media_item_id = um.media_item_id
+                                        and we.basis = 'unattributed'
+                                        and we.watched_on < um.watched_on)
+                       group by um.user_id
+                    ) moved)
 ) as r;
 `;
 
@@ -341,38 +363,71 @@ if (mode === 'plan') {
   console.log(`would apply ${pending.length} file(s), ${(bytes / 1024).toFixed(0)}KB of SQL:`);
   for (const f of pending) console.log(`  ${f}`);
   console.log(`\nthen: the gate, then ${flagKeys.length ? flagKeys.join(' + ') : 'no flag'}.`);
-  console.log('\nRun --rehearse next (applies and rolls back, printing the diff), then --apply.');
+  console.log('\nThen --apply: db push, the gate and the flag, in that order and in one run.');
   process.exit(0);
 }
 
 // ---------------------------------------------------------------------------
-// rehearse / apply
+// report / apply
+//
+// ===========================================================================
+// WHY THE APPLY IS `db push` AND NOT ONE TRANSACTION, MEASURED 2026-09-20
+//
+// This tool was written to send all six files, the gate and the flag as a single
+// `begin … commit` through `db query`, so that nothing could ever observe T1 with the
+// monthly board still reading the cache. **The transport does not support that promise,
+// and it fails silently.** On staging, a `--rehearse` run — the same bundle ending in
+// `rollback;` — left `20261003000100` … `20261010000100` **committed**, while the
+// hardening file and the flag update from the same bundle were not. The rolled-back
+// report it printed said 161 applied and the flag true; the database afterwards said
+// 160 applied and the flag false.
+//
+// It is not a size limit: a 131KB / 3,000-statement bundle and a 2.8MB one both rolled
+// back correctly under the identical shape. So the boundary is not predictable from here,
+// which is the whole reason not to build a safety property on it.
+//
+// So the apply is the path the rest of this repository already uses — `supabase db push
+// --project-ref`, which also writes the history rows the CLI itself would write — and the
+// window is closed by **ordering inside one invocation** instead: push, verify, flip, with
+// no human step between them. If the push fails part way, this says so and prints the one
+// statement that closes the window once the rest is applied, rather than leaving an
+// operator to remember it.
 // ---------------------------------------------------------------------------
 
-const closing = mode === 'apply' ? 'commit;' : 'rollback;';
-
-const run = (label, sql) => {
+const run = (label, fn) => {
   const started = Date.now();
-  const rows = query(sql);
+  const out = fn();
   console.log(`  ${label} — ${((Date.now() - started) / 1000).toFixed(1)}s`);
-  return rows;
+  return out;
 };
 
+/** The verification and the diff, as one read. No transaction control, so nothing to trust. */
+const verify = () => query(`${GATE}${REPORT}`)[0]?.r;
+
 let report;
-if (perFile && !onlyFlags) {
-  for (const file of pending) {
-    run(file, `begin;\n${sqlFor(file)}\nselect 1 as r;\n${mode === 'apply' ? 'commit;' : 'rollback;'}`);
-  }
-  report = run('gate + flags', `begin;\n${GATE}${flagSql}${REPORT}${closing}`)[0]?.r;
+if (mode === 'report' || onlyFlags) {
+  if (onlyFlags) run(`flags: ${flagKeys.join(', ')} = ${flagValue}`, () => query(flagSql));
+  report = verify();
 } else {
-  const body = onlyFlags ? flagSql : `${pending.map(sqlFor).join('\n')}${GATE}${flagSql}`;
-  report = run(
-    onlyFlags ? 'flags' : `${pending.length} file(s) + gate + flags`,
-    `begin;\n${body}${REPORT}${closing}`,
-  )[0]?.r;
+  // 1. The tranche, through the CLI, in file order. It writes its own history rows.
+  //
+  // Run from the repository root, not the scratch workdir: `db push` reads
+  // `supabase/migrations` from where it runs, and the scratch dir holds only a link.
+  // `--project-ref` names the target explicitly and ignores `supabase/.temp` — which is
+  // linked to PRODUCTION, and is exactly why a bare `db push` is never used here.
+  run(`db push (${pending.length} file(s) pending)`, () =>
+    cli(['db', 'push', '--project-ref', ref, '--skip-vault', '--yes'], { cwd: root }),
+  );
+
+  // 2. The invariants and the direction gate, which raise rather than print.
+  // 3. The flag, immediately, in the same invocation.
+  report = run('verify + flag', () => {
+    const seen = query(`${GATE}${flagSql}${REPORT}`)[0]?.r;
+    return seen;
+  });
 }
 
-console.log(`\n${mode === 'apply' ? 'COMMITTED' : 'ROLLED BACK'} — as the transaction saw it:`);
+console.log(`\n${mode === 'apply' ? 'APPLIED' : 'READ'} — the database now says:`);
 console.log(`  env            : ${report.env}`);
 console.log(`  applied        : ${report.applied}, head ${report.head}`);
 console.log(`  flags          : ${JSON.stringify(report.flags)}`);
@@ -397,11 +452,8 @@ for (const row of report.repoint) {
 }
 if (!report.repoint.length) console.log('    none — the repoint is invisible on this backend.');
 
-if (mode === 'rehearse') {
-  console.log(
-    '\nNothing was kept. Read the two lists above, then re-run with --apply.\n' +
-      'The gate that just passed runs again inside the applying transaction.',
-  );
+if (mode === 'report') {
+  console.log('\nRead only: nothing was applied and no flag was touched.');
 } else {
   console.log(
     '\nNext: publish the client update on this lane, then flip the goal flag with\n' +

@@ -62,6 +62,24 @@ async function main() {
     // -----------------------------------------------------------------------
     const t0 = performance.now();
 
+    /**
+     * **The seed runs with user triggers suppressed, and the rows they would have written
+     * are written explicitly instead.**
+     *
+     * Measured here first, which is why it is worth saying: a `user_media` insert costs of
+     * the order of 100–200ms per row with the full trigger stack attached — the deferred
+     * placeholder event, the goal crossing, the watchlist clear, the award evaluation — so
+     * seeding a 1,200-title account and a 120-account background through it takes tens of
+     * minutes and measures the seed rather than anything this file is about. The per-row
+     * cost is itself a finding, and it is timed deliberately below at the size a real
+     * import arrives in.
+     *
+     * `session_replication_role = replica` is the superuser switch for exactly this. It is
+     * reset before anything is measured, and every timed operation runs through the real
+     * RPCs with every trigger in place.
+     */
+    await db.sql(`set session_replication_role = replica`);
+
     // A shared catalogue: RANKED movies + 40 series x 4 seasons.
     await db.sql(
       `insert into media_items (kind, tmdb_id, title, provenance, release_date, poster_path)
@@ -208,6 +226,21 @@ async function main() {
     // Lists: 100 on the heavy account. Five at the 500-item cap, the rest at 20.
     const heavyS = await db.session('heavy');
     await heavyS.actAs(heavy);
+    /**
+     * `lists.max_created_per_day` is 20 and this seeds a hundred, so the knob is raised for
+     * the seed and put back before anything is timed. The refusal is correct product
+     * behaviour — `create_list` counts the operation ledger — and meeting it here was the
+     * cheapest possible confirmation that the limit works.
+     */
+    await db.sql(`update app_config set value = '100000'::jsonb
+                   where key = 'lists.max_created_per_day'`);
+    /**
+     * `lists.max_created_per_day` is 20 and this seeds a hundred, so the knob is raised for
+     * the seed and put back before anything is timed. The refusal is correct product
+     * behaviour — `create_list` counts the operation ledger — and finding it here is the
+     * cheapest possible confirmation that the limit works.
+     */
+    await db.sql(`update app_config set value = '100000'::jsonb where key = 'lists.max_created_per_day'`);
     const lists = [];
     for (let i = 0; i < 100; i += 1) {
       const r = await heavyS.one(
@@ -229,6 +262,30 @@ async function main() {
          ) m`,
       [lists],
     );
+
+    // The real limit is back before anything is measured.
+    await db.sql(`update app_config set value = '20'::jsonb where key = 'lists.max_created_per_day'`);
+
+    /**
+     * One event per logged title — dated where the row was dated, `unattributed` where it
+     * was not, `none` where there is no date at all: exactly the shape T1's backfill
+     * leaves, and what the placeholder trigger would have written had it been attached
+     * during the seed.
+     */
+    await db.sql(
+      `insert into watch_events (user_id, media_item_id, watched_on, basis)
+       select um.user_id, um.media_item_id, um.watched_on,
+              (case when um.watched_on is null then 'none' else 'unattributed' end)::watch_date_basis
+         from user_media um
+        where not exists (
+                select 1 from watch_events we
+                 where we.user_id = um.user_id and we.media_item_id = um.media_item_id)`,
+    );
+
+    // Triggers back, and the real list limit back, before a single number is measured.
+    await db.sql(`set session_replication_role = origin`);
+    await db.sql(`update app_config set value = '20'::jsonb
+                   where key = 'lists.max_created_per_day'`);
 
     await db.sql('analyze');
     const counts = await db.rows(
@@ -381,6 +438,41 @@ async function main() {
       const row = { label: 'rank_again re-check at depth (per call)', p50: median(times), max: Math.max(...times), comparisonsPerRecheck: comparisons / 3 };
       report.results.push(row);
       console.log(`${row.label.padEnd(46)} p50 ${fmt(row.p50).padStart(9)}  max ${fmt(row.max).padStart(9)}  comparisons/recheck ${row.comparisonsPerRecheck.toFixed(1)}`);
+    }
+
+    /**
+     * **What a bulk collection write costs, per row, with every trigger attached.**
+     *
+     * The shape of the importer's apply step, and where T1's deferred placeholder trigger
+     * is paid. Reported per row so it can be multiplied by a library size: a 2,500-film
+     * Letterboxd archive is whatever this says, times 2,500.
+     */
+    for (const n of [50, 150, 400]) {
+      const victim = await fx.createUser();
+      const started = performance.now();
+      await db.sql(
+        `with picked as (
+           select id, row_number() over (order by title desc) as k
+             from media_items where kind = 'movie' order by title desc limit $2
+         )
+         insert into user_media (user_id, media_item_id, bucket, source, watched_on)
+         select $1, id, 'fine', 'import', date '2024-01-01' + (k % 300)::int from picked`,
+        [victim, n],
+      );
+      const took = performance.now() - started;
+      const events = (
+        await db.rows(`select count(*)::int as n from watch_events where user_id = $1`, [victim])
+      )[0].n;
+      report.results.push({
+        label: `bulk user_media insert (${n} rows)`,
+        p50: took,
+        perRow: took / n,
+      });
+      console.log(
+        `${`bulk user_media insert (${n} rows, triggers on)`.padEnd(46)} ${fmt(took).padStart(11)}  ${(
+          took / n
+        ).toFixed(1)}ms/row  events ${events}`,
+      );
     }
 
     console.log('\n== lists ==');
