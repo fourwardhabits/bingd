@@ -41,6 +41,10 @@ const CODES = {
    */
   serializationFailure: '40001',
   unauthenticated: '28000',
+  /** `refine_start` while Refine is switched off (T5, `ranking.refine_enabled`). */
+  featureOff: '0A000',
+  /** `refine_start` past the day's ceiling (T5, `ranking.refine_daily_targets`). */
+  restedForToday: '53400',
 } as const;
 
 /** One comparison to put on screen: the subject against an incumbent. */
@@ -114,6 +118,20 @@ export type Placed = {
    * was never invited.
    */
   activated: boolean;
+  /**
+   * Where the title came from, when the server said (20261004000100, §E.2).
+   *
+   * Absent against a backend that predates the placement ledger, and read only by Refine,
+   * whose result line is the one surface that prints it (T5). Private by construction:
+   * it is the reply to the reader's own call and never reaches the feed.
+   */
+  movement?: PlacementMovement;
+};
+
+/** The ledger's word for what a finished session did to the title's position. */
+export type PlacementMovement = {
+  outcome: 'placed' | 'moved' | 'unchanged' | 'kept';
+  fromPosition: number | null;
 };
 
 export type SessionEnded = { state: 'ended' };
@@ -159,6 +177,19 @@ type RankResponse = {
   cancelled?: boolean;
   skipped?: boolean;
   pivot_card?: ComparisonCard | null;
+  movement?: { outcome?: string; from_position?: number | null } | null;
+};
+
+const OUTCOMES = new Set(['placed', 'moved', 'unchanged', 'kept']);
+
+const movementOf = (data: RankResponse): PlacementMovement | undefined => {
+  const outcome = data.movement?.outcome;
+  if (!outcome || !OUTCOMES.has(outcome)) return undefined;
+  return {
+    outcome: outcome as PlacementMovement['outcome'],
+    fromPosition:
+      typeof data.movement?.from_position === 'number' ? data.movement.from_position : null,
+  };
 };
 
 /**
@@ -210,6 +241,14 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
       };
     case CODES.unauthenticated:
       return { state: 'failed', message: 'Your session expired. Sign in again.', restart: false };
+    case CODES.featureOff:
+      return { state: 'failed', message: 'Refining is not available right now.', restart: true };
+    case CODES.restedForToday:
+      return {
+        state: 'failed',
+        message: 'That is plenty of refining for today. Your rankings are saved.',
+        restart: true,
+      };
     case CODES.serializationFailure:
       // Definitely nothing written, and the session row is untouched — so the answer is
       // to ask again, not to start over. The database's own wording names a transaction
@@ -231,7 +270,9 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
     return { state: 'failed', message: 'The server said nothing.', restart: true, changed: true };
 
   if (data.done) {
+    const movement = movementOf(data);
     return {
+      ...(movement ? { movement } : {}),
       state: 'placed',
       position: data.position ?? 0,
       category: data.category ?? '',
@@ -406,6 +447,19 @@ export const rankAgain = (
     },
     mediaItemId,
   );
+
+/**
+ * Opens (or resumes) Refine's session for one title that is **already ranked** (T5,
+ * `20261013000100`).
+ *
+ * Answers in the same shape as every opening above, and the comparisons that follow go
+ * through `rankAnswer` / `rankSkip` / `rankBack` / `rankCancel` exactly as a correction's
+ * do — Refine is not a second ranking algorithm, it is a session of kind `refine` searched
+ * from where the title already sits. The server chooses the bucket (the one it already
+ * has) and the tolerance (by its position), so the client sends only the title.
+ */
+export const refineStart = (mediaItemId: string, operationId: string) =>
+  call('refine_start', { p_media_item_id: mediaItemId, p_operation_id: operationId }, mediaItemId);
 
 export const rankAnswer = (
   sessionId: string,

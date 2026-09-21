@@ -25,6 +25,7 @@ entry opening a dedicated, pushed **Watch History screen**, and **no History tab
 | **T3** | `log_rewatch` / `edit_watch_event` / `delete_watch_event`; feed `again`, enrichment and deletion | migration **`20261005000100`**. Not applied. |
 | **T3b** | Log another watch, the **Watch History screen** and its `Watched N times ›` entry, the When row via `log_title` / `set_watch_date`, private movement copy | client. **No OTA published.** |
 | **T4** | Goals and the monthly board repointed to watch events, both **behind flags that start false** | migration **`20261006000100`** + client. Not applied, flags not flipped. |
+| **T5** | Refine your rankings: evidence-driven targets, prior search with tolerance, finite rounds | migration **`20261013000100`** + client, on `feat/refine-rankings-t5` (depends on #196). **Behind `ranking.refine_enabled`, which starts false.** Not applied. Built spec and deviations: [`refine-rankings-t5.md`](./refine-rankings-t5.md). |
 **Supersedes:** [`deferred-roadmap.md`](./deferred-roadmap.md) §19 (rewatch history) and §22
 (per-title watch history). It **resolves** §49 (the historical-unranked exception) for the
 historical contexts named here, builds PRD §12's unbuilt import "anchor session", and gives §34
