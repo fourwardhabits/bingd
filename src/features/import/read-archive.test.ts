@@ -134,9 +134,12 @@ describe('the files the importer reads are unchanged', () => {
     expect([...WANTED]).toEqual(['watched.csv', 'ratings.csv', 'diary.csv', 'watchlist.csv']);
   });
 
-  it('does not read a list file even if it is named like a wanted one', () => {
-    // `lists/watched.csv` sits one folder too deep for the positive rule, and a real
-    // watched.csv is present at the root, so the wrapper is the root and this is ignored.
+  it('reads the root watched.csv, not a list named "Watched", in real export order', () => {
+    // A list named "Watched" exports as `lists/watched.csv`. That is two segments, which the
+    // "root or one wrapper" rule ACCEPTS. The root file wins only because `inspect` takes the
+    // first match in listing order, and a real export (2026-09-21, 18 members) stores the
+    // root files before `lists/`. This archive has the same order. Hardening this, so the
+    // rule rather than the order decides, belongs to T6c-3 (letterboxd-lists-import.md §0).
     const decoy = founderArchive({
       'lists/watched.csv': strToU8(
         'Date,Name,Year,Letterboxd URI\n2026-09-11,Canary Film,1999,https://boxd.it/zz\n',
