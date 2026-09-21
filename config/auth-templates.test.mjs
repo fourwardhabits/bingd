@@ -34,6 +34,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
+import {
+  canonicalSettings,
+  describeLimitDrift,
+  limitDrift,
+  limitsOf,
+} from '../scripts/auth-config-contract.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const templatesDir = join(here, '..', 'supabase', 'auth-templates');
 
@@ -188,6 +195,110 @@ describe('the canonical auth email templates', () => {
 
   it('expires the code when the email says it does', () => {
     assert.equal(manifest.settings.mailer_otp_exp, 600, '600s is the "10 minutes" both bodies promise');
+  });
+});
+
+/**
+ * **The limits the client was built against** — recorded, verified by the live check,
+ * and never written by it (`scripts/auth-config-contract.mjs`).
+ *
+ * The 2026-09-21 production signup incident: `RESEND_COOLDOWN_MS` was 30 seconds and
+ * production's `max_frequency` was 60, so the Resend button went live half a minute before
+ * the server would honour it. Neither number was written anywhere the other could be
+ * checked against. These tests are the repo half of that check; `check-auth-config.mjs`
+ * is the deployed half.
+ */
+describe('the auth limits the client depends on', () => {
+  const verify = readFileSync(join(here, '..', 'app', '(auth)', 'verify.tsx'), 'utf8');
+
+  it('records the per-address cooldown and the hourly ceiling production enforces', () => {
+    // As read from production on 2026-09-21 (`supabase config diff`: max_frequency 1m0s,
+    // rate_limit.email_sent 30). Changing either means the dashboard changed too.
+    assert.equal(manifest.limits.smtp_max_frequency.value, 60);
+    assert.equal(manifest.limits.rate_limit_email_sent.value, 30);
+  });
+
+  /** The pair the incident was, asserted. */
+  it('counts the Resend countdown down from the server’s own cooldown', () => {
+    const match = /const RESEND_COOLDOWN_MS = ([\d_]+);/.exec(verify);
+    assert.ok(match, 'verify.tsx must declare RESEND_COOLDOWN_MS as a numeric literal');
+    assert.equal(
+      Number(match[1].replaceAll('_', '')),
+      manifest.limits.smtp_max_frequency.value * 1000,
+      'RESEND_COOLDOWN_MS must equal limits.smtp_max_frequency — the 2026-09-21 incident',
+    );
+  });
+
+  /**
+   * The constant is only the first guess. A refusal carries GoTrue's own remaining seconds,
+   * and the screen re-arms from them, so a dashboard change the constant has not caught up
+   * with costs one refused tap, not a failed signup.
+   */
+  it('re-arms from the server’s remaining seconds when a resend is refused', () => {
+    assert.match(verify, /result\.retryAfterSeconds/);
+    const methods = readFileSync(
+      join(here, '..', 'src', 'features', 'auth', 'methods.ts'),
+      'utf8',
+    );
+    assert.match(
+      methods,
+      /after \(\\d\+\) seconds\?/,
+      'sendEmailCode must parse GoTrue’s remainder',
+    );
+  });
+
+  it('never lets --apply write a limit', () => {
+    const applied = canonicalSettings(manifest, () => '');
+    for (const key of limitsOf(manifest).keys()) {
+      assert.equal(
+        applied.has(key),
+        false,
+        `${key} is a limit and must not be written by --apply`,
+      );
+    }
+    // And a manifest that named one as both is refused outright, rather than applied.
+    const both = { ...manifest, settings: { ...manifest.settings, smtp_max_frequency: 60 } };
+    assert.throws(() => canonicalSettings(both, () => ''), /both a setting and a limit/);
+  });
+
+  describe('drift', () => {
+    const live = { smtp_max_frequency: 60, rate_limit_email_sent: 30 };
+
+    it('is none when the project matches', () => {
+      assert.deepEqual(limitDrift(manifest, live), []);
+    });
+
+    it('is reported, with what the client holds, when the cooldown moves', () => {
+      const [row, ...rest] = limitDrift(manifest, { ...live, smtp_max_frequency: 30 });
+      assert.equal(rest.length, 0);
+      assert.equal(row.key, 'smtp_max_frequency');
+      assert.equal(row.expected, 60);
+      assert.equal(row.actual, 30);
+
+      const printed = describeLimitDrift(row);
+      assert.match(printed, /DRIFT\s+smtp_max_frequency/);
+      assert.match(printed, /RESEND_COOLDOWN_MS/, 'the message must name the client constant');
+    });
+
+    it('is reported when the hourly ceiling is raised, too', () => {
+      const rows = limitDrift(manifest, { ...live, rate_limit_email_sent: 200 });
+      assert.deepEqual(
+        rows.map((r) => [r.key, r.actual]),
+        [['rate_limit_email_sent', 200]],
+      );
+    });
+
+    /** "Could not read it" must never print as "ok". */
+    it('counts a missing or null field as drift', () => {
+      const rows = limitDrift(manifest, { smtp_max_frequency: null });
+      assert.deepEqual(
+        rows.map((r) => [r.key, r.actual]),
+        [
+          ['smtp_max_frequency', null],
+          ['rate_limit_email_sent', null],
+        ],
+      );
+    });
   });
 });
 

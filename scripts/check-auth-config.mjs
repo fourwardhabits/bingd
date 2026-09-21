@@ -28,6 +28,16 @@
  * manifest names.
  *
  * ---------------------------------------------------------------------------
+ * LIMITS ARE CHECKED AND NEVER WRITTEN
+ *
+ * The manifest's `limits` — the per-address email cooldown and the project's hourly email
+ * ceiling — are what the client was built against, and a difference fails this check.
+ * `--apply` never writes one: they are abuse and capacity decisions made in the
+ * dashboard, and putting one back from here would quietly undo a deliberate raise. The
+ * 2026-09-21 signup incident was a client counting 30 seconds against a server enforcing
+ * 60, with neither number written anywhere this could have compared.
+ *
+ * ---------------------------------------------------------------------------
  * WHY `--apply` SENDS A PARTIAL PATCH
  *
  * `supabase config push` sends a whole `[auth]` block and reverts every field it does
@@ -49,6 +59,13 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  canonicalSettings,
+  describeLimitDrift,
+  limitDrift,
+  limitsOf,
+} from './auth-config-contract.mjs';
 
 const require = createRequire(import.meta.url);
 const { supabaseProjectRef } = require('../config/backends.cjs');
@@ -86,15 +103,15 @@ const done = (code) => {
 
 const manifest = JSON.parse(readFileSync(join(templatesDir, 'templates.json'), 'utf8'));
 
-/** The canonical value for every Management API key the manifest names. */
-const wanted = new Map();
-for (const [key, value] of Object.entries(manifest.settings)) {
-  if (key !== '//') wanted.set(key, value);
-}
-for (const entry of manifest.templates) {
-  wanted.set(entry.subjectKey, entry.subject);
-  wanted.set(entry.bodyKey, readFileSync(join(templatesDir, entry.bodyFile), 'utf8'));
-}
+/**
+ * The canonical value for every Management API key `--apply` may write. The manifest's
+ * `limits` are not among them: they are verified below and never written — see
+ * `auth-config-contract.mjs`.
+ */
+const wanted = canonicalSettings(manifest, (entry) =>
+  readFileSync(join(templatesDir, entry.bodyFile), 'utf8'),
+);
+const limits = limitsOf(manifest);
 
 function loadEnv() {
   const out = {};
@@ -187,6 +204,10 @@ async function main() {
         '      Authentication -> Emails -> "Confirm signup"  — body must contain {{ .Token }}',
         '      Authentication -> Emails -> "Magic Link"      — body must contain {{ .Token }}',
         '      Authentication -> Sign In / Providers -> Email — OTP length 6, expiry 600s',
+        ...[...limits].map(
+          ([key, entry]) => `      ${key.padEnd(24)} — must be ${entry.value} (${entry.unit})`,
+        ),
+        '      (the two limits are under Authentication -> Rate Limits and -> Emails -> SMTP)',
         '',
         '    Neither body may contain {{ .ConfirmationURL }}. That is the magic link, and it',
         '    is what a tester receives instead of a code.',
@@ -253,7 +274,33 @@ async function main() {
     if (!ok) console.log(describe(key));
   }
 
+  /**
+   * The limits: verified here, never written. A difference fails whatever the flag, and
+   * the message names what the client is holding that no longer matches.
+   */
+  const limitsDrifted = limitDrift(manifest, live.body);
+  console.log('\n  limits (recorded, verified, never applied)');
+  for (const [key, entry] of limits) {
+    const drifted = limitsDrifted.find((row) => row.key === key);
+    console.log(
+      drifted
+        ? describeLimitDrift(drifted)
+        : `  ok     ${key} = ${entry.value} (${entry.unit})`,
+    );
+  }
+
+  const limitFailure = () => {
+    console.error(
+      `\nFAIL: ${limitsDrifted.length} limit(s) differ from what the client was built against.` +
+        '\n--apply does not write limits. Either put the dashboard back, or change' +
+        '\nsupabase/auth-templates/templates.json and every file named under "client" above' +
+        '\nin one reviewed change.\n',
+    );
+    done(1);
+  };
+
   if (drift.length === 0) {
+    if (limitsDrifted.length) limitFailure();
     console.log('\nThe deployed project matches supabase/auth-templates/. Email sign-in sends a code.\n');
     done(0);
   }
@@ -263,6 +310,7 @@ async function main() {
       `\nFAIL: ${drift.length} key(s) differ from supabase/auth-templates/.` +
         '\nRe-run with --apply to write the canonical values (a partial PATCH; nothing else is touched).\n',
     );
+    if (limitsDrifted.length) limitFailure();
     done(1);
   }
 
@@ -300,6 +348,7 @@ async function main() {
   }
 
   console.log('Confirmed. Email sign-in now sends a code.\n');
+  if (limitsDrifted.length) limitFailure();
   console.log(
     'This is configuration, not code: it is not in the pull request and it does not travel\n' +
       'with a deploy. A new project starts from the default templates again.\n',
