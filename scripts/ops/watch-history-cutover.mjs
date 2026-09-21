@@ -95,6 +95,7 @@ const FILES = [
   '20261006000100_a_year_counted_from_the_watches.sql',
   '20261010000100_a_list_is_a_set_of_titles_you_chose.sql',
   '20261011000100_a_position_two_devices_agree_on.sql',
+  '20261012000100_a_read_of_your_own_that_asks_nobody.sql',
 ];
 
 /** The head every one of these expects to find, and nothing else. */
