@@ -117,14 +117,59 @@ describe('the one email code flow', () => {
     );
   });
 
-  it('says something usable about a rate limit and about closed signups', async () => {
+  /**
+   * **One error code, two failures, and they must not read the same.**
+   *
+   * GoTrue returns `over_email_send_rate_limit` both for the per-address 60-second
+   * cooldown and for the project's exhausted hourly email quota. The second of those
+   * arrives on a stranger's genuine first attempt because it is spent by other people's
+   * sign-ins, so copy that tells them to wait a minute and try again sends a new user
+   * round a loop that cannot succeed. The seconds are only in the message, never in the
+   * code, which is why the message is read.
+   */
+  it('tells the per-address cooldown apart from the project email quota', async () => {
     mockAuth.signInWithOtp.mockResolvedValue({
-      error: { code: 'over_email_send_rate_limit', message: 'rate limited' },
+      error: {
+        code: 'over_email_send_rate_limit',
+        message: 'For security purposes, you can only request this after 43 seconds.',
+      },
     });
     expect(await sendEmailCode('ada@user.example')).toEqual({
       ok: false,
       cancelled: false,
-      message: 'Too many emails just now. Wait a minute and try again.',
+      message: 'You just asked for a code. Try again in 43 seconds.',
+      // Carried structurally, not just in prose: the screens navigate on it and re-arm
+      // their countdowns from it. GoTrue's number is the time **remaining**, which is
+      // why 43 here means the successful send was 17 seconds ago and not 43.
+      retryAfterSeconds: 43,
+    });
+
+    mockAuth.signInWithOtp.mockResolvedValue({
+      error: { code: 'over_email_send_rate_limit', message: 'Email rate limit exceeded' },
+    });
+    const exhausted = await sendEmailCode('ada@user.example');
+    expect(exhausted).toEqual({
+      ok: false,
+      cancelled: false,
+      message:
+        'We cannot send codes right now. Try again in a few minutes, or continue with Apple or Google.',
+    });
+    // The distinction is the whole point: a project-wide exhaustion must not be
+    // described as a wait this person can sit out.
+    if (exhausted.ok) throw new Error('expected a refusal');
+    expect(exhausted.message).not.toMatch(/a minute/);
+  });
+
+  it('says something usable about a request limit and about closed signups', async () => {
+    // A different ceiling with a different cause, and it used to fall through to
+    // GoTrue's own wording, which names the endpoint rather than the person's options.
+    mockAuth.signInWithOtp.mockResolvedValue({
+      error: { code: 'over_request_rate_limit', message: 'Request rate limit reached' },
+    });
+    expect(await sendEmailCode('ada@user.example')).toEqual({
+      ok: false,
+      cancelled: false,
+      message: 'Too many attempts from this device. Wait a minute and try again.',
     });
 
     mockAuth.signInWithOtp.mockResolvedValue({
