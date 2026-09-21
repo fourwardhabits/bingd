@@ -489,3 +489,91 @@ describe('a correction is never a watch event', () => {
     await t.assertValid(user);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The approved rewatch flow (founder QA, 2026-09-21): Save the watch, THEN the ordinary
+// band chooser, THEN comparisons. The band may have changed since the last viewing, so the
+// re-rank after a rewatch must be able to land in a DIFFERENT band through the same
+// `rank_again(p_watch_event_id)` call that ties the placement to the viewing.
+// ---------------------------------------------------------------------------
+
+describe('a rewatch re-ranked into a different band', () => {
+  const placementsFor = async (item) =>
+    (
+      await t.sql(
+        `select kind, bucket, watch_event_id from ranking_placements
+          where user_id = $1 and media_item_id = $2 order by created_at`,
+        [user, item],
+      )
+    ).rows;
+
+  it('moves the band, ties the placement to the watch, and posts once', async () => {
+    await anchors(3, 'loved');
+    await anchors(3, 'fine');
+    const film = await movie('Better the second time');
+    await t.rankToCompletion(film, 'fine', async (pivot) => pivot);
+    const postsBefore = await events(film);
+
+    const logged = await call(`log_rewatch($1, $2, current_date, 'today_default')`, [
+      await op(),
+      film,
+    ]);
+    const eventId = logged.watch_event_id;
+    assert.ok(eventId, 'log_rewatch returned no watch event');
+
+    // The reader chose a band on the ordinary chooser — not the one it had.
+    await finish(
+      await one(t.db, `select rank_again($1, 'loved', $2, true, $3) as r`, [
+        film,
+        await op(),
+        eventId,
+      ]),
+      film,
+    );
+
+    assert.equal((await rankingOf(film)).bucket, 'loved', 'the ranking stayed in its old band');
+    const um = (
+      await t.sql(`select bucket from user_media where user_id = $1 and media_item_id = $2`, [
+        user,
+        film,
+      ])
+    ).rows[0];
+    assert.equal(um.bucket, 'loved', 'user_media.bucket disagrees with the ranking');
+
+    const last = (await placementsFor(film)).at(-1);
+    assert.equal(last.bucket, 'loved');
+    assert.equal(last.watch_event_id, eventId, 'the placement is not tied to the viewing');
+    // One viewing, one activity: the re-rank enriched the post log_rewatch made.
+    assert.equal(await events(film), postsBefore + 1, 'the rewatch posted twice');
+    await t.assertValid(user);
+  });
+
+  it('leaves the ranking exactly as it was when the comparisons are abandoned', async () => {
+    await anchors(3, 'loved');
+    await anchors(3, 'fine');
+    const film = await movie('Watched, not re-ranked');
+    await t.rankToCompletion(film, 'fine', async (pivot) => pivot);
+    const before = await rankingOf(film);
+
+    const logged = await call(`log_rewatch($1, $2, current_date, 'today_default')`, [
+      await op(),
+      film,
+    ]);
+    // Opened, never answered: the reader closed the sheet or killed the app.
+    await one(t.db, `select rank_again($1, 'loved', $2, true, $3) as r`, [
+      film,
+      await op(),
+      logged.watch_event_id,
+    ]);
+
+    assert.deepEqual(await rankingOf(film), before, 'an abandoned re-rank changed the ranking');
+    const count = (
+      await t.sql(`select count(*)::int as n from watch_events where user_id = $1 and media_item_id = $2`, [
+        user,
+        film,
+      ])
+    ).rows[0].n;
+    assert.equal(count, 2, 'the saved watch did not survive the abandoned re-rank');
+    await t.assertValid(user);
+  });
+});
