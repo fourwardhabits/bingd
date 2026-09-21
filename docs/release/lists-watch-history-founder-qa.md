@@ -227,15 +227,16 @@ Five minutes, only what these tranches touched indirectly:
 All of the below is proven by machine and re-run on every change. **Do not spend device time
 on it.**
 
-**Privacy and security (`lists-security.test.mjs`, 25 assertions; `lists-mutation-check.mjs`,
-14/14 defects caught).** A private list is unreachable anonymously through all six public
+**Privacy and security (`lists-security.test.mjs`, 26 assertions; `lists-mutation-check.mjs`,
+14/14 defects caught against a green control run).** A private list is unreachable anonymously through all six public
 readers and the table. Link-only opens by id and is never enumerable, and grants *nothing
 else* about its owner — not their collection, watchlist, rankings, activity or other lists.
 Public follows the profile, including a later flip to private. A moderation hide beats every
 mode. Writers refuse a non-owner with the same answer as "no such list". Progress is the
 caller's own. No list reader returns a score, bucket, position, watch date, note or history.
 The anon grant set is exactly six. Each of those gates was deliberately broken and the suite
-caught every one.
+caught every one — and a suspended owner’s **link** list closes, which only the suspension
+branch can do.
 
 **The public web data path, against real staging.** Every request the list web page and the
 link-preview Function make was run against staging with the real anon key: public and
