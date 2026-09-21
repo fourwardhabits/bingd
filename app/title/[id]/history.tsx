@@ -11,13 +11,9 @@ import { theme } from '@/ui/tokens';
 import { Button, LoadingScreen, Screen, Text } from '@/ui/components';
 
 import { WatchRow } from '@/features/watch-history/WatchRow';
-import {
-  groupByYear,
-  labelFor,
-  movementSentence,
-  type WatchEvent,
-} from '@/features/watch-history/watch-history';
+import { groupByYear, labelFor, type WatchEvent } from '@/features/watch-history/watch-history';
 import { useWatchHistory, type Placement } from '@/features/watch-history/use-watch-history';
+import { refinePlacementLine } from '@/features/ranking/refine';
 import {
   deleteWatchEvent,
   editWatchEvent,
@@ -293,19 +289,8 @@ export default function WatchHistoryScreen() {
               <View style={styles.placements}>
                 {unattached.map((placement) => (
                   <Text key={placement.id} variant="caption" tone="tertiary">
-                    {/* T5: a refine that MOVED the title said "Still #N" here, which is a
-                        false sentence about the reader's own list. The ledger's outcome
-                        decides the words, through the same helper the reveal uses. */}
                     {placement.kind === 'refine'
-                      ? `Refined · ${
-                          movementSentence(
-                            {
-                              outcome: placement.outcome as 'moved' | 'unchanged' | 'kept',
-                              fromPosition: placement.fromPosition,
-                            },
-                            placement.position,
-                          ) ?? `#${placement.position}`
-                        }`
+                      ? refinePlacementLine(placement)
                       : `Placed #${placement.position} of ${placement.categorySize}`}
                     {' · '}
                     {new Date(placement.createdAt).toLocaleDateString(undefined, {
