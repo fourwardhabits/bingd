@@ -153,7 +153,7 @@ export type SocialLinkNetwork = 'instagram' | 'tiktok' | 'youtube' | 'x' | 'webs
 /**
  * Which of the two doors to the My lists screen was used.
  *
- * `collection` is the `My lists ›` action on Collection's title row. `profile_manage`
+ * `collection` is Collection's Lists mode (the selector's third option since 2026-09-21). `profile_manage`
  * is `Manage ›` on the owner's own Lists shelf. They reach the identical screen, and
  * **the split is the entire point**: it is the measurement behind whether a text action
  * on a title row is discoverable enough to stay one (§Q.3, §M).

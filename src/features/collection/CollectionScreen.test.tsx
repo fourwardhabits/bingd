@@ -833,55 +833,50 @@ describe('re-tapping the Collection tab', () => {
 });
 
 /**
- * `My lists ›` — the entry the IA review of 2026-09-19 chose, and the four things it
- * deliberately is not (`docs/product/lists-prd.md` §I, §Q.3, §Q.6).
- *
- * This is the discoverability decision in test form. A text action on the title row buys
- * the clutter constraint at a real cost in findability, and the cost is accepted rather
- * than bought back with a permanent segment — so what has to hold is that the action is
- * *always there*, on every segment and both mediums, and that it is a **label** rather
- * than a glyph.
+ * **Movies / TV / Lists** — Lists is a first-class mode of the one selector (founder QA,
+ * 2026-09-21), replacing the `My lists ›` link. Not a segment and not a bottom tab: in
+ * Lists mode the Watched / Watchlist tabs are not drawn, and the choice is remembered
+ * like the other two.
  */
-describe('My lists', () => {
-  it('is a labelled text action on the title row, not a glyph', async () => {
+describe('the Lists mode', () => {
+  const switchToLists = async (view: Awaited<ReturnType<typeof open>>) => {
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: 'Lists' }));
+  };
+
+  it('is offered beside Movies and TV, and replaces the old link', async () => {
     const view = await open();
-    // The visible words matter: `TitleActions`' rule is that an icon names neither the
-    // thing nor the act, and this control is outside the medium axis with nothing
-    // beside it to borrow a meaning from.
-    view.getByText('My lists');
-    view.getByRole('button', { name: 'My lists' });
+    expect(view.queryByRole('button', { name: 'My lists' })).toBeNull();
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    view.getByRole('button', { name: 'TV' });
+    view.getByRole('button', { name: 'Lists' });
   });
 
-  it('is present on every segment and both mediums, and never moves', async () => {
-    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+  it('shows the lists in place, with no medium tabs and no push', async () => {
     const view = await open();
+    await switchToLists(view);
 
-    for (const segment of ['Watched', 'Watchlist']) {
-      await fireEvent.press(view.getByRole('tab', { name: segment }));
-      expect(view.queryByRole('button', { name: 'My lists' })).toBeTruthy();
-    }
-
-    await switchTo(view, 'TV');
-    for (const segment of ['Watched', 'Watchlist']) {
-      await fireEvent.press(view.getByRole('tab', { name: segment }));
-      expect(view.queryByRole('button', { name: 'My lists' })).toBeTruthy();
-    }
+    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
+    expect(tab(view, 'Watched')).toBeNull();
+    expect(tab(view, 'Watchlist')).toBeNull();
+    expect(view.getByLabelText('Showing Lists')).toBeTruthy();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'lists' });
   });
 
-  it('is not a segment, so it never joins the Movies/TV axis', async () => {
-    // A Lists segment would sit under a `Movies ▾` title it had to ignore — the same
-    // class of disagreement as the Unranked-tab bug this file was written for.
-    const view = await open();
-    expect(view.queryByRole('tab', { name: 'My lists' })).toBeNull();
-    expect(view.queryByRole('tab', { name: 'Lists' })).toBeNull();
+  it('reopens on Lists when that was the last choice', async () => {
+    // One render per test (the RNTL trap this file's neighbours document): the write is
+    // asserted above, and here the stored value is seeded as a restart would find it.
+    mockPrefStore[MEDIUM_KEY] = 'lists';
+    const view = await renderWithProviders(<CollectionScreen />);
+    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
+    expect(tab(view, 'Watched')).toBeNull();
   });
 
-  it('carries the entry that measures whether it is discoverable enough', async () => {
-    // `my_lists_opened.entry` is the tripwire, and both doors reach an identical screen
-    // — so the navigation is the only place the difference still exists (§M).
+  it('is never a segment tab', async () => {
     const view = await open();
-    await fireEvent.press(view.getByRole('button', { name: 'My lists' }));
-    expect(mockPush).toHaveBeenCalledWith('/lists?entry=collection');
+    expect(tab(view, 'Lists')).toBeNull();
+    expect(tab(view, 'My lists')).toBeNull();
   });
 });
 

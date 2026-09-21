@@ -1,7 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -29,12 +28,15 @@ import {
   Button,
   HeaderBoundary,
   EmptyState,
+  MEDIUM_OPTIONS,
   MediumSelector,
   Screen,
   SegmentedTabs,
   SkeletonRow,
   Text,
+  type MediumSelectorOption,
 } from '@/ui/components';
+import { MyLists } from '@/features/lists/MyLists';
 
 type Segment = 'watched' | 'watchlist' | 'unranked';
 type Medium = RankingCategory;
@@ -64,6 +66,24 @@ const MEDIUM_PREF_KEY = 'collection.medium';
 
 const isMedium = (value: unknown): value is Medium =>
   value === 'movies' || value === 'tv_seasons';
+
+/**
+ * **Movies / TV / Lists** — one selector, three modes (founder QA, 2026-09-21).
+ *
+ * Lists was a `My lists ›` link on this row, reached by a push. It is now a first-class
+ * mode of the same control, remembered like the other two under the same key: a reader
+ * who left Collection on Lists comes back to Lists. It is not a segment and not a bottom
+ * tab — Watched, Watchlist and Unranked are slices of a medium, and a list mixes media,
+ * so in Lists mode those tabs are simply not drawn.
+ */
+type CollectionMode = Medium | 'lists';
+
+const isMode = (value: unknown): value is CollectionMode => isMedium(value) || value === 'lists';
+
+const COLLECTION_MODES: readonly MediumSelectorOption<CollectionMode>[] = [
+  ...MEDIUM_OPTIONS,
+  { id: 'lists', label: 'Lists' },
+];
 
 /**
  * Poster or List, per account, across launches (founder §11).
@@ -121,7 +141,7 @@ export default function CollectionScreen() {
    * to clean up: a preference belongs to whoever it was read for, so one that does not
    * name the current reader is simply not theirs and the default stands.
    */
-  const [mediumPref, setMediumPref] = useState<{ profileId: string; medium: Medium }>(() => ({
+  const [mediumPref, setMediumPref] = useState<{ profileId: string; medium: CollectionMode }>(() => ({
     profileId: profile.id,
     /**
      * **A side asked for by whoever navigated here**, which today is See all on the
@@ -136,7 +156,11 @@ export default function CollectionScreen() {
      */
     medium: isMedium(mediumParam) ? mediumParam : 'movies',
   }));
-  const medium: Medium = mediumPref.profileId === profile.id ? mediumPref.medium : 'movies';
+  const mode: CollectionMode = mediumPref.profileId === profile.id ? mediumPref.medium : 'movies';
+  const inLists = mode === 'lists';
+  // The medium the three sections read. In Lists mode none of them is drawn, so the
+  // value only has to be a valid one for the hooks above them.
+  const medium: Medium = mode === 'lists' ? 'movies' : mode;
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
   /**
    * Filters, sort, view mode and shuffle seed, owned here rather than by either
@@ -182,7 +206,7 @@ export default function CollectionScreen() {
         // this, See all under Movies opened Movies and then a slow preference read
         // moved it to TV, which is the defect from the other direction.
         if (cancelled || chosenMedium.current || isMedium(mediumParam)) return;
-        if (isMedium(stored)) setMediumPref({ profileId: profile.id, medium: stored });
+        if (isMode(stored)) setMediumPref({ profileId: profile.id, medium: stored });
       })
       .catch(() => {});
     return () => {
@@ -348,10 +372,12 @@ export default function CollectionScreen() {
    * convenience, and a store that refuses should cost the reader nothing more than
    * opening on Movies next time.
    */
-  const changeMedium = (next: Medium) => {
+  const changeMedium = (next: CollectionMode) => {
     chosenMedium.current = true;
     setMediumPref({ profileId: profile.id, medium: next });
-    if (segment === 'unranked' && unrankedFor(next) === 0) setSegment('watched');
+    if (next !== 'lists' && segment === 'unranked' && unrankedFor(next) === 0) {
+      setSegment('watched');
+    }
     void writePref(`${profile.id}.${MEDIUM_PREF_KEY}`, next).catch(() => {});
   };
 
@@ -411,64 +437,28 @@ export default function CollectionScreen() {
        * Search's All / Movies / TV / People is deliberately still chips: those filter a
        * result set rather than naming which collection you are in.
        */}
-      {/**
-       * **The title row carries the way to Lists, on its unused trailing half**
-       * (founder, IA review 2026-09-19; `docs/product/lists-prd.md` §I and §Q.3).
-       *
-       * Four things it deliberately is not:
-       *
-       * - **Not a fourth segment.** `MediumSelector` is this screen's *title*, and
-       *   Watched, Watchlist and Unranked are all slices of one medium. A list mixes
-       *   movies, seasons and whole series by design, so a Lists segment would sit
-       *   under a `Movies ▾` title it had to ignore — the same class of disagreement as
-       *   the Unranked-tab bug this file already guards against.
-       * - **Not a new control row.** The title row exists and its trailing half was
-       *   empty, so this adds no height at all.
-       * - **Not the `AppHeader` right corner**, which is the bell's on every root tab
-       *   and where a *text* button was already tried and rejected.
-       * - **Not a glyph.** `TitleActions`' rule: an icon names neither the thing nor
-       *   the act.
-       *
-       * **"My lists", not "Lists"**: beside `Movies ▾`, the bare word reads as one
-       * phrase — "Movies lists". It is present on every segment and both mediums, and
-       * it never moves.
-       *
-       * The honest cost is discoverability, and it is accepted rather than bought with
-       * a permanent segment. `my_lists_opened.entry` is the tripwire that measures it,
-       * which is why the push carries `entry=collection`.
-       */}
       <View style={styles.titleRow}>
         <View style={styles.titleRowSelector}>
-          <MediumSelector value={medium} onChange={changeMedium} />
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="My lists"
-          accessibilityHint="Opens the lists you have made"
-          hitSlop={theme.space[2]}
-          onPress={() => router.push('/lists?entry=collection')}
-          style={({ pressed }) => [styles.myLists, pressed && styles.myListsPressed]}
-        >
-          <Text variant="footnote" tone="action">
-            My lists
-          </Text>
-          <Ionicons
-            name="chevron-forward"
-            size={theme.layout.icon.sm}
-            color={theme.semantic.action}
+          <MediumSelector<CollectionMode>
+            value={mode}
+            onChange={changeMedium}
+            options={COLLECTION_MODES}
           />
-        </Pressable>
+        </View>
       </View>
-      <SegmentedTabs
-        options={segments}
-        value={active}
-        onChange={setSegment}
-        accessibilityLabel="Collection section"
-      />
+      {inLists ? <MyLists entry="collection" /> : null}
+      {inLists ? null : (
+        <SegmentedTabs
+          options={segments}
+          value={active}
+          onChange={setSegment}
+          accessibilityLabel="Collection section"
+        />
+      )}
       {/* Beneath the Movies/TV and Watched/Watchlist controls, which are both
           navigation: the same seam Feed and Log use, in the analogous place. The
           information architecture is untouched. */}
-      <HeaderBoundary />
+      {inLists ? null : <HeaderBoundary />}
 
       {/* **Two answers to one question, side by side.**
 
@@ -486,7 +476,7 @@ export default function CollectionScreen() {
           ranked since (`shouldShowUnrankedNudge`). Dismissing
           hides this card only; the Unranked tab stands as long as anything is
           unranked. */}
-      {active === 'watched' && showNudge ? (
+      {!inLists && active === 'watched' && showNudge ? (
         <View style={styles.nudge}>
           <Text variant="callout">You have unranked titles</Text>
           <Text variant="footnote" tone="secondary">
@@ -507,10 +497,10 @@ export default function CollectionScreen() {
         </View>
       ) : null}
 
-      {active === 'watched' ? (
+      {!inLists && active === 'watched' ? (
         <Watched userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
-      {active === 'watchlist' ? (
+      {!inLists && active === 'watchlist' ? (
         <Watchlist
           userId={profile.id}
           medium={medium}
@@ -518,7 +508,7 @@ export default function CollectionScreen() {
           onChange={changeView}
         />
       ) : null}
-      {active === 'unranked' ? (
+      {!inLists && active === 'unranked' ? (
         <Unranked userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
     </Screen>
@@ -704,7 +694,7 @@ function Loading() {
 
 const styles = StyleSheet.create({
   /**
-   * The medium dropdown and `My lists ›`, on one line.
+   * The Movies / TV / Lists dropdown, on its own line.
    *
    * `MediumSelector` renders a fragment — a `Pressable` and its `Modal` — so it is
    * wrapped rather than dropped straight into the row: with three children,
@@ -714,18 +704,6 @@ const styles = StyleSheet.create({
    */
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   titleRowSelector: { flexShrink: 1 },
-  // The selector brings its own leading gutter; this brings the trailing one, so the
-  // two ends of the row measure from the same edges as every other row on the screen.
-  myLists: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[1],
-    minHeight: theme.layout.minTapTarget,
-    paddingLeft: theme.space[3],
-    paddingRight: theme.layout.gutter,
-  },
-  myListsPressed: { opacity: 0.7 },
-
   // A column now. As a row it put the copy and the dismissal at opposite edges,
   // which is what made them read as unrelated to each other.
   nudge: {
