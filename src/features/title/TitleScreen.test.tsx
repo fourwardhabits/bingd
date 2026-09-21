@@ -792,8 +792,8 @@ describe('a title this user has ranked', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    // The watch comes first, and the re-check is offered after it is saved.
-    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    // The rewatch sheet opens on its bands; nothing is unranked or restarted by opening it.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
   });

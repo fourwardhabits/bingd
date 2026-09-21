@@ -977,7 +977,8 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
     await fireEvent.press(view.getByText('Log another watch'));
 
-    await waitFor(() => expect(view.getByText('Save watch')).toBeTruthy());
+    // The log sheet in rewatch mode opens on its bands; nothing ranks until one is chosen.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
   });
 
