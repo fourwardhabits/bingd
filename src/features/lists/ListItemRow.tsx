@@ -53,7 +53,7 @@ export type ListItemRowProps = {
  * Numbered on slid every poster and title to the right. Now the number is a small plate
  * centred on the poster's own centre line, sitting on its lower edge: the poster, the
  * title and the trailing actions are at the same x whether Numbered is on or off, and a
- * 1-, 2- or 3-digit number grows symmetrically about that line (design-system.md §12).
+ * 1-, 2- or 3-digit number grows symmetrically about that line (design-system.md §11b).
  */
 export function ListItemRow({
   item,

@@ -27,7 +27,7 @@ export const HERO_COLLAPSED_BAND = 56;
 export const REVEAL_WINDOW = 96;
 
 /**
- * **The detail-page header rule, as one hook** (design-system.md §12).
+ * **The detail-page header rule, as one hook** (design-system.md §11b).
  *
  * A detail page — a title, and since 2026-09-21 a list — opens on a full-bleed hero with
  * its large title on Paper beneath it. The navigation is drawn over the artwork by

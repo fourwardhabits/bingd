@@ -727,6 +727,55 @@ Two mechanisms, both cheap, both preventing the failures this document exists to
 
 ---
 
+## 11b. Reusable UI rules (founder delta QA, 2026-09-21)
+
+Rules found by device QA that apply beyond the screen they were found on. Each names the
+component that already implements it; a new screen reuses that, not a copy.
+
+**Detail pages: a large hero title, and a compact nav title only once it has gone.** A
+detail page (a title, a list, any future entity page) opens on a full-bleed hero with its
+large title on Paper beneath it. The navigation is drawn over the artwork (`TitleTopBar`)
+and gains its Paper ground as the hero leaves; the compact title appears in the bar **only
+after the large title has scrolled out of view**. Never both on screen at once. The
+arithmetic is one hook, `useHeroReveal`, and the artwork one function, `heroArtwork`
+(backdrop → parent's backdrop → blurred poster → the plain collapsed band). A list borrows
+its first title's artwork.
+
+**Compact title rows share one state-aware trailing contract** (`TitleRowActions`).
+Ranked → the reader's own score circle, alone. Not ranked → the Rank/log action (the dashed
+Rank ring when logged but unranked, `+` when not logged) and the one-tap Watchlist. A series
+gets only `+`. Share is not a row action in browse, search or list contexts; the title page
+carries it. Search and list rows use the same component, so they cannot disagree.
+
+**Primary/secondary action pairs sit side by side** (`ProfileActions` is the reference):
+two equal halves in one row, the secondary act leading, the Maroon fill on the trailing
+primary act, `fit` so a two-word label stays on one line at 320pt. Not two full-width
+stacked bars.
+
+**Numbering replaces a visual anchor; it never shifts row geometry.** A number on a
+numbered list is a plate centred on the poster's own centre line (`ListItemRow`), so the
+poster, title and trailing actions are at the same x whether numbering is on or off, and a
+1-, 2- or 3-digit number grows symmetrically about that line.
+
+**Reuse the ranking/log detail components; do not build a parallel flow.** Logging another
+watch is the log sheet in rewatch mode (`LogAnotherWatchSheet`: same header, same *How was
+it?* bands, same rows), and editing a watch uses the same rows (`WatchDetailsRows`: Who I
+watched with, Note, Watch date — the log sheet's `SheetRow`, `CompanionPicker`, `NoteInput`
+and `WatchDatePicker`), all closed by default.
+
+**Historical versus current opinion.** A watch's score is the opinion held at that watch
+(its post's frozen `payload.score`); Watch History and the Feed both show it and neither
+moves when the reader later updates their rating. The current score is the title page,
+Collection, Search and list rows, all refreshed by one path
+(`invalidateAfterCollectionChange`).
+
+**Row edit affordances are small text** (`Edit`, optionally with a small pencil), never a
+large bare glyph. Destructive row actions on an owned list are revealed by a horizontal
+swipe (`SwipeToRemove`, horizontally dominant moves only, never during a drag) and confirmed
+by a second tap, with the same action available as an accessibility action.
+
+---
+
 ## 12. Open
 
 | Item | Who decides |

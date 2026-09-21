@@ -30,7 +30,7 @@ type Open = 'who' | 'note' | 'date' | null;
 /**
  * A watch's own details — **Who I watched with, Note, Watch date** — in the log sheet's own
  * rows (founder QA, 2026-09-21: "reuse the ranking/log detail components rather than
- * creating parallel flows"; design-system.md §12).
+ * creating parallel flows"; design-system.md §11b).
  *
  * The same `SheetRow`s, the same `CompanionPicker`, the same note field (`NoteInput`, the
  * log sheet's own) and the same `WatchDatePicker`, in the same order and **all closed by

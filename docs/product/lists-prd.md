@@ -1294,3 +1294,17 @@ lists ever reach the Feed, the rules are:
   button, never a side effect of an edit.
 - The Feed card would carry only what the public list page shows (title, cover, count,
   owner) and would follow `can_i_view` like every other event.
+
+### R.3 Final polish, 2026-09-21 (second delta pass)
+
+- **Add to List is one tap on the title page's action row** (Rank · Watchlist · Add to
+  List · Share), replacing the `⋯ → Add to list…` row; the ⋯ is drawn only when the title is
+  ranked or logged. Supersedes §P.4's "the ⋯ is on every title".
+- **Remove from list is a swipe** on an owned list's row (then a tap on Remove), not a
+  permanent ⋯; it stays an accessibility action. Long-press remains the drag.
+- **List rows use the shared compact-row actions** (`TitleRowActions`): the reader's own
+  score when ranked, else Rank/log + Watchlist.
+- **The list page opens on its first title's artwork** with the title page's collapsing
+  header, and Add titles / Share list sit side by side.
+- **Covers:** the 2×2 mosaic is two flex rows of two cells; the earlier tile arithmetic
+  wrapped inside the cover's border and drew two half-width strips on device.

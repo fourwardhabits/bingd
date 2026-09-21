@@ -23,7 +23,7 @@ export type TitleRowActionsProps = {
 
 /**
  * The trailing actions of a compact title row — **one contract for Search and Lists**
- * (founder QA, 2026-09-21; design-system.md §12, "compact title rows").
+ * (founder QA, 2026-09-21; design-system.md §11b, "compact title rows").
  *
  *   ranked        the reader's score circle, and nothing else. A saved-for-later
  *                 control beside a title they have already rated is noise.
