@@ -5,8 +5,8 @@ Search score, Lists mode, drag reorder, sharing, For You, other-profile privacy,
 Profile sections) is untouched; don't re-walk it.
 
 **Build:** the same Android preview APK (`d84c78b3`, runtime `0832dd3e`), no reinstall.
-Open it twice, then Settings ▸ About: the update id must start with the prefix given in
-the handoff. **Backend:** staging, now at `20261015000100`.
+Open it twice, then Settings ▸ About: the update id must start with **`01a0c5c8`** (group
+`f3b15ae8-49bb-4454-ac15-006ad08980b7`, from `5b116a3`). **Backend:** staging, now at `20261015000100`.
 
 ---
 
