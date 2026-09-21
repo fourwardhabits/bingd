@@ -384,22 +384,77 @@ async function main() {
         where user_id = $1 and category = 'movies' order by position`, [heavy]);
     await measure(heavyS, 'profile_title_counts',
       `select * from profile_title_counts($1)`, [heavy]);
-    // The client's own shape (use-feed.ts): a keyset page, ordered by the causal keys,
-    // with the visibility left to the `feed_events_read` policy rather than restated.
-    await measure(heavyS, 'feed: keyset page (50), policy-filtered',
-      `select fe.id, fe.type, fe.actor_id, fe.media_item_id, fe.causal_at, fe.causal_step
+    /**
+     * The feed, in `use-feed.ts`'s own shape: the follow set, the type list, and the
+     * causal order (`causal_at desc, causal_step desc, id ASC` — the keyset compares
+     * `id.gt` on the tie, so the third key ascends). Visibility is left to the
+     * `feed_events_read` policy rather than restated here, because the policy is what
+     * costs, and restating it would measure a query the client never sends.
+     */
+    const FEED_TYPES =
+      `array['title_ranked','title_logged','review_published','goal_completed','award_unlocked','watchlist_added','follow_story']`;
+    const feedPage1 = `select fe.id, fe.type, fe.actor_id, fe.causal_at, fe.causal_step
          from feed_events fe
-        order by fe.causal_at desc, fe.causal_step desc, fe.id desc
-        limit 50`, []);
-    await measure(heavyS, 'feed: keyset page 2 (50), policy-filtered',
-      `select fe.id, fe.type, fe.actor_id, fe.media_item_id, fe.causal_at, fe.causal_step
-         from feed_events fe
-        where (fe.causal_at, fe.causal_step, fe.id) <
-              (select fe2.causal_at, fe2.causal_step, fe2.id from feed_events fe2
-                order by fe2.causal_at desc, fe2.causal_step desc, fe2.id desc
-                offset 40 limit 1)
-        order by fe.causal_at desc, fe.causal_step desc, fe.id desc
-        limit 50`, []);
+        where fe.actor_id = any($1::uuid[])
+          and fe.type::text = any(${FEED_TYPES})
+        order by fe.causal_at desc, fe.causal_step desc, fe.id
+        limit 50`;
+    const followees = (
+      await db.rows(
+        `select followee_id from follows where follower_id = $1 and state = 'approved'`,
+        [heavy],
+      )
+    ).map((r) => r.followee_id);
+    await measure(heavyS, `feed: page 1 (50) over ${followees.length} followees`, feedPage1, [followees]);
+
+    // Page two, through the keyset predicate the client builds.
+    const cursor = (
+      await db.rows(
+        `select causal_at, causal_step, id from feed_events
+          where actor_id = any($1::uuid[])
+          order by causal_at desc, causal_step desc, id offset 49 limit 1`,
+        [followees],
+      )
+    )[0];
+    await measure(
+      heavyS,
+      'feed: page 2 (50) through the keyset',
+      `select fe.id from feed_events fe
+        where fe.actor_id = any($1::uuid[])
+          and (fe.causal_at < $2
+            or (fe.causal_at = $2 and fe.causal_step < $3)
+            or (fe.causal_at = $2 and fe.causal_step = $3 and fe.id > $4))
+        order by fe.causal_at desc, fe.causal_step desc, fe.id
+        limit 50`,
+      [followees, cursor.causal_at, cursor.causal_step, cursor.id],
+    );
+
+    /**
+     * **A/B for the two fixes in `20261012000100`**, because an index nobody measured
+     * is a guess with a comment on it. Each one is dropped, the same query is timed
+     * again, and it is put back.
+     */
+    await db.sql(`drop index if exists feed_events_causal`);
+    await measure(heavyS, 'feed: page 1 WITHOUT feed_events_causal', feedPage1, [followees], { repeat: 3 });
+    await db.sql(
+      `create index feed_events_causal on feed_events
+         (actor_id, causal_at desc, causal_step desc, id)`,
+    );
+    await db.sql('analyze feed_events');
+    await measure(heavyS, 'feed: page 1 WITH feed_events_causal', feedPage1, [followees]);
+
+    const rankingsRead = `select media_item_id, position, bucket from rankings
+                           where user_id = $1 and category = 'movies' order by position`;
+    // The pre-20261012000100 body, restored for one measurement and then undone.
+    await db.sql(`create or replace function can_i_view(subject uuid)
+      returns boolean language sql stable security definer set search_path = public
+      as $$ select can_view_profile(auth.uid(), subject); $$`);
+    await measure(heavyS, 'own rankings (1,200) WITHOUT the self fast path', rankingsRead, [heavy], { repeat: 3 });
+    await db.sql(`create or replace function can_i_view(subject uuid)
+      returns boolean language sql stable security definer set search_path = public
+      as $$ select coalesce(subject = auth.uid(), false)
+                or can_view_profile(auth.uid(), subject); $$`);
+    await measure(heavyS, 'own rankings (1,200) WITH the self fast path', rankingsRead, [heavy]);
     await measure(heavyS, 'leaderboard titles/month (flag off)',
       `select * from leaderboard('titles', 'month', 50)`, []);
     await db.sql(`update app_config set value = 'true'::jsonb where key = 'leaderboard.monthly_from_events'`);
@@ -537,9 +592,47 @@ async function main() {
     }
 
     console.log('\n== cascades ==');
-    await measure(heavyS, 'unlog a deep title (events+placements+comparisons)',
-      `select unlog(gen_random_uuid(), $1)`, () => [ranked[Math.floor(ranked.length * 0.6) + freshAt++].media_item_id],
+    /**
+     * `unlog` refuses a ranked title by design (`_assert_unranked`: "rank_unrank to
+     * change the rating, unrank before removing"), so the subject here is a logged,
+     * unranked season — which is also the shape with a watch event and no placement.
+     */
+    const unranked = (
+      await db.rows(
+        `select um.media_item_id from user_media um
+           left join rankings r
+             on r.user_id = um.user_id and r.media_item_id = um.media_item_id
+          where um.user_id = $1 and r.media_item_id is null limit 20`,
+        [heavy],
+      )
+    ).map((r) => r.media_item_id);
+    let unrankedAt = 0;
+    await measure(heavyS, 'unlog an unranked logged title (cascades)',
+      `select unlog(gen_random_uuid(), $1)`, () => [unranked[unrankedAt++]],
       { repeat: 3, rollback: true });
+
+    // A/B for 20261011000100's four foreign-key indexes, on the two paths that cascade.
+    const FK_INDEXES = [
+      ['comparisons_placement', 'comparisons (placement_id) where placement_id is not null'],
+      ['ranking_placements_watch_event', 'ranking_placements (watch_event_id) where watch_event_id is not null'],
+      ['ranking_sessions_watch_event', 'ranking_sessions (watch_event_id) where watch_event_id is not null'],
+      ['feed_events_list', 'feed_events (list_id) where list_id is not null'],
+    ];
+    for (const [name] of FK_INDEXES) await db.sql(`drop index if exists ${name}`);
+    await measure(heavyS, 'unlog WITHOUT the four FK indexes',
+      `select unlog(gen_random_uuid(), $1)`, () => [unranked[unrankedAt++]],
+      { repeat: 3, rollback: true });
+    await measure(heavyS, 'delete_watch_event WITHOUT the four FK indexes',
+      `select delete_watch_event(gen_random_uuid(), $1)`,
+      async () => [await ev()], { repeat: 3, rollback: true });
+    for (const [name, def] of FK_INDEXES) await db.sql(`create index ${name} on ${def}`);
+    await db.sql('analyze');
+    await measure(heavyS, 'unlog WITH the four FK indexes',
+      `select unlog(gen_random_uuid(), $1)`, () => [unranked[unrankedAt++]],
+      { repeat: 3, rollback: true });
+    await measure(heavyS, 'delete_watch_event WITH the four FK indexes',
+      `select delete_watch_event(gen_random_uuid(), $1)`,
+      async () => [await ev()], { repeat: 3, rollback: true });
     const other = (await db.rows(`select user_id from rankings where user_id <> $1 limit 1`, [heavy]))[0].user_id;
     await measure(await db.session('superuser'), 'delete a background account (cascade)',
       `delete from auth.users where id = $1`, [other], { repeat: 1, rollback: true });
