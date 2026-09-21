@@ -101,6 +101,10 @@ const FILES = [
   '20261014000100_a_watch_with_its_own_details.sql',
   // A watch keeps the opinion it had: feed_watch_scores returns each post's frozen score.
   '20261015000100_a_watch_keeps_the_opinion_it_had.sql',
+  // The latest watch follows a correction; earlier watches freeze (plus a backfill).
+  '20261016000100_the_latest_watch_follows_a_correction.sql',
+  // The Add-to-List picker's cover and description.
+  '20261017000100_a_list_you_can_recognise.sql',
 ];
 
 /** The head every one of these expects to find, and nothing else. */
