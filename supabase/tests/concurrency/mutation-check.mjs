@@ -1267,6 +1267,18 @@ $$;
 //     (nothing to wait on any more), and each transaction's count finds the other's
 //     season unmet — so neither removes the series and the entry outlives the show.
 //     `races/series-watchlist.mjs` SW1 is the assertion that catches it live.
+//
+//     **The second assertion changed meaning under `20261003000100`, and the reason is
+//     worth more than the assertion was.** T1 attaches this same function to
+//     `watch_events` too, and the event for a newly seen row is written by a
+//     `deferrable initially deferred` constraint trigger — so it fires at COMMIT. The
+//     later committer therefore re-runs the count at a moment when the other
+//     transaction's season IS committed and visible, and sweeps the series off the
+//     watchlist even with the advisory lock gone. The entry is no longer stranded in this
+//     interleaving, so that is what is asserted now: a return to stranded would mean the
+//     event-side trigger had been dropped, not that the lock was back.
+//
+//     The waiting assertion above is untouched, and is what still witnesses the lock.
 {
   const db = await createRaceDb();
   const fx = fixtures(db);
@@ -1350,8 +1362,9 @@ end; $$;`);
     blockedOnSeries === false,
   ]);
   results.push([
-    'series lock removed -> the finished series is stranded on the watchlist',
-    stranded.length === 1,
+    // Under 20261003000100 the commit-time event trigger sweeps it; see the note above.
+    'series lock removed -> the event-side trigger still clears the series at the later commit',
+    stranded.length === 0,
   ]);
 
   await t1.end();

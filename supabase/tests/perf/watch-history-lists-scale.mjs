@@ -384,10 +384,22 @@ async function main() {
         where user_id = $1 and category = 'movies' order by position`, [heavy]);
     await measure(heavyS, 'profile_title_counts',
       `select * from profile_title_counts($1)`, [heavy]);
-    await measure(heavyS, 'feed: follow feed page (50)',
-      `select fe.id, fe.type, fe.actor_id, fe.media_item_id, fe.created_at from feed_events fe
-        where fe.actor_id in (select followee_id from follows where follower_id = $1 and state = 'approved')
-        order by fe.created_at desc, fe.id desc limit 50`, [heavy]);
+    // The client's own shape (use-feed.ts): a keyset page, ordered by the causal keys,
+    // with the visibility left to the `feed_events_read` policy rather than restated.
+    await measure(heavyS, 'feed: keyset page (50), policy-filtered',
+      `select fe.id, fe.type, fe.actor_id, fe.media_item_id, fe.causal_at, fe.causal_step
+         from feed_events fe
+        order by fe.causal_at desc, fe.causal_step desc, fe.id desc
+        limit 50`, []);
+    await measure(heavyS, 'feed: keyset page 2 (50), policy-filtered',
+      `select fe.id, fe.type, fe.actor_id, fe.media_item_id, fe.causal_at, fe.causal_step
+         from feed_events fe
+        where (fe.causal_at, fe.causal_step, fe.id) <
+              (select fe2.causal_at, fe2.causal_step, fe2.id from feed_events fe2
+                order by fe2.causal_at desc, fe2.causal_step desc, fe2.id desc
+                offset 40 limit 1)
+        order by fe.causal_at desc, fe.causal_step desc, fe.id desc
+        limit 50`, []);
     await measure(heavyS, 'leaderboard titles/month (flag off)',
       `select * from leaderboard('titles', 'month', 50)`, []);
     await db.sql(`update app_config set value = 'true'::jsonb where key = 'leaderboard.monthly_from_events'`);
@@ -399,6 +411,14 @@ async function main() {
     await measure(heavyS, 'log_title (new title, today)',
       `select log_title(gen_random_uuid(), $1, 'fine', current_date, 'today_default')`,
       () => [fresh[freshAt++].id]);
+    // The pre-epic pair an installed client still calls, timed beside `log_title` so the
+    // per-write cost can be attributed to the trigger stack rather than to the tranche.
+    await measure(heavyS, 'LEGACY set_bucket (new title)',
+      `select set_bucket(gen_random_uuid(), $1, 'loved'::taste_bucket)`,
+      () => [fresh[freshAt++].id], { repeat: 5 });
+    await measure(heavyS, 'LEGACY log_watched (3-arg, dates it)',
+      `select log_watched(gen_random_uuid(), $1, current_date)`,
+      () => [ranked[Math.floor(ranked.length * 0.3) + freshAt++].media_item_id], { repeat: 5 });
     await measure(heavyS, 'log_rewatch (13-watch title)',
       `select log_rewatch(gen_random_uuid(), $1, current_date, 'today_default')`, [rewatched]);
     await measure(heavyS, 'log_rewatch (deep ranked title)',
@@ -456,7 +476,7 @@ async function main() {
              from media_items where kind = 'movie' order by title desc limit $2
          )
          insert into user_media (user_id, media_item_id, bucket, source, watched_on)
-         select $1, id, 'fine', 'import', date '2024-01-01' + (k % 300)::int from picked`,
+         select $1, id, 'fine', 'imported', date '2024-01-01' + (k % 300)::int from picked`,
         [victim, n],
       );
       const took = performance.now() - started;
@@ -495,6 +515,26 @@ async function main() {
     await measure(viewerS, 'viewer: list_items_page (500, first 100)', `select * from list_items_page($1, null, 100)`, [big]);
     await measure(viewerS, 'viewer: add_list_to_watchlist (500)',
       `select add_list_to_watchlist(gen_random_uuid(), $1)`, [big], { repeat: 3, rollback: true });
+
+    console.log('\n== plans for the two slowest reads ==');
+    for (const [label, sql] of [
+      ['rankings for movies', `select media_item_id, position, bucket from rankings
+                                where user_id = '${heavy}' and category = 'movies' order by position`],
+      ['feed keyset page', `select fe.id from feed_events fe
+                             order by fe.causal_at desc, fe.causal_step desc, fe.id desc limit 50`],
+    ]) {
+      const plan = await heavyS.q(`explain (analyze, buffers, summary off) ${sql}`);
+      const text = plan.rows.map((r) => r[Object.keys(r)[0]]).join(`\n`);
+      report.results.push({ label: `plan: ${label}`, plan: text });
+      console.log(`-- ${label}`);
+      console.log(
+        text
+          .split(`\n`)
+          .filter((l) => /Seq Scan|Index|Filter|rows=|Function Scan|SubPlan|actual time/.test(l))
+          .slice(0, 12)
+          .join(`\n`),
+      );
+    }
 
     console.log('\n== cascades ==');
     await measure(heavyS, 'unlog a deep title (events+placements+comparisons)',
