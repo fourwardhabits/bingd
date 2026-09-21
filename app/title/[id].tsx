@@ -1333,7 +1333,9 @@ export default function TitleScreen() {
          * whose only row is the list one. No hero control, no fourth `TitleActions`
          * button, no permanent list button anywhere (§D).
          */
-        onMore={() => setManaging(true)}
+        // Only when the menu has something in it: Add to list moved to the action row,
+        // so a title that is neither ranked nor logged has no menu rows left.
+        onMore={data.ranked || data.logged ? () => setManaging(true) : undefined}
         title={displayTitle ?? title.title}
         subtitle={parent?.title ?? null}
       />
@@ -1591,6 +1593,12 @@ export default function TitleScreen() {
                   onPress: () => void toggleWatchlist(),
                   disabled: watchlistBusy,
                 }}
+                // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
+                // when this is pressed, so there is nothing to serialise against.
+                list={{
+                  accessibilityLabel: `Add ${title.title} to a list`,
+                  onPress: () => setAddingToList(true),
+                }}
                 recommend={
                   rankable
                     ? {
@@ -1633,6 +1641,7 @@ export default function TitleScreen() {
             </View>
           </View>
         </View>
+
 
         {/* Who recommended this, and what they said — below the title and its actions,
             in the flow, whether or not there is artwork (founder F1, 2026-09-19). It sits
@@ -2287,38 +2296,6 @@ export default function TitleScreen() {
           }}
         >
           <View style={styles.menu}>
-            {/**
-             * **Add to list… is first, and it is the one row every title has**
-             * (lists-prd.md §P.4).
-             *
-             * Ungrouped and above the three headed groups, because it is the only row
-             * here that is not about this account's *collection*: the others say where
-             * a title sits in your ranking or whether you keep it at all, and this one
-             * puts it in something you made. A `MenuGroup` over a single row would
-             * imply there are more coming.
-             *
-             * It applies to every movie, season and whole series — ranked or not,
-             * logged or not, watchlisted or not — which is why `onMore` is now
-             * unconditional. On an account with no lists yet the sheet it opens skips
-             * straight to New list with this title preselected (§G).
-             */}
-            <SheetRow
-              icon="list-outline"
-              label="Add to list…"
-              onPress={() => {
-                // Closed first, then handed over on iOS once UIKit has finished
-                // dismissing — the serialised handover `Sheet.onDismissed` documents.
-                // Android has no presentation to wait for and goes straight across.
-                if (Platform.OS === 'ios') {
-                  menuHandoff.current = 'list';
-                  setMenuLeaving(true);
-                  setManaging(false);
-                } else {
-                  setManaging(false);
-                  setAddingToList(true);
-                }
-              }}
-            />
 
             {/**
              * **Three groups, because seven undifferentiated rows is a list rather than

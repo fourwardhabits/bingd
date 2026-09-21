@@ -1053,10 +1053,11 @@ describe('navigation', () => {
    * group is now gated on `data.ranked || data.logged`, so a title in nobody's
    * collection is never offered Remove from it.
    */
-  it('offers the menu on a title nobody has touched, because a list needs no history', async () => {
+  it('offers Add to list on a title nobody has touched, on the action row rather than a menu', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    expect(view.queryByTestId('title-more')).toBeNull();
   });
 
   it('offers the menu on a ranked title, where the Ranked chip used to keep it', async () => {

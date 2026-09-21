@@ -3380,20 +3380,12 @@ describe('a title in the collection that is not ranked', () => {
 });
 
 /**
- * **`Title ⋯ → Add to list…`** — the second of the feature's exactly two entry points
- * (`docs/product/lists-prd.md` §G, §P.4).
+ * **Add to List is one tap on the action row** (founder QA, 2026-09-21), beside Watchlist
+ * and Share — it used to live only behind the page's ⋯ (lists-prd.md §R).
  *
- * Three things are being pinned, and each is a decision rather than an accident:
- *
- * **The ⋯ is on every title.** It used to appear only where there was something to
- * manage, and `Add to list…` is the first row that applies to a title the account has
- * never touched — including a series, which has never had a menu at all.
- *
- * **It is first.** Ungrouped and above the three headed groups, because it is the only
- * row here that is not about this account's collection.
- *
- * **Nothing else on the page changed.** No hero control, no fourth `TitleActions`
- * button, no permanent list button anywhere (§D, §Q.7).
+ * What is pinned: every title has it, it opens the Add-to-list sheet directly (no menu,
+ * so no presentation to serialise), the ⋯ no longer carries a duplicate row, and a title
+ * with nothing else in its menu no longer draws a ⋯ at all.
  */
 describe('Add to list', () => {
   beforeEach(() => {
@@ -3401,45 +3393,7 @@ describe('Add to list', () => {
     tableRows.user_media = [];
   });
 
-  const openMenu = async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
-    await fireEvent.press(view.getByTestId('title-more'));
-    await waitFor(() => expect(view.getByLabelText('Add to list…')).toBeTruthy());
-    return view;
-  };
-
-  it('is offered on a title that is neither ranked nor logged', async () => {
-    await openMenu();
-  });
-
-  it('is the first row in the sheet', async () => {
-    const view = await openMenu();
-
-    // By position in the rendered tree, not by presence: "first" is the claim.
-    const labels = view
-      .queryAllByRole('button')
-      .map((node) => node.props.accessibilityLabel)
-      .filter(Boolean);
-    expect(labels.indexOf('Add to list…')).toBeLessThan(
-      labels.indexOf('Remove from collection') === -1
-        ? labels.length
-        : labels.indexOf('Remove from collection'),
-    );
-    expect(labels[labels.indexOf('Add to list…')]).toBe('Add to list…');
-  });
-
-  it('does not offer Remove from a collection the title is not in', async () => {
-    // The gate that replaced the old `onMore` condition. Without it the menu would
-    // offer to take a film off a shelf it has never been on, and the confirmation
-    // would be the first place anybody found out.
-    const view = await openMenu();
-
-    expect(view.queryByLabelText('Remove from collection')).toBeNull();
-    expect(view.queryByText('Collection')).toBeNull();
-  });
-
-  it('keeps Remove for a title that is in the collection', async () => {
+  const inCollection = () => {
     tableRows.user_media = [
       {
         user_id: 'user-1',
@@ -3451,46 +3405,48 @@ describe('Add to list', () => {
         note_has_spoilers: false,
       },
     ];
-    const view = await openMenu();
+  };
 
-    expect(view.getByLabelText('Remove from collection')).toBeTruthy();
-  });
-
-  it('adds no control to the page itself', async () => {
-    // `TitleActions` still has exactly three controls, and the hero has none of its own.
+  it('is a one-tap action on a title that is neither ranked nor logged', async () => {
     const view = await open();
-
-    expect(view.queryByLabelText(/add to list/i)).toBeNull();
-    expect(view.queryByText(/add to list/i)).toBeNull();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
   });
 
-  /**
-   * **The hand-off actually arrives**, which is the one thing the ordering tests above
-   * cannot say for each other.
-   *
-   * The row closes the menu and waits for `Sheet`'s `onDismissed` before presenting the
-   * Add-to-list sheet, because a presentation issued mid-dismissal is refused by UIKit and
-   * leaves a screen that renders perfectly and takes no touches. That waiting is only safe
-   * if the callback can arrive at all — and a `Sheet` that is **unmounted** rather than
-   * made invisible never sends one. Before `menuLeaving` kept this menu mounted for its
-   * slide-out, the row opened nothing whatsoever, and no existing test could see it: the
-   * others assert that the row is present, in the right order, and stop there.
-   *
-   * `refused` is what stops this passing on a dismissal no device would send.
-   */
-  it('opens the Add-to-list sheet after the menu has finished dismissing', async () => {
-    const view = await openMenu();
+  it('sits between Watchlist and Share on the action row', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    const ids = view
+      .getAllByTestId(/^title-action-(save|list|recommend)$/)
+      .map((node) => node.props.testID as string);
+    expect(ids.indexOf('title-action-save')).toBeLessThan(ids.indexOf('title-action-list'));
+    expect(ids.indexOf('title-action-list')).toBeLessThan(ids.indexOf('title-action-recommend'));
+  });
 
-    await fireEvent.press(view.getByLabelText('Add to list…'));
+  it('opens the Add-to-list sheet directly, with nothing refused', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+
+    await fireEvent.press(view.getByTestId('title-action-list'));
 
     await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
-    // And the menu is gone rather than sitting underneath it.
-    expect(view.queryByLabelText('Add to list…')).toBeNull();
-    // The same accessor the onboarding hand-off tests use: `jest.setup.js` models UIKit's
-    // refusal and counts it here, and a count above zero means this passed on a dismissal
-    // no device would have sent.
     const shows = (globalThis as unknown as { __modalShows: { refused: number } })
       .__modalShows;
     expect(shows.refused).toBe(0);
+  });
+
+  it('draws no ⋯ on a title with nothing else to manage', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    expect(view.queryByTestId('title-more')).toBeNull();
+  });
+
+  it('no longer duplicates Add to list in the menu of a title in the collection', async () => {
+    inCollection();
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-more'));
+
+    await waitFor(() => expect(view.getByLabelText('Remove from collection')).toBeTruthy());
+    expect(view.queryByLabelText('Add to list…')).toBeNull();
   });
 });
