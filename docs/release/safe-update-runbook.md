@@ -40,6 +40,12 @@ Answer three questions. **Any yes means a new build.**
 - Query logic, React Query keys, client-side validation, analytics call sites.
 - A new screen, if it uses only modules already in the binary.
 
+**One exception: JavaScript that runs before any update can.** On a fresh install the
+embedded bundle is the only code that has ever run. Anything that decides what happens
+before the first update applies (today, `src/lib/updates.ts`'s reload decision) reaches a
+fresh install only in a binary. Publish it over the air for existing installs, and ship it in
+the next binary as well.
+
 ### Neither — a server release
 
 - Anything in `supabase/migrations/`. A migration is applied to a database, not shipped to
@@ -131,6 +137,20 @@ the foreground — `src/lib/updates.ts` checks on foreground and applies immedia
 turns "days" into "the next time they pick up their phone" and also means there is no window
 in which to notice a mistake.
 
+**Except before somebody is in the app.** Signed out, creating a profile, or anywhere in the
+first-run steps, the foreground check downloads the update and does not reload
+(`isSafeToReload`). The update then applies on the next safe foreground return or the next
+cold start. Before this guard, a fresh store install reloaded on its first return from Mail
+with its sign-in code and landed on an empty sign-in form (production dependency audit,
+2026-09-21).
+
+**A binary built before that guard still does it once.** On a fresh install the embedded
+bundle's copy of `updates.ts` is what decides, and an update carrying the guard is only
+launched *by* the reload it would have prevented. So every published update re-arms that one
+unguarded reload for fresh installs of older binaries. It is closed only by a store binary
+whose embedded bundle contains the guard. Until that binary is the one being installed,
+publishing updates to `production` has this cost, and it is a reason to publish fewer of them.
+
 ### Check what you are about to hit, first
 
 ```
@@ -211,7 +231,8 @@ npm run update:preview -- --message "update drill"
 # 3. Confirm it landed on the right runtime and nothing else.
 npx eas channel:view preview
 
-# 4. On the phone: background Bingd, wait a moment, foreground it. It reloads.
+# 4. On the phone, signed in and in the app (not on sign-in or a first-run step — those
+#    hold the update for later): background Bingd, wait a moment, foreground it. It reloads.
 #    Settings now reads `runtime <8 chars> · update <8 chars>` instead of `embedded`.
 #    That transition — embedded to an update id — is the whole proof.
 

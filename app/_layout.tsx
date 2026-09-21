@@ -6,7 +6,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import * as Sentry from '@sentry/react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
-import { Stack, useNavigationContainerRef } from 'expo-router';
+import { Stack, useNavigationContainerRef, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { AppState } from 'react-native';
@@ -31,7 +31,7 @@ import { persistLastSession } from '@/lib/flight-persistence';
 import { reportBrandFontFailure, startIconFont } from '@/lib/fonts';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient, startQueryFocusTracking } from '@/lib/query';
-import { startUpdateChecks } from '@/lib/updates';
+import { isSafeToReload, useUpdateChecks } from '@/lib/updates';
 import { ROOT_SCREEN_TITLES, rootStackScreenOptions } from '@/ui/navigation';
 
 // Before the first render, so a crash during startup is still reported. Both
@@ -82,7 +82,6 @@ function RootLayout() {
   // and it gets the background-to-foreground case right where a mount effect does not.
   // Two events for one launch is the duplicate-capture problem in miniature.
 
-  useEffect(() => startUpdateChecks(), []);
   // Without this, `refetchOnWindowFocus` cannot fire at all on a phone — see
   // `startQueryFocusTracking`.
   useEffect(() => startQueryFocusTracking(), []);
@@ -240,6 +239,17 @@ function Navigation() {
    * no UI, and a failure is dropped.
    */
   useReportDeviceContext();
+  /**
+   * Over-the-air updates, reloaded on a foreground return only when that loses nothing.
+   *
+   * Here rather than in `RootLayout` because the answer needs the session and the route,
+   * and only this component sees both. Signed out, creating a profile, or anywhere in the
+   * first-run steps, an update downloads and waits for the next safe moment or the next
+   * cold start — see `isSafeToReload`. A fresh install's first trip to Mail for its code
+   * is what this protects, and why it has to ship embedded in a binary (`lib/updates.ts`).
+   */
+  const [group] = useSegments() as readonly (string | undefined)[];
+  useUpdateChecks(isSafeToReload(auth.status, group));
 
   return (
     <>

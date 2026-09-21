@@ -79,6 +79,24 @@ repository has no credential that can write it. Two ways:
    reverts every field it does not mention, **including the Apple and Google client
    secrets**. Do not reach for it to apply these.
 
+## Limits: recorded and checked, never applied
+
+`templates.json` also has a `limits` block: the per-address email cooldown
+(`smtp_max_frequency`, 60 seconds) and the project's hourly auth-email ceiling
+(`rate_limit_email_sent`, 30), as production had them on 2026-09-21. The client is built
+against them. `RESEND_COOLDOWN_MS` in `app/(auth)/verify.tsx` must equal the cooldown, and CI
+asserts it.
+
+`check-auth-config.mjs` fails when a deployed limit differs from the recorded one, and names
+the client constant that no longer matches. **`--apply` never writes a limit.** They are abuse
+and capacity decisions made in the dashboard, and a repair script that put one back would
+quietly undo a deliberate raise. To change one, change the dashboard, this file and the
+client code it names in one reviewed change.
+
+The 2026-09-21 production signup incident is why this exists: a 30-second client cooldown
+against a 60-second server, with neither number written down anywhere the other could be
+checked against.
+
 ## The prerequisite that is not a template
 
 Supabase refuses template edits altogether while a project is on the free tier with the
