@@ -232,6 +232,11 @@ const ALLOWED = {
   'refine_candidates(ranking_category,integer,integer,uuid[])': ['authenticated'],
   'refine_start(uuid,uuid)': ['authenticated'],
   'refine_snooze(uuid)': ['authenticated'],
+  // Unified Backlog + Refine (same migration). A read of the caller's own backlog and the
+  // opening of one placement from it, both `auth.uid()` only. `_ranking_backlog_items`
+  // takes a user id and is revoked for the same reason as `_refine_support`.
+  'ranking_backlog(ranking_category,integer,uuid[])': ['authenticated'],
+  'rank_backlog_start(uuid,taste_bucket,uuid)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

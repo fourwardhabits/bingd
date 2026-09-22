@@ -900,3 +900,148 @@ describe('privacy', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Unified Backlog + Refine (founder-approved 2026-09-21)
+// ---------------------------------------------------------------------------
+
+/** A ledger row saying `mover` was deliberately moved from `from` to `to` just now. */
+async function rerankedPast(mover, from, to) {
+  await t.sql(
+    `insert into ranking_placements (user_id, media_item_id, category, kind, outcome, bucket,
+       position, band_rank, band_size, category_size, score, from_position, adjustable)
+     values ($1, $2, 'movies', 'correction', 'moved', 'loved', $4, $4, 30, 30, 8.0, $3, false)`,
+    [user, mover, from, to],
+  );
+}
+
+describe('age alone never qualifies a title', () => {
+  it('a well-compared library placed years ago has nothing waiting', async () => {
+    const ids = await library(40, { confirmedDaysAgo: 1100 });
+    await compareAdjacent(ids, 1000);
+    const r = await candidates();
+    assert.equal(r.status, 'nothing_waiting');
+  });
+
+  it('the same evidence gives the same candidates whether it is a day or three years old', async () => {
+    await library(60, { confirmedDaysAgo: 1 });
+    const fresh = await candidates({ limit: 20, seed: 7 });
+    await t.sql(
+      `update ranking_placements set created_at = now() - interval '1100 days' where user_id = $1`,
+      [user],
+    );
+    const old = await candidates({ limit: 20, seed: 7 });
+    assert.deepEqual(
+      old.candidates.map((c) => [c.position, c.reason]),
+      fresh.candidates.map((c) => [c.position, c.reason]),
+    );
+    for (const c of old.candidates) assert.notEqual(c.reason, 'placed_long_ago');
+  });
+});
+
+describe('titles crossing it through explicit reranks', () => {
+  it('two reranks past a well-compared title make it a candidate; one does not', async () => {
+    const ids = await library(30);
+    await compareAdjacent(ids);
+    assert.equal((await candidates()).status, 'nothing_waiting');
+
+    // #3 moved to #15, then #5 to #20 — both after every title was last confirmed.
+    await rerankedPast(ids[2], 3, 15);
+    const one = await candidates({ limit: 20 });
+    assert.equal(one.status, 'nothing_waiting', 'one crossing is not a reason');
+
+    await rerankedPast(ids[4], 5, 20);
+    const two = await candidates({ limit: 20 });
+    assert.equal(two.status, 'ready');
+    // Crossed twice: #6..#15. #4 and #5 were crossed once, #16..#20 once, the movers never
+    // by their own move.
+    assert.deepEqual(
+      two.candidates.map((c) => c.position).sort((a, b) => a - b),
+      [6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    );
+    for (const c of two.candidates) {
+      assert.equal(c.reason, 'crossed');
+      assert.deepEqual(
+        { gap: c.signals.gap, contradicted: c.signals.contradicted, crossed: c.signals.crossed },
+        { gap: false, contradicted: false, crossed: true },
+      );
+    }
+  });
+
+  it('a first ranking or a refine moving past it is not a rerank', async () => {
+    const ids = await library(30);
+    await compareAdjacent(ids);
+    for (const kind of ['first', 'refine', 'import']) {
+      await t.sql(
+        `insert into ranking_placements (user_id, media_item_id, category, kind, outcome,
+           bucket, position, band_rank, band_size, category_size, score, from_position)
+         values ($1, $2, 'movies', $3::placement_kind, 'moved', 'loved', 20, 20, 30, 30, 8, 3)`,
+        [user, ids[2], kind],
+      );
+    }
+    assert.equal((await candidates()).status, 'nothing_waiting');
+  });
+});
+
+describe('candidate exists ≠ show the card', () => {
+  it('a strong batch with nothing unranked shows the card, and says why', async () => {
+    await library(100);
+    const r = await candidates({ limit: 1 });
+    assert.equal(r.cta.show, true);
+    assert.ok(r.cta.strong >= 3, `strong ${r.cta.strong}`);
+    assert.ok(r.cta.qualifying >= r.cta.strong);
+    assert.equal(r.cta.count, 5, 'the card names at most five');
+    assert.ok(r.cta.strong_why.gap >= 3);
+    assert.equal(r.cta.min_strong, 3);
+    assert.equal(Number(r.cta.cta_threshold), 0.25);
+    assert.equal(Number(r.cta.candidate_threshold), 0.08);
+    assert.equal(r.cta.resurface_after, 3);
+  });
+
+  it('anything left to rank in the medium hides it: unranked first', async () => {
+    await library(100);
+    const unranked = await t.createMovie(`Seen, not ranked ${seq}`, 800_000 + seq);
+    await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [
+      user,
+      unranked,
+    ]);
+    const r = await candidates({ limit: 1 });
+    assert.equal(r.status, 'ready', 'a session could still run once somebody opts in');
+    assert.equal(r.cta.show, false);
+    assert.equal(r.cta.why_not, 'backlog');
+  });
+
+  it('a batch below the card threshold is not an invitation, and the bar is config', async () => {
+    await library(100);
+    await setConfig('ranking.refine_cta_min_candidates', 500);
+    try {
+      const r = await candidates({ limit: 1 });
+      assert.equal(r.status, 'ready');
+      assert.equal(r.cta.show, false);
+      assert.equal(r.cta.why_not, 'weak');
+    } finally {
+      await setConfig('ranking.refine_cta_min_candidates', 3);
+    }
+  });
+
+  it('too small and rested never invite', async () => {
+    await library(10);
+    const r = await candidates();
+    assert.equal(r.cta.show, false);
+    assert.equal(r.cta.why_not, 'too_small');
+  });
+});
+
+describe('placements_total, which Not now measures activity with', () => {
+  it('counts first rankings and reranks, never backfill or refine', async () => {
+    const ids = await library(25);
+    assert.equal((await candidates()).placements_total, 0, 'backfill is history, not activity');
+
+    const fresh = await t.createMovie(`Brand new ${seq}`, 700_000 + seq);
+    await t.rankToCompletion(fresh, 'loved', (pivot, subject) => pivot ?? subject);
+    assert.equal((await candidates()).placements_total, 1);
+
+    await refine(ids[0], await order());
+    assert.equal((await candidates()).placements_total, 1, 'a refine does not re-arm its own card');
+  });
+});

@@ -1,5 +1,11 @@
 -- ---------------------------------------------------------------------------
--- T5 — Refine your rankings.
+-- T5 — Refine your rankings, and the unranked backlog beside it.
+--
+-- **Unified Backlog + Refine (founder-approved 2026-09-21; restacked on #196 b9b07c2).**
+-- One ranking session, two sources: the BACKLOG (titles seen and not yet ranked, §9 below)
+-- and REFINE (titles already ranked whose evidence is thin, everything else in this file).
+-- Both use the one engine — `_rank_start_impl` and the ordinary `rank_*` answer calls.
+-- What changed from the T5 draft, and why, is at the end of this header.
 --
 -- `watch-history-and-ranking-calibration.md` §G, §H. Built on T2 (20261004000100), whose
 -- session already knows `kind = 'refine'`, carries a `tolerance`, confirms a window in
@@ -60,16 +66,21 @@
 --
 --     excess   = max(gap_above - w, 0) + max(gap_below - w, 0)
 --     span     = min(1, ln(1 + excess) / ln 32)
---     priority = rank_weight × (0.7·span + 0.3·[conflicts > 0])
---                            × (1 + 0.25·stale + 0.25·fragile)
+--     shifted  = min(1, crossed / (2 · crossed_min))
+--     priority = rank_weight × (0.7·span + 0.3·max([conflicts > 0], shifted))
+--                            × (1 + 0.25·fragile)
 --
 --     rank_weight  1.0 for #1–25, 0.6 for #26–100, 0.3 below (§H.4)
---     stale        min(1, days since last confirmed / 365)
+--     crossed      titles an EXPLICIT rerank (Update your rating, a rewatch re-check,
+--                  a manual move) carried past it since it was last confirmed — the
+--                  "its local section shifted" signal
 --     fragile      last placement was adjustable (skips, dry walk, backfill)
 --
--- A title qualifies at priority >= `ranking.refine_min_priority` (0.08), which works out
--- as: any gap at all in the top 100, and at least three titles beyond the tolerance
--- below #100 — so a deep title that is one neighbour out is not worth a question.
+-- **A title qualifies only on evidence:** a gap beyond the tolerance, a contradiction
+-- newer than its last confirmation, or at least `ranking.refine_crossed_min` (2) titles
+-- crossing it — AND priority >= `ranking.refine_min_priority` (0.08). Age alone never
+-- qualifies it and no longer weights it (founder, 2026-09-21): the T5 draft's `stale`
+-- multiplier and its `placed_long_ago` reason are gone.
 --
 -- Randomness only breaks ties: candidates are ordered by priority in 0.05 steps, then by
 -- a hash of (title, seed) with a seed the client picks per session, so two sessions do not
@@ -113,6 +124,23 @@
 -- `disabled` and `refine_start` refuses, and the client draws no entry. The prior-search
 -- kill switch (`ranking.prior_search_enabled`) also disables Refine: without it a refine
 -- session would be a full re-bisection, which is not the designed feature.
+--
+-- `ranking.backlog_enabled` starts FALSE too, and gates §9 the same way.
+--
+-- ===========================================================================
+-- CANDIDATE EXISTS ≠ SHOW THE CARD (founder, 2026-09-21)
+--
+-- `refine_candidates` also answers a `cta` block: whether Collection's "Fine-tune your
+-- rankings" card may show. That needs a much stronger batch than a session needs:
+-- at least `ranking.refine_cta_min_candidates` (3) titles at priority >=
+-- `ranking.refine_cta_min_priority` (0.25), the medium's backlog empty, and the day's
+-- ceiling not reached. It returns the counts at both thresholds and why the strong ones
+-- qualified, so the numbers can be tuned from real use rather than redesigned.
+-- It also returns `placements_total` — new rankings, backlog placements and reranks in
+-- the medium, never backfill or refine rows — which the client's "Not now" compares
+-- against `ranking.refine_resurface_placements` (3). No time-based return.
+--
+-- Every number above is an `app_config` row, read on each call.
 -- ---------------------------------------------------------------------------
 
 
@@ -125,7 +153,14 @@ insert into app_config (key, value) values
   ('ranking.refine_min_ranked',     '20'::jsonb),
   ('ranking.refine_min_priority',   '0.08'::jsonb),
   ('ranking.refine_daily_targets',  '30'::jsonb),
-  ('ranking.refine_cooldown_days',  '30'::jsonb)
+  ('ranking.refine_cooldown_days',  '30'::jsonb),
+  -- Unified Backlog + Refine (2026-09-21). Starting defaults, not product truths.
+  ('ranking.refine_crossed_min',         '2'::jsonb),
+  ('ranking.refine_cta_min_priority',    '0.25'::jsonb),
+  ('ranking.refine_cta_min_candidates',  '3'::jsonb),
+  ('ranking.refine_resurface_placements','3'::jsonb),
+  ('ranking.backlog_enabled',            'false'::jsonb),
+  ('ranking.backlog_checkpoint',         '10'::jsonb)
 on conflict (key) do nothing;
 
 
@@ -225,6 +260,18 @@ $$;
 
 revoke execute on function _refine_config_int(text, integer) from public, anon, authenticated;
 
+/** A numeric `app_config` value, with a default when the row is absent. */
+create or replace function _refine_config_num(p_key text, p_default numeric)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select coalesce((select (value)::numeric from app_config where key = p_key), p_default);
+$$;
+
+revoke execute on function _refine_config_num(text, numeric) from public, anon, authenticated;
+
 /** Refine placements in the last 24 hours, across both categories. */
 create or replace function _refine_done_today(p_user uuid)
 returns integer
@@ -273,7 +320,8 @@ returns table (
   last_adjustable   boolean,
   refined_at        timestamptz,
   refine_outcome    text,
-  snoozed_until     date
+  snoozed_until     date,
+  crossed           integer
 )
 language sql
 stable
@@ -300,6 +348,18 @@ as $$
       from ranking_placements p
      where p.user_id = p_user and p.category = p_category
      group by p.media_item_id
+  ),
+  -- **The explicit reranks** (unified design §4): a title the reader deliberately moved —
+  -- Update your rating, a rewatch's re-check, a manual move. A first ranking, a backlog or
+  -- import placement, a backfill and a refine are not "somebody moved past it on purpose",
+  -- and counting refines would let Refine feed itself.
+  moves as (
+    select p.media_item_id, p.from_position, p.position, p.created_at
+      from ranking_placements p
+     where p.user_id = p_user and p.category = p_category
+       and p.outcome = 'moved'
+       and p.kind in ('correction', 'rewatch', 'manual')
+       and p.from_position is not null
   ),
   -- Every live answer between two titles ranked in the SAME band of this category. A
   -- cross-band answer is already settled by the bands themselves.
@@ -373,7 +433,23 @@ as $$
          coalesce(ld.last_adjustable, true),
          ld.refined_at,
          ld.refine_outcome,
-         sn.until
+         sn.until,
+         -- How many of those moves carried a title past it since it was last confirmed.
+         -- Positions are read as they are NOW against the ordinals each move recorded, so
+         -- this is an approximation — a later insertion can shift the window by a place —
+         -- and it only ever raises a title's priority; it never moves anything.
+         --
+         -- A correlated count over `moves`, deliberately not a CTE joined back to `r`:
+         -- a second join of `r` to the ledger is the split-join shape a planner without
+         -- statistics nested-loops (see `edges` above), and it took the 1,200-title test
+         -- from seconds to minutes. Reranks are few, so this is O(ranked × reranks) and
+         -- nothing when there are none.
+         (select count(*)::integer
+            from moves m
+           where m.media_item_id <> r.media_item_id
+             and r.position between least(m.from_position, m.position)
+                                and greatest(m.from_position, m.position)
+             and m.created_at > coalesce(ld.confirmed_at, '-infinity'::timestamptz))
     from r
     left join per_item pi on pi.pos = r.position
     left join ledger ld on ld.media_item_id = r.media_item_id
@@ -385,7 +461,8 @@ comment on function _refine_support(uuid, ranking_category) is
   'Placement support (§G.2) for every ranked title in one category: the band, the '
   'distance to the nearest directly-evidenced neighbour above and below (from the latest '
   'non-withdrawn answer per pair, when it agrees with the current order), contradictions '
-  'newer than the last confirmation, and the ledger facts Refine orders by. Derived, never '
+  'newer than the last confirmation, how many explicit reranks carried a title past it '
+  'since then, and the ledger facts Refine orders by. Derived, never '
   'persisted, never a number anybody sees. One set-based statement. Internal (T5).';
 
 revoke execute on function _refine_support(uuid, ranking_category)
@@ -420,6 +497,15 @@ declare
   v_list        jsonb;
   v_open        uuid[];
   v_recent_pos  integer[];
+  -- Unified design §4–§6.
+  v_crossed_min integer;
+  v_cta_prio    numeric;
+  v_cta_min     integer;
+  v_placements  integer;
+  v_backlog     integer;
+  v_qualifying  integer;
+  v_strong      integer;
+  v_why         jsonb;
 begin
   if v_user is null then
     raise exception 'unauthenticated' using errcode = '28000';
@@ -432,19 +518,31 @@ begin
   select count(*)::integer into v_ranked
     from rankings where user_id = v_user and category = p_category;
   v_min_ranked := _refine_config_int('ranking.refine_min_ranked', 20);
+  v_placements := _ranking_placements_total(v_user, p_category);
 
   if v_ranked < v_min_ranked then
     return jsonb_build_object(
       'status', 'too_small', 'candidates', '[]'::jsonb,
-      'min_ranked', v_min_ranked
+      'min_ranked', v_min_ranked,
+      'placements_total', v_placements,
+      'cta', jsonb_build_object('show', false, 'why_not', 'too_small')
     );
   end if;
 
   v_done_today := _refine_done_today(v_user);
   v_daily := _refine_config_int('ranking.refine_daily_targets', 30);
   if v_done_today >= v_daily then
-    return jsonb_build_object('status', 'rested', 'candidates', '[]'::jsonb);
+    return jsonb_build_object(
+      'status', 'rested', 'candidates', '[]'::jsonb,
+      'placements_total', v_placements,
+      'cta', jsonb_build_object('show', false, 'why_not', 'rested')
+    );
   end if;
+
+  v_crossed_min := greatest(_refine_config_int('ranking.refine_crossed_min', 2), 1);
+  v_cta_prio := _refine_config_num('ranking.refine_cta_min_priority', 0.25);
+  v_cta_min := _refine_config_int('ranking.refine_cta_min_candidates', 3);
+  v_backlog := (select count(*)::integer from _ranking_backlog_items(v_user, p_category));
 
   v_cooldown := _refine_config_int('ranking.refine_cooldown_days', 30);
   v_min_prio := coalesce(
@@ -485,10 +583,13 @@ begin
     select sc.*,
            _refine_rank_weight(sc.position)
            * (0.7 * least(1.0, ln(1 + sc.excess) / ln(32))
-              + 0.3 * (case when sc.conflicts > 0 then 1 else 0 end))
-           * (1 + 0.25 * least(1.0, coalesce(extract(epoch from now() - sc.confirmed_at)
-                                                / 86400.0 / 365.0, 1.0))
-                + 0.25 * (case when sc.last_adjustable then 1 else 0 end))
+              + 0.3 * greatest(
+                  (case when sc.conflicts > 0 then 1.0 else 0.0 end),
+                  least(1.0, sc.crossed / (2.0 * v_crossed_min))
+                ))
+           -- No age term (founder, 2026-09-21): how long ago a title was placed is not
+           -- evidence that it is misplaced.
+           * (1 + 0.25 * (case when sc.last_adjustable then 1 else 0 end))
            -- §H.4.3 diversity: the ±3 neighbours of a title refined in this session are
            -- discounted, so a round does not keep showing the same stretch of the list.
            * (case when exists (select 1 from unnest(v_recent_pos) rp(pos)
@@ -506,7 +607,7 @@ begin
        and (
          p.resume
          or (
-           (p.excess > 0 or p.conflicts > 0)
+           (p.excess > 0 or p.conflicts > 0 or p.crossed >= v_crossed_min)
            and p.priority >= v_min_prio
            and (p.refined_at is null
                 or p.refined_at < now() - make_interval(days =>
@@ -522,8 +623,25 @@ begin
               hashtextextended(e.media_item_id::text, coalesce(p_seed, 0)),
               e.position
      limit greatest(least(coalesce(p_limit, 5), 20), 1)
+  ),
+  -- The card's evidence (§5): the whole eligible set, not just this page. An open refine
+  -- session is a resume, not a reason to invite anybody, so it is not counted.
+  counted as (
+    select count(*) filter (where not e.resume)                             as qualifying,
+           count(*) filter (where not e.resume and e.priority >= v_cta_prio) as strong,
+           count(*) filter (where not e.resume and e.priority >= v_cta_prio
+                              and e.excess > 0)                              as strong_gap,
+           count(*) filter (where not e.resume and e.priority >= v_cta_prio
+                              and e.conflicts > 0)                           as strong_contradicted,
+           count(*) filter (where not e.resume and e.priority >= v_cta_prio
+                              and e.crossed >= v_crossed_min)                as strong_crossed
+      from eligible e
   )
-  select coalesce(jsonb_agg(jsonb_build_object(
+  select (select c.qualifying::integer from counted c),
+         (select c.strong::integer from counted c),
+         (select jsonb_build_object('gap', c.strong_gap, 'contradicted', c.strong_contradicted,
+                                    'crossed', c.strong_crossed) from counted c),
+         coalesce(jsonb_agg(jsonb_build_object(
            'media_item_id', c.media_item_id,
            'title', mi.title,
            'poster_path', mi.poster_path,
@@ -540,22 +658,45 @@ begin
            'reason', case
              when c.conflicts > 0 then 'contradicted'
              when not c.compared_above and not c.compared_below then 'never_compared'
+             when c.crossed >= v_crossed_min and c.excess = 0 then 'crossed'
              when c.confirmed_size is not null and c.confirmed_size > 0
                   and v_now_size >= c.confirmed_size * 3 / 2 then 'grown'
-             when c.confirmed_at is not null
-                  and c.confirmed_at < now() - interval '365 days' then 'placed_long_ago'
              else 'neighbours'
-           end
+           end,
+           -- Why it qualified, for analytics only (§5: instrument, then tune). Never drawn.
+           'signals', jsonb_build_object(
+             'gap', c.excess > 0,
+             'contradicted', c.conflicts > 0,
+             'crossed', c.crossed >= v_crossed_min,
+             'strong', c.priority >= v_cta_prio
+           )
          ) order by c.resume desc, floor(c.priority * 20) desc,
                     hashtextextended(c.media_item_id::text, coalesce(p_seed, 0)), c.position),
          '[]'::jsonb)
-    into v_list
+    into v_qualifying, v_strong, v_why, v_list
     from chosen c
     join media_items mi on mi.id = c.media_item_id;
 
   return jsonb_build_object(
     'status', case when jsonb_array_length(v_list) = 0 then 'nothing_waiting' else 'ready' end,
-    'candidates', v_list
+    'candidates', v_list,
+    'placements_total', v_placements,
+    'cta', jsonb_build_object(
+      'show', coalesce(v_strong, 0) >= v_cta_min and v_backlog = 0,
+      'why_not', case
+        when v_backlog > 0 then 'backlog'
+        when coalesce(v_strong, 0) < v_cta_min then 'weak'
+      end,
+      -- min(5, qualifying) is the number the card may name (§5).
+      'count', least(5, coalesce(v_strong, 0)),
+      'qualifying', coalesce(v_qualifying, 0),
+      'strong', coalesce(v_strong, 0),
+      'strong_why', coalesce(v_why, '{}'::jsonb),
+      'min_strong', v_cta_min,
+      'cta_threshold', v_cta_prio,
+      'candidate_threshold', v_min_prio,
+      'resurface_after', _refine_config_int('ranking.refine_resurface_placements', 3)
+    )
   );
 end;
 $$;
@@ -564,7 +705,9 @@ comment on function refine_candidates(ranking_category, integer, integer, uuid[]
   'T5: the next Refine targets for the caller in one category, most useful first, or the '
   'reason there are none: disabled | too_small | rested | nothing_waiting. An open refine '
   'session comes first (resume). p_recent is this session''s targets, excluded and their '
-  'neighbours discounted; p_seed varies the order among equally useful titles. Reads only.';
+  'neighbours discounted; p_seed varies the order among equally useful titles. Also '
+  'answers cta (whether Collection may invite a sitting, with the counts behind it) and '
+  'placements_total (for Not now). Reads only.';
 
 revoke execute on function refine_candidates(ranking_category, integer, integer, uuid[])
   from public, anon;
@@ -852,3 +995,373 @@ comment on function refine_snooze(uuid) is
 
 revoke execute on function refine_snooze(uuid) from public, anon;
 grant execute on function refine_snooze(uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- 9. The unranked backlog (unified design §2, §3, §9)
+--
+-- "Rank what you have already watched", one title at a time, through the same session
+-- screen Refine uses. Two functions and no table: a read that is the ONE definition of
+-- "rankable and unranked" (the Unranked tab's Start ranking card, its count and the
+-- session's "7 of 18" all read it), and a write that opens the placement.
+--
+-- ORDER, inside the launching medium only:
+--   1. incomplete native placements — an open first-ranking session (its answers come
+--      back), then a bucket chosen in bingd with no placement. These skip "How was it?".
+--      After #196's 20261018000100 an import never writes a bucket, so every bucket on an
+--      unranked row IS a reader's own choice; stars never order anything.
+--   2. seen but unranked, no bucket — most recent known watch date first, then most
+--      recently added. Neutral, and recent titles are the easiest to compare.
+-- EXCLUDED: a whole series (not rankable; its seasons are), a season still being watched,
+--   a watchlist-only title (no collection row), and anything already ranked.
+--
+-- FEED: a backlog placement posts NOTHING (founder decision 2, 2026-09-21: batch-ranking
+-- history is setup, not activity). It opens the engine's silent `import` kind, which
+-- `_rank_finalize` already never posts for. Resuming a native session that was abandoned
+-- keeps that session's own kind, so finishing it behaves exactly as it would have.
+-- ---------------------------------------------------------------------------
+
+/** The backlog is on only when its flag is. */
+create or replace function _backlog_enabled()
+returns boolean
+language sql
+stable
+set search_path = public
+as $$
+  select coalesce((select (value)::boolean from app_config
+                    where key = 'ranking.backlog_enabled'), false);
+$$;
+
+revoke execute on function _backlog_enabled() from public, anon, authenticated;
+
+/**
+ * New placements in one category: first rankings, backlog placements and reranks. Never a
+ * backfill row (history nobody just did) and never a refine (Refine must not re-arm its
+ * own card). What "Not now" measures meaningful activity with (§6).
+ */
+create or replace function _ranking_placements_total(p_user uuid, p_category ranking_category)
+returns integer
+language sql
+stable
+set search_path = public
+as $$
+  select count(*)::integer
+    from ranking_placements p
+   where p.user_id = p_user and p.category = p_category
+     and p.kind not in ('backfill', 'refine');
+$$;
+
+revoke execute on function _ranking_placements_total(uuid, ranking_category)
+  from public, anon, authenticated;
+
+create or replace function _ranking_backlog_items(p_user uuid, p_category ranking_category)
+returns table (
+  media_item_id  uuid,
+  tier           smallint,
+  bucket         taste_bucket,
+  resume         boolean,
+  active_at      timestamptz,
+  last_watched   date,
+  added_at       timestamptz
+)
+language sql
+stable
+set search_path = public
+as $$
+  with seen as (
+    select um.media_item_id, um.bucket, um.created_at, um.updated_at
+      from user_media um
+      join media_items mi on mi.id = um.media_item_id
+     where um.user_id = p_user
+       and rankable_category(mi.kind) = p_category
+       and um.progress is distinct from 'watching'
+       and not exists (select 1 from rankings r
+                        where r.user_id = p_user and r.media_item_id = um.media_item_id)
+  ),
+  watched as (
+    select we.media_item_id, max(we.watched_on) as last_watched
+      from watch_events we
+      join seen s on s.media_item_id = we.media_item_id
+     where we.user_id = p_user
+     group by we.media_item_id
+  )
+  select s.media_item_id,
+         (case when rs.id is not null then 1
+               when s.bucket is not null then 1
+               else 2 end)::smallint,
+         s.bucket,
+         rs.id is not null,
+         coalesce(rs.updated_at, s.updated_at),
+         w.last_watched,
+         s.created_at
+    from seen s
+    left join ranking_sessions rs
+      on rs.user_id = p_user and rs.media_item_id = s.media_item_id
+     and not rs.provisional and rs.kind in ('first', 'import')
+    left join watched w on w.media_item_id = s.media_item_id;
+$$;
+
+comment on function _ranking_backlog_items(uuid, ranking_category) is
+  'Unified design §3: every rankable, unranked title in one category of the reader''s '
+  'collection, with its tier (1 = an incomplete native placement: an open first-ranking '
+  'session or a bucket chosen in bingd; 2 = seen, no bucket) and the facts it is ordered '
+  'by. Excludes series, seasons still being watched and watchlist-only titles. Internal.';
+
+revoke execute on function _ranking_backlog_items(uuid, ranking_category)
+  from public, anon, authenticated;
+
+create or replace function ranking_backlog(
+  p_category ranking_category,
+  p_limit    integer default 1,
+  p_skip     uuid[]  default '{}'
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_user      uuid := auth.uid();
+  v_total     integer;
+  v_remaining integer;
+  v_list      jsonb;
+begin
+  if v_user is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  if not _backlog_enabled() then
+    return jsonb_build_object('status', 'disabled', 'total', 0, 'remaining', 0,
+                              'targets', '[]'::jsonb);
+  end if;
+
+  with items as (
+    select * from _ranking_backlog_items(v_user, p_category)
+  ),
+  open as (
+    select i.* from items i
+     where not (i.media_item_id = any (coalesce(p_skip, '{}'::uuid[])))
+  ),
+  chosen as (
+    select o.*
+      from open o
+     order by o.tier,
+              o.resume desc,
+              -- Tier 1 by when the reader last touched it; tier 2 by when they watched it,
+              -- then when they added it.
+              case when o.tier = 1 then o.active_at end desc nulls last,
+              o.last_watched desc nulls last,
+              o.added_at desc,
+              o.media_item_id
+     limit greatest(least(coalesce(p_limit, 1), 20), 1)
+  )
+  select (select count(*)::integer from items),
+         (select count(*)::integer from open),
+         coalesce(jsonb_agg(jsonb_build_object(
+           'media_item_id', c.media_item_id,
+           'title', mi.title,
+           'poster_path', mi.poster_path,
+           'kind', mi.kind,
+           'bucket', c.bucket,
+           'resume', c.resume,
+           'tier', c.tier
+         ) order by c.tier, c.resume desc,
+                    case when c.tier = 1 then c.active_at end desc nulls last,
+                    c.last_watched desc nulls last, c.added_at desc, c.media_item_id),
+         '[]'::jsonb)
+    into v_total, v_remaining, v_list
+    from chosen c
+    join media_items mi on mi.id = c.media_item_id;
+
+  return jsonb_build_object(
+    'status', case when v_total = 0 then 'empty'
+                   when jsonb_array_length(v_list) = 0 then 'skipped'
+                   else 'ready' end,
+    'total', v_total,
+    'remaining', v_remaining,
+    'targets', v_list,
+    'checkpoint_every', greatest(_refine_config_int('ranking.backlog_checkpoint', 10), 1)
+  );
+end;
+$$;
+
+comment on function ranking_backlog(ranking_category, integer, uuid[]) is
+  'Unified design §2: the next unranked titles to rank in one category, incomplete native '
+  'placements first, and the exact count. status: disabled | empty | skipped (everything '
+  'left was skipped this sitting) | ready. p_skip is this sitting''s skipped titles. Reads '
+  'only.';
+
+revoke execute on function ranking_backlog(ranking_category, integer, uuid[])
+  from public, anon;
+grant execute on function ranking_backlog(ranking_category, integer, uuid[])
+  to authenticated;
+
+create or replace function rank_backlog_start(
+  p_media_item_id uuid,
+  p_bucket        taste_bucket default null,
+  p_operation_id  uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user    uuid := auth.uid();
+  v_claim   record;
+  v_seen    record;
+  v_bucket  taste_bucket;
+  v_open    record;
+  v_result  jsonb;
+  v_session record;
+begin
+  if v_user is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  perform assert_can_write();
+
+  if not _backlog_enabled() then
+    raise exception 'the backlog is not available' using errcode = '0A000';
+  end if;
+
+  select * into v_claim from _claim_operation_result(p_operation_id, 'rank_backlog_start');
+  if not v_claim.claimed then
+    return coalesce(v_claim.prior, jsonb_build_object('done', false, 'already_applied', true));
+  end if;
+
+  perform _lock_media(v_user, p_media_item_id);
+
+  select um.bucket into v_seen
+    from user_media um
+   where um.user_id = v_user and um.media_item_id = p_media_item_id;
+
+  -- The backlog is what the reader has SEEN. A title outside the collection is a first
+  -- ranking from somewhere else, and belongs to rank_start.
+  if not found then
+    raise exception 'title is not in your collection' using errcode = 'P0002';
+  end if;
+
+  if exists (select 1 from rankings
+              where user_id = v_user and media_item_id = p_media_item_id) then
+    raise exception 'title is already ranked' using errcode = '23505';
+  end if;
+
+  -- "How was it?" answered now, or the bucket the reader already chose in bingd.
+  v_bucket := coalesce(p_bucket, v_seen.bucket);
+  if v_bucket is null then
+    raise exception 'bucket is required' using errcode = '22023';
+  end if;
+
+  select rs.kind, rs.bucket, rs.new_watch into v_open
+    from ranking_sessions rs
+   where rs.user_id = v_user and rs.media_item_id = p_media_item_id
+     and not rs.provisional and rs.kind in ('first', 'import');
+
+  if v_open.kind is not null and v_open.bucket = v_bucket then
+    -- **Resume, never duplicate.** The session the reader left — a native first ranking
+    -- or an earlier backlog sitting — comes back as itself, with every answer, and keeps
+    -- its own kind, so a native one still posts when it finishes, exactly as it would have.
+    v_result := _rank_start_impl(
+      v_user, p_media_item_id, v_bucket, false, coalesce(v_open.new_watch, false), v_open.kind
+    );
+  else
+    -- A fresh placement in the engine's silent kind: bisection, no feed event. A session
+    -- in another bucket is replaced inside _rank_start_impl — a different answer to "How
+    -- was it?" is a different search. The bucket is written here (not provisional), so a
+    -- sitting abandoned now leaves an incomplete native placement for next time.
+    v_result := _rank_start_impl(v_user, p_media_item_id, v_bucket, false, false, 'import');
+  end if;
+
+  if not coalesce((v_result ->> 'done')::boolean, false) then
+    select rs.id, rs.pivot_item into v_session
+      from ranking_sessions rs
+     where rs.id = (v_result ->> 'session_id')::uuid;
+
+    v_result := jsonb_build_object(
+      'done', false,
+      'session_id', v_session.id,
+      'pivot', v_session.pivot_item,
+      'pivot_card', _rank_pivot_card(v_session.pivot_item),
+      'resumed', coalesce((v_result ->> 'resumed')::boolean, false)
+    );
+  end if;
+
+  return _record_operation_result(p_operation_id, v_result);
+end;
+$$;
+
+comment on function rank_backlog_start(uuid, taste_bucket, uuid) is
+  'Unified design §2: opens the placement of a seen, unranked title from the backlog. '
+  'Resumes the open first-ranking session in the same bucket (native or backlog) with its '
+  'answers; otherwise opens a silent import-kind session (no feed event). p_bucket is the '
+  '"How was it?" answer, or null to use the bucket already chosen. The comparisons then '
+  'run through rank_answer / rank_skip / rank_back / rank_cancel. Refuses when the backlog '
+  'is off (0A000), the title is not in the collection (P0002), already ranked (23505) or '
+  'has no bucket (22023).';
+
+revoke execute on function rank_backlog_start(uuid, taste_bucket, uuid) from public, anon;
+grant execute on function rank_backlog_start(uuid, taste_bucket, uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- 10. `rank_start` resumes a backlog session instead of restarting it
+--
+-- #196's contract: tapping + / Rank on an incomplete placement resumes it with its answers
+-- and never opens a second session. `_rank_start_impl` resumes only the same KIND, so a
+-- title left mid-comparison in a backlog sitting (kind `import`) would be restarted by the
+-- ordinary rank_start (kind `first`) and its answers dropped. This carries the open
+-- session's kind through when it is a backlog one in the same bucket; everything else is
+-- the live body (20260826000500), unchanged. A backlog title finished from the title page
+-- therefore stays silent, as the sitting that started it was.
+-- ---------------------------------------------------------------------------
+
+create or replace function rank_start(
+  p_media_item_id uuid,
+  p_bucket        taste_bucket,
+  p_operation_id  uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user  uuid := auth.uid();
+  v_claim record;
+  v_open  record;
+begin
+  if v_user is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  perform assert_can_write();
+
+  select * into v_claim from _claim_operation_result(p_operation_id, 'rank_start');
+  if not v_claim.claimed then
+    return coalesce(v_claim.prior, jsonb_build_object('done', false, 'already_applied', true));
+  end if;
+
+  perform _lock_media(v_user, p_media_item_id);
+
+  -- 20261019000100: an open backlog placement in the same bucket is resumed as itself.
+  select rs.kind, rs.bucket into v_open
+    from ranking_sessions rs
+   where rs.user_id = v_user and rs.media_item_id = p_media_item_id
+     and not rs.provisional and rs.kind = 'import';
+
+  if v_open.kind is not null and v_open.bucket = p_bucket then
+    return _record_operation_result(
+      p_operation_id,
+      _rank_start_impl(v_user, p_media_item_id, p_bucket, false, false, 'import')
+    );
+  end if;
+
+  -- A first ranking: not provisional, and the feed event is unconditional at finalise
+  -- because it will not be replacing anything.
+  return _record_operation_result(
+    p_operation_id, _rank_start_impl(v_user, p_media_item_id, p_bucket, false, true)
+  );
+end;
+$$;

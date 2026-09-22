@@ -495,6 +495,9 @@ describe('the guard is wired in, not merely present', () => {
      * calls the guard, which is why none of them is here.
      */
     'refine_candidates',
+    // Same migration, same reasoning: the backlog read writes nothing and answers only for
+    // `auth.uid()`. `rank_backlog_start` calls the guard, so it is not here.
+    'ranking_backlog',
     'my_capabilities',
     'unranked_queue',
     // 20260917000100. Two counts over the caller's own collection, SECURITY INVOKER, so
