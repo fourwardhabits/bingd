@@ -3271,10 +3271,12 @@ describe('the page behind an open sheet', () => {
  * star, a natively logged one may carry neither.
  */
 describe('a title in the collection that is not ranked', () => {
+  // An import arrives with no bucket: a Letterboxd star is never a bingd opinion
+  // (founder, 2026-09-21; 20261018000100).
   const importedRow = {
     user_id: 'user-1',
     media_item_id: 'film-1',
-    bucket: 'loved',
+    bucket: null as string | null,
     watched_on: '2026-08-30',
     note: null,
     note_visibility: 'private',
