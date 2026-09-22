@@ -1,8 +1,8 @@
 # #196 final sign-off — founder delta QA (2026-09-21, third pass)
 
 **Only what changed since update `01a0c5c8`.** Same Android preview APK (`d84c78b3`), no
-reinstall. Open twice, Settings ▸ About: the update id must start with **`01a0c63c`** (group
-`52c3aa28-bbfd-438e-97f0-22fb89da4ff5`, from `0cc60b8`). **Backend:** staging, now at `20261017000100`.
+reinstall. Open twice, Settings ▸ About: the update id must start with **`01a0c6a1`** (group
+`fec14bbe-128d-4276-8ab2-2c50149b5f93`, from `6ba7772`). **Backend:** staging, now at `20261018000100`.
 
 1. **Rerank rule.** A film with two watches: note both scores in Watch History. ⋯ ▸
    Update your rating to a different band. Watch History: **Watch 1 unchanged, Watch 2 =
@@ -11,10 +11,10 @@ reinstall. Open twice, Settings ▸ About: the update id must start with **`01a0
    moves.
 2. **Same score everywhere.** After step 1, the title page, Collection, Search and that
    film's row on a list all show the same current score.
-3. **Rated ≠ ranked (the "Rank" rows).** Open one of the Letterboxd imports that shows the
-   dashed Rank ring (e.g. Blade Runner 2049): its title page says *Not ranked yet* and it is
-   in Collection ▸ Unranked. That is the same state everywhere; tap Rank to place it and it
-   shows its score in Search and on your list.
+3. **Three ranking states.** An untouched Letterboxd import (e.g. Blade Runner 2049) now reads
+   **Rank** everywhere (Search, list row, Collection, title page) and has no bucket: stars are
+   provenance only. Start ranking a title, pick a band, then back out of the comparisons: it
+   reads **Finish** (title page: *Finish ranking* / *Ranking not finished*). Finish it: the score.
 4. **List page:** no *Add N unseen to my Watchlist* button; unranked rows still have their
    bookmark.
 5. **Add to List picker:** each list shows its cover, name and a one-line description.
