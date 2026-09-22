@@ -1,5 +1,4 @@
 import type { RankingCategory } from '@/features/collection/use-collection';
-import { movementSentence } from '@/features/watch-history/watch-history';
 import { supabase } from '@/lib/supabase';
 
 import type { PlacedMovement } from './session';
@@ -17,9 +16,36 @@ import type { PlacedMovement } from './session';
 /** Why there is nothing to refine, in the server's words. `ready` means there is. */
 export type RefineStatus = 'ready' | 'nothing_waiting' | 'too_small' | 'rested' | 'disabled';
 
-/** The one-line reason a target was chosen (never a number, §G.3). */
-export type RefineReason =
-  'contradicted' | 'never_compared' | 'grown' | 'placed_long_ago' | 'neighbours';
+/**
+ * The one-line reason a target was chosen (never a number, §G.3). There is no age reason:
+ * how long ago a title was placed is not evidence it is misplaced (founder, 2026-09-21).
+ */
+export type RefineReason = 'contradicted' | 'never_compared' | 'crossed' | 'grown' | 'neighbours';
+
+/** Why the server offered a title, for analytics only (unified design §5). Never drawn. */
+export type RefineSignals = {
+  gap: boolean;
+  contradicted: boolean;
+  crossed: boolean;
+  /** Cleared the card threshold as well as the candidate one. */
+  strong: boolean;
+};
+
+/**
+ * Whether Collection may invite a Refine sitting (unified design §5): the server's answer,
+ * with the counts behind it so the thresholds can be tuned from real use. `count` is the
+ * number the card may name (at most five).
+ */
+export type RefineCta = {
+  show: boolean;
+  count: number;
+  qualifying: number;
+  strong: number;
+  /** Placements needed after Not now before the card may return (§6). */
+  resurfaceAfter: number;
+};
+
+const NO_CTA: RefineCta = { show: false, count: 0, qualifying: 0, strong: 0, resurfaceAfter: 3 };
 
 export type RefineTarget = {
   mediaItemId: string;
@@ -32,9 +58,16 @@ export type RefineTarget = {
   reason: RefineReason;
   lastConfirmedAt: string | null;
   confirmedSize: number | null;
+  signals: RefineSignals;
 };
 
-export type RefineCandidates = { status: RefineStatus; targets: RefineTarget[] };
+export type RefineCandidates = {
+  status: RefineStatus;
+  targets: RefineTarget[];
+  cta: RefineCta;
+  /** New placements in the medium (never backfill or refine), for Not now (§6). */
+  placementsTotal: number;
+};
 
 type Row = {
   media_item_id: string;
@@ -46,6 +79,7 @@ type Row = {
   reason: string;
   last_confirmed_at: string | null;
   confirmed_size: number | null;
+  signals?: Partial<Record<keyof RefineSignals, boolean>>;
 };
 
 const STATUSES = new Set<RefineStatus>([
@@ -58,8 +92,8 @@ const STATUSES = new Set<RefineStatus>([
 const REASONS = new Set<RefineReason>([
   'contradicted',
   'never_compared',
+  'crossed',
   'grown',
-  'placed_long_ago',
   'neighbours',
 ]);
 
@@ -83,7 +117,7 @@ export async function refineCandidates(
   if (error) {
     // PGRST202: PostgREST found no such function (an older backend). 42883: Postgres did.
     if (error.code === 'PGRST202' || error.code === '42883') {
-      return { status: 'disabled', targets: [] };
+      return { status: 'disabled', targets: [], cta: NO_CTA, placementsTotal: 0 };
     }
     throw error;
   }
@@ -91,7 +125,18 @@ export async function refineCandidates(
 }
 
 export function parseCandidates(data: unknown): RefineCandidates {
-  const body = (data ?? {}) as { status?: string; candidates?: Row[] };
+  const body = (data ?? {}) as {
+    status?: string;
+    candidates?: Row[];
+    placements_total?: number;
+    cta?: {
+      show?: boolean;
+      count?: number;
+      qualifying?: number;
+      strong?: number;
+      resurface_after?: number;
+    };
+  };
   const status = STATUSES.has(body.status as RefineStatus)
     ? (body.status as RefineStatus)
     : 'disabled';
@@ -109,11 +154,30 @@ export function parseCandidates(data: unknown): RefineCandidates {
         : 'neighbours',
       lastConfirmedAt: row.last_confirmed_at ?? null,
       confirmedSize: typeof row.confirmed_size === 'number' ? row.confirmed_size : null,
+      signals: {
+        gap: Boolean(row.signals?.gap),
+        contradicted: Boolean(row.signals?.contradicted),
+        crossed: Boolean(row.signals?.crossed),
+        strong: Boolean(row.signals?.strong),
+      },
     }));
+  const cta = body.cta ?? {};
+  const count = (value: unknown, fallback = 0) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback;
   // `ready` with nothing in it would draw an entry that opens onto nothing.
+  const settled = status === 'ready' && targets.length === 0 ? 'nothing_waiting' : status;
   return {
-    status: status === 'ready' && targets.length === 0 ? 'nothing_waiting' : status,
+    status: settled,
     targets,
+    cta: {
+      // An invitation onto an empty sitting is the thing the card exists not to be.
+      show: settled === 'ready' ? Boolean(cta.show) : false,
+      count: count(cta.count),
+      qualifying: count(cta.qualifying),
+      strong: count(cta.strong),
+      resurfaceAfter: count(cta.resurface_after, NO_CTA.resurfaceAfter),
+    },
+    placementsTotal: count(body.placements_total),
   };
 }
 
@@ -216,62 +280,15 @@ export function reasonLine(
       return 'One of your answers disagrees with where it sits';
     case 'never_compared':
       return 'Never compared with the titles around it';
+    case 'crossed':
+      return 'Titles near it have moved past it since';
     case 'grown':
       return target.confirmedSize
         ? `Last placed when you had ${target.confirmedSize} ${noun}`
         : 'Your list has grown around it';
-    case 'placed_long_ago': {
-      const when = monthYear(target.lastConfirmedAt);
-      return when ? `Last placed ${when}` : 'Placed a long time ago';
-    }
     case 'neighbours':
       return 'Titles around it were ranked after it';
     default:
       return null;
   }
-}
-
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-
-function monthYear(iso: string | null): string | null {
-  if (!iso) return null;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  return `${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
-}
-
-/**
- * The line Watch History prints for a `refine` placement (T5).
- *
- * A refine is **ranking evidence, never a viewing**: its ledger row has no
- * `watch_event_id`, so Watch History lists it with the unattached placements and never
- * as a watch row. What it says comes from the ledger's own outcome — `#196` printed
- * `Still #N` for every refine, which is false for one that moved the title. Owned here,
- * beside the rest of Refine, so the screen that draws it needs one call and nothing else.
- */
-export function refinePlacementLine(placement: {
-  outcome: string;
-  position: number;
-  fromPosition: number | null;
-}): string {
-  const outcome =
-    placement.outcome === 'moved' || placement.outcome === 'kept' ? placement.outcome : 'unchanged';
-  const sentence = movementSentence(
-    { outcome, fromPosition: placement.fromPosition },
-    placement.position,
-  );
-  return `Refined · ${sentence ?? `#${placement.position}`}`;
 }

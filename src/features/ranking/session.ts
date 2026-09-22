@@ -453,6 +453,29 @@ export const rankAgain = (
 export const refineStart = (mediaItemId: string, operationId: string) =>
   call('refine_start', { p_media_item_id: mediaItemId, p_operation_id: operationId }, mediaItemId);
 
+/**
+ * Opens (or resumes) the placement of one title from the unranked backlog (unified design,
+ * `20261019000100` §9). `bucket` is the "How was it?" answer, or null for the one the reader
+ * already chose in bingd. The server resumes an open first-ranking session in that bucket
+ * with its answers — native or backlog, never a second one — and otherwise opens a silent
+ * placement that posts nothing to the feed. The comparisons then go through `rankAnswer` /
+ * `rankSkip` / `rankBack` like every other session.
+ */
+export const rankBacklogStart = (
+  mediaItemId: string,
+  bucket: BucketId | null,
+  operationId: string,
+) =>
+  call(
+    'rank_backlog_start',
+    {
+      p_media_item_id: mediaItemId,
+      p_bucket: bucket ? BUCKET_VALUES[bucket] : null,
+      p_operation_id: operationId,
+    },
+    mediaItemId,
+  );
+
 export const rankAnswer = (
   sessionId: string,
   winnerId: string,

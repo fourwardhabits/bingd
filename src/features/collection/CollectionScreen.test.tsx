@@ -23,10 +23,20 @@ const mockTables: Record<string, unknown[]> = {};
 /** Tables whose read fails, and a counter proving a retry re-issued the request. */
 const mockFailing = new Set<string>();
 const mockReads: Record<string, number> = {};
+/**
+ * RPC answers by function name. Unset answers null, which the backlog and Refine reads
+ * parse as `disabled` — the flags-off world every test before the unified design assumes.
+ */
+const mockRpcAnswers: Record<string, unknown> = {};
+/** Every RPC this screen made, by name, so an absence can be gated on the read happening. */
+const mockRpcCalls: string[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
-    rpc: () => Promise.resolve({ data: null, error: null }),
+    rpc: (fn: string) => {
+      mockRpcCalls.push(fn);
+      return Promise.resolve({ data: mockRpcAnswers[fn] ?? null, error: null });
+    },
     from: (table: string) => {
       const chain: Record<string, unknown> = {
         select: () => chain,
@@ -155,6 +165,8 @@ beforeEach(() => {
   mockProfile.id = 'user-1';
   delete mockParams.medium;
   delete mockParams.show;
+  for (const key of Object.keys(mockRpcAnswers)) delete mockRpcAnswers[key];
+  mockRpcCalls.length = 0;
   mockSetParams.mockClear();
   mockPush.mockClear();
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
@@ -931,5 +943,162 @@ describe('the ranking state on the Collection wall', () => {
     expect(view.getByLabelText(/^Film imported/)).toBeTruthy();
     expect(view.queryByLabelText(/ranking not finished/)).toBeNull();
     expect(view.queryAllByText('Finish', { includeHiddenElements: true })).toHaveLength(0);
+  });
+});
+
+/**
+ * **Unified Backlog + Refine** (founder-approved 2026-09-21). With the flags on, the
+ * Watched view has one card slot — the unranked card wins, and it names no count — the
+ * Unranked tab carries a persistent Start ranking with the exact count, and Refine's card
+ * shows only when the server says the batch is strong and no Not now still holds.
+ */
+describe('the backlog and Refine cards', () => {
+  const backlog = (total: number) => ({
+    status: total ? 'ready' : 'empty',
+    total,
+    remaining: total,
+    targets: total
+      ? [{ media_item_id: 'm1', title: 'Film m1', kind: 'movie', bucket: null, resume: false }]
+      : [],
+    checkpoint_every: 10,
+  });
+  const strongRefine = (placementsTotal = 41) => ({
+    status: 'ready',
+    candidates: [{ media_item_id: 'r1', title: 'R', position: 3, reason: 'crossed' }],
+    placements_total: placementsTotal,
+    cta: { show: true, count: 4, qualifying: 9, strong: 4, resurface_after: 3 },
+  });
+
+  it('Watched: titles left to rank, with no count, and View unranked', async () => {
+    mockTables.user_media = [watched('m1', 'movie'), watched('m2', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(327);
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You have titles left to rank')).toBeTruthy());
+    expect(view.getByText(/Finish placing the movies you.ve\s+already seen\./)).toBeTruthy();
+    expect(view.getByRole('button', { name: 'View unranked' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
+    expect(view.queryByText(/327/)).toBeNull();
+    expect(view.queryByText('You have unranked titles')).toBeNull();
+  });
+
+  it('Unranked: a persistent Start ranking with the exact count', async () => {
+    mockTables.user_media = [watched('m1', 'movie'), watched('m2', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(2);
+    mockParams.show = 'unranked';
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('collection-start-ranking-card')).toBeTruthy());
+    expect(view.getByText('Rank your unranked titles')).toBeTruthy();
+    expect(view.getByText('2 movies to rank')).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  });
+
+  it('Start ranking opens the backlog session for this medium', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(1);
+    mockParams.show = 'unranked';
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Start ranking' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Start ranking' }));
+    expect(mockPush).toHaveBeenCalledWith('/rank-session?medium=movies&start=backlog');
+  });
+
+  it('Refine: shown when nothing is left to rank and the batch is strong', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(0);
+    mockRpcAnswers.refine_candidates = strongRefine();
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Fine-tune your rankings')).toBeTruthy());
+    expect(view.getByText('A few comparisons could help tighten up 4 placements.')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
+  });
+
+  it('Refine opens the refine session for this medium', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(0);
+    mockRpcAnswers.refine_candidates = strongRefine();
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Refine rankings' })).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByRole('button', { name: 'Refine rankings' }));
+    expect(mockPush).toHaveBeenCalledWith('/rank-session?medium=movies&start=refine');
+  });
+
+  it('one card slot: the unranked card wins over Refine', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(3);
+    mockRpcAnswers.refine_candidates = strongRefine();
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You have titles left to rank')).toBeTruthy());
+    expect(view.queryByText('Fine-tune your rankings')).toBeNull();
+  });
+
+  it('Not now holds until enough new placements, however long ago it was', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(0);
+    mockRpcAnswers.refine_candidates = strongRefine(42);
+    mockPrefStore['user-1.collection.refine-not-now.movies'] = {
+      dismissedAt: '2020-01-01T00:00:00Z',
+      placementsAtDismissal: 40,
+    };
+    const view = await open();
+
+    // Two new placements against a bar of three: still resting, years later. Gated on the
+    // read having been made and answered, or the absence below would prove nothing.
+    await waitFor(() => expect(mockRpcCalls).toContain('refine_candidates'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(view.queryByText('Fine-tune your rankings')).toBeNull();
+  });
+
+  it('Not now is lifted once the reader has ranked enough since', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(0);
+    mockRpcAnswers.refine_candidates = strongRefine(43);
+    mockPrefStore['user-1.collection.refine-not-now.movies'] = {
+      dismissedAt: new Date().toISOString(),
+      placementsAtDismissal: 40,
+    };
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Fine-tune your rankings')).toBeTruthy());
+  });
+
+  it('Not now records the placement total it is measured from', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(0);
+    mockRpcAnswers.refine_candidates = strongRefine(41);
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(mockPrefWrites).toContainEqual({
+      name: 'user-1.collection.refine-not-now.movies',
+      value: expect.objectContaining({ placementsAtDismissal: 41 }),
+    });
+  });
+
+  it('Lists: no ranking or refinement cards', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    mockRpcAnswers.ranking_backlog = backlog(3);
+    mockRpcAnswers.refine_candidates = strongRefine();
+    mockPrefStore[MEDIUM_KEY] = 'lists';
+    const view = await renderWithProviders(<CollectionScreen />);
+
+    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(view.queryByText('You have titles left to rank')).toBeNull();
+    expect(view.queryByText('Fine-tune your rankings')).toBeNull();
+    expect(view.queryByTestId('collection-start-ranking-card')).toBeNull();
   });
 });

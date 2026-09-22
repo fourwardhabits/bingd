@@ -133,7 +133,17 @@ it('an answer that moves it says exactly where from and to, privately', async ()
   expect(answerArgs).toMatchObject({ p_session_id: 'session-1', p_winner: 'heat' });
   expect(mockTrack).toHaveBeenCalledWith({
     name: 'refine_target_outcome',
-    props: { outcome: 'moved', reason: 'never_compared', comparisons: 1, medium: 'movies' },
+    props: {
+      outcome: 'moved',
+      reason: 'never_compared',
+      comparisons: 1,
+      medium: 'movies',
+      // The fixture carries no signals, so each is false: they are the server's, never guessed.
+      signal_gap: false,
+      signal_contradicted: false,
+      signal_crossed: false,
+      signal_strong: false,
+    },
   });
 });
 

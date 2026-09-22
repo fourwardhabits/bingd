@@ -1,10 +1,56 @@
-# T5 — Refine your rankings (as built)
+# T5 — Unified Backlog + Refine (as built)
 
-**Status:** built on `feat/refine-rankings-t5`, stacked on PR #196 (`integration/watch-history-lists`).
-Migration **`20261019000100`** is not applied anywhere. **`ranking.refine_enabled` ships
-`false`**, so nothing is reachable until an operator flips it.
-**Design:** [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md) §G, §H.
+**Status:** built on `feat/backlog-refine-unified`, restacked on #196's frozen head `b9b07c2`
+(founder device QA passed on update `01a0c6da`). #197's own branch, `feat/refine-rankings-t5`,
+is left untouched until #196 merges; this branch is then rebased onto main.
+Migration **`20261019000100`** (renumbered from `20261013000100`; #196 owns 013–018) is applied to
+**staging only**. **`ranking.backlog_enabled` and `ranking.refine_enabled` both ship `false`**,
+so nothing is reachable until an operator flips them. Production is untouched.
+**Design:** [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md)
+§G, §H, and §I as amended there; the unified design approved by the founder on 2026-09-21.
 This file records what was built, the exact rules, and where the build departs from the design.
+
+---
+
+## 0. The unified design (2026-09-21)
+
+**One ranking session, two sources**, `app/rank-session.tsx?medium=…&start=backlog|refine`:
+
+| Source | What it deals | Opens with | Ends |
+|---|---|---|---|
+| **Backlog** | titles seen and not yet ranked: incomplete native placements first (an open first-ranking session, then a bucket chosen in bingd), then by most recent watch date, then most recently added | `rank_backlog_start`: resumes the open first-ranking session in that bucket with its answers, or opens a silent `import`-kind placement. *How was it?* first when there is no bingd bucket | a soft checkpoint every 10 placed; *You're caught up.* when empty, offering Refine only if the card rules pass and only on a tap |
+| **Refine** | ranked titles whose evidence is thin (§2) | `refine_start` (unchanged) | 5 titles or 12 answers per round, **Keep going** only while card-quality titles remain, at most 3 rounds, 30 a day server-side |
+
+Both run the same comparison view over the same `rank_answer` / `rank_skip` / `rank_back`. There
+is no second ranking algorithm.
+
+**Collection (Movies / TV only; never Lists or Watchlist):**
+
+| Where | Card | Shows when | Buttons |
+|---|---|---|---|
+| Watched (one slot) | *You have titles left to rank* / *Finish placing the movies you've already seen.* — **no count** | the backlog has titles and the card is not dismissed (the 50-ranked rule is dropped while the backlog is on) | View unranked · Dismiss |
+| Watched (same slot) | *Fine-tune your rankings* / *A few comparisons could help tighten up N placements.* | nothing to rank in the medium, the server's `cta.show`, and no Not now still holding | Refine rankings · Not now |
+| Unranked, top | *Rank your unranked titles* / *Go through them one at a time…* / *18 movies to rank* | the backlog has titles | Start ranking (no dismiss) |
+
+Unranked wins the Watched slot. T5's `Refine rankings ›` line is removed; there is no permanent
+manual entry. **Not now** (and Done after a sitting) stores the medium's placement total; the card
+may return only after `ranking.refine_resurface_placements` (3) new placements **and** a strong
+batch again. No time-based return.
+
+**Backend (`20261019000100`, one unapplied-until-now file):** `ranking_backlog` (read) and
+`rank_backlog_start` (write, calls the write guard), `refine_candidates` amended (§2, the `cta`
+block, `placements_total`), and `rank_start` gains one branch: an open backlog session in the same
+bucket is resumed as itself rather than restarted, so + on a row and Rank on the title page keep its
+answers (#196's contract). No new tables. The legacy `unranked_queue` RPC (20260813000700, bucketed
+titles only, both media, unused by the client) is left as it is.
+
+**Reused from #196, not duplicated:** the Letterboxd star correction (`20261018000100`: a star is
+never a bucket; the guarded backfill), `rankingStateOf`, the binary ranked/unranked UI, and the
+first-placement session that survives a close.
+
+**Feed:** a backlog placement posts nothing (founder decision 2). Finishing an abandoned **native**
+ranking — resumed from the backlog or anywhere else — keeps its native kind, so it posts as it
+would have. `ranking-backlog.test.mjs` asserts both.
 
 ---
 
@@ -61,17 +107,27 @@ window. So a refined title drops out of the pool by construction.
 ```
 excess   = max(gap_above − w, 0) + max(gap_below − w, 0)
 span     = min(1, ln(1 + excess) / ln 32)
-priority = rank_weight × (0.7·span + 0.3·[conflicts > 0]) × (1 + 0.25·stale + 0.25·fragile)
+shifted  = min(1, crossed / (2 · crossed_min))
+priority = rank_weight × (0.7·span + 0.3·max([conflicts > 0], shifted)) × (1 + 0.25·fragile)
   rank_weight  1.0 (#1–25), 0.6 (#26–100), 0.3 (below)
-  stale        min(1, days since last confirmed / 365)
+  crossed      titles an EXPLICIT rerank (correction / rewatch re-check / manual) carried past
+               t since t was last confirmed — "its local section shifted"
   fragile      last placement adjustable (skips, dry walk, backfill)
 ```
+
+**No age term (founder, 2026-09-21).** T5's draft multiplied by `1 + 0.25·stale` and had a
+`placed_long_ago` reason. Both are gone: how long ago a title was placed is not evidence that it is
+misplaced. `refine.test.mjs` pins that the same evidence gives the same candidates whether it is a
+day or three years old. `crossed` reads positions as they are now against the ordinals each move
+recorded, so it is an approximation that can only raise a priority; first rankings, backlog/import
+placements, backfill and refines never count (Refine must not feed itself).
 
 **Eligible:**
 
 - band ≥ 2;
 - not snoozed;
 - not in the current sitting;
+- **evidence:** a gap beyond `w`, a conflict, or `crossed ≥ ranking.refine_crossed_min` (2);
 - priority ≥ `ranking.refine_min_priority` (0.08);
 - not refined in the last `ranking.refine_cooldown_days` (30), or 90 days if the last refine was `kept`.
 
@@ -130,7 +186,7 @@ only through the `stale` term, and after a year.
 | Per title        | refined → rests 30 days; `kept` (skipped out) → 90; "I don't remember it" → 180                                                                             | server               |
 | Per library      | nothing over the threshold → `nothing_waiting`. **This is the natural stop**                                                                                | server               |
 | Small collection | fewer than `ranking.refine_min_ranked` (20) ranked in the category → `too_small`; the entry is not drawn                                                    | server               |
-| Entry point      | hidden for 7 days after a sitting that finished at least one title                                                                                          | client (device pref) |
+| Entry point      | the card rests after Not now or a finished sitting until 3 new placements **and** a strong batch again; never on a timer (unified design §6)                 | client (device pref) + server counts |
 
 - **Minimum useful session:** one title, one or two answers. An unchanged top-25 title costs 2
   answers, or 1 when a recent answer already covers one side.
@@ -220,18 +276,23 @@ also an extreme shape; no real account's size was checked for this note.
 
 ## 6. Entry and UX
 
-- **Entry:** `Refine rankings ›`, one line of action text at the top of Collection's **Watched**
-  segment. It is drawn only when the server answers `ready` for that medium. It is absent when the
-  unranked nudge is showing, when the feature is off, when the medium has fewer than 20 ranked, and
-  for 7 days after a finished sitting. There is no badge, no count and no disabled state.
-- **Screen:** `app/refine.tsx` is full-screen and headerless. It shows Close, _Refine · Movies_ and
+- **Entry:** the Watched card *Fine-tune your rankings* (§0), drawn only on the server's `cta.show`:
+  Refine on, at least 20 ranked, nothing left to rank in the medium, at least
+  `ranking.refine_cta_min_candidates` (3) titles at priority ≥ `ranking.refine_cta_min_priority`
+  (0.25, about three times the candidate threshold), the day's ceiling not reached — and no Not now
+  still holding. The number it names is `min(5, strong)`. **Candidate exists ≠ show the card**:
+  once somebody opts in, the session still uses the looser 0.08 threshold.
+- **Instrumented to tune, not redesign:** the `cta` block returns the counts at both thresholds and
+  why the strong titles qualified (`gap` / `contradicted` / `crossed`); each candidate carries
+  `signals`; `refine_card_shown` and `refine_target_outcome` report them (analytics.md).
+- **Screen:** `app/rank-session.tsx?start=refine` is full-screen and headerless. It shows Close, _Refine · Movies_ and
   five round dots. The target stays pinned: _Is this still in the right place?_, then the title,
   `#18 in Movies`, and the reason line (for example _Never compared with the titles around it_ or
   _Last placed when you had 34 movies_). Below that is the existing comparison view (Undo, Too tough,
   Details), then _I don't remember Heat well_.
 - **Result:** private, and exact at any depth: `Moved from #21 → #15 ↑`, `Still #21`, `Kept at #57`,
-  then **Next**. The checkpoint lists the round and offers **Done**, plus **5 more** while rounds
-  remain.
+  then **Next**. The checkpoint lists the round and offers **Done**, plus **Keep going** while
+  rounds remain **and** card-quality titles are still waiting.
 - **No precision theatre.** There is no percentage, no "accuracy" and no count of what is left. A
   test asserts it.
 
@@ -244,25 +305,29 @@ also an extreme shape; no real account's size was checked for this note.
 | Band ≥ 3                                                                                               | Band ≥ 2                                                                                                                                                      | Two titles that were never compared are a real, one-question uncertainty                                                                                                                               |
 | First target from the top 50                                                                           | `rank_weight`                                                                                                                                                 | Same effect without a special case                                                                                                                                                                     |
 | `kept` → 30-day snooze                                                                                 | 90 days (three times the cooldown)                                                                                                                            | A title the reader skipped out of should not return monthly                                                                                                                                            |
-| Dismissible card plus a permanent overflow row                                                         | One conditional line and a 7-day rest after a sitting                                                                                                         | Collection has no overflow menu, and a card would sit beside the unranked nudge                                                                                                                        |
+| Dismissible card plus a permanent overflow row                                                         | **The card, in the unranked card's slot** (unified design): unranked wins the slot; Not now and Done rest it until 3 new placements and a strong batch       | Collection has no overflow menu; one slot means the two never compete; a time-based rest re-offered Refine to people who had not ranked anything since                                               |
 | _I don't remember_ opens `TitleRecallSheet` first                                                      | Snoozes directly; **Details** is already on both cards                                                                                                        | One sheet fewer, and the recall sheet is one tap away                                                                                                                                                  |
 | Undo this move (a compensating correction)                                                             | Not built                                                                                                                                                     | §H.6 assigns it to T7                                                                                                                                                                                  |
 | (not in §H)                                                                                            | Server daily ceiling; 90-day pair memory                                                                                                                      | The brief: no infinite engagement; do not repeat recently answered pairs                                                                                                                               |
 
 ## 8. Gating, rollout, rollback
 
-- **Flag:** `ranking.refine_enabled` (`app_config`, default `false`). While it is false,
-  `refine_candidates` answers `disabled`, `refine_start` refuses `0A000`, and the client draws no
-  entry.
+- **Flags:** `ranking.refine_enabled` and `ranking.backlog_enabled` (`app_config`, both default
+  `false`). While Refine's is false, `refine_candidates` answers `disabled`, `refine_start`
+  refuses `0A000`, and the client draws no card. While the backlog's is false, `ranking_backlog`
+  answers `disabled`, `rank_backlog_start` refuses `0A000`, and Collection is exactly as before
+  (the old unranked card, its 50-ranked rule, no Start ranking).
 - **Kill switch:** Refine is also off whenever `ranking.prior_search_enabled` is false.
 - **Tunables (no deploy):** `ranking.refine_min_ranked`, `refine_min_priority`,
-  `refine_daily_targets` and `refine_cooldown_days`.
+  `refine_daily_targets`, `refine_cooldown_days`, and the unified design's
+  `refine_crossed_min` (2), `refine_cta_min_priority` (0.25), `refine_cta_min_candidates` (3),
+  `refine_resurface_placements` (3) and `backlog_checkpoint` (10).
 - **Client ahead of the backend:** a backend without the function (`PGRST202`/`42883`) reads as
   `disabled`.
 - **Order, after #196 is on the target:**
-  1. Apply `20261019000100` with `db push`.
+  1. Apply `20261019000100` with `db push` (staging: done 2026-09-21).
   2. Publish the client.
-  3. Flip the flag for the QA account's environment.
+  3. Flip the flags for the environment under test (`backlog_enabled` first; Refine after).
 
   Rollback is the flag set to `false`. Nothing Refine wrote needs undoing: moves are ordinary
   placements in the ledger.
@@ -270,35 +335,47 @@ also an extreme shape; no real account's size was checked for this note.
 ## 9. OTA compatibility
 
 Client-only JS/TS. There are no new native modules, no `app.config.ts` or `package.json` change, and
-no new assets. The route is a new file under `app/`, which expo-router resolves at runtime. **It is
+no new assets. The route is a file under `app/` (`rank-session.tsx`, replacing T5's
+`refine.tsx`), which expo-router resolves at runtime. **It is
 OTA-deliverable on a runtime that already carries #196's client.** The binary constraint is the same
 one #196 has, since this branch includes #196: the installed preview builds predate main's runtime
 change, so no preview OTA reaches them until the new preview build #196 already needs.
 
-## 10. Manual QA (after #196, on staging, flag on for the QA account)
+## 10. Founder QA (staging, flags on for the QA session only)
 
-1. **Gate off:** with the flag false, Collection shows no _Refine rankings_, and `/refine` opened by
-   hand says _Not available_.
-2. **Too small:** an account with fewer than 20 ranked movies has no entry. With 20 or more on
-   Movies and fewer than 20 on TV, the entry is on Movies only.
-3. **Imported account:** Letterboxd-import about 100 films, then rank them from the Unranked tab (the T6 queue is not built). Refine
-   should offer top-list titles first, each with a reason line.
-4. **Unchanged:** answer both comparisons in line with the list. The result reads _Still #N_, with
-   no score change, no feed post and no Watch History date.
-5. **Moved:** answer against the list twice. The result reads _Moved from #X → #Y_ with an arrow.
-   Collection's order and scores update, the title page shows the new score, the streak does not
-   change, and the feed shows nothing.
-6. **Kept:** press Too tough three times. The result reads _Kept at #N_.
-7. **Undo** in the middle of a target: the pair goes back. **Undo** at a target's first comparison
-   moves to the next title.
-8. **I don't remember it:** the title goes and the next one loads. It is not offered again.
-9. **Checkpoint:** after 5 titles, the list shows outcomes and **Done / 5 more**. After round 3, it
-   shows **Done** only.
-10. **Interrupt:** kill the app mid-target and reopen Refine. The same title comes first, on the same
-    comparison.
-11. **Close** mid-target: nothing moves. The entry is still shown if nothing was finished, and rests
-    for 7 days if something was.
-12. **Heavily compared account:** _Nothing needs a look right now_.
-13. **Two devices:** the same title opened on both resumes one session. Answering on one updates the
-    other's next step.
-14. **Watch History** for a refined title lists _Refined · Still #N_ or _Refined · Moved from #X → #Y_ (this branch fixes a #196 line that printed _Still_ for every refine), and no new viewing.
+Both flags ship false. For QA an operator sets `ranking.backlog_enabled` (and later
+`ranking.refine_enabled`) to `true` on **staging**, and back to `false` afterwards. One account with
+imported, unranked Letterboxd titles and 20+ ranked movies covers every step.
+
+**Backlog**
+1. **Flags off:** Collection is exactly as in #196 (old *You have unranked titles* card; no Start
+   ranking).
+2. **Watched card:** *You have titles left to rank* — no number anywhere on Watched. **View
+   unranked** opens Unranked.
+3. **Unranked:** *Rank your unranked titles*, the exact count (*N movies to rank*) and **Start
+   ranking**; individual rows below still work (+ / Rank).
+4. **Order:** a film you started ranking in bingd and abandoned comes first, straight into its
+   comparisons at the pair you left (no *How was it?*). Then imports by most recent watch date. An
+   import asks *How was it?* first.
+5. **Progress:** *7 of 18 ranked* counts up toward a fixed total. **Skip this one** moves on; the
+   skipped title is still in Unranked afterwards.
+6. **Checkpoint:** after 10 placed, *10 titles ranked.* — **Keep going** continues, **Done** leaves.
+7. **Close mid-comparison**, then tap + on that title in Search (or Rank on its title page): it
+   resumes at the same pair, with no *How was it?* and no restart.
+8. **Feed:** nothing from the backlog titles you placed. (Finishing a film you had abandoned
+   natively may post, as it always would have.)
+9. **Caught up:** *You're caught up.* — with *Refine a few rankings?* only if step 11's card would
+   show; otherwise just Done.
+
+**Refine**
+10. **Card rules:** with anything left to rank, no Refine card (the unranked card holds the slot).
+11. With nothing to rank and a strong batch: *Fine-tune your rankings — …tighten up N
+    placements* (N ≤ 5). **Refine rankings** opens the session; **Not now** hides it.
+12. **Not now:** stays hidden however long you wait; returns only after 3 new rankings in that
+    medium (if the batch is still strong).
+13. **Session:** reason lines never mention age. After 5 titles (or 12 answers) the checkpoint
+    shows outcomes; **Keep going** appears only while strong titles remain; round 3 offers Done only.
+14. **Only answers move a title:** unchanged → *Still #N*; answered against the list → *Moved from
+    #X → #Y*; three Too tough → *Kept at #N*. No feed post, no new viewing, streak unchanged.
+15. **Movies and TV are separate:** each medium has its own backlog, card and session.
+16. **Lists:** no ranking or refinement cards.

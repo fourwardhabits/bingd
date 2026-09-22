@@ -1,19 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { RankingCategory } from '@/features/collection/use-collection';
 import { queryKeys } from '@/lib/query';
 import { readPref, writePref } from '@/lib/prefs';
 
-import { refineCandidates, type RefineStatus } from './refine';
+import { refineCandidates, type RefineCandidates } from './refine';
 
 /**
- * Whether Collection draws `Refine rankings ›` for one category (T5).
+ * Refine's standing in one category, for Collection's card (unified design §5).
  *
- * **The server's status is the gate, and the only one.** `refine_candidates` answers
- * `disabled` while `ranking.refine_enabled` is false, and a backend that predates the
- * migration reads as `disabled` too (`refineCandidates`). So this code can ship in an OTA
- * with nothing drawn, and switching the feature on is one `app_config` row.
+ * **The server's answer is the gate.** `refine_candidates` answers `disabled` while
+ * `ranking.refine_enabled` is false, and a backend that predates the migration reads as
+ * `disabled` too (`refineCandidates`), so this can ship in an OTA with nothing drawn. Its
+ * `cta` block says whether the batch is strong enough to invite anybody — candidate
+ * exists is not the same as show the card.
  *
  * One cheap read per category, cached for ten minutes: it runs on the Collection tab and
  * must not turn every visit into a query over the reader's whole comparison history.
@@ -24,48 +25,87 @@ export function useRefineAvailability(userId: string, category: RankingCategory)
     enabled: Boolean(userId),
     staleTime: 10 * 60_000,
     retry: false,
-    queryFn: async (): Promise<RefineStatus> =>
-      (await refineCandidates(category, { limit: 1 })).status,
+    queryFn: (): Promise<RefineCandidates> => refineCandidates(category, { limit: 1 }),
   });
 }
 
 /**
- * **A finished sitting quiets the entry for a week** (§H.1.2 "never a permanent call to
- * action"). Per account and per category, on the device, like the unranked nudge's
- * dismissal: it is a habit, not an account setting.
+ * **Not now, and Done after a sitting** (unified design §6).
  *
- * The server's own rests (a refined title, the daily ceiling) still apply underneath;
- * this only stops Collection re-offering Refine the moment somebody has just done it.
+ * Both store the medium's placement total at that moment, per account and per category on
+ * the device, like the unranked card's dismissal: a habit, not an account setting. The card
+ * returns only when the reader has made `resurfaceAfter` new placements since (new rankings,
+ * backlog placements, reranks — never a backfill or a refine, which the server leaves out
+ * of the total) AND the server says the batch is strong again. There is no time-based
+ * return, so a reader who never ranks again is never asked again.
  */
-export const REFINE_QUIET_DAYS = 7;
+export type RefineNotNow = { dismissedAt: string; placementsAtDismissal: number };
 
-const quietKey = (userId: string, category: RankingCategory) =>
-  `${userId}.collection.refine-finished.${category}`;
+const notNowKey = (userId: string, category: RankingCategory) =>
+  `${userId}.collection.refine-not-now.${category}`;
 
-export const markRefineFinished = (userId: string, category: RankingCategory) =>
-  writePref(quietKey(userId, category), new Date().toISOString()).catch(() => {});
+export const markRefineNotNow = (
+  userId: string,
+  category: RankingCategory,
+  placementsTotal: number,
+) =>
+  writePref<RefineNotNow>(notNowKey(userId, category), {
+    dismissedAt: new Date().toISOString(),
+    placementsAtDismissal: placementsTotal,
+  }).catch(() => {});
 
-export function isQuiet(finishedAt: string | null, now = Date.now()): boolean {
-  if (!finishedAt) return false;
-  const at = new Date(finishedAt).getTime();
-  if (Number.isNaN(at)) return false;
-  return now - at < REFINE_QUIET_DAYS * 24 * 60 * 60 * 1000;
+/** Whether a stored Not now still holds, given the medium's placements now. */
+export function isSnoozed(
+  pref: RefineNotNow | null,
+  placementsTotal: number,
+  resurfaceAfter: number,
+): boolean {
+  if (!pref || typeof pref.placementsAtDismissal !== 'number') return false;
+  return placementsTotal - pref.placementsAtDismissal < Math.max(1, resurfaceAfter);
 }
 
-/** Whether the entry is resting after a finished sitting. Null until the store answers. */
-export function useRefineQuiet(userId: string, category: RankingCategory): boolean | null {
-  const [state, setState] = useState<{ key: string; quiet: boolean } | null>(null);
-  const key = quietKey(userId, category);
+/**
+ * The Refine card for one category: whether to draw it, the number it may name, and the
+ * Not now that hides it. `show` is false until both the server and the stored preference
+ * have answered — a card that appears and then vanishes is worse than one a frame late.
+ */
+export function useRefineCard(userId: string, category: RankingCategory) {
+  const availability = useRefineAvailability(userId, category);
+  const key = notNowKey(userId, category);
+  const [pref, setPref] = useState<{ key: string; value: RefineNotNow | null } | null>(null);
 
   useEffect(() => {
     let live = true;
-    readPref<string>(key)
-      .then((value) => live && setState({ key, quiet: isQuiet(value ?? null) }))
-      .catch(() => live && setState({ key, quiet: false }));
+    readPref<RefineNotNow>(key)
+      .then((value) => live && setPref({ key, value: value ?? null }))
+      .catch(() => live && setPref({ key, value: null }));
     return () => {
       live = false;
     };
   }, [key]);
 
-  return state && state.key === key ? state.quiet : null;
+  const data = availability.data;
+  const loaded = pref !== null && pref.key === key;
+  const show =
+    loaded &&
+    data?.status === 'ready' &&
+    data.cta.show &&
+    !isSnoozed(pref.value, data.placementsTotal, data.cta.resurfaceAfter);
+
+  const notNow = useCallback(() => {
+    const placements = data?.placementsTotal ?? 0;
+    setPref({
+      key,
+      value: { dismissedAt: new Date().toISOString(), placementsAtDismissal: placements },
+    });
+    void markRefineNotNow(userId, category, placements);
+  }, [category, data?.placementsTotal, key, userId]);
+
+  return {
+    show: Boolean(show),
+    count: data?.cta.count ?? 0,
+    strong: data?.cta.strong ?? 0,
+    qualifying: data?.cta.qualifying ?? 0,
+    notNow,
+  };
 }

@@ -25,7 +25,7 @@ entry opening a dedicated, pushed **Watch History screen**, and **no History tab
 | **T3** | `log_rewatch` / `edit_watch_event` / `delete_watch_event`; feed `again`, enrichment and deletion | migration **`20261005000100`**. Not applied. |
 | **T3b** | Log another watch, the **Watch History screen** and its `Watched N times ›` entry, the When row via `log_title` / `set_watch_date`, private movement copy | client. **No OTA published.** |
 | **T4** | Goals and the monthly board repointed to watch events, both **behind flags that start false** | migration **`20261006000100`** + client. Not applied, flags not flipped. |
-| **T5** | Refine your rankings: evidence-driven targets, prior search with tolerance, finite rounds | migration **`20261019000100`** + client, on `feat/refine-rankings-t5` (depends on #196). **Behind `ranking.refine_enabled`, which starts false.** Not applied. Built spec and deviations: [`refine-rankings-t5.md`](./refine-rankings-t5.md). |
+| **T5** | **Unified Backlog + Refine** (founder-approved 2026-09-21): one ranking session with two sources — the unranked backlog (§I, as amended there) and Refine (evidence-driven targets, prior search with tolerance, finite rounds) | migration **`20261019000100`** + client, on `feat/backlog-refine-unified` (restacked on #196 `b9b07c2`). **Behind `ranking.backlog_enabled` and `ranking.refine_enabled`, both false.** Staging only. Built spec: [`refine-rankings-t5.md`](./refine-rankings-t5.md). **T6 (a standalone Rank your imports) is eliminated**: the backlog is that flow. T6b (unmatched-title repair) and T6c (Lists import) stay separate. |
 **Supersedes:** [`deferred-roadmap.md`](./deferred-roadmap.md) §19 (rewatch history) and §22
 (per-title watch history). It **resolves** §49 (the historical-unranked exception) for the
 historical contexts named here, builds PRD §12's unbuilt import "anchor session", and gives §34
@@ -755,7 +755,8 @@ Result beat (moved; private → exact at any depth):    Checkpoint (5 targets or
 3. **Diversity**: a resolved target's ±3 neighbours are discounted ×0.3 for the session.
 4. The first target comes from the top 50 when one qualifies.
 5. Unranked imports belong to §I, not here.
-6. **Exhausted**: *Nothing else needs a look right now.* No counts.
+6. **Exhausted**: *Nothing else needs a look right now.* No counts. (Refine's card, not its
+   screen, may name up to five placements — unified design §5.)
 
 ### H.5 Pair selection and settling
 
@@ -788,6 +789,28 @@ create table ranking_snoozes (
 ---
 
 ## I. Rank what you've watched (the import and historical mode)
+
+> **Amended by the unified Backlog + Refine design (founder-approved 2026-09-21; built in
+> `20261019000100`, see [`refine-rankings-t5.md`](./refine-rankings-t5.md) §0).** Where this
+> section and that design differ, the design wins:
+>
+> - **One screen**, `app/rank-session.tsx?start=backlog|refine`, not a separate
+>   `rank-queue`. Entry: Collection ▸ Unranked's persistent **Start ranking** (with the exact
+>   count). The Watched view's card says *You have titles left to rank* and **never** a count.
+> - **Order (§I.2 is replaced):** incomplete native placements first (an open first-ranking
+>   session, then a bucket chosen in bingd), then seen-but-unranked by most recent watch date,
+>   then most recently added. **Stars never order anything and never make a bucket** (#196,
+>   `20261018000100`); a title with no bingd bucket is asked *How was it?* first.
+> - **Progress (§I.3 is replaced):** *7 of 18 ranked*, the total fixed when the sitting began —
+>   useful once the reader chose to start the job — plus a **soft checkpoint** every ten placed
+>   (*10 titles ranked.* · Keep going · Done). Not a limit; Skip and Done are always there.
+> - **Rules (§I.5) hold:** nothing per title in the Feed (a backlog placement uses the silent
+>   `import` kind), no recommendation fulfilment. Finishing an abandoned **native** ranking keeps
+>   its native behaviour. *I don't remember it well* is not in the backlog v1: **Skip** (this
+>   sitting only) covers it, and the title stays in Unranked.
+> - **Resume, never duplicate:** a placement left mid-comparison — native or backlog — comes back
+>   with its answers from the backlog, from + on a row, or from Rank on the title page.
+> - Seasons still being watched stay in Unranked but are not dealt; series are never dealt.
 
 ### I.1 Shape
 

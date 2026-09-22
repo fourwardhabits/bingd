@@ -137,8 +137,10 @@ describe('the event vocabulary', () => {
         'people_suggestions_mode_changed',
         'people_suggestions_viewed',
         'ranking_completed',
+        'backlog_session_ended',
         'ranking_started',
         // T5 Refine, 2026-09-20 (epic §P): one event per finished title, one per sitting.
+        'refine_card_shown',
         'refine_session_ended',
         'refine_target_outcome',
         'recommendation_opened',

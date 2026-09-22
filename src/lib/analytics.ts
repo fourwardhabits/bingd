@@ -227,7 +227,12 @@ export type Bucket = 'loved' | 'fine' | 'not_for_me';
  * distinction lives in the database (`_rank_finalize`'s `p_new_watch`) and on the menu;
  * this is the same distinction carried into the one place that could not see it.
  */
-export type RankingMode = 'start' | 'rebucket' | 'rerank' | 'again';
+/**
+ * `backlog` (unified Backlog + Refine, 2026-09-21): a first placement made from the
+ * Unranked backlog session. It is a title getting a position, so it belongs in
+ * `ranking_completed`; its own word keeps it apart from a `start` made one title at a time.
+ */
+export type RankingMode = 'start' | 'rebucket' | 'rerank' | 'again' | 'backlog';
 
 /**
  * Where a person came from, when that is ever known.
@@ -1040,6 +1045,33 @@ export type AnalyticsEvent =
         reason: string;
         comparisons: number;
         medium: 'movies' | 'tv';
+        /** Why the server offered it (unified design §5), so thresholds tune from use. */
+        signal_gap: boolean;
+        signal_contradicted: boolean;
+        signal_crossed: boolean;
+        /** It also cleared the card threshold, not only the candidate one. */
+        signal_strong: boolean;
+      };
+    }
+  /**
+   * Collection drew the Refine card (unified design §5): once per mount of the card. The
+   * counts are the server's, at both thresholds — what made the card show.
+   */
+  | {
+      name: 'refine_card_shown';
+      props: { strong: number; qualifying: number; medium: 'movies' | 'tv' };
+    }
+  /**
+   * A backlog sitting ended (unified design §7). `ended_by`: `done` (a checkpoint's Done),
+   * `caught_up` (nothing left to rank, or it handed over to Refine) or `close`.
+   */
+  | {
+      name: 'backlog_session_ended';
+      props: {
+        placed: number;
+        skipped: number;
+        ended_by: 'done' | 'caught_up' | 'close';
+        medium: 'movies' | 'tv';
       };
     }
   /**
@@ -1147,6 +1179,9 @@ export const ANALYTICS_EVENTS = [
   // is read as "a title got a position", and a refine that confirms one is not that.
   'refine_target_outcome',
   'refine_session_ended',
+  // Unified Backlog + Refine (2026-09-21).
+  'refine_card_shown',
+  'backlog_session_ended',
   'watchlist_added',
   'follow_created',
   'recommendation_sent',

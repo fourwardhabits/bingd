@@ -8,12 +8,12 @@ import {
   parseCandidates,
   reasonLine,
   recordFinished,
-  refinePlacementLine,
   ROUND_ANSWERS,
   ROUND_TARGETS,
   type RefinedTitle,
 } from './refine';
-import { isQuiet, REFINE_QUIET_DAYS } from './use-refine';
+import { isSnoozed } from './use-refine';
+import { atBacklogCheckpoint, backlogProgress, parseBacklog } from './backlog';
 
 jest.mock('@/lib/supabase', () => ({ supabase: { rpc: jest.fn() } }));
 
@@ -121,14 +121,7 @@ describe('reasonLine', () => {
   it('says what the evidence is, never a confidence number', () => {
     const lines = [
       reasonLine({ reason: 'grown', lastConfirmedAt: null, confirmedSize: 34 }, 'movies'),
-      reasonLine(
-        {
-          reason: 'placed_long_ago',
-          lastConfirmedAt: '2025-03-04T00:00:00Z',
-          confirmedSize: null,
-        },
-        'movies',
-      ),
+      reasonLine({ reason: 'crossed', lastConfirmedAt: null, confirmedSize: null }, 'movies'),
       reasonLine(
         { reason: 'never_compared', lastConfirmedAt: null, confirmedSize: null },
         'tv_seasons',
@@ -139,37 +132,107 @@ describe('reasonLine', () => {
       ),
     ];
     expect(lines[0]).toBe('Last placed when you had 34 movies');
-    expect(lines[1]).toBe('Last placed Mar 2025');
+    expect(lines[1]).toBe('Titles near it have moved past it since');
     for (const line of lines) expect(line).not.toMatch(/%|confiden|accura/i);
   });
 });
 
-describe('the entry rests after a sitting', () => {
-  it(`is quiet for ${REFINE_QUIET_DAYS} days`, () => {
-    const now = Date.parse('2026-09-20T12:00:00Z');
-    expect(isQuiet(null, now)).toBe(false);
-    expect(isQuiet('2026-09-19T12:00:00Z', now)).toBe(true);
-    expect(isQuiet('2026-09-12T11:00:00Z', now)).toBe(false);
-    expect(isQuiet('garbage', now)).toBe(false);
+describe('age is never a reason (founder, 2026-09-21)', () => {
+  it('an old placed_long_ago from a stale backend reads as the neutral reason', () => {
+    const parsed = parseCandidates({
+      status: 'ready',
+      candidates: [{ media_item_id: 'm', title: 'T', position: 3, reason: 'placed_long_ago' }],
+    });
+    expect(parsed.targets[0]?.reason).toBe('neighbours');
   });
 });
 
-describe('refinePlacementLine (Watch History)', () => {
-  it('says what the refine did, never "Still" for a move', () => {
-    expect(refinePlacementLine({ outcome: 'unchanged', position: 21, fromPosition: 21 })).toBe(
-      'Refined · Still #21',
-    );
-    expect(refinePlacementLine({ outcome: 'moved', position: 15, fromPosition: 21 })).toBe(
-      'Refined · Moved from #21 → #15',
-    );
-    expect(refinePlacementLine({ outcome: 'kept', position: 57, fromPosition: 57 })).toBe(
-      'Refined · Kept at #57',
-    );
+describe('the card block and the placement total', () => {
+  it('reads the server answer, and why the batch qualified', () => {
+    const parsed = parseCandidates({
+      status: 'ready',
+      candidates: [
+        {
+          media_item_id: 'm1',
+          title: 'Heat',
+          position: 4,
+          reason: 'crossed',
+          signals: { gap: false, contradicted: false, crossed: true, strong: true },
+        },
+      ],
+      placements_total: 41,
+      cta: { show: true, count: 4, qualifying: 9, strong: 4, resurface_after: 3 },
+    });
+    expect(parsed.cta).toEqual({
+      show: true,
+      count: 4,
+      qualifying: 9,
+      strong: 4,
+      resurfaceAfter: 3,
+    });
+    expect(parsed.placementsTotal).toBe(41);
+    expect(parsed.targets[0]?.signals).toEqual({
+      gap: false,
+      contradicted: false,
+      crossed: true,
+      strong: true,
+    });
   });
 
-  it('is labelled as a refine, not as a watch', () => {
-    const line = refinePlacementLine({ outcome: 'moved', position: 3, fromPosition: 9 });
-    expect(line.startsWith('Refined · ')).toBe(true);
-    expect(line).not.toMatch(/watch/i);
+  it('never invites onto an empty or refused sitting', () => {
+    expect(parseCandidates({ status: 'rested', cta: { show: true } }).cta.show).toBe(false);
+    expect(parseCandidates({ status: 'ready', candidates: [], cta: { show: true } }).cta.show).toBe(
+      false,
+    );
+    expect(parseCandidates(null).cta.show).toBe(false);
+  });
+});
+
+describe('Not now is lifted by activity, never by time', () => {
+  const pref = { dismissedAt: '2020-01-01T00:00:00Z', placementsAtDismissal: 40 };
+
+  it('holds until enough new placements, however long ago it was', () => {
+    expect(isSnoozed(pref, 40, 3)).toBe(true);
+    expect(isSnoozed(pref, 42, 3)).toBe(true);
+    expect(isSnoozed(pref, 43, 3)).toBe(false);
+  });
+
+  it('with no Not now stored, nothing is snoozed', () => {
+    expect(isSnoozed(null, 0, 3)).toBe(false);
+  });
+});
+
+describe('the backlog', () => {
+  it('reads the server shape; a stored bucket skips How was it?', () => {
+    const b = parseBacklog({
+      status: 'ready',
+      total: 18,
+      remaining: 17,
+      checkpoint_every: 10,
+      targets: [
+        { media_item_id: 'a', title: 'A', kind: 'movie', bucket: 'not_for_me', resume: true },
+        { media_item_id: 'b', title: 'B', kind: 'season', bucket: null, resume: false },
+      ],
+    });
+    expect(b).toMatchObject({ status: 'ready', total: 18, remaining: 17, checkpointEvery: 10 });
+    expect(b.targets[0]).toMatchObject({ bucket: 'notForMe', resume: true, kind: 'movie' });
+    expect(b.targets[1]).toMatchObject({ bucket: null, kind: 'season' });
+  });
+
+  it('reads anything unknown as disabled, and an empty ready as empty', () => {
+    expect(parseBacklog(null).status).toBe('disabled');
+    expect(parseBacklog({ status: 'ready', targets: [] }).status).toBe('empty');
+  });
+
+  it('checkpoints softly every ten placed, and counts toward a fixed total', () => {
+    expect([1, 9, 10, 11, 20].map((n) => atBacklogCheckpoint(n, 10))).toEqual([
+      false,
+      false,
+      true,
+      false,
+      true,
+    ]);
+    expect(atBacklogCheckpoint(0, 10)).toBe(false);
+    expect(backlogProgress(7, 18)).toBe('7 of 18 ranked');
   });
 });

@@ -94,8 +94,8 @@ const sessions = async (id) =>
   ).rows;
 
 const feedCount = async () =>
-  (await t.sql(`select count(*)::int as n from feed_events where actor_id = $1`, [user])).rows[0]
-    .n;
+  (await t.sql(`select count(*)::int as n from feed_events where actor_id = $1`, [user]))
+    .rows[0].n;
 
 /** Answers to completion from `truth` (best first). */
 async function finish(first, id, truth) {
@@ -170,13 +170,19 @@ describe('what is in it, and in what order', () => {
     // Never in it.
     const series = await t.createSeries(`Series ${seq}`, (tmdb += 1));
     const watching = await t.createSeason(series, 1, 'Season 1');
-    await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [user, series]);
+    await t.sql(`insert into user_media (user_id, media_item_id) values ($1, $2)`, [
+      user,
+      series,
+    ]);
     await t.sql(
       `insert into user_media (user_id, media_item_id, progress) values ($1, $2, 'watching')`,
       [user, watching],
     );
     const saved = await movie('Saved for later');
-    await t.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [user, saved]);
+    await t.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [
+      user,
+      saved,
+    ]);
 
     const r = await backlog();
     assert.equal(r.status, 'ready');
@@ -244,7 +250,10 @@ describe('opening a placement', () => {
     const id = await movie('No opinion yet');
     await seen(id);
 
-    const refused = await t.errorFrom(`select rank_backlog_start($1, null, $2)`, [id, await op()]);
+    const refused = await t.errorFrom(`select rank_backlog_start($1, null, $2)`, [
+      id,
+      await op(),
+    ]);
     assert.equal(refused?.code, '22023');
 
     const r = await call(`rank_backlog_start($1, 'loved', $2)`, [id, await op()]);
@@ -277,7 +286,8 @@ describe('opening a placement', () => {
       'P0002',
     );
     assert.equal(
-      (await t.errorFrom(`select rank_backlog_start($1, 'loved', $2)`, [top, await op()]))?.code,
+      (await t.errorFrom(`select rank_backlog_start($1, 'loved', $2)`, [top, await op()]))
+        ?.code,
       '23505',
     );
   });

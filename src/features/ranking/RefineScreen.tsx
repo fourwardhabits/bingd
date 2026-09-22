@@ -40,14 +40,14 @@ import {
   refineStart,
   type SessionStep,
 } from './session';
-import { markRefineFinished } from './use-refine';
+import { markRefineNotNow } from './use-refine';
 
 /**
  * Refine your rankings (T5; calibration epic §H).
  *
- * A pushed, full-screen route (`app/refine.tsx`) that holds ONE target at a time — the
- * title being re-checked stays pinned while its comparisons change (§H.2 flow C) — and
- * runs the ordinary comparison view against it. Each target is a provisional `refine`
+ * The Refine source of the ranking session (`app/rank-session.tsx?start=refine`). It holds
+ * ONE target at a time — the title being re-checked stays pinned while its comparisons
+ * change (§H.2 flow C) — and runs the ordinary comparison view against it. Each target is a provisional `refine`
  * session on the server, so closing at any point moves nothing that an answer did not.
  *
  * ---------------------------------------------------------------------------
@@ -99,6 +99,10 @@ export function RefineScreen({
   const openSession = useRef<string | null>(null);
   const answers = useRef(0);
   const ended = useRef(false);
+  /** The medium's placement total at the last read, which Done records (unified §6). */
+  const placementsTotal = useRef(0);
+  /** Card-quality titles still waiting at the last read: Keep going needs one (§7). */
+  const [strongLeft, setStrongLeft] = useState(0);
 
   const endSitting = useCallback(
     (endedBy: 'done' | 'exhausted' | 'close') => {
@@ -115,7 +119,10 @@ export function RefineScreen({
           medium: analyticsMedium,
         },
       });
-      if (totals.targets > 0) void markRefineFinished(profile.id, medium);
+      // A finished sitting quiets the card the same way Not now does: until the reader has
+      // made enough new placements AND the server says the batch is strong again. No
+      // time-based return (unified design §6, replacing T5's seven-day rest).
+      if (totals.targets > 0) void markRefineNotNow(profile.id, medium, placementsTotal.current);
       void queryClient.invalidateQueries({
         queryKey: queryKeys.refineAvailability(profile.id, medium),
       });
@@ -157,6 +164,11 @@ export function RefineScreen({
             reason: target.reason,
             comparisons: answers.current,
             medium: analyticsMedium,
+            // Why it qualified, so the thresholds can be tuned from real use (§5).
+            signal_gap: target.signals.gap,
+            signal_contradicted: target.signals.contradicted,
+            signal_crossed: target.signals.crossed,
+            signal_strong: target.signals.strong,
           },
         });
       }
@@ -205,6 +217,8 @@ export function RefineScreen({
       });
       return;
     }
+    placementsTotal.current = found.placementsTotal;
+    setStrongLeft(found.cta.strong);
     const target = found.targets[0];
     if (found.status !== 'ready' || !target) {
       if (sittingRef.current.finished.length > 0) {
@@ -419,9 +433,11 @@ export function RefineScreen({
                 onExit();
               }}
             />
-            {!phase.exhausted && mayContinue(sitting) ? (
+            {/* Keep going only while card-quality titles remain and rounds are left (§7):
+                a sitting never drifts on into titles the card would not have invited. */}
+            {!phase.exhausted && mayContinue(sitting) && strongLeft > 0 ? (
               <Button
-                label={`${ROUND_TARGETS} more`}
+                label="Keep going"
                 kind="secondary"
                 onPress={() => {
                   update(nextRound(sittingRef.current));
