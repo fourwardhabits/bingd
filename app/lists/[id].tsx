@@ -25,6 +25,8 @@ import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
+import { rankingStateOf } from '@/features/collection/ranking-state';
+import { useLoggedCollection } from '@/features/collection/use-collection';
 import { useMyScores } from '@/features/collection/use-score';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { AddTitlesSheet } from '@/features/lists/AddTitlesSheet';
@@ -150,6 +152,12 @@ export default function ListScreen() {
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const celebrate = useCelebrationHandoff();
   const myScores = useMyScores(profile.id);
+  // The reader's own buckets, for the Finish state (the same read Search uses).
+  const logged = useLoggedCollection(profile.id);
+  const bucketOf = useMemo(
+    () => new Map((logged.data?.entries ?? []).map((entry) => [entry.mediaItemId, entry.bucket])),
+    [logged.data],
+  );
   const [editing, setEditing] = useState(false);
   const [addingTitles, setAddingTitles] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -693,6 +701,12 @@ export default function ListScreen() {
                       if (drag === null) router.push(`/title/${item.mediaItemId}`);
                     }}
                     score={myScores.data?.get(item.mediaItemId) ?? null}
+                    unfinished={
+                      rankingStateOf({
+                        ranked: Boolean(myScores.data?.has(item.mediaItemId)),
+                        bucket: bucketOf.get(item.mediaItemId),
+                      }) === 'unfinished'
+                    }
                     onRank={() => openLog(item)}
                     onToggleWatchlist={() =>
                       void toggleWatchlist(item.mediaItemId, item.watchlisted === true)

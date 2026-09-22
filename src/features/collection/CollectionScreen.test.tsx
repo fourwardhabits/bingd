@@ -913,3 +913,24 @@ describe('a Collection row', () => {
     expect(view.queryByLabelText(/more options/i)).toBeNull();
   });
 });
+
+/**
+ * Founder decision, 2026-09-21: on the Collection wall a bucket chosen in bingd with no
+ * placement carries a **Finish** chip; a seen title with no bucket (an untouched import)
+ * carries none, and a ranked one carries its score.
+ */
+describe('the ranking state on the Collection wall', () => {
+  it('chips only the bucketed, unplaced title with Finish', async () => {
+    mockTables.user_media = [
+      { ...watched('abandoned', 'movie'), bucket: 'fine' },
+      { ...watched('imported', 'movie'), bucket: null },
+    ];
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.queryAllByTestId('tile-finish-chip', { includeHiddenElements: true })).toHaveLength(1),
+    );
+    expect(view.getByLabelText(/Film abandoned.*ranking not finished/)).toBeTruthy();
+    expect(view.queryByLabelText(/Film imported.*ranking not finished/)).toBeNull();
+  });
+});

@@ -3450,3 +3450,45 @@ describe('Add to list', () => {
     expect(view.queryByLabelText('Add to list…')).toBeNull();
   });
 });
+
+/**
+ * **Three ranking states on the title page** (founder decision, 2026-09-21): a completed
+ * placement shows the score; a bucket chosen in bingd with the comparisons abandoned reads
+ * **Finish ranking**; a title seen with no bucket — including an untouched import, whose
+ * Letterboxd star is never a bucket — reads **Rank**.
+ */
+describe('the ranking state on the title page', () => {
+  const logged = (bucket: string | null) => {
+    tableRows.rankings = [];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket,
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+  };
+
+  it('reads Finish ranking for a bucket chosen here with no placement', async () => {
+    logged('fine');
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-action-finish')).toBeTruthy());
+    expect(view.getByText('Finish ranking')).toBeTruthy();
+    expect(view.getByText('Ranking not finished')).toBeTruthy();
+    expect(view.queryByTestId('title-action-rank')).toBeNull();
+  });
+
+  it('reads Rank for a seen title with no bucket, such as an untouched import', async () => {
+    logged(null);
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
+    expect(view.queryByText('Finish ranking')).toBeNull();
+  });
+});

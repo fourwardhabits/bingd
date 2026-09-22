@@ -19,6 +19,12 @@ const ICON_BOX = 32;
 export type RankAction = {
   /** Whether this reader has already ranked it. Decides the word and the treatment. */
   ranked: boolean;
+  /**
+   * A bucket chosen in bingd and no completed placement (`rankingStateOf`): the word is
+   * **Finish ranking** rather than **Rank**, so a half-done ranking is not mistaken for
+   * one never started. Never true for an import — a star is not a bucket.
+   */
+  unfinished?: boolean;
   /** The whole sentence, for a reader who cannot see the control. */
   accessibilityLabel: string;
   accessibilityHint?: string;
@@ -120,7 +126,13 @@ export function TitleActions({ rank, save, list = null, recommend }: TitleAction
       {rank ? (
         <Animated.View style={rankPress.pressStyle}>
           <Pressable
-            testID={rank.ranked ? 'title-action-ranked' : 'title-action-rank'}
+            testID={
+              rank.ranked
+                ? 'title-action-ranked'
+                : rank.unfinished
+                  ? 'title-action-finish'
+                  : 'title-action-rank'
+            }
             accessibilityRole="button"
             accessibilityState={{ selected: rank.ranked }}
             accessibilityLabel={rank.accessibilityLabel}
@@ -148,7 +160,7 @@ export function TitleActions({ rank, save, list = null, recommend }: TitleAction
               numberOfLines={1}
               tone={rank.ranked ? 'action' : 'inverse'}
             >
-              {rank.ranked ? 'Ranked' : 'Rank'}
+              {rank.ranked ? 'Ranked' : rank.unfinished ? 'Finish ranking' : 'Rank'}
             </Text>
           </Pressable>
         </Animated.View>

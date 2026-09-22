@@ -27,6 +27,8 @@ export type PosterTile = {
   /** Chipped onto the corner. Only for a title this user has ranked. */
   score?: number | null;
   bucket?: Bucket | null;
+  /** An opinion with no completed ranking: a small **Finish** chip where a score would be. */
+  unfinished?: boolean;
   /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
   saved?: boolean;
 };
@@ -396,6 +398,19 @@ function Tile({
               {formatScore(score)}
             </Text>
           </View>
+        ) : tile.unfinished ? (
+          // Outlined rather than filled, so a half-done ranking never reads as a score
+          // (founder decision, 2026-09-21). The tile's label says it.
+          <View
+            style={styles.finishChip}
+            testID="tile-finish-chip"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text variant="caption" tone="action" allowFontScaling={false}>
+              Finish
+            </Text>
+          </View>
         ) : null}
       </Pressable>
     </Animated.View>
@@ -406,6 +421,7 @@ const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
   if (tile.year) parts.push(String(tile.year));
   if (tile.score != null) parts.push(`scored ${formatScore(tile.score)} out of 10`);
+  else if (tile.unfinished) parts.push('ranking not finished');
   // Announced on the tile as well as on its own control, because "Saved" is state a
   // sighted reader gets from a filled glyph they can see without touching anything.
   if (tile.saved) parts.push('saved');
@@ -462,6 +478,18 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.control,
     alignItems: 'center',
     backgroundColor: theme.semantic.action,
+  },
+  finishChip: {
+    position: 'absolute',
+    right: theme.space[1],
+    bottom: theme.space[1],
+    paddingHorizontal: theme.space[1],
+    paddingVertical: 1,
+    borderRadius: theme.radius.control,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: theme.semantic.action,
+    backgroundColor: theme.surface.raised,
   },
   pressed: { opacity: 0.7 },
 });

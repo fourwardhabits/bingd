@@ -11,6 +11,7 @@ import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collecti
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useMyScores, type MyScore } from '@/features/collection/use-score';
 import { TitleRowActions } from '@/features/collection/TitleRowActions';
+import { rankingStateOf } from '@/features/collection/ranking-state';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
@@ -173,6 +174,24 @@ export default function LogScreen() {
   const watchedIds = useMemo(
     () => new Set((logged.data?.entries ?? []).map((entry) => entry.mediaItemId)),
     [logged.data],
+  );
+  /**
+   * A bucket chosen in bingd with no completed placement: **Finish**, not Rank
+   * (`rankingStateOf`). An import never has a bucket (20261018000100), so an imported,
+   * untouched title stays on Rank.
+   */
+  const unfinishedIds = useMemo(
+    () =>
+      new Set(
+        (logged.data?.entries ?? [])
+          .filter(
+            (entry) =>
+              rankingStateOf({ ranked: scores.has(entry.mediaItemId), bucket: entry.bucket }) ===
+              'unfinished',
+          )
+          .map((entry) => entry.mediaItemId),
+      ),
+    [logged.data, scores],
   );
   /**
    * The reader's season history, grouped by series, for the series rows.
@@ -557,6 +576,7 @@ export default function LogScreen() {
           saved={saved}
           scores={scores}
           watched={watchedIds}
+          unfinished={unfinishedIds}
           seriesState={seriesState}
           watchlistBusy={watchlistBusy}
           onToggleWatchlist={toggleWatchlist}
@@ -670,6 +690,7 @@ function Results({
   saved,
   scores,
   watched,
+  unfinished,
   seriesState,
   watchlistBusy,
   onToggleWatchlist,
@@ -720,6 +741,8 @@ function Results({
   scores: Map<string, MyScore>;
   /** Media ids this reader has logged, ranked or not — the watched-but-unranked case. */
   watched: Set<string>;
+  /** Titles with a bucket chosen here and no completed placement. */
+  unfinished: Set<string>;
   /** Season activity per series id, for the series rows (`series-state.ts`). */
   seriesState: Map<string, SeriesChildState>;
   /** The id of the title whose watchlist write is in flight, or null. */
@@ -1196,6 +1219,7 @@ function Results({
                     kind={title.kind === 'series' ? 'series' : title.kind === 'season' ? 'season' : 'movie'}
                     score={myScore}
                     watched={isWatched}
+                    unfinished={unfinished.has(title.id)}
                     saved={saved.has(title.id)}
                     busy={watchlistBusy === title.id}
                     onRank={() => onOpenLog(title)}

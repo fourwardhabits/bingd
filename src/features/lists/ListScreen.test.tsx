@@ -68,7 +68,7 @@ type Item = {
 };
 
 /** Plain table reads: `rankings` for the reader's own scores, `media_items` for the hero. */
-const mockTables: Record<string, unknown[]> = { rankings: [], media_items: [] };
+const mockTables: Record<string, unknown[]> = { rankings: [], media_items: [], user_media: [] };
 let mockView: View | null = null;
 let mockItems: Item[] = [];
 let mockProgress: { seen: number; total: number } | null = null;
@@ -182,6 +182,7 @@ const view = (over: Partial<View> = {}): View => ({
 beforeEach(() => {
   mockTables.rankings = [];
   mockTables.media_items = [];
+  mockTables.user_media = [];
   mockView = null;
   mockItems = [];
   mockProgress = null;
@@ -677,6 +678,24 @@ describe('a list row\'s trailing actions', () => {
 
     await waitFor(() => screen.getByLabelText(/^10\.0 out of 10/));
     expect(screen.queryByLabelText('Add Film a to Watchlist')).toBeNull();
+  });
+
+  /**
+   * Founder decision, 2026-09-21: a bucket chosen in bingd with no placement reads
+   * **Finish**; a title seen with no bucket — an untouched import — reads **Rank**.
+   */
+  it('shows Finish for a bucket chosen here and Rank for a seen title with no bucket', async () => {
+    mockItems = [item('a', { viewer_seen: true }), item('b', { position: 2, ordinal: 2, viewer_seen: true })];
+    mockTables.user_media = [
+      { media_item_id: 'a', bucket: 'fine', watched_on: null, created_at: '2026-09-01T00:00:00Z' },
+      { media_item_id: 'b', bucket: null, watched_on: null, created_at: '2026-09-02T00:00:00Z' },
+    ];
+    const screen = await open();
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('Ranking not finished. Finish ranking this title.')).toHaveLength(1),
+    );
+    expect(screen.getAllByLabelText('Not ranked. Rank this title.')).toHaveLength(1);
   });
 
   it('shows Log and the Watchlist on a title the reader has not logged', async () => {

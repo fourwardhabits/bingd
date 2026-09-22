@@ -773,6 +773,12 @@ Collection, Search and list rows, all refreshed by one path
 
 **Every first load shows the loading language.** A screen whose header is up while its first request is pending draws the standard skeleton (`SkeletonRow` / `SkeletonTile`), never an empty area.
 
+**Three ranking states, never two** (`rankingStateOf`). A placed title shows its score
+(filled Maroon circle); a bucket chosen in bingd with the comparisons never completed shows
+**Finish** (compact: a Maroon outline pill; title page: *Finish ranking*, *Ranking not
+finished*); anything else, including an untouched import, shows **Rank** (grey dashed circle,
+or `+` when not logged). A Letterboxd star is never a bucket, so an import never reads Finish.
+
 **Row edit affordances are small text** (`Edit`, optionally with a small pencil), never a
 large bare glyph. Destructive row actions on an owned list are revealed by a horizontal
 swipe (`SwipeToRemove`, horizontally dominant moves only, never during a drag) and confirmed

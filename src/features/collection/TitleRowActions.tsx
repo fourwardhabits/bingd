@@ -13,6 +13,11 @@ export type TitleRowActionsProps = {
   score: { score: number; bucket: Bucket } | null;
   /** Logged (seen) but not ranked — the dashed Rank ring rather than the `+`. */
   watched: boolean;
+  /**
+   * A bucket chosen in bingd with no completed placement (`rankingStateOf` → `unfinished`):
+   * **Finish** rather than **Rank**. Never true for an import — a star is not a bucket.
+   */
+  unfinished?: boolean;
   /** On the reader's Watchlist. Null when unknown, which hides the bookmark. */
   saved: boolean | null;
   busy?: boolean;
@@ -27,6 +32,8 @@ export type TitleRowActionsProps = {
  *
  *   ranked        the reader's score circle, and nothing else. A saved-for-later
  *                 control beside a title they have already rated is noise.
+ *   unfinished    **Finish** — a bucket chosen here, comparisons never completed — then
+ *                 the bookmark. Distinct from Rank so a half-done ranking reads as one.
  *   not ranked    the Rank/log action — the dashed `Rank` ring when the title is logged
  *                 but unranked, the `+` when it is not logged at all — then the one-tap
  *                 Watchlist bookmark.
@@ -43,6 +50,7 @@ export function TitleRowActions({
   kind,
   score,
   watched,
+  unfinished = false,
   saved,
   busy = false,
   onRank,
@@ -60,7 +68,9 @@ export function TitleRowActions({
 
   return (
     <View style={styles.actions} testID="title-row-actions-unranked">
-      {rankable && watched ? (
+      {rankable && unfinished ? (
+        <ScoreBadge size="sm" unfinished onPress={onRank} />
+      ) : rankable && watched ? (
         <ScoreBadge size="sm" onPress={onRank} />
       ) : (
         <Pressable

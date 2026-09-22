@@ -105,6 +105,8 @@ const FILES = [
   '20261016000100_the_latest_watch_follows_a_correction.sql',
   // The Add-to-List picker's cover and description.
   '20261017000100_a_list_you_can_recognise.sql',
+  // An import never writes a bucket, and the buckets earlier imports wrote are cleared.
+  '20261018000100_an_import_never_speaks_for_you.sql',
 ];
 
 /** The head every one of these expects to find, and nothing else. */

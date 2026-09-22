@@ -51,24 +51,16 @@ import type { ArchiveText } from './archive';
 export type Bucket = 'loved' | 'fine' | 'not_for_me';
 
 /**
- * The locked star-to-bucket policy, in one place so it is one edit.
+ * **A Letterboxd star is never a bingd opinion** (founder, 2026-09-21 — canonical).
  *
- * `>= 3.5` is *I liked it*, and that boundary is a founder decision taken on semantic
- * grounds: bingd's top bucket is labelled **"I liked it"**, not "I loved it", and 3.5 of 5
- * is unambiguously liking something. The raw star is preserved beside the bucket
- * (`StagedWatched.rating`) precisely so this line can move later without asking anybody to
- * re-upload.
- *
- * An imported bucket is a **prior**. It never becomes a position and never becomes a
- * score — those come only from comparisons, and nothing in this feature writes `rankings`.
+ * An imported title arrives watched or logged, as the source supports, UNRANKED and with
+ * no bucket until the reader answers "How was it?" in bingd. The star is carried only as
+ * provenance (`StagedWatched.rating`, kept in `imported_titles.rating`) — never as *I
+ * liked it* / *It was fine* / *I didn't like it*, a position or a score. There used to be
+ * a star-to-bucket mapping here; it is gone, and the server refuses a bucket from any
+ * import regardless (20261018000100), so an installed client that still sends one cannot
+ * write it either.
  */
-export function bucketFor(rating: number | null): Bucket | null {
-  if (rating === null) return null;
-  if (rating >= 3.5) return 'loved';
-  if (rating >= 2.5) return 'fine';
-  return 'not_for_me';
-}
-
 /** A title the person has watched, with whatever the export could prove about it. */
 export type StagedWatched = {
   /** Intra-export correlation only. See TRAP 3. */
@@ -439,7 +431,8 @@ export function normalise(text: ArchiveText, options: NormaliseOptions = {}): No
     year: draft.year,
     filmUri: draft.filmUri,
     rating: draft.rating,
-    bucket: bucketFor(draft.rating),
+    // Never derived from the star. See the note above `StagedWatched`.
+    bucket: null,
     watchedOn: draft.watchedOn,
   }));
 

@@ -17,7 +17,6 @@
  */
 
 import type { Bucket } from '@/features/collection/score';
-import { bucketFor } from '@/features/import/letterboxd';
 
 import { CONTENT_WEIGHTS, TASTE_MATCH, YEAR_SCALE, type ModelConfig } from './config';
 import { libraryView, placeOverall, type LibraryView, type Opinion } from './geometry';
@@ -302,9 +301,18 @@ export function contentSimilarity(ds: Dataset, a: string, b: string): number {
   );
 }
 
-/** Where a Letterboxd star sits inside the bucket the import policy gives it. */
+/**
+ * Where a Letterboxd star would sit inside a bucket, **for this offline evaluation only**.
+ *
+ * The product never converts a star into a bingd bucket (founder, 2026-09-21; the importer's
+ * mapping was removed and the server refuses one, 20261018000100). This harness keeps its
+ * own copy of the old thresholds to measure what a star *could* predict, and writes nothing.
+ */
+const evaluationBucketFor = (rating: number): Bucket =>
+  rating >= 3.5 ? 'loved' : rating >= 2.5 ? 'fine' : 'not_for_me';
+
 export function starOpinion(rating: number): { bucket: Bucket; q: number } {
-  const bucket = bucketFor(rating) ?? 'fine';
+  const bucket = evaluationBucketFor(rating);
   const [top, bottom] = bucket === 'loved' ? [5, 3.5] : bucket === 'fine' ? [3, 2.5] : [2, 0.5];
   return { bucket, q: Math.min(1, Math.max(0, (top - rating) / (top - bottom))) };
 }

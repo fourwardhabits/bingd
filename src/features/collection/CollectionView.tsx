@@ -247,6 +247,7 @@ export function CollectionView({
             // numbers, which is what keeps it from looking like a scoreboard.
             score: item.score,
             bucket: item.bucket,
+            unfinished: item.unfinished,
           }))}
           onPressTile={(tile) => onPressItem(tile.id)}
           paddingTop={styles.wall.paddingTop}
@@ -277,6 +278,7 @@ export function CollectionView({
                   <ScoreBadge
                     score={item.score}
                     bucket={item.bucket}
+                    unfinished={item.unfinished}
                     onPress={() => onPressItem(item.mediaItemId)}
                   />
                 ) : undefined

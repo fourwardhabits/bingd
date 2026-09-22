@@ -27,6 +27,7 @@ import {
   type RankingCategory,
 } from '@/features/collection/use-collection';
 import { useTitleScore } from '@/features/collection/use-score';
+import { rankingStateOf } from '@/features/collection/ranking-state';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import {
   invalidateAfterCollectionChange,
@@ -836,6 +837,9 @@ export default function TitleScreen() {
    * anyway — the sheet resolves visibility from what is stored, not from which door was
    * used.
    */
+  // Ranked, unfinished (a bucket chosen here, comparisons never completed) or neither —
+  // the same `rankingStateOf` Search, Collection and list rows ask (founder, 2026-09-21).
+  const rankState = rankingStateOf({ ranked: Boolean(data.ranked), bucket: data.logged?.bucket });
   const noteText = (data.logged?.note ?? '').trim();
   const hasReview = Boolean(noteText) && data.logged?.note_visibility === 'public';
   const hasPrivateNote = Boolean(noteText) && data.logged?.note_visibility !== 'public';
@@ -1573,9 +1577,12 @@ export default function TitleScreen() {
                   rankable
                     ? {
                         ranked: Boolean(data.ranked),
+                        unfinished: rankState === 'unfinished',
                         accessibilityLabel: data.ranked
                           ? 'Ranked. Change or remove this.'
-                          : `Rank ${displayTitle ?? title.title}`,
+                          : rankState === 'unfinished'
+                            ? `Finish ranking ${displayTitle ?? title.title}`
+                            : `Rank ${displayTitle ?? title.title}`,
                         accessibilityHint: data.ranked
                           ? 'Opens rating and collection options'
                           : 'Opens the rating sheet',
@@ -1768,6 +1775,7 @@ export default function TitleScreen() {
                     // yet. `Score loading` rather than `Not ranked yet`, which would
                     // contradict the Ranked control a few points above it.
                     pending: Boolean(data.ranked) && score == null,
+                    unfinished: rankState === 'unfinished',
                     // Exactly where the Ranked control leads: a ranked title opens its
                     // options, an unranked one opens the log. The score has been a place
                     // to press to change a rating since 2026-09-06 and still is.

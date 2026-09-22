@@ -1976,6 +1976,22 @@ describe('the leading action is the reader’s own ranking state', () => {
     );
   });
 
+  /**
+   * Founder decision, 2026-09-21: a bucket chosen in bingd with the comparisons abandoned
+   * reads **Finish**, never the dashed Rank. (An import never has a bucket — a Letterboxd
+   * star is not a bingd opinion — so an untouched import stays on Rank, above.)
+   */
+  it('shows Finish, not Rank, for a title with a bucket chosen here and no placement', async () => {
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'fine' }];
+    tableRows.rankings = [];
+    const view = await search('inception');
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranking not finished. Finish ranking this title.')).toBeTruthy(),
+    );
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+  });
+
   it('leads an unlogged title with the ordinary log action', async () => {
     const view = await search('inception');
 

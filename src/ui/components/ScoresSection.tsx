@@ -25,6 +25,8 @@ export type ScoresSectionProps = {
      * and it is the wrong thing to say beside a control that says Ranked.
      */
     pending?: boolean;
+    /** A bucket chosen in bingd and no completed placement (`rankingStateOf`). */
+    unfinished?: boolean;
     /** Leads where the Ranked control leads: the menu, or the log. */
     onPress?: () => void;
   } | null;
@@ -59,6 +61,8 @@ const NO_FOLLOWING = 'No ratings yet';
 
 /** The reader's own empty state. A statement about them, so it is in the second person. */
 const NOT_RANKED = 'Not ranked yet';
+/** An opinion recorded, comparisons never completed — distinct from never started. */
+const NOT_FINISHED = 'Ranking not finished';
 
 /** Said while the ranking row is in hand and the derived number is not. */
 const SCORE_LOADING = 'Score loading';
@@ -245,7 +249,7 @@ export function ScoresSection({
                * are one now; see `Score`.
                */
               detail={null}
-              emptyLabel={you.pending ? SCORE_LOADING : NOT_RANKED}
+              emptyLabel={you.pending ? SCORE_LOADING : you.unfinished ? NOT_FINISHED : NOT_RANKED}
               onPress={you.onPress}
             />
           ) : null}
