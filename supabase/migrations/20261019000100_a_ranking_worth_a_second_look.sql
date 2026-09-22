@@ -343,7 +343,11 @@ as $$
     select e.pos,
            min(e.gap) filter (where e.side = 1) as gap_above,
            min(e.gap) filter (where e.side = 2) as gap_below,
-           array_agg(e.created_at) filter (where e.side = 3) as conflict_at
+           -- The latest contradiction only: every consumer asks "is there one newer than
+           -- the last confirmation?", which one max() answers. An array_agg here gave each
+           -- group a memory context and spilled the hash aggregate to disk at 2,500 dense
+           -- titles (101 -> 70 ms median, identical output; refine-rankings-t5.md §5a).
+           max(e.created_at) filter (where e.side = 3) as conflict_last
       from edges e
      group by e.pos
   )
@@ -358,12 +362,12 @@ as $$
          coalesce(pi.gap_below, r.band_lo + r.band_size - 1 - r.position)::integer,
          pi.gap_above is not null,
          pi.gap_below is not null,
-         -- Only contradictions newer than its last confirmation count: an unchanged
-         -- Refine after the contradicting answer is the reader settling it.
-         coalesce((
-           select count(*)::integer from unnest(pi.conflict_at) as ca(at)
-            where ld.confirmed_at is null or ca.at > ld.confirmed_at
-         ), 0),
+         -- Only a contradiction newer than its last confirmation counts: an unchanged
+         -- Refine after the contradicting answer is the reader settling it. 0 or 1 — a
+         -- flag, not a count; every reader tests `conflicts > 0`.
+         (case when pi.conflict_last is not null
+                and (ld.confirmed_at is null or pi.conflict_last > ld.confirmed_at)
+               then 1 else 0 end)::integer,
          ld.confirmed_at,
          ld.confirmed_size,
          coalesce(ld.last_adjustable, true),

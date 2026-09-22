@@ -225,7 +225,7 @@ const ALLOWED = {
   // Not anon, by public_scores' rule: the signed-out web pages render no activity.
   'feed_watch_scores(uuid[])': ['authenticated'],
 
-  // T5 Refine (20261013000100). Three, all own-account (`auth.uid()` and nothing else):
+  // T5 Refine (20261019000100). Three, all own-account (`auth.uid()` and nothing else):
   // a read of the caller's own candidates, an opening, and a snooze. The evidence record
   // (`_refine_support`), the seed and every helper are revoked: they take a user id, and a
   // client grant would make them a read of somebody else's comparison history.

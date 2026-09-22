@@ -4,7 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import { call, fire, newOp, raceContext } from './_shared.mjs';
 
 /**
- * Refine under two writers (T5, `20261013000100`).
+ * Refine under two writers (T5, `20261019000100`).
  *
  * Refine adds no lock of its own: `refine_start` takes `_lock_media` like every opening,
  * and the answers run through `rank_answer`, whose claim and category lock are already

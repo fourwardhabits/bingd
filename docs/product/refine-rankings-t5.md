@@ -1,7 +1,7 @@
 # T5 — Refine your rankings (as built)
 
 **Status:** built on `feat/refine-rankings-t5`, stacked on PR #196 (`integration/watch-history-lists`).
-Migration **`20261013000100`** is not applied anywhere. **`ranking.refine_enabled` ships
+Migration **`20261019000100`** is not applied anywhere. **`ranking.refine_enabled` ships
 `false`**, so nothing is reachable until an operator flips it.
 **Design:** [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md) §G, §H.
 This file records what was built, the exact rules, and where the build departs from the design.
@@ -192,9 +192,7 @@ it by giving the aggregate more memory.
 contradicting answer is newer than the last confirmation", which one `max()` answers. Only the internal
 `conflicts` column changes, from a count to 0/1. It is a two-line change.
 
-**Not applied now.** `20261013000100` is frozen while #196's head moves. It has not been applied
-anywhere, so B can be folded into it at restack without a second migration. That is the
-recommendation. It needs no function-level setting (C), which would add a knob and gain nothing over B.
+**Applied at restack (2026-09-21).** B is folded into `20261019000100` (renumbered from `20261013000100` when #196 froze at `b9b07c2`), which had never been applied anywhere, so no second migration was needed. C (a function-level `work_mem`) was not added: it gains nothing over B.
 
 **Why 50 ms is not worth chasing further.** After B, what remains is reading and joining every answer
 once, about 45 ms of scans, joins and the per-pair sort at 27,000 answers. Getting under it would need
@@ -202,7 +200,7 @@ a persisted evidence table, which the design rejects (§G.2: it would be stale a
 The call runs once per title refined, at most 30 a day. 2,500 ranked titles with 27,000 answers is
 also an extreme shape; no real account's size was checked for this note.
 
-**Patch B, to apply at restack** (in `_refine_support`):
+**Patch B, as applied** (in `_refine_support`):
 
 ```diff
 -           array_agg(e.created_at) filter (where e.side = 3) as conflict_at
@@ -262,7 +260,7 @@ also an extreme shape; no real account's size was checked for this note.
 - **Client ahead of the backend:** a backend without the function (`PGRST202`/`42883`) reads as
   `disabled`.
 - **Order, after #196 is on the target:**
-  1. Apply `20261013000100` with `db push`.
+  1. Apply `20261019000100` with `db push`.
   2. Publish the client.
   3. Flip the flag for the QA account's environment.
 

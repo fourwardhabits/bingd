@@ -76,7 +76,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
 | `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
 | `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
-| `refine_target_outcome` | a Refine target's session answered `placed` (T5, `20261013000100`) — one per finished title, never per answer | the ranker | `outcome` (`moved` / `unchanged` / `kept`), `reason`, `comparisons`, `medium` |
+| `refine_target_outcome` | a Refine target's session answered `placed` (T5, `20261019000100`) — one per finished title, never per answer | the ranker | `outcome` (`moved` / `unchanged` / `kept`), `reason`, `comparisons`, `medium` |
 | `refine_session_ended` | a Refine sitting ended: the checkpoint's Done (`done`), the server had nothing else worth a look (`exhausted`), or Close mid-round (`close`) | the ranker | `targets`, `moved`, `comparisons`, `ended_by`, `medium` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
 

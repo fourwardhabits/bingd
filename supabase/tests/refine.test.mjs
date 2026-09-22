@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * T5 — Refine your rankings (`20261013000100`, calibration epic §G, §H).
+ * T5 — Refine your rankings (`20261019000100`, calibration epic §G, §H).
  *
  * What this file has to prove, in the order the brief states it:
  *
@@ -237,7 +237,7 @@ describe('gating', () => {
     const { readFile } = await import('node:fs/promises');
     const sql = await readFile(
       new URL(
-        '../migrations/20261013000100_a_ranking_worth_a_second_look.sql',
+        '../migrations/20261019000100_a_ranking_worth_a_second_look.sql',
         import.meta.url,
       ),
       'utf8',

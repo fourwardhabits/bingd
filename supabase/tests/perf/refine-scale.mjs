@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Refine (T5, `20261013000100`) against a REAL PostgreSQL 17: how long selection takes,
+ * Refine (T5, `20261019000100`) against a REAL PostgreSQL 17: how long selection takes,
  * and whether choosing by evidence beats choosing at random.
  *
  *   node supabase/tests/perf/refine-scale.mjs                 # both parts

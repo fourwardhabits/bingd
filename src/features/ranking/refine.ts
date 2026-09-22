@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import type { PlacedMovement } from './session';
 
 /**
- * Refine your rankings (T5, `20261013000100`; calibration epic §G, §H).
+ * Refine your rankings (T5, `20261019000100`; calibration epic §G, §H).
  *
  * The server decides WHICH titles are worth a second look (`refine_candidates`, from the
  * reader's own pairwise evidence) and HOW each one is searched (a `refine` session from
@@ -67,7 +67,7 @@ const REASONS = new Set<RefineReason>([
  * The next targets, or why there are none.
  *
  * **A backend without the function reads as `disabled`, not as an error.** The client can
- * ship ahead of the migration (an OTA before `20261013000100` is applied), and on that
+ * ship ahead of the migration (an OTA before `20261019000100` is applied), and on that
  * backend the right behaviour is the one the flag gives: no entry, nothing to open.
  */
 export async function refineCandidates(

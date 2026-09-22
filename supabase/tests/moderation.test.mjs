@@ -489,7 +489,7 @@ describe('the guard is wired in, not merely present', () => {
     'my_lists_for_title',
     'profile_lists',
     /**
-     * 20261013000100 (T5). `stable`, writes nothing, answers only for `auth.uid()`: a
+     * 20261019000100 (T5). `stable`, writes nothing, answers only for `auth.uid()`: a
      * suspended account can see which of its own titles Refine would offer, and nothing
      * more. Every act it leads to — `refine_start`, `refine_snooze`, and the `rank_*` steps —
      * calls the guard, which is why none of them is here.
