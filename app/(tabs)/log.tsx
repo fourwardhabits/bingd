@@ -11,7 +11,7 @@ import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collecti
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useMyScores, type MyScore } from '@/features/collection/use-score';
 import { TitleRowActions } from '@/features/collection/TitleRowActions';
-import { rankingStateOf } from '@/features/collection/ranking-state';
+import { rankingStateOf, resumeSubject } from '@/features/collection/ranking-state';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
@@ -164,32 +164,28 @@ export default function LogScreen() {
    * on the collection key the Collection tab and For You both populate. Neither carries
    * artwork — a search row needs a number and a yes/no, not a second copy of the
    * collection.
-   *
-   * `watched` is *logged*, ranked or not. The difference between the two sets is exactly
-   * the watched-but-unranked state, which is the one the dashed `Rank` badge is for.
    */
   const myScores = useMyScores(profile.id);
   const logged = useLoggedCollection(profile.id);
   const scores = useMemo(() => myScores.data ?? new Map<string, MyScore>(), [myScores.data]);
-  const watchedIds = useMemo(
-    () => new Set((logged.data?.entries ?? []).map((entry) => entry.mediaItemId)),
-    [logged.data],
-  );
   /**
-   * A bucket chosen in bingd with no completed placement: **Finish**, not Rank
-   * (`rankingStateOf`). An import never has a bucket (20261018000100), so an imported,
-   * untouched title stays on Rank.
+   * The bucket of every unfinished native placement (`rankingStateOf`), by media id.
+   *
+   * **Internal only** (founder, final UI simplification 2026-09-21): the row draws the
+   * same `+` for these as for a title never touched. What differs is the tap — it goes
+   * straight back into the comparisons instead of asking "How was it?" again. An import
+   * never has a bucket (20261018000100), so it is never in here.
    */
-  const unfinishedIds = useMemo(
+  const unfinishedBuckets = useMemo(
     () =>
-      new Set(
+      new Map(
         (logged.data?.entries ?? [])
           .filter(
             (entry) =>
               rankingStateOf({ ranked: scores.has(entry.mediaItemId), bucket: entry.bucket }) ===
               'unfinished',
           )
-          .map((entry) => entry.mediaItemId),
+          .map((entry) => [entry.mediaItemId, entry.bucket as string] as const),
       ),
     [logged.data, scores],
   );
@@ -402,13 +398,24 @@ export default function LogScreen() {
       return;
     }
 
-    setLogging({
+    const title: LoggableTitle = {
       id: result.id,
       title: result.title,
       year: yearOf(result.release_date),
       posterUri: posterUri(result.poster_path, 'card'),
       kind: result.kind === 'season' ? 'season' : 'movie',
-    });
+    };
+    // An unfinished native placement resumes its session — `rank_start` restores the
+    // comparison and every answer — rather than starting over from "How was it?".
+    const bucket = unfinishedBuckets.get(result.id);
+    const resume = bucket ? resumeSubject(title, bucket) : null;
+    if (resume) {
+      setRanking(resume);
+      setRanked(title);
+      setPlacement(null);
+      return;
+    }
+    setLogging(title);
   };
 
   /**
@@ -575,8 +582,6 @@ export default function LogScreen() {
           onOpenLog={openLog}
           saved={saved}
           scores={scores}
-          watched={watchedIds}
-          unfinished={unfinishedIds}
           seriesState={seriesState}
           watchlistBusy={watchlistBusy}
           onToggleWatchlist={toggleWatchlist}
@@ -689,8 +694,6 @@ function Results({
   onOpenLog,
   saved,
   scores,
-  watched,
-  unfinished,
   seriesState,
   watchlistBusy,
   onToggleWatchlist,
@@ -739,10 +742,6 @@ function Results({
   saved: Set<string>;
   /** Every score this reader has given, by media id (`useMyScores`). */
   scores: Map<string, MyScore>;
-  /** Media ids this reader has logged, ranked or not — the watched-but-unranked case. */
-  watched: Set<string>;
-  /** Titles with a bucket chosen here and no completed placement. */
-  unfinished: Set<string>;
   /** Season activity per series id, for the series rows (`series-state.ts`). */
   seriesState: Map<string, SeriesChildState>;
   /** The id of the title whose watchlist write is in flight, or null. */
@@ -1140,7 +1139,6 @@ function Results({
           const title = item.result;
           // The reader's own state for this title, which is what the leading control is.
           const myScore = scores.get(title.id) ?? null;
-          const isWatched = watched.has(title.id);
           return (
             // Stale dims only what is stale — the title results lagging a beat behind
             // the keystroke, kept legible rather than blinking away. The person rows
@@ -1186,23 +1184,18 @@ function Results({
                  * leave. Ranking is what this app is for, so the ranking control leads and
                  * saving-for-later follows it.
                  *
-                 * **The leading control is the reader's own state, not a generic `+`.**
-                 * Three states, and each is the honest one:
+                 * **The leading control is ranked or not** (founder, final UI
+                 * simplification 2026-09-21): their score, in the app's one score
+                 * treatment, or the canonical `+` — the same `+` for a title never touched,
+                 * one watched or imported and never ranked, and a ranking left unfinished.
                  *
-                 *   ranked            their score, in the app's one score treatment. A
-                 *                     search row that showed a bare `+` over a title they
-                 *                     have already rated 9.0 was throwing away the single
-                 *                     most useful thing bingd. knows about them.
-                 *   watched, unranked the dashed `Rank` ring — the same badge the
-                 *                     collection draws for exactly this state.
-                 *   neither           `+`, the canonical log entry, unchanged.
-                 *
-                 * All three lead to the **same** `LogSheet` this screen already opened.
+                 * Every tap leads to the **same** `LogSheet` this screen already opened,
+                 * except an unfinished placement, which resumes its own session (`openLog`).
                  * There is no Search-specific ranking path: the sheet knows how to open a
                  * ranked title for a rebucket or a rerank, and inventing a second route
                  * into ranking is how two flows come to disagree about what a re-rank is.
                  *
-                 * **A series gets no score and no Rank ring** — it cannot be ranked
+                 * **A series gets no score** — it cannot be ranked
                  * (PRD §10), so either badge there would be a control lying about what it
                  * does. It keeps the `+`, which is not a ranking claim: it opens the
                  * season picker, and the season is the rankable unit. Removing it would
@@ -1218,8 +1211,6 @@ function Results({
                     name={title.title}
                     kind={title.kind === 'series' ? 'series' : title.kind === 'season' ? 'season' : 'movie'}
                     score={myScore}
-                    watched={isWatched}
-                    unfinished={unfinished.has(title.id)}
                     saved={saved.has(title.id)}
                     busy={watchlistBusy === title.id}
                     onRank={() => onOpenLog(title)}

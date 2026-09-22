@@ -1966,30 +1966,46 @@ describe('the leading action is the reader’s own ranking state', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
   });
 
-  it('shows the dashed Rank badge for a title watched but never ranked', async () => {
+  /**
+   * **Binary on the row, three states underneath** (founder, final UI simplification
+   * 2026-09-21). A title watched or imported and never ranked, and a ranking left
+   * unfinished, draw the same `+` as a title never touched — no dashed ring, no Finish.
+   * What differs is the tap: the ordinary log sheet, or straight back into the session.
+   */
+  it('draws the ordinary + for a title watched or imported and never ranked, and logs it', async () => {
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: null }];
     tableRows.rankings = [];
     const view = await search('inception');
 
-    await waitFor(() =>
-      expect(view.getByLabelText('Not ranked. Rank this title.')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+    expect(view.queryByLabelText(/Finish ranking/)).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start')).toHaveLength(0);
   });
 
-  /**
-   * Founder decision, 2026-09-21: a bucket chosen in bingd with the comparisons abandoned
-   * reads **Finish**, never the dashed Rank. (An import never has a bucket — a Letterboxd
-   * star is not a bingd opinion — so an untouched import stays on Rank, above.)
-   */
-  it('shows Finish, not Rank, for a title with a bucket chosen here and no placement', async () => {
+  it('draws the same + for an unfinished ranking, and resumes it instead of asking again', async () => {
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'fine' }];
     tableRows.rankings = [];
     const view = await search('inception');
 
-    await waitFor(() =>
-      expect(view.getByLabelText('Ranking not finished. Finish ranking this title.')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
+    expect(view.queryByLabelText(/Finish ranking/)).toBeNull();
     expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+    // rank_start in the bucket already chosen — the server resumes that session, with its
+    // answers, and never opens a second — and no "How was it?".
+    await waitFor(() =>
+      expect(mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start')).toHaveLength(1),
+    );
+    expect(mockRpc.mock.calls.find(([fn]) => fn === 'rank_start')?.[1]).toMatchObject({
+      p_media_item_id: 'film-1',
+      p_bucket: 'fine',
+    });
+    expect(view.queryByText('How was it?')).toBeNull();
   });
 
   it('leads an unlogged title with the ordinary log action', async () => {

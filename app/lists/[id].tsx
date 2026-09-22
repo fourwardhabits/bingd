@@ -25,7 +25,7 @@ import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
-import { rankingStateOf } from '@/features/collection/ranking-state';
+import { rankingStateOf, resumeSubject } from '@/features/collection/ranking-state';
 import { useLoggedCollection } from '@/features/collection/use-collection';
 import { useMyScores } from '@/features/collection/use-score';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
@@ -152,7 +152,8 @@ export default function ListScreen() {
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const celebrate = useCelebrationHandoff();
   const myScores = useMyScores(profile.id);
-  // The reader's own buckets, for the Finish state (the same read Search uses).
+  // The reader's own buckets, so a `+` on an unfinished placement resumes it (the same
+  // read Search uses). Never drawn: the row is ranked or not.
   const logged = useLoggedCollection(profile.id);
   const bucketOf = useMemo(
     () => new Map((logged.data?.entries ?? []).map((entry) => [entry.mediaItemId, entry.bucket])),
@@ -432,13 +433,28 @@ export default function ListScreen() {
       router.push(`/title/${item.mediaItemId}`);
       return;
     }
-    setLogging({
+    const title: LoggableTitle = {
       id: item.mediaItemId,
       title: item.name,
       year: item.year,
       posterUri: item.posterUri,
       kind: item.kind,
+    };
+    // An unfinished native placement goes back into its own session — `rank_start`
+    // restores the comparison and the answers — not to "How was it?" again.
+    const bucket = bucketOf.get(item.mediaItemId);
+    const state = rankingStateOf({
+      ranked: Boolean(myScores.data?.has(item.mediaItemId)),
+      bucket,
     });
+    const resume = state === 'unfinished' && bucket ? resumeSubject(title, bucket) : null;
+    if (resume) {
+      setRanking(resume);
+      setRanked(title);
+      setPlacement(null);
+      return;
+    }
+    setLogging(title);
   };
 
   const endLog = () => {
@@ -701,12 +717,6 @@ export default function ListScreen() {
                       if (drag === null) router.push(`/title/${item.mediaItemId}`);
                     }}
                     score={myScores.data?.get(item.mediaItemId) ?? null}
-                    unfinished={
-                      rankingStateOf({
-                        ranked: Boolean(myScores.data?.has(item.mediaItemId)),
-                        bucket: bucketOf.get(item.mediaItemId),
-                      }) === 'unfinished'
-                    }
                     onRank={() => openLog(item)}
                     onToggleWatchlist={() =>
                       void toggleWatchlist(item.mediaItemId, item.watchlisted === true)

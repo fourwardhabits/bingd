@@ -236,6 +236,23 @@ export function RankingSheet({
   );
 }
 
+/**
+ * **A first placement left before the end is kept, so Rank can resume it** (founder, final
+ * UI simplification 2026-09-21).
+ *
+ * Closing a first placement (`mode` absent or `start`) leaves its `ranking_sessions` row:
+ * the title is then an unfinished native placement, and its Rank / `+` goes back into this
+ * session — `rank_start` resumes the same-bucket session with the comparison on screen and
+ * every answer, and never opens a second one. A different bucket restarts it server-side.
+ *
+ * A re-rank, a rebucket or a re-check is still cancelled on close: those sit over a
+ * placement that already exists, and leaving one means *keep what I had*, not *remember
+ * where I was*.
+ */
+function keepsSession(subject: Pick<RankingSubject, 'mode'>): boolean {
+  return subject.mode === undefined || subject.mode === 'start';
+}
+
 /** A dismissing sheet answers nothing. */
 const noopClose = () => {};
 
@@ -636,10 +653,9 @@ function Session({
       }
 
       // Dismissed while the session was still opening, so nothing on screen ever learned
-      // its id. Cancelling it here is the only chance: leave it and the next rank_start
-      // for this title resumes it mid-search, with no explanation for why the user is
-      // being asked again.
-      if (next.state === 'comparing') void rankCancel(next.sessionId);
+      // its id. A first placement keeps it — it may be a resumed session carrying answers
+      // (`keepsSession`); a re-rank's is cancelled, or the next open would resume it.
+      if (next.state === 'comparing' && !keepsSession(subject)) void rankCancel(next.sessionId);
     });
 
     return () => {
@@ -686,7 +702,7 @@ function Session({
     openSession.current = null;
     // Already gone reads as success, so this is safe when the server finalised the session
     // under a request that was still in flight.
-    if (sessionId) await rankCancel(sessionId);
+    if (sessionId && !keepsSession(subject)) await rankCancel(sessionId);
     onClose();
   };
 

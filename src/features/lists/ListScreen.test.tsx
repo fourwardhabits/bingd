@@ -681,10 +681,10 @@ describe('a list row\'s trailing actions', () => {
   });
 
   /**
-   * Founder decision, 2026-09-21: a bucket chosen in bingd with no placement reads
-   * **Finish**; a title seen with no bucket — an untouched import — reads **Rank**.
+   * Founder, final UI simplification 2026-09-21: a bucket chosen here with no placement and
+   * a seen title with no bucket (an untouched import) both draw the ordinary `+`.
    */
-  it('shows Finish for a bucket chosen here and Rank for a seen title with no bucket', async () => {
+  it('draws the same + for an unfinished ranking and a seen title with no bucket', async () => {
     mockItems = [item('a', { viewer_seen: true }), item('b', { position: 2, ordinal: 2, viewer_seen: true })];
     mockTables.user_media = [
       { media_item_id: 'a', bucket: 'fine', watched_on: null, created_at: '2026-09-01T00:00:00Z' },
@@ -692,10 +692,10 @@ describe('a list row\'s trailing actions', () => {
     ];
     const screen = await open();
 
-    await waitFor(() =>
-      expect(screen.getAllByLabelText('Ranking not finished. Finish ranking this title.')).toHaveLength(1),
-    );
-    expect(screen.getAllByLabelText('Not ranked. Rank this title.')).toHaveLength(1);
+    await waitFor(() => expect(screen.getByLabelText('Log Film a')).toBeTruthy());
+    expect(screen.getByLabelText('Log Film b')).toBeTruthy();
+    expect(screen.queryByLabelText(/Finish ranking/)).toBeNull();
+    expect(screen.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
   });
 
   it('shows Log and the Watchlist on a title the reader has not logged', async () => {

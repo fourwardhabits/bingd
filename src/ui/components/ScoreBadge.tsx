@@ -52,13 +52,6 @@ export type ScoreBadgeProps = {
   /** Omit for a title that is logged but not yet compared. */
   score?: number | null;
   /**
-   * An opinion with no placement yet — a bucket but no completed ranking (a Letterboxd
-   * star rating, or comparisons abandoned). Only read when `score` is absent: draws
-   * **Finish** instead of the never-started **Rank** (founder decision, 2026-09-21;
-   * `rankingStateOf`).
-   */
-  unfinished?: boolean;
-  /**
    * Carried for the spoken label only. It no longer decides the colour — see the
    * note below — but "8.7, I liked it" is still the useful thing to hear, and the
    * bands are closed so the caller usually has it anyway.
@@ -113,16 +106,11 @@ export function ScoreBadge({
   size = 'md',
   variant = 'filled',
   onPress,
-  unfinished = false,
 }: ScoreBadgeProps) {
   const { diameter, fontSize } = metrics(size);
 
   if (score == null) {
-    return unfinished ? (
-      <FinishBadge diameter={diameter} onPress={onPress} />
-    ) : (
-      <UnrankedBadge diameter={diameter} onPress={onPress} />
-    );
+    return <UnrankedBadge diameter={diameter} onPress={onPress} />;
   }
 
   const value = formatScore(score);
@@ -183,48 +171,6 @@ export function ScoreBadge({
  * yet, and none of those say that (PRD §26.4). A dashed ring reads as an empty
  * slot, and the word makes it an invitation.
  */
-/**
- * **Finish** — an opinion is recorded but the ranking was never completed.
- *
- * Distinct from both neighbours at a glance: not the grey dashed circle that means "never
- * started", and not the filled Maroon circle that means "placed". A Maroon *outline* pill,
- * sized to the same height as the circles so a row does not move between states, with the
- * word the act needs. The stroke is heavier than a hairline because a hairline of Maroon on
- * Paper measures under 3:1; the word itself is the Maroon action tone.
- */
-function FinishBadge({ diameter, onPress }: { diameter: number; onPress?: () => void }) {
-  const content = (
-    <View
-      testID="finish-badge"
-      style={[styles.finish, { minWidth: diameter, height: diameter, borderRadius: diameter / 2 }]}
-    >
-      <Text variant="caption" tone="action" allowFontScaling={false}>
-        Finish
-      </Text>
-    </View>
-  );
-
-  if (!onPress) {
-    return (
-      <View accessible accessibilityLabel="Ranking not finished">
-        {content}
-      </View>
-    );
-  }
-
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel="Ranking not finished. Finish ranking this title."
-      hitSlop={theme.space[2]}
-      style={({ pressed }) => pressed && styles.pressed}
-    >
-      {content}
-    </Pressable>
-  );
-}
-
 function UnrankedBadge({ diameter, onPress }: { diameter: number; onPress?: () => void }) {
   const content = (
     <View style={[styles.circle, styles.unranked, { width: diameter, height: diameter }]}>
@@ -407,14 +353,6 @@ const styles = StyleSheet.create({
    */
   muted: { backgroundColor: theme.semantic.scoreEmpty },
   pressed: { opacity: 0.7 },
-  finish: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: theme.space[2],
-    borderWidth: 1.5,
-    borderColor: theme.semantic.action,
-    backgroundColor: theme.surface.raised,
-  },
 });
 
 /**

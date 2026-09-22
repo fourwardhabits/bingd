@@ -915,22 +915,21 @@ describe('a Collection row', () => {
 });
 
 /**
- * Founder decision, 2026-09-21: on the Collection wall a bucket chosen in bingd with no
- * placement carries a **Finish** chip; a seen title with no bucket (an untouched import)
- * carries none, and a ranked one carries its score.
+ * Founder, final UI simplification 2026-09-21: on the Collection wall an unfinished
+ * ranking and an untouched import look the same — no chip, no "ranking not finished" —
+ * and only a ranked title carries its score.
  */
 describe('the ranking state on the Collection wall', () => {
-  it('chips only the bucketed, unplaced title with Finish', async () => {
+  it('draws an unfinished ranking exactly like an unranked import', async () => {
     mockTables.user_media = [
       { ...watched('abandoned', 'movie'), bucket: 'fine' },
       { ...watched('imported', 'movie'), bucket: null },
     ];
     const view = await open();
 
-    await waitFor(() =>
-      expect(view.queryAllByTestId('tile-finish-chip', { includeHiddenElements: true })).toHaveLength(1),
-    );
-    expect(view.getByLabelText(/Film abandoned.*ranking not finished/)).toBeTruthy();
-    expect(view.queryByLabelText(/Film imported.*ranking not finished/)).toBeNull();
+    await waitFor(() => expect(view.getByLabelText(/^Film abandoned/)).toBeTruthy());
+    expect(view.getByLabelText(/^Film imported/)).toBeTruthy();
+    expect(view.queryByLabelText(/ranking not finished/)).toBeNull();
+    expect(view.queryAllByText('Finish', { includeHiddenElements: true })).toHaveLength(0);
   });
 });

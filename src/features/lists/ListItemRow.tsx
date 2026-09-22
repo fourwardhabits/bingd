@@ -22,9 +22,10 @@ export type ListItemRowProps = {
   number?: number;
   /** The reader's own score, when they have this title ranked (`useMyScores`). */
   score?: { score: number; bucket: Bucket } | null;
-  /** A bucket chosen in bingd, no completed placement: **Finish** (`rankingStateOf`). */
-  unfinished?: boolean;
-  /** Opens the ordinary log sheet — the score, the Rank ring and the `+` all do. */
+  /**
+   * The score or the `+`. The screen decides what it does: an unfinished native placement
+   * resumes its session, anything else opens the ordinary log sheet.
+   */
   onRank?: () => void;
   /** Toggles the reader's own Watchlist. */
   onToggleWatchlist?: () => void;
@@ -63,7 +64,6 @@ export function ListItemRow({
   onPress,
   number,
   score = null,
-  unfinished = false,
   onRank,
   onToggleWatchlist,
   busy = false,
@@ -129,8 +129,6 @@ export function ListItemRow({
           name={item.name}
           kind={item.kind}
           score={score}
-          watched={item.seen === true}
-          unfinished={unfinished}
           saved={item.watchlisted}
           busy={busy}
           onRank={onRank}

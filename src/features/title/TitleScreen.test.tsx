@@ -3454,10 +3454,10 @@ describe('Add to list', () => {
 });
 
 /**
- * **Three ranking states on the title page** (founder decision, 2026-09-21): a completed
- * placement shows the score; a bucket chosen in bingd with the comparisons abandoned reads
- * **Finish ranking**; a title seen with no bucket — including an untouched import, whose
- * Letterboxd star is never a bucket — reads **Rank**.
+ * **Rank or Ranked on the title page** (founder, final UI simplification 2026-09-21): an
+ * untouched title, an untouched import and an unfinished ranking all read the ordinary
+ * **Rank** — never "Finish ranking" or "Ranking not finished". The tap is what knows the
+ * difference: the log sheet, or straight back into the unfinished session.
  */
 describe('the ranking state on the title page', () => {
   const logged = (bucket: string | null) => {
@@ -3475,22 +3475,33 @@ describe('the ranking state on the title page', () => {
     ];
   };
 
-  it('reads Finish ranking for a bucket chosen here with no placement', async () => {
+  const rankStarts = () => mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start');
+
+  it('reads Rank for an unfinished ranking, and Rank resumes it rather than asking again', async () => {
     logged('fine');
     const view = await open();
 
-    await waitFor(() => expect(view.getByTestId('title-action-finish')).toBeTruthy());
-    expect(view.getByText('Finish ranking')).toBeTruthy();
-    expect(view.getByText('Ranking not finished')).toBeTruthy();
-    expect(view.queryByTestId('title-action-rank')).toBeNull();
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
+    expect(view.queryByText('Finish ranking')).toBeNull();
+    expect(view.queryByText('Ranking not finished')).toBeNull();
+
+    await fireEvent.press(view.getByTestId('title-action-rank'));
+    await waitFor(() => expect(rankStarts()).toHaveLength(1));
+    expect(rankStarts()[0][1]).toMatchObject({ p_media_item_id: 'film-1', p_bucket: 'fine' });
+    expect(view.queryByText('How was it?')).toBeNull();
   });
 
-  it('reads Rank for a seen title with no bucket, such as an untouched import', async () => {
+  it('reads Rank for a seen title with no bucket, such as an untouched import, and logs it', async () => {
     logged(null);
     const view = await open();
 
     await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
     expect(view.getByText('Not ranked yet')).toBeTruthy();
     expect(view.queryByText('Finish ranking')).toBeNull();
+
+    await fireEvent.press(view.getByTestId('title-action-rank'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(rankStarts()).toHaveLength(0);
   });
 });

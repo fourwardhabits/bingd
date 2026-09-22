@@ -742,10 +742,10 @@ arithmetic is one hook, `useHeroReveal`, and the artwork one function, `heroArtw
 its first title's artwork.
 
 **Compact title rows share one state-aware trailing contract** (`TitleRowActions`).
-Ranked → the reader's own score circle, alone. Not ranked → the Rank/log action (the dashed
-Rank ring when logged but unranked, `+` when not logged) and the one-tap Watchlist. A series
-gets only `+`. Share is not a row action in browse, search or list contexts; the title page
-carries it. Search and list rows use the same component, so they cannot disagree.
+Ranked → the reader's own score circle, alone. Not ranked → the Maroon `+` and the one-tap
+Watchlist, whatever the reason it is not ranked. A series gets only `+`. Share is not a row
+action in browse, search or list contexts; the title page carries it. Search, list and
+Collection rows use the same component, so they cannot disagree.
 
 **Primary/secondary action pairs sit side by side** (`ProfileActions` is the reference):
 two equal halves in one row, the secondary act leading, the Maroon fill on the trailing
@@ -773,11 +773,15 @@ Collection, Search and list rows, all refreshed by one path
 
 **Every first load shows the loading language.** A screen whose header is up while its first request is pending draws the standard skeleton (`SkeletonRow` / `SkeletonTile`), never an empty area.
 
-**Three ranking states, never two** (`rankingStateOf`). A placed title shows its score
-(filled Maroon circle); a bucket chosen in bingd with the comparisons never completed shows
-**Finish** (compact: a Maroon outline pill; title page: *Finish ranking*, *Ranking not
-finished*); anything else, including an untouched import, shows **Rank** (grey dashed circle,
-or `+` when not logged). A Letterboxd star is never a bucket, so an import never reads Finish.
+**Two ranking states on screen, three underneath** (`rankingStateOf` → `rankingPresentationOf`).
+A placed title shows its score (filled Maroon circle). Everything else — never touched,
+watched or imported and never ranked, or a ranking left unfinished — shows the ordinary
+unranked treatment: `+` on a compact row, **Rank** on the title page. No dashed ring, no
+Finish pill, no *Ranking not finished*. The internal state decides only what the tap does:
+an unfinished native placement resumes its session (`resumeSubject`; `rank_start` restores
+the comparison and the answers and never opens a second session), anything else opens the log
+sheet. Closing a first placement keeps its session for that resume; closing a re-rank cancels
+it. A Letterboxd star is never a bucket, so an import is always plain unranked.
 
 **Row edit affordances are small text** (`Edit`, optionally with a small pencil), never a
 large bare glyph. Destructive row actions on an owned list are revealed by a horizontal

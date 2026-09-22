@@ -1,30 +1,55 @@
 import { renderWithProviders } from '@/test-utils/render';
 
-import { rankingStateOf } from './ranking-state';
+import { rankingPresentationOf, rankingStateOf, resumeSubject } from './ranking-state';
 import { TitleRowActions } from './TitleRowActions';
 import { watchedItems } from './watched-rows';
 import type { LoggedEntry } from './use-collection';
 
 /**
- * **Three ranking states that must stay distinct** (founder decision, 2026-09-21):
+ * **Three internal states, two on screen** (founder, final UI simplification 2026-09-21):
  *
  *   ranked      a completed placement           → the personal score
- *   unfinished  a bucket chosen in bingd, never  → Finish
- *               placed (comparisons abandoned)
- *   unranked    nothing yet — including an      → Rank
+ *   unfinished  a bucket chosen in bingd, never  → the ordinary unranked treatment,
+ *               placed (comparisons abandoned)     whose tap resumes the session
+ *   unranked    nothing yet — including an      → the ordinary unranked treatment
  *               imported title, whose Letterboxd
  *               star is never a bucket
  *
- * Search, Collection, list rows and the title page each have their own suite asserting
- * the same three; this file pins the shared definition and the compact row treatment.
+ * Search, Collection, list rows and the title page each have their own suite; this file
+ * pins the shared definition and the compact row's four cases.
  */
 describe('rankingStateOf', () => {
-  it('distinguishes the three states', () => {
+  it('keeps the three internal states distinct', () => {
     expect(rankingStateOf({ ranked: true, bucket: 'fine' })).toBe('ranked');
     expect(rankingStateOf({ ranked: true, bucket: null })).toBe('ranked');
     expect(rankingStateOf({ ranked: false, bucket: 'loved' })).toBe('unfinished');
     expect(rankingStateOf({ ranked: false, bucket: null })).toBe('unranked');
     expect(rankingStateOf({ ranked: false, bucket: undefined })).toBe('unranked');
+  });
+
+  it('collapses them to two for the screen', () => {
+    expect(rankingPresentationOf('ranked')).toBe('ranked');
+    expect(rankingPresentationOf('unfinished')).toBe('unranked');
+    expect(rankingPresentationOf('unranked')).toBe('unranked');
+  });
+});
+
+describe('resumeSubject', () => {
+  const title = { id: 'm1', title: 'Heat', year: 1995, posterUri: null, kind: 'movie' as const };
+
+  it('goes back into the bucket already chosen, as a first placement', () => {
+    expect(resumeSubject(title, 'not_for_me')).toEqual({
+      id: 'm1',
+      title: 'Heat',
+      bucket: 'notForMe',
+      posterUri: null,
+      kind: 'movie',
+      mode: 'start',
+    });
+  });
+
+  it('refuses a bucket it does not know', () => {
+    expect(resumeSubject(title, 'nonsense')).toBeNull();
   });
 });
 
@@ -43,7 +68,7 @@ const entry = (id: string, bucket: LoggedEntry['bucket']): LoggedEntry => ({
   addedAt: null,
 });
 
-describe('Collection rows carry the same state', () => {
+describe('Collection rows carry the internal state', () => {
   it('marks a bucketed, unplaced title unfinished and an untouched import unranked', () => {
     const items = watchedItems([], [entry('abandoned', 'fine'), entry('imported', null)], 'movies');
     const byId = new Map(items.map((item) => [item.mediaItemId, item]));
@@ -52,36 +77,41 @@ describe('Collection rows carry the same state', () => {
   });
 });
 
-const row = (props: Partial<Parameters<typeof TitleRowActions>[0]>) =>
+/**
+ * The row takes only a score: the caller never tells it whether a title is untouched,
+ * imported or unfinished, so it cannot draw them differently. The three unranked cases
+ * are the same props, which is the point.
+ */
+const row = (score: { score: number; bucket: 'loved' } | null) =>
   renderWithProviders(
     <TitleRowActions
       name="Heat"
       kind="movie"
-      score={null}
-      watched
+      score={score}
       saved={false}
       onRank={() => {}}
       onToggleWatchlist={() => {}}
-      {...props}
     />,
   );
 
-describe('the compact row draws three distinct treatments', () => {
-  it('ranked: the score', async () => {
-    const view = await row({ score: { score: 8.4, bucket: 'loved' } });
-    view.getByLabelText(/^8\.4 out of 10/);
-    expect(view.queryByTestId('finish-badge', { includeHiddenElements: true })).toBeNull();
-  });
-
-  it('unfinished: Finish, never the dashed Rank', async () => {
-    const view = await row({ unfinished: true });
-    view.getByLabelText('Ranking not finished. Finish ranking this title.');
+describe('the compact row is ranked or not', () => {
+  it.each([
+    ['untouched', null],
+    ['watched or imported, never ranked', null],
+    ['an unfinished native placement', null],
+  ])('%s: the ordinary +', async (_case, score) => {
+    const view = await row(score);
+    view.getByLabelText('Log Heat');
+    view.getByLabelText('Add Heat to Watchlist');
     expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+    expect(view.queryByLabelText(/Finish ranking|Ranking not finished/)).toBeNull();
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
   });
 
-  it('an untouched import: Rank, never Finish', async () => {
-    const view = await row({ unfinished: false });
-    view.getByLabelText('Not ranked. Rank this title.');
-    expect(view.queryByTestId('finish-badge', { includeHiddenElements: true })).toBeNull();
+  it('ranked: the score, and nothing else', async () => {
+    const view = await row({ score: 8.4, bucket: 'loved' });
+    view.getByLabelText(/^8\.4 out of 10/);
+    expect(view.queryByLabelText('Log Heat')).toBeNull();
+    expect(view.queryByLabelText('Add Heat to Watchlist')).toBeNull();
   });
 });
