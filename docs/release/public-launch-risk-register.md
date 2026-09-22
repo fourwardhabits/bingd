@@ -582,7 +582,13 @@ Real, known, and **not** worth stopping the beta for. Recorded so they are not r
 as if new, and not promoted without new evidence.
 
 - **A foreground OTA update can reload the app immediately** after it returns active, which
-  may discard local UI state the reader was in the middle of.
+  may discard local UI state the reader was in the middle of. **Promoted and narrowed
+  2026-09-21:** this was not minor before sign-in. On a fresh store install it reloaded on
+  the first return from Mail, discarding the code screen. `isSafeToReload` now holds the
+  reload while signed out, while creating a profile and during the first-run steps. It is
+  JavaScript, but it protects a *fresh* install only once it is embedded in a store binary
+  (`src/lib/updates.ts`, `safe-update-runbook.md` §3). Signed-in reloads are unchanged and
+  stay a minor.
 - **Watch date has a narrow cross-device race.** The log sheet stamps a default date from a
   settled read; a date recorded on another device inside that window needs a server-side
   conditional write to close, which the beta accepts.
