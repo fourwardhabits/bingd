@@ -571,7 +571,7 @@ history reconstruction rather than a fresh watch, so it is never in the first-wa
 one fact is tolerable where deleting the first would cut every saved query and chart
 written against it in two.
 
-`skips` (2026-09-07) is how many *Too tough* presses the server accepted during the
+`skips` (2026-09-07) is how many *Too tough* presses (labelled *Can't decide* since 2026-09-22) the server accepted during the
 session. It is counted on the client from the answered `rank_skip` calls, because
 `_rank_finalize` returns no skip count; an Undo after a skip does not subtract, so it is
 the number of times the control was **used** rather than the net. It is not a measure of
