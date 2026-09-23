@@ -169,8 +169,14 @@ const resolves = (byName, call) =>
   );
 
 /**
- * The last migration on `origin/main`, which is the schema production runs today.
- * Everything after it is the Watch History + Lists tranche under test.
+ * The first migration **production has not run**. Everything from here on is the tranche
+ * under test, and `before_` is therefore the schema of the live database.
+ *
+ * **It is no longer the same thing as "the last migration on `origin/main`", and that is
+ * deliberate** (2026-09-23). Watch History + Lists merged to `main` the night before its
+ * production cutover, so for one window `main`'s client calls RPCs the live database does
+ * not have yet. That window is exactly what this file exists to measure, and the marker
+ * moves when the migrations are applied — not when they are merged.
  */
 const FIRST_NEW = '20261003000100_a_watch_that_knows_when_it_was.sql';
 
@@ -220,19 +226,50 @@ describe('installed clients against the merged schema', () => {
     );
   });
 
-  it('the parser resolves nearly every call on main, so the differential means something', async () => {
-    // A differential over a parser that resolves nothing would pass vacuously. This
-    // pins that main's own client resolves against main's own schema for the great
-    // majority of its calls — the few that do not are parser limits, stated here.
+  it('the parser resolves nearly every call the live schema defines', async () => {
+    /**
+     * A differential over a parser that resolves nothing would pass vacuously, so the
+     * `was` side has to be known good. What is measured is the parser, and the parser's
+     * job is reading argument lists — so the population is the calls whose function the
+     * live schema **has**. A call to something that does not exist there yet is not a
+     * misread; it is a client ahead of the database, which is the next assertion.
+     *
+     * Measuring it the other way is how this test read 81% on 2026-09-23: Watch History
+     * + Lists had merged to `main` the night before its production cutover, so a fifth
+     * of main's calls named functions the live database had never heard of. Nothing was
+     * wrong with the parser and nothing was wrong with the migrations.
+     */
     const { calls } = rpcCalls(legacyClientSources());
     const was = await signatures(before_);
-    const unresolved = calls.filter((c) => !resolves(was, c));
-    const share = 1 - unresolved.length / calls.length;
+    const known = calls.filter((c) => was.has(c.name));
+    const unresolved = known.filter((c) => !resolves(was, c));
+    const share = 1 - unresolved.length / known.length;
     assert.ok(
       share > 0.9,
-      `only ${(share * 100).toFixed(0)}% of main's calls resolve against main — the parser is ` +
-        `too weak for the differential to mean anything:\n  ` +
+      `only ${(share * 100).toFixed(0)}% of the calls the live schema defines resolve — ` +
+        `the parser is too weak for the differential to mean anything:\n  ` +
         unresolved.map((c) => `${c.name}(${c.args.join(',')})`).join('\n  '),
+    );
+  });
+
+  it('every RPC main calls but the live schema lacks is one the pending migrations add', async () => {
+    /**
+     * The deployment gap, stated rather than left to be discovered.
+     *
+     * `main` may run ahead of the live database — it does between a merge and its
+     * cutover — but only ever by functions **these migrations create**. A name that is
+     * in neither is a call to something that exists nowhere, which is a defect whichever
+     * way round the deployment is.
+     */
+    const { calls } = rpcCalls(legacyClientSources());
+    const [was, now] = [await signatures(before_), await signatures(merged)];
+    const missing = [...new Set(calls.filter((c) => !was.has(c.name)).map((c) => c.name))];
+    const nowhere = missing.filter((name) => !now.has(name));
+    assert.deepEqual(
+      nowhere,
+      [],
+      `main calls RPCs that exist neither in the live schema nor after the migrations:\n  ` +
+        nowhere.join('\n  '),
     );
   });
 
