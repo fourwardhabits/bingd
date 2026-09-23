@@ -33,8 +33,8 @@ import {
   profileContextRequest,
   profileDisplay,
   titleContextRequest,
-  titleDisplay,
   titleIdFromPath,
+  titlePreview,
   tokenFromPath,
 } from './router.mjs';
 
@@ -182,10 +182,11 @@ async function readOne(url, anonKey) {
  * poster TMDB no longer serves leaves a page with a name on it instead of a broken
  * image frame. That is also why the name is written before the picture is asked for.
  */
-function paintContext({ name, detail, art, artAlt, note, round = false }) {
-  // A profile picture is a circle and a poster is not, which is a styling fact rather
-  // than a rendering one, so it travels as a class.
-  if (round) document.getElementById('context')?.classList.add('is-profile');
+function paintContext({ name, detail, art, artAlt, note, shape = null }) {
+  // A profile picture is a circle, a poster is not, and the poster on a title page is
+  // drawn larger than the one on a card that only confirms a name. All three are
+  // styling facts rather than rendering ones, so the difference travels as a class.
+  if (shape) document.getElementById('context')?.classList.add(`is-${shape}`);
 
   text('context-name', name);
   if (detail) text('context-detail', detail);
@@ -323,21 +324,31 @@ function profilePage(cfg) {
       art: avatarUrl(cfg.supabaseUrl, row.avatar_path),
       artAlt: '',
       note: 'Shared from bingd.',
-      round: true,
+      shape: 'profile',
     });
   });
 }
 
 /**
- * `/title/<id>` — a film or a season, named so the visitor knows the link worked.
+ * `/title/<id>` — a film or a season, previewed rather than merely named.
  *
  * `media_items` is world readable and has been since the catalogue was built: it is
- * TMDB's data about films, with nobody attached to it. Naming the title here is
- * therefore not a disclosure, it is the difference between a page that reassures
- * somebody and a page that makes them wonder whether they tapped the right thing.
+ * TMDB's data about films, with nobody attached to it. So the page shows the poster,
+ * the name, the year, whether it is a film or which season, the length or the episode
+ * count, the genres and the synopsis — enough that somebody who followed a link from a
+ * group chat learns what the title is without being asked to install anything first.
  *
- * What is still not shown is anyone's *opinion* of it. No rating, no ranking, no who
- * shared it. Those live behind an account, and this page has none.
+ * **It is a preview and not a wall.** The install button is under the content rather
+ * than over it, and nothing is blurred or cut off to make a point.
+ *
+ * What is still not shown is anyone's *opinion* of it. No personal score, no Following
+ * score, no community score, no recommendation note, no sender, no watch date, no
+ * predicted score. Those live behind an account and this page has none — see
+ * `titlePreview`, which is where that line is drawn and tested.
+ *
+ * A row that does not resolve leaves the page exactly as it was built: the generic line,
+ * the two CTAs, and no empty frames. The preview is an improvement on that page, never
+ * a precondition for it.
  */
 function titlePage(cfg) {
   const id = titleIdFromPath(location.pathname);
@@ -349,15 +360,30 @@ function titlePage(cfg) {
   if (!id) return;
 
   void readOne(titleContextRequest(cfg.supabaseUrl, id), cfg.supabaseAnonKey).then((row) => {
-    const display = titleDisplay(row);
-    if (!display) return;
+    const preview = titlePreview(row);
+    if (!preview) return;
+
     paintContext({
-      name: display.name,
-      detail: display.detail,
+      name: preview.name,
+      // The kind, year and length line, which supersedes the bare year `titleDisplay`
+      // carries for the profile-shaped card. A middle dot rather than a comma, because
+      // two of the three parts are already phrases with their own spacing.
+      detail: preview.meta.join(' · '),
       art: posterUrl(row.poster_path),
-      artAlt: `Poster for ${display.name}`,
+      artAlt: `Poster for ${preview.name}`,
       note: 'Shared from bingd.',
+      shape: 'title',
     });
+
+    if (preview.genres.length > 0) text('title-genres', preview.genres.join(', '));
+    else show('title-genres', false);
+
+    if (preview.synopsis) text('title-synopsis', preview.synopsis);
+    else show('title-synopsis', false);
+
+    // The attribution rides with the block it describes, so a page that resolved
+    // nothing carries no credit for data it did not show.
+    show('title-preview', true);
   });
 }
 
