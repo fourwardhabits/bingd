@@ -20,6 +20,9 @@ import {
   watchedItems,
   watchlistItems,
 } from '@/features/collection/watched-rows';
+import { useRankingBacklog } from '@/features/ranking/backlog';
+import { useRefineCard } from '@/features/ranking/use-refine';
+import { track } from '@/lib/analytics';
 import { readPref, writePref } from '@/lib/prefs';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
@@ -402,11 +405,26 @@ export default function CollectionScreen() {
    */
   useTabReset(useCallback(() => setSegment('watched'), []));
 
+  /**
+   * **The unranked backlog, when it is on** (unified Backlog + Refine, 2026-09-21).
+   *
+   * The server's `ranking_backlog` is then the one definition of what is left to rank in
+   * this medium, and it changes two things about the card below: it no longer hides at
+   * fifty ranked (imports make a large backlog common for somebody who ranks a lot), and it
+   * says "titles left to rank" without a count — the Watched view stays light; exact counts
+   * belong to Unranked, which the reader chose to open. While the flag is off (or the
+   * backend predates it) everything here is exactly as it was.
+   */
+  const backlog = useRankingBacklog(profile.id, medium);
+  const backlogOn = backlog.data !== undefined && backlog.data.status !== 'disabled';
+  const backlogTotal = backlogOn ? (backlog.data?.total ?? 0) : 0;
+
   const showNudge = shouldShowUnrankedNudge({
-    unrankedCount,
+    unrankedCount: backlogOn ? backlogTotal : unrankedCount,
     rankedCount,
     pref: nudgePref,
     loaded: nudgePrefLoaded,
+    rankedCap: !backlogOn,
   });
 
   const dismissNudge = async () => {
@@ -476,25 +494,55 @@ export default function CollectionScreen() {
           ranked since (`shouldShowUnrankedNudge`). Dismissing
           hides this card only; the Unranked tab stands as long as anything is
           unranked. */}
+      {/* **One card slot on Watched, and unranked wins** (unified design §1). The
+          Refine card below is drawn only when this one is not — and the server only lets
+          it show when nothing in the medium is left to rank, so the two never compete. */}
       {!inLists && active === 'watched' && showNudge ? (
-        <View style={styles.nudge}>
-          <Text variant="callout">You have unranked titles</Text>
-          <Text variant="footnote" tone="secondary">
-            Rank what you have watched to complete your Collection and improve your
-            recommendations.
-          </Text>
-          <View style={styles.nudgeActions}>
-            <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
-            <Button
-              label="Dismiss"
-              kind="secondary"
-              size="sm"
-              onPress={() => {
-                void dismissNudge().catch(() => {});
-              }}
-            />
+        backlogOn ? (
+          <View style={styles.nudge} testID="collection-unranked-card">
+            {/* No count on Watched (founder decision 3): this view is a collection, not a
+                task list. The count lives on Unranked. */}
+            <Text variant="callout">You have titles left to rank</Text>
+            <Text variant="footnote" tone="secondary">
+              Finish placing the {medium === 'movies' ? 'movies' : 'seasons'} you’ve
+              already seen.
+            </Text>
+            <View style={styles.nudgeActions}>
+              <Button label="View unranked" size="sm" onPress={() => setSegment('unranked')} />
+              <Button
+                label="Dismiss"
+                kind="secondary"
+                size="sm"
+                onPress={() => {
+                  void dismissNudge().catch(() => {});
+                }}
+              />
+            </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.nudge}>
+            <Text variant="callout">You have unranked titles</Text>
+            <Text variant="footnote" tone="secondary">
+              Rank what you have watched to complete your Collection and improve your
+              recommendations.
+            </Text>
+            <View style={styles.nudgeActions}>
+              <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
+              <Button
+                label="Dismiss"
+                kind="secondary"
+                size="sm"
+                onPress={() => {
+                  void dismissNudge().catch(() => {});
+                }}
+              />
+            </View>
+          </View>
+        )
+      ) : null}
+
+      {!inLists && active === 'watched' && !showNudge ? (
+        <RefineCard userId={profile.id} medium={medium} />
       ) : null}
 
       {!inLists && active === 'watched' ? (
@@ -507,6 +555,26 @@ export default function CollectionScreen() {
           state={viewState}
           onChange={changeView}
         />
+      ) : null}
+      {/* **Start ranking, persistent on Unranked** (unified design §1): no dismiss, and
+          the ordinary one-title-at-a-time ranking stays below it. The exact count is
+          useful here, because the reader chose to come and look (founder decision 3). */}
+      {!inLists && active === 'unranked' && backlogOn && backlogTotal > 0 ? (
+        <View style={styles.nudge} testID="collection-start-ranking-card">
+          <Text variant="callout">Rank your unranked titles</Text>
+          {/* No explanatory line: the heading, the count and the button already say it
+              three times over (founder QA, 2026-09-22). */}
+          <Text variant="footnote" tone="secondary">
+            {backlogCountLine(backlogTotal, medium)}
+          </Text>
+          <View style={styles.nudgeActions}>
+            <Button
+              label="Start ranking"
+              size="sm"
+              onPress={() => router.push(`/rank-session?medium=${medium}&start=backlog`)}
+            />
+          </View>
+        </View>
       ) : null}
       {!inLists && active === 'unranked' ? (
         <Unranked userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
@@ -684,6 +752,61 @@ function Unranked({
   );
 }
 
+/**
+ * **"Fine-tune your rankings"** — Refine's only entry (unified design §1, §5, §6), in the
+ * Watched card slot and the unranked card's look. It replaces T5's `Refine rankings ›`
+ * line; there is no permanent manual entry.
+ *
+ * **Candidate exists ≠ show the card.** Drawn only when the server's `cta` says so — Refine
+ * on, at least 20 ranked, nothing left to rank in this medium, a batch of at least three
+ * titles strong enough to be worth an invitation, the day's ceiling not reached — and when
+ * no Not now still holds. **Not now** is lifted by ranking activity, never by time: the
+ * card may return after enough new placements in this medium AND a strong batch again
+ * (`useRefineCard`). The number it names is the server's, at most five.
+ */
+function RefineCard({ userId, medium }: { userId: string; medium: Medium }) {
+  const router = useRouter();
+  const card = useRefineCard(userId, medium);
+  const analyticsMedium = medium === 'movies' ? 'movies' : 'tv';
+
+  const reported = useRef(false);
+  useEffect(() => {
+    if (!card.show || reported.current) return;
+    reported.current = true;
+    track({
+      name: 'refine_card_shown',
+      props: { strong: card.strong, qualifying: card.qualifying, medium: analyticsMedium },
+    });
+  }, [analyticsMedium, card.qualifying, card.show, card.strong]);
+
+  if (!card.show) return null;
+  return (
+    <View style={styles.nudge} testID="collection-refine-card">
+      {/* The Unranked card's shape, to the line: heading, count, primary, secondary. No
+          explanatory sentence (founder, 2026-09-22). */}
+      <Text variant="callout">Fine-tune your rankings</Text>
+      <Text variant="footnote" tone="secondary">
+        {card.count === 1 ? '1 placement to refine' : `${card.count} placements to refine`}
+      </Text>
+      <View style={styles.nudgeActions}>
+        <Button
+          label="Refine rankings"
+          size="sm"
+          onPress={() => router.push(`/rank-session?medium=${medium}&start=refine`)}
+        />
+        <Button label="Not now" kind="secondary" size="sm" onPress={card.notNow} />
+      </View>
+    </View>
+  );
+}
+
+/** "18 movies to rank" — the exact count, on Unranked only (founder decision 3). */
+function backlogCountLine(total: number, medium: Medium) {
+  const noun =
+    medium === 'movies' ? (total === 1 ? 'movie' : 'movies') : total === 1 ? 'season' : 'seasons';
+  return `${total} ${noun} to rank`;
+}
+
 function Loading() {
   return (
     <View style={styles.body}>
@@ -704,6 +827,7 @@ const styles = StyleSheet.create({
    */
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   titleRowSelector: { flexShrink: 1 },
+
   // A column now. As a row it put the copy and the dismissal at opposite edges,
   // which is what made them read as unrelated to each other.
   nudge: {
@@ -755,21 +879,27 @@ const styles = StyleSheet.create({
  * Dismissal hides *this card only*. The Unranked tab is drawn from
  * `unrankedCount` and is unaffected, so the state stays reachable and clearing
  * the last unranked title removes the underlying condition on its own.
+ *
+ * `rankedCap` is the fifty-ranked rule, which the unified backlog drops (2026-09-21):
+ * an import makes a large backlog common for exactly the reader who ranks a lot, so
+ * "has the habit" is no longer a reason to stay quiet about it.
  */
 function shouldShowUnrankedNudge({
   unrankedCount,
   rankedCount,
   pref,
   loaded,
+  rankedCap = true,
 }: {
   unrankedCount: number;
   rankedCount: number;
   pref: UnrankedNudgePref | null;
   loaded: boolean;
+  rankedCap?: boolean;
 }) {
   if (!loaded) return false;
   if (unrankedCount <= 0) return false;
-  if (rankedCount >= 50) return false;
+  if (rankedCap && rankedCount >= 50) return false;
   if (!pref) return true;
 
   const lastDismissedAt = new Date(pref.dismissedAt).getTime();

@@ -1,7 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -942,7 +949,34 @@ function Session({
   );
 }
 
-function Comparison({
+/**
+ * **How wide each comparison card may be, on this device** (founder polish, 2026-09-22).
+ *
+ * It was pinned to `poster.md` (88pt), which on a modern phone left the two posters small
+ * in the middle of a lot of nothing. This clamps rather than picking a second fixed size:
+ * half the width the row actually has, capped so the pair never dominates, and capped
+ * again against height so a short screen does not push the controls off the bottom. The
+ * floor is the old 88, so the smallest phones are no worse off than they were.
+ */
+export function useCardWidth() {
+  const { width, height } = useWindowDimensions();
+  // Two gutters, the gap either side of the divider, and the divider itself.
+  const room = width - theme.layout.gutter * 2 - theme.space[4] * 2 - 2;
+  // A poster is 2:3, so its height is width / aspect. Keep the pair under ~38% of the
+  // screen so the question, the names and the controls all keep their places.
+  const byHeight = height * 0.38 * theme.layout.aspect.poster;
+  return Math.max(
+    theme.poster.md.width,
+    Math.min(Math.floor(room / 2), Math.floor(byHeight), 156),
+  );
+}
+
+/**
+ * Exported for Refine (T5), which asks the same question with the same two cards and the
+ * same Undo / Too tough row. It draws its own header — the target, its position and the
+ * round's progress — so it passes `topBar={false}` rather than stacking a second Close.
+ */
+export function Comparison({
   subject,
   pivotId,
   skipped,
@@ -952,6 +986,7 @@ function Comparison({
   onBack,
   onSkip,
   onClose,
+  topBar = true,
 }: {
   /**
    * `kind` is here for the Details affordance under the card, which says a different
@@ -973,6 +1008,8 @@ function Comparison({
   onBack: () => void;
   onSkip: () => void;
   onClose: () => void;
+  /** Whether to draw the Close row. Off only when the host screen has its own. */
+  topBar?: boolean;
 }) {
   /**
    * Which title the reader asked to be reminded about, if any.
@@ -983,6 +1020,7 @@ function Comparison({
    * is no longer on screen.
    */
   const [recalling, setRecalling] = useState<string | null>(null);
+  const cardWidth = useCardWidth();
 
   const {
     data: pivot,
@@ -1018,7 +1056,7 @@ function Comparison({
     // preference over something they were never shown.
     return (
       <View style={styles.comparison}>
-        <TopBar onClose={onClose} />
+        {topBar ? <TopBar onClose={onClose} /> : null}
         <Centred>
           <Text variant="title2" style={styles.centre}>
             Could not load the other title
@@ -1048,14 +1086,16 @@ function Comparison({
 
   return (
     <View style={styles.comparison}>
-      <TopBar onClose={onClose} />
+      {topBar ? <TopBar onClose={onClose} /> : null}
       <Text variant="headline" style={styles.centre} accessibilityRole="header">
         Which did you like more?
       </Text>
 
       <View style={styles.cards}>
+        {/* `cardWidth` is the one measurement both cards take; see `useCardWidth`. */}
         <Card
           title={subject.title}
+          width={cardWidth}
           kind={subject.kind}
           posterUri={subject.posterUri ?? null}
           disabled={waiting}
@@ -1068,14 +1108,17 @@ function Comparison({
             setRecalling(subject.id);
           }}
         />
-        {/* Beli's device (beli-252). It turns two pictures side by side into a
-            question, and it costs one 32pt circle. */}
-        <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no">
-          <Text variant="caption" tone="secondary">
-            OR
-          </Text>
-        </View>
+        {/**
+         * **A hairline, not a badge** (founder QA, 2026-09-22).
+         *
+         * It was a 32pt circle reading OR — Beli's device (beli-252). On the device it
+         * was clutter between the only two things the screen is asking about, and the
+         * question above already says the two posters are alternatives. A one-pixel rule
+         * keeps them apart without adding a third object to look at.
+         */}
+        <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no" />
         <Card
+          width={cardWidth}
           title={pivot?.title ?? '…'}
           /**
            * Null until the row lands, and that is the point rather than an oversight.
@@ -1238,7 +1281,20 @@ function Comparison({
          */}
         <View style={styles.control}>
           <Button
-            label="Too tough"
+            /**
+             * **`Can't decide`, since 2026-09-22** (founder QA of the backlog session).
+             *
+             * It was "Too tough". Beside the session's own *Skip title*, that read as two
+             * words for one act: a reader met "Too tough" and "Skip this one" together and
+             * could not tell which one left the title alone. They are genuinely different
+             * — this declines THIS COMPARISON and keeps placing the same title, while Skip
+             * title drops the title for the sitting — so the fix is the two names, not one
+             * control (founder: do not collapse them).
+             *
+             * Still one word on every surface (2026-08-30): onboarding, a first ranking,
+             * the Log tab, every rerank and both session sources are this component.
+             */
+            label="Can't decide"
             /**
              * **The word the button uses, and no other** (independent review 76).
              *
@@ -1252,9 +1308,9 @@ function Comparison({
              * control is, hint says what pressing it does -- and "Compares against a
              * different title instead" answers the ambiguity the old spelled-out label
              * existed for, which was that "Skip" alone could be heard as skipping the
-             * whole ranking. "Too tough to call" cannot be heard that way.
+             * whole ranking.
              */
-            accessibilityLabel="Too tough to call"
+            accessibilityLabel="Can't decide between these"
             accessibilityHint="Compares against a different title instead."
             testID="ranking-too-tough"
             kind="secondary"
@@ -1330,11 +1386,14 @@ function Card({
   title,
   kind,
   posterUri,
+  width,
   disabled,
   onPress,
   onRecall,
 }: {
   title: string;
+  /** What `useCardWidth` measured for this device. Both cards get the same number. */
+  width: number;
   /**
    * What the Details sheet under this card will actually contain, or null while the
    * card does not know yet. Null buys silence rather than a guess — see the hint below.
@@ -1348,7 +1407,7 @@ function Card({
   const press = usePressScale({ enabled: !disabled });
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { maxWidth: width }]}>
       {/**
        * Tap chooses, press-and-hold remembers.
        *
@@ -1403,7 +1462,7 @@ function Card({
           onPressOut={press.onPressOut}
           style={({ pressed }) => [styles.cardPress, pressed && styles.pressed]}
         >
-          <Poster uri={posterUri} title={title} width="fill" size="md" />
+          <Poster uri={posterUri} title={title} width={width} size="md" />
           <View style={styles.cardTitleBox}>
             <Text variant="callout" numberOfLines={2} style={styles.centre}>
               {title}
@@ -2024,7 +2083,56 @@ function Centred({ children }: { children: React.ReactNode }) {
   return <View style={styles.centredBox}>{children}</View>;
 }
 
+/**
+ * **Leave this title for now** — the link under the comparison, shared by both ranking
+ * sources (founder QA, 2026-09-22).
+ *
+ * It lived twice, once per screen, and the copies had drifted: Refine's said something
+ * else, sat at a different height and named a different act. One component here, beside
+ * the comparison it belongs to, is what keeps the two surfaces the same screen with a
+ * different queue behind it.
+ *
+ * It is NOT the comparison's own `Can't decide`, which declines the pair on screen and
+ * carries on placing this title. This sets the title itself aside.
+ */
+export function SkipTitleLink({
+  title,
+  disabled,
+  onPress,
+  /**
+   * `(left)` beside two posters, where "Skip title" could be heard as skipping either
+   * one — the title being placed is always the left card. A screen showing one poster
+   * needs no side.
+   */
+  side = false,
+  hint,
+}: {
+  title: string;
+  disabled: boolean;
+  onPress: () => void;
+  side?: boolean;
+  hint: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Skip ${title}`}
+      accessibilityHint={hint}
+      disabled={disabled}
+      hitSlop={theme.space[2]}
+      style={styles.skipTitle}
+      onPress={onPress}
+    >
+      <Text variant="footnote" tone="secondary" style={styles.skipTitleLabel}>
+        {side ? 'Skip title (left)' : 'Skip title'}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  skipTitle: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  skipTitleLabel: { textAlign: 'center' },
   // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
   // moving off a full-height page sheet — a comparison is a small question.
   sheet: { paddingBottom: theme.space[2] },
@@ -2044,15 +2152,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: theme.space[2],
+    // Wider than it was: at 8pt the posters crowded the divider between them.
+    gap: theme.space[4],
   },
   card: {
     flex: 1,
     alignItems: 'center',
-    // poster.md, not poster.xl. At 180×270 two cards plus their gutters overflow a
-    // 375pt screen and the mechanic starts to feel like an event; at 88×132 both
-    // posters stay legible and the answer feels quick, which is the point.
-    maxWidth: theme.poster.md.width,
+    // The ceiling is `useCardWidth`'s and arrives as a prop: a clamp against the device
+    // rather than one number for every phone. 180×270 still overflows a 375pt screen,
+    // which is why that clamp has a ceiling of its own.
     gap: theme.space[2],
   },
   // The poster and its name, which is the part that answers the comparison. Split out
@@ -2074,18 +2182,18 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
     paddingVertical: theme.space[1],
   },
+  // The divider between the two cards: a hairline the height of the poster, and nothing
+  // else. See the note at its use.
   or: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.radius.full,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.sunken,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: StyleSheet.hairlineWidth * 2,
+    alignSelf: 'stretch',
+    marginVertical: theme.space[4],
+    backgroundColor: theme.border.hairline,
   },
+  // Two lines of `callout` before an ellipsis, and the box keeps that height whether the
+  // name needs one line or two, so the controls under it never move.
   cardTitleBox: {
-    minHeight: 36,
+    minHeight: theme.typography.callout.lineHeight * 2,
     justifyContent: 'flex-start',
   },
   pressed: { opacity: 0.85 },
