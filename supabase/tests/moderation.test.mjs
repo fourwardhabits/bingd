@@ -488,6 +488,16 @@ describe('the guard is wired in, not merely present', () => {
     'my_lists',
     'my_lists_for_title',
     'profile_lists',
+    /**
+     * 20261019000100 (T5). `stable`, writes nothing, answers only for `auth.uid()`: a
+     * suspended account can see which of its own titles Refine would offer, and nothing
+     * more. Every act it leads to — `refine_start`, `refine_snooze`, and the `rank_*` steps —
+     * calls the guard, which is why none of them is here.
+     */
+    'refine_candidates',
+    // Same migration, same reasoning: the backlog read writes nothing and answers only for
+    // `auth.uid()`. `rank_backlog_start` calls the guard, so it is not here.
+    'ranking_backlog',
     'my_capabilities',
     'unranked_queue',
     // 20260917000100. Two counts over the caller's own collection, SECURITY INVOKER, so

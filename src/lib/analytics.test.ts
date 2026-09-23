@@ -85,7 +85,7 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the forty-two canonical names and nothing else', () => {
+  it('is the canonical names and nothing else', () => {
     // Pinned deliberately. Adding one — or removing one — is a product decision that has
     // to be made in `docs/product/analytics.md` as well as here, and this failing is the
     // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
@@ -137,7 +137,12 @@ describe('the event vocabulary', () => {
         'people_suggestions_mode_changed',
         'people_suggestions_viewed',
         'ranking_completed',
+        'backlog_session_ended',
         'ranking_started',
+        // T5 Refine, 2026-09-20 (epic §P): one event per finished title, one per sitting.
+        'refine_card_shown',
+        'refine_session_ended',
+        'refine_target_outcome',
         'recommendation_opened',
         'recommendation_sent',
         'sign_in_completed',

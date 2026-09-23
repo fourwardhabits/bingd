@@ -24,6 +24,7 @@ import welcomeEmail from './races/welcome-email.mjs';
 import releaseAwareness from './races/release-awareness.mjs';
 import watchHistory from './races/watch-history.mjs';
 import scaleHardening from './races/scale-hardening.mjs';
+import refine from './races/refine.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -63,6 +64,7 @@ goalCompletion();
 commentMention();
 seriesWatchlist();
 watchHistory();
+refine();
 listMove();
 listAdd();
 welcomeEmail();

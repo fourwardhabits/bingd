@@ -76,6 +76,10 @@ error rather than a decision somebody makes at 2am before a demo.
 | `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
 | `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
 | `comparison_info_opened` | Details under one side of a comparison opened the recall sheet (2026-09-11) | the ranker | `media_kind`, `surface` |
+| `refine_target_outcome` | a Refine target's session answered `placed` (T5, `20261019000100`) — one per finished title, never per answer | the ranker | `outcome` (`moved` / `unchanged` / `kept`), `reason`, `comparisons`, `medium`, and why it was offered: `signal_gap`, `signal_contradicted`, `signal_crossed`, `signal_strong` (cleared the card threshold too) |
+| `refine_session_ended` | a Refine sitting ended: the checkpoint's Done (`done`), the server had nothing else worth a look (`exhausted`), or Close mid-round (`close`) | the ranker | `targets`, `moved`, `comparisons`, `ended_by`, `medium` |
+| `refine_card_shown` | Collection drew the Refine card (unified Backlog + Refine, 2026-09-21), once per mount | the ranker | `strong` and `qualifying` (the server's counts at the card and candidate thresholds), `medium` |
+| `backlog_session_ended` | a backlog sitting ended: a checkpoint's Done (`done`), nothing left or handed over to Refine (`caught_up`), or Close (`close`) | the ranker | `placed`, `skipped`, `ended_by`, `medium` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
 
 ### Social and discovery
@@ -558,8 +562,10 @@ reader who adjusted a placement showed up as a new ranking in every funnel that 
 this event as "watched and placed a new title" — which is the wrong number in the
 direction that flatters, and it is also the one query that cannot be repaired
 afterwards, because the event carried nothing to split it on. **A count of first
-watches is `mode in ('start', 'again')`**; a count of new titles ranked is `mode =
-'start'`; corrections are the other two.
+watches is `mode in ('start', 'again')`**; a count of new titles ranked is `mode in
+('start', 'backlog')`; corrections are `rebucket` and `rerank`. `backlog` (2026-09-21) is a
+first placement made from the Unranked backlog session — a title getting its position, but
+history reconstruction rather than a fresh watch, so it is never in the first-watch count.
 
 `rebucket` is kept beside it and is exactly `mode = 'rebucket'`. A second spelling of
 one fact is tolerable where deleting the first would cut every saved query and chart

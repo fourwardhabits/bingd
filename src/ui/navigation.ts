@@ -110,4 +110,6 @@ export const ROOT_SCREEN_TITLES = {
    */
   'awards/celebrate': 'bingd Awards',
   settings: 'Settings',
+  /** The ranking session (backlog + Refine). Headerless; this is only ever a back label. */
+  'rank-session': 'Rank',
 } as const;

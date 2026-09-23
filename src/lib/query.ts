@@ -54,6 +54,22 @@ export const queryKeys = {
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.
   comparisonCard: (mediaItemId: string) => ['comparison-card', mediaItemId] as const,
+  // Refine's standing for one category (T5 + unified design): the status and whether the
+  // Collection card may invite a sitting, read with a limit of one. Per account.
+  refineAvailability: (userId: string, category: string) =>
+    ['refine-availability', userId, category] as const,
+  /**
+   * The stored "not now" for Refine's card — a device preference, read through the
+   * cache so that finishing a sitting on the ranking screen hides the card on the
+   * Collection screen behind it (founder QA, 2026-09-22). A plain `useState` read it
+   * once per mount, so the card only caught up on the next cold start.
+   */
+  refineNotNow: (userId: string, category: string) =>
+    ['refine-not-now', userId, category] as const,
+  // The unranked backlog's standing for one category (unified design §9): on or off, and
+  // the exact count the Unranked tab names. Per account.
+  rankingBacklog: (userId: string, category: string) =>
+    ['ranking-backlog', userId, category] as const,
   // What a long press during ranking opens: enough of a title to remember it by. Its
   // own key rather than `title`'s for the reason directly above — it reads a different
   // subset of the same row, and two shapes under one key is a race over which screen

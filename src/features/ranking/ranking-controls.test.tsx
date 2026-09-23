@@ -184,7 +184,7 @@ describe('undo and skip are buttons', () => {
     await sheet.ready('Film P');
     return {
       undo: sheet.getByLabelText('Undo the last comparison'),
-      skip: sheet.getByLabelText('Too tough to call'),
+      skip: sheet.getByLabelText("Can't decide between these"),
       sheet,
     };
   };
@@ -236,7 +236,7 @@ describe('undo and skip are buttons', () => {
     // the per-surface split that had onboarding saying one thing and the Log tab
     // another.
     expect(sheet.getByText('Undo')).toBeTruthy();
-    expect(sheet.getByText('Too tough')).toBeTruthy();
+    expect(sheet.getByText("Can't decide")).toBeTruthy();
     expect(sheet.queryByText('Skip')).toBeNull();
 
     // **The accessible label is a surface too** (independent review 76). It read
@@ -268,10 +268,10 @@ describe('undo and skip are buttons', () => {
       const sheet = await openSheet({ surface });
       await sheet.ready('Film P');
 
-      expect(sheet.getByText('Too tough')).toBeTruthy();
+      expect(sheet.getByText("Can't decide")).toBeTruthy();
       expect(sheet.queryByText('Skip')).toBeNull();
 
-      const escape = sheet.getByLabelText('Too tough to call');
+      const escape = sheet.getByLabelText("Can't decide between these");
       const undo = sheet.getByLabelText('Undo the last comparison');
       const a = StyleSheet.flatten(undo.props.style);
       const b = StyleSheet.flatten(escape.props.style);
