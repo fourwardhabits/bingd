@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
@@ -39,10 +40,15 @@ import {
   mustReconcile,
   newOperationId,
   saveNote,
-  setBucket,
   type NoteVisibility,
   type WriteResult,
 } from './writes';
+// The watch-history writers (T1, 20261003000100). `logTitle` replaces the `set_bucket`
+// + read-back + stamp trio this sheet used to perform, and `setWatchDate` carries the
+// basis that `log_watched` structurally cannot (§D.5).
+import { logTitle, setWatchDate } from '@/features/watch-history/writes';
+import { useWatchCount } from '@/features/watch-history/use-watch-history';
+import { watchCountLabel } from '@/features/watch-history/watch-history';
 
 export type LoggableTitle = {
   id: string;
@@ -437,7 +443,6 @@ function Body({
     if (savingDepth.current === 0) setSaving(false);
   };
   const [problem, setProblem] = useState<string | null>(null);
-  const [confirmRebucket, setConfirmRebucket] = useState<BucketId | null>(null);
 
   const people = useTaggablePeople(profile.id);
   const companions = useCompanions(profile.id, title.id);
@@ -454,12 +459,6 @@ function Body({
   // would keep using the coalescing writer against a row that already exists. Only
   // ever written from inside an async callback, never during render.
   const createdRow = useRef(false);
-  // Single-flight for the default-date stamp. Two quick bucket taps launch two
-  // detached decisions, and if both read "no date" before either write lands, both
-  // write — same date almost always, but not across a midnight rollover
-  // (independent review 33d). One decision in flight answers for both taps: if it
-  // stamps, the second was redundant; if it finds a date, the second would too.
-  const stampPending = useRef(false);
   /**
    * One lane for every write that touches `watched_on`.
    *
@@ -585,6 +584,18 @@ function Body({
   // Open by itself only for a carried Earlier, and only until the reader touches a row.
   const dateOpen = expanded === 'date' || (expanded === null && dateAutoOpen && startsEarlier);
 
+  /**
+   * How many viewings this title has, which decides whether the date row is a date row
+   * at all (§J.2).
+   *
+   * A count rather than the history: this sheet draws one label from one integer, and
+   * reading a twenty-row diary to decide whether to say "Watch date" would be a list on
+   * the wire for a string.
+   */
+  const watchCount = useWatchCount(profile.id, title.id);
+  const watchLabel = watchCountLabel(watchCount.data ?? 0);
+  const multipleWatches = watchLabel !== null;
+
   // Logging is a collection change like any other: it writes a feed event, moves the
   // watchlist, and changes what this reader has watched. The same set as ranking.
   const refresh = () => invalidateAfterCollectionChange(queryClient, profile.id, title.id);
@@ -644,33 +655,49 @@ function Body({
    * 2026-08-15, reversing PRD §11). Three cases have to stay distinct:
    *
    *   - not ranked yet: save, then hand off to the ranking sheet;
-   *   - ranked, same bucket: **ask, then re-rank inside that same bucket.** This used
-   *     to return without doing anything, on the reading that re-selecting what is
-   *     already chosen is not a change. The founder found what that reading costs on
-   *     the device: a Loved title, Change your rating, Loved — and the app does
-   *     nothing at all, with no message saying why. The bucket is indeed not the
-   *     change being asked for. The *position* is, and re-opening a rating already
-   *     given is the only way anybody has to say so. No `set_bucket` call is made,
-   *     which is what the old 55000 note was really about;
-   *   - ranked, different bucket: ask first, then move the band.
+   *   - ranked, same bucket: **re-rank inside that same bucket.** This used to return
+   *     without doing anything, on the reading that re-selecting what is already chosen
+   *     is not a change. The founder found what that reading costs on the device: a
+   *     Loved title, Change your rating, Loved — and the app does nothing at all, with
+   *     no message saying why. The bucket is indeed not the change being asked for. The
+   *     *position* is, and re-opening a rating already given is the only way anybody has
+   *     to say so. No `set_bucket` call is made, which is what the old 55000 note was
+   *     really about;
+   *   - ranked, different bucket: move the band, and re-run the comparisons in it.
    *
    * **Both ranked branches are reached from one row.** Since 2026-09-08 the Ranked menu
    * offers *Update your rating*, which lands here, and *Log another watch*, which does
    * not — the second and third cases above are the two halves of that one correction, and
    * the chooser is where the reader says which they meant.
    *
-   * Both confirm, because both re-run the comparisons and that is worth asking about.
-   * **Neither discards anything to begin**, and this comment said the opposite until
-   * 2026-09-08: `20260826000500` made the server run a session *over* the position the
-   * title holds, so the score, band and place survive until a new placement completes.
-   * What differs between the two is the call behind the confirmation and the sentence on
-   * it.
+   * ---------------------------------------------------------------------------
+   * **NO CONFIRMATION, AND IT MUST NOT COME BACK** (founder QA, 2026-09-21)
+   *
+   * Both ranked branches used to stop on a card — "Rank <title> again? You will compare it
+   * again. Nothing changes until you finish. [Re-rank] [Cancel]" — before handing off.
+   * The approved contract is that *Update your rating* goes **straight into the
+   * comparisons**: the band tap is the decision, and a second question about the same
+   * decision is a step the reader has already answered.
+   *
+   * The card was also protecting nothing. `20260826000500` runs the session *over* the
+   * position the title holds, so the score, band and place survive until a new placement
+   * completes: cancelling the comparisons — Close, back, a dropped connection — leaves the
+   * ranking exactly as it was. That is the only thing "Nothing changes until you finish"
+   * ever promised, and the comparison sheet keeps that promise by itself.
+   *
+   * No watch is recorded on either path: `rank_again(p_new_watch: false)` and
+   * `rank_rebucket` are corrections of the current watch. The rewatch is *Log another
+   * watch*, a different row with a different sheet (§J.3).
    */
   const choose = async (chosen: BucketId) => {
     if (saving) return;
 
     if (state.ranked) {
-      setConfirmRebucket(chosen);
+      setBucketEdit(chosen);
+      // One server call, made by the ranking sheet when it opens: `rank_rebucket` for a
+      // band change, `rank_again` with `p_new_watch: false` for the same band. Nothing is
+      // written here — writing the bucket first would only earn a 55000.
+      onRank?.(chosen, chosen === state.bucket ? 'rerank' : 'rebucket');
       return;
     }
 
@@ -697,7 +724,43 @@ function Body({
     // One operation id per intent. If this call is retried it must carry the same one, or
     // the ledger cannot tell a retry from a second opinion.
     const operationId = newOperationId();
-    const result = await setBucket({ operationId, mediaItemId: title.id, bucket: chosen });
+
+    /**
+     * ---------------------------------------------------------------------------
+     * **ONE CALL, AND THE CONDITION IS EVALUATED IN THE SERVER** (§D.5, T3b)
+     *
+     * This was `set_bucket`, then a read-back, then `log_watched(today)` if the settled
+     * row had no date — three round trips with a race in the middle that this file's own
+     * comment named as accepted: *"the instant between that answer and the write — a
+     * date recorded on another device in that gap needs a server-side conditional write,
+     * which the beta accepts as a residual risk"*. `log_title` is that conditional
+     * write. The bucket and the event are one statement pair under one lock, and the
+     * condition — **only when this call creates the seen row** — is evaluated inside it.
+     *
+     * It also puts T0b's rule in the server rather than in this closure. A title that is
+     * already seen gets its bucket set and **no date at all**, whatever this sheet
+     * believes: ranking a title says it was seen, not when (§D.6 path 3). The client
+     * half of that fix is still here and still correct; it is no longer the only thing
+     * standing between an imported film and a false "watched today".
+     *
+     * **The basis is the reader's tap, never an inference.** `none` for *Earlier*,
+     * `reader` when they chose a specific date, `today_default` when the sheet offered
+     * Today and they kept it. That third value is the one §C.3.8 was missing, and it is
+     * what lets §M.7's later cleanup find a fabricated date at all.
+     */
+    const basis: 'today_default' | 'reader' | 'none' = undated
+      ? 'none'
+      : dateEdit !== null
+        ? 'reader'
+        : 'today_default';
+
+    const result = await logTitle({
+      operationId,
+      mediaItemId: title.id,
+      bucket: chosen,
+      watchedOn: undated ? null : effectiveDate,
+      basis,
+    });
 
     if (!report(result)) {
       endSaving();
@@ -731,56 +794,42 @@ function Body({
           bucket: chosen === 'notForMe' ? 'not_for_me' : chosen,
         },
       });
+
+      /**
+       * `watch_logged`, and **only when this call created the seen row** (epic §P).
+       *
+       * The server answers `created`, which is the same fact it used to decide whether
+       * to write an event at all — so the two cannot disagree. Re-rating a title that
+       * was already in the collection emits nothing here, because no viewing was
+       * recorded: that is §D.6 path 3, and reporting it as a watch is precisely the
+       * confusion the epic exists to end.
+       *
+       * `basis` is the reader's own tap, never an inference, and it is the property
+       * that makes §C.3.8's defect visible at all.
+       */
+      if (result.created) {
+        track({ name: 'watch_logged', props: { kind: 'first', basis, surface } });
+      }
     }
 
-    // The row says "Today", so today is what must be stored. `set_bucket` writes no
-    // date, and leaving it at that meant the sheet displayed a default it had never
-    // saved — reopen it a week later and it would still claim "Today". Only when
-    // there is no date already — a re-log must not overwrite the real one — and
-    // "no date already" is `settledLogState`'s question, not this render's closure.
-    //
-    // Deliberately not awaited before the ranking handoff. The stamp is a courtesy
-    // default, already "not worth blocking on", and a read stalled on a bad network
-    // must not hold the ranking sheet hostage (independent review 33c); it waits
-    // for the settled answer on its own and reconciles the cache when it lands.
-    // What remains unclosable from this side is the instant between that answer
-    // and the write — a date recorded on another device in that gap needs a
-    // server-side conditional write, which the beta accepts as a residual risk.
-    // And not at all once the reader has said they do not remember when. Without this
-    // guard the stamp is the thing that undoes the clear: clearing leaves `watched_on`
-    // null, which is exactly the condition the stamp treats as "no date yet", so the
-    // next bucket tap would write today's date back over an explicit "I don't
-    // remember" and nothing on screen would say it had happened.
-    //
-    // And only for a title this sheet is logging for the first time: absent before the
-    // tap, or created by this sheet a moment ago (a note or a companion written before
-    // the bucket). A title that was already in the collection keeps exactly the date it
-    // had — including none — because nothing about ranking it says when it was watched.
-    //
-    // A carried *Earlier* (R4) counts as "they do not remember" even if the tap raced
-    // the read that makes it visible, and `undated` is the answer captured at the tap.
-    if (!stampPending.current && !undated) {
-      stampPending.current = true;
-      void (async () => {
-        try {
-          const settled = await before;
-          const loggingItNow = settled !== undefined && (!settled.exists || createdRow.current);
-          if (settled && !settled.watchedOn && loggingItNow) {
-            // Failure here is not worth blocking on. The bucket is saved, the title
-            // is in the collection, and the date is recoverable from this same row.
-            await logWatched({
-              operationId: newOperationId(),
-              mediaItemId: title.id,
-              watchedOn: effectiveDate,
-            });
-            refresh();
-          }
-        } finally {
-          stampPending.current = false;
-        }
-      })();
-    }
-
+    /**
+     * ---------------------------------------------------------------------------
+     * **THE SEPARATE STAMP IS GONE** (T3b, 20261003000100).
+     *
+     * A long block lived here: read the settled row back, decide whether this sheet
+     * created it, and if so write a date in a floating promise. It existed because
+     * the bucket writer could not carry a date, and it carried three defects of its
+     * own that the tree spent two tranches closing --- C.3.7’s stamp on an
+     * already-seen row (T0b), the acknowledged race between the read-back and the
+     * write, and a second round trip on the critical path of the ranking hand-off.
+     *
+     * The single call above does all of it, and does the one part this could not: the
+     * "did this call create the row" test is evaluated inside the lock rather than
+     * against an answer that was true a moment ago.
+     *
+     * The read-back survives only for the carry below, which asks a different
+     * question --- whether the row existed --- and is not a write.
+     */
     // A new title logged under the carried mode is logging activity, so the sitting
     // stays open (`when-session.ts`). Re-rating something already collected is not.
     if (carried) {
@@ -792,28 +841,6 @@ function Body({
     endSaving();
     refresh();
     onRank?.(chosen, 'start');
-  };
-
-  /**
-   * Confirmed re-rank, in either direction.
-   *
-   * Nothing is written here. Each mode is one server call the ranking sheet makes when
-   * it opens — `rank_rebucket` for a band change, `rank_again` with `p_new_watch: false`
-   * for a re-rank inside the same band — and the sheet is what drives a session. Writing
-   * the bucket first would only earn a 55000.
-   *
-   * The same-band call was `rank_unrank` then `rank_start` when this comment was written,
-   * and that pair is exactly what `20260825000200` replaced with one atomic call and
-   * `20260826000500` made cost nothing until it succeeds. Neither mode gives up the
-   * position to begin any more.
-   */
-  const rebucket = () => {
-    const next = confirmRebucket;
-    if (!next || saving) return;
-
-    setConfirmRebucket(null);
-    setBucketEdit(next);
-    onRank?.(next, next === state.bucket ? 'rerank' : 'rebucket');
   };
 
   /**
@@ -896,7 +923,42 @@ function Body({
     // On the shared lane, so a date written here cannot overtake — or be overtaken by —
     // a clear the reader tapped a moment earlier. See `queueDateWrite`.
     await queueDateWrite(async () => {
-      if (dateChanged || writesNoteHere) {
+      /**
+       * ---------------------------------------------------------------------------
+       * **THE DATE GOES THROUGH `set_watch_date` WHEN THE ROW IS ALREADY THERE** (§D.5)
+       *
+       * `log_watched` still works and still means what it always did — it sets the most
+       * recently recorded viewing's date — but it records the basis as `unattributed`,
+       * because the server cannot tell a date an old client defaulted from one the
+       * reader chose. This client knows, so it says: `reader` when they picked a date,
+       * `none` when they chose *Earlier*.
+       *
+       * It refuses `multiple_watches` on a title with several viewings, and that refusal
+       * is the product decision made structural (§J.2): one date control cannot honestly
+       * represent six viewings, and silently editing "the latest one" is a write nobody
+       * could predict from the screen they were looking at. The sheet shows
+       * `Watched N times ›` instead, and this branch is not reached.
+       *
+       * A note being written on a row that does not exist still goes through
+       * `log_watched`, which upserts — that is the call that creates the row, and
+       * `set_watch_date` deliberately cannot.
+       */
+      if (dateChanged && !writesNoteHere && rowExists) {
+        const result = await setWatchDate({
+          operationId: newOperationId(),
+          mediaItemId: title.id,
+          watchedOn: nextDate,
+          basis: nextDate === null ? 'none' : 'reader',
+        });
+        if (result.multiple) {
+          // Not an error the reader caused, and not one they can act on from here.
+          setProblem('This title has more than one watch. Edit them from its watch history.');
+          ok = false;
+        } else {
+          ok = report(result);
+        }
+        touched = touched || mustReconcile(result);
+      } else if (dateChanged || writesNoteHere) {
         const result = await logWatched({
           operationId: newOperationId(),
           mediaItemId: title.id,
@@ -1295,6 +1357,9 @@ function Body({
     setExpanded('notes');
   };
 
+  // The Watch History route, for the `Watched N times ›` row (§J.2).
+  const router = useRouter();
+
   // Every deliberate way out of the sheet flushes first. The unmount effect would
   // catch these too, but a flush that waits for an unmount is a flush that runs
   // while the modal is animating away — doing it on the tap is free and earlier.
@@ -1376,42 +1441,10 @@ function Body({
           </View>
         )}
 
-        {confirmRebucket ? (
-          <View style={styles.confirm}>
-            {/* Two sentences for two different acts. “Changing this” is untrue of a
-                re-rank in the same bucket — nothing about the rating changes — and a
-                confirmation that misdescribes what it is confirming is worse than none.
-                The second line is the same either way, because the consequence is.
-
-                **And the second line said the position was discarded, which stopped
-                being true on 2026-08-26** (`20260826000500`, corrected here 2026-09-08).
-                The server runs the session *over* the placement the title holds, so
-                cancelling, closing the sheet or losing the connection leaves the score,
-                the band and the place exactly as they were. Warning a reader they are
-                about to lose something they cannot lose is the founder's disappearing
-                score in another form — the fear survived the fix, in copy. What is
-                genuinely being asked for is the comparisons, so that is what it says. */}
-            <Text variant="callout">
-              {confirmRebucket === state.bucket
-                ? `Rank ${title.title} again?`
-                : `Changing this will re-rank ${title.title}.`}
-            </Text>
-            <Text variant="footnote" tone="secondary">
-              You will compare it again. Nothing changes until you finish.
-            </Text>
-            <View style={styles.confirmActions}>
-              <Button label="Re-rank" onPress={rebucket} />
-              <Button
-                label="Cancel"
-                kind="secondary"
-                onPress={() => {
-                  setConfirmRebucket(null);
-                  setBucketEdit(null);
-                }}
-              />
-            </View>
-          </View>
-        ) : null}
+        {/* There was a "Rank <title> again? / [Re-rank] [Cancel]" card here. It is gone on
+            the founder's contract (2026-09-21): a band tap on a ranked title goes straight
+            into the comparisons, and cancelling *those* is what leaves the ranking alone.
+            See `choose`. */}
 
         {/**
          * **Nothing is drawn while a save is succeeding** (founder, 2026-08-29).
@@ -1579,30 +1612,57 @@ function Body({
           {/* Gated for the same reason, and for one of its own: `log_watched`
               assigns the watch date rather than coalescing it, so a date picked
               against the default would overwrite a real one already recorded. */}
-          <SheetRow
-            icon="calendar-outline"
-            label="Watch date"
-            // "Earlier", the same word as the choice that produces it (T0b): seen, at a
-            // time nobody recorded. It was "Not recorded", which read as the sheet having
-            // failed at something rather than as an answer the reader gave.
-            value={
-              loaded
-                ? datelessOnPurpose
-                  ? 'Earlier'
-                  : formatWatchDate(effectiveDate)
-                : undefined
-            }
-            expanded={dateOpen}
-            onPress={
-              loaded
-                ? () => {
-                    setDateAutoOpen(false);
-                    setExpanded(dateOpen ? null : 'date');
-                  }
-                : undefined
-            }
-            disabledReason={GATE_REASON[fieldState]}
-          />
+          {/**
+           * ---------------------------------------------------------------------------
+           * **`Watched N times ›` REPLACES THE DATE ROW FROM THE SECOND VIEWING** (§J.2)
+           *
+           * A single date control cannot honestly represent six viewings, and the server
+           * says so too: `set_watch_date` refuses `multiple_watches` rather than
+           * silently editing "the latest one". So the row stops pretending and becomes
+           * the route to the screen that can.
+           *
+           * **Never `Watched 1 time`.** One viewing keeps the row it always had — the
+           * date, or *Earlier*. The plural count appears from the second watch onward,
+           * which is also the first moment it says anything the date alone did not.
+           */}
+          {multipleWatches ? (
+            <SheetRow
+              icon="repeat-outline"
+              label={watchLabel ?? 'Watch history'}
+              onPress={() => {
+                // The sheet closes BEFORE the push, which is the iOS two-modal rule this
+                // codebase has paid for: navigating out from under a presented sheet
+                // leaves a screen that is mounted, visible and dead to touch.
+                close();
+                router.push(`/title/${title.id}/history` as never);
+              }}
+            />
+          ) : (
+            <SheetRow
+              icon="calendar-outline"
+              label="Watch date"
+              // "Earlier", the same word as the choice that produces it (T0b): seen, at a
+              // time nobody recorded. It was "Not recorded", which read as the sheet having
+              // failed at something rather than as an answer the reader gave.
+              value={
+                loaded
+                  ? datelessOnPurpose
+                    ? 'Earlier'
+                    : formatWatchDate(effectiveDate)
+                  : undefined
+              }
+              expanded={dateOpen}
+              onPress={
+                loaded
+                  ? () => {
+                      setDateAutoOpen(false);
+                      setExpanded(dateOpen ? null : 'date');
+                    }
+                  : undefined
+              }
+              disabledReason={GATE_REASON[fieldState]}
+            />
+          )}
           {/**
            * Open by itself when a carried *Earlier* is in force (R4), so the choice the
            * sheet made on the reader's behalf is on screen with *Today* one tap away —
@@ -1665,7 +1725,7 @@ function Body({
  * Separate so the sheet's own layout stays readable, and because the note is the one
  * control here that is a text field rather than a row.
  */
-function NoteInput({
+export function NoteInput({
   value,
   label,
   onChangeText,
@@ -1719,14 +1779,6 @@ const styles = StyleSheet.create({
   },
   rankedText: { flex: 1, gap: 2 },
   done: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
-  confirm: {
-    marginHorizontal: theme.layout.gutter,
-    padding: theme.space[3],
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.surface.sunken,
-    gap: theme.space[2],
-  },
-  confirmActions: { gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
   unavailable: {
     paddingHorizontal: theme.layout.gutter,

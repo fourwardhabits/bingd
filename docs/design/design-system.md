@@ -727,6 +727,69 @@ Two mechanisms, both cheap, both preventing the failures this document exists to
 
 ---
 
+## 11b. Reusable UI rules (founder delta QA, 2026-09-21)
+
+Rules found by device QA that apply beyond the screen they were found on. Each names the
+component that already implements it; a new screen reuses that, not a copy.
+
+**Detail pages: a large hero title, and a compact nav title only once it has gone.** A
+detail page (a title, a list, any future entity page) opens on a full-bleed hero with its
+large title on Paper beneath it. The navigation is drawn over the artwork (`TitleTopBar`)
+and gains its Paper ground as the hero leaves; the compact title appears in the bar **only
+after the large title has scrolled out of view**. Never both on screen at once. The
+arithmetic is one hook, `useHeroReveal`, and the artwork one function, `heroArtwork`
+(backdrop → parent's backdrop → blurred poster → the plain collapsed band). A list borrows
+its first title's artwork.
+
+**Compact title rows share one state-aware trailing contract** (`TitleRowActions`).
+Ranked → the reader's own score circle, alone. Not ranked → the Maroon `+` and the one-tap
+Watchlist, whatever the reason it is not ranked. A series gets only `+`. Share is not a row
+action in browse, search or list contexts; the title page carries it. Search, list and
+Collection rows use the same component, so they cannot disagree.
+
+**Primary/secondary action pairs sit side by side** (`ProfileActions` is the reference):
+two equal halves in one row, the secondary act leading, the Maroon fill on the trailing
+primary act, `fit` so a two-word label stays on one line at 320pt. Not two full-width
+stacked bars.
+
+**Numbering replaces a visual anchor; it never shifts row geometry.** A number on a
+numbered list is a plate centred on the poster's own centre line (`ListItemRow`), so the
+poster, title and trailing actions are at the same x whether numbering is on or off, and a
+1-, 2- or 3-digit number grows symmetrically about that line.
+
+**Reuse the ranking/log detail components; do not build a parallel flow.** Logging another
+watch is the log sheet in rewatch mode (`LogAnotherWatchSheet`: same header, same *How was
+it?* bands, same rows), and editing a watch uses the same rows (`WatchDetailsRows`: Who I
+watched with, Note, Watch date — the log sheet's `SheetRow`, `CompanionPicker`, `NoteInput`
+and `WatchDatePicker`), all closed by default.
+
+**Historical versus current opinion.** A watch's score is the opinion held at that watch
+(its post's frozen `payload.score`); Watch History and the Feed both show it and neither
+moves when the reader later updates their rating. The current score is the title page,
+Collection, Search and list rows, all refreshed by one path
+(`invalidateAfterCollectionChange`).
+
+**Secondary prose uses `bodySecondary` (15/22), one step below `body`.** A list's description and a watch's note are writing that sits under a title or date, not the page's subject; they use this token, never a one-off size. Titles, dates, actions and controls keep their own tokens.
+
+**Every first load shows the loading language.** A screen whose header is up while its first request is pending draws the standard skeleton (`SkeletonRow` / `SkeletonTile`), never an empty area.
+
+**Two ranking states on screen, three underneath** (`rankingStateOf` → `rankingPresentationOf`).
+A placed title shows its score (filled Maroon circle). Everything else — never touched,
+watched or imported and never ranked, or a ranking left unfinished — shows the ordinary
+unranked treatment: `+` on a compact row, **Rank** on the title page. No dashed ring, no
+Finish pill, no *Ranking not finished*. The internal state decides only what the tap does:
+an unfinished native placement resumes its session (`resumeSubject`; `rank_start` restores
+the comparison and the answers and never opens a second session), anything else opens the log
+sheet. Closing a first placement keeps its session for that resume; closing a re-rank cancels
+it. A Letterboxd star is never a bucket, so an import is always plain unranked.
+
+**Row edit affordances are small text** (`Edit`, optionally with a small pencil), never a
+large bare glyph. Destructive row actions on an owned list are revealed by a horizontal
+swipe (`SwipeToRemove`, horizontally dominant moves only, never during a drag) and confirmed
+by a second tap, with the same action available as an accessibility action.
+
+---
+
 ## 12. Open
 
 | Item | Who decides |

@@ -634,9 +634,25 @@ describe('the comparison', () => {
 });
 
 describe('closing', () => {
-  it('cancels the session it is in the middle of', async () => {
+  const rerank = { ...subject, mode: 'rerank' as const };
+
+  it('keeps a first placement it is in the middle of, so Rank resumes it', async () => {
+    // Founder, final UI simplification 2026-09-21: an unfinished native placement keeps
+    // its session and answers. The title's Rank / + resumes it through rank_start, which
+    // returns the same session rather than opening a second one.
     answering(comparison());
     const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.close());
+
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    expect(callsTo('rank_cancel')).toHaveLength(0);
+  });
+
+  it('cancels a re-rank it is in the middle of — leaving one keeps what was there', async () => {
+    answering(comparison());
+    const sheet = await openSheet({ subject: rerank });
 
     await sheet.ready('Film P');
     await fireEvent.press(sheet.close());
@@ -646,9 +662,8 @@ describe('closing', () => {
     expect(sheet.onClose).toHaveBeenCalled();
   });
 
-  it('cancels a session that arrives after the sheet has been dismissed', async () => {
-    // The dismissal happens while rank_start is still in flight, so nothing on screen ever
-    // learns the session id. Discarding the response leaves the session standing.
+  it('keeps a first placement that arrives after the sheet has been dismissed', async () => {
+    // It may be a resumed session carrying answers; cancelling it would throw them away.
     let answer: (value: unknown) => void = () => {};
     mockRpc.mockImplementation((fn: string) =>
       fn === 'rank_start'
@@ -659,6 +674,30 @@ describe('closing', () => {
     );
 
     const sheet = await openSheet();
+    await fireEvent.press(sheet.close());
+    await sheet.rerender(
+      <RankingSheet subject={null} onClose={sheet.onClose} surface="search" />,
+    );
+    answer(comparison());
+
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(callsTo('rank_cancel')).toHaveLength(0);
+  });
+
+  it('cancels a re-rank that arrives after the sheet has been dismissed', async () => {
+    // The dismissal happens while rank_start is still in flight, so nothing on screen ever
+    // learns the session id. Discarding the response leaves the session standing.
+    let answer: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'rank_again'
+        ? new Promise((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve({ data: { done: true, cancelled: true }, error: null }),
+    );
+
+    const sheet = await openSheet({ subject: rerank });
 
     expect(sheet.getByText('Working out what to ask…')).toBeTruthy();
     await fireEvent.press(sheet.close());
@@ -686,7 +725,7 @@ describe('closing', () => {
     // A dropped connection or a suspension mid-session: the server still has the session,
     // and this is the one exit the screen offers.
     answering(comparison(), { data: null, error: { code: '42501', message: 'suspended' } });
-    const sheet = await openSheet();
+    const sheet = await openSheet({ subject: rerank });
 
     await fireEvent.press(await sheet.ready('Film A'));
     await waitFor(() => expect(sheet.getByText('Could not rank')).toBeTruthy());
@@ -723,18 +762,18 @@ describe('closing', () => {
   });
 
   it('abandoning a session writes no collection state of its own', async () => {
-    // The Unranked contract, pinned. Leaving mid-comparison cancels the session and
-    // nothing else: the bucket the reader already chose survives, the title stays
-    // Logged, and it is Logged-and-not-Ranked — which is exactly what the unranked
-    // reminder is for. Nothing here logs a watch that the bucket tap had not already
-    // claimed.
+    // The Unranked contract, pinned. Leaving mid-comparison writes nothing: the bucket
+    // the reader already chose survives, the title stays Logged-and-not-Ranked, and the
+    // session waits for Rank to resume it. Nothing here logs a watch that the bucket tap
+    // had not already claimed.
     answering(comparison());
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
     await fireEvent.press(sheet.close());
 
-    await waitFor(() => expect(callsTo('rank_cancel')).toHaveLength(1));
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    expect(callsTo('rank_cancel')).toHaveLength(0);
     expect(callsTo('log_watched')).toHaveLength(0);
     expect(callsTo('set_bucket')).toHaveLength(0);
     expect(callsTo('rank_answer')).toHaveLength(0);
@@ -2530,5 +2569,48 @@ describe('when the recall sheet is opened from a comparison', () => {
     expect(events('comparison_info_opened')).toHaveLength(0);
     // And with no kind to be honest about, the control makes no claim about the sheet.
     expect(sheet.getByLabelText('Details about …').props.accessibilityHint).toBeUndefined();
+  });
+});
+
+/**
+ * A re-ranking says where it went (founder QA, 2026-09-21): *Moved from #8 → #2* or
+ * *Still #2*, in the placement's own line, from the `movement` the server returns.
+ */
+describe('the reveal after a re-ranking', () => {
+  const moved = (outcome: string, from: number, position: number) => ({
+    data: {
+      ...placement.data,
+      position,
+      movement: { outcome, from_position: from, from_score: 8, kind: 'rerank' },
+    },
+    error: null,
+  });
+
+  it('shows Moved from #8 → #2 when the placement changed, even outside the top ten', async () => {
+    answering(comparison(), moved('moved', 18, 12));
+    const sheet = await openSheet({ subject: { ...subject, mode: 'rerank' as const } });
+    await fireEvent.press(await sheet.ready('Film P'));
+    expect(
+      (await sheet.findByTestId('reveal-movement', { includeHiddenElements: true })).props
+        .children,
+    ).toBe('Moved from #18 → #12');
+  });
+
+  it('shows Still #3 when it held', async () => {
+    answering(comparison(), moved('unchanged', 3, 3));
+    const sheet = await openSheet({ subject: { ...subject, mode: 'rerank' as const } });
+    await fireEvent.press(await sheet.ready('Film P'));
+    expect(
+      (await sheet.findByTestId('reveal-movement', { includeHiddenElements: true })).props
+        .children,
+    ).toBe('Still #3');
+  });
+
+  it('draws no movement on a first ranking', async () => {
+    answering(comparison(), placement);
+    const sheet = await openSheet();
+    await fireEvent.press(await sheet.ready('Film P'));
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    expect(sheet.queryByTestId('reveal-movement', { includeHiddenElements: true })).toBeNull();
   });
 });

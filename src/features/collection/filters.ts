@@ -39,6 +39,11 @@ export type CollectionItem = {
    */
   position?: number | null;
   bucket: Bucket | null;
+  /**
+   * A bucket chosen in bingd and no completed placement — internal only; never drawn
+   * (`rankingStateOf`). Absent for a ranked title and for one with no opinion yet.
+   */
+  unfinished?: boolean;
   watchedOn: string | null;
   /**
    * When this title entered *this* collection — `user_media.created_at` for a watched

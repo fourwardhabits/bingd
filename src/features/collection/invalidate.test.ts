@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query';
 
 import {
   invalidateAfterCollectionChange,
@@ -48,6 +49,7 @@ const invalidatedBy = (
 };
 
 const KEYS = {
+  myScores: ['my-scores', USER],
   rankedMovies: ['rankings', USER, 'movies'],
   rankedSeasons: ['rankings', USER, 'tv_seasons'],
   collection: ['collection', USER],
@@ -106,6 +108,16 @@ describe('after a ranking completes', () => {
     invalidatedBy(all, (client) =>
       invalidateAfterCollectionChange(client, USER, TITLE, { category: 'movies' }),
     );
+
+  /**
+   * **Search's score badge** (founder QA, 2026-09-21). A just-ranked Black Panther showed
+   * the dashed Rank badge in Search, because the score map it reads was never refreshed
+   * after a ranking: the title was logged, so it was not a +, and it was missing from the
+   * stale map, so it was not a score.
+   */
+  it('refreshes the reader’s own scores, which Search draws its row badge from', async () => {
+    expect(has(touched(), KEYS.myScores)).toBe(true);
+  });
 
   it('refreshes the Feed — the one that was missing', async () => {
     expect(has(touched(), KEYS.feed)).toBe(true);
@@ -323,5 +335,49 @@ describe('after a Letterboxd import ends', () => {
   it('leaves the rankings alone, because an import writes none', () => {
     expect(has(touched(), KEYS.rankedMovies)).toBe(false);
     expect(has(touched(), KEYS.search)).toBe(false);
+  });
+});
+
+/**
+ * **One current score, everywhere, without a restart** (founder release check,
+ * 2026-09-21). After a new ranking or a rerank, the title page, Collection and Search —
+ * and a list's rows, which read the same score as Search — must all show the same current
+ * score. Each consumer's key is built here from the hook that reads it, so a consumer that
+ * moves to a key outside `invalidateAfterCollectionChange` fails this rather than showing a
+ * stale number. `RankingSheet` calls it on every completed placement, new or rerank.
+ *
+ * Historical numbers are deliberately NOT on this path: a watch-backed feed post keeps
+ * its own frozen `payload.score`, and Watch History reads the same, so a rerank that
+ * refreshes these keys still cannot move them (use-feed.test, watch-history.test).
+ */
+describe('every current-score consumer shares the ranking invalidation', () => {
+  const consumers = {
+    // app/title/[id].tsx — the `personal` read that carries `ranked` and its position.
+    titlePage: queryKeys.title(TITLE).concat(['personal', USER]),
+    // useTitleScore — band sizes under the category's rankings key.
+    titleScoreBands: [...queryKeys.rankings(USER, 'movies'), 'bands'],
+    // Collection — useRankedCollection and useLoggedCollection.
+    collectionRanked: queryKeys.rankings(USER, 'movies'),
+    collectionLogged: queryKeys.collection(USER),
+    // Search and list rows — useMyScores.
+    searchAndLists: queryKeys.myScores(USER),
+    // The log sheet's own state for the title.
+    logState: queryKeys.logState(USER, TITLE),
+  } as const;
+
+  it.each([
+    ['a new ranking', { category: 'movies' as const }],
+    ['a rerank, or a lost reply with no category', {}],
+  ])('refreshes all of them after %s', (_label, options) => {
+    const seeds = Object.values(consumers);
+    const touched = invalidatedBy(seeds, (client) =>
+      invalidateAfterCollectionChange(client, USER, TITLE, options),
+    );
+    for (const [name, key] of Object.entries(consumers)) {
+      expect({ name, refreshed: touched.has(JSON.stringify(key)) }).toEqual({
+        name,
+        refreshed: true,
+      });
+    }
   });
 });

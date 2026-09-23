@@ -18,8 +18,20 @@ import { supabase } from '@/lib/supabase';
  * `recommendation` (20260929000100) is the note a sender attached to a recommendation,
  * reported by its recipient from the title page. The server resolves the sender as the
  * owner and accepts it only from the recipient, only while it is delivered and has a note.
+ *
+ * `list` is a whole list, reported from its ⋯ by anybody who can read it. The subject
+ * has existed in the backend taxonomy since 20260813000800 and gained a client entry
+ * with Lists v1 (20261010000100). The server resolves the owner from `lists.owner_id`
+ * rather than from anything the caller sends, and deliberately does **not** require the
+ * reporter to still be able to see the list — a block must not be a way to make what
+ * you posted unreportable.
+ *
+ * `list_title`, for a list whose *name* is the problem, is in the backend taxonomy and
+ * has **no client entry**: one report of a list is enough for an operator to look at
+ * both halves, and asking a reporter to classify which half offended them is a question
+ * nobody outside moderation has a reason to answer.
  */
-export type ReportSubject = 'profile' | 'comment' | 'review' | 'recommendation';
+export type ReportSubject = 'profile' | 'comment' | 'review' | 'recommendation' | 'list';
 
 /** The backend taxonomy, `reports_known_reason`. Eight values, closed. */
 export type ReportReason =

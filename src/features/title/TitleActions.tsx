@@ -6,6 +6,16 @@ import { hapticSelection } from '@/ui/haptics';
 import { usePressScale, usePulse } from '@/ui/press';
 import { theme } from '@/ui/tokens';
 
+/**
+ * The icon controls' own width; `hitSlop` makes up the rest of the 44pt target.
+ *
+ * 32 since the fourth control (Add to List, founder QA 2026-09-21): Rank/Ranked plus three
+ * icons then fits one line in the identity column from a 375pt phone up. On a narrower
+ * column the cluster wraps its icons under Rank rather than truncating the one word the
+ * row exists to say — the controls never change shape, only where the line breaks.
+ */
+const ICON_BOX = 32;
+
 export type RankAction = {
   /** Whether this reader has already ranked it. Decides the word and the treatment. */
   ranked: boolean;
@@ -36,6 +46,12 @@ export type TitleActionsProps = {
   rank: RankAction | null;
   /** The watchlist bookmark. Every kind of title has one. */
   save: IconAction;
+  /**
+   * **Add to List, one tap** (founder QA, 2026-09-21). Every movie, season and series
+   * can go on a list, so every title has it; it opens the Add-to-list sheet directly
+   * rather than sitting behind the page's ⋯.
+   */
+  list?: IconAction | null;
   /** Absent for a series, which cannot be recommended (PRD §10). */
   recommend: IconAction | null;
 };
@@ -88,7 +104,7 @@ export type TitleActionsProps = {
  * Ranked draws outlined — it is a fact you may edit. That pair is the app's standing
  * button hierarchy (design-system.md §8) and is unchanged from before this redesign.
  */
-export function TitleActions({ rank, save, recommend }: TitleActionsProps) {
+export function TitleActions({ rank, save, list = null, recommend }: TitleActionsProps) {
   /**
    * **The page's primary act gives under a thumb** (founder premium pass, 2026-09-08).
    *
@@ -144,6 +160,10 @@ export function TitleActions({ rank, save, recommend }: TitleActionsProps) {
         action={save}
       />
 
+      {list ? (
+        <IconControl testID="title-action-list" icon="list-outline" badge="add" action={list} />
+      ) : null}
+
       {recommend ? (
         <IconControl
           testID="title-action-recommend"
@@ -165,10 +185,13 @@ function IconControl({
   testID,
   icon,
   action,
+  badge,
 }: {
   testID: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
   action: IconAction;
+  /** A small `+` on the glyph's corner: Ionicons has no list-plus, so it is composed. */
+  badge?: 'add';
 }) {
   const press = usePressScale({ enabled: !action.disabled });
   const pop = usePulse();
@@ -204,6 +227,7 @@ function IconControl({
         disabled={action.disabled}
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
+        hitSlop={{ left: 6, right: 6 }}
         style={({ pressed }) => [styles.icon, pressed && styles.pressed]}
       >
         <Animated.View style={pop.pulseStyle}>
@@ -214,6 +238,11 @@ function IconControl({
             // the same pair the feed row and the search row draw.
             color={action.selected ? theme.semantic.action : theme.text.secondary}
           />
+          {badge ? (
+            <View style={styles.badge} pointerEvents="none">
+              <Ionicons name="add" size={11} color={theme.text.secondary} />
+            </View>
+          ) : null}
         </Animated.View>
       </Pressable>
     </Animated.View>
@@ -221,6 +250,13 @@ function IconControl({
 }
 
 const styles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    right: -4,
+    bottom: -3,
+    borderRadius: 7,
+    backgroundColor: theme.surface.base,
+  },
   /**
    * One left-aligned group inside the identity column.
    *
@@ -234,9 +270,10 @@ const styles = StyleSheet.create({
    */
   cluster: {
     flexDirection: 'row',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: theme.space[2],
+    columnGap: theme.space[1],
+    rowGap: theme.space[2],
   },
   rank: {
     flexDirection: 'row',
@@ -273,7 +310,9 @@ const styles = StyleSheet.create({
      * rather than a defect fix, so neither is taken here.
      */
     maxWidth: theme.layout.control.inlineButtonMaxWidth,
-    paddingHorizontal: theme.space[4],
+    // Trimmed with the fourth control so `Ranked` and three icons share one line at 375pt.
+    paddingHorizontal: theme.space[3],
+    marginRight: theme.space[1],
     borderRadius: theme.radius.control,
   },
   unranked: { backgroundColor: theme.semantic.action },
@@ -282,8 +321,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.semantic.action,
   },
+  // 32pt boxes with a 6pt hitSlop each side, so every glyph still clears the 44pt target.
   icon: {
-    width: theme.layout.minTapTarget,
+    width: ICON_BOX,
     height: theme.layout.minTapTarget,
     alignItems: 'center',
     justifyContent: 'center',

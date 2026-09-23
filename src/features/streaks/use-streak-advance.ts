@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef } from 'react';
 import { after, readAllByKey } from '@/lib/read-all';
 import { supabase } from '@/lib/supabase';
 
-import { streakAdvanced, weeklyStreak, type WeeklyStreak } from './streak';
+import { streakBoundary } from '@/features/onboarding/use-taste-onboarding';
+
+import { clampToBoundary, streakAdvanced, weeklyStreak, type WeeklyStreak } from './streak';
 
 /** Every instant this reader placed a title, which is all a streak is made of. */
 async function readRankedAt(userId: string): Promise<string[]> {
@@ -19,7 +21,15 @@ async function readRankedAt(userId: string): Promise<string[]> {
     (row) => [row.media_item_id],
   );
   if (error) throw error;
-  return (data ?? []).map((row) => row.created_at);
+  // Onboarding counts as one week at most, and the streak's life starts when it ends
+  // (`clampToBoundary`, founder QA 2026-09-21). Applied to BOTH readings — the one taken
+  // on mount and the one taken after the placement — so the comparison between them is
+  // made on the same terms.
+  const boundary = await streakBoundary(userId);
+  return clampToBoundary(
+    (data ?? []).map((row) => row.created_at),
+    boundary,
+  ).map((at) => (at instanceof Date ? at.toISOString() : at));
 }
 
 /**

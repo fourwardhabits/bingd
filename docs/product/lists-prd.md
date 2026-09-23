@@ -1,5 +1,39 @@
 # Lists — PRD (v1)
 
+> **Status: BUILT, 2026-09-20, on `feat/lists-v1`.** The header below is the state this
+> document was written in, and is kept because the rest of it is written against that
+> state. This note is what supersedes it.
+>
+> Everything in §O's six PRs is implemented, in one branch rather than six: the migration
+> is `20261010000100`, its suite is `supabase/tests/lists.test.mjs`, the client is
+> `src/features/lists/` plus `app/lists/`, the web render is in `web/src/page.mjs`,
+> `web/src/router.mjs` and `web/build.mjs`, and the preview Function is
+> `functions/lists/[id].js`.
+>
+> **What has not happened**, none of it a code change: the migration has reached no
+> database, no OTA has been published, and the §N device QA has not been run. §O's release
+> order still stands — L1 to production, the client on the staging preview lane, device QA,
+> one OTA to both lanes, the web deploy, then the Function.
+>
+> **Three deliberate departures from the letter of this document**, each recorded where it
+> was made:
+>
+> - **The Settings → Privacy line is in the standing private-state explanation, not on a
+>   confirmation.** §F.4 asks for it on "the private-profile confirmation", and there is
+>   none: going *private* is the protective direction and has never had a dialog — only
+>   going public does, because that one changes other people's access. Inventing a
+>   confirmation for the safe direction would put friction on the act that screen exists to
+>   make easy. The sentence now sits in the block a reader meets every time they check what
+>   private means, which is better for what it is for than an alert read once.
+> - **The See-all screen is `app/lists/by/[userId]`**, inside the already-claimed
+>   `/lists/*`. `listIdFromPath` matches a uuid *directly* under `/lists/` and nothing
+>   else, so this path and `/lists` itself both keep the generic install page, exactly as
+>   §B requires — and a universal link to either still opens the app.
+> - **`Delete list` is a row in the list's ⋯ that opens the editor**, where §H draws it as
+>   a fourth menu row. The destructive act stays in one place (§G's edit mode, behind its
+>   own confirmation) and the menu row is a way *to* it, so there is one delete path rather
+>   than two.
+
 **Status: BUILD-READY AND PARKED, 2026-09-19.** Nothing here is built. Source of truth:
 `origin/main` at `0468f1c` (re-checked at `c77d524` and `d675d69`: nothing Lists-related
 changed), PRD §3 doctrine 4, deferred-roadmap §50, the competitive audit of 2026-09-16 (a
@@ -1198,3 +1232,79 @@ reviewed 2026-09-19 against current product behaviour. The two findings that dec
 **every product that puts lists on the profile has no separate library tab**, and
 **Spotify — the one product that shares bingd's split — manages in Library and displays on
 the profile.**
+
+---
+
+## R. Founder delta QA, 2026-09-21 — what changed, and the Feed direction
+
+### R.1 Decisions that supersede earlier sections
+
+These reverse or amend §G, §H, §I and §Q.6 for the #196 candidate. Where they disagree,
+this section wins.
+
+1. **Collection entry (supersedes §Q.6.1, §Q.2).** Lists is the third option of
+   Collection's selector — **Movies / TV / Lists** — and a first-class mode, remembered
+   under the same device preference as Movies/TV. It is still not a segment and not a
+   bottom tab: in Lists mode the Watched/Watchlist/Unranked tabs are not drawn, because a
+   list mixes media. The `My lists ›` link is gone. Profile keeps its public Lists shelf
+   and `Manage ›` still pushes `/lists`. `my_lists_opened.entry = collection` now means
+   the mode was opened.
+2. **Covers (supersedes the always-2×2 rule).** No posters → neutral placeholder with a
+   list glyph; 1–3 → the first poster, full cover; 4+ → the 2×2 mosaic of the first four.
+   One component (`ListCover`) for My lists, the Profile shelf and all-lists-by.
+3. **List page (supersedes §H's header and §Q.6.4's progress line).** Primary **Share
+   list**, secondary **Add titles**. One metadata line: owner `3/3 watched · Only you ·
+   Updated today`; viewer `X/N watched · Public | Anyone with the link · Updated …`. The
+   viewer's word is derived from `shareable_by_viewer`, which is true for a viewer exactly
+   when the list is public, so it discloses nothing the Share control did not. The
+   "You've seen X of N" line is removed. Tapping the owner's visibility opens settings.
+4. **Privacy words.** Only you / Anyone with the link / Public, identical in the chip,
+   the picker and the metadata.
+5. **Visibility dialogs.** A question as the title, the consequence as the body, the act
+   as the button — *Make this list link-only?* / *Make this list public?* / *Make this
+   list private?* (`visibilityChangeDialog`). Used by Share-on-private and by saving a
+   changed visibility in settings.
+6. **Owner ⋯:** Edit list settings (title, description, Numbered, privacy — no ordering,
+   no delete), Share, Delete list (its own confirmation).
+7. **Reorder (supersedes §Q.6.5 "no long-press" for the list page only).** Long-press a
+   row on the list's own page to lift it, drag, drop. The rows between make room as the
+   lifted row crosses their middle; the drop commits one `move_list_item` (one title, its
+   new index; last-move-wins, as before). Core RN responder system + `Animated`; no new
+   dependency, no new binary. The same moves are accessibility actions on each row.
+   Collection rows still have no long-press (§Q.7 unchanged).
+8. **Numbers** on a numbered list follow the drawn order, on the main page, the public
+   page and the link page, and update the moment a drop lands.
+9. **Remove a title:** per-row ⋯ → *Remove from list* (owner only).
+
+### R.2 Future list Feed events — direction only, NOT built
+
+Nothing here is implemented; `list_created` / `list_added` stay writer-less (§D). When
+lists ever reach the Feed, the rules are:
+
+- **Private (Only you): never** produces a Feed event, of any kind, at any time.
+- **Link-only: never automatically.** A link is a share the owner handed to specific
+  people; broadcasting it would turn every link into a public list.
+- **Public: exactly one event, when the list first becomes public** (created public, or
+  changed to public for the first time). Not again on a later private → public flip, and
+  never retracted-and-reposted by toggling.
+- **No per-title posts.** Adding titles to a list never writes an event; a list is one
+  thing in the Feed, not a stream of additions.
+- **Later, an explicit "Share to Feed"** action may let the owner post a public list
+  deliberately (for example after adding a batch). It would be a user act with its own
+  button, never a side effect of an edit.
+- The Feed card would carry only what the public list page shows (title, cover, count,
+  owner) and would follow `can_i_view` like every other event.
+
+### R.3 Final polish, 2026-09-21 (second delta pass)
+
+- **Add to List is one tap on the title page's action row** (Rank · Watchlist · Add to
+  List · Share), replacing the `⋯ → Add to list…` row; the ⋯ is drawn only when the title is
+  ranked or logged. Supersedes §P.4's "the ⋯ is on every title".
+- **Remove from list is a swipe** on an owned list's row (then a tap on Remove), not a
+  permanent ⋯; it stays an accessibility action. Long-press remains the drag.
+- **List rows use the shared compact-row actions** (`TitleRowActions`): the reader's own
+  score when ranked, else Rank/log + Watchlist.
+- **The list page opens on its first title's artwork** with the title page's collapsing
+  header, and Add titles / Share list sit side by side.
+- **Covers:** the 2×2 mosaic is two flex rows of two cells; the earlier tile arithmetic
+  wrapped inside the cover's border and drew two half-width strips on device.

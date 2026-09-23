@@ -67,7 +67,8 @@ describe.each(SIZES)('a synthetic library of %i titles', (titles) => {
 
   it('rates every title, because the generator does', () => {
     expect(result.counts.rated).toBe(titles);
-    expect(result.watched.every((t) => t.bucket !== null)).toBe(true);
+    // Rated, and still no bucket: a star is provenance, never a bingd opinion.
+    expect(result.watched.every((t) => t.rating !== null && t.bucket === null)).toBe(true);
   });
 
   it('reads no malformed rows out of a well-formed archive', () => {

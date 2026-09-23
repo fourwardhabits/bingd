@@ -36,6 +36,50 @@ const ALLOWED = {
   'list_by_id(uuid)': ['anon', 'authenticated'],
   'list_items_by_list(uuid)': ['anon', 'authenticated'],
 
+  // ---------------------------------------------------------------------------
+  // Lists v1 (20261010000100).
+  //
+  // The anon set is exactly six, and each one is anon for a stated reason rather than
+  // by symmetry with its neighbours:
+  //
+  //   list_view / list_items_page    — the logged-out page at bingd.app/lists/<id> is
+  //                                    the acquisition surface and has no session.
+  //   record_list_open               — that page's one metric, which must not need one
+  //                                    either.
+  //   list_preview                   — read by the Cloudflare Pages Function that sets
+  //                                    og:title. It holds the anon key and nothing more.
+  //   list_by_id / list_items_by_list — the two that predate this tranche, redefined
+  //                                    onto the same predicate at their existing grants.
+  //
+  // Every one of them is gated on `_list_readable`, which is granted to **nobody**: it
+  // takes a viewer, so a client grant would make it the block-graph and follow-graph
+  // oracle `can_view_profile` was withdrawn for being (20260813001900). Same for
+  // `_viewer_has_seen`, which would otherwise report what somebody else has watched,
+  // and for `hide_list` / `unhide_list`, which are the operator's and have no client
+  // entry by design.
+  'list_view(uuid)': ['anon', 'authenticated'],
+  'list_items_page(uuid,integer,integer)': ['anon', 'authenticated'],
+  'record_list_open(uuid,text)': ['anon', 'authenticated'],
+  'list_preview(uuid)': ['anon'],
+
+  // Signed-in list reads. Not anon: there is no viewer to have progress through a
+  // list, no caller for `my_lists` to answer about, and a profile shelf sits behind
+  // `can_view_profile`.
+  'list_viewer_progress(uuid)': ['authenticated'],
+  'my_lists(timestamp with time zone,integer)': ['authenticated'],
+  'my_lists_for_title(uuid)': ['authenticated'],
+  'profile_lists(uuid,timestamp with time zone,integer)': ['authenticated'],
+
+  // Signed-in list writes. Every one takes `p_operation_id` first and resolves the
+  // list from `auth.uid()`, so a list id is a handle rather than an authorisation.
+  'create_list(uuid,text,text,list_visibility,text,uuid)': ['authenticated'],
+  'update_list(uuid,uuid,text,text,list_visibility,text)': ['authenticated'],
+  'delete_list(uuid,uuid)': ['authenticated'],
+  'add_list_item(uuid,uuid,uuid)': ['authenticated'],
+  'remove_list_item(uuid,uuid,uuid)': ['authenticated'],
+  'move_list_item(uuid,uuid,uuid,integer)': ['authenticated'],
+  'add_list_to_watchlist(uuid,uuid)': ['authenticated'],
+
   // Signed-in reads.
   'my_capabilities()': ['authenticated'],
   'unranked_queue(integer)': ['authenticated'],
@@ -97,7 +141,12 @@ const ALLOWED = {
   'rank_unrank(uuid,uuid)': ['authenticated'],
   // Added 2026-08-14 with the comparison screen, which needed a way out of a session.
   'rank_cancel(uuid)': ['authenticated'],
-  'rank_reorder(uuid,integer,uuid)': ['authenticated'],
+  // `rank_reorder` is DELIBERATELY ABSENT since 20261004000100, and its absence is the
+  // assertion. It moves a ranking without writing a `ranking_placements` row, so a title
+  // could sit at #7 with nothing in the ledger explaining how it got there -- which is
+  // the one hole that makes a placement history untrustworthy. It has never had a
+  // caller, and a drag-to-reorder UI is an explicit non-goal (epic §Q). Granting it back
+  // means teaching it to write a `manual` placement first (§E.1).
   'rank_rebucket(uuid,taste_bucket,uuid)': ['authenticated'],
   // New in 20260825000200, and re-signed in 20260826000500. The same-band re-rank the
   // client used to perform as an unrank followed by a start. It no longer unranks at
@@ -106,7 +155,14 @@ const ALLOWED = {
   // another viewing, and one feed activity — from Change your rating, which is a
   // correction and writes none. It defaults to false, so the friend-beta build calling
   // the three-argument form gets the conservative answer.
-  'rank_again(uuid,taste_bucket,uuid,boolean)': ['authenticated'],
+  //
+  // 20261005000100 added a fifth parameter, `p_watch_event_id`, and DROPPED the
+  // four-argument form rather than leaving it as an overload -- the same PostgREST
+  // nesting-ambiguity rule the `log_watched` note below records. It defaults to null, so
+  // an installed client's four-argument call resolves here unchanged; a new client
+  // passes the watch event it has just logged, and the placement links to that viewing
+  // so the re-check enriches one feed activity instead of posting a second (§K).
+  'rank_again(uuid,taste_bucket,uuid,boolean,uuid)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
 
   // The collection writes (api.md §1). Their helpers are absent on purpose:
@@ -129,6 +185,45 @@ const ALLOWED = {
   // from a date-less re-log and is also why "I don't remember when" had no route.
   // Own-row only through auth.uid(), like the rest of this group.
   'clear_watch_date(uuid,uuid)': ['authenticated'],
+
+  // ---------------------------------------------------------------------------
+  // The watch-history writers (20261003000100 T1, 20261005000100 T3).
+  //
+  // Every one of them resolves the account from auth.uid() and takes no identity to act
+  // on behalf of, so a client can only write its own history. The two that take a
+  // `watch_event_id` -- edit and delete -- re-read the row under `user_id = auth.uid()`
+  // and refuse anything else as P0002 "no such watch", which is absent rather than
+  // forbidden: whether somebody else has a viewing of a film is not a client's business
+  // to learn from an error code (20260813001900's rule).
+  //
+  // The READS are plain `select` under the owner-only RLS policy on `watch_events` and
+  // `ranking_placements`, so no function appears here for them. That is deliberate:
+  // watch dates are private at every profile visibility (PRD §22), and a definer read
+  // would be a second door to check.
+  //
+  // `next_pivot`, `_rewatch_posts`, `_watch_cache_recompute`, `_seen_implies_a_watch`
+  // and the rest of the epic's helpers are absent because they are revoked. A client
+  // asking the server what comparison it would offer next is not a surface this product
+  // has, and the ones that write are trigger and definer internals.
+  // ---------------------------------------------------------------------------
+  'log_title(uuid,uuid,taste_bucket,date,watch_date_basis)': ['authenticated'],
+  'set_watch_date(uuid,uuid,date,watch_date_basis)': ['authenticated'],
+  'log_rewatch(uuid,uuid,date,watch_date_basis)': ['authenticated'],
+  'edit_watch_event(uuid,uuid,date,watch_date_basis)': ['authenticated'],
+  'delete_watch_event(uuid,uuid)': ['authenticated'],
+  // 20261014000100 (founder delta QA, 2026-09-21). A viewing's own note and companions:
+  // the rewatch writer with details (log_rewatch plus the details in one transaction) and
+  // the Watch History pencil. Both definer writers that establish ownership of the viewing
+  // and call assert_can_write; companions follow _can_tag, like set_watch_tags. The
+  // details are owner-only reads (RLS through watch_events), never on any public surface.
+  'log_rewatch_with_details(uuid,uuid,date,watch_date_basis,text,uuid[])': ['authenticated'],
+  'set_watch_details(uuid,uuid,text,uuid[])': ['authenticated'],
+  // The same migration. A feed card's own viewing's score, for title_ranked posts on a
+  // title with two or more viewings: a definer read filtered by can_i_view(actor) — the
+  // predicate feed_events_read applies to the activity the caller is already drawing — and
+  // returning only score, band and the watch number. No position, no movement, no date.
+  // Not anon, by public_scores' rule: the signed-out web pages render no activity.
+  'feed_watch_scores(uuid[])': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

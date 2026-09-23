@@ -1,4 +1,7 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+
+import { theme } from '@/ui/tokens';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -16,6 +19,11 @@ const mockPrefs = new Map<string, unknown>();
 /** Rows `from(table)` should answer with, and whether the read should fail outright. */
 const mockTableRows: Record<string, unknown[]> = {};
 let mockAttributionFails = false;
+
+/** The bottom inset the footer is given: a three-button Android navigation bar. */
+jest.mock('@/ui/components/use-stable-bottom-inset', () => ({
+  useStableBottomInset: () => 48,
+}));
 
 jest.mock('@/lib/prefs', () => ({
   readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
@@ -411,5 +419,34 @@ describe('leaving the step', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
 
     expect(eventsNamed('onboarding_step_completed')[0].props.variant).toBe('starter_active');
+  });
+});
+
+/**
+ * **Start your Feed** — the screen the founder photographed with Continue behind Android's
+ * Back / Home / Recents (2026-09-21).
+ */
+describe('the Continue button at the foot of the step', () => {
+  it('sits above a three-button navigation bar, outside the scrolling list', async () => {
+    const view = await renderWithProviders(<PeopleStepScreen />);
+    await waitFor(() => expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy());
+
+    const footer = view.getByTestId('onboarding-footer');
+    // The CTA is in the footer, and the footer clears the whole bar.
+    expect(within(footer).getByRole('button', { name: 'Continue' })).toBeTruthy();
+    expect(StyleSheet.flatten(footer.props.style).paddingBottom).toBe(theme.space[3] + 48);
+    // And it is not inside the ScrollView: on a short screen or with a large font the list
+    // scrolls underneath and the CTA stays put.
+    const ancestors: string[] = [];
+    for (let node = footer.parent; node; node = node.parent) {
+      ancestors.push(String(node.type));
+    }
+    expect(ancestors.some((type) => /ScrollView/.test(type))).toBe(false);
+    // The control that makes that negative mean something: the heading IS in the list.
+    const headingAncestors: string[] = [];
+    for (let node = view.getByText('Start your Feed').parent; node; node = node.parent) {
+      headingAncestors.push(String(node.type));
+    }
+    expect(headingAncestors.some((type) => /ScrollView/.test(type))).toBe(true);
   });
 });

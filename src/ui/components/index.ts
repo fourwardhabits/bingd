@@ -79,6 +79,7 @@ export {
 } from './SegmentedControl';
 export { SegmentedTabs, type SegmentOption } from './SegmentedTabs';
 export { SkeletonRow, type SkeletonRowProps } from './SkeletonRow';
+export { SkeletonGrid, type SkeletonGridProps } from './SkeletonGrid';
 export { SpoilerNote, type SpoilerNoteProps } from './SpoilerNote';
 export { StatRow, type StatItem } from './StatRow';
 export { Text } from './Text';

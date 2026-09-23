@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { OnboardingFooter } from '@/features/onboarding/OnboardingFooter';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import {
   starterLine,
@@ -205,12 +206,12 @@ export default function PeopleStepScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <OnboardingFooter>
         {/* Secondary to following, and present on every branch that has a list: inviting
             somebody is the other way this step can succeed. */}
         {!isError && people.length > 0 ? <InviteFriendsButton /> : null}
         <Button label="Continue" onPress={leave} />
-      </View>
+      </OnboardingFooter>
     </Screen>
   );
 }
@@ -329,11 +330,4 @@ const styles = StyleSheet.create({
   name: { flexShrink: 1, fontFamily: fontFamily.sansSemibold },
   alone: { paddingBottom: theme.space[4] },
   aloneBody: { paddingHorizontal: theme.layout.gutter, gap: theme.space[3] },
-  footer: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[3],
-    gap: theme.space[2],
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.border.hairline,
-  },
 });

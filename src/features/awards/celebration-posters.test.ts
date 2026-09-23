@@ -128,24 +128,24 @@ describe('which posters', () => {
     expect(grid.posters.every((poster) => poster.key.startsWith('c'))).toBe(true);
   });
 
-  it('never repeats a poster to fill a cell', () => {
-    // Nine cells showing the same three posters three times is worse than three cells.
+  it('counts a title once however many times it arrives, before tiling', () => {
+    // Deduplicated first: the same title from the breakdown and the collection is one
+    // poster, and with only one there is no neighbour it could differ from.
     const shared = title('same');
     const grid = build({ contributing: [row('same'), row('same')], collection: [shared] });
 
-    expect(grid.posters.map((poster) => poster.key)).toEqual(['same']);
-  });
-
-  it('renders a smaller wall rather than inventing artwork', () => {
-    const grid = build({ collection: titles(2) });
-
-    expect(grid.posters).toHaveLength(2);
+    expect(new Set(grid.posters.map((poster) => poster.posterPath))).toEqual(new Set(['/same.jpg']));
   });
 
   it('skips a title the catalogue has no poster for', () => {
     const grid = build({ collection: [title('has'), title('none', { posterPath: null })] });
 
-    expect(grid.posters.map((poster) => poster.key)).toEqual(['has']);
+    // Only the titled one is on the wall (tiled into every cell since 2026-09-21).
+    expect(new Set(grid.posters.map((poster) => poster.posterPath))).toEqual(new Set(['/has.jpg']));
+  });
+
+  it('draws a poster-less account no wall at all, rather than placeholders', () => {
+    expect(build({ collection: [title('none', { posterPath: null })] }).posters).toEqual([]);
   });
 
   it('draws nothing at all for an empty collection, rather than placeholders', () => {
@@ -207,7 +207,7 @@ describe('the same wall every time', () => {
       asOf: '2026-06-01T12:00:00Z',
     });
 
-    expect(grid.posters).toHaveLength(1);
+    expect(new Set(grid.posters.map((poster) => poster.posterPath))).toEqual(new Set(['/today.jpg']));
   });
 
   it('keeps an undated title rather than emptying the wall for anyone who logs without dates', () => {
@@ -219,7 +219,7 @@ describe('the same wall every time', () => {
       asOf: '2026-06-01T12:00:00Z',
     });
 
-    expect(grid.posters).toHaveLength(1);
+    expect(new Set(grid.posters.map((poster) => poster.posterPath))).toEqual(new Set(['/undated.jpg']));
   });
 
   it('does not narrow at all when the unlock time could not be read', () => {
@@ -251,5 +251,91 @@ describe('the hash underneath it', () => {
       expect(hash).toBeGreaterThanOrEqual(0);
       expect(hash).toBeLessThanOrEqual(0xffffffff);
     }
+  });
+});
+
+/**
+ * **The wall fills the screen at the smallest collection that can earn an award**
+ * (founder QA, 2026-09-21).
+ *
+ * An award at five ranked titles drew five posters into a 3 × 3 wall sized to cover the
+ * screen, and the other four cells were a gray block behind the card. The reader's own
+ * posters are now tiled into every cell — never a poster beside or beneath itself where
+ * the count allows, never artwork they do not own, and the same wall every time.
+ */
+describe('a small collection still fills the wall', () => {
+  /** The distinct posters, cell by cell, as a grid of source paths. */
+  const layout = (grid: ReturnType<typeof build>) =>
+    Array.from({ length: grid.rows }, (_, r) =>
+      grid.posters.slice(r * grid.columns, (r + 1) * grid.columns).map((p) => p.posterPath),
+    );
+
+  const expectNoPosterBesideItself = (grid: ReturnType<typeof build>) => {
+    const cells = layout(grid);
+    for (let r = 0; r < cells.length; r += 1) {
+      for (let c = 0; c < cells[r]!.length; c += 1) {
+        if (c > 0) expect(cells[r]![c]).not.toBe(cells[r]![c - 1]);
+        if (r > 0) expect(cells[r]![c]).not.toBe(cells[r - 1]![c]);
+      }
+    }
+  };
+
+  it.each([5, 6])('fills all nine cells from %i titles', (count) => {
+    const grid = build({ collection: titles(count) });
+
+    expect(grid.posters).toHaveLength(SMALL_GRID.columns * SMALL_GRID.rows);
+    // Every one of the reader's posters is on the wall, and nothing that is not theirs.
+    const drawn = new Set(grid.posters.map((p) => p.posterPath));
+    expect(drawn).toEqual(new Set(titles(count).map((t) => t.posterPath)));
+    expectNoPosterBesideItself(grid);
+  });
+
+  it('repeats nothing once there are enough posters, exactly as before', () => {
+    const grid = build({ collection: titles(10) });
+
+    expect(grid.posters).toHaveLength(9);
+    expect(new Set(grid.posters.map((p) => p.posterPath)).size).toBe(9);
+  });
+
+  it('tiles around missing artwork rather than leaving its cell empty', () => {
+    const collection = [
+      ...titles(5),
+      title('gone-1', { posterPath: null }),
+      title('gone-2', { posterPath: null }),
+    ];
+    const grid = build({ collection });
+
+    expect(grid.posters).toHaveLength(9);
+    expect(grid.posters.every((p) => Boolean(p.posterPath))).toBe(true);
+    expect(grid.posters.some((p) => p.key.startsWith('gone'))).toBe(false);
+    expectNoPosterBesideItself(grid);
+  });
+
+  it('keeps the award’s own titles in the leading cells', () => {
+    const grid = build({ contributing: rows(3), collection: titles(2) });
+
+    expect(grid.posters.slice(0, 3).every((p) => p.key.startsWith('a'))).toBe(true);
+    expect(grid.posters).toHaveLength(9);
+  });
+
+  it('checkerboards two posters, so neither ever touches itself', () => {
+    const grid = build({ collection: titles(2) });
+
+    expect(grid.posters).toHaveLength(9);
+    expectNoPosterBesideItself(grid);
+  });
+
+  it('gives every cell its own key, and the first appearance keeps the title id', () => {
+    const grid = build({ collection: titles(5) });
+    const keys = grid.posters.map((p) => p.key);
+
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.filter((k) => !k.includes('~'))).toHaveLength(5);
+  });
+
+  it('is the same wall every time', () => {
+    const input = { collection: titles(5) };
+
+    expect(build(input).posters).toEqual(build(input).posters);
   });
 });

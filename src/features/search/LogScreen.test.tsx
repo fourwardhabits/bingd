@@ -274,9 +274,9 @@ describe('a series in the results', () => {
     await waitFor(() => expect(view.getByText('Breaking Bad, S2')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('I liked it'));
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
 
-    expect(callsTo('set_bucket')[0][1]).toMatchObject({ p_media_item_id: 'season-2' });
+    expect(callsTo('log_title')[0][1]).toMatchObject({ p_media_item_id: 'season-2' });
   });
 });
 
@@ -290,8 +290,8 @@ describe('a film in the results', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
-    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
-    expect(callsTo('set_bucket')[0][1]).toMatchObject({
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
+    expect(callsTo('log_title')[0][1]).toMatchObject({
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
@@ -300,7 +300,7 @@ describe('a film in the results', () => {
   /**
    * End to end across the two sheets: the bucket save and the comparison it opens are
    * separate components wired by the screen, and the title has to survive the hand-off.
-   * Sending `rank_start` a different id than `set_bucket` got would rank the wrong film
+   * Sending `rank_start` a different id than `log_title` got would rank the wrong film
    * and look entirely normal doing it.
    *
    * No "Find where it lands" step any more — the comparison opens on the bucket tap.
@@ -1853,7 +1853,7 @@ describe('saving from a search result', () => {
 
     expect(callsTo('rank_start')).toHaveLength(0);
     expect(callsTo('log_watched')).toHaveLength(0);
-    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('log_title')).toHaveLength(0);
     expect(callsTo('recommend')).toHaveLength(0);
     // No navigation, and no log sheet: the reader saves and carries on searching.
     expect(mockPush).not.toHaveBeenCalled();
@@ -1966,14 +1966,46 @@ describe('the leading action is the reader’s own ranking state', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
   });
 
-  it('shows the dashed Rank badge for a title watched but never ranked', async () => {
+  /**
+   * **Binary on the row, three states underneath** (founder, final UI simplification
+   * 2026-09-21). A title watched or imported and never ranked, and a ranking left
+   * unfinished, draw the same `+` as a title never touched — no dashed ring, no Finish.
+   * What differs is the tap: the ordinary log sheet, or straight back into the session.
+   */
+  it('draws the ordinary + for a title watched or imported and never ranked, and logs it', async () => {
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: null }];
     tableRows.rankings = [];
     const view = await search('inception');
 
+    await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+    expect(view.queryByLabelText(/Finish ranking/)).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start')).toHaveLength(0);
+  });
+
+  it('draws the same + for an unfinished ranking, and resumes it instead of asking again', async () => {
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'fine' }];
+    tableRows.rankings = [];
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
+    expect(view.queryByLabelText(/Finish ranking/)).toBeNull();
+    expect(view.queryByLabelText('Not ranked. Rank this title.')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+    // rank_start in the bucket already chosen — the server resumes that session, with its
+    // answers, and never opens a second — and no "How was it?".
     await waitFor(() =>
-      expect(view.getByLabelText('Not ranked. Rank this title.')).toBeTruthy(),
+      expect(mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start')).toHaveLength(1),
     );
+    expect(mockRpc.mock.calls.find(([fn]) => fn === 'rank_start')?.[1]).toMatchObject({
+      p_media_item_id: 'film-1',
+      p_bucket: 'fine',
+    });
+    expect(view.queryByText('How was it?')).toBeNull();
   });
 
   it('leads an unlogged title with the ordinary log action', async () => {
@@ -2035,7 +2067,11 @@ describe('the leading action is the reader’s own ranking state', () => {
 });
 
 describe('the two controls are independent', () => {
-  it('saves to the watchlist without touching the ranking state', async () => {
+  /**
+   * The compact-row contract (founder QA, 2026-09-21; TitleRowActions): a ranked title
+   * shows its score circle and nothing else — no bookmark beside a title already rated.
+   */
+  it('shows a ranked title its score circle alone, with no Watchlist control', async () => {
     tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'loved' }];
     tableRows.rankings = [
       {
@@ -2048,13 +2084,19 @@ describe('the two controls are independent', () => {
     ];
     const view = await search('inception');
 
+    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
+    expect(view.queryByLabelText('Add Inception to Watchlist')).toBeNull();
+    expect(view.queryByLabelText('Log Inception')).toBeNull();
+  });
+
+  it('saves an unranked title to the watchlist without touching the ranking state', async () => {
+    const view = await search('inception');
+
     await waitFor(() => expect(view.getByLabelText('Add Inception to Watchlist')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Add Inception to Watchlist'));
 
-    // The score is still the score. A watchlist write is not a ranking write, and the
-    // two controls sharing a row must not mean sharing an outcome.
-    await waitFor(() => expect(view.getByLabelText(/^10\.0 out of 10/)).toBeTruthy());
-    expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything());
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()));
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
   });
 
   it('offers the watchlist on a title that has never been ranked', async () => {

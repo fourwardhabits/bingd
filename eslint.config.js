@@ -53,6 +53,33 @@ module.exports = [
     },
   },
   {
+    /**
+     * Cloudflare Pages Functions, which run on the Workers runtime rather than in Node
+     * or in a browser.
+     *
+     * `HTMLRewriter` is the one global worth naming: it is Cloudflare's streaming HTML
+     * parser and exists nowhere else, so without this entry the only Function in the
+     * repo fails lint for using the API it was written for. The rest are standard and
+     * listed because a flat-config scope inherits no environment.
+     *
+     * Deliberately **not** folded into the Node-scripts block above: these files have no
+     * `process`, no `Buffer` and no `__dirname`, and pretending otherwise is how
+     * somebody reaches for one and finds out at the edge.
+     */
+    files: ['functions/**/*.js'],
+    languageOptions: {
+      globals: {
+        HTMLRewriter: 'readonly',
+        fetch: 'readonly',
+        Response: 'readonly',
+        Request: 'readonly',
+        Headers: 'readonly',
+        URL: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
+  {
     files: ['jest.setup.js', '**/*.test.{ts,tsx}'],
     languageOptions: {
       globals: {
