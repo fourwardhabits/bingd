@@ -804,6 +804,18 @@ describe('the built site', () => {
     execFileSync(process.execPath, [join(here, 'build.mjs')], { stdio: 'pipe' });
   });
 
+  it('puts the one positioning line under the wordmark on every shared-link page', () => {
+    for (const file of ['i.html', 'u.html', 'title.html', 'lists.html']) {
+      const html = read(file);
+      assert.match(
+        html,
+        /<p class="tagline">Rank what you watch and find your next binge\.<\/p>/,
+        `${file} has another tagline`,
+      );
+      assert.ok(!html.includes('See what your friends really think.'), `${file} kept the old one`);
+    }
+  });
+
   it('serves a page for every claimed app path', () => {
     /**
      * The invariant that keeps the two halves of a deep link in step. A path claimed in
@@ -2992,6 +3004,51 @@ describe('the title page, painted', () => {
     assert.equal(page.el('install-android').href, PLAY);
     // And the preview is the same one, because a desktop reader is a reader.
     assert.equal(page.el('title-preview').hidden, false);
+  });
+
+  /**
+   * The two store buttons were one grid item: their wrapper took the row, so the gap
+   * between rows never reached them and they rendered flush, as one two-line control.
+   * jsdom does no layout, so this reads the cascade: the wrapper must draw no box of its
+   * own (each button becomes a grid item) and the grid must keep a real gap.
+   */
+  it('separates the two desktop store buttons with the shared gap', async () => {
+    const page = await paint({ file: 'title.html', url: AT, userAgent: DESKTOP_UA, row: AMADEUS });
+    const style = (el) => page.window.getComputedStyle(el);
+    const choices = page.el('desktop-choices');
+    const actions = choices.parentElement;
+
+    assert.equal(choices.hidden, false);
+    assert.equal(style(choices).display, 'contents');
+    assert.equal(style(actions).display, 'grid');
+    assert.equal(style(actions).rowGap || style(actions).gap, '0.625rem');
+
+    // Three separate controls, in order, the outlined one last.
+    const shown = [...actions.querySelectorAll('a.button')].filter(
+      (a) => !a.hidden && !a.closest('[hidden]'),
+    );
+    assert.deepEqual(
+      shown.map((a) => a.id),
+      ['install-ios', 'install-android', 'open-app'],
+    );
+    assert.deepEqual(
+      shown.map((a) => a.classList.contains('secondary')),
+      [false, false, true],
+    );
+  });
+
+  it('shows a phone its own store and never the desktop pair', async () => {
+    for (const [userAgent, href] of [
+      [IPHONE_UA, APP_STORE],
+      [ANDROID_UA, PLAY],
+    ]) {
+      const page = await paint({ file: 'title.html', url: AT, userAgent, row: AMADEUS });
+      assert.equal(page.el('desktop-choices').hidden, true);
+      assert.equal(page.window.getComputedStyle(page.el('desktop-choices')).display, 'none');
+      assert.equal(page.el('primary-install').hidden, false);
+      assert.equal(page.el('primary-install').href, href);
+      assert.equal(page.el('open-app').hidden, false);
+    }
   });
 
   it('names a season by its show, its number and its episode count', async () => {
