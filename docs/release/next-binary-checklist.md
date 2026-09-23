@@ -36,7 +36,23 @@ newer than the binary's embedded bundle, or there is nothing to reload onto.
       **Still in onboarding, on the same step.**
 - [ ] Finish onboarding. Background the app, then foreground it. **Now** it reloads, and
       About reads the update id instead of `embedded`.
-- [ ] Record the build ids, runtime versions and date here.
+- [x] **The binaries, built 2026-09-23 from `9de3c5e`** (the stopping-point integration:
+      #195, #198, #196, unified Backlog + Refine). Neither is submitted.
+
+      | | build id | number | runtime |
+      | --- | --- | --- | --- |
+      | iOS production | `313af3ca-a116-4ffc-b731-022bbd7e1708` | 1.0.1 (13) | `61efbf17` |
+      | Android production | `be6d13a1-14bc-49b0-b020-ce32a0fe76c8` | 1.0.1 vc13 | `da3c7f47` |
+
+      Both runtimes are **unchanged** from the binaries they replace (iOS build 12, Android
+      vc12), which is what makes a later JS-only correction deliverable to them by update.
+      The acceptance boxes above are still the founder's to tick, on a device, with the app
+      deleted first.
+
+- [ ] When either of these reaches a store, update `SHIPPED` in
+      `supabase/tests/legacy-client-compat.test.mjs` to its commit. That table is what
+      proves the binaries people have keep working across a migration, and an entry that is
+      out of date is worse than none.
 
 ## 2. Preview binaries: restore the distinct maroon preview icon — production icon unchanged
 
