@@ -1,10 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 
-import { rankingBacklog } from '@/features/ranking/backlog';
 import type { ImportSurface } from '@/lib/analytics';
 import { unrankedMovies } from '@/lib/routes';
 import { Button, Screen, Text } from '@/ui/components';
@@ -551,22 +549,6 @@ function Summary({
     (counts.ambiguous ?? 0) + (counts.unmatched ?? 0) + (counts.stragglers ?? 0);
 
   const added = counts.watched ?? 0;
-  /**
-   * Is anything actually waiting to be ranked? One cheap read, and only when this import
-   * brought titles at all. `shouldOfferRanking` holds the rule and is tested on its own.
-   */
-  const backlog = useQuery({
-    queryKey: ['ranking-backlog', 'import-complete'],
-    enabled: added > 0,
-    retry: false,
-    staleTime: 0,
-    queryFn: () => rankingBacklog('movies', { limit: 1 }),
-  });
-  const showRank = shouldOfferRanking(added, {
-    status: backlog.data?.status,
-    total: backlog.data?.total,
-    settled: backlog.isSuccess || backlog.isError,
-  });
   // Kept (built here, left alone) and already (a previous import owns it) are the same
   // thing from the reader's side: it was in bingd. and nothing happened to it.
   const alreadyHere = (counts.kept ?? 0) + (counts.already ?? 0);
@@ -606,30 +588,23 @@ function Summary({
         </Text>
       ) : null}
 
+      {added > 0 ? (
+        <Text variant="body" tone="secondary">
+          Imported movies start unranked. Rank them whenever you want. A ranking you make in
+          bingd always wins.
+        </Text>
+      ) : null}
+
       {onContinue ? (
         <View style={styles.actions}>
           <Button label="Continue" onPress={onContinue} />
         </View>
       ) : (
         <View style={styles.actions}>
-          {/**
-           * **The bridge into the ranking backlog** (founder, 2026-09-22), and the whole of
-           * it: a question and a button, no helper line. It is drawn only when titles are
-           * actually waiting — `added` says this import brought some, and the backlog read
-           * says some are still unranked *now*, so a reader who has ranked them since is not
-           * asked again. A backend with the backlog off, or one that predates it, answers
-           * `disabled`; then `added` alone decides, which is what this screen did before.
-           * It leads to Collection's Unranked tab and the ordinary flow takes over — there
-           * is no import-specific queue, and nothing here says every imported title is
-           * unranked.
-           */}
-          {showRank ? (
-            <>
-              <Text variant="callout">Want to rank what you imported?</Text>
-              <Button label="Rank imported titles" onPress={onRank} />
-            </>
-          ) : null}
-          <Button label="Done" kind={showRank ? 'secondary' : 'primary'} onPress={onDone} />
+          {/* The next useful thing, first: the films that just arrived are waiting on
+              Collection's Unranked tab. Only when there are some to rank. */}
+          {added > 0 ? <Button label="Rank imported movies" onPress={onRank} /> : null}
+          <Button label="Done" kind={added > 0 ? 'secondary' : 'primary'} onPress={onDone} />
           {/* A finished import is restored for a day, and a notification can open it at any
               time, so this screen is reachable without having just used it. */}
           <Button label="Import another file" kind="tertiary" onPress={onReset} />
@@ -923,28 +898,3 @@ const styles = StyleSheet.create({
   waitingAction: { alignSelf: 'stretch', marginTop: theme.space[3] },
   centred: { textAlign: 'center' },
 });
-
-/**
- * Whether the import-complete screen offers the ranking bridge (founder, 2026-09-22).
- *
- * `added` is what this import brought in as watched; every one of them arrives unranked,
- * because a Letterboxd star is provenance and never a bingd bucket (`20261018000100`). The
- * backlog read then says whether any are still waiting *now*.
- *
- *   nothing added            no — there is nothing this import left to rank
- *   backlog says `disabled`  yes — the flag is off or the backend predates it, so fall
- *                            back to what this screen has always done
- *   backlog says 0 left      no — they have been ranked since
- *   still loading            no — a button that appears late is better than one that
- *                            appears and then vanishes
- */
-export function shouldOfferRanking(
-  added: number,
-  backlog: { status?: string; total?: number; settled: boolean },
-): boolean {
-  if (added <= 0) return false;
-  if (!backlog.settled) return false;
-  if (backlog.status === 'ready' || backlog.status === 'empty') return (backlog.total ?? 0) > 0;
-  // `disabled`, or no answer at all (an error): the count this screen already has decides.
-  return true;
-}
