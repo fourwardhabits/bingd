@@ -1510,9 +1510,15 @@ describe('the app the site claims to open', () => {
    * variant table is read out of the source. Brittle on purpose: if the shape of that
    * table changes this fails and somebody looks, which is the correct outcome. A softer
    * read would return an empty list and quietly assert nothing.
+   *
+   * It has now done that job, on 2026-09-23, when the table gained a per-variant icon and
+   * went multi-line — the shape `bc225f9` gave it. The entries are still read one indent
+   * level in and still anchored to `name` then `bundleId`, in that order, so the read is
+   * no looser than it was: it allows the line break the table now has between them and
+   * nothing else.
    */
   const declaredVariants = [
-    ...appConfig.matchAll(/^ {2}(\w+): \{ name: '[^']*', bundleId: '([^']+)'/gm),
+    ...appConfig.matchAll(/^ {2}(\w+): \{\r?\n?\s*name: '[^']*',\r?\n?\s*bundleId: '([^']+)'/gm),
   ].map(([, name, bundleId]) => ({ name, bundleId }));
 
   it('reads every variant out of app.config.ts, or the rest of this block asserts nothing', () => {

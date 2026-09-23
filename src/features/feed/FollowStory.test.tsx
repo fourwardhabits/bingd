@@ -1,6 +1,8 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { followTail } from './activity';
 import { FollowStoryRow } from './FollowStoryRow';
@@ -274,5 +276,37 @@ describe('followTail', () => {
   it('counts the others rather than the total', () => {
     expect(followTail(2)).toBe('and 1 other');
     expect(followTail(6)).toBe('and 5 others');
+  });
+});
+
+/**
+ * **A row has to say where it ends** (founder, device, 2026-09-23).
+ *
+ * The follow story drew no closing hairline, so on a real feed *Meli followed Abisola* fell
+ * into the whitespace of the ranking beneath it and the list lost its rhythm exactly where
+ * it changes subject.
+ *
+ * The four values below are `ActivityRow.styles.row`'s, and they are asserted as a set on
+ * purpose: the requirement is the same separator as the rows either side of this one, not a
+ * border that happens to look similar. Three of the four were already right, which is why
+ * the row read as *nearly* correct and the missing one was easy to miss.
+ */
+describe('where the row ends', () => {
+  it('closes with the hairline the rows either side of it use', async () => {
+    const view = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi')])}
+        onPressActor={() => {}}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+      />,
+    );
+
+    const row = StyleSheet.flatten(view.getByTestId('follow-story-row').props.style);
+
+    expect(row.borderBottomWidth).toBe(StyleSheet.hairlineWidth * 2);
+    expect(row.borderBottomColor).toBe(theme.border.hairline);
+    expect(row.paddingHorizontal).toBe(theme.layout.gutter);
+    expect(row.paddingVertical).toBe(theme.space[3]);
   });
 });

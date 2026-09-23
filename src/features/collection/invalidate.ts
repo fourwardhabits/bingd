@@ -59,6 +59,12 @@ export function invalidateAfterCollectionChange(
   // (founder QA, 2026-09-21 — Black Panther).
   invalidate(queryKeys.myScores(userId));
 
+  // The backlog and Refine's card, by prefix over both categories (unified design): a title
+  // ranked anywhere leaves the backlog, and a ranking can empty it — which is when Refine's
+  // card becomes possible — or move titles past others, which is one of Refine's reasons.
+  invalidate(['ranking-backlog', userId]);
+  invalidate(['refine-availability', userId]);
+
   // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
   // date-ordered read with a key of its own. Same reason as the line above: the trigger
   // in `20260815040000` takes a title off the watchlist the moment it is logged or

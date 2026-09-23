@@ -372,7 +372,7 @@ describe('the comparison', () => {
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await fireEvent.press(sheet.getByLabelText("Can't decide between these"));
 
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
     expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
@@ -398,7 +398,7 @@ describe('the comparison', () => {
     const sheet = await openSheet({ surface: 'onboarding' });
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await fireEvent.press(sheet.getByLabelText("Can't decide between these"));
 
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
     expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
@@ -2204,10 +2204,10 @@ describe('how many Too tough presses a completion carries', () => {
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await fireEvent.press(sheet.getByLabelText("Can't decide between these"));
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await fireEvent.press(sheet.getByLabelText("Can't decide between these"));
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(2));
     await fireEvent.press(await sheet.ready('Film A'));
     await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
@@ -2303,7 +2303,7 @@ describe('a Too tough whose reply was lost', () => {
 
   const tooTough = async (sheet: Awaited<ReturnType<typeof openSheet>>) => {
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
+    await fireEvent.press(sheet.getByLabelText("Can't decide between these"));
   };
 
   const retry = async (sheet: Awaited<ReturnType<typeof openSheet>>) => {

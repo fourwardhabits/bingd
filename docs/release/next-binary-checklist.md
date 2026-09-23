@@ -36,7 +36,23 @@ newer than the binary's embedded bundle, or there is nothing to reload onto.
       **Still in onboarding, on the same step.**
 - [ ] Finish onboarding. Background the app, then foreground it. **Now** it reloads, and
       About reads the update id instead of `embedded`.
-- [ ] Record the build ids, runtime versions and date here.
+- [x] **The binaries, built 2026-09-23 from `9de3c5e`** (the stopping-point integration:
+      #195, #198, #196, unified Backlog + Refine). Neither is submitted.
+
+      | | build id | number | runtime |
+      | --- | --- | --- | --- |
+      | iOS production | `313af3ca-a116-4ffc-b731-022bbd7e1708` | 1.0.1 (13) | `61efbf17` |
+      | Android production | `be6d13a1-14bc-49b0-b020-ce32a0fe76c8` | 1.0.1 vc13 | `da3c7f47` |
+
+      Both runtimes are **unchanged** from the binaries they replace (iOS build 12, Android
+      vc12), which is what makes a later JS-only correction deliverable to them by update.
+      The acceptance boxes above are still the founder's to tick, on a device, with the app
+      deleted first.
+
+- [ ] When either of these reaches a store, update `SHIPPED` in
+      `supabase/tests/legacy-client-compat.test.mjs` to its commit. That table is what
+      proves the binaries people have keep working across a migration, and an entry that is
+      out of date is worse than none.
 
 ## 2. Preview binaries: restore the distinct maroon preview icon — production icon unchanged
 
@@ -50,24 +66,37 @@ for every variant, so a future preview binary built from `main` would look like 
 
 Before the next **preview** binary:
 
-- [ ] Restore from `bc225f9`:
-  - `assets/brand/icon-preview.png` and `assets/brand/icon-adaptive-preview.png`;
-  - the variant-keyed `icon` / `adaptiveIcon` in `app.config.ts`, for development and
-    preview only;
+- [x] **2026-09-23 — restored from `bc225f9`:**
+  - `assets/brand/icon-preview.png` and `assets/brand/icon-adaptive-preview.png`, byte
+    for byte from that commit;
+  - the variant-keyed `icon` / `adaptiveIcon` / `adaptiveBackground` in
+    `app.config.ts`, for development and preview only;
   - the preview render in `assets/brand/render.mjs`;
-  - the variant assertions in `config/variants.test.mjs`.
-- [ ] **The production variant keeps `./assets/brand/icon.png` and
-      `./assets/brand/icon-adaptive.png`, byte for byte.** `beta` builds the production
-      variant, so it keeps them too.
-- [ ] Measure the fingerprint of `production` and `beta` before and after the restore.
-      **Both must be unchanged.** A moved production runtime strands every installed store
-      build from OTAs. This is the same class of trap as editing `eas.json` or
-      `config/backends.cjs`. Only the preview/development runtime may move.
-- [ ] `bc225f9` also gates universal links on the variant (`claimsWebLinks`) and edits
-      `web/deep-links.config.json`. That is a separate decision. Restore it deliberately or
-      leave it out, but do not bring it in by accident with the icon.
+  - `config/variants.test.mjs` (new here), its icon assertions unchanged.
+- [x] **The production variant keeps `./assets/brand/icon.png` and
+      `./assets/brand/icon-adaptive.png`.** Asserted for production *and* beta by
+      `config/variants.test.mjs`, which resolves the real config per lane.
+- [x] **Fingerprints, measured before and after in one working tree, 2026-09-23** (local
+      resolution, so the numbers are lower than EAS's; what is being proven is the
+      before/after pair, not the absolute value):
+
+      | lane              | before     | after      |
+      | ----------------- | ---------- | ---------- |
+      | production / iOS  | `e0eb045d` | `e0eb045d` |
+      | production / Android | `93e55ba2` | `93e55ba2` |
+      | beta / Android    | `93e55ba2` | `93e55ba2` |
+      | preview / Android | `772229b8` | `8f829d57` |
+
+      Only the preview runtime moved, which is the whole permitted effect. **The preview
+      APK installed for founder QA (EAS runtime `0832dd3e`) therefore cannot receive
+      updates from a preview build made after this**; it does not need to — the new
+      binary embeds everything that OTA carried.
+- [x] `claimsWebLinks` and `web/deep-links.config.json` were **deliberately left out**,
+      per the line below. Every lane still declares the `bingd.app` links exactly as
+      `main` has always had it, and `config/variants.test.mjs` now asserts that for all
+      four lanes so the state is pinned while the decision is open.
 - [ ] On the next preview build: preview and the store app installed side by side show two
-      different icons.
+      different icons. **(Founder, on the device.)**
 
 ## 3. Not for the binary (recorded so nobody bundles it in)
 

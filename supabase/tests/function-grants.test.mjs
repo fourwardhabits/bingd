@@ -225,6 +225,19 @@ const ALLOWED = {
   // Not anon, by public_scores' rule: the signed-out web pages render no activity.
   'feed_watch_scores(uuid[])': ['authenticated'],
 
+  // T5 Refine (20261019000100). Three, all own-account (`auth.uid()` and nothing else):
+  // a read of the caller's own candidates, an opening, and a snooze. The evidence record
+  // (`_refine_support`), the seed and every helper are revoked: they take a user id, and a
+  // client grant would make them a read of somebody else's comparison history.
+  'refine_candidates(ranking_category,integer,integer,uuid[])': ['authenticated'],
+  'refine_start(uuid,uuid)': ['authenticated'],
+  'refine_snooze(uuid)': ['authenticated'],
+  // Unified Backlog + Refine (same migration). A read of the caller's own backlog and the
+  // opening of one placement from it, both `auth.uid()` only. `_ranking_backlog_items`
+  // takes a user id and is revoked for the same reason as `_refine_support`.
+  'ranking_backlog(ranking_category,integer,uuid[])': ['authenticated'],
+  'rank_backlog_start(uuid,taste_bucket,uuid)': ['authenticated'],
+
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's
   // perspective the way 20260813001900 describes. public_notes projects only the
