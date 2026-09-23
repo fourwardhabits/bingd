@@ -419,6 +419,15 @@ What *does* need doing before public release:
   and must not be**: the build refuses `public` while either `storeUrl` is null, and
   `web/router.test.mjs` asserts the mode is still `beta`, so no commit can make
   bingd.app claim a store listing that does not exist. See T4/T5.
+
+  > **Corrected 2026-09-20.** Two things in the paragraph above have moved. `mode` no
+  > longer drives any copy — the `isPublic` it derived is gone, availability is expressed
+  > per platform by the install buttons, and indexing is per route — so flipping it
+  > changes no byte of the site. And **both `storeUrl`s are now set**: iOS on 2026-09-10,
+  > Android on 2026-09-20 with the public Play tranche. The store half of the lock is
+  > therefore satisfied and the gate still holding `public` shut is **`TERMS_STATUS`**,
+  > which is `draft`. That is L-1 below, and it is a legal event rather than a release
+  > step. The switch stays unthrown for that reason and no other.
 - **The signup semantics are now recorded in the PRD too**, in §11's As-built block, in
   the words this entry uses: an invite is referral and attribution, never permission to
   create an account, and **there is no gate to remove**. Written down because the
@@ -442,9 +451,14 @@ Recorded because it was in question and the answer is "it already works":
   signed-in and not-suspended. Profile → **Invite friends** is two taps, and the same link
   is reachable from the Recommend sheet and from Settings → Privacy.
 - **One link is enough.** `https://bingd.app/i/<token>` is the canonical URL. The web page
-  it resolves to offers a real, public TestFlight join URL and a real Play closed-test
-  opt-in URL, both committed in `web/distribution.config.json`. Nothing in the app tells a
-  user to ask the founder for anything.
+  it resolves to offers a real install destination per platform, committed in
+  `web/distribution.config.json`. Nothing in the app tells a user to ask the founder for
+  anything.
+
+  > **Updated 2026-09-20.** Those destinations are now **both public store listings** —
+  > `https://apps.apple.com/app/id6803954532` and
+  > `https://play.google.com/store/apps/details?id=app.bingd`. They were a public
+  > TestFlight join URL and a Play closed-test opt-in URL when this was written.
 - **The token preserves the inviter** through `redeem_invite` into
   `invite_attributions` and `profiles.invited_by`, plus the follow edge.
 - **Two caveats that are platform, not product.** Android closed testing only admits
@@ -452,6 +466,12 @@ Recorded because it was in question and the answer is "it already works":
   testers there — no link fixes that. And the recipient must return to the same
   `bingd.app/i/<token>` page after installing and tap *I already have Bingd*, or the
   account is created with no inviter (**M7**).
+
+  > **The first caveat expired on 2026-09-20** and the second did not. Android is on the
+  > Play production track, so there is no tester list to be added to and anybody can
+  > install from the listing. **M7 is untouched**: there is still no Install Referrer and
+  > no attribution vendor, a public Play install carries no invitation across any more
+  > than a closed-test one did, and the page still says so in the words the visitor needs.
 
 
 ---

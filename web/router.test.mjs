@@ -21,9 +21,12 @@ import {
   posterUrl,
   profileContextRequest,
   profileDisplay,
+  runtimeText,
+  synopsisText,
   titleContextRequest,
   titleDisplay,
   titleIdFromPath,
+  titlePreview,
   tokenFromPath,
 } from './src/router.mjs';
 
@@ -121,24 +124,44 @@ describe('destinationFor', () => {
     assert.equal(d.kind, 'store');
   });
 
-  it('sends Android to the closed-test opt-in page before the store listing', () => {
-    /**
-     * The ordering that is easy to get wrong and expensive to get wrong. A closed test
-     * is not reachable from the listing until the tester has opted in — Play shows
-     * "this app is not available for your device", which reads as *Bingd is broken*
-     * rather than *you have not joined yet*.
-     */
+  /**
+   * **The inversion this tranche makes, stated as the assertion that holds it.**
+   *
+   * This used to read *sends Android to the closed-test opt-in page before the store
+   * listing*, and while Play was a closed test that was right: a closed test is not
+   * reachable from the listing until the tester has opted in, and somebody sent to the
+   * plain listing first is told "this app is not available for your device", which reads
+   * as *Bingd is broken* rather than as *you have not joined yet*.
+   *
+   * That reason expired when vc12 went to the Play production track. A public listing
+   * is reachable by everybody, so the opt-in URL must never win again — and it is still
+   * in the config, so "must never win" is a thing a test has to say rather than a thing
+   * the absence of a value guarantees.
+   */
+  it('sends Android to the public listing even with the opt-in page still configured', () => {
     const d = destinationFor('android', {
       android: {
         optInUrl: 'https://play.google.com/apps/testing/app.bingd',
-        betaUrl: 'https://play.google.com/store/apps/details?id=app.bingd',
+        betaUrl: null,
+        storeUrl: 'https://play.google.com/store/apps/details?id=app.bingd',
       },
+    });
+    assert.equal(d.kind, 'store');
+    assert.equal(d.url, 'https://play.google.com/store/apps/details?id=app.bingd');
+    assert.ok(!d.url.includes('/apps/testing/'), 'a public visitor was sent to a tester page');
+  });
+
+  it('falls back to the opt-in page only when no public listing is configured', () => {
+    // The state this file was in until the production track existed, kept because it is
+    // what the site says again if the listing is ever pulled.
+    const d = destinationFor('android', {
+      android: { optInUrl: 'https://play.google.com/apps/testing/app.bingd', storeUrl: null },
     });
     assert.equal(d.kind, 'play-opt-in');
     assert.equal(d.url, 'https://play.google.com/apps/testing/app.bingd');
   });
 
-  it('falls back to the listing on the day the track goes open', () => {
+  it('falls back to the plain listing when that is the only Android destination', () => {
     const d = destinationFor('android', {
       android: { betaUrl: 'https://play.google.com/store/apps/details?id=app.bingd' },
     });
@@ -200,9 +223,10 @@ describe('installLabel', () => {
    *
    * Both platforms' public listings share `kind: 'store'`, and the label used to be a
    * map keyed on kind alone — so the day the Play listing went live, every Android
-   * visitor's one dominant button would have read "Get Bingd for iPhone". Invisible in
-   * beta because Android's closed test takes the `play-opt-in` branch, which is
-   * exactly why it needs a test rather than an eye.
+   * visitor's one dominant button would have read "Get Bingd for iPhone". It was
+   * invisible in beta because Android's closed test took the `play-opt-in` branch, which
+   * is exactly why it needed a test rather than an eye. **That day is this tranche**, so
+   * this is now the label every Android visitor actually gets.
    */
   it('never labels the Android store button as an iPhone one', () => {
     const label = installLabel(
@@ -462,14 +486,51 @@ describe('avatarUrl', () => {
 });
 
 describe('the context requests', () => {
-  it('asks for one title by id, naming its columns', () => {
+  /**
+   * The column list grew with the public title preview, and what it must never grow into
+   * is the thing this asserts.
+   *
+   * It used to forbid `overview` outright, on the reasoning that a plot synopsis was
+   * more than a page confirming a link needed. The page is a preview now and the
+   * synopsis is the point of it — but the line it was standing in for is still there and
+   * has only moved: every column named here is **TMDB's description of a film or a
+   * season**, and nothing here is anybody's opinion of one.
+   *
+   * So the rule is written as the rule. `select=*` is refused, because it would ship
+   * whatever column is added to `media_items` next; and no table but `media_items` may
+   * be named, because a PostgREST embed is how a request for a film quietly becomes a
+   * request for who watched it.
+   */
+  it('asks for one title by id, naming its columns and no private ones', () => {
     const url = titleContextRequest(SUPA, UUID);
     assert.ok(url.startsWith(`${SUPA}/rest/v1/media_items?id=eq.${UUID}`));
     assert.ok(url.includes('limit=1'));
-    // Named columns, so a column added to `media_items` later is not shipped to every
-    // visitor by accident. `overview` is the one that would hurt: a plot synopsis.
     assert.ok(!url.includes('select=*'));
-    assert.ok(!url.includes('overview'));
+
+    const select = decodeURIComponent(/[?&]select=([^&]+)/.exec(url)[1]);
+    assert.equal(
+      select,
+      'kind,title,release_date,season_number,poster_path,overview,runtime_minutes,genres,' +
+        'episode_count,parent:parent_id(title,genres)',
+    );
+
+    // And the named absences, one per thing the preview is forbidden to carry. Each is a
+    // real column or table in the schema, so this fails if somebody reaches for one.
+    for (const forbidden of [
+      'user_media',
+      'rankings',
+      'ranking_position',
+      'score',
+      'note',
+      'note_visibility',
+      'watched_on',
+      'title_recommendations',
+      'follows',
+      'feed_events',
+      'profiles',
+    ]) {
+      assert.ok(!select.includes(forbidden), `the title request reaches for ${forbidden}`);
+    }
   });
 
   it('asks for one profile by handle, and for three columns only', () => {
@@ -553,6 +614,199 @@ describe('titleDisplay', () => {
     }
     // A malformed date is no year rather than a wrong one.
     assert.equal(titleDisplay({ kind: 'movie', title: 'X', release_date: 'soon' }).detail, null);
+  });
+});
+
+describe('runtimeText', () => {
+  it('reads minutes the way a person says them', () => {
+    assert.equal(runtimeText(109), '1h 49m');
+    assert.equal(runtimeText(49), '49m');
+    assert.equal(runtimeText(120), '2h');
+  });
+
+  it('says nothing rather than 0m for a runtime the catalogue does not hold', () => {
+    // TMDB stores 0 for a film it has no duration for, and "0m" under a poster reads as
+    // a bug in bingd. rather than as a gap in TMDB.
+    for (const bad of [0, null, undefined, -30, 1.5, '109', NaN]) {
+      assert.equal(runtimeText(bad), null, String(bad));
+    }
+  });
+});
+
+describe('synopsisText', () => {
+  it('collapses the whitespace TMDB overviews arrive with', () => {
+    assert.equal(synopsisText('  Two   lines\n\nof it.  '), 'Two lines of it.');
+  });
+
+  it('cuts at a word boundary, and only when there is enough over to be worth cutting', () => {
+    const short = 'a'.repeat(340);
+    assert.equal(synopsisText(short), short, 'a near-limit synopsis must not gain an ellipsis');
+
+    const long = `${'word '.repeat(200)}end`;
+    const cut = synopsisText(long);
+    assert.ok(cut.length <= 321, `cut to ${cut.length}`);
+    assert.ok(cut.endsWith('…'));
+    assert.ok(!cut.includes(' …'), 'the cut left a dangling space before the ellipsis');
+  });
+
+  it('answers null for an overview the catalogue does not hold', () => {
+    for (const bad of [null, undefined, '', '   ', 42]) {
+      assert.equal(synopsisText(bad), null, String(bad));
+    }
+  });
+});
+
+/**
+ * The public title preview, which is the one place on this site where the question
+ * "should a signed-out stranger see this" is answered by code rather than by RLS.
+ *
+ * RLS answers it too, and answers it first: everything here comes from `media_items`,
+ * whose read policy is `using (true)` because catalogue metadata is not user data, and
+ * a private column would have to be fetched before it could be rendered. But the row
+ * handed to `titlePreview` is an object, and an object grows fields — so the test that
+ * matters is the one that says what the *output* may contain, whatever the input has.
+ */
+describe('titlePreview', () => {
+  const AMADEUS = {
+    kind: 'movie',
+    title: 'Amadeus',
+    release_date: '1984-09-19',
+    runtime_minutes: 160,
+    genres: ['Drama', 'History', 'Music'],
+    overview: 'Antonio Salieri believes that Mozart’s music is divine.',
+    poster_path: '/amadeus.jpg',
+  };
+
+  it('describes a film by kind, year and length', () => {
+    const preview = titlePreview(AMADEUS);
+    assert.equal(preview.name, 'Amadeus');
+    assert.deepEqual(preview.meta, ['Film', '1984', '2h 40m']);
+    assert.deepEqual(preview.genres, ['Drama', 'History', 'Music']);
+    assert.equal(preview.synopsis, 'Antonio Salieri believes that Mozart’s music is divine.');
+  });
+
+  it('describes a season by its own number and its episode count', () => {
+    // "Season" on its own is the one word that does not identify which, and a season
+    // has no runtime — the episode count is the equivalent fact.
+    const preview = titlePreview({
+      kind: 'season',
+      title: 'Season 1',
+      season_number: 1,
+      episode_count: 9,
+      release_date: '2023-01-15',
+      genres: [],
+      parent: { title: 'The Last of Us', genres: ['Drama'] },
+    });
+    assert.equal(preview.name, 'The Last of Us, S1');
+    assert.deepEqual(preview.meta, ['Season 1', '2023', '9 episodes']);
+  });
+
+  /**
+   * Every season in the production catalogue carries an empty `genres`, because TMDB
+   * publishes them on the series and `tmdb_upsert_seasons` writes what TMDB gives. So a
+   * preview that read the season's own column alone would show a blank line on half the
+   * links anybody shares, and it would read as the page being broken rather than as the
+   * column being empty. Same own-then-parent rule as `resolveMetadata` in the app.
+   */
+  it('inherits the series genres for a season that carries none, and prefers its own', () => {
+    const season = (genres, parentGenres) =>
+      titlePreview({
+        kind: 'season',
+        title: 'Season 1',
+        season_number: 1,
+        genres,
+        parent: { title: 'Shogun', genres: parentGenres },
+      }).genres;
+
+    assert.deepEqual(season([], ['Drama', 'War']), ['Drama', 'War']);
+    assert.deepEqual(season(['Anime'], ['Drama']), ['Anime'], 'its own must win');
+    assert.deepEqual(season([], []), [], 'absent stays absent rather than being guessed');
+    assert.deepEqual(
+      titlePreview({ kind: 'season', title: 'Season 1', season_number: 1, parent: null }).genres,
+      [],
+    );
+  });
+
+  it('names the specials bucket rather than calling it Season 0', () => {
+    const preview = titlePreview({
+      kind: 'season',
+      title: 'Specials',
+      season_number: 0,
+      episode_count: 1,
+      parent: { title: 'Barakamon' },
+    });
+    assert.equal(preview.meta[0], 'Specials');
+    assert.ok(preview.meta.includes('1 episode'), 'one episode is not "1 episodes"');
+  });
+
+  it('drops what the row does not carry rather than guessing it', () => {
+    const preview = titlePreview({ kind: 'movie', title: 'Untitled' });
+    assert.deepEqual(preview.meta, ['Film']);
+    assert.deepEqual(preview.genres, []);
+    assert.equal(preview.synopsis, null);
+  });
+
+  it('caps the genres and drops anything in the array that is not a name', () => {
+    // Written with `textContent`, so a stray object would render "[object Object]"
+    // under a poster rather than throw anywhere somebody would notice.
+    const preview = titlePreview({
+      ...AMADEUS,
+      genres: ['Drama', '', {}, 'History', null, 'Music', 'Biography'],
+    });
+    assert.deepEqual(preview.genres, ['Drama', 'History', 'Music']);
+  });
+
+  it('answers null exactly when titleDisplay does, so the caller has one check', () => {
+    for (const bad of [null, undefined, {}, { kind: 'movie', title: '   ' }]) {
+      assert.equal(titlePreview(bad), null, JSON.stringify(bad));
+    }
+  });
+
+  /**
+   * **The disclosure test, and the reason it is written against a poisoned row.**
+   *
+   * A reviewer asked for an anonymous community score on this page and it was deferred,
+   * because it needs an RPC that does not exist. The risk is not that somebody adds the
+   * RPC — that is a visible change with a migration attached. It is that somebody widens
+   * the `select`, or embeds a table, and then reads the extra fields off the row here
+   * because they are already sitting there.
+   *
+   * So the row below carries every forbidden thing at once, and the assertion is about
+   * the whole output rather than about named fields: nothing a viewer could read may
+   * contain any of them.
+   */
+  it('lets nothing private out, even when the row it is handed carries it', () => {
+    const preview = titlePreview({
+      ...AMADEUS,
+      score: 9.4,
+      predicted_score: 8.1,
+      ranking_position: 3,
+      following_score: 7.2,
+      community_score: 8.8,
+      note: 'my private review',
+      note_visibility: 'private',
+      watched_on: '2026-04-02',
+      recommended_by: 'fourward',
+      sender: { username: 'fourward' },
+      user_media: [{ score: 9.4 }],
+    });
+
+    assert.deepEqual(Object.keys(preview).sort(), ['genres', 'meta', 'name', 'synopsis']);
+
+    const rendered = JSON.stringify(preview);
+    for (const leak of [
+      '9.4',
+      '8.1',
+      '7.2',
+      '8.8',
+      'my private review',
+      '2026-04-02',
+      'fourward',
+      'predicted',
+      'ranking_position',
+    ]) {
+      assert.ok(!rendered.includes(leak), `the preview leaked ${leak}`);
+    }
   });
 });
 
@@ -676,6 +930,9 @@ describe('listDisplay', () => {
 
 describe('the built site', () => {
   const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+  const distributionConfig = JSON.parse(
+    readFileSync(join(here, 'distribution.config.json'), 'utf8'),
+  );
 
   before(() => {
     execFileSync(process.execPath, [join(here, 'build.mjs')], { stdio: 'pipe' });
@@ -685,6 +942,18 @@ describe('the built site', () => {
     // Rebuilt without the environment a test may have set, so the working tree is left
     // as an ordinary `npm run build:web` would leave it.
     execFileSync(process.execPath, [join(here, 'build.mjs')], { stdio: 'pipe' });
+  });
+
+  it('puts the one positioning line under the wordmark on every shared-link page', () => {
+    for (const file of ['i.html', 'u.html', 'title.html', 'lists.html']) {
+      const html = read(file);
+      assert.match(
+        html,
+        /<p class="tagline">Rank what you watch and find your next binge\.<\/p>/,
+        `${file} has another tagline`,
+      );
+      assert.ok(!html.includes('See what your friends really think.'), `${file} kept the old one`);
+    }
   });
 
   it('serves a page for every claimed app path', () => {
@@ -857,6 +1126,36 @@ describe('the built site', () => {
     assert.ok(!read('i.html').includes('id="context"'));
   });
 
+  /**
+   * The title preview ships as an empty shape with a credit in it, and nothing else.
+   *
+   * The genres and the synopsis arrive in the browser and are written with
+   * `textContent`; what is in the file is three empty elements and the TMDB attribution,
+   * which is the one line that is true of the block whatever resolves into it.
+   *
+   * **No CTA in here.** The two buttons are the page's existing `open-app` and
+   * `primary-install`, so a visitor who cannot be offered a store still gets the honest
+   * empty state rather than a preview with a dead button under it.
+   */
+  it('gives the title page a preview shape with TMDB credited and nothing prefilled', () => {
+    const html = read('title.html');
+    assert.match(html, /<div id="title-preview" class="preview" hidden>/);
+    assert.match(html, /<p class="preview-genres" id="title-genres"><\/p>/);
+    assert.match(html, /<p class="preview-synopsis" id="title-synopsis"><\/p>/);
+    assert.match(html, /not endorsed or certified by TMDB/);
+    assert.match(html, /themoviedb\.org/);
+
+    // The two CTAs the preview sits between, and the slots they are painted into.
+    assert.match(html, /id="open-app"/);
+    assert.match(html, /id="primary-install"/);
+
+    // And it is the title page only. A profile page showing a synopsis slot would be a
+    // block waiting for data that route never fetches.
+    for (const route of ['i', 'u', 'lists']) {
+      assert.ok(!read(`${route}.html`).includes('id="title-preview"'), route);
+    }
+  });
+
   it('renders no content into the shipped HTML, only the places for it', () => {
     // The names arrive in the browser and are written with textContent. Nothing about a
     // film or an account is in the bytes Cloudflare serves, which is what keeps these
@@ -890,24 +1189,94 @@ describe('the built site', () => {
     assert.equal(read('router.mjs'), readFileSync(join(here, 'src', 'router.mjs'), 'utf8'));
   });
 
-  it('carries the friend-beta install destinations for both platforms', () => {
-    // These are the two links behind every button on the invitation page. Pinned as
-    // exact values: a typo here is a store button that 404s on a page a friend was
-    // sent, and nothing else in the build would catch it.
+  /**
+   * The destinations a page actually ships, resolved the way a phone resolves them.
+   *
+   * It used to assert the two beta URLs were in the config block and stop there, which
+   * checked the values were carried and not that either one wins. Both stores are public
+   * now and `optInUrl` is still in the file, so carrying a value and choosing it are
+   * different facts and only the second one is the visitor's experience.
+   *
+   * Pinned as exact strings: a typo here is a store button that 404s on a page a friend
+   * was sent, and nothing else in the build would catch it.
+   */
+  it('resolves the public store for each platform from the config it ships', () => {
     const invite = read('i.html');
     const config = JSON.parse(
       /<script type="application\/json" id="bingd-config">(.*?)<\/script>/s.exec(invite)[1],
     );
     assert.equal(config.page, 'invite');
+    assert.equal(config.distribution.app.scheme, 'bingd');
+
+    const android = destinationFor('android', config.distribution);
+    assert.deepEqual(android, {
+      platform: 'android',
+      kind: 'store',
+      url: 'https://play.google.com/store/apps/details?id=app.bingd',
+    });
+    assert.equal(installLabel(android), 'Get bingd. on Google Play');
+
+    const ios = destinationFor('ios', config.distribution);
+    assert.deepEqual(ios, {
+      platform: 'ios',
+      kind: 'store',
+      url: 'https://apps.apple.com/app/id6803954532',
+    });
+    assert.equal(installLabel(ios), 'Get bingd. on the App Store');
+
+    // The fallbacks are still carried, and still lose. Keeping them is deliberate — see
+    // distribution.config.json — so "they lose" has to be asserted rather than assumed
+    // from a field being absent.
     assert.equal(config.distribution.ios.betaUrl, 'https://testflight.apple.com/join/kkgaYsqx');
     assert.equal(
       config.distribution.android.optInUrl,
       'https://play.google.com/apps/testing/app.bingd',
     );
-    assert.equal(config.distribution.app.scheme, 'bingd');
+
     // The empty state must still exist for the 'other' platform and for any future
     // un-configured window — it is painted by page.mjs, not removed by configuration.
     assert.match(invite, /is not on this platform yet/);
+  });
+
+  /**
+   * One canonical Play URL, and it is written in one file.
+   *
+   * The failure this prevents is the ordinary one: a second copy of the URL added to a
+   * page, a document or a script, which then does not move when the first one does. So
+   * every built page is read, every Play URL in it is collected, and there must be
+   * exactly one distinct value — the one `distribution.config.json` holds.
+   */
+  it('sends every public Android CTA to the one canonical Play listing', () => {
+    const PLAY = 'https://play.google.com/store/apps/details?id=app.bingd';
+    assert.equal(distributionConfig.android.storeUrl, PLAY);
+
+    const pages = readdirSync(dist, { recursive: true })
+      .map(String)
+      .filter((file) => file.endsWith('.html'));
+
+    const found = new Set();
+    for (const page of pages) {
+      for (const url of read(page).match(/https:\/\/play\.google\.com[^"'\s<)]*/g) ?? []) {
+        found.add(url);
+      }
+    }
+
+    // The opt-in page is in the shipped config block and must never be anywhere else,
+    // because everywhere else is a place a visitor could be sent.
+    const optIn = 'https://play.google.com/apps/testing/app.bingd';
+    assert.deepEqual([...found].sort(), [optIn, PLAY].sort());
+
+    for (const page of pages) {
+      const html = read(page);
+      const optInCount = html.split(optIn).length - 1;
+      const inConfig = /id="bingd-config">(.*?)<\/script>/s.exec(html)?.[1] ?? '';
+      assert.equal(
+        optInCount,
+        (inConfig.split(optIn).length - 1),
+        `${page} names the tester opt-in outside the config block`,
+      );
+      assert.ok(!/href="[^"]*apps\/testing/.test(html), `${page} links to the tester opt-in`);
+    }
   });
 
   it('drops the $comment prose rather than shipping it to every visitor', () => {
@@ -1306,6 +1675,67 @@ describe('the app the site claims to open', () => {
         assert.match(fingerprint, /^([A-F0-9]{2}:){31}[A-F0-9]{2}$/);
       }
     }
+  });
+
+  /**
+   * The production fingerprints, pinned, because nothing else in this repository would
+   * notice them changing.
+   *
+   * Two of them and both are load-bearing. The first is the EAS upload keystore, which
+   * signs anything installed straight from EAS. The second is the **Google Play app
+   * signing key**: Play strips the upload signature and re-signs, so it is the
+   * certificate every device that installed from Play actually checks. Drop either and
+   * App Links stop verifying for that install path, silently, for everybody who already
+   * has the app — a tapped `https://bingd.app/i/<token>` opens Chrome instead.
+   *
+   * **The public-launch tranche changed neither.** Promoting a track does not re-sign an
+   * app: the package is `app.bingd` on every track by design, and Play has signed it with
+   * the same key since the closed test. So this is a test that the rewiring needed no
+   * Android rebuild, which is the claim the release notes make.
+   */
+  it('pins the two production certificates App Links actually verify against', () => {
+    const statements = JSON.parse(read('.well-known', 'assetlinks.json'));
+    const production = statements.find((s) => s.target.package_name === 'app.bingd');
+    assert.ok(production, 'no statement for the production package');
+    assert.deepEqual(production.target.sha256_cert_fingerprints, [
+      'A1:5B:92:A7:0F:AD:0D:78:77:FE:4C:6D:DE:EB:AE:DD:95:79:F1:31:70:2D:D7:79:CF:76:09:B1:BF:C9:B9:00',
+      'D3:A1:05:A0:AD:F8:EE:42:6E:44:EE:90:27:BC:9E:4B:4C:2B:02:D4:D9:B0:D9:37:10:70:F0:2E:A8:D0:29:A7',
+    ]);
+  });
+
+  /**
+   * The installed-Android path for an invitation, end to end across the three files that
+   * have to agree about it.
+   *
+   * A token is the one thing on this site that must survive a tap, and it survives by
+   * three separate claims lining up: the Android intent filter claims `/i/`, the site
+   * publishes a fingerprint that verifies the claim, and the page hands the same token
+   * to the app through the custom scheme when the link cannot be handed over directly.
+   *
+   * Nothing in the public-distribution tranche touches any of them, which is the point
+   * of asserting it in one place: a store URL moving must not be able to reach this.
+   */
+  it('carries an invitation token through the installed-Android route unchanged', () => {
+    const token = 'a3f19c2b4d5e6f708192a3b4c5d6e7f8';
+
+    // 1. Android claims the path, and the claim is verified by a published fingerprint.
+    assert.ok(links.appPaths.includes('/i/*'));
+    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    assert.match(filters, /autoVerify: true/);
+    assert.match(filters, /pathPrefix: '\/i\/'/);
+    const statements = JSON.parse(read('.well-known', 'assetlinks.json'));
+    assert.ok(
+      statements.some((s) => s.target.package_name === 'app.bingd'),
+      'the production package publishes no statement, so /i/ would not verify',
+    );
+
+    // 2. Where the app cannot be handed the link — the same-domain case — the token
+    //    reaches it through the scheme instead, character for character.
+    assert.equal(appLinkFor('bingd', 'i', token), `bingd://i/${token}`);
+
+    // 3. And the web fallback is still there for a device without the app: the page is
+    //    served, and it is the page that holds the token in its own URL.
+    assert.match(read('_redirects'), /^\/i\/\* {2}\/i {2}200$/m);
   });
 
   it('keeps the two .well-known files typed as JSON, which is the whole of whether they work', () => {
@@ -1854,19 +2284,31 @@ describe('the release mode', () => {
   const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
 
   /**
-   * **The lock, stated as a test.**
+   * **The lock, stated as a test — and the reason for it has moved.**
    *
-   * Bingd is not public today. A commit that flips this to "public" while the store
-   * URLs are still null cannot build at all — but a commit that flips it *and* invents
-   * URLs would build, and this is the line that says the decision is deliberate. It
-   * fails on launch day and is updated then, by somebody who meant to.
+   * It used to read *is still beta, because the apps are not on the stores*. Both apps
+   * are on public stores now: iOS since 2026-09-08 and Android with this tranche. The
+   * flag stays `beta` anyway, and that is not an oversight left to be tidied later.
+   *
+   * `mode` changes no byte of the built site. It is a pre-flight gate, and the gate it
+   * still fails is `TERMS_STATUS`, which is `draft` — a build that flipped this would
+   * refuse outright rather than publish anything. `final` is the record that a lawyer
+   * read the Terms (L-1 in the public-launch risk register) and is not a word written to
+   * make a build pass.
+   *
+   * So this asserts the gate is closed while the destinations are open, which is exactly
+   * the state that let the public Play rewiring ship without waiting on a legal review.
    */
-  it('is still beta, because the apps are not on the stores', () => {
+  it('is still beta, because the Terms has not been read, not because the stores are missing', () => {
     assert.equal(
       distribution.mode ?? 'beta',
       'beta',
-      'mode is no longer beta — if the apps really have launched, update this test with the commit that launched them',
+      'mode is no longer beta — flipping it requires TERMS_STATUS to be final; update this test with the commit that settles L-1',
     );
+    // Both store URLs are set, so `mode` is the only thing beta about the site, and the
+    // public destinations do not wait on it.
+    assert.ok(distribution.ios?.storeUrl, 'the iOS listing is configured');
+    assert.ok(distribution.android?.storeUrl, 'the Play listing is configured');
   });
 
   /**
@@ -1893,7 +2335,16 @@ describe('the release mode', () => {
      * A regex that only catches the wording you happened to think of is a regex that
      * certifies the ones you did not.
      */
-    const gate = /closed testing|closed beta|invite[- ]only|Invitations are going out/i;
+    /**
+     * **The Android half was added with the public Play tranche**, and for the reason the
+     * `closed beta` entry above already records: a regex that only catches the wording
+     * you happened to think of certifies the ones you did not. The site described
+     * Android as a closed test in three separate registers — "Join the bingd. Android
+     * beta" on a button, "the tester opt-in you join first" under it, and "not on Google
+     * Play yet" beside that — and none of those three matches `closed testing`.
+     */
+    const gate =
+      /closed testing|closed beta|invite[- ]only|Invitations are going out|tester opt-in|Android beta|not on Google Play/i;
     const pages = [
       ['index.html'],
       ['i.html'],
@@ -2303,12 +2754,23 @@ describe('the release mode', () => {
     }
 
     // And the destination the pages actually carry is the one that was configured.
-    if (iosLive) {
+    for (const [platform, url] of [
+      ['App Store', iosLive ? distribution.ios.storeUrl : null],
+      ['Play listing', androidLive ? distribution.android.storeUrl : null],
+    ]) {
+      if (!url) continue;
       assert.match(
         read('index.html'),
-        new RegExp(distribution.ios.storeUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-        'the front page does not carry the configured App Store URL',
+        new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        `the front page does not carry the configured ${platform} URL`,
       );
+    }
+
+    // Both are live, so the availability line says the same thing about each rather than
+    // explaining an Android exception. It is derived from these URLs; this is the
+    // sentence a visitor reads under the buttons.
+    if (iosLive && androidLive) {
+      assert.match(read('index.html'), /Free on the App Store\. Free on Google Play\./);
     }
   });
 });
@@ -2352,12 +2814,21 @@ describe('the public build, in a sandbox', () => {
     }
     cpSync(join(here, 'src'), join(sandbox, 'src'), { recursive: true });
 
-    // The launch commit's first edit: the mode, with both store URLs real.
-    patch('distribution.config.json', [
-      ['"mode": "beta"', '"mode": "public"'],
-      ['"storeUrl": null', '"storeUrl": "https://apps.apple.com/app/id0000000000"'],
-      ['"storeUrl": null', '"storeUrl": "https://play.google.com/store/apps/details?id=app.bingd"'],
-    ]);
+    /**
+     * The launch commit's first edit: the mode.
+     *
+     * It used to patch two `"storeUrl": null` lines to invented URLs as well, because
+     * the gate refuses `public` while either is null and the sandbox had to get past it.
+     * **Both are real in the source now**, so those two replacements would find nothing
+     * and write the file back unchanged — a setup step that quietly stopped happening,
+     * which is worse than one that was deleted. They are deleted, and the sandbox
+     * rehearses the launch against the actual configured listings.
+     */
+    patch('distribution.config.json', [['"mode": "beta"', '"mode": "public"']]);
+
+    const patched = JSON.parse(readFileSync(join(sandbox, 'distribution.config.json'), 'utf8'));
+    assert.equal(patched.mode, 'public', 'the sandbox patch no longer applies');
+    assert.ok(patched.ios?.storeUrl && patched.android?.storeUrl);
   });
 
   after(() => {
@@ -2510,5 +2981,337 @@ describe('_headers', () => {
     // back: a header here would silently re-hide the front page.
     assert.equal(rule('/*')['X-Robots-Tag'], undefined);
     assert.equal(rule('/*')['X-Content-Type-Options'], 'nosniff');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The page, painted
+//
+// `page.mjs` was for a long time "the part no test observes": everything with a
+// decision in it lives in `router.mjs`, and what was left was DOM writing. That was a
+// fair trade while the router pages were a name and a button.
+//
+// It stopped being fair with the public title preview. The question this tranche has to
+// answer is not "does `titlePreview` return the right object" — that is settled above —
+// it is **what ends up on the page a stranger reads**, and the one honest way to ask it
+// is to run the real module against the real built HTML and read the result back.
+//
+// jsdom rather than a browser: it is already a dependency, and the assertions here are
+// about text content and href values, none of which needs layout.
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs the shipped `page.mjs` against a shipped page, with one row of catalogue data.
+ *
+ * The config block is rewritten to carry a Supabase URL, because a local
+ * `npm run build:web` has none and the fetch would be skipped — which would make every
+ * assertion below pass against a page that painted nothing.
+ */
+let paintRun = 0;
+
+async function paint({ file, url, userAgent, row = null }) {
+  const source = readFileSync(join(dist, file), 'utf8');
+  const block = /<script type="application\/json" id="bingd-config">(.*?)<\/script>/s;
+  const config = {
+    ...JSON.parse(block.exec(source)[1]),
+    supabaseUrl: 'https://example.supabase.co',
+    supabaseAnonKey: 'anon-key-is-public-by-construction',
+  };
+  const rewritten =
+    '<script type="application/json" id="bingd-config">' +
+    JSON.stringify(config) +
+    '</script>';
+  const html = source.replace(block, () => rewritten);
+
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM(html, { url });
+  const requested = [];
+
+  const saved = {
+    document: globalThis.document,
+    location: globalThis.location,
+    fetch: globalThis.fetch,
+  };
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+  globalThis.document = dom.window.document;
+  globalThis.location = dom.window.location;
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { userAgent, maxTouchPoints: 0 },
+    configurable: true,
+    writable: true,
+  });
+  globalThis.fetch = async (target) => {
+    requested.push(String(target));
+    return { ok: true, json: async () => (row ? [row] : []) };
+  };
+
+  try {
+    // Cache-busted, because the module paints on import and each case needs its own run.
+    // A counter rather than anything derived from the case, because two cases that
+    // happened to describe themselves the same way would share a module instance and the
+    // second one would assert against a page nothing had painted.
+    await import('./src/page.mjs?case=' + ++paintRun);
+    // One turn for the fetch promise chain that paints the context.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    globalThis.document = saved.document;
+    globalThis.location = saved.location;
+    globalThis.fetch = saved.fetch;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+
+  const text = (id) => dom.window.document.getElementById(id)?.textContent?.trim() ?? null;
+  const el = (id) => dom.window.document.getElementById(id);
+  return { window: dom.window, document: dom.window.document, text, el, requested };
+}
+
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+const IPHONE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1';
+const DESKTOP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const PLAY = 'https://play.google.com/store/apps/details?id=app.bingd';
+const APP_STORE = 'https://apps.apple.com/app/id6803954532';
+
+describe('the title page, painted', () => {
+  const ID = '11111111-2222-3333-4444-555555555555';
+  const AT = `https://bingd.app/title/${ID}`;
+
+  /**
+   * One row, carrying everything the preview may show and everything it may not.
+   *
+   * The private fields are here deliberately. `titlePreview` is tested against a
+   * poisoned row above; this asserts the same thing one layer out, where it is a
+   * property of the bytes a person's browser actually renders rather than of an object.
+   */
+  const AMADEUS = {
+    kind: 'movie',
+    title: 'Amadeus',
+    release_date: '1984-09-19',
+    runtime_minutes: 160,
+    genres: ['Drama', 'History', 'Music'],
+    overview: 'Antonio Salieri believes that Mozart is the voice of God.',
+    poster_path: '/amadeus.jpg',
+    score: 9.4,
+    predicted_score: 8.1,
+    note: 'my private review',
+    watched_on: '2026-04-02',
+    recommended_by: 'fourward',
+  };
+
+  it('shows the film, and both calls to action', async () => {
+    const page = await paint({ file: 'title.html', url: AT, userAgent: ANDROID_UA, row: AMADEUS });
+
+    assert.equal(page.text('context-name'), 'Amadeus');
+    assert.equal(page.text('context-detail'), 'Film · 1984 · 2h 40m');
+    assert.equal(page.text('title-genres'), 'Drama, History, Music');
+    assert.equal(page.text('title-synopsis'), AMADEUS.overview);
+    assert.equal(page.el('title-preview').hidden, false);
+    assert.match(page.text('title-preview'), /not endorsed or certified by TMDB/);
+
+    // The poster is asked for from TMDB's CDN and stays hidden until it decodes, which
+    // in jsdom it never does — so the assertion is the src, not the visibility.
+    assert.equal(page.el('context-art').src, 'https://image.tmdb.org/t/p/w342/amadeus.jpg');
+
+    // Open in bingd., carrying the id through the custom scheme.
+    assert.equal(page.el('open-app').href, `bingd://title/${ID}`);
+    assert.equal(page.el('open-app').textContent, 'Open in bingd.');
+    assert.equal(page.el('open-app').hidden, false);
+
+    // Get bingd., which on Android is the public Play listing and nothing else.
+    const install = page.el('primary-install');
+    assert.equal(install.href, PLAY);
+    assert.equal(install.textContent, 'Get bingd. on Google Play');
+    assert.equal(install.hidden, false);
+
+    // The generic line is replaced rather than left above the real one.
+    assert.equal(page.el('generic-subject').hidden, true);
+  });
+
+  it('sends an iPhone to the App Store from the same page', async () => {
+    const page = await paint({ file: 'title.html', url: AT, userAgent: IPHONE_UA, row: AMADEUS });
+    assert.equal(page.el('primary-install').href, APP_STORE);
+    assert.equal(page.el('primary-install').textContent, 'Get bingd. on the App Store');
+  });
+
+  it('offers both stores to a desktop browser and chooses neither', async () => {
+    const page = await paint({ file: 'title.html', url: AT, userAgent: DESKTOP_UA, row: AMADEUS });
+    assert.equal(page.el('primary-install').hidden, true);
+    assert.equal(page.el('install-ios').href, APP_STORE);
+    assert.equal(page.el('install-android').href, PLAY);
+    // And the preview is the same one, because a desktop reader is a reader.
+    assert.equal(page.el('title-preview').hidden, false);
+  });
+
+  /**
+   * The two store buttons were one grid item: their wrapper took the row, so the gap
+   * between rows never reached them and they rendered flush, as one two-line control.
+   * jsdom does no layout, so this reads the cascade: the wrapper must draw no box of its
+   * own (each button becomes a grid item) and the grid must keep a real gap.
+   */
+  it('separates the two desktop store buttons with the shared gap', async () => {
+    const page = await paint({ file: 'title.html', url: AT, userAgent: DESKTOP_UA, row: AMADEUS });
+    const style = (el) => page.window.getComputedStyle(el);
+    const choices = page.el('desktop-choices');
+    const actions = choices.parentElement;
+
+    assert.equal(choices.hidden, false);
+    assert.equal(style(choices).display, 'contents');
+    assert.equal(style(actions).display, 'grid');
+    assert.equal(style(actions).rowGap || style(actions).gap, '0.625rem');
+
+    // Three separate controls, in order, the outlined one last.
+    const shown = [...actions.querySelectorAll('a.button')].filter(
+      (a) => !a.hidden && !a.closest('[hidden]'),
+    );
+    assert.deepEqual(
+      shown.map((a) => a.id),
+      ['install-ios', 'install-android', 'open-app'],
+    );
+    assert.deepEqual(
+      shown.map((a) => a.classList.contains('secondary')),
+      [false, false, true],
+    );
+  });
+
+  it('shows a phone its own store and never the desktop pair', async () => {
+    for (const [userAgent, href] of [
+      [IPHONE_UA, APP_STORE],
+      [ANDROID_UA, PLAY],
+    ]) {
+      const page = await paint({ file: 'title.html', url: AT, userAgent, row: AMADEUS });
+      assert.equal(page.el('desktop-choices').hidden, true);
+      assert.equal(page.window.getComputedStyle(page.el('desktop-choices')).display, 'none');
+      assert.equal(page.el('primary-install').hidden, false);
+      assert.equal(page.el('primary-install').href, href);
+      assert.equal(page.el('open-app').hidden, false);
+    }
+  });
+
+  it('names a season by its show, its number and its episode count', async () => {
+    const page = await paint({
+      file: 'title.html',
+      url: AT,
+      userAgent: ANDROID_UA,
+      row: {
+        kind: 'season',
+        title: 'Season 1',
+        season_number: 1,
+        episode_count: 9,
+        release_date: '2023-01-15',
+        genres: [],
+        overview: 'Twenty years after a fungal outbreak.',
+        parent: { title: 'The Last of Us', genres: ['Drama', 'Sci-Fi & Fantasy'] },
+      },
+    });
+    assert.equal(page.text('context-name'), 'The Last of Us, S1');
+    assert.equal(page.text('context-detail'), 'Season 1 · 2023 · 9 episodes');
+    assert.equal(page.text('title-genres'), 'Drama, Sci-Fi & Fantasy');
+  });
+
+  /**
+   * **The disclosure test, at the layer a person reads.**
+   *
+   * Not a check of named elements — a leak that mattered would be a field somebody
+   * added to a slot nobody thought to assert on. So the whole rendered document is read,
+   * markup and text, and every private value from the row must be absent from all of it.
+   */
+  it('renders nothing from the row that a signed-out stranger may not see', async () => {
+    const page = await paint({ file: 'title.html', url: AT, userAgent: ANDROID_UA, row: AMADEUS });
+    const rendered = page.document.documentElement.outerHTML;
+
+    for (const secret of ['9.4', '8.1', 'my private review', '2026-04-02', 'fourward']) {
+      assert.ok(!rendered.includes(secret), `the rendered page leaked ${secret}`);
+    }
+
+    // And it asked for one thing, from one table, with the id it was given.
+    assert.deepEqual(page.requested, [
+      'https://example.supabase.co/rest/v1/media_items?id=eq.' +
+        ID +
+        '&select=kind,title,release_date,season_number,poster_path,overview,runtime_minutes,' +
+        'genres,episode_count,parent:parent_id(title,genres)&limit=1',
+    ]);
+  });
+
+  it('keeps the page useful when the title does not resolve', async () => {
+    // Offline, a deleted row, or a catalogue id nobody has. The preview is an
+    // improvement on this page, never a precondition for it.
+    const page = await paint({ file: 'title.html', url: AT, userAgent: ANDROID_UA, row: null });
+
+    assert.equal(page.el('title-preview').hidden, true);
+    assert.equal(page.el('generic-subject').hidden, false);
+    assert.equal(page.text('generic-subject'), 'A film or series on bingd.');
+    assert.equal(page.el('primary-install').href, PLAY);
+    assert.equal(page.el('open-app').href, `bingd://title/${ID}`);
+  });
+});
+
+describe('the invitation page, painted', () => {
+  const TOKEN_ = 'a3f19c2b4d5e6f708192a3b4c5d6e7f8';
+
+  it('keeps the token and sends an uninstalled Android visitor to the public listing', async () => {
+    const page = await paint({
+      file: 'i.html',
+      url: `https://bingd.app/i/${TOKEN_}`,
+      userAgent: ANDROID_UA,
+    });
+
+    // The token survives into the one link that can hand it to an installed app.
+    assert.equal(page.el('open-app').href, `bingd://i/${TOKEN_}`);
+    assert.equal(page.el('open-app').textContent, 'I already have bingd.');
+
+    // And the install CTA is the public listing, not a tester opt-in.
+    const install = page.el('primary-install');
+    assert.equal(install.href, PLAY);
+    assert.ok(!install.href.includes('/apps/testing/'));
+    assert.equal(install.textContent, 'Get bingd. on Google Play');
+
+    // The honest return instruction stays, because deferred attribution is still not
+    // implemented and a store install still does not carry the invitation across.
+    const prose = page.document.body.textContent.replace(/\s+/g, ' ');
+    assert.ok(prose.includes('come back to this page'), 'the store round trip is not explained');
+
+    // One call, and it is the open metric — the only analytics this site has.
+    assert.equal(page.requested.length, 1);
+    assert.match(page.requested[0], /\/rest\/v1\/rpc\/record_invite_open$/);
+  });
+
+  it('still offers the install when the token was truncated in a message', async () => {
+    const page = await paint({
+      file: 'i.html',
+      url: 'https://bingd.app/i/a3f19c2b4d5e6f70',
+      userAgent: ANDROID_UA,
+    });
+    assert.equal(page.el('invite-broken').hidden, false);
+    assert.equal(page.el('invite-intro').hidden, true);
+    assert.equal(page.el('primary-install').href, PLAY);
+    assert.deepEqual(page.requested, [], 'a token that cannot be real must not be reported');
+  });
+});
+
+describe('the front page, painted', () => {
+  it('paints one decision into the hero, the closing band and the sticky bar', async () => {
+    const page = await paint({
+      file: 'index.html',
+      url: 'https://bingd.app/',
+      userAgent: ANDROID_UA,
+    });
+
+    const buttons = [
+      page.el('primary-install'),
+      ...page.document.querySelectorAll('[data-install="primary-install"]'),
+    ];
+    assert.ok(buttons.length >= 3, `only ${buttons.length} install buttons were painted`);
+    for (const button of buttons) {
+      assert.equal(button.href, PLAY);
+      assert.equal(button.textContent, 'Get bingd. on Google Play');
+      assert.equal(button.hidden, false);
+    }
+
+    // The front page reads no account and no catalogue, so it makes no request at all.
+    assert.deepEqual(page.requested, []);
   });
 });

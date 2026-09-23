@@ -39,9 +39,8 @@
  *   9. The Android filter widened back to the whole host, which is what it said before
  *      2026-08-20. It claims /privacy, /support and /account-deletion, and Android hands
  *      the store's own compliance links to the app to render as `+not-found`.
- *  10. The release mode flipped to `public`, with store URLs invented to get past the
- *      build's own guard. The site then claims both apps are downloadable and asks to be
- *      indexed while neither is true.
+ *  10. The release mode flipped to `public` while the Terms is still an unread draft,
+ *      which is the one gate still shut now that both stores are real.
  *  11. The noindex header dropped while the mode still says beta. The pages' meta tag
  *      still says the right thing, so the mistake is invisible from the HTML alone.
  *  12. The developer name given a company suffix nobody has registered. Until
@@ -53,6 +52,12 @@
  *      alone would open the launch — and publish a Terms still calling itself an
  *      unreviewed draft, exactly the hole an independent review found before the gate
  *      existed.
+ *  14. The Android destination order put back the way the closed test needed it, so
+ *      every public visitor is sent to a tester opt-in page instead of the listing.
+ *  15. The canonical Play URL replaced by the opt-in URL in the one file that holds it,
+ *      which is the same defect arriving as a config edit rather than a code one.
+ *  16. The title preview spreading the row it was handed, which is how a private field
+ *      reaches a public page without anybody writing its name.
  *
  * **The Apple team id is not here, and cannot be.** It has exactly one source in this
  * repository and nothing to cross-check it against, so a wrong value is consistent
@@ -73,8 +78,64 @@ const APP_CONFIG = join(root, 'app.config.ts');
 // directive has to follow the release mode, so it is generated. The mutants that used to
 // edit it edit the template it is generated from.
 const BUILD = join(here, 'build.mjs');
+const ROUTER = join(here, 'src', 'router.mjs');
+const DISTRIBUTION = join(here, 'distribution.config.json');
 
 const MUTANTS = [
+  {
+    /**
+     * The Android ordering, put back the way the closed test needed it.
+     *
+     * This was the correct order for six weeks and is the obvious thing to restore if
+     * somebody reads the comment about opt-in pages without the date on it. With
+     * `optInUrl` leading, every public Android visitor is sent to a tester page for a
+     * track they are not on, from a button labelled "Join the bingd. Android beta" —
+     * and the site still builds, still passes a shape check, and still has a working
+     * link under every button.
+     */
+    name: 'the Android destination order restored to the one the closed test needed',
+    file: ROUTER,
+    apply: (s) =>
+      s.replace(
+        /(\s+)(if \(android\.storeUrl\) return \{ platform: 'android', kind: 'store', url: android\.storeUrl \};)(\s+)(if \(android\.optInUrl\) return \{ platform: 'android', kind: 'play-opt-in', url: android\.optInUrl \};)/,
+        '$3$4$1$2',
+      ),
+  },
+  {
+    /**
+     * The same defect arriving as a config edit.
+     *
+     * One file holds the Play URL, which is what makes it cheap to move — and cheap to
+     * move wrong. A tester opt-in page where the listing belongs is a live, plausible
+     * URL on Google's own domain that tells a stranger the app is unavailable for their
+     * device.
+     */
+    name: 'the canonical Play URL replaced by the tester opt-in page',
+    file: DISTRIBUTION,
+    apply: (s) =>
+      s.replace(
+        '"storeUrl": "https://play.google.com/store/apps/details?id=app.bingd"',
+        '"storeUrl": "https://play.google.com/apps/testing/app.bingd"',
+      ),
+  },
+  {
+    /**
+     * The title preview handed the whole row instead of four named fields.
+     *
+     * The public preview is safe because it *names* what it returns. Spreading the row
+     * is the one-character-ish edit that makes it safe only because of what the `select`
+     * happens to ask for today — and the `select` is a string in a different function
+     * that somebody will widen for an unrelated reason. Nothing renders differently, so
+     * there is nothing to see in a browser.
+     */
+    name: 'the title preview spreading the row it was handed rather than naming its fields',
+    file: ROUTER,
+    apply: (s) =>
+      s.replace(
+        'return { name: display.name, meta, genres, synopsis: synopsisText(row.overview) };',
+        'return { ...row, name: display.name, meta, genres, synopsis: synopsisText(row.overview) };',
+      ),
+  },
   {
     name: 'the /list/* typo, reintroduced',
     file: LINKS,
@@ -122,22 +183,21 @@ const MUTANTS = [
   },
   {
     /**
-     * The launch switch, thrown early.
+     * The launch switch, thrown early — and what "early" means has changed.
      *
-     * This is the defect with the longest tail in the whole repository: a site that
-     * says the apps are on the stores when they are not sends people to a 404, and an
-     * indexed `/u/<handle>` cannot be withdrawn by any privacy setting in the app.
-     * The build's own guard catches it while the store URLs are null — so this mutant
-     * supplies them too, which is exactly the shape a careless launch commit would
-     * have, and checks that the suite still notices.
+     * It used to mean *before the apps are on the stores*, and the mutant supplied
+     * invented store URLs so it could get past the build's own null check. Both stores
+     * are real now, so the store half of the gate is satisfied and only one input still
+     * holds the flag shut: `TERMS_STATUS`, which is `draft`.
+     *
+     * That makes this mutant smaller and sharper. One edit, the one somebody would
+     * actually make on a launch night — "both apps are live, flip it" — and the question
+     * is whether the suite still refuses. It must, because the Terms a public launch
+     * asks every new account to agree to still says it has not been read by a lawyer.
      */
-    name: 'the release mode flipped to public before the apps are actually on the stores',
+    name: 'the release mode flipped to public while the Terms is still an unread draft',
     file: join(here, 'distribution.config.json'),
-    apply: (s) =>
-      s
-        .replace('"mode": "beta"', '"mode": "public"')
-        .replace('"storeUrl": null', '"storeUrl": "https://apps.apple.com/app/id6803954532"')
-        .replace('"storeUrl": null', '"storeUrl": "https://play.google.com/store/apps/details?id=app.bingd"'),
+    apply: (s) => s.replace('"mode": "beta"', '"mode": "public"'),
   },
   {
     /**
