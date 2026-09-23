@@ -89,12 +89,41 @@ export type ArchiveLimits = {
  * The founder's 22-film export is a few kilobytes. A 10,000-film export — the
  * architectural ceiling the Collection reader imposes — is on the order of 1.5 MB of CSV
  * across the four files we read, and perhaps three times that including the ones we do
- * not. 50 MB and 50 entries are therefore several orders of magnitude above anything
- * legitimate, which is where a bomb guard belongs: high enough that no real user meets it,
- * low enough that nothing can exhaust a phone.
+ * not. 50 MB is therefore several orders of magnitude above anything legitimate, which is
+ * where a bomb guard belongs: high enough that no real user meets it, low enough that
+ * nothing can exhaust a phone.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE MEMBER COUNT IS 1,000 AND NOT 50
+ *
+ * The count bounds *listing*, not inflating, and 50 was set from the wrong archive. The
+ * founder's export has 16 members because that account has no lists. Letterboxd is
+ * reported to write each custom list as its own CSV (not yet seen in a real export here),
+ * so 16 plus one file per list would refuse anybody with about 34 lists as "too big", and
+ * their watched history with it. Those files are never read (see `isWanted`). They only
+ * have to be counted.
+ *
+ * The count can rise because it was never what stopped a bomb. These do, and none of them
+ * changes:
+ *
+ *   · the picked file is refused above `maxTotalBytes` before it is read (`use-import.ts`),
+ *     so the whole central directory sits inside 50 MB;
+ *   · each member's *declared* uncompressed size is capped (`maxEntryBytes`), a missing or
+ *     nonsense one counts as over the cap, and all members' declared sizes together are
+ *     capped (`maxTotalBytes`), including files that are never opened;
+ *   · `fflate` inflates into a buffer of exactly the declared size and does not grow it,
+ *     so a member that lies about its size yields at most what it declared;
+ *   · only four paths are ever inflated, chosen by the positive rule below;
+ *   · rows and bytes per job are capped again in `payload.ts` and by `import_stage`.
+ *
+ * `zipSource` also stops walking the directory at `maxEntries + 1`. A directory claiming a
+ * million members therefore costs a thousand small records, not a million.
+ *
+ * 1,000 is about sixty times a real base export and leaves room for several hundred lists.
+ * A thousand `{ path, bytes }` records is nothing on any phone this ships to.
  */
 export const DEFAULT_LIMITS: ArchiveLimits = {
-  maxEntries: 50,
+  maxEntries: 1_000,
   maxTotalBytes: 50 * 1024 * 1024,
   maxEntryBytes: 25 * 1024 * 1024,
 };

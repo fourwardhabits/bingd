@@ -55,7 +55,10 @@
 
 import { strFromU8, unzipSync } from 'fflate';
 
-import type { ArchiveEntry, ArchiveSource } from './archive';
+import { DEFAULT_LIMITS, type ArchiveEntry, type ArchiveSource } from './archive';
+
+/** Thrown by the listing filter to stop the walk once the limit is exceeded. */
+const LISTING_FULL = Symbol('listing full');
 
 /** The smallest legal ZIP is an empty one: a 22-byte end-of-central-directory record. */
 const MIN_ZIP_BYTES = 22;
@@ -99,10 +102,18 @@ export class DamagedZipError extends Error {
  * that asks again should not pay for it twice. Entries are inflated lazily, one call to
  * `readEntry` at a time, so the four wanted files are never all resident at once.
  *
+ * **The listing stops at `maxEntries + 1`.** One entry past the limit is enough for
+ * `inspect` to refuse the archive, and it means the walk costs at most that many records,
+ * however many members the central directory claims. Before this, the whole directory was
+ * listed and only then counted, so the member limit never bounded the listing.
+ *
  * @throws NotAZipError if the bytes are not an archive.
  * @throws DamagedZipError if they are one and it cannot be walked.
  */
-export function zipSource(bytes: Uint8Array): ArchiveSource {
+export function zipSource(
+  bytes: Uint8Array,
+  { maxEntries = DEFAULT_LIMITS.maxEntries }: { maxEntries?: number } = {},
+): ArchiveSource {
   if (!looksLikeZip(bytes)) throw new NotAZipError();
 
   let listing: ArchiveEntry[] | null = null;
@@ -117,12 +128,15 @@ export function zipSource(bytes: Uint8Array): ArchiveSource {
           // `originalSize`, not `size`. See the header: `size` is the compressed length,
           // and a bomb guard written against that measures the wrong number.
           entries.push({ path: file.name, bytes: file.originalSize });
+          // Enough to be refused. Throwing is the only way to stop `unzipSync` early; the
+          // sentinel is caught below and is not damage.
+          if (entries.length > maxEntries) throw LISTING_FULL;
           // Nothing is inflated by the listing pass. This `false` is the privacy guarantee.
           return false;
         },
       });
     } catch (error) {
-      throw new DamagedZipError(error);
+      if (error !== LISTING_FULL) throw new DamagedZipError(error);
     }
 
     listing = entries;
