@@ -164,6 +164,31 @@ describe('bounds, applied before anything is decompressed', () => {
     });
   });
 
+  it('accepts a real export beside hundreds of list files, and opens only the four', () => {
+    // A base export is 16 members. Under the old ceiling of 50, an account with about 34
+    // lists was refused outright, history and all.
+    const lists = Array.from({ length: 600 }, (_, i) => ({
+      path: `lists/list-${i}.csv`,
+      bytes: 2_000,
+    }));
+    const { source, asked } = spy([...REAL_LISTING, ...lists]);
+    const inspection = inspect(source);
+
+    expect(inspection.ok).toBe(true);
+    if (!inspection.ok) return;
+    readWanted(source, inspection.found);
+    expect(asked.sort()).toEqual(['diary.csv', 'ratings.csv', 'watched.csv', 'watchlist.csv']);
+  });
+
+  it('accepts exactly the member limit and refuses one more', () => {
+    const at = [...REAL_LISTING, ...many(DEFAULT_LIMITS.maxEntries - REAL_LISTING.length)];
+    expect(inspect(spy(at).source).ok).toBe(true);
+    expect(inspect(spy([...at, { path: 'one-more.csv', bytes: 1 }]).source)).toEqual({
+      ok: false,
+      reason: 'too_many_entries',
+    });
+  });
+
   it('refuses one oversized member', () => {
     expect(
       inspect(spy([
