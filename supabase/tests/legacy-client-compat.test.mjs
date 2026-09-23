@@ -95,9 +95,54 @@ function legacyClientSources() {
  * one that gets believed at 3am.
  */
 const SHIPPED = [
-  { what: 'iOS 1.0.0 (7), App Store', commit: 'ba14bd0' },
-  { what: 'Android 1.0.1 (12), Play', commit: '6d2f845' },
+  { what: 'iOS 1.0.0 (7), App Store', commit: 'ba14bd06d8ae3db7ff1e6d62f70a66d2badd3d01' },
+  { what: 'Android 1.0.1 (12), Play', commit: '6d2f8455458afabc42d1cfd0a0bd68f5bd2ae343' },
 ];
+
+/**
+ * Makes a shipped commit readable, in CI as well as on a developer machine.
+ *
+ * `actions/checkout` clones at depth 1, so these commits are absent there —
+ * `ensureOriginMain` above fetches `main` the same way and hits the same wall one commit
+ * deeper. Both entries in `SHIPPED` are ancestors of `main`, so **deepening that history
+ * is what reaches them**; fetching the bare object is not, because a shallow fetch of an
+ * arbitrary sha is a different permission and it failed in release gate run 35824023061.
+ *
+ * It deepens progressively rather than unshallowing outright: the first step is usually
+ * enough and the whole history of this repository is not needed to read two files.
+ * **Never skips.** A check that silently does not run is worse than one that is red, and
+ * this is the check a production cutover leans on.
+ */
+function ensureCommit(sha) {
+  const have = () => {
+    try {
+      execFileSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: root, stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (have()) return;
+
+  ensureOriginMain();
+  for (const depth of ['--deepen=500', '--deepen=2000', '--unshallow']) {
+    try {
+      execFileSync(
+        'git',
+        ['fetch', '--no-tags', depth, 'origin', '+refs/heads/main:refs/remotes/origin/main'],
+        { cwd: root, stdio: 'ignore' },
+      );
+    } catch {
+      // `--unshallow` on a complete clone is an error, and so is deepening one. Either
+      // way the next `have()` is the answer.
+    }
+    if (have()) return;
+  }
+  throw new Error(
+    `${sha} is not readable here. It is meant to be an ancestor of main — if a binary was ` +
+      `built from a branch that never merged, put its sha in SHIPPED only once it has.`,
+  );
+}
 
 /**
  * `supabase.rpc('name', { a: …, b: … })` → { name, args }.
@@ -304,20 +349,8 @@ describe('installed clients against the merged schema', () => {
    */
   for (const { what, commit } of SHIPPED) {
     it(`${what} keeps every RPC it calls`, async () => {
-      let sources;
-      try {
-        sources = clientSourcesAt(commit);
-      } catch {
-        // A shallow CI clone may not have the commit. Fetch it rather than skip: a check
-        // that silently does not run is the failure mode this file was written against.
-        execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', commit], {
-          cwd: root,
-          stdio: 'ignore',
-        });
-        sources = clientSourcesAt(commit);
-      }
-
-      const { calls } = rpcCalls(sources);
+      ensureCommit(commit);
+      const { calls } = rpcCalls(clientSourcesAt(commit));
       assert.ok(calls.length > 40, `expected ${what}'s RPC surface, found ${calls.length}`);
 
       const [was, now] = [await signatures(before_), await signatures(merged)];
