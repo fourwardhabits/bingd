@@ -70,7 +70,7 @@ for (const variant of config.variants) {
 /**
  * Distribution URLs are checked for *shape* and never for presence.
  *
- * Null is the correct value today — no TestFlight link exists — and a build that
+ * Null is the correct value for a destination that does not exist, and a build that
  * refused it would block the site on a thing that is not ready. What is refused is a
  * URL that is set and wrong: anything that is not `https://`, because every one of
  * these becomes the destination of a button on a page people reach from an invitation,
@@ -247,16 +247,23 @@ if (mode === 'public') {
  *
  * There used to be an `isPublic` derived here, and about a dozen strings and the robots
  * directive branched on it. Every one of those is gone: the copy stopped claiming a
- * closed test because iOS is on the public App Store and Android is not, which is a
- * per-platform fact that `distribution.config.json`'s URLs already carry and one global
- * sentence could never state correctly. Indexing became per route for a different
- * reason — `/u/<handle>` should stay out of Google whether or not the apps have shipped.
+ * closed test because availability was a per-platform fact that
+ * `distribution.config.json`'s URLs already carry and one global sentence could never
+ * state correctly. Indexing became per route for a different reason — `/u/<handle>`
+ * should stay out of Google whether or not the apps have shipped.
  *
  * So `mode` changes no byte of the built site. What it still does is everything above:
  * refuse to build `public` while a store URL is null, while the Terms names an
  * unconfirmed entity, or while `TERMS_STATUS` is `draft`. That is worth keeping — it is
  * the launch checklist expressed as a build failure — but it is a gate, not a flag, and
  * a derived `isPublic` sitting unused invites somebody to branch on it again.
+ *
+ * **Both store URLs are now set**, and the separation is what makes that safe. Public
+ * visitors have been getting the public App Store since 2026-09-10 and get the public
+ * Play listing from this tranche, with `mode` still reading `beta` the whole time,
+ * because the flag describes the launch checklist and the URLs describe the
+ * destinations. `TERMS_STATUS` is the one gate still closed, and it closes on a
+ * lawyer's read rather than on a store approval.
  */
 
 if (problems.length > 0) {
@@ -558,6 +565,11 @@ const styles = `
          thumb on a phone is the case being designed for. */
       .actions { display: grid; gap: 0.625rem; margin-top: 1.5rem; }
 
+      /* A desktop visitor gets both stores, wrapped so one flag can show or hide the
+         pair. The wrapper takes no box of its own, so each store button is a grid item
+         and the gap above separates it; without this the two sat flush as one control. */
+      .actions > #desktop-choices { display: contents; }
+
       a.button {
         display: block;
         min-height: 48px;
@@ -607,6 +619,12 @@ const styles = `
       /* A profile picture is round and square-cropped; a poster is neither. */
       .context.is-profile .context-art { aspect-ratio: 1; border-radius: 50%; }
 
+      /* The title page shows the poster rather than referring to it, so it is drawn
+         at a size somebody can recognise a film from. Still a flex basis and still
+         hidden until it decodes, so an unresolved poster reserves nothing. */
+      .context.is-title { align-items: flex-start; }
+      .context.is-title .context-art { width: 96px; flex-basis: 96px; }
+
       .context-lines { min-width: 0; }
       .context-lines .subject { margin: 0; }
 
@@ -621,6 +639,128 @@ const styles = `
         font-size: 0.8125rem;
         letter-spacing: 0.01em;
         color: var(--secondary);
+      }
+
+      /* ---------------------------------------------------------------------
+         The title preview.
+
+         Genres, then the synopsis, then the TMDB credit, under the poster and
+         above the two buttons. Deliberately below the name rather than beside
+         it: the card is 26rem wide on a phone and a synopsis in a column next
+         to a poster is four words a line.
+         --------------------------------------------------------------------- */
+      .preview { margin: 0 0 1rem; }
+
+      .preview-genres {
+        margin: 0 0 0.5rem;
+        font-size: 0.8125rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--maroon);
+      }
+
+      /* ---------------------------------------------------------------------
+         A list.
+
+         The only route that renders somebody else's content, so it is also the
+         only block here that has to be legible at the length a person can
+         actually type: a 100-character title and a 1000-character description.
+         Both wrap and neither is clamped — a list somebody shared should be
+         readable, and truncating the description would hide the sentence that
+         says what the list is for.
+         --------------------------------------------------------------------- */
+      .list { text-align: left; }
+
+      .list-kicker {
+        margin: 0 0 0.25rem;
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--maroon);
+      }
+
+      .preview-synopsis { margin: 0 0 0.75rem; }
+
+      .preview-source {
+        margin: 0;
+        font-size: 0.75rem;
+        line-height: 1.5;
+        color: var(--secondary);
+      }
+
+      .preview-source a { color: var(--maroon); text-underline-offset: 2px; }
+
+      .list .subject { margin: 0; }
+
+      .list-owner { margin: 0.375rem 0 0; font-size: 0.9375rem; color: var(--secondary); }
+
+      /* Underlined rather than coloured alone: on a page whose accent is already
+         Maroon, colour on its own does not distinguish a link from a heading. */
+      .list-owner-link { color: var(--maroon); }
+
+      .list-description {
+        margin: 0.625rem 0 0;
+        font-size: 0.9375rem;
+        color: var(--secondary);
+        /* Newlines a person typed are theirs. textContent writes them literally,
+           and without this they would collapse into one paragraph. (No backticks in
+           this stylesheet: it is a template literal, and one would end it.) */
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .list-facts {
+        margin: 0.5rem 0 0;
+        font-size: 0.8125rem;
+        letter-spacing: 0.01em;
+        color: var(--tertiary);
+      }
+
+      /* The rows. A numbered column, a poster and two lines — and never a score,
+         a seen mark or a bookmark: there is no reader out here to have one. */
+      .list-items {
+        margin: 1.25rem 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.75rem;
+        text-align: left;
+      }
+
+      .list-item { display: flex; align-items: center; gap: 0.75rem; }
+
+      .list-item-ordinal {
+        flex: 0 0 1.5rem;
+        text-align: right;
+        font-size: 0.8125rem;
+        color: var(--tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .list-item-art {
+        flex: 0 0 40px;
+        width: 40px;
+        border-radius: 0.375rem;
+        background: var(--parchment);
+        object-fit: cover;
+        aspect-ratio: 2 / 3;
+      }
+
+      .list-item-lines { min-width: 0; }
+      .list-item-name { margin: 0; font-size: 0.9375rem; overflow-wrap: anywhere; }
+      .list-item-year { margin: 0.125rem 0 0; font-size: 0.8125rem; color: var(--tertiary); }
+
+      .list-more {
+        margin: 1rem 0 0;
+        font-size: 0.8125rem;
+        color: var(--tertiary);
+      }
+
+      /* Desktop gets the posters across rather than down: a 400-item list in one
+         column is a scroll nobody finishes, and the grid is what §J's "5-column
+         poster grid" means at this width. */
+      @media (min-width: 56rem) {
+        .list-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
 
       /* ---------------------------------------------------------------------
@@ -922,32 +1062,118 @@ const PROFILE_BODY = `${CONTEXT_BLOCK}
           private account stays private, whichever way you arrive.
         </p>`;
 
+/**
+ * The public preview of a title, which is the block `/title/<id>` grew this tranche.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THERE IS ONE AT ALL
+ * ---------------------------------------------------------------------------
+ *
+ * A `/title/<id>` link is the one bingd. link that gets pasted somewhere nobody has the
+ * app. Until now it answered with a name, a poster and an install button, which is a
+ * page that tells a stranger their friend sent them *something* and then asks them to
+ * download an app to find out what. That is a download wall with a poster on it.
+ *
+ * So the page says what the title is. Everything in here is TMDB's description of a
+ * film or a season, read from `media_items`, whose read policy has been `using (true)`
+ * since the catalogue was built because catalogue metadata is not user data.
+ *
+ * **Nobody's opinion of it is here and that is the whole line.** No personal score, no
+ * Following score, no community score, no recommendation note, no sender, no watch date,
+ * no predicted score. `titlePreview` in `router.mjs` is where that is decided and
+ * tested; this is only the shape it paints into.
+ *
+ * Empty and hidden in the shipped bytes, like `CONTEXT_BLOCK` and for the same reason:
+ * these files are one set for every visitor, so nothing about a film can be in them.
+ *
+ * The TMDB credit rides inside the block rather than in the page footer, so a page that
+ * resolved nothing carries no attribution for data it never showed.
+ */
+const TITLE_PREVIEW = `        <div id="title-preview" class="preview" hidden>
+          <p class="preview-genres" id="title-genres"></p>
+          <p class="preview-synopsis" id="title-synopsis"></p>
+          <p class="preview-source">
+            Title information from <a href="https://www.themoviedb.org">TMDB</a>. This
+            product uses the TMDB API but is not endorsed or certified by TMDB.
+          </p>
+        </div>`;
+
 const TITLE_BODY = `${CONTEXT_BLOCK}
         <p class="subject" id="generic-subject">A film or series on bingd.</p>
+${TITLE_PREVIEW}
         <p>
           Open it in bingd. to see where your friends placed it, and where you would.
         </p>`;
 
 /**
- * No longer branches on `mode`, and that is the point.
+ * A list, for a visitor with no account.
  *
- * It used to say "bingd. is in closed testing. Invitations are going out to a small
- * first group" whenever `mode` was `beta`. **That stopped being true**: iOS has been on
- * the public App Store since 2026-09-08, and the TestFlight link was public before that
- * by deliberate choice. So the sentence described a gate that did not exist, on the page
- * a person lands on when a link cannot open the app — and it was the *only* body copy
- * they got, with no install button under it.
+ * ---------------------------------------------------------------------------
+ * EVERY ELEMENT EXISTS FROM THE START, HIDDEN
  *
- * The invite-only claim is gone rather than reworded. What remains is true in both
- * modes, which is why the branch went with it: the per-platform reality is carried by
- * the install buttons, which read `distribution.config.json` and say exactly what is
- * available where. One sentence cannot describe "public on iOS, closed test on Android"
- * and should not try.
+ * Same rule as `CONTEXT_BLOCK`: the page has its final shape before any network call
+ * finishes, so a slow connection does not grow a list under somebody's thumb. Every one
+ * of these is filled by `page.mjs` with `textContent`, and **there is no `innerHTML`
+ * path to any of them** — this is the one page on the site that renders a person's own
+ * words, so that rule stops being a precaution and becomes the thing that keeps the page
+ * safe.
+ *
+ * ---------------------------------------------------------------------------
+ * TWO ELEMENTS FOR ONE ATTRIBUTION, AND WHY
+ *
+ * `#list-owner-link` and `#list-owner-plain` hold the same name and handle, and exactly
+ * one of them is ever revealed. A public-profile owner gets the link to `/u/<handle>`;
+ * a private one gets plain text with no link at all (§F.2, §J). Doing that by *choosing
+ * an element* rather than by conditionally setting an `href` means the private case has
+ * no anchor in the document at all — there is nothing for a later change to accidentally
+ * point somewhere.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS DELIBERATELY ABSENT
+ *
+ * No "You've seen X of N": `list_viewer_progress` is not granted to anon, and there is
+ * no reader here to have progress. No seen marks, no bookmarks, no scores, and no
+ * "more lists by…" — holding a link grants one list.
  */
-const GENERIC_BODY = `        <p>
-          bingd. is where you rank what you&rsquo;ve watched and see what your friends
-          really think. Get it below.
-        </p>`;
+const LIST_BODY = `        <div id="list" class="list" hidden>
+          <p class="list-kicker">A list on bingd.</p>
+          <p class="subject" id="list-title"></p>
+          <p class="list-owner" id="list-owner" hidden>
+            <a class="list-owner-link" id="list-owner-link" hidden href="#"
+               ><span id="list-owner-name"></span> <span id="list-owner-handle"></span></a>
+            <span id="list-owner-plain" hidden></span>
+          </p>
+          <p class="list-description" id="list-description" hidden></p>
+          <p class="list-facts" id="list-facts" hidden></p>
+        </div>
+        <p class="subject" id="generic-subject">A list on bingd.</p>
+        <p>
+          Open it in bingd. to see the whole list, mark what you have already seen, and
+          add the rest to your watchlist.
+        </p>
+        <ol class="list-items" id="list-items" hidden></ol>
+        <p class="list-more" id="list-more" hidden></p>`;
+
+/**
+ * **Removed 2026-09-20, and the lesson it carries is kept.**
+ *
+ * `GENERIC_BODY` had exactly one caller — the `/lists` route, which had a claimed path
+ * and no feature behind it, so an install card was the honest page. Lists v1 gave that
+ * route a body of its own (`LIST_BODY`) and left this constant with no callers.
+ *
+ * What is worth keeping is why its last revision happened. It used to say "bingd. is in
+ * closed testing. Invitations are going out to a small first group" whenever `mode` was
+ * `beta`. **That stopped being true**: iOS has been on the public App Store since
+ * 2026-09-08, and the TestFlight link was public before that by deliberate choice — so
+ * the sentence described a gate that did not exist, on the page a person lands on when
+ * a link cannot open the app, and it was the *only* body copy they got.
+ *
+ * The rule that came out of it applies to every route body in this file: **the
+ * per-platform reality is carried by the install buttons**, which read
+ * `distribution.config.json` and say exactly what is available where. One sentence
+ * cannot describe "public on iOS, closed test on Android" and should not try. A new
+ * route's body should say what the *thing* is and leave distribution to the buttons.
+ */
 
 /**
  * The two app screenshots, and why there are exactly two.
@@ -978,10 +1204,10 @@ const SHOWCASE = `      <div class="showcase" aria-hidden="false">
  *
  * It used to read "bingd. is in closed testing" in beta mode, on the reasoning that a
  * closed test is why a stranger who found a profile link cannot get in. **That is no
- * longer the reason.** iOS is on the public App Store and Android's closed test has a
- * public opt-in URL, so nobody is turned away for lack of an invitation — the only
- * remaining reason a device has no destination is a platform Bingd has not shipped to,
- * which was previously the launch-mode sentence and is now simply the true one.
+ * longer the reason.** Both platforms are public store listings, so nobody is turned
+ * away for lack of an invitation — the only remaining reason a device has no destination
+ * is a platform Bingd has not shipped to, which was previously the launch-mode sentence
+ * and is now simply the true one.
  *
  * It is reached rarely and deliberately: `paintInstall` shows it only when
  * `destinationFor` returns null for the visitor's platform, which today means neither a
@@ -1847,13 +2073,16 @@ const DOCUMENTS = [
   },
 ];
 
+/** The established positioning line, under the wordmark on every shared-link page. */
+const TAGLINE = 'Rank what you watch and find your next binge.';
+
 const ROUTES = [
   {
     dir: 'i',
     kind: 'invite',
     share: 'You have been invited to bingd.',
     title: 'You have been invited to bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     // The invited visitor's heading is the same complete sentence as every other
     // route's. It used to be "Ask whoever invited you to let you know when it is." in
     // beta, whose "it" had its antecedent in the lead-in half of #no-destination — and
@@ -1867,7 +2096,7 @@ const ROUTES = [
     kind: 'profile',
     share: 'Open on bingd.',
     title: 'A profile on bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     heading: UNAVAILABLE,
     body: PROFILE_BODY,
   },
@@ -1876,18 +2105,26 @@ const ROUTES = [
     kind: 'title',
     share: 'Open on bingd.',
     title: 'A title on bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     heading: UNAVAILABLE,
     body: TITLE_BODY,
   },
   {
     dir: 'lists',
-    kind: 'generic',
+    /**
+     * **The one route whose page draws somebody else's content.**
+     *
+     * It was `generic` until Lists v1: the path was claimed by AASA and assetlinks and
+     * the feature was not built, so the honest page was an install card. It now renders
+     * the list, under the same `_list_readable` predicate the app obeys — see
+     * `LIST_BODY` and `page.mjs`'s `listsPage`.
+     */
+    kind: 'list',
     share: 'Open on bingd.',
     title: 'A list on bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     heading: UNAVAILABLE,
-    body: GENERIC_BODY,
+    body: LIST_BODY,
   },
 ];
 
@@ -1933,8 +2170,8 @@ for (const route of ROUTES) {
  * row. So the row is here, wired by the same `page.mjs` the router pages use through
  * `page: 'generic'`, which is `paintInstall` and nothing else: no context fetch, no
  * Supabase read, no handle in the URL. `destinationFor` then says what is actually
- * available per platform — the App Store on iOS, the Play opt-in on Android — instead of
- * one sentence trying to describe both.
+ * available per platform — the App Store on iOS, the public Play listing on Android —
+ * instead of one sentence trying to describe both.
  */
 /**
  * The front page's own stylesheet.
@@ -2208,7 +2445,7 @@ const LANDING_STYLES = `
         /* The reservation has to carry the safe-area inset, because the bar does.
            5.5rem flat left the bar overlapping the last 22px of the footer on any
            phone with a home indicator, and more than that when a two-line label
-           ("Join the bingd. Android beta" at 320pt) makes the button taller. */
+           ("Get bingd. on Google Play" at 320pt) makes the button taller. */
         body:has(.sticky a.button:not([hidden])) {
           padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
         }
@@ -2318,12 +2555,15 @@ const installRow = ({ primary = false } = {}) => {
 /**
  * What the page says under the buttons about where it can actually be installed from.
  *
- * Derived from `distribution.config.json` rather than written out, because the two
- * facts in it are not symmetric and one of them will change without this sentence being
- * reread. iOS is a public listing. Android is a **closed test** whose opt-in page is the
- * only way in: somebody sent to the plain Play listing before opting in is told the app
- * is unavailable for their device, which reads as Bingd being broken rather than as
- * them not having joined yet.
+ * Derived from `distribution.config.json` rather than written out, because the facts in
+ * it move without this sentence being reread. **Both are now public listings**, so it
+ * reads "Free on the App Store. Free on Google Play." and says the same thing about
+ * each platform, which it could not do while Android was a closed test.
+ *
+ * The earlier branches are kept rather than deleted. They are what the line says again
+ * if a listing is ever pulled and the config falls back to `betaUrl` or `optInUrl`, and
+ * the whole point of deriving the sentence is that it cannot be left claiming a store
+ * the config no longer names.
  */
 const AVAILABILITY = [
   distribution.ios?.storeUrl
@@ -2334,11 +2574,82 @@ const AVAILABILITY = [
   distribution.android?.storeUrl
     ? 'Free on Google Play.'
     : distribution.android?.optInUrl
-      ? 'Android is not on Google Play yet, so the Android button is the tester opt-in you join first.'
+      ? 'On Android through the tester opt-in you join first.'
       : null,
 ]
   .filter(Boolean)
   .join(' ');
+
+/**
+ * Every public store listing that exists, in the order the page offers them.
+ *
+ * One array, read three times: by the `<noscript>` fallback, by the structured data,
+ * and by nothing else. The alternative was each of those naming the App Store by hand,
+ * which is how the front page came to advertise one store on the day there were two.
+ */
+const PUBLIC_STORES = [
+  ['iOS', distribution.ios?.storeUrl, 'Get bingd. on the App Store'],
+  ['Android', distribution.android?.storeUrl, 'Get bingd. on Google Play'],
+].filter(([, url]) => url);
+
+/**
+ * The install links for a browser that never ran `page.mjs`.
+ *
+ * The install row is painted by the module, because which destination a visitor should
+ * get is a per-platform decision. A page whose module does not load has no install link
+ * in it at all, which for this page is the whole point missing.
+ *
+ * **Both stores now, and still no platform detection**: this is the fallback for a
+ * browser that is not running the module, so it cannot detect anything. It offers the
+ * listings that exist and lets the reader pick. Each is built from the configured URL
+ * rather than written out, so neither can outlive its URL.
+ */
+const NOSCRIPT_INSTALL =
+  PUBLIC_STORES.length === 0
+    ? ''
+    : `<noscript>
+      <p class="fineprint" style="text-align: center">
+        ${PUBLIC_STORES.map(([, url, label]) => `<a href="${url}">${label}</a>`).join(
+          '\n        ',
+        )}
+      </p>
+    </noscript>`;
+
+/**
+ * The front page's structured data, deliberately the short version.
+ *
+ * Name, what it is, where it runs, and that it costs nothing. No `aggregateRating` and
+ * no `ratingCount`, because bingd. has neither a rating to state nor a number of
+ * ratings to state it over, and a structured-data field is precisely where an invented
+ * one would be believed without anybody reading it.
+ *
+ * **`operatingSystem` and `installUrl` are derived rather than written out.** This block
+ * said `iOS` and carried one install URL for as long as Android was a closed test, and a
+ * closed test is exactly the thing that must not appear here: an `installUrl` in
+ * structured data is a destination a search engine may offer directly, with none of the
+ * page's own wording around it to explain a tester opt-in. Derived from `storeUrl`, it
+ * can only ever name a public listing, because a public listing is the only thing
+ * `storeUrl` holds.
+ */
+const SOFTWARE_APPLICATION = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'bingd.',
+  applicationCategory: 'EntertainmentApplication',
+  ...(PUBLIC_STORES.length > 0
+    ? { operatingSystem: PUBLIC_STORES.map(([name]) => name).join(', ') }
+    : {}),
+  url: `${ORIGIN}/`,
+  description:
+    'Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, see what your friends are watching, and find what to watch next.',
+  author: { '@type': 'Person', name: 'Suraj Kandukuri' },
+  ...(PUBLIC_STORES.length === 1
+    ? { installUrl: PUBLIC_STORES[0][1] }
+    : PUBLIC_STORES.length > 1
+      ? { installUrl: PUBLIC_STORES.map(([, url]) => url) }
+      : {}),
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+};
 
 /**
  * `/` &mdash; the landing page, and Cloudflare Pages' fallback for anything unmatched.
@@ -2538,22 +2849,14 @@ ${installRow({})}
       The install row is painted by page.mjs, because which destination a visitor should
       get is a per-platform decision. That means a page whose module does not load or
       does not run has no install link in it at all, which for this page is the whole
-      point missing. So the iOS listing is also a plain anchor here.
+      point missing. So every configured store listing is also a plain anchor here.
 
-      iOS rather than both, and no platform detection: this is the fallback for a
-      browser that is not running the module, so it cannot detect anything. It names
-      the one store that exists, and it is built from the configured URL rather than
-      written out, so it cannot outlive that URL.
+      Both of them now, and still no platform detection: this is the fallback for a
+      browser that is not running the module, so it cannot detect anything. It offers
+      the stores that exist and lets the reader pick, and each link is built from the
+      configured URL rather than written out, so neither can outlive its URL.
     -->
-    ${
-      distribution.ios?.storeUrl
-        ? `<noscript>
-      <p class="fineprint" style="text-align: center">
-        <a href="${distribution.ios.storeUrl}">Get bingd. on the App Store</a>
-      </p>
-    </noscript>`
-        : ''
-    }
+    ${NOSCRIPT_INSTALL}
 
     <script type="application/json" id="bingd-config">${jsonBlock({
       page: 'generic',
@@ -2561,24 +2864,9 @@ ${installRow({})}
     })}</script>
     <script type="module" src="/page.mjs"></script>
 
-    <!-- Structured data, deliberately the short version. Name, what it is, where it
-         runs, and that it costs nothing. No aggregateRating and no ratingCount, because
-         bingd. has neither a rating to state nor a number of ratings to state it over,
-         and a structured-data field is precisely where an invented one would be
-         believed without anybody reading it. -->
-    <script type="application/ld+json">${jsonBlock({
-      '@context': 'https://schema.org',
-      '@type': 'SoftwareApplication',
-      name: 'bingd.',
-      applicationCategory: 'EntertainmentApplication',
-      operatingSystem: 'iOS',
-      url: `${ORIGIN}/`,
-      description:
-        'Rank the movies and TV you watch through quick head-to-head comparisons instead of star ratings, see what your friends are watching, and find what to watch next.',
-      author: { '@type': 'Person', name: 'Suraj Kandukuri' },
-      ...(distribution.ios?.storeUrl ? { installUrl: distribution.ios.storeUrl } : {}),
-      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-    })}</script>
+    <!-- Structured data. Built above, from the same config the buttons read; see
+         SOFTWARE_APPLICATION for what is in it and what is deliberately not. -->
+    <script type="application/ld+json">${jsonBlock(SOFTWARE_APPLICATION)}</script>
   </body>
 </html>
 `,
@@ -2802,9 +3090,9 @@ if (assetlinks.length === 0) {
 
 if (configured.length === 0) {
   console.log('');
-  console.log('  No install destination is configured, so every route shows "the Bingd beta');
-  console.log('  is not open for this device yet". That is the honest state until a public');
-  console.log('  TestFlight link and a Play closed-test opt-in URL exist. Set them in');
+  console.log('  No install destination is configured, so every route shows "bingd. is not');
+  console.log('  on this platform yet". That is the honest state while no store listing');
+  console.log('  exists. Set ios.storeUrl and android.storeUrl in');
   console.log('  web/distribution.config.json — no rebuild of the app, and no reissued');
   console.log('  invitation links, are needed when they arrive.');
 }

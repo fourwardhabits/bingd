@@ -10,7 +10,7 @@ import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
-import { metadataFor, tailFor, verbFor } from '@/features/feed/activity';
+import { metadataFor, tailFor, verbFor, watchLabel } from '@/features/feed/activity';
 import { useActivityEvent } from '@/features/feed/use-feed';
 import {
   DEFAULT_REACTION,
@@ -290,6 +290,7 @@ export default function ActivityScreen() {
                   ? goalAchievement(event.goal.category, event.goal.target)
                   : metadataFor(event)
             }
+            watchLabel={watchLabel(event.watchNumber)}
             score={event.score}
             bucket={event.bucket}
             note={event.note?.text ?? null}

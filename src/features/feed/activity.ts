@@ -327,6 +327,19 @@ export function metadataFor(item: {
 }
 
 /**
+ * `2nd watch`, `3rd watch`, `11th watch` — the grey line under a rewatch's ranking post.
+ * Null below 2: a first viewing says nothing, as the title page does for one watch.
+ */
+export function watchLabel(watchNumber: number | null | undefined): string | null {
+  if (!watchNumber || watchNumber < 2) return null;
+  const teen = watchNumber % 100 >= 11 && watchNumber % 100 <= 13;
+  const suffix = teen
+    ? 'th'
+    : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[watchNumber % 10] ?? 'th';
+  return `${watchNumber}${suffix} watch`;
+}
+
+/**
  * How long ago, in the words every activity surface uses.
  *
  * Minutes under an hour, hours under a day, days after that — and never "just now" or a

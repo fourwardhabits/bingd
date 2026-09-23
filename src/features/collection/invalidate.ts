@@ -53,6 +53,12 @@ export function invalidateAfterCollectionChange(
   // log or an unlog moves them as surely as a ranking does.
   invalidate(queryKeys.profileStats(userId));
 
+  // The reader's score for every ranked title, which Search's row badge reads. It was
+  // never invalidated here, so a title ranked a moment ago was still "logged but
+  // unscored" in Search and drew the dashed Rank badge until the cache aged out
+  // (founder QA, 2026-09-21 — Black Panther).
+  invalidate(queryKeys.myScores(userId));
+
   // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
   // date-ordered read with a key of its own. Same reason as the line above: the trigger
   // in `20260815040000` takes a title off the watchlist the moment it is logged or
@@ -63,6 +69,35 @@ export function invalidateAfterCollectionChange(
   // `[...title(id), 'personal', userId]`.
   invalidate(queryKeys.title(mediaItemId));
   invalidate(queryKeys.logState(userId, mediaItemId));
+
+  /**
+   * **The watch history and its count** (20261003000100).
+   *
+   * Added here rather than beside each new writer, which is the failure this module's
+   * own header describes and which the note surfaces above paid for twice: a surface
+   * added later gets added to one writer's list or to none. Every act that can change a
+   * viewing already comes through here — logging, unlogging, ranking, a rewatch, a date
+   * edit — so this is the list that cannot be forgotten.
+   *
+   * The count is separate from the history for the reason `queryKeys.watchCount`
+   * records, and both move together: a rewatch changes the number on the title line and
+   * the rows on the screen behind it in one act.
+   */
+  invalidate(queryKeys.watchHistory(userId, mediaItemId));
+  invalidate(queryKeys.watchCount(userId, mediaItemId));
+
+  /**
+   * The yearly goal, which from T4 counts watch events rather than one cached date.
+   *
+   * It was not invalidated here before and did not need to be: `watched_on` moved only
+   * through the log sheet, which invalidated the goal itself. A rewatch moves the goal
+   * without moving the cache — the new viewing is not the latest date — so the bar would
+   * have sat at its old number until something else happened to refetch it.
+   *
+   * By prefix, because the key carries the year and a backdated viewing can complete a
+   * goal in a year that is not the current one.
+   */
+  invalidate(['goals', userId]);
 
   // The feed. `_rank_finalize` writes a `feed_events` row, so the activity exists the
   // moment the session ends and only the cache was hiding it. Keyed by prefix because

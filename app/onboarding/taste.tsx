@@ -13,6 +13,7 @@ import {
 import { useCurrentProfile, UseDifferentAccountButton } from '@/features/auth';
 import { useRankedCollection } from '@/features/collection/use-collection';
 import { bandSizes, formatScore, scoreFor } from '@/features/collection/score';
+import { OnboardingFooter } from '@/features/onboarding/OnboardingFooter';
 import { OnboardingHeader } from '@/features/onboarding/OnboardingHeader';
 import { PICK_TARGET, setRankingOutcome } from '@/features/onboarding/pick-five';
 import { useStarterMovies } from '@/features/onboarding/use-starter-movies';
@@ -622,7 +623,7 @@ export default function TasteOnboardingScreen() {
             </ScrollView>
           )}
 
-          <View style={styles.footer}>
+          <OnboardingFooter>
             {/**
              * **The way out, kept.**
              *
@@ -649,7 +650,7 @@ export default function TasteOnboardingScreen() {
                 wrong account signed in on this phone it would otherwise be a locked room.
                 See `UseDifferentAccountButton`. */}
             <UseDifferentAccountButton />
-          </View>
+          </OnboardingFooter>
         </>
       )}
 
@@ -1020,10 +1021,10 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
             action and nothing beneath the five competes with them. */}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <OnboardingFooter>
         <Button label="Continue" onPress={onContinue} />
         <UseDifferentAccountButton />
-      </View>
+      </OnboardingFooter>
 
       <DiagnosticsSheet visible={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </>
@@ -1065,11 +1066,4 @@ const styles = StyleSheet.create({
   ordinal: { width: 28, textAlign: 'center', color: theme.semantic.score },
   rankPoster: { width: theme.poster.sm.width },
   rankTitle: { flex: 1, gap: 2 },
-  footer: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[3],
-    gap: theme.space[2],
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.border.hairline,
-  },
 });

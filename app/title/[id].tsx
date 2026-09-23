@@ -27,6 +27,7 @@ import {
   type RankingCategory,
 } from '@/features/collection/use-collection';
 import { useTitleScore } from '@/features/collection/use-score';
+import { rankingStateOf, resumeSubject } from '@/features/collection/ranking-state';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import {
   invalidateAfterCollectionChange,
@@ -39,6 +40,10 @@ import {
   setWatchlist,
 } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
+import { LogAnotherWatchSheet } from '@/features/watch-history/LogAnotherWatchSheet';
+import { useWatchCount } from '@/features/watch-history/use-watch-history';
+import { hasHistory, watchCountLabel } from '@/features/watch-history/watch-history';
+import { AddToListSheet } from '@/features/lists/AddToListSheet';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
@@ -48,6 +53,7 @@ import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
 import { TitleActions } from '@/features/title/TitleActions';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
+import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
@@ -259,12 +265,61 @@ export default function TitleScreen() {
    */
   const [openSection, setOpenSection] = useState<'who' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
+  /**
+   * *Log another watch* (§J.3), which is now a **watch** and then an optional re-check.
+   *
+   * It used to open the ranking sheet directly in `mode: 'again'` — a forced full re-rank
+   * that recorded no watch and no date (§C.3.2). The sheet below records the viewing
+   * first, and hands the ranking sheet the event id only if the reader asks for the
+   * re-check, so the two halves reach one feed activity rather than two (§K).
+   *
+   * **Three states rather than a boolean.** `leaving` is the sheet still on screen and
+   * sliding out after *Re-check placement*: the ranking sheet may not be presented until
+   * that dismissal has finished, so the phase keeps the component mounted long enough
+   * for `onDismissed` to arrive. See the mount site.
+   */
+  const [rewatchPhase, setRewatchPhase] = useState<'closed' | 'open' | 'leaving'>('closed');
+  /**
+   * The viewing just saved and the band the reader chose for it, held across the sheet's
+   * dismissal so the comparisons open for exactly that pair.
+   */
+  const pendingRecheck = useRef<{ watchEventId: string; bucket: RankingSubject['bucket'] } | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
   const [recommending, setRecommending] = useState(false);
-  /** The Ranked control's menu: change the rating, drop it, or remove the title. */
+  /**
+   * The ⋯ menu: add to a list, change the rating, drop it, or remove the title.
+   *
+   * It opens for **every** title since Lists v1 (§P.4) — `Add to list…` is the one row
+   * that applies whether or not this account has ever touched the thing.
+   */
   const [managing, setManaging] = useState(false);
+  /** `Add to list…`, opened from the menu above. */
+  const [addingToList, setAddingToList] = useState(false);
+  /**
+   * Where the ⋯ menu was closed on its way to, or null for an ordinary close.
+   *
+   * A ref rather than state, so remembering the destination costs no render — see the
+   * `onDismissed` on the menu's `Sheet` for why the hand-off is serialised on iOS at
+   * all. **Two destinations now**: `Add to list…` (Lists §P.4) and *Log another watch*
+   * (§J.3), which is why this is a named destination rather than one boolean each. A
+   * second boolean is how two of these come to be set at once.
+   */
+  const menuHandoff = useRef<'list' | 'rewatch' | null>(null);
+  /**
+   * The menu is closed but still on screen, on its way to another sheet.
+   *
+   * **A `Sheet` that is unmounted never reports its dismissal.** `onDismissed` is a
+   * `Modal` callback and this menu is mounted conditionally, so closing it by dropping
+   * `managing` to false tore the modal out of the tree and took the hand-off waiting on
+   * that callback with it. Measured rather than reasoned about: with the menu unmounted on
+   * the tap, `Add to list…` opened **nothing at all** on iOS, and so did *Log another
+   * watch*. Keeping it mounted and merely invisible for the length of the slide-out is
+   * what lets the callback arrive; `Sheet` renders no modal host once `visible` is false
+   * and the dismissal has finished.
+   */
+  const [menuLeaving, setMenuLeaving] = useState(false);
   /** The people behind the Following score (§13), opened from the Scores section. */
   const [followingRatingsOpen, setFollowingRatingsOpen] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
@@ -377,6 +432,17 @@ export default function TitleScreen() {
   const credits = useCredits(titleId);
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
+  /**
+   * How many viewings the reader has of this title (§J.2), for the personal-context
+   * line far below.
+   *
+   * **Declared up here with the other title-scoped reads, not beside the line it
+   * feeds.** There are early returns between this point and that one — loading, error,
+   * not-found — and a hook after them is called in a different order on different
+   * renders. ESLint caught it; the device symptom would have been a crash on the first
+   * title that failed to load.
+   */
+  const watchCount = useWatchCount(profile.id, titleId ?? '');
   /**
    * Reviews are Bingd's own public Notes on this exact title.
    *
@@ -771,6 +837,10 @@ export default function TitleScreen() {
    * anyway — the sheet resolves visibility from what is stored, not from which door was
    * used.
    */
+  // Ranked, unfinished (a bucket chosen here, comparisons never completed) or neither —
+  // the same `rankingStateOf` Search, Collection and list rows ask. Internal only: the page
+  // draws Rank or Ranked, and `rank` uses it to resume (founder, 2026-09-21).
+  const rankState = rankingStateOf({ ranked: Boolean(data.ranked), bucket: data.logged?.bucket });
   const noteText = (data.logged?.note ?? '').trim();
   const hasReview = Boolean(noteText) && data.logged?.note_visibility === 'public';
   const hasPrivateNote = Boolean(noteText) && data.logged?.note_visibility !== 'public';
@@ -897,11 +967,40 @@ export default function TitleScreen() {
    * Built by filtering, so a title ranked outside the top ten and never dated produces no
    * line at all rather than a dangling separator.
    */
-  const watchedLine = data.logged?.watched_on
-    // `lib/dates.ts`, which is where this moved: it was a byte-identical local copy of
-    // the formatter the Episodes tab below already used, in this same file.
-    ? `Watched ${formatShortDate(data.logged.watched_on)}`
-    : null;
+  /**
+   * ---------------------------------------------------------------------------
+   * **`Watched N times ›`** — founder-locked, 2026-09-19 (§J.2)
+   *
+   * The entry is the line that is already here. It gains a count and a chevron, and
+   * nothing else on the page moves — which is the whole argument against a History tab:
+   * a watch history is reader-specific and private, and it belongs with the reader's
+   * other personal facts rather than in a tab row whose every other entry describes the
+   * title itself and reads identically for every viewer (§J.1).
+   *
+   *   1 watch, dated     `#2 in Movies · Watched Aug 17, 2026 ›`
+   *   1 watch, undated   `#2 in Movies ›`
+   *   2 watches          `#2 in Movies · Watched 2 times ›`
+   *
+   * **Never `Watched 1 time`.** One viewing keeps the sentence the page already had, and
+   * the plural count appears from the second watch onward — which is also the first
+   * moment it says anything the date alone did not.
+   *
+   * The count is the reader's own and appears on nobody else's view of this title.
+   */
+  const countLabel = watchCountLabel(watchCount.data ?? 0);
+
+  const watchedLine =
+    countLabel ??
+    (data.logged?.watched_on
+      // `lib/dates.ts`, which is where this moved: it was a byte-identical local copy of
+      // the formatter the Episodes tab below already used, in this same file.
+      ? `Watched ${formatShortDate(data.logged.watched_on)}`
+      : null);
+
+  // The whole line is the route whenever there is a history to open, which is any seen
+  // title: a single dated watch still has a date to edit and a past watch to add.
+  const historyOpen = hasHistory(watchCount.data ?? 0);
+
   const contextLine = [
     heroRank?.basis === 'overall' ? heroRank.label : null,
     watchedLine,
@@ -1048,6 +1147,30 @@ export default function TitleScreen() {
     setLoggingTitle(loggable);
   };
 
+  /**
+   * **Rank, aware of where the reader left off** (founder, final UI simplification
+   * 2026-09-21). The button says *Rank* either way; the internal state decides the path:
+   *
+   *   unranked     the ordinary flow — the log sheet and its *How was it?*.
+   *   unfinished   straight back into the comparisons in the bucket already chosen.
+   *                `rank_start` resumes the server's session for that bucket — the
+   *                comparison on screen and every answer — so this never opens a second
+   *                session and never asks the question again.
+   */
+  const rank = () => {
+    const bucket = data.logged?.bucket;
+    const resume =
+      rankable && rankState === 'unfinished' && bucket ? resumeSubject(loggable, bucket) : null;
+    if (!resume) {
+      openLog();
+      return;
+    }
+    setActionError(null);
+    setPlacement(null);
+    setRankedTitle(loggable);
+    setRankingSubject(resume);
+  };
+
   const toggleWatchlist = async () => {
     if (watchlistBusy) return;
     setWatchlistBusy(true);
@@ -1111,6 +1234,35 @@ export default function TitleScreen() {
    * The copy stays plain and serious. This is the one place in the app the playful
    * voice does not go, and the deletion behaviour behind it is untouched.
    */
+  /**
+   * Opens the comparisons for the band the reader chose, on the viewing they just saved.
+   *
+   * Its own function because two paths reach it — straight across on Android, and out of
+   * the rewatch sheet's `onDismissed` on iOS — and a second copy of the subject is how
+   * the two come to disagree about which watch they are re-ranking.
+   *
+   * **The band is the one chosen in the sheet, not the one the title had** (founder QA,
+   * 2026-09-21): a second viewing can change how somebody feels about a film, and the
+   * ranking entry after a rewatch is the ordinary *How was it?*, asked again. `rank_again`
+   * opens the session over the existing placement in whichever band it is given.
+   */
+  const openRecheck = () => {
+    const pending = pendingRecheck.current;
+    pendingRecheck.current = null;
+    if (!pending) return;
+    setRankedTitle(loggable);
+    setRankingSubject({
+      id: title.id,
+      title: title.title,
+      bucket: pending.bucket,
+      posterUri: posterUri(title.poster_path, 'card'),
+      // Only a film or a season is ever ranked; a series has no menu.
+      kind: title.kind === 'season' ? 'season' : 'movie',
+      mode: 'again',
+      watchEventId: pending.watchEventId,
+    });
+  };
+
   const confirmRemoval = () => {
     setManaging(false);
     Alert.alert(
@@ -1194,13 +1346,25 @@ export default function TitleScreen() {
         // this, so a title opened from Search returns to Search and one opened from the
         // feed returns to the feed — the route stack decides, not this screen.
         onBack={() => router.back()}
-        // The menu, where the Ranked control used to keep it. Present wherever there is
-        // something to manage: a ranked title, and — since a wrongly imported film could not
-        // otherwise be taken out without ranking it (2026-09-18) — a film or season that is
-        // logged but unranked, for which the menu holds Remove from collection alone.
-        onMore={
-          data.ranked || (data.logged && rankable) ? () => setManaging(true) : undefined
-        }
+        /**
+         * The menu, where the Ranked control used to keep it.
+         *
+         * **It is now on every title** (lists-prd.md §P.4, 2026-09-19). It used to be
+         * present only where there was something to manage — a ranked title, and since
+         * 2026-09-18 a film or season that is logged but unranked, so that a wrongly
+         * imported film could be taken out without being ranked first. `Add to list…`
+         * applies to **every movie, season and whole series**, ranked or not, logged or
+         * not, which is the one thing that could be true of a title with nothing else in
+         * its menu — including a series, which has never had one.
+         *
+         * Nothing below it changed: the ranking rows and Remove from collection keep
+         * their place and their conditions, and a title with neither simply gets a menu
+         * whose only row is the list one. No hero control, no fourth `TitleActions`
+         * button, no permanent list button anywhere (§D).
+         */
+        // Only when the menu has something in it: Add to list moved to the action row,
+        // so a title that is neither ranked nor logged has no menu rows left.
+        onMore={data.ranked || data.logged ? () => setManaging(true) : undefined}
         title={displayTitle ?? title.title}
         subtitle={parent?.title ?? null}
       />
@@ -1388,17 +1552,35 @@ export default function TitleScreen() {
              * Hidden from accessibility while empty, so a screen reader is not handed a
              * blank line to announce between the metadata and the actions.
              */}
-            <Text
-              testID="title-context"
-              variant="caption"
-              tone="tertiary"
-              numberOfLines={1}
-              style={styles.contextLine}
-              accessibilityElementsHidden={!contextLine}
-              importantForAccessibility={contextLine ? 'auto' : 'no-hide-descendants'}
+            {/**
+             * Tappable whenever there is a history to open (§J.2). A `Pressable` around
+             * the existing `Text` rather than a new row: the reservation that holds this
+             * line's height is the `Text` itself carrying a zero-width space, and
+             * replacing it would reintroduce the layout jump that reservation exists to
+             * prevent.
+             */}
+            <Pressable
+              accessibilityRole={historyOpen ? 'button' : undefined}
+              accessibilityLabel={historyOpen ? 'Watch history' : undefined}
+              disabled={!historyOpen}
+              hitSlop={8}
+              onPress={
+                historyOpen ? () => router.push(`/title/${id}/history` as never) : undefined
+              }
             >
-              {contextLine || ZERO_WIDTH}
-            </Text>
+              <Text
+                testID="title-context"
+                variant="caption"
+                tone="tertiary"
+                numberOfLines={1}
+                style={styles.contextLine}
+                accessibilityElementsHidden={!contextLine}
+                importantForAccessibility={contextLine ? 'auto' : 'no-hide-descendants'}
+              >
+                {contextLine || ZERO_WIDTH}
+                {historyOpen && contextLine ? ' ›' : ''}
+              </Text>
+            </Pressable>
 
             {/**
              * **Rank/Ranked, Save, Recommend — inside this column, directly under the
@@ -1426,7 +1608,7 @@ export default function TitleScreen() {
                         accessibilityHint: data.ranked
                           ? 'Opens rating and collection options'
                           : 'Opens the rating sheet',
-                        onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                        onPress: () => (data.ranked ? setManaging(true) : rank()),
                       }
                     : null
                 }
@@ -1439,6 +1621,12 @@ export default function TitleScreen() {
                     : `Add ${title.title} to your watchlist`,
                   onPress: () => void toggleWatchlist(),
                   disabled: watchlistBusy,
+                }}
+                // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
+                // when this is pressed, so there is nothing to serialise against.
+                list={{
+                  accessibilityLabel: `Add ${title.title} to a list`,
+                  onPress: () => setAddingToList(true),
                 }}
                 recommend={
                   rankable
@@ -1482,6 +1670,7 @@ export default function TitleScreen() {
             </View>
           </View>
         </View>
+
 
         {/* Who recommended this, and what they said — below the title and its actions,
             in the flow, whether or not there is artwork (founder F1, 2026-09-19). It sits
@@ -1611,7 +1800,7 @@ export default function TitleScreen() {
                     // Exactly where the Ranked control leads: a ranked title opens its
                     // options, an unranked one opens the log. The score has been a place
                     // to press to change a rating since 2026-09-06 and still is.
-                    onPress: () => (data.ranked ? setManaging(true) : openLog()),
+                    onPress: () => (data.ranked ? setManaging(true) : rank()),
                   }
                 : null
             }
@@ -2006,6 +2195,49 @@ export default function TitleScreen() {
           setLoggingTitle(null);
         }}
       />
+      {/**
+       * *Log another watch* (§J.3). Mounted beside `RankingSheet` rather than inside it,
+       * and it is **fully dismissed before the ranking sheet is presented** — two
+       * presented sheets at once is the iOS dead end this codebase has paid for before,
+       * and so is a presentation issued while a dismissal is still animating.
+       *
+       * Hence `rewatchPhase` rather than a boolean, and `openRecheck` being called from
+       * `onDismissed` on iOS: the component stays mounted and invisible for the length
+       * of the slide-out so that callback can arrive at all. Android has no presentation
+       * to serialise against (`Sheet`'s contract) and goes straight across.
+       */}
+      {rewatchPhase !== 'closed' ? (
+        <LogAnotherWatchSheet
+          open={rewatchPhase === 'open'}
+          title={displayTitle ?? title.title}
+          mediaItemId={title.id}
+          posterUri={posterUri(title.poster_path, 'card') ?? posterUri(parent?.poster_path ?? null, 'card')}
+          subtitle={year ? String(year) : null}
+          onClose={() => {
+            pendingRecheck.current = null;
+            setRewatchPhase('closed');
+          }}
+          onSaved={() => {
+            invalidateAfterCollectionChange(queryClient, profile.id, title.id, {
+              category: data.ranked?.category,
+            });
+          }}
+          onRank={(watchEventId, bucket) => {
+            pendingRecheck.current = { watchEventId, bucket };
+            if (Platform.OS === 'ios') {
+              setRewatchPhase('leaving');
+            } else {
+              setRewatchPhase('closed');
+              openRecheck();
+            }
+          }}
+          onDismissed={() => {
+            if (rewatchPhase !== 'leaving') return;
+            setRewatchPhase('closed');
+            openRecheck();
+          }}
+        />
+      ) : null}
       <RankingSheet
         subject={rankingSubject}
         onClose={() => setRankingSubject(null)}
@@ -2064,13 +2296,38 @@ export default function TitleScreen() {
        * a title between bands, and it is granted, tested and load-bearing. What has
        * gone is one row in one sheet.
        */}
-      {managing ? (
+      {/* Mounted while it is open **and** while it is dismissing on its way to another
+          sheet: an unmounted `Modal` sends no `onDismiss`, and the hand-off below waits
+          for exactly that. `visible` carries open-or-closed instead. */}
+      {managing || menuLeaving ? (
         <Sheet
-          visible
+          visible={managing}
           onClose={() => setManaging(false)}
           label={`Options for ${displayTitle ?? title.title}`}
+          /**
+           * The serialised handover to the Add-to-list sheet, on iOS only.
+           *
+           * UIKit refuses a presentation issued while it is still dismissing another
+           * from the same presenter, React believes it succeeded, and what is left is a
+           * transparent window that swallows every touch — the reproduced 2026-09-10
+           * freeze (`Sheet.onDismissed`). This menu is on the audit's own list of
+           * unserialised swaps, and both rows that leave it for another sheet are new —
+           * `Add to list…` (Lists §P.4) and *Log another watch* (§J.3) — so both wait.
+           *
+           * **Do not "simplify" this back into a pair of `setState` calls.** That is
+           * exactly the shape of the bug, and the screen renders perfectly while it has
+           * stopped accepting touches.
+           */
+          onDismissed={() => {
+            const to = menuHandoff.current;
+            menuHandoff.current = null;
+            setMenuLeaving(false);
+            if (to === 'list') setAddingToList(true);
+            if (to === 'rewatch') setRewatchPhase('open');
+          }}
         >
           <View style={styles.menu}>
+
             {/**
              * **Three groups, because seven undifferentiated rows is a list rather than
              * a menu.**
@@ -2239,16 +2496,25 @@ export default function TitleScreen() {
                 {/**
                  * The explicit rewatch, and the only row in the app that declares one.
                  *
-                 * Completing it writes exactly one new `title_ranked` activity, which is the
-                 * whole difference from the row above — and the reason the label says what
-                 * happened rather than what the app will do about it. Two genuine rewatches
-                 * are still two activities; that is not a duplicate.
+                 * ---------------------------------------------------------------------------
+                 * **IT RECORDS A WATCH NOW, AND THAT IS THE WHOLE CHANGE** (§J.3, T3b)
                  *
-                 * `rank_again` opens the session **over** the position the title already
-                 * has, so nothing the reader can see moves until they finish: close the
-                 * sheet, lose the network, kill the app, and the score, band and place are
-                 * where they were. The bucket passes straight through from
-                 * `rankings.bucket`, so this row decides no rating.
+                 * It used to open the ranking sheet directly in `mode: 'again'`: a forced
+                 * full re-rank that recorded **no watch and no date** (§C.3.2). A reader
+                 * saying "I watched Heat again last night" was made to answer six
+                 * comparisons, and at the end of it the app knew nothing about the viewing.
+                 *
+                 * Now it opens a sheet whose first act is the watch — Today in one tap,
+                 * *Earlier* if they do not remember when — and which offers the re-check
+                 * afterwards. Save and close, and the rewatch is recorded and posted; tap
+                 * *Re-check placement*, and `rank_again` runs over the position the title
+                 * already holds with the new §F.2 policy, which costs about two comparisons
+                 * when nothing has changed.
+                 *
+                 * **One viewing still produces exactly one feed activity**, which is what
+                 * the label has always promised. The sheet posts it; the re-check enriches
+                 * that same post with the new score rather than writing a second one (§K).
+                 * Two genuine rewatches are still two activities; that is not a duplicate.
                  */}
                 <SheetRow
                   icon="repeat-outline"
@@ -2256,18 +2522,18 @@ export default function TitleScreen() {
                   onPress={
                     rankedBucket
                       ? () => {
-                          setManaging(false);
                           setActionError(null);
-                          setRankedTitle(loggable);
-                          setRankingSubject({
-                            id: title.id,
-                            title: title.title,
-                            bucket: rankedBucket,
-                            posterUri: posterUri(title.poster_path, 'card'),
-                            // Only a film or a season is ever ranked; a series has no menu.
-                            kind: title.kind === 'season' ? 'season' : 'movie',
-                            mode: 'again',
-                          });
+                          // Serialised the same way `Add to list…` is: this row leaves
+                          // the menu for another modal, and on iOS the presentation
+                          // waits for this one's dismissal to finish.
+                          if (Platform.OS === 'ios') {
+                            menuHandoff.current = 'rewatch';
+                            setMenuLeaving(true);
+                            setManaging(false);
+                          } else {
+                            setManaging(false);
+                            setRewatchPhase('open');
+                          }
                         }
                       : undefined
                   }
@@ -2276,14 +2542,42 @@ export default function TitleScreen() {
               </>
             ) : null}
 
-            <MenuGroup title="Collection" />
-            <SheetRow
-              icon="trash-outline"
-              label="Remove from collection"
-              onPress={confirmRemoval}
-            />
+            {/**
+             * **Gated on the title actually being in the collection**, which it was
+             * not obliged to be until this menu opened on every title (§P.4).
+             *
+             * It used to be unconditional, and that was correct while `onMore` itself
+             * carried the condition — the sheet could not open for a title that was
+             * neither ranked nor logged. Now that it can, an ungated Remove would offer
+             * to take a film off a shelf it has never been on, and the confirmation
+             * would be the first place anybody found out.
+             */}
+            {data.ranked || data.logged ? (
+              <>
+                <MenuGroup title="Collection" />
+                <SheetRow
+                  icon="trash-outline"
+                  label="Remove from collection"
+                  onPress={confirmRemoval}
+                />
+              </>
+            ) : null}
           </View>
         </Sheet>
+      ) : null}
+
+      {/* `Title ⋯ → Add to list…`. Mounted only while open, like every sheet on this
+          screen: it reads the caller's lists on mount, which is exactly the read not to
+          keep warm on a title page nobody is listing. */}
+      {addingToList ? (
+        <AddToListSheet
+          mediaItemId={title.id}
+          kind={title.kind}
+          name={displayTitle ?? title.title}
+          profilePrivate={profile.visibility === 'private'}
+          onClose={() => setAddingToList(false)}
+          onOpenList={(listId) => router.push(`/lists/${listId}?surface=title_menu`)}
+        />
       ) : null}
       {recommending ? (
         <RecommendSheet
@@ -2507,20 +2801,7 @@ function formatDate(date: string | null) {
  * Two things that used to depend on the lift are now stated on their own terms, below:
  * the collapsed band's height, and where the recommendation callout sits.
  */
-/**
- * How much warm band sits *below the navigation* when a title has no artwork at all.
- *
- * The seed catalogue ships without posters or backdrops, so this is a real state and not
- * a failure one — it draws no grey box and never a poster stretched to fill. The bar's
- * height is added to it at the call site, because the navigation overlays the band and a
- * band shorter than the bar would put the identity block under the back control.
- *
- * 56 is what shipped as the poster's lift and is kept as the band's own number now that
- * nothing overlaps it: it is enough Parchment to read as a deliberate surface rather than
- * as a hairline, and short enough that a title with no artwork does not spend a third of
- * the screen saying so.
- */
-const HERO_COLLAPSED_BAND = 56;
+// HERO_COLLAPSED_BAND and REVEAL_WINDOW live in use-hero-reveal, shared with the list page.
 
 /**
  * How far the poster sits below the top of the identity row, so its top rule meets the
@@ -2538,15 +2819,6 @@ const HERO_COLLAPSED_BAND = 56;
 const NO_RECOMMENDATIONS: TitleRecommendation[] = [];
 
 const TITLE_CAP_OFFSET = theme.space[1];
-/**
- * Over how many points the navigation finishes becoming a header.
- *
- * The last stretch of the hero's own height, so the ground has arrived by the time the
- * artwork has. Short enough that the transition reads as a response to the scroll rather
- * than as a slow dissolve, long enough that it is a fade and not a switch — which is the
- * whole of the founder's objection to the boolean it replaces.
- */
-const REVEAL_WINDOW = 96;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },

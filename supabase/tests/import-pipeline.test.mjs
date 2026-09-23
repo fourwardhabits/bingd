@@ -257,13 +257,21 @@ describe('an archive that imports cleanly', () => {
     assert.equal(await sourceOf(bob, barbie), 'imported');
   });
 
-  it('carries the star across as a bucket prior', async () => {
-    const { rows } = await t.sql(
-      `select bucket from user_media where user_id = $1 and media_item_id = $2`, [bob, shrek]);
-    assert.equal(rows[0].bucket, 'loved');
+  /**
+   * The canonical rule (founder, 2026-09-21): a Letterboxd star is never a bingd opinion.
+   * These payloads still CLAIM `bucket: 'loved'` / `'not_for_me'`, exactly as an
+   * installed client's do, and the row must arrive with no bucket regardless.
+   */
+  it('never turns a star into a bucket, whatever the payload claims', async () => {
+    for (const film of [shrek, barbie]) {
+      const { rows } = await t.sql(
+        `select bucket from user_media where user_id = $1 and media_item_id = $2`, [bob, film]);
+      assert.equal(rows[0].bucket, null, 'an import wrote a bingd opinion');
+    }
+    assert.equal(await count('rankings', `user_id = '${bob}'`), 0, 'an import placed a title');
   });
 
-  it('keeps the raw star beside it, so the policy stays reversible', async () => {
+  it('keeps the raw star as provenance only', async () => {
     const { rows } = await t.sql(
       `select rating, source_name from imported_titles where user_id = $1 and media_item_id = $2`,
       [bob, shrek]);
@@ -1148,39 +1156,76 @@ describe('an import does not disturb what the person built here', () => {
   });
 
   it('leaves a natively logged film on this month’s board', async () => {
-    // A native log with no date is attributed to the month it was logged. Filling that
-    // null with a 2019 date from Letterboxd would silently remove it from this month's
-    // board — the mirror of "imported rows never count toward monthly", and equally
-    // unsanctioned.
+    /**
+     * A native log with no date is attributed to the month it was logged. Filling that
+     * null with a 2019 date from Letterboxd would silently remove it from this month's
+     * board — the mirror of "imported rows never count toward monthly", and equally
+     * unsanctioned.
+     *
+     * ---------------------------------------------------------------------------
+     * **WHAT CHANGED AT T1, AND WHERE THE CONTRACT NOW LIVES** (20261003000100,
+     * 20261006000100)
+     *
+     * The import still does not touch `watched_on` on a row somebody built here — that
+     * branch of `_import_apply_batch` is unchanged. What changed is that the diary's
+     * dates are now watch EVENTS, and `user_media.watched_on` is a cache of
+     * `max(event date)`. A row that had no date now shows 2019-03-04, because that is
+     * the latest date anybody knows about it, and the title page saying *Watched Mar 4,
+     * 2019* is more true than saying nothing (§D.7).
+     *
+     * The contract this test is about — **an import must not move a native row off this
+     * month** — therefore stops being a property of the cache and becomes a property of
+     * the board. `leaderboard.monthly_from_events` (R2) is where it now holds, and it
+     * holds structurally rather than by the import declining to write: the board counts
+     * NATIVE-DATED events, a diary event is not one, and no import can produce one.
+     *
+     * Asserted under the flag for that reason. **While the flag is off the row does
+     * leave the board**, which is a real window between T1 applying and T4's flags being
+     * flipped, and it is recorded in the release gate rather than hidden here.
+     */
     await t.actAs(owen);
     await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved') as r`, [film]);
     await t.actAs(null);
 
-    const before = await t.asUser(owen, async () => {
-      const { rows } = await t.sql(`select * from my_leaderboard_standing('titles', 'month')`);
-      return rows[0]?.metric_count ?? 0;
-    });
-    assert.equal(before, 1);
+    await t.sql(
+      `update app_config set value = 'true'::jsonb where key = 'leaderboard.monthly_from_events'`,
+    );
 
-    await importArchive(owen, [
-      staged(`Native Standing ${seq - 1}`, {
-        correlation: `native standing ${seq - 1}|2001`,
-        watchedOn: '2019-03-04',
-        watches: [{ diaryUri: 'https://boxd.it/ns', watchedOn: '2019-03-04', isRewatch: false }],
-      }),
-    ]);
+    const standing = () =>
+      t.asUser(owen, async () => {
+        const { rows } = await t.sql(`select * from my_leaderboard_standing('titles', 'month')`);
+        return rows[0]?.metric_count ?? 0;
+      });
 
-    const after = await t.asUser(owen, async () => {
-      const { rows } = await t.sql(`select * from my_leaderboard_standing('titles', 'month')`);
-      return rows[0]?.metric_count ?? 0;
-    });
-    assert.equal(after, 1, 'an import must not move a native row off this month');
+    try {
+      // Nothing dated, so nothing on the board: R2's own rule, before the import runs.
+      assert.equal(await standing(), 0, 'an undated row was never really this month’s');
+
+      await importArchive(owen, [
+        staged(`Native Standing ${seq - 1}`, {
+          correlation: `native standing ${seq - 1}|2001`,
+          watchedOn: '2019-03-04',
+          watches: [{ diaryUri: 'https://boxd.it/ns', watchedOn: '2019-03-04', isRewatch: false }],
+        }),
+      ]);
+
+      assert.equal(await standing(), 0, 'and an import cannot put it there either');
+    } finally {
+      await t.sql(
+        `update app_config set value = 'false'::jsonb
+          where key = 'leaderboard.monthly_from_events'`,
+      );
+    }
 
     const { rows } = await t.sql(
       `select watched_on, source from user_media where user_id = $1 and media_item_id = $2`,
       [owen, film]);
-    assert.equal(rows[0].watched_on, null, 'the native watched state is untouched');
-    assert.equal(rows[0].source, 'in_app');
+    assert.equal(
+      rows[0].watched_on === null ? null : new Date(rows[0].watched_on).toISOString().slice(0, 10),
+      '2019-03-04',
+      'the cache is the latest KNOWN date, which is now the diary’s',
+    );
+    assert.equal(rows[0].source, 'in_app', 'and the row is still theirs');
 
     // And nothing was lost: the Letterboxd date is still recorded as provenance.
     assert.equal(await count('imported_watches', `user_id = '${owen}'`), 1);
@@ -2478,5 +2523,91 @@ describe('a watchlist the import did not add to', () => {
       're-importing forty watchlist films used to report forty additions');
 
     assert.equal(await count('watchlist', `user_id = '${wren}' and media_item_id = '${film}'`), 1);
+  });
+});
+
+// ===========================================================================
+
+/**
+ * The same rule against rows that already exist, and the one-time backfill of buckets an
+ * earlier importer wrote (20261018000100). A bucket is cleared only when the import
+ * provably wrote it; a bucket chosen in bingd is never touched.
+ */
+describe('an import never speaks for you', () => {
+  let fay;
+  let seq2 = 9_100_000;
+  const film = (title) => t.createMovie(title, (seq2 += 1));
+  const bucketOf = async (item) =>
+    (await t.sql(`select bucket from user_media where user_id = $1 and media_item_id = $2`, [fay, item]))
+      .rows[0]?.bucket ?? null;
+  // Rows as an earlier importer left them, written outside an import so the guard allows it.
+  const legacyImport = async (item, bucket, rating, source = 'imported') => {
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket, source) values ($1, $2, $3, $4)`,
+      [fay, item, bucket, source],
+    );
+    if (rating !== undefined) {
+      await t.sql(
+        `insert into imported_titles (user_id, media_item_id, source_name, rating) values ($1, $2, 'x', $3)`,
+        [fay, item, rating],
+      );
+    }
+  };
+
+  before(async () => {
+    fay = await t.createUser({ username: 'pipe_fay' });
+  });
+
+  it('does not fill an empty bucket on a title logged here', async () => {
+    const logged = await film('Logged, no opinion');
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, source) values ($1, $2, 'in_app')`,
+      [fay, logged],
+    );
+    await importArchive(fay, [
+      staged('Logged, no opinion', { correlation: 'logged, no opinion|2001', bucket: 'loved', rating: 5 }),
+    ]);
+    assert.equal(await bucketOf(logged), null);
+  });
+
+  it('clears a bucket only an earlier import could have written', async () => {
+    const onlyImport = await film('Blade Runner 2049');
+    const nativeChoice = await film('Chosen here');
+    const ranked = await film('Ranked here');
+    const placedOnce = await film('Placed once');
+    const noStar = await film('No star on record');
+    const mismatch = await film('Bucket disagrees with the star');
+
+    await legacyImport(onlyImport, 'loved', 5);
+    await legacyImport(nativeChoice, 'fine', 3, 'in_app');
+    await legacyImport(ranked, 'loved', 4.5);
+    await t.sql(
+      `insert into rankings (user_id, media_item_id, category, bucket, position) values ($1, $2, 'movies', 'loved', 1)`,
+      [fay, ranked],
+    );
+    await legacyImport(placedOnce, 'fine', 3);
+    await t.sql(
+      `insert into ranking_placements (user_id, media_item_id, category, kind, outcome, bucket, position,
+         band_rank, band_size, category_size, score)
+       values ($1, $2, 'movies', 'first', 'placed', 'fine', 1, 1, 1, 1, 6.9)`,
+      [fay, placedOnce],
+    );
+    await legacyImport(noStar, 'loved', undefined);
+    await legacyImport(mismatch, 'loved', 2);
+
+    await t.sql(`select _clear_import_derived_buckets()`);
+
+    assert.equal(await bucketOf(onlyImport), null, 'the import-only bucket survived');
+    assert.equal(await bucketOf(nativeChoice), 'fine', 'a bucket chosen in bingd was cleared');
+    assert.equal(await bucketOf(ranked), 'loved', 'a ranked title lost its bucket');
+    assert.equal(await bucketOf(placedOnce), 'fine', 'a title with comparison evidence lost its bucket');
+    assert.equal(await bucketOf(noStar), 'loved', 'a bucket with no star behind it was cleared');
+    assert.equal(await bucketOf(mismatch), 'loved', 'a bucket the star did not produce was cleared');
+    // Membership and provenance are untouched.
+    assert.equal(await sourceOf(fay, onlyImport), 'imported');
+    assert.equal(
+      await count('imported_titles', `user_id = '${fay}' and media_item_id = '${onlyImport}' and rating = 5`),
+      1,
+    );
   });
 });

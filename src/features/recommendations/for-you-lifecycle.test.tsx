@@ -33,6 +33,8 @@ const mockReads: Record<string, number> = {};
 /** Tables whose read fails, and how the failure is reported. */
 const mockFailing = new Set<string>();
 let mockTables: Record<string, unknown[]> = {};
+/** Tables whose read never answers, so the first load stays pending. */
+const mockHanging = new Set<string>();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -48,7 +50,8 @@ jest.mock('@/lib/supabase', () => ({
           ? { data: null, error: { code: '08006', message: 'connection failure' } }
           : { data: mockTables[table] ?? [], error: null };
       chain.maybeSingle = () => Promise.resolve(answer());
-      chain.then = (resolve: (value: unknown) => unknown) => resolve(answer());
+      chain.then = (resolve: (value: unknown) => unknown) =>
+        mockHanging.has(table) ? new Promise(() => {}) : resolve(answer());
       return chain;
     },
   },
@@ -77,6 +80,7 @@ jest.mock('@/features/auth', () => ({
 beforeEach(() => {
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   mockFailing.clear();
+  mockHanging.clear();
   mockTables = {};
 });
 
@@ -89,7 +93,7 @@ describe('For You when one of the reads it is built from fails', () => {
 
     await waitFor(() => expect(view.getByText('Could not load recommendations')).toBeTruthy());
     // The defect, named: the state that used to persist forever.
-    expect(view.queryByTestId('skeleton')).toBeNull();
+    expect(view.queryByTestId(/^skeleton/, { includeHiddenElements: true })).toBeNull();
     expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 
@@ -124,6 +128,22 @@ describe('For You when one of the reads it is built from fails', () => {
 
     await waitFor(() => expect(view.getByText('Rank a few things first')).toBeTruthy());
     expect(view.queryByText('Could not load recommendations')).toBeNull();
-    expect(view.queryByTestId('skeleton')).toBeNull();
+    expect(view.queryByTestId(/^skeleton/, { includeHiddenElements: true })).toBeNull();
+  });
+});
+
+/**
+ * A cold first load is never an empty area (founder QA, 2026-09-21: ~6 s with the header
+ * up and nothing under it). While the slate's inputs are still on their way, the wall's
+ * own skeleton holds the space.
+ */
+describe('For You while its first load is pending', () => {
+  it('draws the poster-grid skeleton under the header', async () => {
+    mockHanging.add('rankings');
+    const view = await renderWithProviders(<RecommendationsScreen />);
+
+    await waitFor(() => expect(view.getByTestId('skeleton-grid')).toBeTruthy());
+    expect(view.getAllByTestId('skeleton-tile', { includeHiddenElements: true }).length).toBeGreaterThan(0);
+    expect(view.queryByText('Rank a few things first')).toBeNull();
   });
 });

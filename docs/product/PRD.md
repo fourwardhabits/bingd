@@ -643,7 +643,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 - **Watch tagging** of Bingd users, with the invite hand-off for non-users.
 - **Notification system**: events, in-app inbox, per-category preferences. Push built and credentialed but **delivery flagged off**. *(As built: there is no delivery flag. Push was built on 2026-08-24 and is gated on a production binary and founder credentials — §15 As-built, §27 items 5–7.)*
 - Automatic recommendations from collaborative, content, and bucket signals with cold-start fallback and the full guardrail set.
-- Custom lists with the **three-list limit enforced**.
+- Custom lists. *(**Corrected 2026-09-20.** This read "with the **three-list limit enforced**". It is not, and was decided not to be before a line of Lists was written: the three-list cap is hypothetical — measured on every creation and never enforced, shown or branched on — and the only enforced count is a 100-list sanity ceiling. See `lists-prd.md` §P.1 and §M, and the same correction at §20's tier matrix.)*
 - A central capability resolver supporting `base_free` and `alpha_early_access`, with backend enforcement and no billing code.
 - Recommendation impression history, feedback events, and quality-guardrail tests.
 - Native sharing for title rank, top set, profile, and public list, with canonical links and a working web fallback. **Top 10 is the polished artifact.**
@@ -4085,7 +4085,14 @@ This governs every current and future limit, and it is the answer to "what happe
 | Recaps | None | None | Recurring |
 | Card templates | Standard | Standard | Enhanced |
 
-> **Resolves a v0.5 contradiction.** v0.5 simultaneously deferred lists past public alpha and listed unlimited lists as a v1 Early Access capability. **Lists ship in v1 with the three-list limit enforced for everyone.** `unlimited_custom_lists` is defined but not granted. Granting it in alpha would remove the only observable signal about whether the limit motivates upgrade.
+> **Resolves a v0.5 contradiction.** v0.5 simultaneously deferred lists past public alpha and listed unlimited lists as a v1 Early Access capability. `unlimited_custom_lists` is defined but not granted.
+>
+> **Superseded 2026-09-19, and corrected here 2026-09-20 when Lists was built.** This paragraph used to continue: *"Lists ship in v1 with the three-list limit enforced for everyone."* They do not. The founder's decision record (`lists-prd.md` §P.1) settled it before any Lists code existed, and `20261010000100` implements that decision:
+>
+> - **No user-visible list limit, count or upsell**, and no gate component. The three-list cap is **hypothetical**: `create_list` returns `in_app_count_before` so that `list_created.would_have_exceeded_3_lists` can record how many creations *would* have been refused under it. The event is the source of truth — a later SQL snapshot cannot see a list that was created and then deleted — and it is never shown to anybody.
+> - **The only enforced count is `lists.max_per_user` at 100**, a sanity ceiling rather than a tier. `lists.base_free_limit = 3` stays in `app_config` purely because the measurement is defined against it.
+>
+> The reasoning is that the signal being protected here — whether a limit motivates upgrade — is better obtained by measuring who *would* have hit it than by charging the first people to use the feature for the privilege of proving it.
 
 > **Clarified 2026-08-13.** Read down the Free and Early Access columns: they are identical in every row. That is correct and intended — but it means **`alpha_early_access` confers no benefit in v1.** It is a resolver path with a live grant behind it and nothing on the other side, kept so that granting a real capability later exercises code that has already run in production rather than code written for the occasion.
 >

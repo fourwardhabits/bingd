@@ -125,7 +125,12 @@ const anchors = async (n, bucket = 'loved') => {
 // ---------------------------------------------------------------------------
 
 describe('the founder’s report', () => {
-  it('a correction moves the live score and leaves the snapshot where it was', async () => {
+  /**
+   * Since 20261016000100 (the founder's canonical rule, 2026-09-21) a correction also moves
+   * the latest watch's post — here the only watch — so the card and the live score agree
+   * again. Still no new event: the post is updated in place.
+   */
+  it('a correction moves the live score, and the latest watch\'s post with it', async () => {
     await anchors(4);
     const film = await movie('Sinners');
     // Every comparison goes to the incumbent, so it lands at the bottom of the band.
@@ -141,8 +146,8 @@ describe('the founder’s report', () => {
     assert.notEqual(num(after.score), first, 'the reader moved it and the number moved');
     assert.equal(
       num((await snapshot(film)).score),
-      first,
-      'and the snapshot did not, which is the whole defect: no new event, no new payload',
+      num(after.score),
+      'the latest watch\'s post follows the correction',
     );
   });
 
@@ -158,7 +163,7 @@ describe('the founder’s report', () => {
     const after = await live(film);
     assert.equal(after.bucket, 'fine');
     assert.ok(num(after.score) <= 6.9, 'inside the It was fine range');
-    assert.equal((await snapshot(film)).bucket, 'loved', 'the snapshot still says loved');
+    assert.equal((await snapshot(film)).bucket, 'fine', 'the latest watch\'s post moved band too');
   });
 
   it('re-scores a card nobody touched, when a later ranking grows its band', async () => {

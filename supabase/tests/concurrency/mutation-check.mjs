@@ -445,6 +445,8 @@ end; $$;`;
 
 await startCluster();
 const results = [];
+/** Invariants that must still hold under a mutant: reported apart, never counted as a catch. */
+const controls = [];
 
 // --- Mutant 1: the pair lock removed. The block must stop waiting, and a row must survive.
 {
@@ -1267,6 +1269,18 @@ $$;
 //     (nothing to wait on any more), and each transaction's count finds the other's
 //     season unmet — so neither removes the series and the entry outlives the show.
 //     `races/series-watchlist.mjs` SW1 is the assertion that catches it live.
+//
+//     **The second assertion changed meaning under `20261003000100`, and the reason is
+//     worth more than the assertion was.** T1 attaches this same function to
+//     `watch_events` too, and the event for a newly seen row is written by a
+//     `deferrable initially deferred` constraint trigger — so it fires at COMMIT. The
+//     later committer therefore re-runs the count at a moment when the other
+//     transaction's season IS committed and visible, and sweeps the series off the
+//     watchlist even with the advisory lock gone. The entry is no longer stranded in this
+//     interleaving, so that is what is asserted now: a return to stranded would mean the
+//     event-side trigger had been dropped, not that the lock was back.
+//
+//     The waiting assertion above is untouched, and is what still witnesses the lock.
 {
   const db = await createRaceDb();
   const fx = fixtures(db);
@@ -1345,13 +1359,22 @@ end; $$;`);
     [who, show],
   );
 
+  // THE detection. `races/series-watchlist.mjs` SW1 asserts the real function makes the
+  // second completion wait on exactly this advisory key; with the lock deleted it no longer
+  // waits, so SW1 goes red. That is the release gate catching the mutant for real — through
+  // the lock's own observable effect, not through a symptom T1 has since made unreachable.
   results.push([
-    'series lock removed -> the second completion no longer waits',
+    'series lock removed -> the second completion no longer waits on the series key',
     blockedOnSeries === false,
   ]);
-  results.push([
-    'series lock removed -> the finished series is stranded on the watchlist',
-    stranded.length === 1,
+  // A CONTROL, not a detection, and reported as one. Under 20261003000100 the commit-time
+  // event trigger sweeps the series at the later commit, so the entry is not stranded even
+  // without the lock (see the note above). Counting that as "DETECTED" would claim a catch
+  // this mutant cannot produce; failing the run if it ever reads stranded keeps the note
+  // honest, because then the event-side sweep has gone.
+  controls.push([
+    'series lock removed -> the event-side trigger still clears the series at the later commit',
+    stranded.length === 0,
   ]);
 
   await t1.end();
@@ -1492,4 +1515,10 @@ for (const [name, passed] of results) {
   console.log(`${passed ? 'DETECTED ' : 'MISSED   '} ${name}`);
   if (!passed) ok = false;
 }
+for (const [name, held] of controls) {
+  console.log(`${held ? 'CONTROL  ' : 'BROKEN   '} ${name}`);
+  if (!held) ok = false;
+}
+console.log(`
+${results.filter(([, d]) => d).length} / ${results.length} mutations detected, ${controls.filter(([, h]) => h).length} / ${controls.length} controls held`);
 process.exit(ok ? 0 : 1);

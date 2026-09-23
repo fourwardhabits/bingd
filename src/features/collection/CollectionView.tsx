@@ -10,7 +10,6 @@ import {
   IconToggle,
   type IconToggleOption,
   PosterGridList,
-  ScoreBadge,
   SortChip,
   SortMenu,
   Text,
@@ -21,6 +20,7 @@ import { coerceSortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 import { CollectionFilterSheet } from './CollectionFilterSheet';
+import { TitleRowActions } from './TitleRowActions';
 import {
   activeFilterCount,
   applyFilters,
@@ -274,10 +274,17 @@ export function CollectionView({
               }
               trailing={
                 segment !== 'watchlist' ? (
-                  <ScoreBadge
-                    score={item.score}
-                    bucket={item.bucket}
-                    onPress={() => onPressItem(item.mediaItemId)}
+                  // The compact-row contract (design-system.md §11b): the score when
+                  // ranked, otherwise the ordinary `+` — never a dashed ring, and the same
+                  // for an import never ranked and a ranking left unfinished. It opens the
+                  // title, whose Rank resumes an unfinished session.
+                  <TitleRowActions
+                    name={nameOf(item)}
+                    kind={item.kind}
+                    score={item.score != null ? { score: item.score, bucket: item.bucket } : null}
+                    saved={null}
+                    onRank={() => onPressItem(item.mediaItemId)}
+                    onToggleWatchlist={() => {}}
                   />
                 ) : undefined
               }

@@ -21,8 +21,10 @@ verified, what is assumed, and what is still open.
 ## 1. What the import is
 
 Somebody's Letterboxd export, brought into Bingd as collection history. Films they have
-watched, the dates they watched them, their ratings — turned into the three taste buckets —
-and their watchlist.
+watched, the dates they watched them, and their watchlist. Their star ratings are kept as
+provenance only: **a Letterboxd star is never a bingd bucket, position or score** (founder,
+2026-09-21 — canonical). An imported title arrives unranked with no bucket until the reader
+answers "How was it?" in bingd; the server refuses a bucket from any import (20261018000100).
 
 It is **optional and always available**. Since 2026-09-13 the first-run flow offers it
 once, as an optional step of its own straight after *Your First Five* (below), and the

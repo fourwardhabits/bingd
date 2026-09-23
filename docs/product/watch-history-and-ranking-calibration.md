@@ -20,6 +20,11 @@ entry opening a dedicated, pushed **Watch History screen**, and **no History tab
 |---|---|---|
 | **T0b** | Ranking an already-seen title no longer stamps today; *Earlier*; the R4 session carry | PR #174, merged `ed644cb`. Client only, no OTA published. |
 | **T0** | A correction is not a new ranking: `created_at` preserved, chronology-based watchlist rule, re-rating is not "becoming watched" | PR #180, merged `4a88237`, migration **`20261001000100`**, live on staging and production |
+| **T1** | `watch_events` with basis, the R3-compliant backfill, the cache and seen triggers, rebuilt legacy writers, `log_title` / `set_watch_date` | migration **`20261003000100`**. Not applied to either project. |
+| **T2** | `ranking_placements`, the prior-anchored search, clean comparison evidence, `movement` in responses | migration **`20261004000100`**. Not applied. |
+| **T3** | `log_rewatch` / `edit_watch_event` / `delete_watch_event`; feed `again`, enrichment and deletion | migration **`20261005000100`**. Not applied. |
+| **T3b** | Log another watch, the **Watch History screen** and its `Watched N times ›` entry, the When row via `log_title` / `set_watch_date`, private movement copy | client. **No OTA published.** |
+| **T4** | Goals and the monthly board repointed to watch events, both **behind flags that start false** | migration **`20261006000100`** + client. Not applied, flags not flipped. |
 **Supersedes:** [`deferred-roadmap.md`](./deferred-roadmap.md) §19 (rewatch history) and §22
 (per-title watch history). It **resolves** §49 (the historical-unranked exception) for the
 historical contexts named here, builds PRD §12's unbuilt import "anchor session", and gives §34
@@ -75,7 +80,15 @@ The user-facing features built on top:
   Merged; it carries no migration and is **waiting for its first OTA or binary**, so installed
   clients still have the old behaviour until then (§C.3.7).
 
-**Next: T1**, the watch-event foundation, at migration `20261002000100`. Not started.
+**T1 through T4 are built** (2026-09-20), on `feat/watch-history-t1-t4`. **T5 (Refine) and
+T6 (Rank what you've watched) are not started**, deliberately: the founder scoped this tranche
+to T1–T4.
+
+**The version this document reserved for T1, `20261002000100`, was taken** by the feed-score
+fix (PR #189) between the design being written and the work starting. T1 is
+`20261003000100` and every tranche after it follows in its own day bucket. That is the
+second renumbering this epic has needed, which is why the instruction in
+§RECOMMENDED BUILD SEQUENCE is to check the applied head rather than to trust this file.
 
 ---
 

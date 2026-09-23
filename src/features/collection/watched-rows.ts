@@ -1,4 +1,5 @@
 import type { CollectionItem } from './filters';
+import { rankingStateOf } from './ranking-state';
 import { bandSizes, scoreFor, type Bucket } from './score';
 import type { LoggedEntry, RankedEntry, RankingCategory } from './use-collection';
 
@@ -148,7 +149,12 @@ export function watchedItems(
 
   for (const entry of filterByMedium(logged, medium)) {
     if (seen.has(entry.mediaItemId)) continue;
-    items.push({ ...toItem(entry), score: null, bucket: null });
+    items.push({
+      ...toItem(entry),
+      score: null,
+      bucket: null,
+      unfinished: rankingStateOf({ ranked: false, bucket: entry.bucket }) === 'unfinished',
+    });
   }
 
   return items;

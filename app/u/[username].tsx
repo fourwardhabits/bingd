@@ -30,6 +30,7 @@ import { RankedTitlesSheet } from '@/features/profile/RankedTitlesSheet';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileMenu } from '@/features/profile/ProfileMenu';
+import { ProfileLists } from '@/features/lists/ProfileLists';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import {
@@ -555,6 +556,31 @@ export default function PublicProfileScreen() {
           <ProfileWatchlist
             userId={subjectId}
             onPressTitle={(id: string) => router.push(`/title/${id}`)}
+          />
+
+          {/* Same position as the own profile, for the reason directly above.
+
+              **The section is absent entirely unless this account has at least one
+              public list**, which is `ProfileWatchlist`'s own rule: a profile the viewer
+              may not read and one with nothing public both answer zero rows, and the
+              only way those two can look identical is if neither draws anything. An
+              empty state here would itself be the disclosure.
+
+              `See all` is a **push**, not a sheet — which is what removes the
+              close-the-sheet-then-push sequencing hazard, and lets a shelf card open a
+              list directly (§Q.4). */}
+          <ProfileLists
+            ownerId={subjectId}
+            isOwner={false}
+            onOpenList={(listId: string) =>
+              router.push(`/lists/${listId}?surface=profile_shelf`)
+            }
+            onSeeAll={() =>
+              router.push({
+                pathname: '/lists/by/[userId]',
+                params: { userId: subjectId, name: profile.data?.name ?? '' },
+              })
+            }
           />
 
           {notes.data?.length ? (

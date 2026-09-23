@@ -474,9 +474,27 @@ describe('I6: Rank Again is one transaction', () => {
     assert.equal(guarded?.code, '22023');
     assert.deepEqual(await t.ranking(user), before);
 
-    // And the rollback itself, forced at a point after the deletion has happened. The
-    // trigger is disposable and exists only to fail the insert; nothing in the schema
-    // depends on it.
+    /**
+     * And the rollback itself, forced at a point after the deletion has happened.
+     *
+     * **It needs a placement that actually moves** (20261004000100). This used to call
+     * `rank_again` on the only title in its band, which reaches `_rank_finalize`
+     * immediately — and since T2 that case is the **no-op finalize** (§E.3.2): the
+     * resolved point equals the prior and the bucket is unchanged, so `rankings` is left
+     * entirely alone. No delete, no insert, and therefore nothing for a refusing insert
+     * trigger to refuse. The test passed for a reason that no longer happens rather than
+     * failing for one.
+     *
+     * So a second title gives the band something to compare against, and the answer
+     * moves the subject to the top — which is a genuine delete-and-insert, which is what
+     * this test has always been about.
+     */
+    const rival = await movie('Atomic rank again rival');
+    await t.rankToCompletion(rival, 'loved', async (pivot) => pivot);
+    const beforeMove = await t.ranking(user);
+
+    // The trigger is disposable and exists only to fail the insert; nothing in the
+    // schema depends on it.
     await t.exec(`
       create or replace function _test_refuse_ranking() returns trigger
       language plpgsql as $$
@@ -488,8 +506,16 @@ describe('I6: Rank Again is one transaction', () => {
         for each row execute function _test_refuse_ranking();
     `);
 
-    const rolled = await t.errorFrom(`select rank_again($1, 'loved'::taste_bucket, $2)`, [
+    const opened = await one(t.db, `select rank_again($1, 'loved'::taste_bucket, $2) as r`, [
       film,
+      await op(),
+    ]);
+    // The RIVAL wins, so the subject drops below it — `film` was ranked first and holds
+    // position 1, so the subject winning would resolve at the prior and be a no-op. A
+    // loss is what makes this a genuine delete-and-insert.
+    const rolled = await t.errorFrom(`select rank_answer($1, $2, $3)`, [
+      opened.session_id,
+      rival,
       await op(),
     ]);
 
@@ -498,7 +524,7 @@ describe('I6: Rank Again is one transaction', () => {
     assert.equal(rolled?.code, 'P0001', 'the fresh placement was refused');
     assert.deepEqual(
       await t.ranking(user),
-      before,
+      beforeMove,
       'and the position it had already deleted came back with the rollback',
     );
     await t.assertValid(user);

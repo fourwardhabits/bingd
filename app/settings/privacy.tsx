@@ -222,13 +222,38 @@ export default function PrivacyScreen() {
                 switch above already guards against. */}
             <View style={styles.explain}>
               {known === 'private' ? (
-                <Text variant="caption" tone="tertiary">
-                  People can still find you by name or @handle and ask to follow — being
-                  private hides what you have, not who you are. Until you approve
-                  somebody, your ranked titles, watchlist, reviews and activity stay
-                  hidden. People you already approved stay approved; remove them from
-                  your followers if you want them gone.
-                </Text>
+                <>
+                  <Text variant="caption" tone="tertiary">
+                    People can still find you by name or @handle and ask to follow — being
+                    private hides what you have, not who you are. Until you approve
+                    somebody, your ranked titles, watchlist, reviews and activity stay
+                    hidden. People you already approved stay approved; remove them from
+                    your followers if you want them gone.
+                  </Text>
+                  {/* **The link-only lists sentence** (lists-prd.md §F.4).
+
+                      The PRD asks for it on "the private-profile confirmation", and
+                      there is none: going *private* is the protective direction and has
+                      never had a dialog — only going public does, because that one
+                      changes other people's access. Inventing a confirmation for the
+                      safe direction would put friction on the act this screen exists to
+                      make easy.
+
+                      So it lives in the standing explanation instead, which is better
+                      for what the sentence is actually for: an alert is read once, at a
+                      moment the reader is thinking about something else, and this is
+                      here every time they come back to check what private means.
+
+                      Its own paragraph rather than a clause, because it is a fact about
+                      a different object. Link-only is an **object-level** share and
+                      deliberately does not follow the profile — that is the whole of
+                      §F.4, and somebody who has just gone private is exactly the person
+                      entitled to be surprised by it. */}
+                  <Text variant="caption" tone="tertiary">
+                    Lists you have shared by link stay viewable by anyone holding the
+                    link. Make a list private, or delete it, to stop that.
+                  </Text>
+                </>
               ) : null}
               {known === 'public' ? (
                 <Text variant="caption" tone="tertiary">
