@@ -6,7 +6,6 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import type { RankingCategory } from '@/features/collection/use-collection';
-import { movementDirection, movementSentence } from '@/features/watch-history/watch-history';
 import { track } from '@/lib/analytics';
 import { useOperationIntent } from '@/lib/operation-intent';
 import { posterUri } from '@/lib/images';
@@ -51,10 +50,10 @@ import { applyRefineNotNow } from './use-refine';
  * ---------------------------------------------------------------------------
  * WHAT IT DOES NOT SAY
  *
- * No percentage, no "accuracy", no count of what is left in the library. The progress is
- * this round's five dots, which is a promise the screen can keep, and the result of each
- * title is the exact ordinal fact (`Moved from #118 → #72`, `Still #33`), which is private
- * and true. The server's ordering is never shown as a number (§G.3).
+ * No percentage, no "accuracy", no count of what is left in the library. The progress is a
+ * count of this round's own batch, which is a promise the screen can keep, and the round
+ * ends by stating where each title now sits — `#7 in Movies`, the same label the reveal
+ * and the title page use. The server's ordering is never shown as a number (§G.3).
  */
 export function RefineScreen({
   medium,
@@ -510,7 +509,7 @@ export function RefineScreen({
           </Text>
           <View style={styles.results}>
             {sitting.finished.map((title) => (
-              <RefinedRow key={title.mediaItemId} title={title} />
+              <RefinedRow key={title.mediaItemId} title={title} medium={medium} />
             ))}
           </View>
           {phase.exhausted || (fresh !== null && !fresh.ready) ? (
@@ -595,25 +594,27 @@ function emptyBody(status: Exclude<RefineStatus, 'ready'>, medium: RankingCatego
  *
  * **The hierarchy is deliberate and it is the founder's.** What the reader earned is the
  * CURRENT bingd score, so that is the badge, at full strength, on the right where a score
- * always is. Where it came from is muted footnote text under the title. The old value is
- * never given the same weight as the new one.
+ * always is. Under the title is where the title now *sits*, muted.
  *
- * **And the old value is an ordinal, not a score.** A refine session reports the position
- * it moved from; nothing anywhere captures what the score used to be. Rather than compute
- * a plausible number — which would be a made-up fact stated next to a real one — the row
- * says `#12 → #11`, which is exactly what is known. `movementSentence` is the same
- * function Watch History uses, so the two surfaces word it identically.
+ * **It states where a title is, not how it got there** (founder, 2026-09-23). It used to
+ * say `#12 → #11`, and a column of five of those is a page about the last two minutes
+ * rather than about the list. The canonical label every other surface uses — the reveal,
+ * the title page — is `#7 in Movies`: the position it holds now, named with the medium so
+ * it reads as a sentence rather than a code. No arrow, no previous ordinal, no `Still`,
+ * because a title that did not move is in exactly the same standing as one that did.
+ *
+ * Omitted entirely when there is no valid ordinal to name. A row with a blank where a
+ * position should be is worse than a row that does not claim one.
  *
  * Not pressable. It is a receipt for something the reader just did, not a way into
  * anything, and a row that navigates out of a summary loses the rest of the summary.
  */
-function RefinedRow({ title }: { title: RefinedTitle }) {
-  const movement = title.movement ?? { outcome: 'unchanged' as const, fromPosition: null };
-  const sentence = movementSentence(movement, title.position) ?? `#${title.position}`;
-  // "Moved from #118 → #72" is the Watch History sentence; in a column of five it is the
-  // arrow that reads, so the row keeps the pair and drops the preamble.
-  const line = sentence.replace('Moved from ', '');
-  const direction = movementDirection(movement, title.position);
+function RefinedRow({ title, medium }: { title: RefinedTitle; medium: RankingCategory }) {
+  // The reveal's own words (`RankingSheet`): `#7 in Movies`, `#2 in TV`.
+  const place =
+    Number.isInteger(title.position) && title.position > 0
+      ? `#${title.position} in ${medium === 'movies' ? 'Movies' : 'TV'}`
+      : null;
 
   return (
     <View style={styles.row} accessible accessibilityRole="text">
@@ -622,19 +623,11 @@ function RefinedRow({ title }: { title: RefinedTitle }) {
         <Text variant="callout" numberOfLines={2}>
           {title.title}
         </Text>
-        <View style={styles.rowMovement}>
+        {place ? (
           <Text variant="footnote" tone="tertiary" numberOfLines={1}>
-            {line}
+            {place}
           </Text>
-          {direction ? (
-            <Ionicons
-              name={direction === 'up' ? 'arrow-up' : 'arrow-down'}
-              size={theme.layout.icon.sm}
-              color={theme.text.tertiary}
-              accessibilityLabel={direction === 'up' ? 'Moved up' : 'Moved down'}
-            />
-          ) : null}
-        </View>
+        ) : null}
       </View>
       {typeof title.score === 'number' ? (
         <ScoreBadge score={title.score} bucket={bucketOf(title.bucket)} size="sm" />
@@ -685,9 +678,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.space[3],
-    paddingVertical: theme.space[1],
+    // A little more air than a list row: five of these are the whole screen.
+    paddingVertical: theme.space[2],
   },
   rowText: { flex: 1, gap: 2 },
-  rowMovement: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   checkpointActions: { gap: theme.space[2], paddingTop: theme.space[2] },
 });

@@ -130,7 +130,7 @@ it('opens straight into the comparison, with a count and no explanatory block', 
   expect(startArgs).toHaveProperty('p_operation_id');
 });
 
-it('an answer that moves it says exactly where from and to, privately', async () => {
+it('states where the title now sits, and the score it earned', async () => {
   serve({
     refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
     refine_start: [comparing],
@@ -152,13 +152,14 @@ it('an answer that moves it says exactly where from and to, privately', async ()
 
   await fireEvent.press(view.getByLabelText('Choose Heat'));
 
-  // The summary states the ordinal pair muted and the CURRENT score in the badge every
-  // other list in the app draws. The old value never carries the weight of the new one,
-  // and no old SCORE is invented — nothing in the session captured one.
-  await waitFor(() => expect(view.getByText('#21 → #15')).toBeTruthy());
-  expect(view.queryByText('Moved from #21 → #15')).toBeNull();
+  // The canonical label the reveal and the title page use — where it IS, not how it got
+  // there — with the current score in the badge every other list in the app draws.
+  await waitFor(() => expect(view.getByText('#15 in Movies')).toBeTruthy());
   expect(view.getByLabelText('8.8 out of 10, I liked it')).toBeTruthy();
-  expect(view.getByLabelText('Moved up')).toBeTruthy();
+  // No arrow, no previous ordinal, no "Still" (founder, 2026-09-23).
+  expect(view.queryByText('#21 → #15')).toBeNull();
+  expect(view.queryByText('Moved from #21 → #15')).toBeNull();
+  expect(view.queryByLabelText('Moved up')).toBeNull();
   const [, answerArgs] = callsTo('rank_answer')[0];
   expect(answerArgs).toMatchObject({ p_session_id: 'session-1', p_winner: 'heat' });
   expect(mockTrack).toHaveBeenCalledWith({
@@ -177,7 +178,7 @@ it('an answer that moves it says exactly where from and to, privately', async ()
   });
 });
 
-it('a confirmed title reads Still #N', async () => {
+it('a title that did not move reads the same way as one that did', async () => {
   serve({
     refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
     refine_start: [comparing],
@@ -195,7 +196,54 @@ it('a confirmed title reads Still #N', async () => {
   const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
   await waitFor(() => expect(view.getByLabelText('Choose Collateral')).toBeTruthy());
   await fireEvent.press(view.getByLabelText('Choose Collateral'));
-  await waitFor(() => expect(view.getByText('Still #21')).toBeTruthy());
+  // Its standing is the fact, and it is stated identically whether or not it moved.
+  await waitFor(() => expect(view.getByText('#21 in Movies')).toBeTruthy());
+  expect(view.queryByText('Still #21')).toBeNull();
+});
+
+it('names the medium the way TV is named everywhere else', async () => {
+  serve({
+    refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
+    refine_start: [comparing],
+    rank_answer: [
+      {
+        done: true,
+        position: 4,
+        category: 'tv_seasons',
+        bucket: 'loved',
+        score: 9.1,
+        movement: { outcome: 'moved', from_position: 11, kind: 'refine' },
+      },
+    ],
+  });
+  const view = await renderWithProviders(
+    <RefineScreen medium="tv_seasons" onExit={jest.fn()} />,
+  );
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+
+  await waitFor(() => expect(view.getByText('#4 in TV')).toBeTruthy());
+});
+
+it('claims no position when the server reports none', async () => {
+  // A row with a blank where a position should be is worse than a row that does not
+  // claim one, so the line is omitted rather than rendered empty.
+  serve({
+    refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
+    refine_start: [comparing],
+    rank_answer: [
+      { done: true, category: 'movies', bucket: 'fine', score: 6.2, movement: null },
+    ],
+  });
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+
+  await waitFor(() => expect(view.getByLabelText('6.2 out of 10, It was fine')).toBeTruthy());
+  expect(view.queryByText(/in Movies/)).toBeNull();
+  expect(view.queryByText(/^#/)).toBeNull();
 });
 
 it('Close mid-comparison cancels the provisional session and leaves', async () => {

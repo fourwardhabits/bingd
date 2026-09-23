@@ -81,7 +81,7 @@ export function FollowStoryRow({
     .join(' ');
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} testID="follow-story-row">
       {/**
        * The actor's face, and at `sm` rather than as the 22pt chip `ActivityRow` stamps on a
        * poster. There is no artwork here for a chip to sit on, so the avatar *is* the
@@ -152,6 +152,22 @@ const styles = StyleSheet.create({
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[3],
+    /**
+     * The same closing hairline `ActivityRow` draws, at the same weight and colour
+     * (founder, device, 2026-09-23).
+     *
+     * It was missing, and what that produced was not a lighter row but an unbounded one:
+     * *Meli followed Abisola* fell into the whitespace of the ranking under it, and the
+     * feed lost its rhythm exactly where the list changes subject. The gutters and the
+     * vertical padding already matched `ActivityRow` — this is the third member of that
+     * set, and the one that says where the row ends. Declared here rather than as a
+     * one-off border component, because it IS the adjacent rows' declaration.
+     *
+     * Density stays the difference between the two: this row is a third of an activity
+     * row's height whether or not it is closed.
+     */
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomColor: theme.border.hairline,
   },
   copy: { flex: 1, gap: 1 },
   // `ActivityRow`'s own emphasis for a named entity inside the sentence, so an actor's
