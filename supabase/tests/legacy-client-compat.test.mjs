@@ -57,26 +57,47 @@ function ensureOriginMain() {
   }
 }
 
-/** Every file under src/ and app/ as it stood on origin/main. */
-function legacyClientSources() {
-  ensureOriginMain();
-  const files = execFileSync(
-    'git',
-    ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'src', 'app'],
-    { cwd: root, encoding: 'utf8' },
-  )
+/** Every file under src/ and app/ as it stood at one ref. */
+function clientSourcesAt(ref) {
+  const files = execFileSync('git', ['ls-tree', '-r', '--name-only', ref, '--', 'src', 'app'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
     .split('\n')
     .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.(ts|tsx)$/.test(f));
 
   return files.map((f) => ({
     file: f,
-    text: execFileSync('git', ['show', `origin/main:${f}`], {
+    text: execFileSync('git', ['show', `${ref}:${f}`], {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,
     }),
   }));
 }
+
+/** Every file under src/ and app/ as it stood on origin/main. */
+function legacyClientSources() {
+  ensureOriginMain();
+  return clientSourcesAt('origin/main');
+}
+
+/**
+ * **The binaries people actually have**, by the commit each was built from.
+ *
+ * `origin/main` is a good proxy for "the shipped client" only while main and production
+ * move together, and on 2026-09-23 they stopped: Watch History + Lists merged the night
+ * before its cutover. From then on the honest question is about these commits, because
+ * they are what is on the phones while the migrations go in.
+ *
+ * **Update this table whenever a binary ships**, and delete a row when its build is no
+ * longer installable — an entry that is wrong is worse than no entry, because it is the
+ * one that gets believed at 3am.
+ */
+const SHIPPED = [
+  { what: 'iOS 1.0.0 (7), App Store', commit: 'ba14bd0' },
+  { what: 'Android 1.0.1 (12), Play', commit: '6d2f845' },
+];
 
 /**
  * `supabase.rpc('name', { a: …, b: … })` → { name, args }.
@@ -272,6 +293,49 @@ describe('installed clients against the merged schema', () => {
         nowhere.join('\n  '),
     );
   });
+
+  /**
+   * The same differential, asked of the binaries in the field rather than of `main`.
+   *
+   * This is the question phase 1 of a cutover turns on: the migrations land hours or days
+   * before the new store build does, so every phone keeps calling the schema with the
+   * bundle it already has. A call that resolved yesterday and does not resolve after the
+   * push is a screen that breaks for somebody who did nothing.
+   */
+  for (const { what, commit } of SHIPPED) {
+    it(`${what} keeps every RPC it calls`, async () => {
+      let sources;
+      try {
+        sources = clientSourcesAt(commit);
+      } catch {
+        // A shallow CI clone may not have the commit. Fetch it rather than skip: a check
+        // that silently does not run is the failure mode this file was written against.
+        execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', commit], {
+          cwd: root,
+          stdio: 'ignore',
+        });
+        sources = clientSourcesAt(commit);
+      }
+
+      const { calls } = rpcCalls(sources);
+      assert.ok(calls.length > 40, `expected ${what}'s RPC surface, found ${calls.length}`);
+
+      const [was, now] = [await signatures(before_), await signatures(merged)];
+      const regressions = [
+        ...new Set(
+          calls
+            .filter((call) => resolves(was, call) && !resolves(now, call))
+            .map((call) => `${call.name}(${call.args.join(', ')}) — ${call.file}`),
+        ),
+      ];
+
+      assert.deepEqual(
+        regressions,
+        [],
+        `${what} would break against the migrated schema:\n  ${regressions.join('\n  ')}`,
+      );
+    });
+  }
 
   it('no relation the shipped client reads directly disappears', async () => {
     const tables = new Set();
