@@ -565,6 +565,11 @@ const styles = `
          thumb on a phone is the case being designed for. */
       .actions { display: grid; gap: 0.625rem; margin-top: 1.5rem; }
 
+      /* A desktop visitor gets both stores, wrapped so one flag can show or hide the
+         pair. The wrapper takes no box of its own, so each store button is a grid item
+         and the gap above separates it; without this the two sat flush as one control. */
+      .actions > #desktop-choices { display: contents; }
+
       a.button {
         display: block;
         min-height: 48px;
@@ -1926,13 +1931,16 @@ const DOCUMENTS = [
   },
 ];
 
+/** The established positioning line, under the wordmark on every shared-link page. */
+const TAGLINE = 'Rank what you watch and find your next binge.';
+
 const ROUTES = [
   {
     dir: 'i',
     kind: 'invite',
     share: 'You have been invited to bingd.',
     title: 'You have been invited to bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     // The invited visitor's heading is the same complete sentence as every other
     // route's. It used to be "Ask whoever invited you to let you know when it is." in
     // beta, whose "it" had its antecedent in the lead-in half of #no-destination — and
@@ -1946,7 +1954,7 @@ const ROUTES = [
     kind: 'profile',
     share: 'Open on bingd.',
     title: 'A profile on bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     heading: UNAVAILABLE,
     body: PROFILE_BODY,
   },
@@ -1955,7 +1963,7 @@ const ROUTES = [
     kind: 'title',
     share: 'Open on bingd.',
     title: 'A title on bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     heading: UNAVAILABLE,
     body: TITLE_BODY,
   },
@@ -1964,7 +1972,7 @@ const ROUTES = [
     kind: 'generic',
     share: 'Open on bingd.',
     title: 'A list on bingd.',
-    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    tagline: TAGLINE,
     heading: UNAVAILABLE,
     body: GENERIC_BODY,
   },
