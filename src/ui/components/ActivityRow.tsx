@@ -52,6 +52,8 @@ export type ActivityRowProps = {
   posterUri?: string | null;
   /** `PG-13 · 148m · Science Fiction · Adventure`, beneath the sentence. */
   metadata?: string | null;
+  /** `2nd watch`, in grey under the metadata, on a rewatch's ranking post. */
+  watchLabel?: string | null;
   score?: number | null;
   bucket?: Bucket | null;
   note?: string | null;
@@ -216,6 +218,7 @@ export function ActivityRow({
   year,
   posterUri,
   metadata,
+  watchLabel,
   score,
   bucket,
   note,
@@ -369,6 +372,11 @@ export function ActivityRow({
           {metadata ? (
             <Text variant="caption" tone="tertiary" numberOfLines={1}>
               {metadata}
+            </Text>
+          ) : null}
+          {watchLabel ? (
+            <Text variant="caption" tone="tertiary" numberOfLines={1} testID="activity-watch-label">
+              {watchLabel}
             </Text>
           ) : null}
         </View>

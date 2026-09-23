@@ -327,6 +327,20 @@ describe('ending the flow', () => {
    * `complete` is called here and nowhere else, so the completion is reported once, at the
    * real end of onboarding rather than at the end of the ranking run.
    */
+  /**
+   * **The end of the flow stamps where the weekly streak starts**, for the account that
+   * never reached the five-placed settle (it said Not now). See `streakBoundary`.
+   */
+  it('stamps the streak boundary when onboarding completes', async () => {
+    mockCounts.follows = 1;
+    mockPrefs.set('user-1.onboarding.rankingOutcome', 'skipped');
+    await finish();
+
+    await waitFor(() =>
+      expect(typeof mockPrefs.get('user-1.onboarding.taste.completed_at')).toBe('string'),
+    );
+  });
+
   it('reports one completion, at the end rather than at the payoff', async () => {
     mockCounts.follows = 1;
     // Recorded by the ranking screen, which is the only thing that knows. Without it the

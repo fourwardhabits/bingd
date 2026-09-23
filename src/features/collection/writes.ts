@@ -101,7 +101,13 @@ export type WriteResult =
 export const mustReconcile = (result: WriteResult) =>
   result.outcome !== 'failed' || result.changed === true;
 
-const interpret = (error: { code?: string; message: string } | null): WriteResult => {
+/**
+ * Exported since 20261003000100: the watch-history writers in
+ * `features/watch-history/writes.ts` are the same kind of RPC with the same failure
+ * vocabulary, and a second copy of this switch is how two halves of one product come to
+ * word `23514` differently.
+ */
+export const interpret = (error: { code?: string; message: string } | null): WriteResult => {
   if (!error) return { outcome: 'ok' };
 
   /**

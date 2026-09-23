@@ -938,9 +938,10 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
     await fireEvent.press(view.getByText('Update your rating'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
+    // One tap, straight into the comparisons (founder QA, 2026-09-21): the band is the
+    // decision, and the "Rank <title> again? [Re-rank]" card that sat here is gone.
     await fireEvent.press(view.getByText('I liked it'));
-    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
-    await fireEvent.press(view.getByText('Re-rank'));
+    expect(view.queryByText('Re-rank')).toBeNull();
 
     // `rank_again` with `p_new_watch: false` — the session runs over the position the
     // title already holds, and `_rank_finalize` posts `title_ranked` only `if p_new_watch
@@ -958,7 +959,17 @@ describe('the action group', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
-  it('declares a new watch only from the rewatch row', async () => {
+  /**
+   * **The rewatch row records the viewing, and ranks nothing** (T3b, epic §J.3).
+   *
+   * It used to call `rank_again(p_new_watch: true)` on the tap: a forced full re-rank
+   * that recorded no watch and no date. The viewing comes first now, and the re-check is
+   * offered after it is saved — so the assertion is that the row opens the watch and
+   * declares nothing yet. The test directly above still pins `p_new_watch: false` for
+   * the correction row, which is the other half of the distinction and the half that did
+   * not move.
+   */
+  it('records a watch, and ranks nothing, from the rewatch row', async () => {
     rankIt('film-1', 'movies');
     const view = await openOn(completeFilm, 'Inception');
 
@@ -966,18 +977,9 @@ describe('the action group', () => {
     await fireEvent.press(view.getByTestId('title-action-ranked'));
     await fireEvent.press(view.getByText('Log another watch'));
 
-    // The one row in the app that declares a second viewing, and the only one that asks
-    // for an activity. Exactly one, on completion.
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith(
-        'rank_again',
-        expect.objectContaining({ p_new_watch: true }),
-      ),
-    );
-    expect(mockRpc).not.toHaveBeenCalledWith(
-      'rank_again',
-      expect.objectContaining({ p_new_watch: false }),
-    );
+    // The log sheet in rewatch mode opens on its bands; nothing ranks until one is chosen.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_again', expect.anything());
   });
 
   it('opens the log rather than a comparison for an unranked title', async () => {
@@ -1038,9 +1040,24 @@ describe('navigation', () => {
   // Two tests rather than one render, unmount and re-render: this library keeps every
   // mounted tree in one document, so a second render inside one test is a second copy of
   // the screen and every query becomes ambiguous.
-  it('offers no menu on a title with nothing to manage', async () => {
+  /**
+   * **The menu is on every title now** (`docs/product/lists-prd.md` §P.4, 2026-09-19).
+   *
+   * This test asserted the opposite, and the change is deliberate rather than a
+   * regression. `onMore` was conditional — a ranked title, and since 2026-09-18 a film
+   * or season that is logged but unranked — because until Lists there was nothing in
+   * the sheet that applied to a title the account had never touched. `Add to list…` is
+   * exactly that: it applies to every movie, season and whole series, ranked or not,
+   * logged or not, and a series has never had a menu at all.
+   *
+   * What protected the old behaviour is one level down rather than gone: the Collection
+   * group is now gated on `data.ranked || data.logged`, so a title in nobody's
+   * collection is never offered Remove from it.
+   */
+  it('offers Add to list on a title nobody has touched, on the action row rather than a menu', async () => {
     const view = await openOn(completeFilm, 'Inception');
 
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
     expect(view.queryByTestId('title-more')).toBeNull();
   });
 

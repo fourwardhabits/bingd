@@ -124,7 +124,7 @@ export type MyScore = {
  */
 export function useMyScores(userId: string, enabled = true) {
   return useQuery({
-    queryKey: ['my-scores', userId],
+    queryKey: queryKeys.myScores(userId),
     enabled: enabled && Boolean(userId),
     queryFn: async (): Promise<Map<string, MyScore>> => {
       const { data, error } = await readAllByKey<{

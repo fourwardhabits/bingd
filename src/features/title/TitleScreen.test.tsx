@@ -773,7 +773,18 @@ describe('a title this user has ranked', () => {
    * `rank_start` here would open a window in which the title has no position and no
    * session, and a dropped connection inside it loses the ranking outright.
    */
-  it('offers Rank again, through the atomic call rather than an unrank and a restart', async () => {
+  /**
+   * **The rewatch row opens the watch, and the atomic guarantee is still what matters
+   * behind it** (T3b).
+   *
+   * The row reached `rank_again` directly until 20261005000100 — a forced full re-rank
+   * that recorded no watch and no date. It opens the sheet that records the viewing
+   * first, so this test asserts what is still true and load-bearing at this seam: the
+   * screen never composes `rank_unrank` and `rank_start`, which would open a window in
+   * which the title has no position and no session, and a dropped connection inside it
+   * loses the ranking outright.
+   */
+  it('never composes an unrank and a restart, from either ranking row', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
@@ -781,13 +792,17 @@ describe('a title this user has ranked', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('rank_again', expect.anything()));
-    // One call, and the guarantee T2 bought: never the pair.
+    // The rewatch sheet opens on its bands; nothing is unranked or restarted by opening it.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
   });
 
-  it('re-ranks inside the band the title is already in', async () => {
+  it('names the title the rewatch is about, rather than deciding a rating', async () => {
+    // The sheet decides no band: the re-check behind it passes `rankings.bucket`
+    // straight through, which is asserted where that call is made
+    // (`adjusting a ranking versus watching it again`). What belongs here is that the
+    // row opens the right title's sheet at all.
     const view = await open();
     await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
     await fireEvent.press(view.getByTestId('title-more'));
@@ -795,14 +810,10 @@ describe('a title this user has ranked', () => {
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    // Rank again redoes the comparisons; it does not decide a rating. The bucket goes
-    // straight through from `rankings.bucket`, in the database's own spelling.
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith(
-        'rank_again',
-        expect.objectContaining({ p_bucket: 'loved' }),
-      ),
-    );
+    // The log sheet in rewatch mode: the title's own header, and How was it?.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+    expect(view.getByText('How was it?')).toBeTruthy();
+    expect(view.getAllByText('Inception').length).toBeGreaterThan(0);
   });
 
   /**
@@ -987,7 +998,16 @@ describe('a title this user has ranked', () => {
 
     // None of the four writers that would move a score, a band or a position, and none
     // of the two that would post an activity.
-    for (const rpc of ['rank_again', 'rank_start', 'rank_rebucket', 'set_bucket']) {
+    // `log_title` joins the list, and `set_bucket` stays on it: the sheet calls the
+    // first now (T3b) and installed clients still call the second, so a screen that
+    // opened a row must be silent to both.
+    for (const rpc of [
+      'rank_again',
+      'rank_start',
+      'rank_rebucket',
+      'set_bucket',
+      'log_title',
+    ]) {
       expect(mockRpc).not.toHaveBeenCalledWith(rpc, expect.anything());
     }
   });
@@ -2863,10 +2883,10 @@ describe('adjusting a ranking versus watching it again', () => {
    * **The same-watch correction, taken the way a reader now takes it.**
    *
    * *Update your rating* opens the log sheet's band chooser; re-choosing the band the
-   * title already has is the correction — `LogSheet` confirms it, because the position is
-   * re-derived either way, and then calls `rankAgain(newWatch: false)`. That is the exact
-   * call the retired *Rank it again* row made in one tap, which is what makes this a
-   * consolidated entry point rather than a lost capability.
+   * title already has is the correction, and it goes **straight into the comparisons** —
+   * `rankAgain(newWatch: false)` on the tap, with no confirmation card between (founder QA,
+   * 2026-09-21). That is the exact call the retired *Rank it again* row made in one tap,
+   * which is what makes this a consolidated entry point rather than a lost capability.
    *
    * The fixture is a Loved film throughout this block, so `I liked it` is the same band.
    */
@@ -2874,8 +2894,14 @@ describe('adjusting a ranking versus watching it again', () => {
     await fireEvent.press(view.getByLabelText('Update your rating'));
     await waitFor(() => expect(view.getByText('I liked it')).toBeTruthy());
     await fireEvent.press(view.getByText('I liked it'));
-    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
-    await fireEvent.press(view.getByText('Re-rank'));
+  };
+
+  /** The card that used to sit between the band tap and the comparisons, in every form. */
+  const expectNoRerankConfirmation = (view: Awaited<ReturnType<typeof openMenu>>) => {
+    expect(view.queryByText(/again\?/)).toBeNull();
+    expect(view.queryByText(/Changing this will re-rank/)).toBeNull();
+    expect(view.queryByText(/Nothing changes until you finish/)).toBeNull();
+    expect(view.queryByText('Re-rank')).toBeNull();
   };
 
   /** Every `rank_again` call the screen made, with its arguments. */
@@ -2914,15 +2940,29 @@ describe('adjusting a ranking versus watching it again', () => {
     expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
   });
 
-  it('declares a new watch only from the rewatch row', async () => {
+  /**
+   * **The rewatch row records a watch first, and ranks nothing** (T3b, epic §J.3).
+   *
+   * It used to open the ranking sheet directly: a forced full re-rank that recorded no
+   * watch and no date (§C.3.2), so a reader saying "I watched Heat again last night" was
+   * made to answer six comparisons and the app learned nothing about the viewing.
+   *
+   * The assertion is therefore the opposite of what it was, and deliberately so: tapping
+   * this row must call **no** `rank_again` at all. The re-check is offered after the
+   * watch is saved, and it is optional — closing from there is a complete act.
+   *
+   * The correction row's own `p_new_watch: false` is asserted by the tests around this
+   * one, which is where that half of the distinction now lives.
+   */
+  it('records a watch before it ranks anything, from the rewatch row', async () => {
     const view = await openMenu();
 
     await fireEvent.press(view.getByLabelText('Log another watch'));
 
-    await waitFor(() => expect(againCalls().length).toBe(1));
-    expect(againCalls()[0]![1]).toEqual(
-      expect.objectContaining({ p_new_watch: true, p_bucket: 'loved' }),
-    );
+    // The sheet opens on the bands; nothing is saved or ranked until one is chosen.
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+    expect(againCalls().length).toBe(0);
+    expect(mockRpc).not.toHaveBeenCalledWith('log_rewatch_with_details', expect.anything());
   });
 
   it('never unranks and restarts, in either intent', async () => {
@@ -2976,9 +3016,17 @@ describe('adjusting a ranking versus watching it again', () => {
     await fireEvent.press(row);
     await fireEvent.press(row);
 
-    // The menu closes on the first press, so the second lands on nothing — and the
-    // sheet is keyed by title, so even a re-entry would reuse one session.
-    await waitFor(() => expect(againCalls().length).toBe(1));
+    /**
+     * The menu closes on the first press, so the second lands on nothing — and the
+     * sheet is keyed by title, so even a re-entry would reuse one.
+     *
+     * **What it opens is the watch, not a session** (T3b). The double tap still has to
+     * cost nothing, and the property is stronger than it was: no session exists yet at
+     * all, because the re-check is offered only after the viewing is saved.
+     */
+    await waitFor(() => expect(view.getByTestId('rewatch-bucket-choices')).toBeTruthy());
+    expect(againCalls().length).toBe(0);
+    expect(view.queryAllByTestId('rewatch-bucket-choices')).toHaveLength(1);
   });
 
   it('holds for a season, which is the shape the founder reported', async () => {
@@ -3056,9 +3104,8 @@ describe('adjusting a ranking versus watching it again', () => {
 
     await fireEvent.press(view.getByLabelText('Update your rating'));
     await waitFor(() => expect(view.getByText('It was fine')).toBeTruthy());
+    // One tap, and the comparisons open: there is no confirmation to press.
     await fireEvent.press(view.getByText('It was fine'));
-    await waitFor(() => expect(view.getByText('Re-rank')).toBeTruthy());
-    await fireEvent.press(view.getByText('Re-rank'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
@@ -3066,8 +3113,68 @@ describe('adjusting a ranking versus watching it again', () => {
         expect.objectContaining({ p_bucket: 'fine' }),
       ),
     );
+    expectNoRerankConfirmation(view);
     // A band change is its own call; it never routes through the rewatch one.
     expect(againCalls()).toHaveLength(0);
+  });
+
+  /**
+   * **The contract, as the founder stated it after device QA (2026-09-21).**
+   *
+   *   Update your rating → the comparisons, immediately, and NO watch event.
+   *   Log another watch  → a separate sheet, and a watch event.
+   *
+   * The first half used to stop on "Rank <title> again? … [Re-rank] [Cancel]". Both
+   * halves are asserted together so that neither can drift toward the other.
+   */
+  it('goes straight into the comparisons, and records no watch, from Update your rating', async () => {
+    const view = await openMenu();
+
+    await correctTheRating(view);
+
+    // The session opened on the band tap itself.
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
+    expectNoRerankConfirmation(view);
+    // None of the calls that record a viewing was made.
+    expect(mockRpc).not.toHaveBeenCalledWith('log_rewatch', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('log_title', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('set_watch_date', expect.anything());
+  });
+
+  /**
+   * **The approved rewatch flow** (founder QA, 2026-09-21): the viewing's details, Save, then
+   * the ORDINARY ranking entry — *How was it?* with nothing preselected — then comparisons
+   * in whichever band was chosen, tied to the viewing. No *Re-check placement*, no *Keep at
+   * #X*, and no assumption that the band the title had last time is still right.
+   */
+  it('records a watch, then asks How was it? afresh and ranks in the band chosen', async () => {
+    mockRpcResults.log_rewatch_with_details = { status: 'ok', watch_event_id: 'event-2' };
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Log another watch'));
+
+    // The log sheet's layout: How was it? on top, nothing preselected, then the same
+    // optional rows as the ordinary log, all closed.
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(view.getByLabelText(/Who I watched with/)).toBeTruthy();
+    expect(view.getByLabelText(/^Note/)).toBeTruthy();
+    expect(view.getByLabelText(/Watch date/)).toBeTruthy();
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+    expect(view.queryByText(/Re-check placement/)).toBeNull();
+    expect(view.queryByText(/Keep at #/)).toBeNull();
+    expect(view.queryByText('Save watch')).toBeNull();
+
+    // Choosing a band saves the watch (details in the same call), then ranks. The
+    // fixture is Loved; a DIFFERENT band re-ranks there, on this viewing.
+    await fireEvent.press(view.getByText('It was fine'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('log_rewatch_with_details', expect.anything()),
+    );
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(
+      expect.objectContaining({ p_bucket: 'fine', p_watch_event_id: 'event-2' }),
+    );
   });
 });
 
@@ -3164,10 +3271,12 @@ describe('the page behind an open sheet', () => {
  * star, a natively logged one may carry neither.
  */
 describe('a title in the collection that is not ranked', () => {
+  // An import arrives with no bucket: a Letterboxd star is never a bingd opinion
+  // (founder, 2026-09-21; 20261018000100).
   const importedRow = {
     user_id: 'user-1',
     media_item_id: 'film-1',
-    bucket: 'loved',
+    bucket: null as string | null,
     watched_on: '2026-08-30',
     note: null,
     note_visibility: 'private',
@@ -3269,5 +3378,130 @@ describe('a title in the collection that is not ranked', () => {
     const names = mockRpc.mock.calls.map(([name]) => name);
     expect(names.indexOf('rank_unrank')).toBeGreaterThanOrEqual(0);
     expect(names.indexOf('rank_unrank')).toBeLessThan(names.indexOf('unlog'));
+  });
+});
+
+/**
+ * **Add to List is one tap on the action row** (founder QA, 2026-09-21), beside Watchlist
+ * and Share — it used to live only behind the page's ⋯ (lists-prd.md §R).
+ *
+ * What is pinned: every title has it, it opens the Add-to-list sheet directly (no menu,
+ * so no presentation to serialise), the ⋯ no longer carries a duplicate row, and a title
+ * with nothing else in its menu no longer draws a ⋯ at all.
+ */
+describe('Add to list', () => {
+  beforeEach(() => {
+    tableRows.rankings = [];
+    tableRows.user_media = [];
+  });
+
+  const inCollection = () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-30',
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+  };
+
+  it('is a one-tap action on a title that is neither ranked nor logged', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+  });
+
+  it('sits between Watchlist and Share on the action row', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    const ids = view
+      .getAllByTestId(/^title-action-(save|list|recommend)$/)
+      .map((node) => node.props.testID as string);
+    expect(ids.indexOf('title-action-save')).toBeLessThan(ids.indexOf('title-action-list'));
+    expect(ids.indexOf('title-action-list')).toBeLessThan(ids.indexOf('title-action-recommend'));
+  });
+
+  it('opens the Add-to-list sheet directly, with nothing refused', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+
+    await fireEvent.press(view.getByTestId('title-action-list'));
+
+    await waitFor(() => expect(view.getByLabelText('New list')).toBeTruthy());
+    const shows = (globalThis as unknown as { __modalShows: { refused: number } })
+      .__modalShows;
+    expect(shows.refused).toBe(0);
+  });
+
+  it('draws no ⋯ on a title with nothing else to manage', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-action-list')).toBeTruthy());
+    expect(view.queryByTestId('title-more')).toBeNull();
+  });
+
+  it('no longer duplicates Add to list in the menu of a title in the collection', async () => {
+    inCollection();
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('title-more')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('title-more'));
+
+    await waitFor(() => expect(view.getByLabelText('Remove from collection')).toBeTruthy());
+    expect(view.queryByLabelText('Add to list…')).toBeNull();
+  });
+});
+
+/**
+ * **Rank or Ranked on the title page** (founder, final UI simplification 2026-09-21): an
+ * untouched title, an untouched import and an unfinished ranking all read the ordinary
+ * **Rank** — never "Finish ranking" or "Ranking not finished". The tap is what knows the
+ * difference: the log sheet, or straight back into the unfinished session.
+ */
+describe('the ranking state on the title page', () => {
+  const logged = (bucket: string | null) => {
+    tableRows.rankings = [];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket,
+        watched_on: null,
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+  };
+
+  const rankStarts = () => mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start');
+
+  it('reads Rank for an unfinished ranking, and Rank resumes it rather than asking again', async () => {
+    logged('fine');
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
+    expect(view.queryByText('Finish ranking')).toBeNull();
+    expect(view.queryByText('Ranking not finished')).toBeNull();
+
+    await fireEvent.press(view.getByTestId('title-action-rank'));
+    await waitFor(() => expect(rankStarts()).toHaveLength(1));
+    expect(rankStarts()[0][1]).toMatchObject({ p_media_item_id: 'film-1', p_bucket: 'fine' });
+    expect(view.queryByText('How was it?')).toBeNull();
+  });
+
+  it('reads Rank for a seen title with no bucket, such as an untouched import, and logs it', async () => {
+    logged(null);
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
+    expect(view.queryByText('Finish ranking')).toBeNull();
+
+    await fireEvent.press(view.getByTestId('title-action-rank'));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(rankStarts()).toHaveLength(0);
   });
 });

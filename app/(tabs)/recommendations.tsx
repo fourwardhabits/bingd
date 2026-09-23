@@ -67,6 +67,7 @@ import {
   Screen,
   MediumSelector,
   type MediumSelectorOption,
+  SkeletonGrid,
   SkeletonRow,
   Text,
 } from '@/ui/components';
@@ -921,7 +922,9 @@ export default function RecommendationsScreen() {
               action={{ label: 'Try again', onPress: () => void wall.refetch() }}
             />
           ) : wall.isPending ? (
-            <SkeletonRow count={6} />
+            // The wall's own shape while the first slate is on its way (founder QA,
+            // 2026-09-21: a cold load showed the header over an empty area).
+            <SkeletonGrid rows={4} />
           ) : items.length === 0 ? (
             onTopRated ? (
               /**

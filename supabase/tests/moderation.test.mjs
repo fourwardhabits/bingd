@@ -465,6 +465,29 @@ describe('the guard is wired in, not merely present', () => {
     'watch_tag_visible',
     'list_by_id',
     'list_items_by_list',
+    /**
+     * 20261010000100. The seven list readers.
+     *
+     * Every one is `language sql stable` and writes nothing, and every one is gated on
+     * `_list_readable`, which refuses a list whose **owner** is suspended — that is the
+     * direction suspension is for, and it is already covered. A suspended *caller*
+     * reading a list learns nothing it could not have read while active, and every act a
+     * list leads to goes through a function that does call the guard: `create_list`,
+     * `update_list`, `delete_list`, `add_list_item`, `remove_list_item`,
+     * `move_list_item`, `add_list_to_watchlist` and `record_list_open` are all absent
+     * from this array for exactly that reason.
+     *
+     * `my_lists` and `my_lists_for_title` answer only for `auth.uid()`, so a suspended
+     * account reads its own lists — which suspension has never hidden from the person it
+     * was applied to.
+     */
+    'list_view',
+    'list_items_page',
+    'list_viewer_progress',
+    'list_preview',
+    'my_lists',
+    'my_lists_for_title',
+    'profile_lists',
     'my_capabilities',
     'unranked_queue',
     // 20260917000100. Two counts over the caller's own collection, SECURITY INVOKER, so
@@ -500,6 +523,10 @@ describe('the guard is wired in, not merely present', () => {
     // activity they could already read. Every act a score leads to (`rank_start`,
     // `rank_again`, `set_bucket`) calls the guard itself.
     'public_scores',
+    // 20261014000100. A feed card's own viewing's score and watch number: a stable read
+    // that writes nothing, filtered by can_i_view(actor) exactly as the feed is, so a
+    // suspended caller learns nothing about activity it could not already read.
+    'feed_watch_scores',
     // 20260913000100. The same read as community_score over the whole catalogue: a
     // stable aggregate that writes nothing and takes no subject, so a suspended caller
     // learns nothing it could not learn by asking community_score title by title — and

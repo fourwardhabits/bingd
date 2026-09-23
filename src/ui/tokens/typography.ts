@@ -36,6 +36,13 @@ export const typography = {
   title2: { fontFamily: fontFamily.serif, fontSize: 22, lineHeight: 28 },
   headline: { fontFamily: fontFamily.sansSemibold, fontSize: 17, lineHeight: 22 },
   body: { fontFamily: fontFamily.sans, fontSize: 16, lineHeight: 24 },
+  /**
+   * Secondary prose: a list's description, a watch's note — writing that sits under a
+   * title or date rather than being the page's subject (founder QA, 2026-09-21). One step
+   * below `body`, with the same comfortable measure, so a paragraph still reads easily.
+   * Never for titles, dates, actions or controls. design-system.md §11b.
+   */
+  bodySecondary: { fontFamily: fontFamily.sans, fontSize: 15, lineHeight: 22 },
   callout: { fontFamily: fontFamily.sansMedium, fontSize: 15, lineHeight: 20 },
   subhead: { fontFamily: fontFamily.sansMedium, fontSize: 14, lineHeight: 20 },
   footnote: { fontFamily: fontFamily.sans, fontSize: 13, lineHeight: 18 },

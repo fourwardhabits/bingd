@@ -4,6 +4,7 @@ import {
   isWatchActivity,
   tailFor,
   verbFor,
+  watchLabel,
   type ActivityType,
 } from './activity';
 
@@ -253,5 +254,18 @@ describe('the standardised subheading', () => {
     expect(
       activityMetadata({ kind: 'season', certification: null, episodeCount: 1, genres: [] }),
     ).toBe('1 episode');
+  });
+});
+
+describe('watchLabel', () => {
+  it('says nothing for a first viewing and numbers every later one', () => {
+    expect(watchLabel(null)).toBeNull();
+    expect(watchLabel(1)).toBeNull();
+    expect(watchLabel(2)).toBe('2nd watch');
+    expect(watchLabel(3)).toBe('3rd watch');
+    expect(watchLabel(4)).toBe('4th watch');
+    expect(watchLabel(11)).toBe('11th watch');
+    expect(watchLabel(21)).toBe('21st watch');
+    expect(watchLabel(112)).toBe('112th watch');
   });
 });

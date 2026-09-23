@@ -1,5 +1,6 @@
 import type { ArchiveText } from './archive';
-import { bucketFor, correlationKey, displayName, normalise } from './letterboxd';
+import { correlationKey, displayName, normalise } from './letterboxd';
+import * as letterboxd from './letterboxd';
 import { REAL_EXPORT } from './__fixtures__/real-export';
 
 /** The day after the real export was taken, so its one diary date is in range. */
@@ -21,30 +22,13 @@ const find = (result: ReturnType<typeof run>, name: string) =>
 // The locked star policy
 // ---------------------------------------------------------------------------
 
-describe('bucketFor', () => {
-  it('puts 3.5 in "I liked it"', () => {
-    // The founder's decision, and the boundary most likely to be revisited. bingd's top
-    // bucket is labelled "I liked it", not "I loved it", and 3.5 of 5 is liking something.
-    expect(bucketFor(3.5)).toBe('loved');
-  });
-
-  it.each([
-    [5, 'loved'],
-    [4.5, 'loved'],
-    [4, 'loved'],
-    [3.5, 'loved'],
-    [3, 'fine'],
-    [2.5, 'fine'],
-    [2, 'not_for_me'],
-    [1.5, 'not_for_me'],
-    [1, 'not_for_me'],
-    [0.5, 'not_for_me'],
-  ])('maps %s stars to %s', (rating, bucket) => {
-    expect(bucketFor(rating)).toBe(bucket);
-  });
-
-  it('has no bucket for an unrated film', () => {
-    expect(bucketFor(null)).toBeNull();
+/**
+ * The canonical rule (founder, 2026-09-21): a Letterboxd star never becomes a bingd bucket.
+ * The mapping function no longer exists, so nothing in the importer can call it.
+ */
+describe('a star is never a bucket', () => {
+  it('exports no star-to-bucket mapping', () => {
+    expect('bucketFor' in letterboxd).toBe(false);
   });
 });
 
@@ -66,9 +50,10 @@ describe('the founder’s real export', () => {
     });
   });
 
-  it('splits the ratings nine, eight and five', () => {
-    const count = (bucket: string) => result.watched.filter((t) => t.bucket === bucket).length;
-    expect([count('loved'), count('fine'), count('not_for_me')]).toEqual([9, 8, 5]);
+  it('keeps all twenty-two stars as provenance and turns none of them into a bucket', () => {
+    // Founder, 2026-09-21: a star is never a bingd opinion.
+    expect(result.watched.filter((t) => t.rating !== null)).toHaveLength(22);
+    expect(result.watched.every((t) => t.bucket === null)).toBe(true);
   });
 
   it('gives exactly one film a watch date, and it is the diary’s', () => {
@@ -190,7 +175,8 @@ describe('a film rated but absent from watched.csv', () => {
         'Date,Name,Year,Letterboxd URI,Rating\n2026-09-11,Shrek,2001,https://boxd.it/29zi,4\n',
     });
     expect(result.watched).toHaveLength(1);
-    expect(result.watched[0]!.bucket).toBe('loved');
+    expect(result.watched[0]!.rating).toBe(4);
+    expect(result.watched[0]!.bucket).toBeNull();
   });
 });
 
@@ -310,7 +296,7 @@ describe('when ratings.csv and a diary entry disagree', () => {
     });
 
     expect(result.watched[0]!.rating).toBe(4.5);
-    expect(result.watched[0]!.bucket).toBe('loved');
+    expect(result.watched[0]!.bucket).toBeNull();
   });
 });
 

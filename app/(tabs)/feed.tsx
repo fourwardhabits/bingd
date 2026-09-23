@@ -19,7 +19,13 @@ import { unreadCount, useNotifications } from '@/features/notifications/use-noti
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
-import { metadataFor, relativeTime, tailFor, verbFor } from '@/features/feed/activity';
+import {
+  metadataFor,
+  relativeTime,
+  tailFor,
+  verbFor,
+  watchLabel,
+} from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
@@ -964,6 +970,7 @@ export default function FeedScreen() {
                         ? goalAchievement(event.goal.category, event.goal.target)
                         : metadataFor(event)
                   }
+                  watchLabel={watchLabel(event.watchNumber)}
                   score={event.score}
                   bucket={event.bucket}
                   note={event.note?.text ?? null}

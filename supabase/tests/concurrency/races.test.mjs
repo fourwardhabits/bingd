@@ -18,8 +18,12 @@ import awardRevocation from './races/award-revocation.mjs';
 import goalCompletion from './races/goal-completion.mjs';
 import commentMention from './races/comment-mention.mjs';
 import seriesWatchlist from './races/series-watchlist.mjs';
+import listMove from './races/list-move.mjs';
+import listAdd from './races/list-add.mjs';
 import welcomeEmail from './races/welcome-email.mjs';
 import releaseAwareness from './races/release-awareness.mjs';
+import watchHistory from './races/watch-history.mjs';
+import scaleHardening from './races/scale-hardening.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -58,6 +62,10 @@ awardRevocation();
 goalCompletion();
 commentMention();
 seriesWatchlist();
+watchHistory();
+listMove();
+listAdd();
 welcomeEmail();
 releaseAwareness();
+scaleHardening();
 stress();

@@ -14,6 +14,10 @@ import {
   detectPlatform,
   handleFromPath,
   installLabel,
+  listDisplay,
+  listIdFromPath,
+  listItemsRequest,
+  listViewRequest,
   posterUrl,
   profileContextRequest,
   profileDisplay,
@@ -340,6 +344,41 @@ describe('titleIdFromPath', () => {
   });
 });
 
+describe('listIdFromPath', () => {
+  const id = '0f9c1e2a-3b4c-4d5e-8f60-112233445566';
+
+  it('takes a uuid directly under /lists/', () => {
+    assert.equal(listIdFromPath(`/lists/${id}`), id);
+    assert.equal(listIdFromPath(`/lists/${id}/`), id);
+  });
+
+  it('leaves /lists itself as the generic install page', () => {
+    // The app's My lists screen lives at this path and is management rather than an
+    // object. Nobody shares it, and a web page for it would be a page about nothing.
+    assert.equal(listIdFromPath('/lists'), null);
+    assert.equal(listIdFromPath('/lists/'), null);
+  });
+
+  it('leaves the app-only See-all route to the generic page too', () => {
+    // `/lists/by/<uuid>` is inside the claim so a universal link opens the app, and the
+    // web answers with the install card rather than with a list that does not exist.
+    assert.equal(listIdFromPath(`/lists/by/${id}`), null);
+  });
+
+  it('refuses anything that is not a uuid, including an encoded traversal', () => {
+    for (const path of [
+      '/lists/1',
+      `/lists/${id}x`,
+      '/lists/../../x',
+      '/lists/%2e%2e%2f%2e%2e%2fadmin',
+      `/lists/${id}?select=*`,
+      `/lists/${id.toUpperCase()}`,
+    ]) {
+      assert.equal(listIdFromPath(path), null, path);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The app link
 // ---------------------------------------------------------------------------
@@ -350,6 +389,11 @@ describe('appLinkFor', () => {
     // preference: a same-domain navigation is deliberately not handed to the app.
     assert.equal(appLinkFor('bingd', 'i', TOKEN), `bingd://i/${TOKEN}`);
     assert.equal(appLinkFor('bingd', 'u', 'saisuraj'), 'bingd://u/saisuraj');
+  });
+
+  it('opens a list, which is the button on the list page', () => {
+    const id = '0f9c1e2a-3b4c-4d5e-8f60-112233445566';
+    assert.equal(appLinkFor('bingd', 'lists', id), `bingd://lists/${id}`);
   });
 
   it('returns null rather than a bare scheme when there is nothing to open', () => {
@@ -785,6 +829,102 @@ describe('profileDisplay', () => {
     for (const bad of [null, undefined, {}, { display_name: 'Ada' }]) {
       assert.equal(profileDisplay(bad), null);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lists
+// ---------------------------------------------------------------------------
+
+describe('the list requests', () => {
+  it('address the two anon RPCs, and refuse an id that is not a uuid', () => {
+    assert.equal(listViewRequest(SUPA, UUID), `${SUPA}/rest/v1/rpc/list_view`);
+    assert.equal(listItemsRequest(SUPA, UUID), `${SUPA}/rest/v1/rpc/list_items_page`);
+
+    // Belt over the braces `listIdFromPath` already provides. The id travels in the POST
+    // body rather than in the URL, so this is about refusing to make the request at all
+    // for something that cannot be a list.
+    assert.equal(listViewRequest(SUPA, 'not-a-uuid'), null);
+    assert.equal(listItemsRequest(SUPA, `${UUID}&select=*`), null);
+    assert.equal(listViewRequest('https://evil.example/x', UUID), null);
+    assert.equal(listItemsRequest(null, UUID), null);
+  });
+});
+
+describe('listDisplay', () => {
+  const base = {
+    title: 'Best breakup movies',
+    description: 'Ones that actually help.',
+    order_style: 'ranked',
+    item_count: 14,
+  };
+
+  it('reads the title, description and the facts line', () => {
+    const shown = listDisplay({ ...base, owner: null });
+    assert.equal(shown.title, 'Best breakup movies');
+    assert.equal(shown.description, 'Ones that actually help.');
+    assert.equal(shown.facts, '14 titles · numbered');
+    assert.equal(shown.count, 14);
+  });
+
+  it('drops "numbered" for an unranked list and singularises one title', () => {
+    const shown = listDisplay({ ...base, order_style: 'unranked', item_count: 1, owner: null });
+    assert.equal(shown.facts, '1 title');
+  });
+
+  it('links the attribution for a public-profile owner', () => {
+    const shown = listDisplay({
+      ...base,
+      owner: { username: 'maya', display_name: 'Maya Chen', profile_visible: true },
+    });
+    assert.deepEqual(shown.owner, { name: 'Maya Chen', handle: '@maya', href: '/u/maya' });
+  });
+
+  it('never links a private account, which is the whole of the link-only rule', () => {
+    // §F.2: link-only grants one list. A `/u/` link from here would be the path into
+    // private content that the object-level share deliberately does not buy.
+    const shown = listDisplay({
+      ...base,
+      owner: { username: 'maya', display_name: 'Maya Chen', profile_visible: false },
+    });
+    assert.equal(shown.owner.href, null);
+    assert.equal(shown.owner.name, 'Maya Chen');
+    assert.equal(shown.owner.handle, '@maya');
+  });
+
+  it('refuses to build an href from a handle that is not one', () => {
+    // The handle comes from the server rather than from the URL, so it is not attacker
+    // controlled in the ordinary sense — and it is still the one value on this page that
+    // becomes a link, which is exactly the class `posterUrl` is narrowed for.
+    for (const username of ['../admin', 'MAYA', 'a', 'maya maya', 'maya"onerror=x']) {
+      const shown = listDisplay({
+        ...base,
+        owner: { username, display_name: 'X', profile_visible: true },
+      });
+      assert.equal(shown.owner.href, null, username);
+    }
+  });
+
+  it('falls back to the handle for a nameless owner, never the other way round', () => {
+    const shown = listDisplay({
+      ...base,
+      owner: { username: 'maya', display_name: '   ', profile_visible: true },
+    });
+    assert.equal(shown.owner.name, 'maya');
+  });
+
+  it('answers null without a title, which is the row not existing', () => {
+    for (const bad of [null, undefined, {}, { title: '   ' }, 'nope']) {
+      assert.equal(listDisplay(bad), null);
+    }
+  });
+
+  it('keeps an XSS title as text rather than refusing it', () => {
+    // It is a legal list name. What makes it inert is that `page.mjs` writes it with
+    // `textContent` and never with `innerHTML` — this function's job is to hand over
+    // the string unchanged, not to sanitise it into something else.
+    const nasty = '<img src=x onerror=alert(1)>';
+    assert.equal(listDisplay({ ...base, title: nasty, owner: null }).title, nasty);
   });
 });
 

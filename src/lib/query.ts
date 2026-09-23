@@ -15,6 +15,12 @@ export const queryKeys = {
   myProfile: (userId: string) => ['my-profile', userId] as const,
   collection: (userId: string) => ['collection', userId] as const,
   rankings: (userId: string, category: string) => ['rankings', userId, category] as const,
+  /**
+   * The reader's own score for every ranked title — Search's row badges read it.
+   * A named key, so the post-ranking invalidation cannot forget it again (founder QA,
+   * 2026-09-21: a just-ranked Black Panther showed the dashed Rank badge in Search).
+   */
+  myScores: (userId: string) => ['my-scores', userId] as const,
   // The feed is an infinite query (feed pagination, 2026-09-04): its cursor is a *page
   // param*, which React Query stores inside the entry itself. A cursor in the key as well
   // would give every page its own cache entry, and the list would be one page long.
@@ -32,6 +38,18 @@ export const queryKeys = {
   // one's job — and `myProfile` above is keyed this way for exactly the reason given
   // in its own comment. One argument is a cheaper guarantee than a lifecycle.
   logState: (userId: string, mediaItemId: string) => ['log-state', userId, mediaItemId] as const,
+  // One title's viewings and placements, for the Watch History screen (§J.2). Keyed by
+  // the account for the reason `logState` records above: a watch date is owner-only at
+  // every profile visibility (PRD §22), so an entry holding one must not be reachable
+  // from a second account signed in on the same device.
+  watchHistory: (userId: string, mediaItemId: string) =>
+    ['watch-history', userId, mediaItemId] as const,
+  // Just the integer the title page's context line draws. Its own key, not a slice of
+  // `watchHistory`, because the line renders on every title page visit and the history
+  // is a list — sharing a key would put a twenty-row diary on the wire to draw four
+  // words, and the `head: true` count sends no rows at all.
+  watchCount: (userId: string, mediaItemId: string) =>
+    ['watch-count', userId, mediaItemId] as const,
   // Deliberately separate from `title`: the comparison card reads three columns, and
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.
@@ -78,6 +96,33 @@ export const queryKeys = {
   // that prefix would answer "no longer new" the moment the first film was placed and
   // evict the user from the flow they were in the middle of.
   tasteOnboarding: (userId: string) => ['taste-onboarding', userId] as const,
+
+  // ---------------------------------------------------------------------------
+  // Lists (20261010000100).
+  //
+  // Two branches, deliberately not one. `myLists` is the caller's own management
+  // screen and holds every visibility; `profileLists` is the public shelf and holds
+  // only what a visitor would see — for the owner as well (§Q.4). Sharing a prefix
+  // would let an invalidation after creating a *private* list refill the profile
+  // shelf from a read that answered a different question, and keeping the two
+  // distinguishable is the whole reason the shelf is public-only.
+  myLists: (userId: string) => ['my-lists', userId] as const,
+  profileLists: (ownerId: string, limit: number) => ['profile-lists', ownerId, limit] as const,
+  // One list's header. Not keyed by viewer: the server answers per caller, and the
+  // client clears the whole cache on sign-out (session.tsx) — the same treatment
+  // `title` has.
+  list: (listId: string) => ['list', listId] as const,
+  // Separate from `list` for the reason `comparisonCard` is separate from `title`: a
+  // different shape read by a different query, and one key over two shapes is a race
+  // about which ran first. It is also an infinite query, so its cursor is a page param
+  // and deliberately not in the key.
+  listItems: (listId: string) => ['list-items', listId] as const,
+  // "You've seen X of N", over the whole list rather than over the loaded pages. Its
+  // own key because logging a *watch* moves it while nothing about the list changed.
+  listProgress: (listId: string) => ['list-progress', listId] as const,
+  // What the Add-to-list sheet reads: the caller's lists plus a membership flag for
+  // one title. Keyed by the title, because that flag is the whole answer.
+  listsForTitle: (mediaItemId: string) => ['lists-for-title', mediaItemId] as const,
 } as const;
 
 /**

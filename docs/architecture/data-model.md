@@ -605,7 +605,18 @@ create table list_items (
 );
 ```
 
-**`source` is what makes the three-list limit measurable.** PRD §12 requires all lists to import regardless of the limit, and PRD §28 requires the ceiling metric to count in-app creation only. The limit check in `create_list` counts `where source = 'in_app'`, so an importer with 15 lists is not blocked by their own history — and the monetization signal is not washed out by it.
+**`source` is what makes the hypothetical three-list ceiling measurable.** PRD §12 requires all lists to import regardless of any limit, and the ceiling metric counts in-app creation only — so an importer with 15 lists is not blocked by their own history, and the monetization signal is not washed out by it.
+
+> **Corrected 2026-09-20 (Lists v1, `20261010000100`).** This paragraph used to say "the limit check in `create_list` counts `where source = 'in_app'`", which named a function that did not exist and a limit that is not enforced. Both halves are now true, and they are worth stating separately:
+>
+> - **`create_list` exists**, and it does count `where source = 'in_app'` — but it *returns* that count as `in_app_count_before` rather than refusing on it. The three-list cap is **hypothetical**: measured on every creation through `list_created.would_have_exceeded_3_lists`, never enforced, never shown, and no client branches on it (`lists-prd.md` §P.1, §M).
+> - **The one enforced list count is `lists.max_per_user`, at 100**, a sanity ceiling rather than a tier. `lists.base_free_limit = 3` stays in `app_config` only because the measurement is defined against it.
+
+**Altered by `20261010000100`.** `lists` gains `updated_at` (bumped by every writer, item changes included, and the My lists sort key), `order_style` (`ranked` / `unranked`, deciding only whether numbers are *drawn* — toggling it never reorders anything), `hidden_at` (a moderation hide, which outranks every visibility level and is still visible to the owner), and length checks on `title` and `description`. `list_items` gains a **deferrable** `unique (list_id, position)`, which is what lets `move_list_item` renumber a run of rows in a single statement.
+
+`position` is a stored integer **with gaps**: a removal leaves one behind on purpose, because every reader draws the read-time ordinal (1…N) instead. Renumbering on every removal would be a write proportional to the list for no visible gain.
+
+**One predicate decides every list read.** `_list_readable(list, viewer)` is `lists-prd.md` §F's matrix in one place, granted to nobody, and the two readers that predate it — `list_by_id` and `list_items_by_list` — were redefined onto it rather than left to disagree. The `lists_read` select policy keeps its shape (owner, or `public` and `can_i_view(owner)`) and gains `hidden_at is null`; it still never admits `link`, which is what keeps link-only lists un-enumerable.
 
 ```sql
 create table feed_events (

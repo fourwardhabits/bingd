@@ -27,6 +27,7 @@ import { invalidateAfterCollectionChange } from '@/features/collection/invalidat
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { compactName } from '@/lib/titles';
+import { movementSentence } from '@/features/watch-history/watch-history';
 import { hapticDecision, hapticSuccess } from '@/ui/haptics';
 import { useReducedMotion, useReducedMotionState } from '@/ui/motion';
 import { usePressScale } from '@/ui/press';
@@ -44,6 +45,7 @@ import {
   rankRebucket,
   rankSkip,
   rankStart,
+  type PlacedMovement,
   type SessionStep,
 } from './session';
 import { TitleRecallSheet } from './TitleRecallSheet';
@@ -84,6 +86,19 @@ export type RankingSubject = {
    * session over the ranking that is already there.
    */
   mode?: 'start' | 'rebucket' | 'rerank' | 'again';
+  /**
+   * The viewing this session is a re-check of (20261005000100, §K).
+   *
+   * Set only by *Log another watch*, which since T3b records the watch FIRST and offers
+   * the re-check second. Passing the event's id is what makes the two halves reach one
+   * feed activity: `_rank_finalize` finds the post `log_rewatch` already made and
+   * updates its score, rather than posting a second "watched again" for one viewing.
+   *
+   * Absent everywhere else, including on an installed client — which has never heard of
+   * a watch event, and whose `mode: 'again'` the server answers with an **undated** one
+   * rather than a fabricated date (§D.6 path 15).
+   */
+  watchEventId?: string | null;
 };
 
 export type RankingSheetProps = {
@@ -219,6 +234,23 @@ export function RankingSheet({
       onShown={onShown}
     />
   );
+}
+
+/**
+ * **A first placement left before the end is kept, so Rank can resume it** (founder, final
+ * UI simplification 2026-09-21).
+ *
+ * Closing a first placement (`mode` absent or `start`) leaves its `ranking_sessions` row:
+ * the title is then an unfinished native placement, and its Rank / `+` goes back into this
+ * session — `rank_start` resumes the same-bucket session with the comparison on screen and
+ * every answer, and never opens a second one. A different bucket restarts it server-side.
+ *
+ * A re-rank, a rebucket or a re-check is still cancelled on close: those sit over a
+ * placement that already exists, and leaving one means *keep what I had*, not *remember
+ * where I was*.
+ */
+function keepsSession(subject: Pick<RankingSubject, 'mode'>): boolean {
+  return subject.mode === undefined || subject.mode === 'start';
 }
 
 /** A dismissing sheet answers nothing. */
@@ -568,7 +600,13 @@ function Session({
             rankRebucket(id, bucket, operationId)
         : subject.mode === 'rerank' || subject.mode === 'again'
           ? (id: string, bucket: BucketId, operationId: string) =>
-              rankAgain(id, bucket, operationId, newWatch)
+              // 20261005000100: the viewing this re-check is about, when the caller has
+              // already logged one. It is what makes the rewatch and its re-check reach
+              // ONE feed activity instead of two (§K) — `_rank_finalize` finds the post
+              // `log_rewatch` made and updates its score rather than writing a second.
+              // Null on every other path, and on an installed client, where the server
+              // supplies an undated event instead of inventing a date.
+              rankAgain(id, bucket, operationId, newWatch, subject.watchEventId ?? null)
           : (id: string, bucket: BucketId, operationId: string) =>
               rankStart(id, bucket, operationId);
     const attempt = () =>
@@ -615,10 +653,9 @@ function Session({
       }
 
       // Dismissed while the session was still opening, so nothing on screen ever learned
-      // its id. Cancelling it here is the only chance: leave it and the next rank_start
-      // for this title resumes it mid-search, with no explanation for why the user is
-      // being asked again.
-      if (next.state === 'comparing') void rankCancel(next.sessionId);
+      // its id. A first placement keeps it — it may be a resumed session carrying answers
+      // (`keepsSession`); a re-rank's is cancelled, or the next open would resume it.
+      if (next.state === 'comparing' && !keepsSession(subject)) void rankCancel(next.sessionId);
     });
 
     return () => {
@@ -665,7 +702,7 @@ function Session({
     openSession.current = null;
     // Already gone reads as success, so this is safe when the server finalised the session
     // under a request that was still in flight.
-    if (sessionId) await rankCancel(sessionId);
+    if (sessionId && !keepsSession(subject)) await rankCancel(sessionId);
     onClose();
   };
 
@@ -731,6 +768,7 @@ function Session({
           <Reveal
             score={step.score}
             position={step.position}
+            movement={step.movement}
             category={step.category}
             bucket={step.bucket}
             subjectId={subject.id}
@@ -1464,6 +1502,7 @@ function Card({
 function Reveal({
   score,
   position,
+  movement,
   category,
   bucket,
   subjectId,
@@ -1474,6 +1513,8 @@ function Reveal({
 }: {
   score: number;
   position: number;
+  /** Where it was before, on a re-ranking; null on a first one. */
+  movement?: PlacedMovement | null;
   category: string;
   bucket: string;
   subjectId: string;
@@ -1664,14 +1705,21 @@ function Reveal({
    * this line is allowed to make about them -- a season is ranked against other seasons
    * and never against its own series, so nothing here says "#7 show".
    */
-  const placement = showsOverall ? `#${position} in ${readableCategory}` : null;
+  /**
+   * **A re-ranking says where it went** (founder QA, 2026-09-21): *Moved from #8 → #2*,
+   * or *Still #2*, in the placement's own line. Private and exact at any depth (§E.2), so
+   * the top-ten rule does not apply to it — the reader asked where this title now sits
+   * relative to where it was, and the answer is the same kind of fact at #40 as at #4.
+   */
+  const moved = movement ? movementSentence(movement, position) : null;
+  const placement = moved ?? (showsOverall ? `#${position} in ${readableCategory}` : null);
 
   /**
    * `#6 Science Fiction · #7 Action`, and only when the overall placement is not being
    * shown — see the rule above. Two at most, none worse than tenth, and still no
    * denominator: that is on the title page.
    */
-  const genreContext = showsOverall ? '' : genres.map(formatGenreRank).join('  ·  ');
+  const genreContext = showsOverall || moved ? '' : genres.map(formatGenreRank).join('  ·  ');
 
   /**
    * The whole placement, said once, for the summary the panel carries.
@@ -1756,6 +1804,7 @@ function Reveal({
             tone="secondary"
             style={styles.centre}
             accessibilityElementsHidden
+            testID={moved ? 'reveal-movement' : undefined}
           >
             {placement}
           </Text>

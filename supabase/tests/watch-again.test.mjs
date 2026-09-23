@@ -179,8 +179,20 @@ describe('one activity per watch, and none for a correction', () => {
       film,
       await op(),
     ]);
-    // One comparison answered, then the reader closes the sheet.
-    await one(t.db, `select rank_answer($1, $2, $3) as r`, [step.session_id, step.pivot, await op()]);
+    /**
+     * One comparison answered, then the reader closes the sheet.
+     *
+     * **The SUBJECT wins, and it has to** (20261004000100). `rankToCompletion` above
+     * answers every comparison against the film, so it sits at the bottom of the band —
+     * and the prior-anchored search opens on the neighbour directly above it. Answering
+     * for the opponent confirms the bottom, which is `lo >= hi` in one answer: the
+     * session finalises, and `rank_cancel` then has nothing to cancel ("no such ranking
+     * session"). That is §F.3's band-edge case working, not a defect.
+     *
+     * Answering for the subject moves it up, leaves the range open, and gives this test
+     * the mid-flight session it is actually about.
+     */
+    await one(t.db, `select rank_answer($1, $2, $3) as r`, [step.session_id, film, await op()]);
     await t.sql(`select rank_cancel($1)`, [step.session_id]);
 
     assert.equal(await events(film), 1);

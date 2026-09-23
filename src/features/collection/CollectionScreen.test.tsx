@@ -52,6 +52,8 @@ jest.mock('@/lib/supabase', () => ({
 /** Mutable so a test can arrive with `?medium=` the way See all does. */
 const mockParams: { medium?: string; show?: string } = {};
 const mockSetParams = jest.fn();
+/** Stable, so a navigation this screen makes can actually be asserted. */
+const mockPush = jest.fn();
 
 /** See the `useNavigation` stand-in below. */
 const mockTabPress: (() => void)[] = [];
@@ -76,7 +78,7 @@ jest.mock('expo-router', () => ({
   // Navigation does with it. `focused` is mutable because "already-selected" is the whole
   // of the contract.
   useNavigation: () => mockNavigation,
-  useRouter: () => ({ push: jest.fn(), setParams: mockSetParams }),
+  useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
   useLocalSearchParams: () => mockParams,
 }));
 
@@ -154,6 +156,7 @@ beforeEach(() => {
   delete mockParams.medium;
   delete mockParams.show;
   mockSetParams.mockClear();
+  mockPush.mockClear();
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
@@ -826,5 +829,107 @@ describe('re-tapping the Collection tab', () => {
         true,
       ),
     );
+  });
+});
+
+/**
+ * **Movies / TV / Lists** — Lists is a first-class mode of the one selector (founder QA,
+ * 2026-09-21), replacing the `My lists ›` link. Not a segment and not a bottom tab: in
+ * Lists mode the Watched / Watchlist tabs are not drawn, and the choice is remembered
+ * like the other two.
+ */
+describe('the Lists mode', () => {
+  const switchToLists = async (view: Awaited<ReturnType<typeof open>>) => {
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: 'Lists' }));
+  };
+
+  it('is offered beside Movies and TV, and replaces the old link', async () => {
+    const view = await open();
+    expect(view.queryByRole('button', { name: 'My lists' })).toBeNull();
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    view.getByRole('button', { name: 'TV' });
+    view.getByRole('button', { name: 'Lists' });
+  });
+
+  it('shows the lists in place, with no medium tabs and no push', async () => {
+    const view = await open();
+    await switchToLists(view);
+
+    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
+    expect(tab(view, 'Watched')).toBeNull();
+    expect(tab(view, 'Watchlist')).toBeNull();
+    expect(view.getByLabelText('Showing Lists')).toBeTruthy();
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'lists' });
+  });
+
+  it('reopens on Lists when that was the last choice', async () => {
+    // One render per test (the RNTL trap this file's neighbours document): the write is
+    // asserted above, and here the stored value is seeded as a restart would find it.
+    mockPrefStore[MEDIUM_KEY] = 'lists';
+    const view = await renderWithProviders(<CollectionScreen />);
+    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
+    expect(tab(view, 'Watched')).toBeNull();
+  });
+
+  it('is never a segment tab', async () => {
+    const view = await open();
+    expect(tab(view, 'Lists')).toBeNull();
+    expect(tab(view, 'My lists')).toBeNull();
+  });
+});
+
+/**
+ * **No long press and no per-row overflow on a Collection row** (§D, §Q.6, §Q.7).
+ *
+ * Long press already means three different things elsewhere in this app — recall in
+ * `RankingSheet`, report on a recommendation card, the reaction picker — and Collection
+ * rows have never had one. A fourth meaning discoverable only by accident is not a
+ * feature, and every Collection row is one tap from the title page, which owns the ⋯.
+ */
+describe('a Collection row', () => {
+  it('has no long press and no overflow control', async () => {
+    // List mode, so the rows draw their titles and this assertion has rows to be about.
+    // Poster is the default, and under it there is no text to wait for — the test would
+    // pass without ever having rendered a row.
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    // The view control's own state, which is how the rest of this file establishes that
+    // the list actually drew — a row's text lives inside FlashList and is not reliably
+    // queryable from here.
+    await waitFor(() =>
+      expect(view.getByLabelText('List view').props.accessibilityState?.selected).toBe(true),
+    );
+
+    // Every pressable on the screen, not only the rows: the claim is that Collection has
+    // no long press *anywhere*, and enumerating only the rows would miss the next
+    // control somebody adds one to.
+    for (const node of view.queryAllByRole('button', { includeHiddenElements: true })) {
+      expect(node.props.onLongPress).toBeUndefined();
+    }
+    expect(view.queryByLabelText(/more options/i)).toBeNull();
+  });
+});
+
+/**
+ * Founder, final UI simplification 2026-09-21: on the Collection wall an unfinished
+ * ranking and an untouched import look the same — no chip, no "ranking not finished" —
+ * and only a ranked title carries its score.
+ */
+describe('the ranking state on the Collection wall', () => {
+  it('draws an unfinished ranking exactly like an unranked import', async () => {
+    mockTables.user_media = [
+      { ...watched('abandoned', 'movie'), bucket: 'fine' },
+      { ...watched('imported', 'movie'), bucket: null },
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText(/^Film abandoned/)).toBeTruthy());
+    expect(view.getByLabelText(/^Film imported/)).toBeTruthy();
+    expect(view.queryByLabelText(/ranking not finished/)).toBeNull();
+    expect(view.queryAllByText('Finish', { includeHiddenElements: true })).toHaveLength(0);
   });
 });

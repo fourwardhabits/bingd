@@ -29,6 +29,10 @@ import {
   destinationFor,
   handleFromPath,
   installLabel,
+  listDisplay,
+  listIdFromPath,
+  listItemsRequest,
+  listViewRequest,
   posterUrl,
   profileContextRequest,
   profileDisplay,
@@ -387,6 +391,224 @@ function titlePage(cfg) {
   });
 }
 
+/**
+ * `/lists/<id>` — a public or link-only list, rendered for somebody with no account.
+ *
+ * ---------------------------------------------------------------------------
+ * THIS IS THE ONE PAGE ON THIS SITE THAT SHOWS SOMEBODY'S OWN WORDS
+ * ---------------------------------------------------------------------------
+ *
+ * A list title and description are typed by a person, which makes this the place the
+ * file's opening rule has to hold absolutely: **every user string is set with
+ * `textContent`**, and no `innerHTML` path touches a title, a description or a name.
+ * The poster URLs go through `posterUrl`, which pins them to TMDB's own shape, and the
+ * one href on the page — the owner's handle — is built by `listDisplay` from an
+ * already-validated alphabet and is null for a private account.
+ *
+ * ---------------------------------------------------------------------------
+ * ZERO ROWS KEEPS THE GENERIC PAGE
+ * ---------------------------------------------------------------------------
+ *
+ * Private, deleted, hidden and suspended all read the same from out here, because
+ * `_list_readable(id, null)` answers them all the same way. The page that results still
+ * says what bingd is and still offers the install: the list is an improvement on that
+ * page, never a precondition for it.
+ *
+ * The progress line is deliberately **absent**. `list_viewer_progress` is not granted to
+ * anon at all, and "You've seen X of N" is a fact about a reader this page does not
+ * have.
+ */
+function listsPage(cfg) {
+  const id = listIdFromPath(location.pathname);
+  const platform = platformNow();
+
+  link('open-app', appLinkFor(cfg.distribution?.app?.scheme, 'lists', id), 'Open in bingd.');
+  paintInstall(cfg, platform);
+
+  if (!id) return;
+
+  // Fire and forget, and every failure swallowed: a metric must never be the reason
+  // somebody cannot read the page they were sent. The server records only when the list
+  // is readable by an anonymous viewer, so this is not a probe either.
+  recordListOpen(cfg, id, platform);
+
+  void rpcOne(listViewRequest(cfg.supabaseUrl, id), cfg.supabaseAnonKey, { p_list_id: id }).then(
+    (row) => {
+      const display = listDisplay(row);
+      if (!display) return;
+
+      paintList(display);
+      void rpcRows(listItemsRequest(cfg.supabaseUrl, id), cfg.supabaseAnonKey, {
+        p_list_id: id,
+        p_after_position: null,
+        p_limit: 100,
+      }).then((items) => paintListItems(items, display.count));
+    },
+  );
+}
+
+/** Reports that a list's web page was opened. See `recordOpen` for the whole argument. */
+function recordListOpen(cfg, listId, platform) {
+  const { supabaseUrl, supabaseAnonKey } = cfg;
+  if (!supabaseUrl || !supabaseAnonKey || !listId) return;
+
+  try {
+    fetch(`${supabaseUrl}/rest/v1/rpc/record_list_open`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ p_list_id: listId, p_platform: platform }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* no network, no metric, no problem */
+  }
+}
+
+/**
+ * One RPC, answered or not.
+ *
+ * `readOne`'s contract with a POST body: every failure is one answer, null, and the page
+ * keeps the generic copy it was built with. PostgREST returns a scalar function's result
+ * as the body itself rather than as a row array, which is why this does not index.
+ */
+async function rpcOne(url, anonKey, body) {
+  if (!url || !anonKey) return null;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return Array.isArray(payload) ? (payload[0] ?? null) : payload;
+  } catch {
+    return null;
+  }
+}
+
+/** The same, for a set-returning function. An empty array on every failure. */
+async function rpcRows(url, anonKey, body) {
+  const payload = await rpcOne(url, anonKey, body);
+  if (Array.isArray(payload)) return payload;
+  return payload ? [payload] : [];
+}
+
+/** The list's own header block. Every string through `textContent`. */
+function paintList(display) {
+  text('list-title', display.title);
+
+  if (display.owner) {
+    /**
+     * A link **only** for a public profile.
+     *
+     * For a private one the same words are drawn into a different element — a `span`
+     * that is not an anchor at all — which is the §F.2 rule made structural rather than
+     * conditional. The decision itself is `listDisplay`'s, in `router.mjs`, where the
+     * tests can reach it.
+     */
+    if (display.owner.href) {
+      text('list-owner-name', display.owner.name);
+      text('list-owner-handle', display.owner.handle);
+      link('list-owner-link', display.owner.href);
+    } else {
+      text('list-owner-plain', `${display.owner.name} ${display.owner.handle}`);
+      show('list-owner-plain', true);
+    }
+    show('list-owner', true);
+  }
+
+  if (display.description) {
+    text('list-description', display.description);
+    show('list-description', true);
+  }
+
+  text('list-facts', display.facts);
+  show('list-facts', true);
+
+  show('generic-subject', false);
+  show('list', true);
+}
+
+/**
+ * The rows: a number, a poster, a name and a year.
+ *
+ * No seen marks, no bookmarks and **no scores** — the same rule the app's rows follow
+ * (§F.11), and out here there is not even a viewer to have an opinion.
+ *
+ * Built with `createElement` and `textContent` rather than a template string, which is
+ * the whole reason this page is safe to give somebody else's words to.
+ */
+function paintListItems(rows, total) {
+  const container = document.getElementById('list-items');
+  if (!container || !Array.isArray(rows) || rows.length === 0) return;
+
+  for (const row of rows) {
+    const name = typeof row?.title === 'string' ? row.title.trim() : '';
+    if (!name) continue;
+
+    const item = document.createElement('li');
+    item.className = 'list-item';
+
+    const ordinal = document.createElement('span');
+    ordinal.className = 'list-item-ordinal';
+    ordinal.textContent = Number.isInteger(row.ordinal) ? String(row.ordinal) : '';
+    item.append(ordinal);
+
+    const art = posterUrl(row.poster_path);
+    if (art) {
+      const img = document.createElement('img');
+      img.className = 'list-item-art';
+      img.loading = 'lazy';
+      img.alt = '';
+      img.src = art;
+      item.append(img);
+    }
+
+    const lines = document.createElement('div');
+    lines.className = 'list-item-lines';
+
+    const label = document.createElement('p');
+    label.className = 'list-item-name';
+    // A season's own row already says the show, because `list_items_page` returns the
+    // parent title and the app compacts it — out here the plain title is what the
+    // server sent, and it is set as text either way.
+    label.textContent =
+      row.kind === 'season' && typeof row.parent_title === 'string' && row.parent_title
+        ? `${row.parent_title}, ${name}`
+        : name;
+    lines.append(label);
+
+    if (Number.isInteger(row.year)) {
+      const year = document.createElement('p');
+      year.className = 'list-item-year';
+      year.textContent = String(row.year);
+      lines.append(year);
+    }
+
+    item.append(lines);
+    container.append(item);
+  }
+
+  show('list-items', true);
+
+  // "See all 400 in the app" only when there genuinely are more. The first page is 100,
+  // which is the server's cap.
+  if (total > rows.length) {
+    text('list-more', `See all ${total} in the app`);
+    show('list-more', true);
+  }
+}
+
 /** Everything else that reached a Bingd route: install, and nothing to open. */
 function genericPage(cfg) {
   paintInstall(cfg, platformNow());
@@ -396,6 +618,7 @@ const PAGES = {
   invite: invitePage,
   profile: profilePage,
   title: titlePage,
+  list: listsPage,
   generic: genericPage,
 };
 

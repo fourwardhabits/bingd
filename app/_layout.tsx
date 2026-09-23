@@ -287,9 +287,24 @@ function Navigation() {
                 name="person/[id]"
                 options={{ headerShown: true, title: ROOT_SCREEN_TITLES['person/[id]'] }}
               />
+              {/* The My lists management screen, reached from Collection's title row
+                and from `Manage ›` on the owner's own profile. Declared for the same
+                reason its neighbours are: on iOS a route's title is the back label of
+                whatever is pushed on top of it, and an undeclared route's is its
+                directory name — which here would spell `lists` over the top of a list. */}
+              <Stack.Screen
+                name="lists/index"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/index'] }}
+              />
               <Stack.Screen
                 name="lists/[id]"
                 options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/[id]'] }}
+              />
+              {/* `See all` from a profile's Lists shelf. The screen names the owner on
+                its own header once the param resolves; this is the fallback until then. */}
+              <Stack.Screen
+                name="lists/by/[userId]"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/by/[userId]'] }}
               />
               {/* Where a comment or reply notification lands. Declared here rather than
                 left to the file tree so it carries `ROOT_SCREEN_TITLES` like its

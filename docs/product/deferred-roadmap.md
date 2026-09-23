@@ -2102,13 +2102,31 @@ specifically. There was nothing to bring to parity.
 
 ## 50. Lists — private organisation and public curation
 
-**Status: designed, approved and PARKED, 2026-09-19.** Still the highest-priority deferred
-feature. [`lists-prd.md`](./lists-prd.md) is build-ready: scope, data model, privacy matrix,
-UX, analytics, QA and a six-PR sequence. **Nothing is built** — no migration, no client, no
-PR, no deploy. The `lists` and `list_items` tables from `20260813000800` are deployed and
-have no writer.
+**Status: BUILT on `feat/lists-v1`, 2026-09-20. Awaiting integration, deploy and device
+QA.** [`lists-prd.md`](./lists-prd.md) is implemented as specified — the §F privacy
+matrix, the §I hybrid IA, the §M analytics, the public web page and the link-preview
+Function. What has **not** happened: the migration reaching any database, any OTA, and the
+device QA of §N.
 
-**Unparks after** Watch History T1–T4 and the post-foundation hardening/scalability pass.
+This supersedes the previous status ("designed, approved and PARKED, nothing is built").
+The feature was parked behind Watch History T1–T4 and the post-foundation hardening pass;
+it was built ahead of that on the founder's instruction, in a worktree kept separate from
+Watch History. The sequencing note is kept below because it still decides when it *ships*.
+
+**What landed, against §O's six PRs:**
+
+| PR | State |
+|---|---|
+| **L1** backend | `20261010000100`: the §E alters, `_list_readable`, the redefined `list_by_id` / `list_items_by_list`, every writer and reader, `list_web_opens`, the `app_config` keys, `hide_list` / `unhide_list`. SQL suite in `supabase/tests/lists.test.mjs` |
+| **L2** make and edit | `app/lists/index.tsx`, the real `app/lists/[id].tsx`, `My lists ›` on Collection's title row, `Title ⋯ → Add to list…`, the New-list and Add-titles sheets, edit mode with move controls, Share with the consent prompt, the Settings → Privacy line, and every §M event including `my_lists_opened.entry` |
+| **L3** reading others' | the public-only Profile shelf with `Manage ›` and the **pushed** See-all, both attribution states, seen marks and progress for viewer and owner alike, row bookmarks, the bulk "my Watchlist", Report |
+| **L4** web page | `listIdFromPath`, `appLinkFor` + `lists`, the render with the attribution rule, `record_list_open`, router tests |
+| **L5** previews | `functions/lists/[id].js` — `list_preview`, generic fallback, five-minute cache, and the owner named only for a public profile |
+| **L6** docs | this entry, `data-model.md` §6, PRD §8 and §20, `web-deployment.md`, `analytics.md`. The PostHog tiles are the remaining half and need the events live first |
+
+**Still ships after** Watch History T1–T4 and the post-foundation hardening/scalability
+pass. Building it early does not move that: the release order is a founder decision about
+what the beta cohort meets next, not about what exists on a branch.
 
 **The navigation question was settled on 2026-09-19 (founder), and it went the other way
 from the PRD's first draft.** **Collection owns list management; the Profile owns public

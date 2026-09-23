@@ -659,6 +659,26 @@ const styles = `
         color: var(--maroon);
       }
 
+      /* ---------------------------------------------------------------------
+         A list.
+
+         The only route that renders somebody else's content, so it is also the
+         only block here that has to be legible at the length a person can
+         actually type: a 100-character title and a 1000-character description.
+         Both wrap and neither is clamped — a list somebody shared should be
+         readable, and truncating the description would hide the sentence that
+         says what the list is for.
+         --------------------------------------------------------------------- */
+      .list { text-align: left; }
+
+      .list-kicker {
+        margin: 0 0 0.25rem;
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--maroon);
+      }
+
       .preview-synopsis { margin: 0 0 0.75rem; }
 
       .preview-source {
@@ -669,6 +689,79 @@ const styles = `
       }
 
       .preview-source a { color: var(--maroon); text-underline-offset: 2px; }
+
+      .list .subject { margin: 0; }
+
+      .list-owner { margin: 0.375rem 0 0; font-size: 0.9375rem; color: var(--secondary); }
+
+      /* Underlined rather than coloured alone: on a page whose accent is already
+         Maroon, colour on its own does not distinguish a link from a heading. */
+      .list-owner-link { color: var(--maroon); }
+
+      .list-description {
+        margin: 0.625rem 0 0;
+        font-size: 0.9375rem;
+        color: var(--secondary);
+        /* Newlines a person typed are theirs. textContent writes them literally,
+           and without this they would collapse into one paragraph. (No backticks in
+           this stylesheet: it is a template literal, and one would end it.) */
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .list-facts {
+        margin: 0.5rem 0 0;
+        font-size: 0.8125rem;
+        letter-spacing: 0.01em;
+        color: var(--tertiary);
+      }
+
+      /* The rows. A numbered column, a poster and two lines — and never a score,
+         a seen mark or a bookmark: there is no reader out here to have one. */
+      .list-items {
+        margin: 1.25rem 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.75rem;
+        text-align: left;
+      }
+
+      .list-item { display: flex; align-items: center; gap: 0.75rem; }
+
+      .list-item-ordinal {
+        flex: 0 0 1.5rem;
+        text-align: right;
+        font-size: 0.8125rem;
+        color: var(--tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .list-item-art {
+        flex: 0 0 40px;
+        width: 40px;
+        border-radius: 0.375rem;
+        background: var(--parchment);
+        object-fit: cover;
+        aspect-ratio: 2 / 3;
+      }
+
+      .list-item-lines { min-width: 0; }
+      .list-item-name { margin: 0; font-size: 0.9375rem; overflow-wrap: anywhere; }
+      .list-item-year { margin: 0.125rem 0 0; font-size: 0.8125rem; color: var(--tertiary); }
+
+      .list-more {
+        margin: 1rem 0 0;
+        font-size: 0.8125rem;
+        color: var(--tertiary);
+      }
+
+      /* Desktop gets the posters across rather than down: a 400-item list in one
+         column is a scroll nobody finishes, and the grid is what §J's "5-column
+         poster grid" means at this width. */
+      @media (min-width: 56rem) {
+        .list-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
 
       /* ---------------------------------------------------------------------
          The two screenshots.
@@ -1013,25 +1106,74 @@ ${TITLE_PREVIEW}
         </p>`;
 
 /**
- * No longer branches on `mode`, and that is the point.
+ * A list, for a visitor with no account.
  *
- * It used to say "bingd. is in closed testing. Invitations are going out to a small
- * first group" whenever `mode` was `beta`. **That stopped being true**: iOS has been on
- * the public App Store since 2026-09-08, and the TestFlight link was public before that
- * by deliberate choice. So the sentence described a gate that did not exist, on the page
- * a person lands on when a link cannot open the app — and it was the *only* body copy
- * they got, with no install button under it.
+ * ---------------------------------------------------------------------------
+ * EVERY ELEMENT EXISTS FROM THE START, HIDDEN
  *
- * The invite-only claim is gone rather than reworded. What remains is true in both
- * modes, which is why the branch went with it: the per-platform reality is carried by
- * the install buttons, which read `distribution.config.json` and say exactly what is
- * available where. One sentence cannot describe "public on iOS, closed test on Android"
- * and should not try.
+ * Same rule as `CONTEXT_BLOCK`: the page has its final shape before any network call
+ * finishes, so a slow connection does not grow a list under somebody's thumb. Every one
+ * of these is filled by `page.mjs` with `textContent`, and **there is no `innerHTML`
+ * path to any of them** — this is the one page on the site that renders a person's own
+ * words, so that rule stops being a precaution and becomes the thing that keeps the page
+ * safe.
+ *
+ * ---------------------------------------------------------------------------
+ * TWO ELEMENTS FOR ONE ATTRIBUTION, AND WHY
+ *
+ * `#list-owner-link` and `#list-owner-plain` hold the same name and handle, and exactly
+ * one of them is ever revealed. A public-profile owner gets the link to `/u/<handle>`;
+ * a private one gets plain text with no link at all (§F.2, §J). Doing that by *choosing
+ * an element* rather than by conditionally setting an `href` means the private case has
+ * no anchor in the document at all — there is nothing for a later change to accidentally
+ * point somewhere.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS DELIBERATELY ABSENT
+ *
+ * No "You've seen X of N": `list_viewer_progress` is not granted to anon, and there is
+ * no reader here to have progress. No seen marks, no bookmarks, no scores, and no
+ * "more lists by…" — holding a link grants one list.
  */
-const GENERIC_BODY = `        <p>
-          bingd. is where you rank what you&rsquo;ve watched and see what your friends
-          really think. Get it below.
-        </p>`;
+const LIST_BODY = `        <div id="list" class="list" hidden>
+          <p class="list-kicker">A list on bingd.</p>
+          <p class="subject" id="list-title"></p>
+          <p class="list-owner" id="list-owner" hidden>
+            <a class="list-owner-link" id="list-owner-link" hidden href="#"
+               ><span id="list-owner-name"></span> <span id="list-owner-handle"></span></a>
+            <span id="list-owner-plain" hidden></span>
+          </p>
+          <p class="list-description" id="list-description" hidden></p>
+          <p class="list-facts" id="list-facts" hidden></p>
+        </div>
+        <p class="subject" id="generic-subject">A list on bingd.</p>
+        <p>
+          Open it in bingd. to see the whole list, mark what you have already seen, and
+          add the rest to your watchlist.
+        </p>
+        <ol class="list-items" id="list-items" hidden></ol>
+        <p class="list-more" id="list-more" hidden></p>`;
+
+/**
+ * **Removed 2026-09-20, and the lesson it carries is kept.**
+ *
+ * `GENERIC_BODY` had exactly one caller — the `/lists` route, which had a claimed path
+ * and no feature behind it, so an install card was the honest page. Lists v1 gave that
+ * route a body of its own (`LIST_BODY`) and left this constant with no callers.
+ *
+ * What is worth keeping is why its last revision happened. It used to say "bingd. is in
+ * closed testing. Invitations are going out to a small first group" whenever `mode` was
+ * `beta`. **That stopped being true**: iOS has been on the public App Store since
+ * 2026-09-08, and the TestFlight link was public before that by deliberate choice — so
+ * the sentence described a gate that did not exist, on the page a person lands on when
+ * a link cannot open the app, and it was the *only* body copy they got.
+ *
+ * The rule that came out of it applies to every route body in this file: **the
+ * per-platform reality is carried by the install buttons**, which read
+ * `distribution.config.json` and say exactly what is available where. One sentence
+ * cannot describe "public on iOS, closed test on Android" and should not try. A new
+ * route's body should say what the *thing* is and leave distribution to the buttons.
+ */
 
 /**
  * The two app screenshots, and why there are exactly two.
@@ -1969,12 +2111,20 @@ const ROUTES = [
   },
   {
     dir: 'lists',
-    kind: 'generic',
+    /**
+     * **The one route whose page draws somebody else's content.**
+     *
+     * It was `generic` until Lists v1: the path was claimed by AASA and assetlinks and
+     * the feature was not built, so the honest page was an install card. It now renders
+     * the list, under the same `_list_readable` predicate the app obeys — see
+     * `LIST_BODY` and `page.mjs`'s `listsPage`.
+     */
+    kind: 'list',
     share: 'Open on bingd.',
     title: 'A list on bingd.',
     tagline: TAGLINE,
     heading: UNAVAILABLE,
-    body: GENERIC_BODY,
+    body: LIST_BODY,
   },
 ];
 

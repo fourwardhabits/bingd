@@ -81,6 +81,12 @@ export type FeedItem = {
    */
   score: number | null;
   bucket: Bucket | null;
+  /**
+   * Which viewing a ranking post belongs to, from 2 up (`feed_watch_scores`,
+   * 20261014000100). Null on a first viewing, a single-viewing title, and a post that
+   * maps to no viewing. The card says `2nd watch` from it.
+   */
+  watchNumber: number | null;
   category: 'movies' | 'tv_seasons' | null;
   /**
    * The actor's public note on this title, live rather than snapshotted.
@@ -791,6 +797,7 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       category: row.payload?.category ?? null,
       note: null,
       companions: [],
+      watchNumber: null,
       // Filled by `attachFollowPeople` below, per viewer, and only on a follow row.
       followed: [],
       award: award(row),
@@ -829,12 +836,15 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
    * correctness pass, not a redesign of what a card shows.
    */
   const ranked = items.filter((item) => item.type === 'title_ranked' && item.mediaItemId);
-  await Promise.all([
+  const [, , , , watchScores] = await Promise.all([
     attachNotes(watched),
     attachCompanions(watched),
     attachScores(ranked),
     attachFollowPeople(follows),
+    readWatchScores(ranked),
   ]);
+  // After the live scores, because a superseded viewing's frozen score replaces them.
+  applyWatchScores(ranked, watchScores);
 
   /**
    * **A follow story with nobody the reader may see is not a row.**
@@ -958,11 +968,76 @@ async function attachScores(items: FeedItem[]) {
   for (const item of items) {
     if (!item.mediaItemId) continue;
     const live = byPair.get(`${item.actorId}:${item.mediaItemId}`);
-    // All three together, from one row or from none. Taking the live score beside a
-    // snapshotted bucket would tint a corrected badge with the band it left.
-    item.score = live ? Number(live.score) : null;
-    item.bucket = live?.bucket ?? null;
-    item.position = live?.position ?? null;
+    // No longer ranked: the post still says "ranked", but no number stands behind it.
+    if (!live) {
+      item.score = null;
+      item.bucket = null;
+      item.position = null;
+      continue;
+    }
+    /**
+     * **Ranked: the post shows its own watch's score** (founder delta QA, 2026-09-21).
+     * `payload.score` is the score of the watch this post is about. The server keeps the
+     * MOST RECENT watch's post in step with a pure Update your rating
+     * (20261016000100) and leaves every earlier watch's post frozen, so this reads the
+     * payload and never the live score — a band that grew cannot move any card.
+     *
+     * Only a post written before the snapshot existed (no `payload.score`) borrows the
+     * live score, score and band together.
+     */
+    if (item.score === null || item.score === undefined) {
+      item.score = Number(live.score);
+      item.bucket = live.bucket;
+      item.position = live.position;
+    }
+  }
+}
+
+/** One row of `feed_watch_scores` (`20261014000100`). */
+type WatchScoreRow = {
+  event_id: string;
+  score: number | string | null;
+  bucket: Bucket | null;
+  watch_number: number | null;
+};
+
+/**
+ * **A post keeps its own viewing's score** (founder QA, 2026-09-21).
+ *
+ * Watch Heat (8.0), watch it again and re-rank it (8.5): the first post stays 8.0 and
+ * the second reads 8.5, and neither moves when the reader later updates their rating. The
+ * server answers only for titles with two or more viewings, with each post's own frozen
+ * score and band (20261015000100) and the watch number the card prints.
+ *
+ * Read in the same `Promise.all` as the live scores, so it costs no extra wait. A failed
+ * read — or a backend without the function — changes nothing: the live score stands.
+ */
+async function readWatchScores(items: FeedItem[]): Promise<WatchScoreRow[]> {
+  const ids = items.map((item) => item.id).slice(0, 50);
+  if (!ids.length) return [];
+  try {
+    const { data, error } = await supabase.rpc('feed_watch_scores', { p_event_ids: ids });
+    if (error || !Array.isArray(data)) return [];
+    return data as WatchScoreRow[];
+  } catch {
+    // An enrichment: a thrown read must not take the page down with it.
+    return [];
+  }
+}
+
+export function applyWatchScores(items: FeedItem[], rows: readonly WatchScoreRow[]) {
+  const byEvent = new Map(rows.map((row) => [row.event_id, row]));
+  for (const item of items) {
+    const row = byEvent.get(item.id);
+    if (!row) continue;
+    item.watchNumber = row.watch_number !== null && row.watch_number >= 2 ? row.watch_number : null;
+    if (row.score !== null && row.bucket !== null) {
+      // Score and band together, as `attachScores` insists. The live ordinal is not this
+      // viewing's, so it goes rather than sitting beside a number it does not describe.
+      item.score = Number(row.score);
+      item.bucket = row.bucket;
+      item.position = null;
+    }
   }
 }
 
