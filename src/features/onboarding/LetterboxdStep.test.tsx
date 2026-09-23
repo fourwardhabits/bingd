@@ -624,7 +624,7 @@ describe('importing from the step', () => {
 
     await waitFor(() => expect(view.getByText('Your Letterboxd history is in')).toBeTruthy());
     // Collection is outside the flow, and the guard would send it straight back.
-    expect(view.queryByText('Rank imported movies')).toBeNull();
+    expect(view.queryByText('Rank imported titles')).toBeNull();
     expect(view.queryByText('Import another file')).toBeNull();
     await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
 
