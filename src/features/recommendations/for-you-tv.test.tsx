@@ -27,6 +27,8 @@ jest.mock('@/lib/analytics', () => ({ track: () => {} }));
 const mockCacheSimilar = jest.fn();
 /** When set, a fill writes the facet the way the adapter does: `liked-N` → `[rec-N]`. */
 let mockFillWrites = false;
+/** When set, a fill never settles — the wall must draw anyway (2026-09-23). */
+let mockFillHangs = false;
 jest.mock('@/lib/tmdb-adapter', () => ({
   AdapterError: class AdapterError extends Error {},
   cacheSimilar: (id: string) => {
@@ -39,6 +41,7 @@ jest.mock('@/lib/tmdb-adapter', () => ({
         expires_at: '2999-01-01T00:00:00Z',
       });
     }
+    if (mockFillHangs) return new Promise(() => {});
     return Promise.resolve();
   },
 }));
@@ -136,6 +139,7 @@ beforeEach(() => {
   mockSimilarAsks.length = 0;
   mockCacheSimilar.mockReset();
   mockFillWrites = false;
+  mockFillHangs = false;
   resetRecommendationSession(1);
   resetImpressions();
 });
@@ -311,6 +315,48 @@ describe('selected anchors inside one launch', () => {
     expect(result.current.isPending).toBe(false);
   });
 
+  /**
+   * **A fill is work for the next launch, not a wall the reader waits behind** (2026-09-23).
+   *
+   * Measured against staging: one `cacheSimilar` is an edge call at 561ms p50 and six in
+   * series were 3,368ms — with the grid empty for all of it. `fillAnchors` fires them and
+   * does not await, *provided* the slate has an anchor to reason from; the facets it writes
+   * last a week and are what the next launch draws on.
+   *
+   * A fill that never settles is the sharpest way to say it: under the old queryFn this
+   * test could not finish.
+   */
+  it('draws the wall without waiting for a fill, once any anchor has a list', async () => {
+    seedLikedAccount();
+    // Four of twelve cached, so the chosen eight include titles that must be filled.
+    mockTables.media_cache = mockTables.media_cache!.slice(0, 4);
+    mockFillHangs = true;
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+
+    await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+    // Drawn from the lists that were already there — and the fills were still fired, which
+    // is what makes the next launch broader rather than this one slower.
+    expect(result.current.data!.anchorsUsed).toBeGreaterThan(0);
+    expect(mockCacheSimilar).toHaveBeenCalled();
+  });
+
+  /**
+   * The other half of the same rule, and the reason it is not simply "never wait": with no
+   * list at all the wall would be trending and whoever the reader follows, labelled
+   * "Popular right now" — honest, and not what somebody who has loved twelve films is owed.
+   */
+  it('still waits for the fills when no anchor has a list at all', async () => {
+    seedLikedAccount({ cached: false });
+    mockFillWrites = true;
+
+    const { result } = await renderHookWithProviders(() => useForYou('user-1', 'movies'));
+
+    await waitFor(() => expect(result.current.data?.items.length).toBeGreaterThan(0));
+    expect(result.current.data!.anchorsUsed).toBeGreaterThan(0);
+    expect(result.current.data!.popularityOnly).toBe(false);
+  });
+
   it('keeps the selection when a refetch finds the cache has moved underneath it', async () => {
     // Review m1. Selection weights titles whose lists are cached, and the cache moves on
     // its own: this launch's fills land, and other readers fill titles this launch never
@@ -350,8 +396,22 @@ describe('selected anchors inside one launch', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
 
-      expect(anchorsBehind(result.current.data!.scored)).toEqual(behind);
-      // Every chosen list landed on the first run, so the refetch asked for nothing.
+      /**
+       * **The selection is the memo's, not a fresh draw** — which is what review m1 asked
+       * this test to pin, and it is now pinned against a wall the fills did not wait for.
+       *
+       * Since 2026-09-23 a slate with any cached anchor draws immediately and fires its
+       * fills without awaiting them (`fillAnchors`), so the first wall is attributed to the
+       * lists that were already there — a subset — and this refetch, which finds every list
+       * present, shows the whole chosen eight. Stability is therefore the *superset*: every
+       * anchor the first wall quoted is still behind this one, so no weight that moved
+       * underneath it re-drew the selection.
+       */
+      const after = anchorsBehind(result.current.data!.scored);
+      expect(after).toEqual(expect.arrayContaining(behind));
+      expect(after).toHaveLength(8);
+      // The fills this launch fired are the only ones: the refetch found every chosen list
+      // in the cache and asked the adapter for nothing further.
       expect(mockCacheSimilar.mock.calls.length).toBe(fills);
       await unmount();
     }

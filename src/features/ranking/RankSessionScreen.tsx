@@ -9,7 +9,6 @@ import type { RankingCategory } from '@/features/collection/use-collection';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { useOperationIntent } from '@/lib/operation-intent';
-import { queryKeys } from '@/lib/query';
 import { BucketChoices, Button, Poster, Screen, Text, type BucketId } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -24,6 +23,7 @@ import { refineCandidates } from './refine';
 import { RefineScreen } from './RefineScreen';
 import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
 import { outcomeUnknown, rankAnswer, rankBack, rankSkip, type SessionStep } from './session';
+import { seedPivotCard } from './pivot-card';
 
 export type RankSessionSource = 'backlog' | 'refine';
 
@@ -209,9 +209,9 @@ function BacklogSession({
   const applyStep = useCallback(
     (target: BacklogTarget, next: SessionStep) => {
       if (next.state === 'comparing') {
-        if (next.pivotCard) {
-          queryClient.setQueryData(queryKeys.comparisonCard(next.pivotId), next.pivotCard);
-        }
+        // The card, from the answer where there is one and from the reader's own band at
+        // the start of a session, where `rank_start` sends none. See `seedPivotCard`.
+        seedPivotCard(queryClient, profile.id, next);
         setPhase({ kind: 'comparing', target, step: next });
       } else if (next.state === 'placed') {
         onPlaced(target, next);
@@ -229,7 +229,7 @@ function BacklogSession({
         });
       }
     },
-    [loadNext, onPlaced, queryClient],
+    [loadNext, onPlaced, profile.id, queryClient],
   );
 
   async function open(target: BacklogTarget, bucket: BucketId | null) {

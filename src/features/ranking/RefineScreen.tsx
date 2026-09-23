@@ -37,6 +37,7 @@ import {
   refineStart,
   type SessionStep,
 } from './session';
+import { seedPivotCard } from './pivot-card';
 import { applyRefineNotNow } from './use-refine';
 
 /**
@@ -222,9 +223,9 @@ export function RefineScreen({
     (target: RefineTarget, next: SessionStep) => {
       if (next.state === 'comparing') {
         openSession.current = next.sessionId;
-        if (next.pivotCard) {
-          queryClient.setQueryData(queryKeys.comparisonCard(next.pivotId), next.pivotCard);
-        }
+        // The card, from the answer where there is one and from the reader's own band
+        // otherwise. See `seedPivotCard`.
+        seedPivotCard(queryClient, profile.id, next);
         setPhase({ kind: 'comparing', target, step: next });
       } else if (next.state === 'placed') {
         finish(target, next);
@@ -237,7 +238,7 @@ export function RefineScreen({
         setPhase({ kind: 'failed', message: next.message, changed: Boolean(next.changed) });
       }
     },
-    [finish, queryClient],
+    [finish, profile.id, queryClient],
   );
 
   const loadNext = useCallback(async () => {

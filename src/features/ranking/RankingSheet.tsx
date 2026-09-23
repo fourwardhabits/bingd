@@ -55,6 +55,7 @@ import {
   type PlacedMovement,
   type SessionStep,
 } from './session';
+import { seedPivotCard } from './pivot-card';
 import { TitleRecallSheet } from './TitleRecallSheet';
 
 export type RankingSubject = {
@@ -446,9 +447,10 @@ function Session({
        * It is display data keyed by title, never search state: the server still decides
        * every pivot, and a card that is absent simply leaves the query to read it.
        */
-      if (next.state === 'comparing' && next.pivotCard) {
-        queryClient.setQueryData(queryKeys.comparisonCard(next.pivotId), next.pivotCard);
-      }
+      // `rank_start` sends no card, so the first comparison of a session fell back to the
+      // query and a `media_items` read. `seedPivotCard` takes that one from the reader's
+      // own band, which is already cached — see its header.
+      seedPivotCard(queryClient, profile.id, next);
 
       if (next.state === 'comparing') openSession.current = next.sessionId;
       // placed and ended mean the server deleted the session itself; a failure asking for
