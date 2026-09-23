@@ -22,7 +22,7 @@ import {
 } from './backlog';
 import { refineCandidates } from './refine';
 import { RefineScreen } from './RefineScreen';
-import { Comparison as ComparisonView } from './RankingSheet';
+import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
 import { outcomeUnknown, rankAnswer, rankBack, rankSkip, type SessionStep } from './session';
 
 export type RankSessionSource = 'backlog' | 'refine';
@@ -374,9 +374,10 @@ function BacklogSession({
             onSelect={(bucket) => void open(phase.target, bucket)}
             testID="backlog-bucket-choices"
           />
-          <SkipLink
+          <SkipTitleLink
             title={phase.target.title}
             disabled={busy}
+            hint="Leaves it unranked for now. It stays in Unranked."
             onPress={() => skipTitle(phase.target)}
           />
         </Centred>
@@ -434,10 +435,11 @@ function BacklogSession({
               )
             }
           />
-          <SkipLink
+          <SkipTitleLink
             title={phase.target.title}
             disabled={busy}
             side
+            hint="Leaves it unranked for now. It stays in Unranked."
             onPress={() => skipTitle(phase.target)}
           />
         </View>
@@ -493,44 +495,13 @@ function BacklogSession({
   );
 }
 
-function SkipLink({
-  title,
-  disabled,
-  onPress,
-  /**
-   * `(left)` on the comparison screen only (founder QA, 2026-09-22). Beside two posters,
-   * "Skip title" could be heard as skipping either one — and the title being placed is
-   * always the left card. The bucket screen shows one poster, so it needs no side.
-   */
-  side = false,
-}: {
-  title: string;
-  disabled: boolean;
-  onPress: () => void;
-  side?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Skip ${title}`}
-      accessibilityHint="Leaves it unranked for now. It stays in Unranked."
-      disabled={disabled}
-      hitSlop={theme.space[2]}
-      style={styles.skip}
-      onPress={onPress}
-    >
-      {/**
-       * **`Skip title`, since 2026-09-22** (founder QA). It was "Skip this one", which
-       * beside the comparison's own escape read as the same act twice. The two are
-       * different and both stay: `Can't decide` declines the comparison on screen and
-       * keeps placing this title; this leaves the TITLE for another sitting.
-       */}
-      <Text variant="footnote" tone="secondary" style={styles.centre}>
-        {side ? 'Skip title (left)' : 'Skip title'}
-      </Text>
-    </Pressable>
-  );
-}
+/**
+ * **`Skip title`, since 2026-09-22** (founder QA). It was "Skip this one", which beside
+ * the comparison's own escape read as the same act twice. The two are different and both
+ * stay: `Can't decide` declines the comparison on screen and keeps placing this title;
+ * this leaves the TITLE for another sitting. The link itself is `SkipTitleLink`, shared
+ * with Refine — see `RankingSheet`.
+ */
 
 function Centred({ children }: { children: React.ReactNode }) {
   return <View style={styles.centred}>{children}</View>;
@@ -548,7 +519,6 @@ const styles = StyleSheet.create({
   // Centred like the bucket screen, so the posters sit at the same height on both and
   // the flow does not jump between states (founder QA, 2026-09-22).
   body: { flex: 1, justifyContent: 'center' },
-  skip: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
   // Poster then name, the way a comparison card stacks them.
   askPoster: { alignItems: 'center', gap: theme.space[2] },
   centred: {

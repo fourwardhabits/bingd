@@ -2083,7 +2083,56 @@ function Centred({ children }: { children: React.ReactNode }) {
   return <View style={styles.centredBox}>{children}</View>;
 }
 
+/**
+ * **Leave this title for now** — the link under the comparison, shared by both ranking
+ * sources (founder QA, 2026-09-22).
+ *
+ * It lived twice, once per screen, and the copies had drifted: Refine's said something
+ * else, sat at a different height and named a different act. One component here, beside
+ * the comparison it belongs to, is what keeps the two surfaces the same screen with a
+ * different queue behind it.
+ *
+ * It is NOT the comparison's own `Can't decide`, which declines the pair on screen and
+ * carries on placing this title. This sets the title itself aside.
+ */
+export function SkipTitleLink({
+  title,
+  disabled,
+  onPress,
+  /**
+   * `(left)` beside two posters, where "Skip title" could be heard as skipping either
+   * one — the title being placed is always the left card. A screen showing one poster
+   * needs no side.
+   */
+  side = false,
+  hint,
+}: {
+  title: string;
+  disabled: boolean;
+  onPress: () => void;
+  side?: boolean;
+  hint: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Skip ${title}`}
+      accessibilityHint={hint}
+      disabled={disabled}
+      hitSlop={theme.space[2]}
+      style={styles.skipTitle}
+      onPress={onPress}
+    >
+      <Text variant="footnote" tone="secondary" style={styles.skipTitleLabel}>
+        {side ? 'Skip title (left)' : 'Skip title'}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  skipTitle: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  skipTitleLabel: { textAlign: 'center' },
   // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
   // moving off a full-height page sheet — a comparison is a small question.
   sheet: { paddingBottom: theme.space[2] },

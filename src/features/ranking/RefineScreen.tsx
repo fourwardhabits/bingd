@@ -11,10 +11,10 @@ import { track } from '@/lib/analytics';
 import { useOperationIntent } from '@/lib/operation-intent';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
-import { Button, Screen, Text } from '@/ui/components';
+import { Button, Poster, Screen, ScoreBadge, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-import { Comparison as ComparisonView } from './RankingSheet';
+import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
 import {
   atCheckpoint,
   markShown,
@@ -38,7 +38,7 @@ import {
   refineStart,
   type SessionStep,
 } from './session';
-import { markRefineNotNow } from './use-refine';
+import { applyRefineNotNow } from './use-refine';
 
 /**
  * Refine your rankings (T5; calibration epic §H).
@@ -102,10 +102,17 @@ export function RefineScreen({
    * below — the only path a placement can arrive by.
    */
   const advance = useRef(false);
+  /** A round has just ended and its checkpoint wants fresh server state. Read by `act`. */
+  const probe = useRef(false);
   /** The medium's placement total at the last read, which Done records (unified §6). */
   const placementsTotal = useRef(0);
-  /** Card-quality titles still waiting at the last read: Keep going needs one (§7). */
-  const [strongLeft, setStrongLeft] = useState(0);
+  /**
+   * **What the server says AFTER the round** (founder QA, 2026-09-22), or null while it
+   * is still being asked. Keep going is offered off this and nothing else: the count the
+   * round opened on is by then several placements out of date, and offering another
+   * round that opens onto nothing is the one thing the checkpoint must not do.
+   */
+  const [fresh, setFresh] = useState<{ strong: number; ready: boolean } | null>(null);
   /** The batch this round opened on; null until the first answer, and again per round. */
   const [batchAtStart, setBatchAtStart] = useState<number | null>(null);
 
@@ -124,10 +131,23 @@ export function RefineScreen({
           medium: analyticsMedium,
         },
       });
-      // A finished sitting quiets the card the same way Not now does: until the reader has
-      // made enough new placements AND the server says the batch is strong again. No
-      // time-based return (unified design §6, replacing T5's seven-day rest).
-      if (totals.targets > 0) void markRefineNotNow(profile.id, medium, placementsTotal.current);
+      /**
+       * **Done means done for now** (founder QA, 2026-09-22).
+       *
+       * A finished sitting quiets the card exactly as Not now does: until the reader has
+       * made enough new placements AND the server says the batch is strong again. It is
+       * not a rest on the server — the titles the round revealed are genuinely still
+       * candidates, and Keep going is the way to have them — it is the card declining to
+       * ask again on its own. No time-based return (unified design §6, replacing T5's
+       * seven-day rest).
+       *
+       * `applyRefineNotNow` writes the cache before the preference, so the card behind
+       * this screen is already right when it reappears rather than on the next cold
+       * start, which is the defect this replaced.
+       */
+      if (totals.targets > 0) {
+        void applyRefineNotNow(queryClient, profile.id, medium, placementsTotal.current);
+      }
       void queryClient.invalidateQueries({
         queryKey: queryKeys.refineAvailability(profile.id, medium),
       });
@@ -145,6 +165,11 @@ export function RefineScreen({
         position: step.position,
         movement: step.movement ?? null,
         answers: answers.current,
+        // For the round's summary: the poster it was compared under, and the score this
+        // placement earned — the server's number, the one now in the collection.
+        posterPath: target.posterPath,
+        score: step.score,
+        bucket: step.bucket,
       };
       const advanced = recordFinished(sittingRef.current, title);
       update(advanced);
@@ -182,8 +207,14 @@ export function RefineScreen({
       // move this one again, so a per-title "Moved from #7 → #6" interrupts a batch to
       // state something that is not durable yet. The count goes up and the next target
       // opens. The round still ends on its checkpoint, which lists what moved.
-      if (atCheckpoint(advanced)) setPhase({ kind: 'checkpoint', exhausted: false });
-      else advance.current = true;
+      if (atCheckpoint(advanced)) {
+        // The summary is drawn at once — the round IS over — and what is still worth
+        // refining is asked of the server from `act`, which is what decides whether
+        // Keep going is offered at all (founder QA, 2026-09-22).
+        setFresh(null);
+        probe.current = true;
+        setPhase({ kind: 'checkpoint', exhausted: false });
+      } else advance.current = true;
     },
     [analyticsMedium, profile.id, queryClient, update],
   );
@@ -229,7 +260,10 @@ export function RefineScreen({
       return;
     }
     placementsTotal.current = found.placementsTotal;
-    setStrongLeft(found.cta.strong);
+    setFresh({
+      strong: found.cta.strong,
+      ready: found.status === 'ready' && Boolean(found.targets[0]),
+    });
     setBatchAtStart((current) =>
       current ??
       Math.max(
@@ -261,6 +295,30 @@ export function RefineScreen({
     applyStep(target, next);
   }, [applyStep, medium, seed, update, withIntent]);
 
+  /**
+   * What is left, asked once the round is over. It costs one read and it is the only
+   * honest basis for Keep going: the round just changed the very evidence the selection
+   * is made from. `recent` keeps the titles this sitting already showed out of it, so
+   * "another round" means another round of titles, not the same five again.
+   */
+  const probeAfterRound = useCallback(async () => {
+    try {
+      const found = await refineCandidates(medium, {
+        limit: 1,
+        seed,
+        recent: sittingRef.current.shown,
+      });
+      placementsTotal.current = found.placementsTotal;
+      setFresh({
+        strong: found.cta.strong,
+        ready: found.status === 'ready' && Boolean(found.targets[0]),
+      });
+    } catch {
+      // No fresh evidence is not a reason to invite another round.
+      setFresh({ strong: 0, ready: false });
+    }
+  }, [medium, seed]);
+
   const opened = useRef(false);
   useEffect(() => {
     if (opened.current) return;
@@ -291,6 +349,9 @@ export function RefineScreen({
     if (next.state === 'ended' || advance.current) {
       advance.current = false;
       void loadNext();
+    } else if (probe.current) {
+      probe.current = false;
+      void probeAfterRound();
     }
   };
 
@@ -422,43 +483,37 @@ export function RefineScreen({
             }
           />
           {/**
-           * **The backlog's title skip, with the backlog's words** (founder, 2026-09-22).
+           * **The backlog's title skip, in the backlog's own component** (founder QA,
+           * 2026-09-22).
            *
            * It was *I don't remember <title> well*, which snoozed the title for 180 days —
            * a second, invisible memory state beside the ordinary skip. One act now: leave
-           * this title for this sitting, exactly as the backlog does. `refine_snooze`
-           * stays in the schema, unused, rather than being dropped in a UI pass.
+           * this title for this sitting, exactly as the backlog does, and drawn by the
+           * same `SkipTitleLink` so the two screens cannot drift apart again.
+           * `refine_snooze` stays in the schema, unused, rather than being dropped in a
+           * UI pass.
            */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Skip ${phase.target.title}`}
-            accessibilityHint="Leaves it for another time. Its ranking does not change."
+          <SkipTitleLink
+            title={phase.target.title}
             disabled={busy}
-            hitSlop={theme.space[2]}
-            style={styles.forget}
+            side
+            hint="Leaves it for another time. Its ranking does not change."
             onPress={() => void skipTitle(phase.target)}
-          >
-            <Text variant="footnote" tone="secondary" style={styles.centre}>
-              Skip title (left)
-            </Text>
-          </Pressable>
+          />
         </View>
       ) : phase.kind === 'checkpoint' ? (
         <ScrollView contentContainerStyle={styles.checkpoint}>
-          <Text variant="title2">
+          <Text variant="title2" accessibilityRole="header">
             {sitting.finished.length === 1
               ? '1 title checked'
               : `${sitting.finished.length} titles checked`}
           </Text>
-          {sitting.finished.map((title) => (
-            <View key={title.mediaItemId} style={styles.checkpointRow}>
-              <Text variant="callout" numberOfLines={1} style={styles.checkpointTitle}>
-                {title.title}
-              </Text>
-              <ResultLine title={title} compact />
-            </View>
-          ))}
-          {phase.exhausted ? (
+          <View style={styles.results}>
+            {sitting.finished.map((title) => (
+              <RefinedRow key={title.mediaItemId} title={title} />
+            ))}
+          </View>
+          {phase.exhausted || (fresh !== null && !fresh.ready) ? (
             <Text variant="footnote" tone="secondary">
               Nothing else needs a look right now.
             </Text>
@@ -471,9 +526,14 @@ export function RefineScreen({
                 onExit();
               }}
             />
-            {/* Keep going only while card-quality titles remain and rounds are left (§7):
-                a sitting never drifts on into titles the card would not have invited. */}
-            {!phase.exhausted && mayContinue(sitting) && strongLeft > 0 ? (
+            {/**
+             * **Keep going waits for the server** (founder QA, 2026-09-22). It appears
+             * only once `probeAfterRound` has answered, and only when what is left is
+             * card-quality and there are rounds in the sitting still (§7) — so a sitting
+             * never drifts on into titles the card itself would not have invited, and
+             * never opens a round on evidence the last round has already spent.
+             */}
+            {!phase.exhausted && mayContinue(sitting) && fresh?.ready && fresh.strong > 0 ? (
               <Button
                 label="Keep going"
                 kind="secondary"
@@ -525,29 +585,67 @@ function emptyBody(status: Exclude<RefineStatus, 'ready'>, medium: RankingCatego
   }
 }
 
-function ResultLine({ title, compact = false }: { title: RefinedTitle; compact?: boolean }) {
+/**
+ * **One checked title, in the app's own row** (founder, 2026-09-22).
+ *
+ * The round's summary was a bare list: a name on the left and a sentence on the right,
+ * in a screen otherwise made of posters and score circles. This is the row every other
+ * list in the app draws — poster, title, and the score in `ScoreBadge` — with the
+ * movement underneath as the secondary line.
+ *
+ * **The hierarchy is deliberate and it is the founder's.** What the reader earned is the
+ * CURRENT bingd score, so that is the badge, at full strength, on the right where a score
+ * always is. Where it came from is muted footnote text under the title. The old value is
+ * never given the same weight as the new one.
+ *
+ * **And the old value is an ordinal, not a score.** A refine session reports the position
+ * it moved from; nothing anywhere captures what the score used to be. Rather than compute
+ * a plausible number — which would be a made-up fact stated next to a real one — the row
+ * says `#12 → #11`, which is exactly what is known. `movementSentence` is the same
+ * function Watch History uses, so the two surfaces word it identically.
+ *
+ * Not pressable. It is a receipt for something the reader just did, not a way into
+ * anything, and a row that navigates out of a summary loses the rest of the summary.
+ */
+function RefinedRow({ title }: { title: RefinedTitle }) {
   const movement = title.movement ?? { outcome: 'unchanged' as const, fromPosition: null };
   const sentence = movementSentence(movement, title.position) ?? `#${title.position}`;
+  // "Moved from #118 → #72" is the Watch History sentence; in a column of five it is the
+  // arrow that reads, so the row keeps the pair and drops the preamble.
+  const line = sentence.replace('Moved from ', '');
   const direction = movementDirection(movement, title.position);
+
   return (
-    <View style={styles.resultLine}>
-      <Text
-        variant={compact ? 'footnote' : 'body'}
-        tone="secondary"
-        style={compact ? undefined : styles.centre}
-      >
-        {sentence}
-      </Text>
-      {direction ? (
-        <Ionicons
-          name={direction === 'up' ? 'arrow-up' : 'arrow-down'}
-          size={theme.layout.icon.sm}
-          color={theme.text.secondary}
-          accessibilityLabel={direction === 'up' ? 'Moved up' : 'Moved down'}
-        />
+    <View style={styles.row} accessible accessibilityRole="text">
+      <Poster uri={posterUri(title.posterPath ?? null, 'card')} title={title.title} size="row" />
+      <View style={styles.rowText}>
+        <Text variant="callout" numberOfLines={2}>
+          {title.title}
+        </Text>
+        <View style={styles.rowMovement}>
+          <Text variant="footnote" tone="tertiary" numberOfLines={1}>
+            {line}
+          </Text>
+          {direction ? (
+            <Ionicons
+              name={direction === 'up' ? 'arrow-up' : 'arrow-down'}
+              size={theme.layout.icon.sm}
+              color={theme.text.tertiary}
+              accessibilityLabel={direction === 'up' ? 'Moved up' : 'Moved down'}
+            />
+          ) : null}
+        </View>
+      </View>
+      {typeof title.score === 'number' ? (
+        <ScoreBadge score={title.score} bucket={bucketOf(title.bucket)} size="sm" />
       ) : null}
     </View>
   );
+}
+
+/** The server's band name, only when it is one the badge can speak. */
+function bucketOf(bucket: string | null | undefined) {
+  return bucket === 'loved' || bucket === 'fine' || bucket === 'not_for_me' ? bucket : null;
 }
 
 function Centred({ children }: { children: React.ReactNode }) {
@@ -563,22 +661,13 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
   },
   headerTitle: { flex: 1 },
-  dots: { flexDirection: 'row', gap: theme.space[1] },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.text.tertiary,
-  },
-  dotDone: { backgroundColor: theme.semantic.action, borderColor: theme.semantic.action },
-  body: { flex: 1 },
-  target: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-    gap: theme.space[1],
-  },
-  forget: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  /**
+   * **Centred, exactly as the backlog is** (founder QA, 2026-09-22). It was `flex: 1`
+   * alone, which pinned the pair to the top of the screen — so the same comparison sat
+   * at two different heights depending on which queue had dealt it, and moving between
+   * the two read as two different screens.
+   */
+  body: { flex: 1, justifyContent: 'center' },
   centred: {
     flex: 1,
     justifyContent: 'center',
@@ -586,22 +675,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
   },
   centre: { textAlign: 'center' },
-  resultLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.space[1],
-  },
   checkpoint: {
     padding: theme.layout.gutter,
     gap: theme.space[3],
   },
-  checkpointRow: {
+  // The rows carry their own vertical padding, like every other list in the app.
+  results: { gap: theme.space[1] },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: theme.space[3],
+    paddingVertical: theme.space[1],
   },
-  checkpointTitle: { flexShrink: 1 },
+  rowText: { flex: 1, gap: 2 },
+  rowMovement: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   checkpointActions: { gap: theme.space[2], paddingTop: theme.space[2] },
 });

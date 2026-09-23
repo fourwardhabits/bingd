@@ -47,6 +47,21 @@ jest.mock('@/lib/analytics', () => ({
   track: (...a: unknown[]) => mockTrack(...a),
 }));
 
+/**
+ * A round ends after five titles, and five presses in one test poison every later render
+ * in the file (the RNTL double-press trap). Forcing the round's own stopping rule is how
+ * one press reaches the summary; everything downstream of it is the real code.
+ */
+let mockForceCheckpoint = false;
+jest.mock('./refine', () => {
+  const actual = jest.requireActual('./refine');
+  return {
+    ...actual,
+    atCheckpoint: (sitting: unknown) =>
+      mockForceCheckpoint ? true : actual.atCheckpoint(sitting),
+  };
+});
+
 const HEAT = {
   media_item_id: 'heat',
   title: 'Heat',
@@ -80,6 +95,7 @@ function serve(answers: Record<string, unknown[]>) {
 const callsTo = (fn: string) => mockRpc.mock.calls.filter((c) => c[0] === fn);
 
 beforeEach(() => {
+  mockForceCheckpoint = false;
   mockRpc.mockReset();
   mockTrack.mockReset();
   mockWritePref.mockClear();
@@ -136,7 +152,12 @@ it('an answer that moves it says exactly where from and to, privately', async ()
 
   await fireEvent.press(view.getByLabelText('Choose Heat'));
 
-  await waitFor(() => expect(view.getByText('Moved from #21 → #15')).toBeTruthy());
+  // The summary states the ordinal pair muted and the CURRENT score in the badge every
+  // other list in the app draws. The old value never carries the weight of the new one,
+  // and no old SCORE is invented — nothing in the session captured one.
+  await waitFor(() => expect(view.getByText('#21 → #15')).toBeTruthy());
+  expect(view.queryByText('Moved from #21 → #15')).toBeNull();
+  expect(view.getByLabelText('8.8 out of 10, I liked it')).toBeTruthy();
   expect(view.getByLabelText('Moved up')).toBeTruthy();
   const [, answerArgs] = callsTo('rank_answer')[0];
   expect(answerArgs).toMatchObject({ p_session_id: 'session-1', p_winner: 'heat' });
@@ -321,4 +342,140 @@ it('Undo at a title’s first comparison sets it aside and deals the next', asyn
 
   await waitFor(() => expect(view.getByText('Nothing needs a look right now')).toBeTruthy());
   expect(callsTo('refine_candidates')[1][1]).toMatchObject({ p_recent: ['heat'] });
+});
+
+/**
+ * **Keep going is offered off fresh server state, never off the round's own opening
+ * count** (founder QA, 2026-09-22).
+ *
+ * The round just changed the evidence the selection is made from: titles it moved are
+ * now well compared, and titles beside them may have become candidates. The count the
+ * round opened on is by then several placements out of date, so the checkpoint asks
+ * again — excluding what this sitting has already shown — and only then decides whether
+ * there is another round worth offering.
+ */
+it('asks the server what is left before offering another round', async () => {
+  mockForceCheckpoint = true;
+  serve({
+    refine_candidates: [
+      {
+        status: 'ready',
+        candidates: [HEAT],
+        placements_total: 40,
+        cta: { show: true, count: 5, strong: 5 },
+      },
+      {
+        status: 'ready',
+        candidates: [{ ...HEAT, media_item_id: 'ronin', title: 'Ronin', position: 9 }],
+        placements_total: 40,
+        cta: { show: true, count: 3, strong: 3 },
+      },
+    ],
+    refine_start: [comparing],
+    rank_answer: [{
+        done: true,
+        position: 15,
+        category: 'movies',
+        bucket: 'loved',
+        score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' },
+      }],
+  });
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+  await waitFor(() => expect(view.getByRole('button', { name: 'Keep going' })).toBeTruthy());
+  expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
+  // Asked after the round, and asked about titles this sitting has not shown.
+  expect(callsTo('refine_candidates')).toHaveLength(2);
+  expect(callsTo('refine_candidates')[1][1]).toMatchObject({ p_recent: ['heat'] });
+});
+
+it('offers Done alone when the round used up what was worth refining', async () => {
+  mockForceCheckpoint = true;
+  serve({
+    refine_candidates: [
+      {
+        status: 'ready',
+        candidates: [HEAT],
+        placements_total: 40,
+        cta: { show: true, count: 1, strong: 1 },
+      },
+      { status: 'nothing_waiting', candidates: [], placements_total: 40 },
+    ],
+    refine_start: [comparing],
+    rank_answer: [{
+        done: true,
+        position: 15,
+        category: 'movies',
+        bucket: 'loved',
+        score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' },
+      }],
+  });
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+
+  await waitFor(() =>
+    expect(view.getByText('Nothing else needs a look right now.')).toBeTruthy(),
+  );
+  expect(view.queryByRole('button', { name: 'Keep going' })).toBeNull();
+  expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
+});
+
+/**
+ * **Done means done for now** (founder QA, 2026-09-22): the Collection card is quieted
+ * against the placement total the server reported, which is the same act as Not now. It
+ * is not a server-side rest — the candidates are genuinely still there, which is what
+ * Keep going is for — so nothing but the card's own invitation is suppressed.
+ */
+it('Done at the end of a round quiets the Collection card', async () => {
+  mockForceCheckpoint = true;
+  serve({
+    refine_candidates: [
+      {
+        status: 'ready',
+        candidates: [HEAT],
+        placements_total: 40,
+        cta: { show: true, count: 5, strong: 5 },
+      },
+      {
+        status: 'ready',
+        candidates: [{ ...HEAT, media_item_id: 'ronin', title: 'Ronin', position: 9 }],
+        placements_total: 40,
+        cta: { show: true, count: 3, strong: 3 },
+      },
+    ],
+    refine_start: [comparing],
+    rank_answer: [{
+        done: true,
+        position: 15,
+        category: 'movies',
+        bucket: 'loved',
+        score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' },
+      }],
+  });
+  const onExit = jest.fn();
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={onExit} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+
+  await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+
+  expect(onExit).toHaveBeenCalled();
+  expect(mockWritePref).toHaveBeenCalledWith(
+    'user-1.collection.refine-not-now.movies',
+    expect.objectContaining({ placementsAtDismissal: 40 }),
+  );
+  expect(mockTrack).toHaveBeenCalledWith({
+    name: 'refine_session_ended',
+    props: { targets: 1, moved: 1, comparisons: 1, ended_by: 'done', medium: 'movies' },
+  });
 });

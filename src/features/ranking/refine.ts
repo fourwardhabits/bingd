@@ -211,6 +211,19 @@ export type RefinedTitle = {
   position: number;
   movement: PlacedMovement | null;
   answers: number;
+  /**
+   * What the round's summary draws (founder, 2026-09-22): the poster, and the score the
+   * placement earned — the server's own number, from `Placed`, which is the one written
+   * to the collection. Optional because the pure stopping rules above are tested without
+   * a placement, and because a backend that answers no score must summarise anyway.
+   *
+   * There is deliberately **no previous score**: nothing in the session captures one, and
+   * the founder's rule is not to invent it. The movement the summary shows is the ordinal
+   * pair, which is a fact the server did return.
+   */
+  posterPath?: string | null;
+  score?: number | null;
+  bucket?: string | null;
 };
 
 export type Sitting = {

@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
 import type { RankingCategory } from '@/features/collection/use-collection';
 import { queryKeys } from '@/lib/query';
@@ -54,6 +54,57 @@ export const markRefineNotNow = (
     placementsAtDismissal: placementsTotal,
   }).catch(() => {});
 
+/**
+ * The stored Not now, read through the query cache.
+ *
+ * **Why this is a query and not a `useState` + effect** (founder QA, 2026-09-22): the
+ * value is written on a *different screen* from the one that reads it. A Refine sitting
+ * ends on the ranking screen and the card lives on Collection, which is mounted
+ * underneath it and never unmounts — so a per-mount read answered with the value from
+ * before the sitting, the card stayed, and only a cold start put it right. One cache
+ * entry, written by {@link applyRefineNotNow} the moment the sitting ends, is the same
+ * value both screens see, and it is the value a restart would have read anyway.
+ */
+export function useRefineNotNow(userId: string, category: RankingCategory) {
+  return useQuery({
+    queryKey: queryKeys.refineNotNow(userId, category),
+    enabled: Boolean(userId),
+    // Nothing but this app writes it, and every writer updates the cache itself.
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async (): Promise<RefineNotNow | null> => {
+      try {
+        return (await readPref<RefineNotNow>(notNowKey(userId, category))) ?? null;
+      } catch {
+        // A device that cannot read its preferences is not a device that has dismissed
+        // anything; the server still gates the card.
+        return null;
+      }
+    },
+  });
+}
+
+/**
+ * Record a Not now — the button, or the Done that ends a sitting — and make every
+ * mounted card agree with it on the next frame.
+ *
+ * The cache is written first and awaited second, deliberately: the storage write can be
+ * slow or fail outright, and neither is a reason for the card to linger.
+ */
+export function applyRefineNotNow(
+  queryClient: QueryClient,
+  userId: string,
+  category: RankingCategory,
+  placementsTotal: number,
+): Promise<void> {
+  const value: RefineNotNow = {
+    dismissedAt: new Date().toISOString(),
+    placementsAtDismissal: placementsTotal,
+  };
+  queryClient.setQueryData(queryKeys.refineNotNow(userId, category), value);
+  return writePref<RefineNotNow>(notNowKey(userId, category), value).catch(() => {});
+}
+
 /** Whether a stored Not now still holds, given the medium's placements now. */
 export function isSnoozed(
   pref: RefineNotNow | null,
@@ -70,36 +121,22 @@ export function isSnoozed(
  * have answered — a card that appears and then vanishes is worse than one a frame late.
  */
 export function useRefineCard(userId: string, category: RankingCategory) {
+  const queryClient = useQueryClient();
   const availability = useRefineAvailability(userId, category);
-  const key = notNowKey(userId, category);
-  const [pref, setPref] = useState<{ key: string; value: RefineNotNow | null } | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    readPref<RefineNotNow>(key)
-      .then((value) => live && setPref({ key, value: value ?? null }))
-      .catch(() => live && setPref({ key, value: null }));
-    return () => {
-      live = false;
-    };
-  }, [key]);
+  const stored = useRefineNotNow(userId, category);
 
   const data = availability.data;
-  const loaded = pref !== null && pref.key === key;
+  // `isSuccess` rather than "not undefined": null IS an answer here (nothing stored).
+  const loaded = stored.isSuccess;
   const show =
     loaded &&
     data?.status === 'ready' &&
     data.cta.show &&
-    !isSnoozed(pref.value, data.placementsTotal, data.cta.resurfaceAfter);
+    !isSnoozed(stored.data ?? null, data.placementsTotal, data.cta.resurfaceAfter);
 
   const notNow = useCallback(() => {
-    const placements = data?.placementsTotal ?? 0;
-    setPref({
-      key,
-      value: { dismissedAt: new Date().toISOString(), placementsAtDismissal: placements },
-    });
-    void markRefineNotNow(userId, category, placements);
-  }, [category, data?.placementsTotal, key, userId]);
+    void applyRefineNotNow(queryClient, userId, category, data?.placementsTotal ?? 0);
+  }, [category, data?.placementsTotal, queryClient, userId]);
 
   return {
     show: Boolean(show),
