@@ -89,8 +89,8 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
         <EmptyState
           kind="nothingYet"
           title="No lists yet"
-          body="A list is a set of titles you choose — a movie night, a theme, a gift for a friend. Only you can see it until you share it."
-          action={{ label: 'New list', onPress: () => setCreating(true) }}
+          body="Pull together picks for friends, your favorite comfort movies, or anything else you want to save. It stays private until you choose to share it."
+          action={{ label: 'Create a list', onPress: () => setCreating(true) }}
         />
       ) : (
         <FlatList

@@ -652,12 +652,12 @@ A pushed route. Every list the caller owns, all visibilities, `updated_at desc` 
 │                  ▤                           │
 │              No lists yet                    │
 │                                              │
-│   A list is a set of titles you choose —     │
-│   a movie night, a theme, a gift for a       │
-│   friend. Only you can see it until you      │
-│   share it.                                  │
+│   Pull together picks for friends, your      │
+│   favorite comfort movies, or anything else  │
+│   you want to save. It stays private until   │
+│   you choose to share it.                    │
 │                                              │
-│              [  New list  ]                  │
+│            [  Create a list  ]               │
 └──────────────────────────────────────────────┘
 ```
 
