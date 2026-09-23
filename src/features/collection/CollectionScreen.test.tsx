@@ -1012,7 +1012,7 @@ describe('the backlog and Refine cards', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Fine-tune your rankings')).toBeTruthy());
-    expect(view.getByText('A few comparisons could help tighten up 4 placements.')).toBeTruthy();
+    expect(view.getByText('4 placements to refine')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
   });
 

@@ -1,5 +1,6 @@
-import { forwardRef, useId, useImperativeHandle, useRef } from 'react';
-import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { forwardRef, useId, useImperativeHandle, useRef, useState } from 'react';
+import { Pressable, StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 
 import { inputText, theme } from '../tokens';
 import { useEnsureVisible } from './KeyboardScreen';
@@ -22,6 +23,17 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
 ) {
   const id = useId();
   const description = error ?? hint;
+
+  /**
+   * **A password can be looked at** (founder, 2026-09-22).
+   *
+   * Hidden to start, and the eye only exists on a field that asked to be secure, so
+   * every other field in the app is untouched. Toggling swaps `secureTextEntry` on the
+   * same `TextInput`, so the value, the cursor and the keyboard all stay where they
+   * were — this is not a second field swapped in. Nothing about signing in changes.
+   */
+  const secure = Boolean(rest.secureTextEntry);
+  const [shown, setShown] = useState(false);
 
   /**
    * Kept locally as well as forwarded, so focusing this field can scroll it clear of
@@ -52,20 +64,45 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
       <Text variant="caption" tone="secondary" nativeID={`${id}-label`}>
         {label}
       </Text>
-      <TextInput
-        ref={input}
-        accessibilityLabel={error ? `${label}. ${error}` : label}
-        accessibilityLabelledBy={`${id}-label`}
-        accessibilityHint={description}
-        placeholderTextColor={theme.text.tertiary}
-        style={[
-          styles.input,
-          rest.multiline && styles.inputMultiline,
-          Boolean(error) && styles.inputError,
-        ]}
-        onFocus={handleFocus}
-        {...rest}
-      />
+      <View style={styles.row}>
+        <TextInput
+          ref={input}
+          accessibilityLabel={error ? `${label}. ${error}` : label}
+          accessibilityLabelledBy={`${id}-label`}
+          accessibilityHint={description}
+          placeholderTextColor={theme.text.tertiary}
+          onFocus={handleFocus}
+          {...rest}
+          // After `rest`, because both of these are this component's to decide: the eye
+          // owns `secureTextEntry` once the caller has asked for one, and the field owns
+          // its own padding.
+          secureTextEntry={secure && !shown}
+          style={[
+            styles.input,
+            rest.multiline && styles.inputMultiline,
+            Boolean(error) && styles.inputError,
+            secure && styles.inputSecure,
+          ]}
+        />
+        {secure ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              shown ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`
+            }
+            accessibilityState={{ selected: shown }}
+            hitSlop={theme.space[2]}
+            style={styles.reveal}
+            onPress={() => setShown((was) => !was)}
+          >
+            <Ionicons
+              name={shown ? 'eye-off-outline' : 'eye-outline'}
+              size={theme.layout.icon.md}
+              color={theme.text.secondary}
+            />
+          </Pressable>
+        ) : null}
+      </View>
       {description ? (
         <Text variant="caption" tone={error ? 'action' : 'tertiary'}>
           {description}
@@ -77,6 +114,17 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
 
 const styles = StyleSheet.create({
   wrapper: { gap: theme.space[1] },
+  row: { justifyContent: 'center' },
+  // Room for the eye, so a long password never runs under it.
+  inputSecure: { paddingRight: theme.layout.minTapTarget },
+  reveal: {
+    position: 'absolute',
+    right: 0,
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   input: {
     minHeight: theme.layout.buttonMinHeight,
     borderRadius: theme.radius.control,

@@ -782,11 +782,11 @@ function RefineCard({ userId, medium }: { userId: string; medium: Medium }) {
   if (!card.show) return null;
   return (
     <View style={styles.nudge} testID="collection-refine-card">
+      {/* The Unranked card's shape, to the line: heading, count, primary, secondary. No
+          explanatory sentence (founder, 2026-09-22). */}
       <Text variant="callout">Fine-tune your rankings</Text>
       <Text variant="footnote" tone="secondary">
-        {card.count === 1
-          ? 'A few comparisons could help tighten up 1 placement.'
-          : `A few comparisons could help tighten up ${card.count} placements.`}
+        {card.count === 1 ? '1 placement to refine' : `${card.count} placements to refine`}
       </Text>
       <View style={styles.nudgeActions}>
         <Button

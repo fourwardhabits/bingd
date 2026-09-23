@@ -85,18 +85,27 @@ beforeEach(() => {
   mockWritePref.mockClear();
 });
 
-it('opens on the most useful target, pinned, with why it was chosen', async () => {
+/**
+ * Refine looks like the backlog now (founder polish, 2026-09-22): the header, the progress
+ * count and the ordinary pairwise question. The evidence that chose the title is still
+ * carried — `refine_target_outcome` reports it — but the reader is not shown a case for it.
+ */
+it('opens straight into the comparison, with a count and no explanatory block', async () => {
   serve({
-    refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
+    refine_candidates: [
+      { status: 'ready', candidates: [HEAT], cta: { show: true, count: 4, strong: 9 } },
+    ],
     refine_start: [comparing],
   });
   const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
 
   await waitFor(() => expect(view.getByText('Which did you like more?')).toBeTruthy());
   expect(view.getByText('Refine · Movies')).toBeTruthy();
-  expect(view.getByText('#21 in Movies')).toBeTruthy();
-  expect(view.getByText('Never compared with the titles around it')).toBeTruthy();
-  expect(view.getByLabelText('0 of 5 in this round')).toBeTruthy();
+  // The batch the server offered, held for the round.
+  expect(view.getByTestId('refine-progress').props.children).toBe('0 of 4 refined');
+  expect(view.queryByText('Is this still in the right place?')).toBeNull();
+  expect(view.queryByText('#21 in Movies')).toBeNull();
+  expect(view.queryByText('Never compared with the titles around it')).toBeNull();
 
   const [, candidateArgs] = callsTo('refine_candidates')[0];
   expect(candidateArgs).toMatchObject({ p_category: 'movies', p_limit: 1, p_recent: [] });
@@ -190,23 +199,69 @@ it('Close mid-comparison cancels the provisional session and leaves', async () =
   expect(mockWritePref).not.toHaveBeenCalled();
 });
 
-it('"I don’t remember it" rests the title and moves on without repeating it', async () => {
+/**
+ * The title skip is the backlog's, in the backlog's words (founder, 2026-09-22). It leaves
+ * the title for this sitting and cancels its provisional session — it does not snooze it
+ * for 180 days, and `refine_snooze` is no longer called from anywhere in the flow.
+ */
+it('"Skip title (left)" leaves it for the sitting and never snoozes it', async () => {
   serve({
     refine_candidates: [
       { status: 'ready', candidates: [HEAT] },
       { status: 'nothing_waiting', candidates: [] },
     ],
     refine_start: [comparing],
-    refine_snooze: [{ snoozed_until: '2027-03-19' }],
+    rank_cancel: [{ done: true, cancelled: true }],
   });
   const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
-  await waitFor(() => expect(view.getByText('I don’t remember Heat well')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Skip title (left)')).toBeTruthy());
 
-  await fireEvent.press(view.getByText('I don’t remember Heat well'));
+  await fireEvent.press(view.getByText('Skip title (left)'));
 
   await waitFor(() => expect(view.getByText('Nothing needs a look right now')).toBeTruthy());
-  expect(callsTo('refine_snooze')[0][1]).toEqual({ p_media_item_id: 'heat' });
+  expect(callsTo('refine_snooze')).toHaveLength(0);
+  expect(callsTo('rank_cancel')[0][1]).toEqual({ p_session_id: 'session-1' });
   expect(callsTo('refine_candidates')[1][1]).toMatchObject({ p_recent: ['heat'] });
+});
+
+/**
+ * No per-title result page (founder, 2026-09-22): a later target in the same round can move
+ * this one again, so the count goes up and the next target opens. The checkpoint at the end
+ * of the round still lists what moved.
+ */
+it('counts a finished target and deals the next one, with no result page', async () => {
+  serve({
+    refine_candidates: [
+      { status: 'ready', candidates: [HEAT], cta: { show: true, count: 3, strong: 5 } },
+      {
+        status: 'ready',
+        candidates: [{ ...HEAT, media_item_id: 'ronin', title: 'Ronin', position: 9 }],
+        cta: { show: true, count: 3, strong: 4 },
+      },
+    ],
+    refine_start: [comparing, comparing],
+    rank_answer: [
+      {
+        done: true,
+        position: 15,
+        category: 'movies',
+        bucket: 'loved',
+        score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' },
+      },
+    ],
+  });
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+
+  await waitFor(() =>
+    expect(view.getByTestId('refine-progress').props.children).toBe('1 of 3 refined'),
+  );
+  expect(view.queryByText('Moved from #21 → #15')).toBeNull();
+  expect(view.queryByRole('button', { name: 'Next' })).toBeNull();
+  expect(callsTo('refine_candidates')).toHaveLength(2);
 });
 
 it('nothing waiting is a finish, not an error', async () => {

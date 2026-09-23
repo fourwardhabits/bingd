@@ -1,7 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -943,6 +950,28 @@ function Session({
 }
 
 /**
+ * **How wide each comparison card may be, on this device** (founder polish, 2026-09-22).
+ *
+ * It was pinned to `poster.md` (88pt), which on a modern phone left the two posters small
+ * in the middle of a lot of nothing. This clamps rather than picking a second fixed size:
+ * half the width the row actually has, capped so the pair never dominates, and capped
+ * again against height so a short screen does not push the controls off the bottom. The
+ * floor is the old 88, so the smallest phones are no worse off than they were.
+ */
+export function useCardWidth() {
+  const { width, height } = useWindowDimensions();
+  // Two gutters, the gap either side of the divider, and the divider itself.
+  const room = width - theme.layout.gutter * 2 - theme.space[4] * 2 - 2;
+  // A poster is 2:3, so its height is width / aspect. Keep the pair under ~38% of the
+  // screen so the question, the names and the controls all keep their places.
+  const byHeight = height * 0.38 * theme.layout.aspect.poster;
+  return Math.max(
+    theme.poster.md.width,
+    Math.min(Math.floor(room / 2), Math.floor(byHeight), 156),
+  );
+}
+
+/**
  * Exported for Refine (T5), which asks the same question with the same two cards and the
  * same Undo / Too tough row. It draws its own header — the target, its position and the
  * round's progress — so it passes `topBar={false}` rather than stacking a second Close.
@@ -991,6 +1020,7 @@ export function Comparison({
    * is no longer on screen.
    */
   const [recalling, setRecalling] = useState<string | null>(null);
+  const cardWidth = useCardWidth();
 
   const {
     data: pivot,
@@ -1062,8 +1092,10 @@ export function Comparison({
       </Text>
 
       <View style={styles.cards}>
+        {/* `cardWidth` is the one measurement both cards take; see `useCardWidth`. */}
         <Card
           title={subject.title}
+          width={cardWidth}
           kind={subject.kind}
           posterUri={subject.posterUri ?? null}
           disabled={waiting}
@@ -1086,6 +1118,7 @@ export function Comparison({
          */}
         <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no" />
         <Card
+          width={cardWidth}
           title={pivot?.title ?? '…'}
           /**
            * Null until the row lands, and that is the point rather than an oversight.
@@ -1353,11 +1386,14 @@ function Card({
   title,
   kind,
   posterUri,
+  width,
   disabled,
   onPress,
   onRecall,
 }: {
   title: string;
+  /** What `useCardWidth` measured for this device. Both cards get the same number. */
+  width: number;
   /**
    * What the Details sheet under this card will actually contain, or null while the
    * card does not know yet. Null buys silence rather than a guess — see the hint below.
@@ -1371,7 +1407,7 @@ function Card({
   const press = usePressScale({ enabled: !disabled });
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { maxWidth: width }]}>
       {/**
        * Tap chooses, press-and-hold remembers.
        *
@@ -1426,7 +1462,7 @@ function Card({
           onPressOut={press.onPressOut}
           style={({ pressed }) => [styles.cardPress, pressed && styles.pressed]}
         >
-          <Poster uri={posterUri} title={title} width="fill" size="md" />
+          <Poster uri={posterUri} title={title} width={width} size="md" />
           <View style={styles.cardTitleBox}>
             <Text variant="callout" numberOfLines={2} style={styles.centre}>
               {title}
@@ -2067,15 +2103,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: theme.space[2],
+    // Wider than it was: at 8pt the posters crowded the divider between them.
+    gap: theme.space[4],
   },
   card: {
     flex: 1,
     alignItems: 'center',
-    // poster.md, not poster.xl. At 180×270 two cards plus their gutters overflow a
-    // 375pt screen and the mechanic starts to feel like an event; at 88×132 both
-    // posters stay legible and the answer feels quick, which is the point.
-    maxWidth: theme.poster.md.width,
+    // The ceiling is `useCardWidth`'s and arrives as a prop: a clamp against the device
+    // rather than one number for every phone. 180×270 still overflows a 375pt screen,
+    // which is why that clamp has a ceiling of its own.
     gap: theme.space[2],
   },
   // The poster and its name, which is the part that answers the comparison. Split out
@@ -2105,8 +2141,10 @@ const styles = StyleSheet.create({
     marginVertical: theme.space[4],
     backgroundColor: theme.border.hairline,
   },
+  // Two lines of `callout` before an ellipsis, and the box keeps that height whether the
+  // name needs one line or two, so the controls under it never move.
   cardTitleBox: {
-    minHeight: 36,
+    minHeight: theme.typography.callout.lineHeight * 2,
     justifyContent: 'flex-start',
   },
   pressed: { opacity: 0.85 },

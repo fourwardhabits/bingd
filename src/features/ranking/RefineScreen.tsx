@@ -21,10 +21,8 @@ import {
   mayContinue,
   newSitting,
   nextRound,
-  reasonLine,
   recordFinished,
   refineCandidates,
-  refineSnooze,
   ROUND_TARGETS,
   type RefinedTitle,
   type RefineStatus,
@@ -89,7 +87,6 @@ export function RefineScreen({
         target: RefineTarget;
         step: Extract<SessionStep, { state: 'comparing' }>;
       }
-    | { kind: 'result'; title: RefinedTitle }
     | { kind: 'checkpoint'; exhausted: boolean }
     | { kind: 'failed'; message: string; changed: boolean };
 
@@ -99,10 +96,18 @@ export function RefineScreen({
   const openSession = useRef<string | null>(null);
   const answers = useRef(0);
   const ended = useRef(false);
+  /**
+   * A finished target wants the next one. `finish` is declared before `loadNext`, and an
+   * effect that called it would be a cascading render, so the flag is read by `act`
+   * below — the only path a placement can arrive by.
+   */
+  const advance = useRef(false);
   /** The medium's placement total at the last read, which Done records (unified §6). */
   const placementsTotal = useRef(0);
   /** Card-quality titles still waiting at the last read: Keep going needs one (§7). */
   const [strongLeft, setStrongLeft] = useState(0);
+  /** The batch this round opened on; null until the first answer, and again per round. */
+  const [batchAtStart, setBatchAtStart] = useState<number | null>(null);
 
   const endSitting = useCallback(
     (endedBy: 'done' | 'exhausted' | 'close') => {
@@ -141,7 +146,8 @@ export function RefineScreen({
         movement: step.movement ?? null,
         answers: answers.current,
       };
-      update(recordFinished(sittingRef.current, title));
+      const advanced = recordFinished(sittingRef.current, title);
+      update(advanced);
 
       if (step.movement?.outcome === 'moved') {
         // A move shifts every title between the two ordinals, so it is a collection change.
@@ -172,7 +178,12 @@ export function RefineScreen({
           },
         });
       }
-      setPhase({ kind: 'result', title });
+      // **No result page** (founder, 2026-09-22): a later target in the same round can
+      // move this one again, so a per-title "Moved from #7 → #6" interrupts a batch to
+      // state something that is not durable yet. The count goes up and the next target
+      // opens. The round still ends on its checkpoint, which lists what moved.
+      if (atCheckpoint(advanced)) setPhase({ kind: 'checkpoint', exhausted: false });
+      else advance.current = true;
     },
     [analyticsMedium, profile.id, queryClient, update],
   );
@@ -219,6 +230,16 @@ export function RefineScreen({
     }
     placementsTotal.current = found.placementsTotal;
     setStrongLeft(found.cta.strong);
+    setBatchAtStart((current) =>
+      current ??
+      Math.max(
+        1,
+        Math.min(
+          found.cta.count || found.cta.strong || found.cta.qualifying || ROUND_TARGETS,
+          ROUND_TARGETS,
+        ),
+      ),
+    );
     const target = found.targets[0];
     if (found.status !== 'ready' || !target) {
       if (sittingRef.current.finished.length > 0) {
@@ -265,8 +286,25 @@ export function RefineScreen({
     }
     if (next.state !== 'failed') answers.current = Math.max(0, answers.current + progress);
     applyStep(target, next);
-    // Undo at a target's first comparison ended its session: deal the next title.
-    if (next.state === 'ended') void loadNext();
+    // Undo at a target's first comparison ended its session; or the target was placed and
+    // the round has room. Either way the next target is dealt from here.
+    if (next.state === 'ended' || advance.current) {
+      advance.current = false;
+      void loadNext();
+    }
+  };
+
+  /**
+   * Leave this title for this sitting. The session is provisional, so cancelling it
+   * moves nothing; `shown` keeps it out of the rest of the sitting, and the server may
+   * offer it again another day.
+   */
+  const skipTitle = async (target: RefineTarget) => {
+    const sessionId = openSession.current;
+    openSession.current = null;
+    update(markShown(sittingRef.current, target.mediaItemId));
+    if (sessionId) await rankCancel(sessionId);
+    await loadNext();
   };
 
   const close = async () => {
@@ -278,12 +316,14 @@ export function RefineScreen({
     onExit();
   };
 
-  const afterResult = () => {
-    if (atCheckpoint(sittingRef.current)) setPhase({ kind: 'checkpoint', exhausted: false });
-    else void loadNext();
-  };
-
   const round = sitting.finished.length;
+  /**
+   * **How many this round is asking for** (founder, 2026-09-22): the batch the server
+   * offered when the round opened, capped at the round size, and then held — the same
+   * convention the backlog uses, so "2 of 5 refined" counts toward a number that does
+   * not move under the reader as candidates are used up.
+   */
+  const batchTotal = Math.min(batchAtStart ?? 0, ROUND_TARGETS);
 
   return (
     <Screen>
@@ -299,7 +339,11 @@ export function RefineScreen({
         <Text variant="headline" accessibilityRole="header" style={styles.headerTitle}>
           Refine · {medium === 'movies' ? 'Movies' : 'TV'}
         </Text>
-        <Dots done={Math.min(round, ROUND_TARGETS)} />
+        {batchTotal > 0 ? (
+          <Text variant="footnote" tone="secondary" testID="refine-progress">
+            {`${Math.min(round, batchTotal)} of ${batchTotal} refined`}
+          </Text>
+        ) : null}
       </View>
 
       {phase.kind === 'loading' ? (
@@ -326,7 +370,6 @@ export function RefineScreen({
         </Centred>
       ) : phase.kind === 'comparing' ? (
         <View style={styles.body}>
-          <TargetHeader target={phase.target} medium={medium} />
           <ComparisonView
             subject={{
               id: phase.target.mediaItemId,
@@ -378,33 +421,28 @@ export function RefineScreen({
               )
             }
           />
+          {/**
+           * **The backlog's title skip, with the backlog's words** (founder, 2026-09-22).
+           *
+           * It was *I don't remember <title> well*, which snoozed the title for 180 days —
+           * a second, invisible memory state beside the ordinary skip. One act now: leave
+           * this title for this sitting, exactly as the backlog does. `refine_snooze`
+           * stays in the schema, unused, rather than being dropped in a UI pass.
+           */}
           <Pressable
             accessibilityRole="button"
-            accessibilityHint="Sets this title aside for a while. Its ranking does not change."
+            accessibilityLabel={`Skip ${phase.target.title}`}
+            accessibilityHint="Leaves it for another time. Its ranking does not change."
             disabled={busy}
             hitSlop={theme.space[2]}
             style={styles.forget}
-            onPress={() => {
-              const target = phase.target;
-              openSession.current = null;
-              void refineSnooze(target.mediaItemId)
-                .catch(() => {})
-                .then(() => loadNext());
-            }}
+            onPress={() => void skipTitle(phase.target)}
           >
             <Text variant="footnote" tone="secondary" style={styles.centre}>
-              I don’t remember {phase.target.title} well
+              Skip title (left)
             </Text>
           </Pressable>
         </View>
-      ) : phase.kind === 'result' ? (
-        <Centred>
-          <Text variant="title2" style={styles.centre}>
-            {phase.title.title}
-          </Text>
-          <ResultLine title={phase.title} />
-          <Button label="Next" onPress={afterResult} />
-        </Centred>
       ) : phase.kind === 'checkpoint' ? (
         <ScrollView contentContainerStyle={styles.checkpoint}>
           <Text variant="title2">
@@ -441,6 +479,7 @@ export function RefineScreen({
                 kind="secondary"
                 onPress={() => {
                   update(nextRound(sittingRef.current));
+                  setBatchAtStart(null);
                   void loadNext();
                 }}
               />
@@ -486,28 +525,6 @@ function emptyBody(status: Exclude<RefineStatus, 'ready'>, medium: RankingCatego
   }
 }
 
-function TargetHeader({ target, medium }: { target: RefineTarget; medium: RankingCategory }) {
-  const reason = reasonLine(target, medium);
-  return (
-    <View style={styles.target}>
-      <Text variant="footnote" tone="tertiary">
-        Is this still in the right place?
-      </Text>
-      <Text variant="callout" numberOfLines={1}>
-        {target.title}
-      </Text>
-      <Text variant="footnote" tone="secondary">
-        #{target.position} in {medium === 'movies' ? 'Movies' : 'TV'}
-      </Text>
-      {reason ? (
-        <Text variant="caption" tone="tertiary">
-          {reason}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
 function ResultLine({ title, compact = false }: { title: RefinedTitle; compact?: boolean }) {
   const movement = title.movement ?? { outcome: 'unchanged' as const, fromPosition: null };
   const sentence = movementSentence(movement, title.position) ?? `#${title.position}`;
@@ -529,21 +546,6 @@ function ResultLine({ title, compact = false }: { title: RefinedTitle; compact?:
           accessibilityLabel={direction === 'up' ? 'Moved up' : 'Moved down'}
         />
       ) : null}
-    </View>
-  );
-}
-
-/** This round's targets, not the library (§H.3). */
-function Dots({ done }: { done: number }) {
-  return (
-    <View
-      style={styles.dots}
-      accessible
-      accessibilityLabel={`${done} of ${ROUND_TARGETS} in this round`}
-    >
-      {Array.from({ length: ROUND_TARGETS }, (_, i) => (
-        <View key={i} style={[styles.dot, i < done && styles.dotDone]} />
-      ))}
     </View>
   );
 }
