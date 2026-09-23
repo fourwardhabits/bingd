@@ -20,7 +20,7 @@ wrong — people use the app overnight — but the *ratios* below must still hol
 | Project | `abheeqyjzekiowkztfxv` |
 | Migrations applied | **155**, head `20261002000100` |
 | Pending | **13** migrations, `20261003000100` … `20261019000100` |
-| iOS on the App Store | 1.0.0 (7), runtime from `ba14bd0` |
+| iOS on the App Store | 1.0.0 (7), runtime `971caf34`, from `ba14bd0` |
 | iOS latest TestFlight | 1.0.1 (12), runtime `61efbf17`, from `89a1d8c` |
 | Android on Play | 1.0.1, versionCode 12, runtime `da3c7f47`, from `6d2f845` |
 | `goals.count_watch_events` | false (row does not exist until `20261006000100`) |
@@ -34,34 +34,40 @@ them `source = 'imported'` with a star-derived bucket; `rankings` 1106; `ranking
 
 ---
 
-## Read this before phase 1: the OTA in step 9 cannot exist
+## Read this before phase 1: who the step-9 OTA actually reaches
 
-The founder's rollout lists "9. compatible production OTA". **There is no
-runtime-compatible production OTA from this head, and there cannot be one.**
+**Corrected 2026-09-23 07:20 UTC.** An earlier draft of this file said no runtime-compatible
+production OTA could exist. That was computed **without the EAS environment**, which
+truncates the fingerprint's source list and produces a hash that means nothing. Measured
+properly — the four `EXPO_PUBLIC_*` values from `eas env:list production` exported first —
+**both production runtimes are unchanged**:
 
-`package.json` gained a dependency between `89a1d8c` (iOS build 12) and the integrated
-head, so the production runtime has moved. An update published from the new `main`
-carries the new runtime, and **no installed binary will ever see it** — not the App Store
-1.0.0, not TestFlight 1.0.1 (12), not Play versionCode 12.
+| lane | runtime at this head | shipped binaries carrying it |
+| --- | --- | --- |
+| production / iOS | `61efbf17` (170 sources) | 1.0.1 builds 8–12 — **TestFlight only** |
+| production / Android | `da3c7f47` (173 sources) | 1.0.1 vc11 and **vc12, which is what Play serves** |
 
-The consequence is the thing to plan around rather than the thing to fix: **the migrations
-go live before the new client does.** Every phone in the field keeps running its current
-bundle against the migrated schema until the new store binaries are approved and
-installed. That is safe by construction and it is asserted, not assumed —
-`supabase/tests/legacy-client-compat.test.mjs` proves that no RPC the client calls stops
-resolving after these thirteen migrations — but it means:
+So the step-9 OTA is real, and it is not the same event on the two platforms:
 
-- **do not** expect Watch History, Lists, Backlog or Refine to appear for anyone on the
-  day of the migration;
-- the feature flags below are therefore not urgent. Backlog and Refine can stay off until
-  the binary that draws them is actually out;
-- an OTA is still worth publishing to the `production` channel once the new binaries are
-  live, because that is the first update *their* runtime can receive.
+- **Android users get the release from the OTA.** Play serves vc12 on `da3c7f47`, and an
+  update published from this head carries that runtime. It reaches them on the next
+  foreground. This is the fastest path to Watch History, Lists and ranking for the Android
+  audience, and it waits for no review.
+- **iOS App Store users do not.** The App Store serves **1.0.0 (7)**, runtime `971caf34` — a
+  different number, from before the 1.0.1 line began. Nothing published from here will ever
+  reach it. Those users get the release when 1.0.1 (13) is approved.
+- **iOS TestFlight users do**, because builds 8–12 are all on `61efbf17`.
 
-If you want the features in users' hands sooner, the lever is the store review queue, not
-an update.
+Two consequences worth holding on to:
 
----
+1. **The OTA comes after the migrations, never before.** It delivers a client that calls RPCs
+   the live database does not have until phase 1 has run. The founder's order already does
+   this; the reason is written here so nobody reorders it.
+2. **Until it is published, every phone in the field keeps running its current bundle against
+   the migrated schema.** That is safe by construction and it is asserted rather than assumed:
+   `supabase/tests/legacy-client-compat.test.mjs` resolves the RPC surface of both shipped
+   commits — `ba14bd0` (App Store 1.0.0) and `6d2f845` (Play vc12) — against the merged
+   schema, and both pass.
 
 ## Phase 1 — the #196 migrations
 
@@ -273,9 +279,13 @@ is one `update` away from off, and turning either flag off takes effect on the n
 ## Phases 9–11
 
 **9. The production OTA** — see the note at the top. Publish it only once the new store
-binaries are live, from `main`, with `npm run update:production -- --message "…"`, and
-check the printed runtime matches the runtime of the shipped binary before believing it
-reached anybody.
+binaries are live, with `node scripts/release.mjs update production --message "…"` (there is no
+`npm run update:production` script — only preview and beta have one), from `main` or a
+`release/*` branch with the release gate green on that exact commit.
+
+**Check the runtime it prints.** `da3c7f47` for Android means it reached Play's vc12;
+anything else means it reached nobody, and the cause is almost always a missing local
+`EXPO_PUBLIC_*` (see the fingerprint note above) or `google-services.json`.
 
 **10. Final smoke** — the phase 3 list again, plus Watch History on a rewatched title,
 a list created and shared, and the Refine card appearing for an eligible account.
