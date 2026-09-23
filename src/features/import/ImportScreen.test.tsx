@@ -3,7 +3,7 @@ import { strToU8, zipSync } from 'fflate';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { ImportScreen } from './ImportScreen';
+import { ImportScreen, shouldOfferRanking } from './ImportScreen';
 
 /**
  * The importer's screen, exercised through the states a person actually passes.
@@ -489,8 +489,10 @@ describe('when it is over', () => {
     expect(screen.getByLabelText('2 Already in bingd')).toBeTruthy();
     // Named as diary entries, because it is the one number that is not a count of films.
     expect(screen.getByLabelText('3 Diary entries saved')).toBeTruthy();
-    // And the rule that explains why an import never overwrites a ranking.
-    expect(screen.getByText(/start unranked/)).toBeTruthy();
+    // The helper line that used to explain why an import never overwrites a ranking is
+    // gone (founder, 2026-09-22): the bridge is a question and a button, and the rule it
+    // stated is enforced in the database (`20261018000100`), not in this paragraph.
+    expect(screen.queryByText(/start unranked/)).toBeNull();
     // A zero is left out rather than drawn.
     expect(screen.queryByText('Added to your watchlist')).toBeNull();
   });
@@ -524,7 +526,7 @@ describe('when it is over', () => {
     );
     expect(screen.queryByText('Your Letterboxd history is in')).toBeNull();
     // Nothing arrived, so there is nothing to rank.
-    expect(screen.queryByText('Rank imported movies')).toBeNull();
+    expect(screen.queryByText('Rank imported titles')).toBeNull();
   });
 });
 
@@ -806,21 +808,31 @@ describe('restoring an import that ended while they were away', () => {
 });
 
 describe('the way on', () => {
-  it('leads with Rank imported movies, which opens Collection on Unranked', async () => {
+  it('leads with Rank imported titles, which opens Collection on Unranked', async () => {
     mockRpcResults = {
       import_status: {
         status: 'done',
         counts: { applied: 19, watched: 19 },
         completed_at: '2026-01-01T00:00:00.000Z',
       },
+      ranking_backlog: {
+        status: 'ready',
+        total: 19,
+        remaining: 19,
+        targets: [],
+        checkpoint_every: 10,
+      },
     };
     const screen = await renderWithProviders(<ImportScreen surface="settings" jobId={JOB} />);
 
-    await waitFor(() => expect(screen.getByText('Rank imported movies')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Rank imported titles')).toBeTruthy());
+    expect(screen.getByText('Want to rank what you imported?')).toBeTruthy();
+    // No helper line: the question and the button are the whole bridge (founder).
+    expect(screen.queryByText(/start unranked/)).toBeNull();
     expect(screen.getByText('Done')).toBeTruthy();
     expect(screen.getByText('Import another file')).toBeTruthy();
 
-    await fireEvent.press(screen.getByText('Rank imported movies'));
+    await fireEvent.press(screen.getByText('Rank imported titles'));
     expect(mockDismissTo).toHaveBeenCalledWith({
       pathname: '/(tabs)/collection',
       params: { show: 'unranked' },
@@ -906,4 +918,33 @@ describe('the words', () => {
       expect(screen.queryAllByText(/—/)).toHaveLength(0);
     },
   );
+});
+
+/**
+ * The bridge into the ranking backlog (founder, 2026-09-22). The rule is small enough to
+ * test on its own, and the screen test above proves it is wired to the button.
+ */
+describe('shouldOfferRanking', () => {
+  const settled = { settled: true };
+
+  it('offers nothing when the import added nothing', () => {
+    expect(shouldOfferRanking(0, { ...settled, status: 'ready', total: 12 })).toBe(false);
+  });
+
+  it('offers the bridge while titles are still waiting', () => {
+    expect(shouldOfferRanking(19, { ...settled, status: 'ready', total: 19 })).toBe(true);
+  });
+
+  it('says nothing once they have been ranked since', () => {
+    expect(shouldOfferRanking(19, { ...settled, status: 'empty', total: 0 })).toBe(false);
+  });
+
+  it('falls back to the import count when the backlog is off or unreachable', () => {
+    expect(shouldOfferRanking(19, { ...settled, status: 'disabled', total: 0 })).toBe(true);
+    expect(shouldOfferRanking(19, { settled: true })).toBe(true);
+  });
+
+  it('waits for the answer rather than flashing a button', () => {
+    expect(shouldOfferRanking(19, { settled: false })).toBe(false);
+  });
 });
