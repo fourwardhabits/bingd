@@ -108,8 +108,8 @@ describe('the three states', () => {
     await waitFor(() => view.getByText('No lists yet'));
     // The copy is doing real work here: it is the one place the product says what a
     // list is *for*, and it names the default before anybody has to discover it.
-    view.getByText(/Only you can see it until you share it/);
-    view.getByRole('button', { name: 'New list' });
+    view.getByText(/It stays private until you choose to share it/);
+    view.getByRole('button', { name: 'Create a list' });
   });
 
   it('draws one list with its three facts', async () => {
