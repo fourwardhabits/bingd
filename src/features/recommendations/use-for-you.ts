@@ -548,6 +548,47 @@ export const MAX_PAGES = 5;
 const CACHED_READ_LIMIT = 100;
 
 /**
+ * How many fills may be in flight at once when a slate has to wait for them.
+ *
+ * Three rather than one, because the wait is in front of a reader looking at an empty
+ * wall, and three rather than six because each fill is a provider request charged to a
+ * quota everybody shares. {@link MAX_FILLS_PER_SLATE} still bounds how many are made.
+ */
+const FILL_CONCURRENCY = 3;
+
+/**
+ * Fills missing `similar` facets, at most {@link FILL_CONCURRENCY} at a time.
+ *
+ * **A rate limit stops the whole run**, which is the rule the serial loop had and the
+ * reason this is a worker pool rather than a `Promise.all`: BG429 is about the account,
+ * so the fills not yet started would all be refused too, each at the cost of a round trip
+ * and a log line. Anything else is about one title and leaves the rest worth asking for.
+ *
+ * Resolves when every fill has settled. Callers that are not waiting for the result must
+ * still handle rejection — it never rejects, which is what makes that safe.
+ */
+async function fillAnchors(ids: readonly string[]): Promise<void> {
+  let next = 0;
+  let stopped = false;
+  const worker = async () => {
+    while (!stopped) {
+      const index = next;
+      next += 1;
+      const id = ids[index];
+      if (!id) return;
+      try {
+        await cacheSimilar(id);
+      } catch (cause) {
+        if (cause instanceof AdapterError && cause.isRateLimit) stopped = true;
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(FILL_CONCURRENCY, ids.length) }, () => worker()),
+  );
+}
+
+/**
  * This launch's selection, per wall, so a refetch cannot re-draw it (review of 2026-09-13).
  *
  * `selectAnchors` weights titles whose lists are cached, and the cache moves on its own:
@@ -843,6 +884,22 @@ export function useForYou(
        * no cached preference.
        */
       const readIds = liked.slice(0, CACHED_READ_LIMIT).map((anchor) => anchor.mediaItemId);
+      /**
+       * **The two sources that are not about the anchors, started here** (2026-09-23).
+       *
+       * `trendingFallback` and `social_candidates` depend on nothing above them, and they
+       * were awaited one after the other *below* the anchor work — so a cold wall spent
+       * three round trips in series where one would do. Started now, awaited where they
+       * were, they cost the wall whichever is slowest rather than the sum.
+       *
+       * On TV both trending lists are asked for, and the day list is discarded when an
+       * anchor resolved (`TRENDING_FOR`). That is the one request this can waste, it is a
+       * cached read of a shared row, and it runs beside work the wall is waiting for
+       * anyway. Which list is *used* is decided below exactly as before, so an anchored
+       * TV wall still gets no popularity padding.
+       */
+      const trendingReads = Promise.all(TRENDING_FOR[medium].map(trendingFallback));
+      const socialRead = socialCandidates(medium);
       let lists = await cachedSimilar(readIds);
       const selectionKey = [
         userId,
@@ -884,21 +941,39 @@ export function useForYou(
         .map((anchor) => anchor.mediaItemId)
         .slice(0, MAX_FILLS_PER_SLATE);
 
+      /**
+       * **A fill blocks the wall only when there would otherwise be no wall** (2026-09-23).
+       *
+       * Measured against staging: one fill is an edge call at 561ms p50, and six of them
+       * in series were 3,368ms — the whole of a cold For You, in front of a reader looking
+       * at an empty grid. The cached-list reads either side of them cost 81ms and 60ms.
+       *
+       * The fills are worth making; waiting for them is what was not. Each one writes a
+       * facet that lasts a week and that *every* reader of that title then gets for free,
+       * so a fill fired and not awaited is the same work landing a launch later, and the
+       * anchor seed only moves on a cold launch anyway.
+       *
+       * So: if any chosen anchor already has a list with breadth, this slate is a real
+       * taste-led slate and the fills are for the next one. If none does, the alternative
+       * to waiting is a wall drawn from popularity and whoever the reader follows, labelled
+       * "Popular right now" — which is the honest thing to say about it but is not what a
+       * reader who has loved eight films should be shown. That case waits, and pays for
+       * three at a time rather than one after another.
+       *
+       * Deliberately **not** awaited and deliberately not invalidating anything: a wall
+       * that redrew itself when the fills landed would move under the reader's thumb,
+       * which is the defect every other part of this hook is arranged to avoid.
+       */
       if (missing.length > 0) {
-        // Sequentially, so a cold start is six requests spread out rather than six at
-        // once against a provider quota shared by everyone.
-        for (const id of missing) {
-          try {
-            await cacheSimilar(id);
-          } catch (cause) {
-            // A rate limit is about the *account*, not about this anchor, so the five
-            // calls after it would all be refused too — and each one still costs a
-            // round trip and a log line. Every other failure is about the one title,
-            // and the remaining anchors are still worth asking for.
-            if (cause instanceof AdapterError && cause.isRateLimit) break;
-          }
+        const usable = anchorSeeds.filter(
+          (anchor) => (lists.get(anchor.mediaItemId)?.length ?? 0) > 0,
+        ).length;
+        if (usable > 0) {
+          void fillAnchors(missing);
+        } else {
+          await fillAnchors(missing);
+          lists = new Map([...lists, ...(await cachedSimilar(missing))]);
         }
-        lists = new Map([...lists, ...(await cachedSimilar(missing))]);
       }
 
       const anchors: Anchor[] = anchorSeeds.map((anchor) => ({
@@ -913,11 +988,9 @@ export function useForYou(
       // The day list only when nothing about this reader anchors the TV wall — see
       // `TRENDING_FOR`. An anchored reader's wall is taste-led, and more trending titles
       // competing for its slots would be popularity padding, which the fix may not add.
-      const trendingLists =
-        medium === 'tv' && anchorsUsed > 0 ? TRENDING_FOR.tv.slice(0, 1) : TRENDING_FOR[medium];
-      const fallback = [
-        ...new Set((await Promise.all(trendingLists.map(trendingFallback))).flat()),
-      ];
+      const keptLists =
+        medium === 'tv' && anchorsUsed > 0 ? 1 : TRENDING_FOR[medium].length;
+      const fallback = [...new Set((await trendingReads).slice(0, keptLists).flat())];
       /**
        * The third source: titles the people this reader follows put in their top band.
        *
@@ -935,7 +1008,7 @@ export function useForYou(
        * Failing open. It is an enrichment of the pool, and a slate built from two sources
        * instead of three is a slightly narrower slate rather than a broken one.
        */
-      const social = await socialCandidates(medium);
+      const social = await socialRead;
       const candidateIds = candidateIdsFrom(anchors, social, fallback);
 
       const candidates = await candidatesFor(candidateIds, medium);
