@@ -10,7 +10,7 @@ import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { useOperationIntent } from '@/lib/operation-intent';
 import { queryKeys } from '@/lib/query';
-import { BucketChoices, Button, Screen, Text, type BucketId } from '@/ui/components';
+import { BucketChoices, Button, Poster, Screen, Text, type BucketId } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import {
@@ -342,6 +342,20 @@ function BacklogSession({
         </Centred>
       ) : phase.kind === 'ask' ? (
         <Centred>
+          {/**
+           * **The poster stays** (founder QA, 2026-09-22). Without it this read as a
+           * different flow from the comparison that follows, where two posters are the
+           * whole screen. One `Poster`, the same component and treatment the comparison
+           * cards use, then the title, then the question — so bucketing is visibly one
+           * state of the same ranking flow rather than a form in front of it.
+           */}
+          <View style={styles.askPoster} testID="backlog-ask-poster">
+            <Poster
+              uri={posterUri(phase.target.posterPath, 'card')}
+              title={phase.target.title}
+              size="md"
+            />
+          </View>
           <Text variant="callout" style={styles.centre} numberOfLines={2}>
             {phase.target.title}
           </Text>
@@ -490,8 +504,14 @@ function SkipLink({
       style={styles.skip}
       onPress={onPress}
     >
+      {/**
+       * **`Skip title`, since 2026-09-22** (founder QA). It was "Skip this one", which
+       * beside the comparison's own escape read as the same act twice. The two are
+       * different and both stay: `Can't decide` declines the comparison on screen and
+       * keeps placing this title; this leaves the TITLE for another sitting.
+       */}
       <Text variant="footnote" tone="secondary" style={styles.centre}>
-        Skip this one
+        Skip title
       </Text>
     </Pressable>
   );
@@ -512,6 +532,7 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1 },
   body: { flex: 1 },
   skip: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  askPoster: { alignItems: 'center' },
   centred: {
     flex: 1,
     justifyContent: 'center',

@@ -563,7 +563,7 @@ export default function CollectionScreen() {
         <View style={styles.nudge} testID="collection-start-ranking-card">
           <Text variant="callout">Rank your unranked titles</Text>
           <Text variant="footnote" tone="secondary">
-            Go through them one at a time instead of opening each title individually.
+            Rank them one after another in one flow.
           </Text>
           <Text variant="footnote" tone="secondary">
             {backlogCountLine(backlogTotal, medium)}

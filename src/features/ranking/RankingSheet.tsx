@@ -1246,7 +1246,20 @@ export function Comparison({
          */}
         <View style={styles.control}>
           <Button
-            label="Too tough"
+            /**
+             * **`Can't decide`, since 2026-09-22** (founder QA of the backlog session).
+             *
+             * It was "Too tough". Beside the session's own *Skip title*, that read as two
+             * words for one act: a reader met "Too tough" and "Skip this one" together and
+             * could not tell which one left the title alone. They are genuinely different
+             * — this declines THIS COMPARISON and keeps placing the same title, while Skip
+             * title drops the title for the sitting — so the fix is the two names, not one
+             * control (founder: do not collapse them).
+             *
+             * Still one word on every surface (2026-08-30): onboarding, a first ranking,
+             * the Log tab, every rerank and both session sources are this component.
+             */
+            label="Can't decide"
             /**
              * **The word the button uses, and no other** (independent review 76).
              *
@@ -1260,9 +1273,9 @@ export function Comparison({
              * control is, hint says what pressing it does -- and "Compares against a
              * different title instead" answers the ambiguity the old spelled-out label
              * existed for, which was that "Skip" alone could be heard as skipping the
-             * whole ranking. "Too tough to call" cannot be heard that way.
+             * whole ranking.
              */
-            accessibilityLabel="Too tough to call"
+            accessibilityLabel="Can't decide between these"
             accessibilityHint="Compares against a different title instead."
             testID="ranking-too-tough"
             kind="secondary"

@@ -247,3 +247,42 @@ it('start=refine opens Refine directly', async () => {
   await waitFor(() => expect(view.getByText('Nothing needs a look right now')).toBeTruthy());
   expect(callsTo('ranking_backlog')).toHaveLength(0);
 });
+
+/**
+ * **The denominator is fixed when the sitting starts** (founder QA, 2026-09-22: "0 of 19"
+ * became "0 of 18" after a skip). Skipping removes a title from what is left to deal —
+ * `remaining` — and must never move the number the reader is counting toward. The server
+ * keeps `total` stable across a skip (`ranking-backlog.test.mjs`); this pins the screen
+ * against a shrinking one whatever the reason, including a title ranked on another device
+ * mid-sitting.
+ */
+it('a skip never moves the denominator, even if the server total shrinks', async () => {
+  serve({
+    ranking_backlog: [
+      queue([UNTOUCHED], { total: 19, remaining: 19 }),
+      queue([{ ...UNTOUCHED, media_item_id: 'ronin', title: 'Ronin' }], {
+        total: 18,
+        remaining: 18,
+      }),
+    ],
+  });
+  const view = await open();
+
+  await waitFor(() => expect(view.getByLabelText('Skip Heat')).toBeTruthy());
+  expect(view.getByTestId('backlog-progress').props.children).toBe('0 of 19 ranked');
+
+  await fireEvent.press(view.getByLabelText('Skip Heat'));
+
+  await waitFor(() => expect(view.getByText('Ronin')).toBeTruthy());
+  expect(view.getByTestId('backlog-progress').props.children).toBe('0 of 19 ranked');
+  expect(callsTo('ranking_backlog')[1][1]).toMatchObject({ p_skip: ['heat'] });
+});
+
+/** The bucket screen is one state of the same flow, so the target's poster stays on it. */
+it('shows the target poster on How was it?', async () => {
+  serve({ ranking_backlog: [queue([{ ...UNTOUCHED, poster_path: '/heat.jpg' }])] });
+  const view = await open();
+
+  await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+  expect(view.getByTestId('backlog-ask-poster')).toBeTruthy();
+});
