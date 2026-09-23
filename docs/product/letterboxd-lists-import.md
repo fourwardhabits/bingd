@@ -1,6 +1,11 @@
 # Letterboxd → bingd Lists import (T6c)
 
-**Status: DESIGN, not built.** A read-only analysis from 2026-09-21, revised the same day to
+**Status: DEFERRED ON PURPOSE, post-freeze (T6c).** It is not in the stopping-point release.
+The 2026-09-22 build-readiness pass came back **NO-GO**, and the founder accepted that. §D
+below records why and what a future build must do. The rest of this document is unchanged
+and is still the design.
+
+**Status of the design: DESIGN, not built.** A read-only analysis from 2026-09-21, revised the same day to
 match the Lists terminology and behaviour after the #196 founder QA pass. It was then
 **reconciled against a real Letterboxd export that contains lists** (2026-09-21 22:08 UTC;
 scrubbed fixture at `src/features/import/__fixtures__/real-list-export.ts`). Nothing in this
@@ -20,6 +25,105 @@ Putting a title in a list creates:
 - no Collection membership.
 
 Imported lists produce **no Feed events**.
+
+---
+
+## D. Deferred: the 2026-09-22 NO-GO
+
+**Decision.** Letterboxd Lists import is **not built for the stopping-point release**. It stays
+**T6c, post-freeze**. The build-readiness pass of 2026-09-22 stopped before writing any code,
+and nothing was applied, flagged or published.
+
+**What is already done, and is separate from this.** Native bingd Lists (Lists v1,
+[`lists-prd.md`](lists-prd.md), built in #196) is a **completed feature of its own**. It does
+not wait on this import, and nothing here changes how native Lists behave. This document
+only adds a way to fill them from a Letterboxd archive.
+
+### D.1 Why it stopped
+
+1. **The design needs a substantial schema and changes the import worker.** §9 is one
+   migration, but inside it:
+   - three new tables: `import_lists`, `import_list_entries` and `imported_lists`;
+   - four new RPCs: `import_stage_lists`, `_import_apply_lists`, `my_imported_list_keys` and
+     `import_remove_lists`;
+   - a new "create lists" phase in `_drain_import_jobs`, the worker every import runs
+     through;
+   - two new `import_jobs` columns, a new `import_rows` kind and three `app_config` rows;
+   - rebuilds of `import_stage`, `_import_match_batch`, `_import_apply_batch`,
+     `_import_settle`, `_import_redact_on_complete`, `_import_sweep_abandoned`,
+     `_import_thin_titles` and `my_lists_for_title`.
+2. **A smaller version does not exist.** Matching runs later, on the server worker, so
+   creating the lists has to be a server phase too. The client cannot create them with
+   `create_list`, for three reasons:
+   - it stamps `in_app`, not `imported`;
+   - it is limited to 20 lists a day;
+   - the client never learns the matched title ids for titles that appear only in lists.
+3. **Two decisions are still open** (D.3).
+
+### D.2 What a future build requires
+
+- **A migration after #196, numbered `20261020000100` or later.** #196 ends at
+  `20261018000100`, and the Unified Ranking branch (`feat/backlog-refine-unified`) takes
+  `20261019000100`. **Check the migration heads again on the repo, staging and production
+  before choosing the number.** §9's list of which migration holds each function's latest
+  definition must be checked again at the same time.
+- **#196 on production first.** The functions this rebuilds are #196's versions (for
+  example `_import_apply_batch` from `20261003000100`), and production does not have them.
+- **PR #200 (T6c-0) merged.** Without it, any archive with more than about 34 lists is
+  refused before its watched history can be imported. #200 is client-only and does not
+  depend on this document, so it can ship on its own.
+- **The architecture in §9:** the three tables, the four RPCs and the new worker phase,
+  behind `import.lists_enabled = false`.
+- **Checked on 2026-09-22, and still to confirm at build time:** `_import_provider_claim` and
+  the `letterboxd-import` Edge Function select rows by status alone. A `list` kind should
+  therefore need no Edge Function change or deploy.
+
+### D.3 The two decisions the founder must make first
+
+1. **What counts as "edited since the import"?** §6 item 4 says *Remove imported lists* keeps
+   lists edited since the import, but it never defines "edited". Is a rename an edit? A
+   visibility change, a reorder, adding or removing a title? Every native list writer bumps
+   `lists.updated_at`, and so does the moderation `hide_list`, so "`updated_at` later than
+   the import" would also count a moderation hide as an edit. This decides which of a
+   person's lists get deleted, so it must not be defaulted silently.
+   - *Suggestion, not decided:* edited means `updated_at` is later than the moment the
+     import finished writing that list, and a moderation hide does not count.
+2. **What happens past 100 imported lists?** §7 adds `lists.max_imported_per_user = 100` but
+   does not say what happens when an import would cross it. Which lists are skipped? In what
+   order? What does the summary say? Does a re-import that deletes nothing still count
+   toward the cap? (The 100 lists per import that *Choose lists* enforces is a separate cap,
+   and it is specified.)
+
+### D.4 What is kept for the future build
+
+- **The real v7 fixture findings (§1).** They come from real bytes and do not need redoing:
+  - `src/features/import/__fixtures__/real-list-export.ts` and its 11-test pin;
+  - one CSV per list at `lists/<name>.csv`, CRLF with no BOM, in three sections;
+  - `Position` runs 1..N;
+  - an item's `URL` is the film's `boxd.it` URI, the same one `watched.csv` uses;
+  - there is no field for ranked state or visibility.
+- **The §10 questions** stay open, and they do not block a build.
+- **A throwaway branch.** `feat/letterboxd-lists-import` (local only, `a124187`) is #196
+  `b9b07c2` plus #200 and #201 merged. The import and Lists jest suites passed on it: 19/19
+  suites, 324 tests. It has no commits of its own, and a future build can start there or
+  start fresh.
+
+### D.5 This is not the import-complete ranking bridge
+
+**Today's Letterboxd watched-title importer already hands off to ranking. That hand-off is
+separate from T6c, needs no Lists import, and must not be tied to this deferral.**
+
+- **Today:** the import summary leads with **Rank imported movies**
+  (`ImportScreen` → `unrankedMovies()`, Collection ▸ Movies ▸ Unranked), and imported
+  titles arrive unranked.
+- **Planned in the watch history document:** the Unified Ranking work
+  ([`watch-history-and-ranking-calibration.md`](watch-history-and-ranking-calibration.md)
+  §I.1) points that button, and the import-completed notification, at the unified ranking
+  session.
+- **The bridge uses only watched rows.** A list import writes no `user_media` row, no
+  watch and no ranking (§4), so list-only titles are never in Unranked and the bridge never
+  deals them. Shipping, changing or re-pointing the bridge therefore needs nothing from this
+  document, and T6c needs nothing from the bridge.
 
 ---
 
@@ -362,7 +466,7 @@ This is a **separate T6c**, not part of T6 or T6b.
 |---|---|---|
 | **T6c-0** | Archive member count 50 → 1,000; the listing stops at the limit plus one. Client only, OTA. | **PR #200** |
 | **T6c-1** | A real export with lists, and a scrubbed fixture that leaves out `profile.csv` | **Done, 2026-09-21:** `real-list-export.ts` plus its test (§1). The questions in §10 are still open. |
-| **T6c-2** | Backend (§9), behind `import.lists_enabled = false` | #196 on production |
+| **T6c-2** | Backend (§9), behind `import.lists_enabled = false`. **Deferred post-freeze (§D).** | #196 on production; #200; the two decisions in §D.3 |
 | **T6c-3** | Client work, OTA-deliverable: the `lists/<name>.csv` path rule, which never takes `lists` as a wrapper folder and prefers a root match (§0 item 4); a section-aware reader for the v7 format on the existing tokenizer (§1a); preview and summary | T6c-2 |
 | **T6c-4** | Repair for list entries | T6b |
 
@@ -370,9 +474,10 @@ This is a **separate T6c**, not part of T6 or T6b.
 
 ## 9. Migrations and API likely needed
 
-**One migration.** #196 now reaches `20261015000100` on staging, so use the next free number
-at build time, checked on both projects. It must rebuild each function from its **latest**
-definition:
+**One migration.** It is numbered `20261020000100` or later: #196 ends at `20261018000100`,
+and Unified Ranking takes `20261019000100` (§D.2). Check the heads again on both projects at
+build time. It must rebuild each function from its **latest** definition, and that list must
+be checked again at build time too:
 
 - `_import_apply_batch` from `20261003000100`;
 - `_import_match_batch` from `20260925000100`;
