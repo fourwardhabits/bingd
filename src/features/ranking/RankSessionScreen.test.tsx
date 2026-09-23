@@ -286,3 +286,18 @@ it('shows the target poster on How was it?', async () => {
   await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
   expect(view.getByTestId('backlog-ask-poster')).toBeTruthy();
 });
+
+/** Founder QA, 2026-09-22: the two escapes must read as different acts on the pair screen. */
+it('names the title skip by its side on the comparison, and plainly on the bucket screen', async () => {
+  serve({ ranking_backlog: [queue([UNTOUCHED])], rank_backlog_start: [comparing] });
+  const view = await open();
+
+  await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+  expect(view.getByText('Skip title')).toBeTruthy();
+
+  await fireEvent.press(view.getByLabelText('It was fine'));
+
+  await waitFor(() => expect(view.getByText('Skip title (left)')).toBeTruthy());
+  expect(view.getByText("Can't decide")).toBeTruthy();
+  expect(view.queryByText('Too tough')).toBeNull();
+});

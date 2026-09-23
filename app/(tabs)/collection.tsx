@@ -562,9 +562,8 @@ export default function CollectionScreen() {
       {!inLists && active === 'unranked' && backlogOn && backlogTotal > 0 ? (
         <View style={styles.nudge} testID="collection-start-ranking-card">
           <Text variant="callout">Rank your unranked titles</Text>
-          <Text variant="footnote" tone="secondary">
-            Rank them one after another in one flow.
-          </Text>
+          {/* No explanatory line: the heading, the count and the button already say it
+              three times over (founder QA, 2026-09-22). */}
           <Text variant="footnote" tone="secondary">
             {backlogCountLine(backlogTotal, medium)}
           </Text>

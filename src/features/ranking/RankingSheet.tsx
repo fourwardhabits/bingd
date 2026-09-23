@@ -1076,13 +1076,15 @@ export function Comparison({
             setRecalling(subject.id);
           }}
         />
-        {/* Beli's device (beli-252). It turns two pictures side by side into a
-            question, and it costs one 32pt circle. */}
-        <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no">
-          <Text variant="caption" tone="secondary">
-            OR
-          </Text>
-        </View>
+        {/**
+         * **A hairline, not a badge** (founder QA, 2026-09-22).
+         *
+         * It was a 32pt circle reading OR — Beli's device (beli-252). On the device it
+         * was clutter between the only two things the screen is asking about, and the
+         * question above already says the two posters are alternatives. A one-pixel rule
+         * keeps them apart without adding a third object to look at.
+         */}
+        <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no" />
         <Card
           title={pivot?.title ?? '…'}
           /**
@@ -2095,15 +2097,13 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
     paddingVertical: theme.space[1],
   },
+  // The divider between the two cards: a hairline the height of the poster, and nothing
+  // else. See the note at its use.
   or: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.radius.full,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.sunken,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: StyleSheet.hairlineWidth * 2,
+    alignSelf: 'stretch',
+    marginVertical: theme.space[4],
+    backgroundColor: theme.border.hairline,
   },
   cardTitleBox: {
     minHeight: 36,

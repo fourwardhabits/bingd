@@ -349,19 +349,26 @@ function BacklogSession({
            * cards use, then the title, then the question — so bucketing is visibly one
            * state of the same ranking flow rather than a form in front of it.
            */}
+          {/**
+           * **The same rhythm as the comparison** (founder QA, 2026-09-22): question at
+           * the top, poster under it, name under the poster. The comparison screen reads
+           * *Which did you like more?* over two `md` posters with their names beneath; this
+           * is that screen with one card instead of two, so nothing jumps vertically when
+           * the reader answers and the pair slides in.
+           */}
+          <Text variant="headline" style={styles.centre} accessibilityRole="header">
+            How was it?
+          </Text>
           <View style={styles.askPoster} testID="backlog-ask-poster">
             <Poster
               uri={posterUri(phase.target.posterPath, 'card')}
               title={phase.target.title}
               size="md"
             />
+            <Text variant="callout" style={styles.centre} numberOfLines={2}>
+              {phase.target.title}
+            </Text>
           </View>
-          <Text variant="callout" style={styles.centre} numberOfLines={2}>
-            {phase.target.title}
-          </Text>
-          <Text variant="title2" style={styles.centre}>
-            How was it?
-          </Text>
           <BucketChoices
             selected={null}
             onSelect={(bucket) => void open(phase.target, bucket)}
@@ -430,6 +437,7 @@ function BacklogSession({
           <SkipLink
             title={phase.target.title}
             disabled={busy}
+            side
             onPress={() => skipTitle(phase.target)}
           />
         </View>
@@ -489,10 +497,17 @@ function SkipLink({
   title,
   disabled,
   onPress,
+  /**
+   * `(left)` on the comparison screen only (founder QA, 2026-09-22). Beside two posters,
+   * "Skip title" could be heard as skipping either one — and the title being placed is
+   * always the left card. The bucket screen shows one poster, so it needs no side.
+   */
+  side = false,
 }: {
   title: string;
   disabled: boolean;
   onPress: () => void;
+  side?: boolean;
 }) {
   return (
     <Pressable
@@ -511,7 +526,7 @@ function SkipLink({
        * keeps placing this title; this leaves the TITLE for another sitting.
        */}
       <Text variant="footnote" tone="secondary" style={styles.centre}>
-        Skip title
+        {side ? 'Skip title (left)' : 'Skip title'}
       </Text>
     </Pressable>
   );
@@ -530,9 +545,12 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
   },
   headerTitle: { flex: 1 },
-  body: { flex: 1 },
+  // Centred like the bucket screen, so the posters sit at the same height on both and
+  // the flow does not jump between states (founder QA, 2026-09-22).
+  body: { flex: 1, justifyContent: 'center' },
   skip: { paddingVertical: theme.space[3], paddingHorizontal: theme.layout.gutter },
-  askPoster: { alignItems: 'center' },
+  // Poster then name, the way a comparison card stacks them.
+  askPoster: { alignItems: 'center', gap: theme.space[2] },
   centred: {
     flex: 1,
     justifyContent: 'center',
