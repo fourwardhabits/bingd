@@ -11,6 +11,8 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 
+import { RankingBatchRow } from '@/features/feed/RankingBatchRow';
+import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { useCurrentProfile } from '@/features/auth';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { ProfileAwards } from '@/features/awards/ProfileAwards';
@@ -87,6 +89,10 @@ export default function PublicProfileScreen() {
   const viewer = useCurrentProfile();
   const router = useRouter();
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+    null,
+  );
   // Mounted only while open, as on the own profile: it reads nine things when it
   // mounts, and one that stayed mounted would read them on every visit to anybody.
   //
@@ -658,7 +664,30 @@ export default function PublicProfileScreen() {
           {recent.length ? (
             <View style={styles.section}>
               <SectionHeader title="Recent activity" />
-              {recent.map((event) => (
+              {recent.map((event) => {
+                /**
+                 * **A whole Unranked sitting is one row** (20261020000100), here as well as on the
+                 * Feed. It is the same event, drawn by the same component: an `ActivityRow` is about
+                 * one title and carries controls a post about eighteen titles has no use for.
+                 */
+                if (event.type === 'ranking_batch') {
+                  return (
+                    <RankingBatchRow
+                      key={event.id}
+                      event={event}
+                      onPressTitle={() =>
+                        event.mediaItemId ? router.push(`/title/${event.mediaItemId}`) : undefined
+                      }
+                      onOpenList={() =>
+                        setRankingBatchFor({
+                          id: event.id,
+                          medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                        })
+                      }
+                    />
+                  );
+                }
+                return (
                 <ActivityRow
                   key={event.id}
                   actorName={event.actorName}
@@ -698,7 +727,8 @@ export default function PublicProfileScreen() {
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
                 />
-              ))}
+                );
+              })}
               {/* A later page failing keeps the rows that arrived. This section has no
                   first-page error state at all — it is drawn only when `recent.length`
                   is non-zero — so the footer is the only thing here that can say a page
@@ -746,6 +776,16 @@ export default function PublicProfileScreen() {
         subjectId={reportingReview ?? ''}
         noun="review"
       />
+
+      {/* The titles one Unranked sitting ranked (20261020000100). Mounted only while
+          open, like every other sheet here. */}
+      {rankingBatchFor ? (
+        <RankingBatchSheet
+          eventId={rankingBatchFor.id}
+          medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
 
       <CommentSheet
         eventId={commentsFor}

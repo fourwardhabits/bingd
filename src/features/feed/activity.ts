@@ -60,9 +60,10 @@ export const ACTIVITY_TYPES = [
   /**
    * 20261020000100. One row per Unranked sitting, which grows as titles finish.
    *
-   * Feed only, like a follow story and for the same reason: somebody reading a profile
-   * came to see what that person has watched, and "ranked Heat + 17 more" between two
-   * rankings is the audit entry §A9 says not to build.
+   * **On both surfaces** (founder, 2026-09-24), unlike a follow story. A sitting is
+   * genuine ranking activity — the same act the individual Rank path already posts to a
+   * profile — so it should not vanish when a reader moves from the Feed to the profile of
+   * the person who did it. One event, eligible twice; never a second row.
    */
   'ranking_batch',
 ] as const;
@@ -71,6 +72,11 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 /**
  * The types a **profile's** Recent activity asks for: everything except follow stories.
+ *
+ * `ranking_batch` is deliberately **in** this list (founder, 2026-09-24): a grouped
+ * Unranked sitting is ranking activity, and the individual Rank path already posts to a
+ * profile, so hiding the grouped one would make the same act appear or disappear
+ * depending on how it was reached.
  *
  * The founder's §A9 scopes follow activity to the Feed, where it is social *discovery*
  * content — a way for a network to propagate. On a profile it would be neither: somebody

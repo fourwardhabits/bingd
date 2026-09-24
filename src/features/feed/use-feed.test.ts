@@ -1277,6 +1277,62 @@ describe('follow stories', () => {
     expect(mockFeedReads[0]?.in.type).toContain('title_ranked');
   });
 
+  /**
+   * **A grouped sitting is eligible on both surfaces** (founder, 2026-09-24), which is
+   * where it parts company with a follow story.
+   *
+   * A sitting is genuine ranking activity — the same act the individual Rank path already
+   * posts to a profile — so hiding the grouped one would make one act appear or disappear
+   * depending on how the reader reached it. One event, asked for twice; never two rows.
+   */
+  it('asks for a grouped ranking sitting on the feed and on a profile', async () => {
+    mockFeedRows = [event()];
+    await load();
+    expect(mockFeedReads[0]?.in.type).toContain('ranking_batch');
+
+    mockFeedReads.length = 0;
+    const view = await renderHookWithProviders(() => useActorActivity('friend'));
+    await waitFor(() => expect(view.result.current.isPending).toBe(false));
+
+    expect(mockFeedReads[0]?.in.type).toContain('ranking_batch');
+    // ... and scoped to that one actor, so it appears on its author's profile and nobody
+    // else's. The grouped post is no exception to the rule every profile read follows.
+    expect(mockFeedReads[0]?.in.actor_id).toEqual(['friend']);
+  });
+
+  it('reads one grouped sitting as one item, with its count', async () => {
+    mockFeedRows = [
+      event({
+        id: 'batch-1',
+        type: 'ranking_batch',
+        payload: { sitting: 'sitting-1', count: 18 },
+      }),
+    ];
+
+    const items = await load();
+
+    // One event in, one item out: the grouping happened on the server, and the client
+    // must not split or duplicate it.
+    const batches = items.filter((item) => item.type === 'ranking_batch');
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.rankedCount).toBe(18);
+  });
+
+  it('leaves ordinary activity exactly as it was', async () => {
+    mockFeedRows = [
+      event({ id: 'ranked-1', type: 'title_ranked' }),
+      event({ id: 'batch-1', type: 'ranking_batch', payload: { sitting: 's', count: 3 } }),
+    ];
+
+    const items = await load();
+
+    // The grouped row carries a count and an ordinary one does not — the field is scoped
+    // to the type rather than filled in for everything.
+    expect(items.find((i) => i.id === 'ranked-1')?.rankedCount).toBeNull();
+    expect(items.find((i) => i.id === 'batch-1')?.rankedCount).toBe(3);
+    expect(items).toHaveLength(2);
+  });
+
   it('resolves who a story is about, in one call for the page', async () => {
     mockFeedRows = [followRow(), followRow({ id: 'follow-2' }), event()];
     mockFollowPeopleRows = [

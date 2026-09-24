@@ -12,6 +12,8 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 
+import { RankingBatchRow } from '@/features/feed/RankingBatchRow';
+import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
@@ -83,6 +85,10 @@ export default function ProfileScreen() {
   const stats = useProfileStats(profile.id);
   const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+    null,
+  );
   /**
    * Which of the two people lists is open, if either.
    *
@@ -493,6 +499,28 @@ export default function ProfileScreen() {
           ) : null}
           {recent.map((event) => {
             const summary = reactions.data?.get(event.id);
+            /**
+             * **A whole Unranked sitting is one row** (20261020000100), here as well as on the
+             * Feed. It is the same event, drawn by the same component: an `ActivityRow` is about
+             * one title and carries controls a post about eighteen titles has no use for.
+             */
+            if (event.type === 'ranking_batch') {
+              return (
+                <RankingBatchRow
+                  key={event.id}
+                  event={event}
+                  onPressTitle={() =>
+                    event.mediaItemId ? router.push(`/title/${event.mediaItemId}`) : undefined
+                  }
+                  onOpenList={() =>
+                    setRankingBatchFor({
+                      id: event.id,
+                      medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                    })
+                  }
+                />
+              );
+            }
             return (
               <ActivityRow
                 key={event.id}
@@ -563,6 +591,16 @@ export default function ProfileScreen() {
           />
         </View>
       </ScrollView>
+
+      {/* The titles one Unranked sitting ranked (20261020000100). Mounted only while
+          open, like every other sheet here. */}
+      {rankingBatchFor ? (
+        <RankingBatchSheet
+          eventId={rankingBatchFor.id}
+          medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
 
       <CommentSheet
         eventId={commentsFor}
