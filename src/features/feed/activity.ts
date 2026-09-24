@@ -57,6 +57,14 @@ export const ACTIVITY_TYPES = [
   // 20260912000100. One aggregated row per actor per window — see `FEED_ACTIVITY_TYPES`
   // below, which is the only read that asks for it.
   'follow_added',
+  /**
+   * 20261020000100. One row per Unranked sitting, which grows as titles finish.
+   *
+   * Feed only, like a follow story and for the same reason: somebody reading a profile
+   * came to see what that person has watched, and "ranked Heat + 17 more" between two
+   * rankings is the audit entry §A9 says not to build.
+   */
+  'ranking_batch',
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
@@ -104,6 +112,9 @@ export const isWatchActivity = (type: ActivityType): boolean =>
 /** The verb between the actor and the title — or, for an award, the award's name. */
 const VERB: Record<ActivityType, string> = {
   title_ranked: 'ranked',
+  // A whole sitting, which `RankingBatchRow` draws itself — this entry exists so the
+  // map stays total, and the row never asks for it.
+  ranking_batch: 'ranked',
   title_logged: 'watched',
   season_completed: 'finished',
   watchlist_added: 'added',

@@ -147,6 +147,11 @@ export type FeedItem = {
    * dropped — see `attachFollowPeople`.
    */
   followed: FollowedPerson[];
+  /**
+   * How many titles one Unranked sitting ranked (`ranking_batch` only, 20261020000100).
+   * The row names the first and counts the rest, so the tail is this less one.
+   */
+  rankedCount: number | null;
 };
 
 /** One person named by a follow story. Identity only: this is a discovery list. */
@@ -211,6 +216,9 @@ type FeedRow = {
     category?: 'movies' | 'tv_seasons';
     score?: number;
     bucket?: Bucket;
+    /** ranking_batch rows only (20261020000100): how many titles that sitting placed. */
+    count?: number;
+    sitting?: string;
     /** award_earned rows only (20260828000100). */
     award?: string;
     tier?: string;
@@ -800,6 +808,10 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       watchNumber: null,
       // Filled by `attachFollowPeople` below, per viewer, and only on a follow row.
       followed: [],
+      rankedCount:
+        row.type === 'ranking_batch' && typeof row.payload?.count === 'number'
+          ? row.payload.count
+          : null,
       award: award(row),
       goal:
         row.type === 'goal_completed' && row.payload?.year && row.payload?.category

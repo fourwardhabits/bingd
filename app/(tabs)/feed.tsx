@@ -38,6 +38,8 @@ import {
 } from '@/features/feed/use-feed';
 import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
+import { RankingBatchRow } from '@/features/feed/RankingBatchRow';
+import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import {
   DEFAULT_REACTION,
@@ -437,6 +439,10 @@ export default function FeedScreen() {
    * had already outgrown.
    */
   const [followStoryFor, setFollowStoryFor] = useState<string | null>(null);
+  /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+    null,
+  );
   /**
    * The event being recommended, if any.
    *
@@ -908,7 +914,33 @@ export default function FeedScreen() {
                  * somebody's relationship, on which the two people best placed to feel
                  * strange about a thread are the ones named in it.
                  */
-                event.type === 'follow_added' ? (
+                /**
+                 * **A whole sitting is one row** (20261020000100). Working through an
+                 * imported library posts one grouped story rather than forty, and it is
+                 * its own row for the follow story's reason: `ActivityRow` is about one
+                 * title and carries eight controls that a post about eighteen titles has
+                 * no use for.
+                 */
+                event.type === 'ranking_batch' ? (
+                  <RankingBatchRow
+                    key={event.id}
+                    event={event}
+                    onPressActor={
+                      event.actorId === profile.id || !event.actorUsername
+                        ? undefined
+                        : () => router.push(`/u/${event.actorUsername}`)
+                    }
+                    onPressTitle={() =>
+                      event.mediaItemId ? router.push(`/title/${event.mediaItemId}`) : undefined
+                    }
+                    onOpenList={() =>
+                      setRankingBatchFor({
+                        id: event.id,
+                        medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                      })
+                    }
+                  />
+                ) : event.type === 'follow_added' ? (
                   <FollowStoryRow
                     key={event.id}
                     event={event}
@@ -1104,6 +1136,17 @@ export default function FeedScreen() {
           router.push(`/u/${username}`);
         }}
       />
+
+      {/* The titles one Unranked sitting ranked (20261020000100). Mounted only while
+          open, like every other sheet here: its read is a whole sitting's worth of rows
+          and most visits never ask for it. */}
+      {rankingBatchFor ? (
+        <RankingBatchSheet
+          eventId={rankingBatchFor.id}
+          medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
 
       {/* Mounted only while open, like every other sheet on this screen. Its one query is
           `follow_state_with` over people the page has already hydrated, so there is nothing
