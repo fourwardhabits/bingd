@@ -222,21 +222,27 @@ it('caught up with no strong batch: just Done, and it never moves on by itself',
   expect(callsTo('refine_start')).toHaveLength(0);
 });
 
-it('Close keeps a placement left mid-comparison, so + / Rank resumes it', async () => {
+/**
+ * **Done with nothing placed is the old Close** (founder addendum, 2026-09-24): it leaves,
+ * and it does not manufacture a summary of zero titles. The placement left mid-comparison
+ * is still not cancelled, so + / Rank resumes it — the property this test has always been
+ * about, now reached through the control that replaced the glyph.
+ */
+it('Done with nothing placed leaves, and keeps a placement left mid-comparison', async () => {
   serve({ ranking_backlog: [queue([INCOMPLETE])], rank_backlog_start: [comparing] });
   const view = await open();
 
   await waitFor(() => expect(view.getByLabelText('Choose Ronin')).toBeTruthy());
-  // The screen's own Close, in its header (the comparison below draws no top bar here).
-  const [closeButton] = view.getAllByLabelText('Close');
-  if (!closeButton) throw new Error('no Close control');
-  await fireEvent.press(closeButton);
+  expect(view.queryByLabelText('Close')).toBeNull();
+
+  await fireEvent.press(view.getByLabelText('Done'));
 
   expect(view.onExit).toHaveBeenCalled();
+  expect(view.queryByTestId('ranked-summary-scroll')).toBeNull();
   expect(callsTo('rank_cancel')).toHaveLength(0);
   expect(mockTrack).toHaveBeenCalledWith({
     name: 'backlog_session_ended',
-    props: { placed: 0, skipped: 0, ended_by: 'close', medium: 'movies' },
+    props: { placed: 0, skipped: 0, ended_by: 'done', medium: 'movies' },
   });
 });
 
@@ -300,4 +306,94 @@ it('names the title skip by its side on the comparison, and plainly on the bucke
   await waitFor(() => expect(view.getByText('Skip title (left)')).toBeTruthy());
   expect(view.getByText("Can't decide")).toBeTruthy();
   expect(view.queryByText('Too tough')).toBeNull();
+});
+
+/**
+ * **The payoff** (founder addendum, 2026-09-24).
+ *
+ * A reader with four hundred unranked titles should not have to empty the queue to see
+ * what they just did. Done ends the sitting and shows it — and shows **only** what this
+ * sitting actually placed, which is the constraint every case below is really about.
+ */
+describe('the completion summary', () => {
+  it('Done mid-sitting summarises what was placed, and offers to carry on', async () => {
+    serve({
+      ranking_backlog: [queue([UNTOUCHED, INCOMPLETE], { checkpoint_every: 99 })],
+      rank_backlog_start: [placed],
+    });
+    const view = await open();
+
+    // One placement lands from the bucket tap, then Done.
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+    await waitFor(() => expect(view.getByLabelText('Done')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Done'));
+
+    await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
+    // The canonical label, the score badge, and nothing about movement or watching.
+    expect(view.getByText('#4 in Movies')).toBeTruthy();
+    expect(view.getByLabelText('6.2 out of 10, It was fine')).toBeTruthy();
+    expect(view.queryByText(/→/)).toBeNull();
+    expect(view.queryByText(/Still #/)).toBeNull();
+    // The queue is not finished, so it says so by offering to continue it.
+    expect(view.getByRole('button', { name: 'Keep ranking' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
+    expect(view.queryByText('You’re caught up.')).toBeNull();
+  });
+
+  it('lists only completed titles — never a skipped one', async () => {
+    serve({
+      ranking_backlog: [
+        queue([UNTOUCHED, INCOMPLETE], { checkpoint_every: 99 }),
+        queue([INCOMPLETE], { checkpoint_every: 99 }),
+      ],
+      // Ronin resumes into its comparison rather than landing, so it stays incomplete.
+      rank_backlog_start: [comparing],
+    });
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Skip Heat')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Skip Heat'));
+
+    // Heat was skipped and Ronin never finished, so Done has nothing to show and leaves.
+    await waitFor(() => expect(view.getByLabelText('Choose Ronin')).toBeTruthy());
+    expect(view.queryByText('Heat')).toBeNull();
+    expect(view.queryByTestId('ranked-summary-scroll')).toBeNull();
+  });
+
+  it('a natural finish uses the same summary, and keeps the caught-up transition', async () => {
+    serve({
+      ranking_backlog: [queue([UNTOUCHED], { checkpoint_every: 99 }), queue([])],
+      rank_backlog_start: [placed],
+      refine_candidates: [{ status: 'ready', candidates: [{}], cta: { show: true } }],
+    });
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+
+    // The queue empties by itself: same component, and the caught-up line with it.
+    await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
+    expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
+    expect(view.getByText('#4 in Movies')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('You’re caught up.')).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Keep ranking' })).toBeNull();
+  });
+
+  it('the rows scroll, so a long sitting cannot bury the actions', async () => {
+    serve({
+      ranking_backlog: [queue([UNTOUCHED], { checkpoint_every: 99 }), queue([])],
+      rank_backlog_start: [placed],
+    });
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('It was fine'));
+
+    await waitFor(() => expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy());
+    // The actions are siblings of the scroll view rather than children of it.
+    expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
+    expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(1);
+  });
 });

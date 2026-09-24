@@ -21,6 +21,12 @@ import {
 } from './backlog';
 import { refineCandidates } from './refine';
 import { RefineScreen } from './RefineScreen';
+import {
+  RankedSummary,
+  rankedHeading,
+  SessionHeader,
+  type RankedSummaryTitle,
+} from './RankedSummary';
 import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
 import { outcomeUnknown, rankAnswer, rankBack, rankSkip, type SessionStep } from './session';
 import { seedPivotCard } from './pivot-card';
@@ -66,6 +72,13 @@ type Phase =
       step: Extract<SessionStep, { state: 'comparing' }>;
     }
   | { kind: 'checkpoint' }
+  /**
+   * **The payoff** (founder addendum, 2026-09-24), reached two ways and no others: the
+   * reader taps Done, or the queue runs out. `remaining` is what the backlog still held
+   * at that moment, which decides whether the foot offers Keep ranking or the caught-up
+   * transition — a sitting ended early must not claim the backlog is finished.
+   */
+  | { kind: 'summary'; remaining: boolean; offerRefine: boolean }
   | { kind: 'caughtUp'; offerRefine: boolean }
   | { kind: 'failed'; target: BacklogTarget | null; message: string; changed: boolean };
 
@@ -104,6 +117,12 @@ function BacklogSession({
   const placedRef = useRef(0);
   /** Fixed at the first read, so "7 of 18" counts toward a number that does not move. */
   const [total, setTotal] = useState<number | null>(null);
+  /**
+   * What this sitting placed, for the summary. Only titles whose placement **completed**
+   * — a skip never reaches `onPlaced`, and a title abandoned mid-comparison stays an
+   * open server session rather than a finished one, so neither can appear here.
+   */
+  const [ranked, setRanked] = useState<RankedSummaryTitle[]>([]);
   const skipped = useRef<string[]>([]);
   const checkpointEvery = useRef(10);
   const answers = useRef(0);
@@ -145,7 +164,12 @@ function BacklogSession({
     } catch {
       offerRefine = false;
     }
-    setPhase({ kind: 'caughtUp', offerRefine });
+    /**
+     * A reader who placed nothing gets the plain caught-up screen: a summary of zero
+     * titles is a page that says "you did nothing", which is worse than the sentence.
+     */
+    if (placedRef.current > 0) setPhase({ kind: 'summary', remaining: false, offerRefine });
+    else setPhase({ kind: 'caughtUp', offerRefine });
   }, [medium]);
 
   const loadNext = useCallback(async () => {
@@ -183,6 +207,17 @@ function BacklogSession({
     (target: BacklogTarget, step: Extract<SessionStep, { state: 'placed' }>) => {
       placedRef.current += 1;
       setPlaced(placedRef.current);
+      setRanked((was) => [
+        ...was,
+        {
+          mediaItemId: target.mediaItemId,
+          title: target.title,
+          posterPath: target.posterPath,
+          position: step.position,
+          score: step.score,
+          bucket: step.bucket,
+        },
+      ]);
       invalidateAfterCollectionChange(queryClient, profile.id, target.mediaItemId, {
         category: step.category,
       });
@@ -308,6 +343,47 @@ function BacklogSession({
     onExit();
   };
 
+  /**
+   * **Done, from the header** (founder addendum, 2026-09-24).
+   *
+   * Ends the sitting and shows what it placed. Everything the reader answered is already
+   * on the server — each placement committed as it finished — so this writes nothing and
+   * cancels nothing: a title left mid-comparison stays an open session and resumes, which
+   * is the existing rule and the reason Done is safe to offer at any moment.
+   *
+   * **Nothing placed, nothing to show.** Done before a single title finished exits
+   * exactly as it always did, rather than presenting an empty list as an achievement.
+   *
+   * What is left is *asked*, not inferred from the count this sitting started with: a
+   * reader may have ranked elsewhere since, and a summary that says the queue is finished
+   * when it is not is the one wrong thing this screen could say. An unknown answer is
+   * treated as "there is more", because that offers Keep ranking rather than falsely
+   * claiming completion.
+   */
+  const finishSitting = async () => {
+    if (placedRef.current === 0) {
+      done('done');
+      return;
+    }
+    let remaining = true;
+    let offerRefine = false;
+    try {
+      const left = await rankingBacklog(medium, { limit: 1, skip: skipped.current });
+      remaining = left.status === 'ready' && left.targets.length > 0;
+    } catch {
+      remaining = true;
+    }
+    if (!remaining) {
+      try {
+        const refine = await refineCandidates(medium, { limit: 1 });
+        offerRefine = refine.status === 'ready' && refine.cta.show;
+      } catch {
+        offerRefine = false;
+      }
+    }
+    setPhase({ kind: 'summary', remaining, offerRefine });
+  };
+
   const target =
     phase.kind === 'ask' || phase.kind === 'comparing' || phase.kind === 'failed'
       ? phase.target
@@ -315,24 +391,25 @@ function BacklogSession({
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          hitSlop={theme.space[3]}
-          onPress={close}
-        >
-          <Ionicons name="close" size={theme.layout.icon.md} color={theme.text.secondary} />
-        </Pressable>
-        <Text variant="headline" accessibilityRole="header" style={styles.headerTitle}>
-          Rank · {medium === 'movies' ? 'Movies' : 'TV'}
-        </Text>
-        {total !== null && total > 0 ? (
-          <Text variant="footnote" tone="secondary" testID="backlog-progress">
-            {backlogProgress(placed, total)}
-          </Text>
-        ) : null}
-      </View>
+      {/* The summary draws its own foot; a Done in the header there would be two. */}
+      {phase.kind === 'summary' ? null : (
+        <SessionHeader
+          title={`Rank · ${medium === 'movies' ? 'Movies' : 'TV'}`}
+          progress={
+            total !== null && total > 0 ? (
+              <Text variant="footnote" tone="secondary" testID="backlog-progress">
+                {backlogProgress(placed, total)}
+              </Text>
+            ) : null
+          }
+          // Only while there is ranking to leave. Every terminal phase draws its own.
+          onDone={
+            phase.kind === 'ask' || phase.kind === 'comparing' || phase.kind === 'loading'
+              ? () => void finishSitting()
+              : undefined
+          }
+        />
+      )}
 
       {phase.kind === 'loading' ? (
         <Centred>
@@ -451,6 +528,38 @@ function BacklogSession({
           <Button label="Keep going" onPress={() => void loadNext()} />
           <Button label="Done" kind="secondary" onPress={() => done('done')} />
         </Centred>
+      ) : phase.kind === 'summary' ? (
+        <RankedSummary
+          heading={rankedHeading(ranked.length, 'ranked')}
+          titles={ranked}
+          medium={medium}
+          note={
+            phase.remaining ? null : (
+              <Text variant="body" tone="secondary">
+                You’re caught up.
+              </Text>
+            )
+          }
+          actions={
+            <>
+              <Button label="Done" onPress={() => done(phase.remaining ? 'done' : 'caught_up')} />
+              {phase.remaining ? (
+                /* The same queue, not a new one: `loadNext` reads the server again with
+                   this sitting's skips still applied, so nothing is dealt twice. */
+                <Button label="Keep ranking" kind="secondary" onPress={() => void loadNext()} />
+              ) : phase.offerRefine ? (
+                <Button
+                  label="Refine a few rankings"
+                  kind="secondary"
+                  onPress={() => {
+                    endSitting('caught_up');
+                    onRefine();
+                  }}
+                />
+              ) : null}
+            </>
+          }
+        />
       ) : phase.kind === 'caughtUp' ? (
         <Centred>
           <Text variant="title2" style={styles.centre}>

@@ -246,7 +246,7 @@ it('claims no position when the server reports none', async () => {
   expect(view.queryByText(/^#/)).toBeNull();
 });
 
-it('Close mid-comparison cancels the provisional session and leaves', async () => {
+it('Done with nothing refined cancels the provisional session and leaves', async () => {
   serve({
     refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
     refine_start: [comparing],
@@ -256,9 +256,12 @@ it('Close mid-comparison cancels the provisional session and leaves', async () =
   const view = await renderWithProviders(<RefineScreen medium="movies" onExit={onExit} />);
   await waitFor(() => expect(view.getByText('Which did you like more?')).toBeTruthy());
 
-  await fireEvent.press(view.getByLabelText('Close'));
+  expect(view.queryByLabelText('Close')).toBeNull();
+  await fireEvent.press(view.getByLabelText('Done'));
 
   await waitFor(() => expect(onExit).toHaveBeenCalled());
+  // Nothing finished, so there is no summary to show — it simply leaves.
+  expect(view.queryByTestId('ranked-summary-scroll')).toBeNull();
   expect(callsTo('rank_cancel')[0][1]).toEqual({ p_session_id: 'session-1' });
   expect(mockTrack).toHaveBeenCalledWith({
     name: 'refine_session_ended',
@@ -526,4 +529,92 @@ it('Done at the end of a round quiets the Collection card', async () => {
     name: 'refine_session_ended',
     props: { targets: 1, moved: 1, comparisons: 1, ended_by: 'done', medium: 'movies' },
   });
+});
+
+/**
+ * **Done mid-batch** (founder addendum, 2026-09-24). A round is five titles and a reader
+ * may be finished after one; they still get the payoff for what they did.
+ */
+it('Done part-way through a batch summarises only what was refined', async () => {
+  serve({
+    refine_candidates: [
+      {
+        status: 'ready',
+        candidates: [HEAT],
+        placements_total: 40,
+        cta: { show: true, count: 5, strong: 5 },
+      },
+      {
+        status: 'ready',
+        candidates: [{ ...HEAT, media_item_id: 'ronin', title: 'Ronin', position: 9 }],
+        placements_total: 40,
+        cta: { show: true, count: 3, strong: 3 },
+      },
+    ],
+    refine_start: [comparing, comparing],
+    rank_answer: [
+      {
+        done: true,
+        position: 15,
+        category: 'movies',
+        bucket: 'loved',
+        score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' },
+      },
+    ],
+  });
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  // One target finishes, the next is dealt, and the reader stops there.
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+  await waitFor(() => expect(view.getByLabelText('Done')).toBeTruthy());
+  await fireEvent.press(view.getByLabelText('Done'));
+
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+  expect(view.getByText('#15 in Movies')).toBeTruthy();
+  expect(view.getByLabelText('8.8 out of 10, I liked it')).toBeTruthy();
+  // The target that was on screen is cancelled, not counted.
+  expect(view.queryByText('Ronin')).toBeNull();
+  expect(callsTo('rank_cancel')).toHaveLength(1);
+});
+
+it('Done part-way still quiets the Collection card', async () => {
+  // "Done means done for now" is about the reader deciding they are finished, which is
+  // exactly what an early Done is — so the snooze is written the same way.
+  serve({
+    refine_candidates: [
+      {
+        status: 'ready',
+        candidates: [HEAT],
+        placements_total: 40,
+        cta: { show: true, count: 5, strong: 5 },
+      },
+      { status: 'nothing_waiting', candidates: [], placements_total: 40 },
+    ],
+    refine_start: [comparing],
+    rank_answer: [
+      {
+        done: true,
+        position: 15,
+        category: 'movies',
+        bucket: 'loved',
+        score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' },
+      },
+    ],
+  });
+  const onExit = jest.fn();
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={onExit} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+
+  await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+
+  expect(onExit).toHaveBeenCalled();
+  expect(mockWritePref).toHaveBeenCalledWith(
+    'user-1.collection.refine-not-now.movies',
+    expect.objectContaining({ placementsAtDismissal: 40 }),
+  );
 });
