@@ -461,6 +461,13 @@ describe('the guard is wired in, not merely present', () => {
    * inspect the body for anything except the guard call.
    */
   const READ_ONLY = [
+    /**
+     * 20261020000100. The titles behind one grouped ranking post — `language sql stable`,
+     * writes nothing, and gated on `can_view_profile` for the post's actor. A suspended
+     * *caller* reading it learns nothing they could not read from the feed row itself,
+     * and the act it belongs to, `rank_batch_note`, does call the guard.
+     */
+    'ranking_batch_titles',
     'can_i_view',
     'watch_tag_visible',
     'list_by_id',

@@ -108,6 +108,9 @@ begin
     raise exception 'unauthenticated' using errcode = '28000';
   end if;
 
+  -- A suspended account may not post activity, which is the whole point of the guard.
+  perform assert_can_write();
+
   select * into v_claim from _claim_operation_result(p_operation_id, 'rank_batch_note');
   if not v_claim.claimed then
     return coalesce(v_claim.prior, jsonb_build_object('status', 'already_applied'));
