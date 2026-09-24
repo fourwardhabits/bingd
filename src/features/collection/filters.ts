@@ -129,11 +129,16 @@ export const ANIME_GENRE = PRODUCT_ANIME_GENRE;
  *   · **rating** — the reader's own 0–10 score, derived from band and position.
  *     Called *Rating* rather than "Your score" because the badge on every row is a
  *     rating and the question the reader is asking is how they rated it.
+ *   · **watched** — {@link CollectionItem.watchedOn}, the **latest real watch**, which
+ *     the server maintains as `max(watch_events.watched_on)` and recomputes on every
+ *     watch write. A rewatch moves it; a ranking, a rerank, a refine and an import's
+ *     ranking do not, because none of those writes a watch event. On a library of
+ *     watched titles this is the chronology a reader actually has in mind, and it is now
+ *     the only recency axis offered there (founder, 2026-09-24).
  *   · **added** — {@link CollectionItem.addedAt}, the moment the title entered this
- *     collection. Labelled **Recently added** and never "Recently watched": those are
- *     different facts, one of them is nullable, and conflating them is the defect this
- *     model was rebuilt to end. A title logged today and watched in 2011 is a recent
- *     *addition* and an old *watch*, and the chip must not claim the second.
+ *     collection. Still **Recently added**, and still never "Recently watched": those
+ *     are different facts. It survives on the **watchlist**, where nothing has been
+ *     watched and when it was added is exactly the question.
  *   · **year** — the title's own release year. **Release year**, so no reader has to
  *     work out whether "Newest" is about the film or about their library; the old
  *     labels were a bare *Newest* and *Oldest* sitting one row below a recency axis.
@@ -147,7 +152,7 @@ export const ANIME_GENRE = PRODUCT_ANIME_GENRE;
  * is a date on every row, which is a product decision about the Log sheet rather than
  * a comparator. Shipping the label without the data is what produced the photograph.
  */
-export type SortAxis = 'rating' | 'added' | 'year' | 'title' | 'shuffle';
+export type SortAxis = 'rating' | 'watched' | 'added' | 'year' | 'title' | 'shuffle';
 
 /**
  * A collection's whole sort, as one value.
@@ -173,6 +178,12 @@ export const COLLECTION_SORT_AXES = {
     axis: 'rating',
     label: 'Rating',
     directions: { desc: 'highest first', asc: 'lowest first' },
+    defaultDirection: 'desc',
+  },
+  watched: {
+    axis: 'watched',
+    label: 'Recently watched',
+    directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },
   added: {
@@ -460,6 +471,20 @@ export function compareItems(sort: CollectionSortState) {
           a.position != null && b.position != null ? (b.position - a.position) * flip : 0;
         return (a.score - b.score) * flip || byOrdinal || byId;
       }
+      /**
+       * **The latest watch, with undated titles beneath the dated ones.**
+       *
+       * Sunk rather than interleaved, in both directions, and that asymmetry is the
+       * point: "oldest first" means the oldest *watch*, and a title nobody dated is not
+       * the oldest watch — it is an unknown. `byId` underneath keeps the unknowns in a
+       * fixed order instead of letting them shuffle between renders.
+       */
+      case 'watched': {
+        if (!a.watchedOn && !b.watchedOn) return byId;
+        if (!a.watchedOn) return 1;
+        if (!b.watchedOn) return -1;
+        return compareLabels(a.watchedOn, b.watchedOn) * flip || byId;
+      }
       case 'added': {
         if (!a.addedAt && !b.addedAt) return byId;
         if (!a.addedAt) return 1;
@@ -527,9 +552,19 @@ function mulberry32(seed: number) {
  * cannot do anything is worse than not offering it; it is also, precisely, how a label
  * comes to disagree with an order.
  *
- * **Recently added is offered everywhere**, because all three lists are backed by a
- * table that stamps `created_at` on insert. That is the difference from the axis it
- * replaced: Recently watched was offered on two of the three and worked on neither.
+ * **Recently watched replaced Recently added on the two watched lists** (founder,
+ * 2026-09-24). Every row on Watched and on Unranked is a title the reader has seen, so
+ * the useful chronology is when they saw it; "added to bingd" is implementation
+ * chronology, and an imported library makes that plain — seven hundred titles added in
+ * one minute orders by nothing at all, while their real watch dates span years.
+ *
+ * It works now where the old Recently watched did not, and the reason is the data rather
+ * than the comparator: `user_media.watched_on` is a maintained `max(watch_events.
+ * watched_on)` since T1, so every row has the latest watch or an honest null.
+ *
+ * **The watchlist keeps Recently added**, and only it. Nothing there has been watched, so
+ * a watch axis would sort by a column that is null on every row — the exact defect that
+ * retired the first Recently watched. Both are deliberately never offered together.
  *
  * The first entry is also the fallback `coerceSortState` lands on when a reader carries
  * Rating from Watched into their watchlist — Recently added there, Rating on Watched.
@@ -537,13 +572,14 @@ function mulberry32(seed: number) {
 export type CollectionSegment = 'watched' | 'watchlist' | 'unranked';
 
 export function sortAxesFor(segment: CollectionSegment): SortAxisSpec<SortAxis>[] {
-  const shared: SortAxisSpec<SortAxis>[] = [
-    COLLECTION_SORT_AXES.added,
+  const tail: SortAxisSpec<SortAxis>[] = [
     COLLECTION_SORT_AXES.year,
     COLLECTION_SORT_AXES.title,
     COLLECTION_SORT_AXES.shuffle,
   ];
 
-  if (segment === 'watched') return [COLLECTION_SORT_AXES.rating, ...shared];
-  return shared;
+  // Watchlist: nothing is watched, so added time is the only honest recency it has.
+  if (segment === 'watchlist') return [COLLECTION_SORT_AXES.added, ...tail];
+  if (segment === 'unranked') return [COLLECTION_SORT_AXES.watched, ...tail];
+  return [COLLECTION_SORT_AXES.rating, COLLECTION_SORT_AXES.watched, ...tail];
 }

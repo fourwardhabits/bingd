@@ -13,6 +13,7 @@ import { queryKeys } from '@/lib/query';
 import { Button, Poster, Screen, ScoreBadge, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
+import { RankedSummary, rankedHeading, SessionHeader } from './RankedSummary';
 import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
 import {
   atCheckpoint,
@@ -87,7 +88,7 @@ export function RefineScreen({
         target: RefineTarget;
         step: Extract<SessionStep, { state: 'comparing' }>;
       }
-    | { kind: 'checkpoint'; exhausted: boolean }
+    | { kind: 'checkpoint'; exhausted: boolean; early?: boolean }
     | { kind: 'failed'; message: string; changed: boolean };
 
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
@@ -368,6 +369,37 @@ export function RefineScreen({
     await loadNext();
   };
 
+  /**
+   * **Done, from the header** (founder addendum, 2026-09-24).
+   *
+   * A batch is five titles and a reader may be finished after two. This ends the sitting
+   * where it stands and pays off what it did: the summary lists the targets that actually
+   * completed, and the one on screen — whose session is provisional and whose answers have
+   * moved nothing yet — is cancelled exactly as closing would cancel it.
+   *
+   * **Nothing refined, nothing to show.** Done before a single target finished leaves
+   * silently, with the same cancel and the same unfinished semantics as the close button
+   * it replaced.
+   *
+   * `early` marks the checkpoint as reader-ended, which is what stops it claiming the
+   * pool is exhausted. Keep going stays available on the same rule as ever — fresh server
+   * state, asked now — so a reader who stops early can still be offered more if more
+   * genuinely exists.
+   */
+  const finishSitting = async () => {
+    const sessionId = openSession.current;
+    openSession.current = null;
+    if (sessionId) await rankCancel(sessionId);
+    if (sittingRef.current.finished.length === 0) {
+      endSitting('close');
+      onExit();
+      return;
+    }
+    setFresh(null);
+    setPhase({ kind: 'checkpoint', exhausted: false, early: true });
+    void probeAfterRound();
+  };
+
   const close = async () => {
     const sessionId = openSession.current;
     openSession.current = null;
@@ -388,24 +420,25 @@ export function RefineScreen({
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          hitSlop={theme.space[3]}
-          onPress={() => void close()}
-        >
-          <Ionicons name="close" size={theme.layout.icon.md} color={theme.text.secondary} />
-        </Pressable>
-        <Text variant="headline" accessibilityRole="header" style={styles.headerTitle}>
-          Refine · {medium === 'movies' ? 'Movies' : 'TV'}
-        </Text>
-        {batchTotal > 0 ? (
-          <Text variant="footnote" tone="secondary" testID="refine-progress">
-            {`${Math.min(round, batchTotal)} of ${batchTotal} refined`}
-          </Text>
-        ) : null}
-      </View>
+      {/* The summary draws its own foot; a Done in the header there would be two. */}
+      {phase.kind === 'checkpoint' ? null : (
+        <SessionHeader
+          title={`Refine · ${medium === 'movies' ? 'Movies' : 'TV'}`}
+          progress={
+            batchTotal > 0 ? (
+              <Text variant="footnote" tone="secondary" testID="refine-progress">
+                {`${Math.min(round, batchTotal)} of ${batchTotal} refined`}
+              </Text>
+            ) : null
+          }
+          // Only while there is a sitting to leave. Every terminal phase draws its own.
+          onDone={
+            phase.kind === 'comparing' || phase.kind === 'loading'
+              ? () => void finishSitting()
+              : undefined
+          }
+        />
+      )}
 
       {phase.kind === 'loading' ? (
         <Centred>
@@ -502,50 +535,57 @@ export function RefineScreen({
           />
         </View>
       ) : phase.kind === 'checkpoint' ? (
-        <ScrollView contentContainerStyle={styles.checkpoint}>
-          <Text variant="title2" accessibilityRole="header">
-            {sitting.finished.length === 1
-              ? '1 title checked'
-              : `${sitting.finished.length} titles checked`}
-          </Text>
-          <View style={styles.results}>
-            {sitting.finished.map((title) => (
-              <RefinedRow key={title.mediaItemId} title={title} medium={medium} />
-            ))}
-          </View>
-          {phase.exhausted || (fresh !== null && !fresh.ready) ? (
-            <Text variant="footnote" tone="secondary">
-              Nothing else needs a look right now.
-            </Text>
-          ) : null}
-          <View style={styles.checkpointActions}>
-            <Button
-              label="Done"
-              onPress={() => {
-                endSitting(phase.exhausted ? 'exhausted' : 'done');
-                onExit();
-              }}
-            />
-            {/**
-             * **Keep going waits for the server** (founder QA, 2026-09-22). It appears
-             * only once `probeAfterRound` has answered, and only when what is left is
-             * card-quality and there are rounds in the sitting still (§7) — so a sitting
-             * never drifts on into titles the card itself would not have invited, and
-             * never opens a round on evidence the last round has already spent.
-             */}
-            {!phase.exhausted && mayContinue(sitting) && fresh?.ready && fresh.strong > 0 ? (
+        <RankedSummary
+          heading={rankedHeading(sitting.finished.length, 'checked')}
+          titles={sitting.finished.map((t) => ({
+            mediaItemId: t.mediaItemId,
+            title: t.title,
+            posterPath: t.posterPath,
+            position: t.position,
+            score: t.score,
+            bucket: t.bucket,
+          }))}
+          medium={medium}
+          note={
+            phase.exhausted || (fresh !== null && !fresh.ready) ? (
+              <Text variant="footnote" tone="secondary">
+                Nothing else needs a look right now.
+              </Text>
+            ) : null
+          }
+          actions={
+            <>
               <Button
-                label="Keep going"
-                kind="secondary"
+                label="Done"
                 onPress={() => {
-                  update(nextRound(sittingRef.current));
-                  setBatchAtStart(null);
-                  void loadNext();
+                  endSitting(phase.exhausted ? 'exhausted' : 'done');
+                  onExit();
                 }}
               />
-            ) : null}
-          </View>
-        </ScrollView>
+              {/**
+               * **Keep going waits for the server** (founder QA, 2026-09-22). It appears
+               * only once `probeAfterRound` has answered, and only when what is left is
+               * card-quality and there are rounds in the sitting still (§7) — so a sitting
+               * never drifts on into titles the card itself would not have invited, and
+               * never opens a round on evidence the last round has already spent.
+               *
+               * It is offered after an early Done on exactly the same rule: stopping early
+               * is not a reason to hide more work that genuinely exists.
+               */}
+              {!phase.exhausted && mayContinue(sitting) && fresh?.ready && fresh.strong > 0 ? (
+                <Button
+                  label="Keep going"
+                  kind="secondary"
+                  onPress={() => {
+                    update(nextRound(sittingRef.current));
+                    setBatchAtStart(null);
+                    void loadNext();
+                  }}
+                />
+              ) : null}
+            </>
+          }
+        />
       ) : (
         <Centred>
           <Text variant="title2" style={styles.centre}>

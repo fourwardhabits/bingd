@@ -556,14 +556,34 @@ describe('which axes are offered', () => {
   it('offers Rating on a watched list, first', () => {
     const axes = sortAxesFor('watched').map((option) => option.axis);
     expect(axes[0]).toBe('rating');
-    expect(axes).toContain('added');
+    expect(axes).toContain('watched');
   });
 
-  it('never offers a watch-date axis anywhere', () => {
+  /**
+   * **Recently watched replaced Recently added on the watched lists** (founder,
+   * 2026-09-24), and this test used to assert the opposite — that no watch axis existed
+   * anywhere. That rule was right while `watched_on` was a field nobody maintained; it
+   * is a maintained `max(watch_events.watched_on)` now, so the axis works where every
+   * row has been seen.
+   */
+  it('sorts the watched lists by the watch, and the watchlist by the addition', () => {
+    for (const segment of ['watched', 'unranked'] as const) {
+      const axes = sortAxesFor(segment).map((option) => option.axis);
+      expect(axes).toContain('watched');
+      expect(axes).not.toContain('added');
+    }
+
+    // Nothing on a watchlist has been watched, so a watch axis there would sort by a
+    // column that is null on every row — the defect that retired the first one.
+    const watchlist = sortAxesFor('watchlist').map((option) => option.axis);
+    expect(watchlist).toContain('added');
+    expect(watchlist).not.toContain('watched');
+  });
+
+  it('never offers both recency axes at once', () => {
     for (const segment of ['watched', 'watchlist', 'unranked'] as const) {
-      for (const spec of sortAxesFor(segment)) {
-        expect(spec.label.toLowerCase()).not.toContain('watched');
-      }
+      const axes = sortAxesFor(segment).map((option) => option.axis);
+      expect(axes.filter((a) => a === 'watched' || a === 'added')).toHaveLength(1);
     }
   });
 
@@ -714,5 +734,70 @@ describe('the same genre downstream of the shared resolver', () => {
     ];
 
     expect(heroRankFor('bebop', ranked, 'movies')?.label).toBe(`#3 in ${ANIME_GENRE}`);
+  });
+});
+
+/**
+ * **Recently watched** (founder, 2026-09-24): the latest real watch, and nothing else.
+ *
+ * The cases below are the ones that make it a different axis from the one it replaced —
+ * a rewatch moves a title, a ranking does not, and an import's own date is a real watch
+ * date. `watchedOn` is the server's maintained `max(watch_events.watched_on)`, so
+ * "ranking does not move it" is a property of the data rather than of this comparator:
+ * ranking writes no watch event, so the field it reads cannot change.
+ */
+describe('Recently watched', () => {
+  const item = (id: string, watchedOn: string | null, addedAt = '2026-09-15T21:00:00Z') =>
+    ({ mediaItemId: id, title: id, watchedOn, addedAt }) as never;
+
+  const order = (items: unknown[], direction: 'desc' | 'asc' = 'desc') =>
+    sortItems(items as never[], { axis: 'watched', direction }).map((i) => i.mediaItemId);
+
+  it('puts the most recent watch first', () => {
+    expect(order([item('old', '2018-05-25'), item('new', '2026-09-22')])).toEqual(['new', 'old']);
+  });
+
+  it('uses the latest watch of a rewatched title, not its first', () => {
+    // The server stores max(watch_events.watched_on), so a 2018 film rewatched last week
+    // arrives here as last week. Asserted as the ordering that produces.
+    const rewatched = item('rewatched', '2026-09-22');
+    const once = item('once', '2026-09-10');
+    expect(order([once, rewatched])).toEqual(['rewatched', 'once']);
+  });
+
+  it('does not move a title because it was ranked', () => {
+    // Ranking writes no watch event, so `watchedOn` is untouched and only `addedAt`
+    // and the row's updated_at move. Ordering by the watch is therefore stable across it.
+    // Ranking moved the row's addedAt to today and left its watch date alone, which is
+    // the whole point: the order is identical either side of it.
+    const before = [item('oasis', '2026-09-10'), item('recent', '2026-09-20')];
+    const afterRanking = [
+      item('oasis', '2026-09-10', '2026-09-24T04:22:00Z'),
+      item('recent', '2026-09-20'),
+    ];
+    expect(order(before)).toEqual(['recent', 'oasis']);
+    expect(order(afterRanking)).toEqual(['recent', 'oasis']);
+  });
+
+  it('sinks titles with no known watch date beneath every dated one', () => {
+    expect(order([item('undated', null), item('dated', '2018-05-25')])).toEqual([
+      'dated',
+      'undated',
+    ]);
+  });
+
+  it('keeps undated titles beneath even when the oldest is asked for first', () => {
+    // "Oldest first" means the oldest watch. A title nobody dated is not the oldest
+    // watch; it is an unknown, and it stays out of the answer either way.
+    expect(order([item('undated', null), item('dated', '2018-05-25')], 'asc')).toEqual([
+      'dated',
+      'undated',
+    ]);
+  });
+
+  it('orders undated titles deterministically rather than arbitrarily', () => {
+    const a = order([item('b', null), item('a', null)]);
+    const b = order([item('a', null), item('b', null)]);
+    expect(a).toEqual(b);
   });
 });
