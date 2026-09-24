@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Crypto from 'expo-crypto';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -15,6 +16,7 @@ import { theme } from '@/ui/tokens';
 import {
   atBacklogCheckpoint,
   backlogProgress,
+  noteBatchRanking,
   rankBacklogStart,
   rankingBacklog,
   type BacklogTarget,
@@ -123,6 +125,13 @@ function BacklogSession({
    * open server session rather than a finished one, so neither can appear here.
    */
   const [ranked, setRanked] = useState<RankedSummaryTitle[]>([]);
+  /**
+   * **This sitting, for the feed** (founder, 2026-09-24). Minted once when the screen
+   * opens and passed with every completed placement, so the server can group them into
+   * one post. A later sitting is a later uuid and a second post, which is the whole of
+   * the grouping rule — no time windows.
+   */
+  const [sitting] = useState(() => Crypto.randomUUID());
   const skipped = useRef<string[]>([]);
   const checkpointEvery = useRef(10);
   const answers = useRef(0);
@@ -221,6 +230,9 @@ function BacklogSession({
       invalidateAfterCollectionChange(queryClient, profile.id, target.mediaItemId, {
         category: step.category,
       });
+      // The sitting's one grouped story, extended by each completed placement. Never a
+      // watch, and never called from Refine or the ordinary single-title flow.
+      void noteBatchRanking(sitting, target.mediaItemId);
       track({
         name: 'ranking_completed',
         props: {
@@ -238,7 +250,7 @@ function BacklogSession({
         void loadNext();
       }
     },
-    [loadNext, mediaKind, profile.id, queryClient],
+    [loadNext, mediaKind, profile.id, queryClient, sitting],
   );
 
   const applyStep = useCallback(
