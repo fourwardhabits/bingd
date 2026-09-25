@@ -1333,6 +1333,38 @@ describe('follow stories', () => {
     expect(items).toHaveLength(2);
   });
 
+  /**
+   * **#209 QA, 2026-09-25.** Staging answered every activity read with HTTP 300, PGRST201:
+   * the grouped post's membership table gave `feed_events` a second path to `media_items`,
+   * and a bare `media_items(` embed cannot choose. The embed names its column now, as
+   * `profiles:actor_id` always has. (The schema side is `client-embeds.test.mjs` and
+   * `20261022000100`; this is the part a mock can see.)
+   */
+  it('names the column its title embed follows, so a second path cannot make it ambiguous', async () => {
+    mockFeedRows = [event()];
+    await load();
+    expect(mockFeedReads[0]?.select).toContain('media_items:media_item_id(');
+    expect(mockFeedReads[0]?.select).not.toMatch(/(^|[\s,])media_items\(/);
+  });
+
+  it('one malformed grouped sitting does not take the rest of the page with it', async () => {
+    mockFeedRows = [
+      event({ id: 'ranked-1', type: 'title_ranked' }),
+      // No count, a count that is not a number, and a title that could not be embedded.
+      event({ id: 'batch-a', type: 'ranking_batch', payload: { sitting: 's-a' } }),
+      event({ id: 'batch-b', type: 'ranking_batch', payload: { sitting: 's-b', count: '3' } }),
+      event({ id: 'batch-c', type: 'ranking_batch', payload: null, media_items: null }),
+      event({ id: 'logged-1', type: 'title_logged', payload: {} }),
+    ];
+
+    const items = await load();
+
+    expect(items.find((i) => i.id === 'ranked-1')).toBeDefined();
+    expect(items.find((i) => i.id === 'logged-1')).toBeDefined();
+    expect(items.find((i) => i.id === 'batch-a')?.rankedCount).toBeNull();
+    expect(items.find((i) => i.id === 'batch-b')?.rankedCount).toBeNull();
+  });
+
   it('resolves who a story is about, in one call for the page', async () => {
     mockFeedRows = [followRow(), followRow({ id: 'follow-2' }), event()];
     mockFollowPeopleRows = [

@@ -497,7 +497,7 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
             supabase
               .from('comments')
               .select(
-                `id, created_at, feed_event_id, feed_events!inner(media_item_id, media_items(${MEDIA}))`,
+                `id, created_at, feed_event_id, feed_events!inner(media_item_id, media_items:media_item_id(${MEDIA}))`,
               )
               .eq('author_id', userId),
             'id',
@@ -546,7 +546,7 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
           const request = supabase
             .from('reactions')
             .select(
-              `feed_event_id, user_id, feed_events!inner(actor_id, media_item_id, media_items(${MEDIA}))`,
+              `feed_event_id, user_id, feed_events!inner(actor_id, media_item_id, media_items:media_item_id(${MEDIA}))`,
             )
             .eq('feed_events.actor_id', userId)
             .neq('user_id', userId);
