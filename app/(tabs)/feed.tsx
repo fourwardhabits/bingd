@@ -38,7 +38,6 @@ import {
 } from '@/features/feed/use-feed';
 import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
-import { RankingBatchRow } from '@/features/feed/RankingBatchRow';
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import {
@@ -921,26 +920,7 @@ export default function FeedScreen() {
                  * title and carries eight controls that a post about eighteen titles has
                  * no use for.
                  */
-                event.type === 'ranking_batch' ? (
-                  <RankingBatchRow
-                    key={event.id}
-                    event={event}
-                    onPressActor={
-                      event.actorId === profile.id || !event.actorUsername
-                        ? undefined
-                        : () => router.push(`/u/${event.actorUsername}`)
-                    }
-                    onPressTitle={() =>
-                      event.mediaItemId ? router.push(`/title/${event.mediaItemId}`) : undefined
-                    }
-                    onOpenList={() =>
-                      setRankingBatchFor({
-                        id: event.id,
-                        medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
-                      })
-                    }
-                  />
-                ) : event.type === 'follow_added' ? (
+                event.type === 'follow_added' ? (
                   <FollowStoryRow
                     key={event.id}
                     event={event}
@@ -969,6 +949,22 @@ export default function FeedScreen() {
                   }
                   verb={verbFor(event.type)}
                   tail={tailFor(event.type, event.title)}
+                  /* A grouped sitting reads "ranked Sheroes and 2 more": the connector
+                     is ordinary ink so the eye finds the break after the title, and the
+                     count is the thing you press to see the rest (20261023000100). */
+                  tailAction={
+                    event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
+                      ? {
+                          connector: 'and',
+                          label: `${(event.rankedCount ?? 1) - 1} more`,
+                          onPress: () =>
+                            setRankingBatchFor({
+                              id: event.id,
+                              medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                            }),
+                        }
+                      : null
+                  }
                   companions={event.companions}
                   title={event.title}
                   year={event.year}

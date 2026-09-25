@@ -234,8 +234,17 @@ function WatchEditor({
         <Button label="Save" size="sm" disabled={busy} onPress={save} />
       </View>
 
-      {/* The only watch says something different, because the server refuses it
-          (`P0001 last_watch`): the reader means the title should leave the collection. */}
+      {/**
+       * The only watch says something different, because the server refuses deleting it
+       * (`P0001 last_watch`): a title in the collection has at least one watch, so what
+       * the reader means is that the title should leave the collection.
+       *
+       * **And now it does that** (founder, 2026-09-25). The words were already
+       * "Remove from collection…" and pressing them produced an error telling the reader
+       * to go and remove it from their collection — which is what they had just pressed.
+       * The ellipsis is gone with the contradiction: this is the act, not a doorway to
+       * somewhere else that performs it.
+       */}
       <Pressable
         accessibilityRole="button"
         disabled={busy}
@@ -244,7 +253,7 @@ function WatchEditor({
         testID={`watch-remove-${event.id}`}
       >
         <Text variant="footnote" tone="action">
-          {onlyWatch ? 'Remove from collection…' : 'Remove this watch'}
+          {onlyWatch ? 'Remove from collection' : 'Remove this watch'}
         </Text>
       </Pressable>
     </View>

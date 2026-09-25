@@ -180,3 +180,28 @@ export async function noteBatchRanking(sitting: string, mediaItemId: string): Pr
     // See above: the ranking is saved either way.
   }
 }
+
+/**
+ * **Ends the sitting and publishes its post** (founder, 2026-09-25; `20261023000100`).
+ *
+ * Until this runs the sitting is a draft that no activity read asks for, so nobody
+ * watches the poster and the count change while somebody works through their library.
+ * Called on every path that ends a sitting deliberately — Done, the queue emptying, and
+ * leaving the flow — and on none that do not: a force-kill publishes nothing, which the
+ * founder accepted rather than have the app guess at process death.
+ *
+ * Fire and forget for the same reason `noteBatchRanking` is: every placement is already
+ * committed, and a social post that failed to publish is not a reason to tell somebody
+ * their ranking did not save. A sitting that completed nothing answers `empty` and leaves
+ * no row.
+ */
+export async function finalizeBatchRanking(sitting: string): Promise<void> {
+  try {
+    await supabase.rpc('rank_batch_finalize', {
+      p_operation_id: Crypto.randomUUID(),
+      p_sitting: sitting,
+    });
+  } catch {
+    // See above: the rankings are saved either way.
+  }
+}

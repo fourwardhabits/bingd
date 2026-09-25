@@ -49,7 +49,23 @@ const note = async (s, id) =>
     await t.sql(`select rank_batch_note($1, $2, $3) as r`, [await op(), s, id])
   ).rows[0].r;
 
+/**
+ * Both states, because since `20261023000100` a sitting is a draft until it ends. Tests
+ * about accumulation read the draft; tests about what other people see finalise first and
+ * then read `published()`.
+ */
 const events = async () =>
+  (
+    await t.sql(
+      `select id, type, media_item_id, payload from feed_events
+        where actor_id = $1 and type in ('ranking_batch', 'ranking_batch_draft')
+        order by created_at`,
+      [user],
+    )
+  ).rows;
+
+/** Only what an activity read would actually fetch — the draft type is in no read's IN. */
+const published = async () =>
   (
     await t.sql(
       `select id, type, media_item_id, payload from feed_events
@@ -57,6 +73,9 @@ const events = async () =>
       [user],
     )
   ).rows;
+
+const finalize = async (s_) =>
+  (await t.sql(`select rank_batch_finalize($1, $2) as r`, [await op(), s_])).rows[0].r;
 
 /** A ranked title, so `rank_batch_note` has something it is willing to announce. */
 async function ranked(name, { watchedOn = null } = {}) {
@@ -103,8 +122,10 @@ describe('one post per sitting', () => {
     const rows = await events();
     assert.equal(rows.length, 1, 'three placements must be one post');
     assert.equal(rows[0].payload.count, 3);
-    // Still named by the first: the sentence does not change under the reader.
-    assert.equal(rows[0].media_item_id, heat);
+    // Named by the LAST placed (20261023000100): at the moment the post appears, the
+    // thing the reader most recently finished is the thing to show them. Nobody sees it
+    // change on the way there, because the draft is in no read's IN clause.
+    assert.equal(rows[0].media_item_id, collateral);
   });
 
   it('a later sitting is a second post', async () => {
@@ -230,6 +251,7 @@ describe('the expanded list', () => {
     await note(s, ronin);
     const [event] = await events();
 
+    await finalize(s);
     const { rows } = await t.sql(`select * from ranking_batch_titles($1)`, [event.id]);
 
     assert.equal(rows.length, 2);
@@ -328,9 +350,11 @@ describe('the sitting is the only post (20261022000100)', () => {
 
     const rows = await activity();
     assert.deepEqual(
-      rows.filter((r) => r.type === 'ranking_batch').map((r) => r.media_item_id),
-      [sheroes],
-      'exactly one post for the sitting, named by its first title',
+      rows.filter((r) => r.type.startsWith('ranking_batch')).map((r) => r.media_item_id),
+      // Named by the LAST placed since 20261023000100: the representative is what the
+      // reader most recently finished, and nobody watches it change on the way there.
+      [hounds],
+      'exactly one post for the sitting, named by its last title',
     );
     for (const id of [sheroes, king, hounds]) {
       assert.equal(
@@ -385,7 +409,7 @@ describe('the sitting is the only post (20261022000100)', () => {
       await note(s, id);
     }
     const rows = await activity();
-    assert.equal(rows.filter((r) => r.type === 'ranking_batch').length, 2);
+    assert.equal(rows.filter((r) => r.type.startsWith('ranking_batch')).length, 2);
     assert.deepEqual(
       rows.filter((r) => r.type === 'title_ranked').map((r) => r.media_item_id),
       [anchor],
@@ -398,7 +422,11 @@ describe('the sitting is the only post (20261022000100)', () => {
     const heat = await logged('Heat');
     await call(`rank_start($1, 'loved', $2)`, [heat, await op()]);
     await finish(await call(`rank_backlog_start($1, null, $2)`, [heat, await op()]));
-    await note(await sitting(), heat);
+    const s_ = await sitting();
+    await note(s_, heat);
+    // Ended, because a draft is in no read IN clause: what a follower sees is what a
+    // FINALISED sitting publishes (20261023000100).
+    await finalize(s_);
     const [post] = await events();
 
     const follower = await t.createUser({ username: `follower_${seq}` });
@@ -455,12 +483,12 @@ describe('the sitting is the only post (20261022000100)', () => {
                 fe.actor_id, frt.media_item_id, frt.placed_at - interval '1 hour', frt.placed_at)
          from feed_events fe
          join feed_ranking_titles frt on frt.event_id = fe.id
-        where fe.type = 'ranking_batch'`,
+        where fe.type like 'ranking_batch%'`,
     );
 
     const after_ = await activity();
     assert.equal(after_.filter((r) => r.type === 'title_ranked').length, 0);
-    assert.equal(after_.filter((r) => r.type === 'ranking_batch').length, 1, 'the post stays');
+    assert.equal(after_.filter((r) => r.type.startsWith('ranking_batch')).length, 1, 'the post stays');
   });
 
   it('is not a junction PostgREST could embed through', async () => {
@@ -479,5 +507,102 @@ describe('the sitting is the only post (20261022000100)', () => {
           and contype = 'u'`,
     );
     assert.equal(unique.rows.length, 1, 'membership is still one row per title');
+  });
+});
+
+/**
+ * **A sitting nobody watches you have** (`20261023000100`, founder device QA 2026-09-25).
+ *
+ * The post used to appear on the first placement and then change under its readers — its
+ * poster, its title and its count all moving as the sitting went on. What this file pins
+ * is that nothing is visible until the sitting ends, and that when it does appear it names
+ * the title the reader most recently finished.
+ */
+describe('a sitting is published when it ends', () => {
+  it('is invisible to every activity read while it runs', async () => {
+    const s_ = await sitting();
+    await note(s_, await ranked('Heat'));
+    await note(s_, await ranked('Ronin'));
+
+    // The rows exist and the membership is real...
+    assert.equal((await events()).length, 1);
+    assert.equal((await events())[0].type, 'ranking_batch_draft');
+    // ...and no read that draws activity asks for that type.
+    assert.equal((await published()).length, 0);
+  });
+
+  it('publishes on finalize, naming the LAST title finished', async () => {
+    const s_ = await sitting();
+    await note(s_, await ranked('Heat'));
+    await note(s_, await ranked('Ronin'));
+    const last = await ranked('Collateral');
+    await note(s_, last);
+
+    const result = await finalize(s_);
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.count, 3);
+    const rows = await published();
+    assert.equal(rows.length, 1);
+    // The thing they most recently finished, not the thing they started with.
+    assert.equal(rows[0].media_item_id, last);
+    assert.equal(rows[0].payload.count, 3);
+  });
+
+  it('dates the post when the sitting ended, not when it started', async () => {
+    // The Feed pages by a keyset over causal_at, so a post that existed invisibly for ten
+    // minutes has to enter the ordering where it became real.
+    const s_ = await sitting();
+    await note(s_, await ranked('Heat'));
+    const [draft] = await events();
+    const before_ = (
+      await t.sql(`select causal_at from feed_events where id = $1`, [draft.id])
+    ).rows[0].causal_at;
+
+    await t.sql(`select pg_sleep(0.05)`);
+    await finalize(s_);
+
+    const after_ = (
+      await t.sql(`select causal_at from feed_events where id = $1`, [draft.id])
+    ).rows[0].causal_at;
+    assert.ok(after_ > before_, 'causal_at moves to the end of the sitting');
+  });
+
+  it('a sitting that finished nothing leaves no post at all', async () => {
+    const s_ = await sitting();
+
+    const result = await finalize(s_);
+
+    assert.equal(result.status, 'empty');
+    assert.equal((await events()).length, 0);
+    assert.equal((await published()).length, 0);
+  });
+
+  it('finalizing twice publishes one post', async () => {
+    const s_ = await sitting();
+    await note(s_, await ranked('Heat'));
+
+    await finalize(s_);
+    const again = await finalize(s_);
+
+    // The second call finds no draft, which is the state it was asked for.
+    assert.equal(again.status, 'empty');
+    assert.equal((await published()).length, 1);
+  });
+
+  it('a later sitting is its own draft and its own post', async () => {
+    const first = await sitting();
+    await note(first, await ranked('Heat'));
+    await finalize(first);
+
+    const second = await sitting();
+    await note(second, await ranked('Ronin'));
+
+    // The published one and the running one coexist without contending.
+    assert.equal((await published()).length, 1);
+    assert.equal((await events()).length, 2);
+
+    await finalize(second);
+    assert.equal((await published()).length, 2);
   });
 });

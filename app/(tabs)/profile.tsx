@@ -12,7 +12,6 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 
-import { RankingBatchRow } from '@/features/feed/RankingBatchRow';
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
@@ -499,28 +498,6 @@ export default function ProfileScreen() {
           ) : null}
           {recent.map((event) => {
             const summary = reactions.data?.get(event.id);
-            /**
-             * **A whole Unranked sitting is one row** (20261020000100), here as well as on the
-             * Feed. It is the same event, drawn by the same component: an `ActivityRow` is about
-             * one title and carries controls a post about eighteen titles has no use for.
-             */
-            if (event.type === 'ranking_batch') {
-              return (
-                <RankingBatchRow
-                  key={event.id}
-                  event={event}
-                  onPressTitle={() =>
-                    event.mediaItemId ? router.push(`/title/${event.mediaItemId}`) : undefined
-                  }
-                  onOpenList={() =>
-                    setRankingBatchFor({
-                      id: event.id,
-                      medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
-                    })
-                  }
-                />
-              );
-            }
             return (
               <ActivityRow
                 key={event.id}
@@ -532,6 +509,20 @@ export default function ProfileScreen() {
                 // event saying two things on two screens.
                 verb={verbFor(event.type)}
                 tail={tailFor(event.type, event.title)}
+                /* A grouped sitting reads "ranked Sheroes and 2 more" (20261023000100). */
+                tailAction={
+                  event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
+                    ? {
+                        connector: 'and',
+                        label: `${(event.rankedCount ?? 1) - 1} more`,
+                        onPress: () =>
+                          setRankingBatchFor({
+                            id: event.id,
+                            medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                          }),
+                      }
+                    : null
+                }
                 companions={event.companions}
                 title={event.title}
                 year={event.year}

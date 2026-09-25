@@ -16,6 +16,7 @@ import { theme } from '@/ui/tokens';
 import {
   atBacklogCheckpoint,
   backlogProgress,
+  finalizeBatchRanking,
   noteBatchRanking,
   rankBacklogStart,
   rankingBacklog,
@@ -159,10 +160,18 @@ function BacklogSession({
           medium: analyticsMedium,
         },
       });
+      /**
+       * **The sitting ends here, and so does its draft** (2026-09-25). `endSitting` is the
+       * one place every deliberate exit passes through — Done, the queue emptying, Close —
+       * so publishing from it means the post appears exactly when the reader stopped, and
+       * on no other path. A force-kill never reaches this and publishes nothing, which is
+       * the accepted trade rather than an oversight.
+       */
+      void finalizeBatchRanking(sitting);
       void queryClient.invalidateQueries({ queryKey: ['ranking-backlog', profile.id] });
       void queryClient.invalidateQueries({ queryKey: ['refine-availability', profile.id] });
     },
-    [analyticsMedium, profile.id, queryClient],
+    [analyticsMedium, profile.id, queryClient, sitting],
   );
 
   const caughtUp = useCallback(async () => {

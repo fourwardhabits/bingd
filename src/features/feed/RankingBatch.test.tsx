@@ -2,9 +2,7 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { RankingBatchRow } from './RankingBatchRow';
 import { RankingBatchSheet } from './RankingBatchSheet';
-import type { FeedItem } from './use-feed';
 
 /**
  * The grouped ranking post (`20261020000100`, founder 2026-09-24).
@@ -22,108 +20,8 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
-const event = (over: Partial<FeedItem> = {}) =>
-  ({
-    id: 'event-1',
-    type: 'ranking_batch',
-    actorId: 'michael-id',
-    actorUsername: 'michael',
-    actorName: 'Michael',
-    actorAvatarUri: null,
-    mediaItemId: 'oasis',
-    kind: 'movie',
-    title: "Oasis: Don't Look Back in Anger",
-    createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-    rankedCount: 18,
-    followed: [],
-    ...over,
-  }) as FeedItem;
-
 beforeEach(() => {
   mockRpc.mockReset();
-});
-
-describe('the collapsed row', () => {
-  it('names the first title and counts the rest', async () => {
-    const view = await renderWithProviders(
-      <RankingBatchRow
-        event={event()}
-        onPressActor={() => {}}
-        onPressTitle={() => {}}
-        onOpenList={() => {}}
-      />,
-    );
-
-    expect(view.getByText('Michael')).toBeTruthy();
-    expect(view.getByText("Oasis: Don't Look Back in Anger")).toBeTruthy();
-    // Eighteen ranked, one named, seventeen counted.
-    expect(view.getByText(/\+ 17 more/)).toBeTruthy();
-    expect(view.getByText('5m ago')).toBeTruthy();
-  });
-
-  it('says ranked, never watched or added', async () => {
-    // Ranking chronology and watch chronology are different things, and this row is the
-    // one place they could be confused.
-    const view = await renderWithProviders(
-      <RankingBatchRow
-        event={event()}
-        onPressActor={() => {}}
-        onPressTitle={() => {}}
-        onOpenList={() => {}}
-      />,
-    );
-
-    expect(view.getByText(/ranked/)).toBeTruthy();
-    expect(view.queryByText(/watched/i)).toBeNull();
-    expect(view.queryByText(/rewatch/i)).toBeNull();
-    expect(view.queryByText(/added/i)).toBeNull();
-  });
-
-  it('adds no tail for a sitting of one', async () => {
-    const view = await renderWithProviders(
-      <RankingBatchRow
-        event={event({ rankedCount: 1 })}
-        onPressActor={() => {}}
-        onPressTitle={() => {}}
-        onOpenList={() => {}}
-      />,
-    );
-
-    expect(view.getByText("Oasis: Don't Look Back in Anger")).toBeTruthy();
-    expect(view.queryByText(/more/)).toBeNull();
-  });
-
-  it('the title opens its page', async () => {
-    const onPressTitle = jest.fn();
-    const view = await renderWithProviders(
-      <RankingBatchRow
-        event={event()}
-        onPressActor={() => {}}
-        onPressTitle={onPressTitle}
-        onOpenList={() => {}}
-      />,
-    );
-
-    await fireEvent.press(view.getByText("Oasis: Don't Look Back in Anger"));
-
-    expect(onPressTitle).toHaveBeenCalled();
-  });
-
-  it('the tail opens the sitting', async () => {
-    const onOpenList = jest.fn();
-    const view = await renderWithProviders(
-      <RankingBatchRow
-        event={event()}
-        onPressActor={() => {}}
-        onPressTitle={() => {}}
-        onOpenList={onOpenList}
-      />,
-    );
-
-    await fireEvent.press(view.getByText(/\+ 17 more/));
-
-    expect(onOpenList).toHaveBeenCalled();
-  });
 });
 
 describe('the expanded list', () => {

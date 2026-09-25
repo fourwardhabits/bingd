@@ -44,6 +44,18 @@ export type ActivityRowProps = {
    * watchlist Dune (2021)" — the founder asked for grammatical over uniform.
    */
   tail?: string | null;
+  /**
+   * A tail with something to press in it — "ranked Sheroes **and 2 more**", where the
+   * count opens the rest (20261023000100).
+   *
+   * Two parts rather than one string, because they carry different weights and different
+   * jobs: `connector` is ordinary sentence ink, so the eye finds the break after the
+   * title, and `label` is an entity the reader can touch. A plain `tail` cannot express
+   * that, and a whole second row type for one caller is what this exists to avoid.
+   *
+   * Ignored when `tail` is set; no caller wants both, and one sentence cannot end twice.
+   */
+  tailAction?: { connector: string; label: string; onPress: () => void } | null;
   /** Names the actor said they watched it with (PRD §14). */
   companions?: string[];
   /** Already in its compact form — "Parks and Recreation, S2" (`lib/titles.ts`). */
@@ -226,6 +238,7 @@ export function ActivityRow({
   noteMasked = false,
   timeLabel,
   onPressTitle,
+  tailAction,
   onPressWatchlist,
   inWatchlist = false,
   onPressRecommend,
@@ -364,6 +377,19 @@ export function ActivityRow({
               </Text>
             ) : null}
             {tail ? ` ${tail}` : null}
+            {!tail && tailAction ? (
+              <Text variant="subhead" tone="secondary">
+                {` ${tailAction.connector} `}
+                <Text
+                  variant="subhead"
+                  style={styles.entity}
+                  onPress={tailAction.onPress}
+                  accessibilityRole="button"
+                >
+                  {tailAction.label}
+                </Text>
+              </Text>
+            ) : null}
           </Text>
 
           {/* The row's second line, and a sibling of the sentence rather than a
