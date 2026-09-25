@@ -89,19 +89,22 @@ export function RankedSummaryRow({
  * place fifty titles before they tap Done — so the rows are the scrolling part and the
  * actions sit outside the scroll view, pinned at the foot. Putting the buttons inside the
  * list is what makes a long session end with a reader flicking to find Done.
+ *
+ * **No helper sentence under the rows** (founder, 2026-09-25). It carried "You're caught
+ * up." here and "Nothing else needs a look right now." on Refine; both restated what the
+ * heading and the rows had already said, and the instruction was to remove rather than
+ * reword. What is left is the count, the titles and the actions — and the actions are
+ * where "there is more" is expressed, by Keep ranking being offered or not.
  */
 export function RankedSummary({
   heading,
   titles,
   medium,
-  note,
   actions,
 }: {
   heading: string;
   titles: readonly RankedSummaryTitle[];
   medium: RankingCategory;
-  /** An optional line under the rows — "Nothing else needs a look right now." */
-  note?: React.ReactNode;
   /** The buttons, pinned below the scroll so a long list cannot bury them. */
   actions: React.ReactNode;
 }) {
@@ -121,7 +124,6 @@ export function RankedSummary({
             <RankedSummaryRow key={title.mediaItemId} title={title} medium={medium} />
           ))}
         </View>
-        {note}
       </ScrollView>
       <View style={styles.actions}>{actions}</View>
     </View>

@@ -361,7 +361,7 @@ describe('the completion summary', () => {
     expect(view.queryByTestId('ranked-summary-scroll')).toBeNull();
   });
 
-  it('a natural finish uses the same summary, and keeps the caught-up transition', async () => {
+  it('a natural finish uses the same summary, with no helper sentence', async () => {
     serve({
       ranking_backlog: [queue([UNTOUCHED], { checkpoint_every: 99 }), queue([])],
       rank_backlog_start: [placed],
@@ -372,12 +372,18 @@ describe('the completion summary', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
-    // The queue empties by itself: same component, and the caught-up line with it.
+    // The queue empties by itself: the same component, the same heading and rows.
     await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
     expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
     expect(view.getByText('#4 in Movies')).toBeTruthy();
-    await waitFor(() => expect(view.getByText('You’re caught up.')).toBeTruthy());
+    /**
+     * **No helper sentence** (founder, 2026-09-25). "You're caught up." restated what the
+     * heading and the rows already said. That there is nothing left is expressed by the
+     * action that is absent, not by a line of prose.
+     */
+    expect(view.queryByText('You’re caught up.')).toBeNull();
     expect(view.queryByRole('button', { name: 'Keep ranking' })).toBeNull();
+    expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
   });
 
   it('the rows scroll, so a long sitting cannot bury the actions', async () => {

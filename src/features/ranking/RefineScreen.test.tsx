@@ -472,9 +472,10 @@ it('offers Done alone when the round used up what was worth refining', async () 
 
   await fireEvent.press(view.getByLabelText('Choose Heat'));
 
-  await waitFor(() =>
-    expect(view.getByText('Nothing else needs a look right now.')).toBeTruthy(),
-  );
+  // The summary carries no helper sentence either (founder, 2026-09-25): that there is
+  // nothing left to refine is said by Keep going being absent.
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+  expect(view.queryByText('Nothing else needs a look right now.')).toBeNull();
   expect(view.queryByRole('button', { name: 'Keep going' })).toBeNull();
   expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
 });

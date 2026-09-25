@@ -402,7 +402,7 @@ function BacklogSession({
       : null;
 
   return (
-    <Screen>
+    <Screen includeBottomInset>
       {/* The summary draws its own foot; a Done in the header there would be two. */}
       {phase.kind === 'summary' ? null : (
         <SessionHeader
@@ -545,13 +545,6 @@ function BacklogSession({
           heading={rankedHeading(ranked.length, 'ranked')}
           titles={ranked}
           medium={medium}
-          note={
-            phase.remaining ? null : (
-              <Text variant="body" tone="secondary">
-                You’re caught up.
-              </Text>
-            )
-          }
           actions={
             <>
               <Button label="Done" onPress={() => done(phase.remaining ? 'done' : 'caught_up')} />

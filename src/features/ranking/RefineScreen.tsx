@@ -419,7 +419,7 @@ export function RefineScreen({
   const batchTotal = Math.min(batchAtStart ?? 0, ROUND_TARGETS);
 
   return (
-    <Screen>
+    <Screen includeBottomInset>
       {/* The summary draws its own foot; a Done in the header there would be two. */}
       {phase.kind === 'checkpoint' ? null : (
         <SessionHeader
@@ -546,13 +546,6 @@ export function RefineScreen({
             bucket: t.bucket,
           }))}
           medium={medium}
-          note={
-            phase.exhausted || (fresh !== null && !fresh.ready) ? (
-              <Text variant="footnote" tone="secondary">
-                Nothing else needs a look right now.
-              </Text>
-            ) : null
-          }
           actions={
             <>
               <Button
