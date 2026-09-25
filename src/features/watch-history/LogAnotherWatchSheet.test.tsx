@@ -55,11 +55,6 @@ jest.mock('@/features/collection/use-log-state', () => ({
   useLogState: (...args: unknown[]) => mockLogState(...(args as [])),
 }));
 
-jest.mock('@/features/collection/note-visibility-pref', () => ({
-  readNoteVisibilityDefault: () => Promise.resolve(null),
-  rememberNoteVisibility: () => Promise.resolve(),
-}));
-
 beforeEach(() => {
   mockRewatch.mockClear();
   mockSaveNote.mockClear();
