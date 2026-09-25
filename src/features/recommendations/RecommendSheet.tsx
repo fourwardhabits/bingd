@@ -340,18 +340,28 @@ export function RecommendSheet({
           />
         </View>
       ) : people.length === 0 ? (
-        <View style={styles.status}>
-          <EmptyState
-            kind="nothingYet"
-            compact
-            title="Nobody to recommend to yet"
-            // The rule, in the words it is now true in: follow people to send
-            // recommendations. It no longer depends on anybody following back — that
-            // decides where the recommendation lands, not whether it can be sent, and
-            // the sender is deliberately not told which (`20260826000400`).
-            body="Follow people to send recommendations. Send a friend the link below to get started."
-          />
-        </View>
+        /**
+         * **One subdued line, not an empty region** (founder, QA on an account following
+         * nobody, 2026-09-25).
+         *
+         * This was an `EmptyState` — an illustration, a title and a body, sized for a
+         * whole screen — inside a sheet whose only other content is two buttons. The
+         * founder's report was that it "looks broken even though it is technically
+         * valid", and that is what a page-sized absence does in a 200pt sheet: it reads
+         * as content that failed to arrive rather than as an explanation.
+         *
+         * So: secondary body text, one sentence, and the sheet sizes around it. The
+         * sentence names the place to go, because "follow people" without saying where is
+         * an instruction the reader has to go and find. Not italic — the founder's rule,
+         * and the right one at footnote weight.
+         *
+         * Following is still the only requirement. Nobody has to follow back: that
+         * decides where a recommendation lands, not whether it can be sent, and the
+         * sender is deliberately not told which (`20260826000400`).
+         */
+        <Text variant="footnote" tone="secondary" style={styles.status} testID="recommend-empty">
+          Follow people from the People tab in Feed to recommend on bingd.
+        </Text>
       ) : (
         // The picker itself lives in `features/people/PeoplePicker` since 2026-09-03,
         // extracted so Group Picks could reuse it. Neither optional addition — the

@@ -1,42 +1,39 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
-import { Text } from './Text';
+import { MiniButton } from './MiniButton';
 
 /**
  * **The way out of a utility sheet** (founder, device QA, 2026-09-25).
  *
  * ---------------------------------------------------------------------------
- * WHY IT IS NOT A BUTTON
+ * WHY IT IS NOT A PRIMARY BUTTON
  *
  * These sheets — Where to watch, bingd Awards, a sitting's ranked titles — are
  * *statements*. Nothing in them is a decision, and the only thing to do with one is stop
- * reading it. A filled Maroon `Button` is the app's strongest call to action, and
- * spending it on "I have finished looking at this" made the least consequential control
- * on the screen the loudest thing on it.
- *
- * So: Maroon words, no fill, at the same weight as *New list* — which is the existing
- * treatment for an action that is available rather than urged. No icon: a plus belongs to
- * a control that creates something, and this ends something.
+ * reading it. A filled Maroon `Button` is the app's strongest call to action, and spending
+ * it on "I have finished looking at this" made the least consequential control on the
+ * screen the loudest thing on it.
  *
  * ---------------------------------------------------------------------------
- * WHERE IT SITS, AND WHY IT ADDS NO INSET OF ITS OWN
+ * AND WHY IT IS NOT BARE WORDS EITHER
+ *
+ * That was the previous version, and the founder's verdict on a device was that it looked
+ * **detached**: maroon text with no container floats at the foot of a sheet instead of
+ * sitting there, and nothing says how much of it you may press. So it is `MiniButton` now
+ * — the quietest container the design system has, shrunk to its label, centred — and the
+ * same primitive `+ New list` uses, which is the founder's one visual language for a small
+ * optional act beside content that is the real subject.
+ *
+ * ---------------------------------------------------------------------------
+ * WHERE IT SITS, AND WHY IT ADDS NO INSET
  *
  * Its first version paid the device's bottom inset here, on top of the inset `Sheet`
  * already pays on the sheet body — so on a phone reporting a 48pt navigation bar the band
- * under the word measured about 108pt, which is what the founder saw in bingd Awards as
- * an empty region held open for one word. **`Sheet` owns a sheet's bottom clearance and
- * this owns none**, which is also why there is exactly one place to change it.
- *
- * Right-aligned rather than centred (founder, 2026-09-25). A centred word reads as the
- * screen's subject; against the right edge it reads as the way out, which is what it is
- * and where every other dismissal in the app already lives.
- *
- * The target is a box rather than a word with `hitSlop`: Android clips touches outside a
- * parent's box, so slop on a text node measures generously on iOS and taps at the glyph
- * on Android. It is `minTapTarget` square with the gutter's padding, not a full-width
- * row — a right-aligned control whose target spans the sheet would swallow taps meant for
- * the content beside it.
+ * under one word measured about 108pt, an empty region held open for a single control.
+ * **`Sheet` owns a sheet's bottom clearance and this owns none.** It follows its content:
+ * no spacer, no `marginTop: 'auto'`, no reserved footer, so a short sheet ends where its
+ * content ends with the button under it.
  */
 export function SheetDone({
   onPress,
@@ -48,37 +45,14 @@ export function SheetDone({
 }) {
   return (
     <View style={styles.foot} testID="sheet-done">
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        onPress={onPress}
-        style={({ pressed }) => [styles.press, pressed && styles.pressed]}
-      >
-        <Text variant="callout" tone="action">
-          {label}
-        </Text>
-      </Pressable>
+      <MiniButton label={label} onPress={onPress} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  /**
-   * It follows the content rather than being held apart from it: no `marginTop: 'auto'`,
-   * no spacer, and no bottom padding — the sheet's own gutter is already below this. A
-   * short sheet ends where its content ends, with the word under it.
-   */
   foot: {
-    paddingTop: theme.space[2],
+    paddingTop: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
-    alignItems: 'flex-end',
   },
-  press: {
-    minHeight: theme.layout.minTapTarget,
-    minWidth: theme.layout.minTapTarget,
-    paddingHorizontal: theme.space[2],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.6 },
 });

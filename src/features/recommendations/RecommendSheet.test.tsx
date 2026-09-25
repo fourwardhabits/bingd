@@ -181,15 +181,13 @@ describe('who the sheet offers', () => {
 
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await waitFor(() =>
-      expect(view.getByText('Nobody to recommend to yet')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Follow people from the People tab in Feed to recommend on bingd.')).toBeTruthy());
   });
 
   it('says what makes somebody eligible when nobody is', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await waitFor(() => expect(view.getByText('Nobody to recommend to yet')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Follow people from the People tab in Feed to recommend on bingd.')).toBeTruthy());
     // The off-Bingd path is still offered, because it is the answer to an empty list.
     expect(view.getByText('Share off bingd')).toBeTruthy();
   });
@@ -978,5 +976,55 @@ describe('the action row clears the system navigation', () => {
     expect(inside).toBe(true);
     expect(view.getByText('Recommend')).toBeTruthy();
     expect(view.getByText('Share off bingd')).toBeTruthy();
+  });
+});
+
+/**
+ * **An account following nobody** (founder, QA, 2026-09-25).
+ *
+ * The sheet showed its title, a page-sized `EmptyState` — illustration, heading, body —
+ * and then Share off bingd. In a sheet whose only other content is two buttons that reads
+ * as content that failed to arrive. One subdued sentence, and the sheet sizes around it.
+ */
+describe('nobody to recommend to', () => {
+  beforeEach(() => {
+    mockOutgoing = [];
+    setViewport(412);
+  });
+
+  it('explains it in one subdued line, where the reader should go', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByTestId('recommend-empty')).toBeTruthy());
+    expect(view.getByText('Follow people from the People tab in Feed to recommend on bingd.')).toBeTruthy();
+  });
+
+  it('draws no empty list region and no illustration', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByTestId('recommend-empty')).toBeTruthy());
+    // The picker and its search are the region that used to be blank. Neither is here,
+    // so the sheet has nothing to size around but the sentence and the actions.
+    expect(view.queryByPlaceholderText('Search your friends')).toBeNull();
+    // The old page-sized state's own words, which must not come back.
+    expect(view.queryByText('Nobody to recommend to yet')).toBeNull();
+  });
+
+  it('still offers the off-platform share, which is the answer to an empty list', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByTestId('recommend-empty')).toBeTruthy());
+    expect(view.getByText('Share off bingd')).toBeTruthy();
+    // And no Recommend button, because there is nobody it could send to.
+    expect(view.queryByText('Recommend')).toBeNull();
+  });
+
+  it('keeps the search and the list the moment somebody is eligible', async () => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada')];
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByPlaceholderText('Search your friends')).toBeTruthy();
+    expect(view.queryByTestId('recommend-empty')).toBeNull();
   });
 });

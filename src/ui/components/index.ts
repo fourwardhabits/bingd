@@ -62,6 +62,7 @@ export { usePullRefresh } from './use-pull-refresh';
 export { Screen } from './Screen';
 export { ScreenError, type ScreenErrorProps } from './ScreenError';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
+export { MiniButton } from './MiniButton';
 export { SheetDone } from './SheetDone';
 export {
   EmptyScoreBadge,

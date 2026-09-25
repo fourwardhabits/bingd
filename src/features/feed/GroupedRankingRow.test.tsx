@@ -33,9 +33,23 @@ const mockPush = jest.fn();
 /** One `feed_events` page, shaped exactly as staging returns it. */
 let mockRows: unknown[] = [];
 
+/**
+ * What `public_scores` answers for (actor, title).
+ *
+ * A `ranking_batch` payload is `{count, sitting}` and carries no score, so a card that
+ * shows one has borrowed the live score exactly as a pre-snapshot `title_ranked` post
+ * does. That borrowing is the fix for the founder's *Solo: A Star Wars Story* report, and
+ * this is the read it depends on.
+ */
+let mockScores: unknown[] = [];
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
-    rpc: () => Promise.resolve({ data: [], error: null }),
+    rpc: (name: string) =>
+      Promise.resolve({
+        data: name === 'public_scores' ? mockScores : [],
+        error: null,
+      }),
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
       const result = () => {
@@ -112,6 +126,7 @@ const sitting = (count: number, title = 'Sheroes') => ({
 
 beforeEach(() => {
   mockRows = [];
+  mockScores = [];
   mockPush.mockClear();
   jest
     .spyOn(BackHandler, 'addEventListener')
@@ -218,4 +233,64 @@ it('renders through the canonical shell whenever there is a representative title
 
   expect(imageUris(view.toJSON()).some((uri) => uri.includes('/sheroes.jpg'))).toBe(true);
   expect(view.getByText('1 more')).toBeTruthy();
+});
+
+/**
+ * ---------------------------------------------------------------------------
+ * **A SITTING OF ONE IS AN ORDINARY RANKING POST** (founder, production QA, 2026-09-25)
+ *
+ * Ranking a single title through the Unranked flow — *Solo: A Star Wars Story* — produced
+ * a card with the poster, the avatar and the sentence of a normal ranking activity and
+ * **no score badge**, because `_rank_finalize` is the only writer of a payload carrying a
+ * score and a `ranking_batch` payload is `{count, sitting}`.
+ *
+ * A reader should not be able to tell which door a single ranking came through. Above one
+ * title the representative is a stand-in for a set, so its own score on the row would read
+ * as the sitting's — the grouped treatment keeps no badge and offers the tail instead.
+ */
+describe('the score badge on a sitting', () => {
+  const liveScore = {
+    user_id: 'friend',
+    media_item_id: 'film-sheroes',
+    score: 8.7,
+    bucket: 'loved',
+    position: 3,
+    category: 'movies',
+  };
+
+  it('shows the live score when the sitting placed exactly one title', async () => {
+    mockRows = [sitting(1, 'Solo: A Star Wars Story')];
+    mockScores = [liveScore];
+    const view = await renderWithProviders(<FeedScreen />);
+
+    await waitFor(() => expect(view.getByText(/Solo/)).toBeTruthy());
+
+    expect(view.getByLabelText('8.7 out of 10, I liked it')).toBeTruthy();
+    // And nothing that says it was part of a set.
+    expect(sentence(view.toJSON())).not.toContain('more');
+  });
+
+  it('keeps the grouped treatment above one title', async () => {
+    mockRows = [sitting(3)];
+    mockScores = [liveScore];
+    const view = await renderWithProviders(<FeedScreen />);
+
+    await waitFor(() => expect(view.getByText(/Sheroes/)).toBeTruthy());
+
+    // No badge: the representative's own score is not the sitting's.
+    expect(view.queryByLabelText('8.7 out of 10, I liked it')).toBeNull();
+    expect(sentence(view.toJSON())).toContain('and 2 more');
+  });
+
+  it('draws no badge for a single sitting whose title is no longer ranked', async () => {
+    // `public_scores` answers nothing, which is how "they unranked it" arrives. The post
+    // still says ranked, and no number stands behind it.
+    mockRows = [sitting(1, 'Solo: A Star Wars Story')];
+    mockScores = [];
+    const view = await renderWithProviders(<FeedScreen />);
+
+    await waitFor(() => expect(view.getByText(/Solo/)).toBeTruthy());
+
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+  });
 });

@@ -1,13 +1,13 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useCurrentProfile } from '@/features/auth';
 import { track, type MyListsEntry } from '@/lib/analytics';
 import { queryKeys } from '@/lib/query';
-import { EmptyState, SkeletonRow, Text } from '@/ui/components';
+import { EmptyState, MiniButton, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { ListRow } from './ListRow';
@@ -126,34 +126,24 @@ export function MyLists({ entry }: { entry: MyListsEntry }) {
 /**
  * `+ New list`, as the list's header rather than as a floating control. It scrolls with
  * the rows: a person here is looking at their lists, not halfway through filing a title.
+ *
+ * **`MiniButton` since 2026-09-25**, which is the founder's one visual language for a
+ * small optional action — the same sizing, border, radius and tap target as a utility
+ * sheet's Done. It keeps its plus and it keeps its place: `align="start"` because this is
+ * a control under a heading, not a footer, and centring it would move something the
+ * founder asked to leave where it is.
  */
 function NewListButton({ onPress }: { onPress: () => void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="New list"
-      onPress={onPress}
-      style={({ pressed }) => [styles.newList, pressed && styles.pressed]}
-    >
-      <Ionicons name="add" size={theme.layout.icon.md} color={theme.semantic.action} />
-      <Text variant="callout" tone="action">
-        New list
-      </Text>
-    </Pressable>
-  );
+  return <MiniButton label="New list" icon="add" align="start" onPress={onPress} style={styles.newList} />;
 }
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
   loading: { paddingTop: theme.space[3] },
   list: { paddingBottom: theme.space[8] },
+  // Its place on the page. The shape is `MiniButton`'s, and the tap target with it.
   newList: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[2],
-    minHeight: theme.layout.minTapTarget,
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[2],
   },
-  pressed: { opacity: 0.7 },
 });

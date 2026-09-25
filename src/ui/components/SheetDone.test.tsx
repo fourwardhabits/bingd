@@ -7,45 +7,44 @@ import { theme } from '@/ui/tokens';
 import { SheetDone } from './SheetDone';
 
 /**
- * **The way out of a utility sheet** (founder, device QA, 2026-09-25).
+ * **The way out of a utility sheet**, and the three founder verdicts it has survived.
  *
- * Two findings produced this component and both are asserted here, because both were
- * invisible to every existing test: Where to watch and bingd Awards put their Done within
- * a thumb's width of the Android system Back control, and the grouped-ranking sheet had no
- * Done at all.
+ *   1. A filled Maroon `Button` made the least consequential control on the screen the
+ *      loudest thing on it. Where to watch and bingd Awards also put theirs within a
+ *      thumb's width of the Android Back control, and the grouped-ranking sheet had none.
+ *   2. Bare maroon words fixed the emphasis and read as **detached** — no container, no
+ *      edge, nothing to say how much of it may be pressed.
+ *   3. So: `MiniButton`, centred, and no inset of its own.
  *
- * The emphasis half matters as much as the spacing half. These sheets are statements, not
- * decisions, and a filled Maroon `Button` made the least consequential control on the
- * screen the loudest thing on it.
+ * The spacing half is asserted here because it was invisible to every other test: this
+ * footer used to add `inset + space[3]` on top of the inset `Sheet` already applies, and on
+ * a 48pt navigation bar the band under one word measured about 108pt.
  */
 
 it('adds no bottom inset of its own, because the sheet already paid it', async () => {
-  /**
-   * The regression this replaces (founder, device QA, 2026-09-25): this footer used to
-   * add `inset + space[3]` on top of the inset `Sheet` applies to the sheet body, so on
-   * a phone reporting a 48pt navigation bar the band under one word measured about
-   * 108pt. `Sheet` owns a sheet's bottom clearance; this owns none.
-   */
   const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
 
   const foot = StyleSheet.flatten(view.getByTestId('sheet-done').props.style);
   expect(foot.paddingBottom).toBeUndefined();
   // And it follows the content rather than being held apart from it: no spacer, no
   // `marginTop: 'auto'`, no reserved region.
-  expect(foot.paddingTop).toBe(theme.space[2]);
+  expect(foot.paddingTop).toBe(theme.space[3]);
   expect(foot.flex).toBeUndefined();
   expect(foot.marginTop).toBeUndefined();
-});
-
-it('sits against the right edge, where a way out belongs', async () => {
-  const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
-
-  const foot = StyleSheet.flatten(view.getByTestId('sheet-done').props.style);
-  expect(foot.alignItems).toBe('flex-end');
   expect(foot.paddingHorizontal).toBe(theme.layout.gutter);
 });
 
-it('is words rather than a filled button', async () => {
+it('is a small button with an edge, not bare words', async () => {
+  // The founder's verdict on version 2: maroon text with no container looked detached.
+  const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
+
+  const press = StyleSheet.flatten(view.getByLabelText('Done').props.style);
+  expect(press.borderWidth).toBeGreaterThan(0);
+  expect(press.borderRadius).toBe(theme.radius.control);
+  expect(press.backgroundColor).toBe(theme.surface.raised);
+});
+
+it('is not a filled primary action', async () => {
   const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
 
   type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
@@ -62,17 +61,27 @@ it('is words rather than a filled button', async () => {
   expect(styles.some((s) => s.backgroundColor === theme.semantic.action)).toBe(false);
 });
 
-it('is a real target rather than a word with slop around it', async () => {
-  // Android clips touches outside a parent's box, so `hitSlop` on a text node is a
-  // target that measures generously on iOS and taps at the glyph on Android.
+it('shrinks to its label and sits centred', async () => {
+  const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
+
+  const press = StyleSheet.flatten(view.getByLabelText('Done').props.style);
+  // A `stretch`, a width or a flex here is a full-width control, which this is not.
+  expect(press.alignSelf).toBeUndefined();
+  expect(press.width).toBeUndefined();
+  expect(press.flex).toBeUndefined();
+  expect(press.paddingHorizontal).toBe(theme.space[5]);
+
+  // `alignItems` on the row, so the row shrink-wraps the button rather than stretching it.
+  const row = StyleSheet.flatten(view.getByLabelText('Done').parent?.props.style);
+  expect(row.alignItems).toBe('center');
+});
+
+it('meets the accessible tap height on the control itself', async () => {
+  // Android clips touches outside a parent's box, so a padded parent is not a target.
   const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
 
   const press = StyleSheet.flatten(view.getByLabelText('Done').props.style);
   expect(press.minHeight).toBe(theme.layout.minTapTarget);
-  expect(press.minWidth).toBe(theme.layout.minTapTarget);
-  // Not stretched: a right-aligned control whose target spans the sheet would swallow
-  // taps meant for the content beside it.
-  expect(press.alignSelf).toBeUndefined();
 });
 
 it('dismisses', async () => {

@@ -844,13 +844,30 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
   const watched = items.filter((item) => isWatchActivity(item.type));
   const follows = items.filter((item) => item.type === 'follow_added');
   /**
-   * **Only `title_ranked`**, which is the only type that has ever drawn a score badge:
-   * `_rank_finalize` is the sole writer of a payload carrying one. Scoring the other
-   * watch activities here would put a number on rows that have never had one — a
-   * `season_completed` card would suddenly assert a rating — and this tranche is a
-   * correctness pass, not a redesign of what a card shows.
+   * **`title_ranked`, and a sitting that placed exactly one title.**
+   *
+   * `_rank_finalize` is the only writer of a payload carrying a score, so everything here
+   * has none and borrows the live one below. The rule is still narrow on purpose: scoring
+   * the other watch activities would put a number on rows that have never had one — a
+   * `season_completed` card would suddenly assert a rating.
+   *
+   * **The single-title sitting** (founder, production QA, 2026-09-25: *Solo: A Star Wars
+   * Story*). Ranking one title through the Unranked flow produced a card with the poster,
+   * the avatar and the sentence of an ordinary ranking post and **no badge**, because a
+   * `ranking_batch` payload is `{count, sitting}` and carries no score. A reader should
+   * not be able to tell which door a single ranking came through, so it borrows the live
+   * score exactly as a pre-snapshot `title_ranked` post does.
+   *
+   * **Only at `count === 1`.** Above that the representative title is a stand-in for a
+   * set, and one of its scores on the row would read as the sitting's — so the grouped
+   * treatment keeps no badge, and the *N more* tail is what the row offers instead.
    */
-  const ranked = items.filter((item) => item.type === 'title_ranked' && item.mediaItemId);
+  const ranked = items.filter(
+    (item) =>
+      Boolean(item.mediaItemId) &&
+      (item.type === 'title_ranked' ||
+        (item.type === 'ranking_batch' && (item.rankedCount ?? 1) === 1)),
+  );
   const [, , , , watchScores] = await Promise.all([
     attachNotes(watched),
     attachCompanions(watched),
