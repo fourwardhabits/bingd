@@ -23,6 +23,7 @@ import {
   type BucketId,
 } from '@/ui/components';
 
+import { NoteClaims, NoteInput } from './NoteComposer';
 import { CompanionPicker } from './CompanionPicker';
 import { formatWatchDate, today } from './dates';
 import {
@@ -1560,45 +1561,18 @@ function Body({
                 }}
                 onBlur={flushNote}
               />
-              {/* Both claims sit with the field they describe rather than in a
-                  settings screen, because both are decisions about this piece of
-                  writing and are only ever made while writing it. */}
-              <View style={styles.noteClaims}>
-                <ToggleChip
-                  icon={spoilers ? 'eye-off' : 'eye-off-outline'}
-                  label="Contains spoilers"
-                  on={spoilers}
-                  accessibilityLabel="This note contains spoilers"
-                  onToggle={() => {
-                    setSpoilersEdit(!spoilers);
-                    void saveDetails({ spoilers: !spoilers });
-                  }}
-                />
-                {/* Publishing is the positive state of this control, not the absence
-                    of a negative one. It read "Only me" and was off by default, so
-                    the way to keep a note to yourself was to notice a chip and tick
-                    it — and the way to publish was to do nothing at all. Naming the
-                    act that has consequences is what makes the default safe to
-                    leave alone. */}
-                <ToggleChip
-                  icon={visibility === 'public' ? 'people' : 'people-outline'}
-                  label="Share as a review"
-                  on={visibility === 'public'}
-                  accessibilityLabel="Share this note as a public review"
-                  onToggle={() => {
-                    const next: NoteVisibility = visibility === 'public' ? 'private' : 'public';
-                    setVisibilityEdit(next);
-                    void saveDetails({ visibility: next });
-                  }}
-                />
-              </View>
-              <Text variant="caption" tone="tertiary">
-                {visibility === 'private'
-                  ? 'Only you can read this.'
-                  : spoilers
-                    ? 'Shown with your rating, hidden until people who have not seen it tap to reveal.'
-                    : 'Shown with your rating on your profile and in your friends’ feeds.'}
-              </Text>
+              <NoteClaims
+                visibility={visibility}
+                spoilers={spoilers}
+                onSpoilers={(next) => {
+                  setSpoilersEdit(next);
+                  void saveDetails({ spoilers: next });
+                }}
+                onVisibility={(next) => {
+                  setVisibilityEdit(next);
+                  void saveDetails({ visibility: next });
+                }}
+              />
             </View>
           ) : null}
 
@@ -1725,32 +1699,9 @@ function Body({
  * Separate so the sheet's own layout stays readable, and because the note is the one
  * control here that is a text field rather than a row.
  */
-export function NoteInput({
-  value,
-  label,
-  onChangeText,
-  onBlur,
-}: {
-  value: string;
-  /** "Note". One field, one name; whether it is shared is the chip's job to say. */
-  label: string;
-  onChangeText: (next: string) => void;
-  onBlur: () => void;
-}) {
-  return (
-    <TextInput
-      accessibilityLabel={label}
-      value={value}
-      onChangeText={onChangeText}
-      onBlur={onBlur}
-      multiline
-      maxLength={2000}
-      placeholder="What did you think?"
-      placeholderTextColor={theme.text.tertiary}
-      style={styles.noteInput}
-    />
-  );
-}
+
+/** Re-exported: the field moved to `NoteComposer`, its importers did not. */
+export { NoteInput };
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[4], gap: theme.space[4] },
@@ -1793,16 +1744,4 @@ const styles = StyleSheet.create({
   },
   expanded: { paddingBottom: theme.space[2] },
   noteBox: { paddingHorizontal: theme.layout.gutter, gap: theme.space[2] },
-  noteClaims: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
-  noteInput: {
-    minHeight: 88,
-    borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.strong,
-    backgroundColor: theme.surface.raised,
-    padding: theme.space[3],
-    textAlignVertical: 'top',
-    color: theme.text.primary,
-    ...theme.typography.body,
-  },
 });

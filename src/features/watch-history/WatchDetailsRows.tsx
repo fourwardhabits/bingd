@@ -3,10 +3,11 @@ import { StyleSheet, View } from 'react-native';
 
 import { CompanionPicker } from '@/features/collection/CompanionPicker';
 import { formatWatchDate, today } from '@/features/collection/dates';
-import { NoteInput } from '@/features/collection/LogSheet';
+import { NoteClaims, NoteInput } from '@/features/collection/NoteComposer';
+import type { TitleNote } from '@/features/collection/use-title-note';
 import { taggableWith, type Person } from '@/features/collection/use-companions';
 import { WatchDatePicker } from '@/features/collection/WatchDatePicker';
-import { SheetRow, Text } from '@/ui/components';
+import { SheetRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** The same ceiling `set_watch_details` enforces through `watch_tags.max_per_watch`. */
@@ -21,8 +22,11 @@ export type WatchDetailsRowsProps = {
   peopleLoading?: boolean;
   companionIds: string[];
   onToggleCompanion: (id: string) => void;
-  note: string;
-  onNote: (next: string) => void;
+  /**
+   * The title's one note, from `useTitleNote`. The caller owns it because the caller owns
+   * the commit: it must `flush()` when the reader presses Save or picks a bucket.
+   */
+  titleNote: TitleNote;
 };
 
 type Open = 'who' | 'note' | 'date' | null;
@@ -37,10 +41,16 @@ type Open = 'who' | 'note' | 'date' | null;
  * default**, with the same `Add` values. Used by the rewatch sheet and by editing a watch in
  * Watch History, so the two cannot drift from the ordinary log.
  *
- * **No spoiler or Share-as-review chips here, deliberately.** A watch's note is a private
- * diary line (20261014000100: owner-only, never on any public surface). The public review
- * is the title's one note, written in the ordinary log sheet, and a second door into it from
- * a watch would be two places to publish one piece of writing.
+ * **The Note row edits the title's one note, with its two claims** (founder decision,
+ * 2026-09-25). It used to edit `watch_events.note` — a private diary line, owner-only by
+ * schema — which is why "Contains spoilers" and "Share as a review" had nowhere to go here
+ * and the two rewatch surfaces read as a downgrade from the ordinary log sheet.
+ *
+ * There is still exactly one note per title and exactly one place it is published from; what
+ * changed is that this is now one of the doors into it rather than a door into something
+ * else that looked the same. The field and the chips are `NoteComposer`'s, so the three
+ * entry points cannot drift again. `watch_events.note` is untouched and stays owner-only:
+ * nothing writes it, and no existing row was rewritten (production held none).
  */
 export function WatchDetailsRows({
   date,
@@ -49,8 +59,7 @@ export function WatchDetailsRows({
   peopleLoading = false,
   companionIds,
   onToggleCompanion,
-  note,
-  onNote,
+  titleNote,
 }: WatchDetailsRowsProps) {
   const [open, setOpen] = useState<Open>(null);
   const toggle = (row: Exclude<Open, null>) => setOpen((was) => (was === row ? null : row));
@@ -61,8 +70,15 @@ export function WatchDetailsRows({
       ? (selected[0]?.name ?? '1 person')
       : `${companionIds.length} people`
     : 'Add';
-  const written = note.trim();
-  const noteValue = written ? `${written.split(/\s+/).length} words` : 'Add';
+  const written = titleNote.note.trim();
+  const words = written ? written.split(/\s+/).length : 0;
+  const noteValue = !titleNote.loaded
+    ? undefined
+    : words
+      ? titleNote.visibility === 'public'
+        ? `Shared · ${words} words`
+        : `${words} words`
+      : 'Add';
 
   return (
     <View style={styles.rows}>
@@ -94,10 +110,18 @@ export function WatchDetailsRows({
       />
       {open === 'note' ? (
         <View style={[styles.expanded, styles.noteBox]}>
-          <NoteInput value={note} label="Note" onChangeText={onNote} onBlur={() => {}} />
-          <Text variant="caption" tone="tertiary">
-            Only you can see notes on a watch.
-          </Text>
+          <NoteInput
+            value={titleNote.note}
+            label="Note"
+            onChangeText={titleNote.onChangeText}
+            onBlur={() => void titleNote.flush()}
+          />
+          <NoteClaims
+            visibility={titleNote.visibility}
+            spoilers={titleNote.spoilers}
+            onVisibility={titleNote.onVisibility}
+            onSpoilers={titleNote.onSpoilers}
+          />
         </View>
       ) : null}
 

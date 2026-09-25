@@ -45,8 +45,35 @@ const mockRemove = jest.fn(
   (_input: unknown): Promise<{ outcome: string; message?: string }> =>
     Promise.resolve({ outcome: 'ok' }),
 );
+const mockSaveNote = jest.fn((_input: unknown) =>
+  Promise.resolve({ outcome: 'ok', noteVersion: '2026-09-25T00:00:00Z' }),
+);
 jest.mock('@/features/collection/writes', () => ({
   removeFromCollection: (input: unknown) => mockRemove(input),
+  saveNote: (input: unknown) => mockSaveNote(input),
+  newOperationId: () => 'op-note',
+}));
+
+/**
+ * Editing a watch writes the **title's** note (founder decision, 2026-09-25), so the log
+ * state is what the editor reads. `private` with writing already in it is the case that
+ * matters: no default may republish it.
+ */
+const mockLogState = jest.fn(() => ({
+  data: {
+    note: 'Still holds up.',
+    noteVisibility: 'private' as const,
+    noteSpoilers: false,
+    noteVersion: '2026-09-24T00:00:00Z',
+  },
+}));
+jest.mock('@/features/collection/use-log-state', () => ({
+  useLogState: (...args: unknown[]) => mockLogState(...(args as [])),
+}));
+
+jest.mock('@/features/collection/note-visibility-pref', () => ({
+  readNoteVisibilityDefault: () => Promise.resolve(null),
+  rememberNoteVisibility: () => Promise.resolve(),
 }));
 
 const event = (id: string, watchedOn: string, recordedAt: string) => ({
@@ -86,6 +113,7 @@ const post = (createdAt: string, score: number, watchEventId: string | null = nu
 beforeEach(() => {
   mockEdit.mockClear();
   mockDetails.mockClear();
+  mockSaveNote.mockClear();
 });
 
 describe('Watch History — a historical feed of this title (founder QA, 2026-09-21)', () => {
@@ -173,12 +201,89 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), '  With popcorn.  ');
     await fireEvent.press(view.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(mockDetails).toHaveBeenCalledTimes(1));
-    expect(mockDetails).toHaveBeenCalledWith(
-      expect.objectContaining({ watchEventId: 'w1', note: 'With popcorn.', companionIds: [] }),
+    // The note goes to `save_note` — the title's one note — not to the watch's own row.
+    await waitFor(() => expect(mockSaveNote).toHaveBeenCalledTimes(1));
+    expect(mockSaveNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaItemId: 'film-1',
+        note: 'With popcorn.',
+        noteVisibility: 'private',
+        noteSpoilers: false,
+      }),
     );
+    // Nothing about the watch itself changed, so neither writer is called.
+    expect(mockDetails).not.toHaveBeenCalled();
     // The date was not touched, so it is not rewritten, and nothing is re-ranked.
     expect(mockEdit).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The founder's item 11 (2026-09-25). The controls were missing here because this surface
+   * had been built against `watch_events.note` — owner-only by schema, so there was nothing
+   * for them to do. They are the log sheet's own, from `NoteComposer`.
+   */
+  it('offers both review claims when editing a watch', async () => {
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: {
+        count: 1,
+        events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
+        details: new Map(),
+        placements: [],
+        posts: [],
+      },
+    });
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+
+    expect(view.getByLabelText('This note contains spoilers')).toBeTruthy();
+    expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
+  });
+
+  it('opens a stored private note private, and never republishes it by default', async () => {
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: {
+        count: 1,
+        events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
+        details: new Map(),
+        placements: [],
+        posts: [],
+      },
+    });
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+
+    expect(view.getByText('Only you can read this.')).toBeTruthy();
+    // Opening the composer is not an act: nothing is written until the reader writes.
+    expect(mockSaveNote).not.toHaveBeenCalled();
+  });
+
+  it('publishes only when the reader presses the chip', async () => {
+    mockHistory.mockReturnValue({
+      isPending: false,
+      data: {
+        count: 1,
+        events: [event('w1', '2026-09-01', '2026-09-01T10:00:00Z')],
+        details: new Map(),
+        placements: [],
+        posts: [],
+      },
+    });
+    const view = await renderWithProviders(<WatchHistoryScreen />);
+
+    await fireEvent.press(view.getByTestId('watch-edit-w1'));
+    await fireEvent.press(view.getByLabelText(/^Note/));
+    await fireEvent.press(view.getByLabelText('Share this note as a public review'));
+
+    await waitFor(() => expect(mockSaveNote).toHaveBeenCalledTimes(1));
+    expect(mockSaveNote).toHaveBeenCalledWith(
+      expect.objectContaining({ note: 'Still holds up.', noteVisibility: 'public' }),
+    );
   });
 });
 
