@@ -68,19 +68,29 @@ import { theme } from '@/ui/tokens';
  * control ends up shipping with no accessible name. Nothing else about it wants to be
  * separate; being nameable is the whole reason.
  *
- * **The ordinary settings gear, and the composite is gone** (founder, physical Android,
- * 2026-09-06).
+ * **The bell wearing a gear, restored** (founder, 2026-09-25). This control has been
+ * decided three times, and the history belongs here because the last decision was the
+ * opposite of this one.
  *
- * It was a bell wearing a 12pt gear on its shoulder, on the reasoning that the bell
- * names the subject and the gear names the action. On a device it did not read as an
- * annotated bell: the two glyphs overlapped into one shape and the gear looked punched
- * through the bell — transparent, malformed, and the sort of thing a reader assumes is a
- * rendering fault rather than a control.
+ *   #61   the composite arrived: a bell says *notifications*, a gear says *settings*,
+ *         and the pair says *notification settings* without a word.
+ *   #62   the Paper disc behind the gear came off — the founder's device read it as a
+ *         badge background, a count bubble on a control that carries no count. At this
+ *         weight the filled gear separates from the bell's strokes unaided.
+ *   #111  the whole composite came off, on a physical Android pass: the glyphs were read
+ *         as overlapping into one shape, the gear looking punched through the bell. It
+ *         became `settings-outline`, the glyph `AppHeader` puts in the Profile corner.
+ *   now   the founder asks for it back, because a bare gear on this screen says
+ *         *settings* and not *notification settings*.
  *
- * So it is `settings-outline` at `icon.md` in neutral ink: the exact glyph `AppHeader`
- * puts in the Profile corner. Two gears in two places is not the ambiguity the composite
- * was avoiding — this one is *inside* the notifications screen, where the only settings
- * there are to open are the notification ones, and the accessible name says so.
+ * What is restored is **#62's geometry exactly** rather than a fourth drawing of the
+ * idea: the filled `settings-sharp` cut at 12pt on the bell's lower-right shoulder, no
+ * disc, and the *combined* glyph centred in its 44pt square rather than the bell alone.
+ * Two device passes produced that shape; inventing a new one would spend them.
+ *
+ * **#111's report is not answered by this and should be checked on a device.** If the two
+ * glyphs still merge on Android, the fix is a size or spacing change here — the bare gear
+ * is the thing that has now been rejected.
  */
 export function NotificationSettingsButton() {
   const router = useRouter();
@@ -92,14 +102,55 @@ export function NotificationSettingsButton() {
       onPress={() => router.push('/settings/notification-preferences')}
       style={({ pressed }) => [styles.gear, pressed && styles.gearPressed]}
     >
-      <Ionicons
-        name="settings-outline"
-        size={theme.layout.icon.md}
-        color={theme.text.secondary}
-      />
+      <View style={styles.bellWrap}>
+        <Ionicons
+          name="notifications-outline"
+          size={theme.layout.icon.md}
+          color={theme.text.secondary}
+        />
+        {/**
+         * **The plug, which is what #111 was actually reporting.**
+         *
+         * `settings-sharp` is a filled gear with a *hole punched through its middle* —
+         * the glyph is a ring, not a disc. Laid over the bell, the bell's own strokes
+         * showed through that hole, and what a reader saw was not two shapes but one
+         * malformed one. That is the "transparent, punched through" defect, and neither
+         * the disc removal (#62) nor removing the composite (#111) named it.
+         *
+         * A small opaque square of the surface colour sits *behind* the gear and is
+         * sized to the hole rather than to the glyph, so it fills the middle and leaves
+         * no visible ring around the teeth. It is not the disc #62 removed: that one was
+         * larger than the gear and read as a badge bubble; this one is smaller than the
+         * gear and is invisible except through the hole it plugs.
+         */}
+        <View style={styles.gearPlug} />
+        {/**
+         * The filled cut, not the outline: at this size an outlined gear is a smudge.
+         *
+         * **Maroon since 2026-09-25.** Against a grey bell the two glyphs now separate by
+         * hue as well as by shape, which is the separation the composite needed and the
+         * reason it can be small enough not to crowd the bell. It is the app's action
+         * colour on a control that is an action, and at 12pt it reads as an annotation
+         * rather than as emphasis — the founder's "if maroon over-emphasises it, keep
+         * both grey" judgement call, made in favour of maroon because the grey-on-grey
+         * merge is the defect being fixed.
+         */}
+        <Ionicons
+          name="settings-sharp"
+          size={GEAR_BADGE_SIZE}
+          color={theme.semantic.action}
+          style={styles.gearGlyph}
+        />
+      </View>
     </Pressable>
   );
 }
+
+/** Small enough to read as an annotation on the bell, large enough to still be a gear. */
+const GEAR_BADGE_SIZE = 12;
+
+/** How far the gear pokes past the bell's lower-right corner. */
+const GEAR_OVERHANG = { x: 3, y: 2 };
 
 /**
  * The three shelves, in the small-caps maroon voice every section on this surface
@@ -896,6 +947,46 @@ const styles = StyleSheet.create({
     marginRight: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
   },
   gearPressed: { opacity: 0.6 },
+  /**
+   * The glyph's own box, so the gear's absolute offsets measure from the bell rather than
+   * from the 44pt touch square around it. The translate is half the gear's overhang, so
+   * the *combined* glyph — bell plus the gear poking past its lower-right corner —
+   * centres in the touch square rather than the bell alone.
+   */
+  bellWrap: {
+    width: theme.layout.icon.md,
+    height: theme.layout.icon.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ translateX: -GEAR_OVERHANG.x / 2 }, { translateY: -GEAR_OVERHANG.y / 2 }],
+  },
+  /**
+   * The gear, riding the bell's lower-right shoulder directly — no disc behind it. The
+   * founder's device read the old Paper bubble as a badge background; the plug below is
+   * not that, and is deliberately smaller than the gear rather than larger.
+   */
+  gearGlyph: {
+    position: 'absolute',
+    right: -GEAR_OVERHANG.x,
+    bottom: -GEAR_OVERHANG.y,
+  },
+  /**
+   * Behind the gear's hole and nothing more.
+   *
+   * Centred on the same point as the glyph and sized to roughly the hole's diameter —
+   * `settings-sharp`'s inner circle is about a third of its box — so it cannot show
+   * past the teeth at any density. `surface.base` because that is what a navigation bar
+   * paints; the gear sits on the header's own ground, not on the bell.
+   */
+  gearPlug: {
+    position: 'absolute',
+    right: -GEAR_OVERHANG.x + GEAR_BADGE_SIZE / 3,
+    bottom: -GEAR_OVERHANG.y + GEAR_BADGE_SIZE / 3,
+    width: GEAR_BADGE_SIZE / 3,
+    height: GEAR_BADGE_SIZE / 3,
+    borderRadius: GEAR_BADGE_SIZE / 6,
+    backgroundColor: theme.surface.base,
+  },
   unread: { backgroundColor: theme.surface.raised },
 
   dot: {

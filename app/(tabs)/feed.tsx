@@ -38,6 +38,7 @@ import {
 } from '@/features/feed/use-feed';
 import { activityLead } from '@/features/feed/ActivityLead';
 import { FollowStoryRow } from '@/features/feed/FollowStoryRow';
+import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import {
   DEFAULT_REACTION,
@@ -437,6 +438,10 @@ export default function FeedScreen() {
    * had already outgrown.
    */
   const [followStoryFor, setFollowStoryFor] = useState<string | null>(null);
+  /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+    null,
+  );
   /**
    * The event being recommended, if any.
    *
@@ -908,6 +913,13 @@ export default function FeedScreen() {
                  * somebody's relationship, on which the two people best placed to feel
                  * strange about a thread are the ones named in it.
                  */
+                /**
+                 * **A whole sitting is one row** (20261020000100). Working through an
+                 * imported library posts one grouped story rather than forty, and it is
+                 * its own row for the follow story's reason: `ActivityRow` is about one
+                 * title and carries eight controls that a post about eighteen titles has
+                 * no use for.
+                 */
                 event.type === 'follow_added' ? (
                   <FollowStoryRow
                     key={event.id}
@@ -937,6 +949,22 @@ export default function FeedScreen() {
                   }
                   verb={verbFor(event.type)}
                   tail={tailFor(event.type, event.title)}
+                  /* A grouped sitting reads "ranked Sheroes and 2 more": the connector
+                     is ordinary ink so the eye finds the break after the title, and the
+                     count is the thing you press to see the rest (20261023000100). */
+                  tailAction={
+                    event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
+                      ? {
+                          connector: 'and',
+                          label: `${(event.rankedCount ?? 1) - 1} more`,
+                          onPress: () =>
+                            setRankingBatchFor({
+                              id: event.id,
+                              medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                            }),
+                        }
+                      : null
+                  }
                   companions={event.companions}
                   title={event.title}
                   year={event.year}
@@ -1104,6 +1132,17 @@ export default function FeedScreen() {
           router.push(`/u/${username}`);
         }}
       />
+
+      {/* The titles one Unranked sitting ranked (20261020000100). Mounted only while
+          open, like every other sheet here: its read is a whole sitting's worth of rows
+          and most visits never ask for it. */}
+      {rankingBatchFor ? (
+        <RankingBatchSheet
+          eventId={rankingBatchFor.id}
+          medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
 
       {/* Mounted only while open, like every other sheet on this screen. Its one query is
           `follow_state_with` over people the page has already hydrated, so there is nothing

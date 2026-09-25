@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Crypto from 'expo-crypto';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -15,6 +16,8 @@ import { theme } from '@/ui/tokens';
 import {
   atBacklogCheckpoint,
   backlogProgress,
+  finalizeBatchRanking,
+  noteBatchRanking,
   rankBacklogStart,
   rankingBacklog,
   type BacklogTarget,
@@ -123,6 +126,13 @@ function BacklogSession({
    * open server session rather than a finished one, so neither can appear here.
    */
   const [ranked, setRanked] = useState<RankedSummaryTitle[]>([]);
+  /**
+   * **This sitting, for the feed** (founder, 2026-09-24). Minted once when the screen
+   * opens and passed with every completed placement, so the server can group them into
+   * one post. A later sitting is a later uuid and a second post, which is the whole of
+   * the grouping rule — no time windows.
+   */
+  const [sitting] = useState(() => Crypto.randomUUID());
   const skipped = useRef<string[]>([]);
   const checkpointEvery = useRef(10);
   const answers = useRef(0);
@@ -150,10 +160,18 @@ function BacklogSession({
           medium: analyticsMedium,
         },
       });
+      /**
+       * **The sitting ends here, and so does its draft** (2026-09-25). `endSitting` is the
+       * one place every deliberate exit passes through — Done, the queue emptying, Close —
+       * so publishing from it means the post appears exactly when the reader stopped, and
+       * on no other path. A force-kill never reaches this and publishes nothing, which is
+       * the accepted trade rather than an oversight.
+       */
+      void finalizeBatchRanking(sitting);
       void queryClient.invalidateQueries({ queryKey: ['ranking-backlog', profile.id] });
       void queryClient.invalidateQueries({ queryKey: ['refine-availability', profile.id] });
     },
-    [analyticsMedium, profile.id, queryClient],
+    [analyticsMedium, profile.id, queryClient, sitting],
   );
 
   const caughtUp = useCallback(async () => {
@@ -221,6 +239,9 @@ function BacklogSession({
       invalidateAfterCollectionChange(queryClient, profile.id, target.mediaItemId, {
         category: step.category,
       });
+      // The sitting's one grouped story, extended by each completed placement. Never a
+      // watch, and never called from Refine or the ordinary single-title flow.
+      void noteBatchRanking(sitting, target.mediaItemId);
       track({
         name: 'ranking_completed',
         props: {
@@ -238,7 +259,7 @@ function BacklogSession({
         void loadNext();
       }
     },
-    [loadNext, mediaKind, profile.id, queryClient],
+    [loadNext, mediaKind, profile.id, queryClient, sitting],
   );
 
   const applyStep = useCallback(
@@ -390,7 +411,7 @@ function BacklogSession({
       : null;
 
   return (
-    <Screen>
+    <Screen includeBottomInset>
       {/* The summary draws its own foot; a Done in the header there would be two. */}
       {phase.kind === 'summary' ? null : (
         <SessionHeader
@@ -533,13 +554,6 @@ function BacklogSession({
           heading={rankedHeading(ranked.length, 'ranked')}
           titles={ranked}
           medium={medium}
-          note={
-            phase.remaining ? null : (
-              <Text variant="body" tone="secondary">
-                You’re caught up.
-              </Text>
-            )
-          }
           actions={
             <>
               <Button label="Done" onPress={() => done(phase.remaining ? 'done' : 'caught_up')} />

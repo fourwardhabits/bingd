@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useCurrentProfile } from '@/features/auth/session';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { useTaggablePeople, type Person } from '@/features/collection/use-companions';
+import { removeFromCollection } from '@/features/collection/writes';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
 import { LoadingScreen, Screen, Text } from '@/ui/components';
@@ -66,6 +67,7 @@ const EMPTY_PEOPLE: Person[] = [];
 
 export default function WatchHistoryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const mediaItemId = String(id ?? '');
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
@@ -171,12 +173,44 @@ export default function WatchHistoryScreen() {
     }
   };
 
+  /**
+   * **The last watch is the title leaving** (founder, 2026-09-25).
+   *
+   * `delete_watch_event` refuses the only watch with `P0001 last_watch`, because a title
+   * in the collection has at least one (§D.0). This screen used to turn that refusal into
+   * a sentence asking the reader to remove the title from their collection — which is the
+   * control they had just pressed. So it performs that act instead.
+   *
+   * `removeFromCollection` is the canonical one, the same writer the title page spends:
+   * it unranks first where the title is ranked (`unlog` refuses a ranked title) and then
+   * deletes the row, and the server takes the watch events and the feed activity with it.
+   * Nothing bespoke is added here — in particular no second confirmation, because this
+   * screen's control is already the confirmed act and the project has no dialog standard
+   * for it to reuse.
+   *
+   * Then it leaves: the screen it is on is a list of watches for a title that is no
+   * longer in the collection, so staying would be showing the reader a page about
+   * something they just removed. The title page behind it reflects the unlogged state
+   * from the invalidation `reconcile` already performs.
+   */
   const remove = async (eventId: string, onlyWatch: boolean) => {
     if (onlyWatch) {
-      // The server would refuse this with `P0001 last_watch`, and what the reader means
-      // is that the title should not be in the collection. That is a different act, on a
-      // different screen, and it is not one to perform on their behalf from here.
-      setError('This is the only watch. Remove the title from your collection instead.');
+      setBusy(true);
+      setError(null);
+      const result = await removeFromCollection({
+        operationId: newOperationId(),
+        mediaItemId: id as string,
+        // Every placement on this screen belongs to a ranked title; an unranked one has
+        // no position to show, so the ranked path is the one to take when there is one.
+        wasRanked: placements.length > 0,
+      });
+      setBusy(false);
+      reconcile();
+      if (result.outcome === 'failed') {
+        setError(result.message);
+        return;
+      }
+      router.back();
       return;
     }
     setBusy(true);

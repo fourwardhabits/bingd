@@ -246,6 +246,16 @@ export type Notification = {
    * founder asked for the two sentences to differ (2026-08-29).
    */
   commentIsReply: boolean;
+  /**
+   * `comment` only: whether the row is the POST AUTHOR following up with a new top-level
+   * comment on a post this reader had already commented on (20261021000100).
+   *
+   * A third row of the same type, told apart by `payload.participant` exactly as
+   * `payload.reply_to` tells the first two apart. It needs a sentence of its own because
+   * the post belongs to the actor: "commented on your ranking" would be false, and
+   * "replied to your comment" would claim a Reply they never tapped.
+   */
+  commentIsFollowUp: boolean;
   preview: string | null;
   /**
    * Why there is no preview, when the reason is a spoiler claim. The row says "Contains
@@ -375,6 +385,7 @@ export function useNotifications(viewerId: string) {
             // `comment` (20260826000600): present iff this row is about a *reply* to the
             // reader's own comment rather than a remark under their activity.
             reply_to?: string;
+            participant?: boolean;
           } | null;
           // 20260830000100. Optional in the type for the same reason `mentions` is in
           // `use-comments`: a bundle can be newer than the database it is pointed at
@@ -435,6 +446,7 @@ export function useNotifications(viewerId: string) {
           // newline would otherwise draw an empty second line under the sentence.
           mentionInReply: row.kind === 'mention' && row.payload?.reply === true,
           commentIsReply: row.kind === 'comment' && Boolean(row.payload?.reply_to),
+          commentIsFollowUp: row.kind === 'comment' && Boolean(row.payload?.participant),
           preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
           previewHidden: row.comment_spoilers === true,
           viewerRanked: row.viewer_ranked === true,
@@ -728,9 +740,19 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
         // A reply is about the reader's *comment*, not about their activity, so the
         // preposition changes and the noun does not apply at all. `payload.reply_to` is
         // what distinguishes the two rows `add_comment` writes.
-        return row.commentIsReply
-          ? { lead: 'replied to your comment on', subject, tail: null }
-          : { lead: 'commented on your', subject, tail: noun };
+        if (row.commentIsReply) {
+          return { lead: 'replied to your comment on', subject, tail: null };
+        }
+        /**
+         * The author following up under their own post. It is not "your" anything — the
+         * ranking is theirs — and it is not a reply, because they did not tap one. What
+         * it is is somebody joining a conversation this reader is already in, and that
+         * is what it says.
+         */
+        if (row.commentIsFollowUp) {
+          return { lead: 'also commented on the', subject, tail: noun };
+        }
+        return { lead: 'commented on your', subject, tail: noun };
       case 'reaction':
         return { lead: 'reacted to your', subject, tail: noun };
       case 'mention':

@@ -44,19 +44,22 @@ describe('the notifications gear', () => {
     expect(view.queryByText('Settings')).toBeNull();
   });
 
-  it('is the ordinary settings gear, not a composite glyph', async () => {
+  it('is a bell wearing a gear, not a bare settings glyph', async () => {
     /**
-     * **The founder's physical Android pass, 2026-09-06.**
+     * **Decided three times, and this is the third** (founder, 2026-09-25).
      *
-     * It was a bell wearing a 12pt gear on its shoulder — the bell naming the subject
-     * and the gear naming the action. On a device the two glyphs overlapped into one
-     * shape and the gear read as punched through the bell: transparent, malformed, and
-     * the sort of thing somebody assumes is a rendering fault rather than a control.
+     *   #61   the composite arrived — a bell for the subject, a gear for the action.
+     *   #62   the Paper disc behind the gear came off; the founder's device read it as
+     *         a badge background on a control that carries no count.
+     *   #111  the whole composite came off, on a physical Android pass: the glyphs were
+     *         read as overlapping into one shape, the gear punched through the bell.
+     *   now   the composite is back, because a bare gear on the Notifications screen
+     *         says *settings* rather than *notification settings*.
      *
-     * One glyph now, at `icon.md`, exactly what `AppHeader` puts in the Profile corner.
-     * Two gears in two places is not the ambiguity the composite was avoiding: this one
-     * lives inside the notifications screen, where the only settings to open are the
-     * notification ones, and the accessible name says so.
+     * What is asserted is **#62's geometry**, which is what was restored: the bell at
+     * `icon.md` and the gear at 12pt riding its shoulder. This test previously pinned
+     * the opposite — `[24]` and never 12 — and it is inverted rather than deleted so
+     * the next reader can see the decision moved rather than that a rule vanished.
      *
      * Walked over the rendered JSON because a glyph has no role or label of its own —
      * an icon's `size` lands as the glyph's fontSize, which is the trace it leaves.
@@ -80,9 +83,71 @@ describe('the notifications gear', () => {
       .map((style) => style.fontSize)
       .filter((size): size is number => typeof size === 'number');
 
-    // One glyph, at the app's icon size. The 12pt annotation is what is gone.
-    expect(glyphSizes).toEqual([24]);
-    expect(glyphSizes).not.toContain(12);
+    // Two glyphs: the bell at the app's icon size, the gear annotating it at 12.
+    expect(glyphSizes).toEqual([24, 12]);
+  });
+
+  it('plugs the gear’s hole without reintroducing a badge disc', async () => {
+    /**
+     * Two rules at once, and they pull in opposite directions.
+     *
+     * **#62:** a filled circle *behind the whole gear* reads as a count badge on a
+     * control that carries no count, so it came off.
+     *
+     * **#111, properly diagnosed (2026-09-25):** `settings-sharp` is a ring, not a disc
+     * — it has a hole punched through its middle, and the bell's strokes showed through
+     * it. That is the "transparent, punched through" defect, and it is why the composite
+     * was removed rather than resized.
+     *
+     * The plug satisfies both by being **smaller than the gear**: big enough to fill the
+     * hole, too small to be seen past the teeth. The assertion is that relationship
+     * rather than the presence or absence of a background, because "no background at
+     * all" is what left the hole transparent.
+     */
+    const view = await render(<NotificationSettingsButton />);
+
+    type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
+    const flatten = (style: unknown): Record<string, unknown> => {
+      if (Array.isArray(style)) return Object.assign({}, ...style.map(flatten));
+      return (style ?? {}) as Record<string, unknown>;
+    };
+    const styles: Record<string, unknown>[] = [];
+    const walk = (node: Node) => {
+      if (!node || typeof node === 'string') return;
+      styles.push(flatten(node.props?.style));
+      for (const child of node.children ?? []) walk(child as Node);
+    };
+    walk(view.toJSON() as Node);
+
+    const filled = styles.filter((style) => typeof style.backgroundColor === 'string');
+    expect(filled).toHaveLength(1);
+
+    // Strictly smaller than the 12pt gear, so nothing of it shows around the teeth.
+    const plug = filled[0] as { width?: number; height?: number };
+    expect(plug.width).toBeLessThan(12);
+    expect(plug.height).toBeLessThan(12);
+    expect(plug.width).toBeGreaterThan(0);
+  });
+
+  it('separates the gear from the bell by hue as well as by shape', async () => {
+    // Maroon on a grey bell (founder, 2026-09-25). Grey-on-grey at 12pt is the merge
+    // that #111 reported, and colour is what lets the annotation stay small.
+    const view = await render(<NotificationSettingsButton />);
+
+    type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
+    const colours: unknown[] = [];
+    const walk = (node: Node) => {
+      if (!node || typeof node === 'string') return;
+      // An icon renders as text: its colour lands in the style, beside the fontSize
+      // the sizing assertions above read.
+      const style = StyleSheet.flatten(node.props?.style) as { color?: unknown; fontSize?: number };
+      if (style?.color !== undefined && style?.fontSize !== undefined) colours.push(style.color);
+      for (const child of node.children ?? []) walk(child as Node);
+    };
+    walk(view.toJSON() as Node);
+
+    // Two glyphs, two different inks.
+    expect(new Set(colours).size).toBe(2);
   });
 
   it('pulls back exactly the box slack, so the glyph centres on the bar position', async () => {

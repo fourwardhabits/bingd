@@ -1085,3 +1085,41 @@ describe('a Letterboxd import', () => {
     });
   });
 });
+
+/**
+ * **The author answering without tapping Reply** (`20261021000100`, founder 2026-09-25).
+ *
+ * A third `comment` row, told apart by `payload.participant`. It needs its own sentence
+ * because the post belongs to the actor: "commented on your ranking" would be false, and
+ * "replied to your comment" would claim a Reply they never tapped. What the row has to
+ * convey is that somebody joined a conversation this reader is already in.
+ */
+describe('the author’s follow-up', () => {
+  it('says the author also commented, not that they commented on yours', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({
+        payload: { comment_id: 'x', participant: true },
+        subject_activity_type: 'title_ranked',
+      }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(/also commented on the/)).toBeTruthy());
+    expect(view.queryByText(/commented on your/)).toBeNull();
+    expect(view.queryByText(/replied to your comment/)).toBeNull();
+  });
+
+  it('still says "commented on your" for an ordinary comment', async () => {
+    // The discriminator is the payload flag and nothing else, so the existing row is
+    // untouched by its arrival.
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ subject_activity_type: 'title_ranked' }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
+    expect(view.queryByText(/also commented/)).toBeNull();
+  });
+});

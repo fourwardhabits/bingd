@@ -12,6 +12,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 
+import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
@@ -83,6 +84,10 @@ export default function ProfileScreen() {
   const stats = useProfileStats(profile.id);
   const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /** The grouped ranking post whose titles are open, if any (20261020000100). */
+  const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
+    null,
+  );
   /**
    * Which of the two people lists is open, if either.
    *
@@ -504,6 +509,20 @@ export default function ProfileScreen() {
                 // event saying two things on two screens.
                 verb={verbFor(event.type)}
                 tail={tailFor(event.type, event.title)}
+                /* A grouped sitting reads "ranked Sheroes and 2 more" (20261023000100). */
+                tailAction={
+                  event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
+                    ? {
+                        connector: 'and',
+                        label: `${(event.rankedCount ?? 1) - 1} more`,
+                        onPress: () =>
+                          setRankingBatchFor({
+                            id: event.id,
+                            medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                          }),
+                      }
+                    : null
+                }
                 companions={event.companions}
                 title={event.title}
                 year={event.year}
@@ -563,6 +582,16 @@ export default function ProfileScreen() {
           />
         </View>
       </ScrollView>
+
+      {/* The titles one Unranked sitting ranked (20261020000100). Mounted only while
+          open, like every other sheet here. */}
+      {rankingBatchFor ? (
+        <RankingBatchSheet
+          eventId={rankingBatchFor.id}
+          medium={rankingBatchFor.medium as 'movies' | 'tv_seasons'}
+          onClose={() => setRankingBatchFor(null)}
+        />
+      ) : null}
 
       <CommentSheet
         eventId={commentsFor}

@@ -237,6 +237,16 @@ const ALLOWED = {
   // takes a user id and is revoked for the same reason as `_refine_support`.
   'ranking_backlog(ranking_category,integer,uuid[])': ['authenticated'],
   'rank_backlog_start(uuid,taste_bucket,uuid)': ['authenticated'],
+  // The grouped ranking post (20261020000100). The writer acts on `auth.uid()` alone and
+  // refuses a title the caller has not ranked, so it cannot announce somebody else's
+  // library or a placement that never happened. The reader takes an event id and applies
+  // that event's own `can_view_profile`, so it is exactly as wide as the feed row it
+  // expands — `feed_ranking_titles` itself is revoked from every client role.
+  'rank_batch_note(uuid,uuid,uuid)': ['authenticated'],
+  // Ending a sitting (20261023000100): publishes that sitting's own draft and nothing
+  // else — it is keyed on auth.uid() and the caller's own sitting uuid.
+  'rank_batch_finalize(uuid,uuid)': ['authenticated'],
+  'ranking_batch_titles(uuid)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's

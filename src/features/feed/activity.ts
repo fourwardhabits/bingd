@@ -57,12 +57,26 @@ export const ACTIVITY_TYPES = [
   // 20260912000100. One aggregated row per actor per window — see `FEED_ACTIVITY_TYPES`
   // below, which is the only read that asks for it.
   'follow_added',
+  /**
+   * 20261020000100. One row per Unranked sitting, which grows as titles finish.
+   *
+   * **On both surfaces** (founder, 2026-09-24), unlike a follow story. A sitting is
+   * genuine ranking activity — the same act the individual Rank path already posts to a
+   * profile — so it should not vanish when a reader moves from the Feed to the profile of
+   * the person who did it. One event, eligible twice; never a second row.
+   */
+  'ranking_batch',
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 /**
  * The types a **profile's** Recent activity asks for: everything except follow stories.
+ *
+ * `ranking_batch` is deliberately **in** this list (founder, 2026-09-24): a grouped
+ * Unranked sitting is ranking activity, and the individual Rank path already posts to a
+ * profile, so hiding the grouped one would make the same act appear or disappear
+ * depending on how it was reached.
  *
  * The founder's §A9 scopes follow activity to the Feed, where it is social *discovery*
  * content — a way for a network to propagate. On a profile it would be neither: somebody
@@ -104,6 +118,9 @@ export const isWatchActivity = (type: ActivityType): boolean =>
 /** The verb between the actor and the title — or, for an award, the award's name. */
 const VERB: Record<ActivityType, string> = {
   title_ranked: 'ranked',
+  // A whole sitting, which `RankingBatchRow` draws itself — this entry exists so the
+  // map stays total, and the row never asks for it.
+  ranking_batch: 'ranked',
   title_logged: 'watched',
   season_completed: 'finished',
   watchlist_added: 'added',

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import * as Crypto from 'expo-crypto';
 
 import type { RankingCategory } from '@/features/collection/use-collection';
 import { queryKeys } from '@/lib/query';
@@ -152,3 +153,55 @@ export const atBacklogCheckpoint = (placed: number, every: number) =>
  */
 export const backlogProgress = (placed: number, total: number) =>
   `${Math.min(placed, total)} of ${total} ranked`;
+
+/**
+ * **This sitting's grouped feed post** (founder, 2026-09-24; `20261020000100`).
+ *
+ * Called once per *completed* placement. The server creates the sitting's post on the
+ * first title and appends to that same row on every later one, so a reader working
+ * through an imported library produces one story rather than forty.
+ *
+ * **Fire and forget, deliberately.** The placement is already committed by the time this
+ * runs; the post is a social echo of it, and a feed row that failed to write is not a
+ * reason to tell somebody their ranking did not save. A failure is swallowed and the next
+ * title simply creates or extends the post instead.
+ *
+ * It is never called for Refine, for a rerank or for the ordinary single-title flow —
+ * those keep the feed semantics they have always had (founder scope note).
+ */
+export async function noteBatchRanking(sitting: string, mediaItemId: string): Promise<void> {
+  try {
+    await supabase.rpc('rank_batch_note', {
+      p_operation_id: Crypto.randomUUID(),
+      p_sitting: sitting,
+      p_media_item_id: mediaItemId,
+    });
+  } catch {
+    // See above: the ranking is saved either way.
+  }
+}
+
+/**
+ * **Ends the sitting and publishes its post** (founder, 2026-09-25; `20261023000100`).
+ *
+ * Until this runs the sitting is a draft that no activity read asks for, so nobody
+ * watches the poster and the count change while somebody works through their library.
+ * Called on every path that ends a sitting deliberately — Done, the queue emptying, and
+ * leaving the flow — and on none that do not: a force-kill publishes nothing, which the
+ * founder accepted rather than have the app guess at process death.
+ *
+ * Fire and forget for the same reason `noteBatchRanking` is: every placement is already
+ * committed, and a social post that failed to publish is not a reason to tell somebody
+ * their ranking did not save. A sitting that completed nothing answers `empty` and leaves
+ * no row.
+ */
+export async function finalizeBatchRanking(sitting: string): Promise<void> {
+  try {
+    await supabase.rpc('rank_batch_finalize', {
+      p_operation_id: Crypto.randomUUID(),
+      p_sitting: sitting,
+    });
+  } catch {
+    // See above: the rankings are saved either way.
+  }
+}

@@ -220,12 +220,6 @@ export function ProfileIdentity({
         </View>
       </View>
 
-      {/* Full width, under the identity block and above the bio, starting at the page
-          gutter (founder, 2026-09-16). In the name column it left an empty well under
-          the avatar; here it lines up with the bio and everything below it. Renders
-          nothing at all when there are no links, so the bio sits where it always has. */}
-      <SocialLinkRow links={socialLinks} style={styles.social} />
-
       {/* Full width, under the header. Absent entirely rather than an empty line: a
           blank row still moves everything below it, and a profile with no bio should
           look like a profile with no bio rather than one with a gap. */}
@@ -236,6 +230,21 @@ export function ProfileIdentity({
           </Text>
         </View>
       ) : null}
+
+      {/**
+       * **Under the bio** (founder, 2026-09-25), where it was above it since 2026-09-16.
+       *
+       * The order the page reads in is who this is, what they say about themselves, then
+       * where else to find them — the links are a footnote to the identity rather than
+       * part of it. Full width at the page gutter either way, so nothing about the row
+       * itself changes; only what it follows.
+       *
+       * It keeps its own slot when there is no bio rather than moving up into the
+       * identity block: `SocialLinkRow` renders nothing at all when there are no links,
+       * so a profile with neither has no gap to show, and one with links but no bio gets
+       * them exactly where the bio would have been.
+       */}
+      <SocialLinkRow links={socialLinks} style={styles.social} />
 
       {statsFallback ? (
         statsFallback
