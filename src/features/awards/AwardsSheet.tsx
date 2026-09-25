@@ -204,16 +204,4 @@ const styles = StyleSheet.create({
     gap: theme.space[3],
     paddingVertical: theme.space[2],
   },
-  /**
-   * Sticky, and now visibly its own band: the hairline is what tells the reader the
-   * list above it is scrolled rather than ended. The sheet itself owns the space below
-   * this — see `Sheet`, which guarantees a gutter under every footer whatever the
-   * device reports as its bottom inset.
-   */
-  foot: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.border.hairline,
-  },
 });

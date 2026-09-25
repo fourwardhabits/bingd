@@ -7,6 +7,7 @@ const mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => mockInsets,
+  initialWindowMetrics: undefined,
 }));
 
 beforeEach(() => {
@@ -33,35 +34,56 @@ const bottomPaddingOf = async () => {
 /**
  * The foot of every sheet in the app.
  *
- * This is one primitive and eleven consumers, and the founder found the same defect on
- * two of them — Collection Filters and bingd. Awards, which are the two whose last
- * element is a button rather than a list. A bottom safe area alone pads by the inset and
- * by nothing else, so on any display reporting no bottom inset the buttons finish flush
- * against the edge of the sheet.
+ * ---------------------------------------------------------------------------
+ * **A sum, not a `Math.max`** (founder, physical-device QA, 2026-09-25).
+ *
+ * This was `Math.max(insets.bottom, theme.space[4])` — the device's inset and the app's
+ * own spacing treated as alternatives. On a phone reporting a 48pt navigation bar the
+ * larger value wins, so the sheet's last row got 48pt of *system* clearance and **zero**
+ * of bingd's spacing: the Recommend / Share off bingd pair finished exactly on the edge
+ * of the safe area, hard against the navigation bar. That is what the founder
+ * photographed, and every sheet in the app had it.
+ *
+ * The inset says how much room the hardware takes. The gutter says how much room the
+ * design wants. They answer different questions, so they add.
+ *
+ * This is also the only place a sheet's bottom clearance is decided — `SheetDone` used to
+ * add its own on top of this one, and the doubling is what made bingd Awards look like it
+ * was holding a region open for one word.
  */
 describe('the bottom edge', () => {
-  it('clears an iPhone home indicator', async () => {
-    expect(await bottomPaddingOf()).toBe(34);
+  it('clears an iPhone home indicator and still keeps the gutter', async () => {
+    expect(await bottomPaddingOf()).toBe(34 + 16);
   });
 
   it('keeps a gutter where the system reports no inset at all', async () => {
-    // Android with three-button navigation, an older phone, a simulator. This is the
-    // case the founder photographed: real device, real zero, buttons on the edge.
+    // An older phone, a simulator, a display with nothing at the bottom.
     mockInsets.bottom = 0;
     expect(await bottomPaddingOf()).toBe(16);
   });
 
-  it('does not add the gutter on top of a large inset', async () => {
-    // `Math.max`, not a sum. The indicator's inset is already breathing room, and
-    // adding a gutter to it would lift the footer off a modern iPhone for no reason.
+  it('clears Android three-button navigation with the gutter on top', async () => {
+    // The regression itself. 48dp is the system bar's own height, which is what a device
+    // reports under edge-to-edge; `Math.max` returned exactly that and left the buttons
+    // touching it.
     mockInsets.bottom = 48;
-    expect(await bottomPaddingOf()).toBe(48);
+    expect(await bottomPaddingOf()).toBe(48 + 16);
   });
 
-  it('takes the gutter when an Android inset is smaller than one', async () => {
-    // Gesture navigation reports a real but small inset. Neither value is wrong; the
-    // larger one is the one the design asks for.
+  it('clears a gesture-navigation inset, which is real but small', async () => {
+    // The case the old rule got closest to right and still got wrong: 12pt of inset is
+    // room for the gesture bar and none for the design.
     mockInsets.bottom = 12;
-    expect(await bottomPaddingOf()).toBe(16);
+    expect(await bottomPaddingOf()).toBe(12 + 16);
+  });
+
+  it('never returns less than the inset the device reported', async () => {
+    // The property behind all four: whatever the hardware asks for, the sheet gives it
+    // that much and more. A single assertion that cannot be satisfied by a `Math.max`.
+    for (const inset of [0, 12, 34, 48, 64]) {
+      mockInsets.bottom = inset;
+      expect(await bottomPaddingOf()).toBeGreaterThan(inset === 0 ? -1 : inset);
+    }
   });
 });
+

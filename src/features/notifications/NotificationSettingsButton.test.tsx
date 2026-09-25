@@ -122,11 +122,60 @@ describe('the notifications gear', () => {
     const filled = styles.filter((style) => typeof style.backgroundColor === 'string');
     expect(filled).toHaveLength(1);
 
-    // Strictly smaller than the 12pt gear, so nothing of it shows around the teeth.
-    const plug = filled[0] as { width?: number; height?: number };
-    expect(plug.width).toBeLessThan(12);
-    expect(plug.height).toBeLessThan(12);
-    expect(plug.width).toBeGreaterThan(0);
+    /**
+     * **Both bounds, measured from Ionicons.ttf rather than chosen** (founder,
+     * device QA, 2026-09-25: "a little of the bell is still visible through the
+     * gear's centre").
+     *
+     * `settings-sharp` is two contours on a 512-unit em: the gear at 450x460 units
+     * and its hole at 165x164 units, centred on it. At `fontSize: 12` the hole is
+     * **3.87pt** across and the gear is **10.55pt**.
+     *
+     * The first plug was `12 / 3` — a 4pt circle over a 3.87pt hole, 0.07pt of
+     * margin, which is below one pixel at any density and is exactly why the hole's
+     * antialiased edge still showed the bell. So the lower bound is the hole with
+     * room to spare, and the upper bound is the gear, and the fix lives between them
+     * rather than at a number somebody liked the look of.
+     */
+    const HOLE_PT = (165 / 512) * 12;
+    const GEAR_PT = (450 / 512) * 12;
+
+    const plug = filled[0] as { width?: number; height?: number; borderRadius?: number };
+    expect(plug.width).toBeGreaterThan(HOLE_PT + 0.5);
+    expect(plug.width).toBeLessThan(GEAR_PT);
+    expect(plug.height).toBe(plug.width);
+    // Round, because the hole is: a square would leave its corners on the gear's own
+    // body, which is filled Maroon and would show the notches as Paper.
+    expect(plug.borderRadius).toBe((plug.width as number) / 2);
+  });
+
+  it('centres the plug on the gear, because the hole is centred on the glyph', async () => {
+    // The hole's centre sits within a unit of the glyph's (0.5 and 1.0 of 512), so any
+    // offset here would be correcting something that is not there.
+    const view = await render(<NotificationSettingsButton />);
+
+    type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
+    const flatten = (style: unknown): Record<string, unknown> => {
+      if (Array.isArray(style)) return Object.assign({}, ...style.map(flatten));
+      return (style ?? {}) as Record<string, unknown>;
+    };
+    const styles: Record<string, unknown>[] = [];
+    const walk = (node: Node) => {
+      if (!node || typeof node === 'string') return;
+      styles.push(flatten(node.props?.style));
+      for (const child of node.children ?? []) walk(child as Node);
+    };
+    walk(view.toJSON() as Node);
+
+    const plug = styles.find((style) => typeof style.backgroundColor === 'string') as {
+      right: number;
+      bottom: number;
+      width: number;
+    };
+    // The gear glyph is the absolutely positioned 12pt box at right/bottom -3/-2.
+    const gear = { right: -3, bottom: -2, size: 12 };
+    expect(plug.right + plug.width / 2).toBeCloseTo(gear.right + gear.size / 2, 5);
+    expect(plug.bottom + plug.width / 2).toBeCloseTo(gear.bottom + gear.size / 2, 5);
   });
 
   it('separates the gear from the bell by hue as well as by shape', async () => {

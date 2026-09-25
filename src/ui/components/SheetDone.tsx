@@ -2,7 +2,6 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
 import { Text } from './Text';
-import { useStableBottomInset } from './use-stable-bottom-inset';
 
 /**
  * **The way out of a utility sheet** (founder, device QA, 2026-09-25).
@@ -21,22 +20,23 @@ import { useStableBottomInset } from './use-stable-bottom-inset';
  * a control that creates something, and this ends something.
  *
  * ---------------------------------------------------------------------------
- * THE PART THAT IS NOT DECORATION
+ * WHERE IT SITS, AND WHY IT ADDS NO INSET OF ITS OWN
  *
- * **It sits above the Android navigation bar**, which is the bug it was built for: two of
- * these sheets put their Done within a thumb's width of the system Back control, and one
- * had no Done at all. The padding is the stable inset plus the app's ordinary spacing —
- * *plus*, not *instead of*, because an inset alone leaves the words touching the system
- * bar on a gesture-navigation device where the inset is small.
+ * Its first version paid the device's bottom inset here, on top of the inset `Sheet`
+ * already pays on the sheet body — so on a phone reporting a 48pt navigation bar the band
+ * under the word measured about 108pt, which is what the founder saw in bingd Awards as
+ * an empty region held open for one word. **`Sheet` owns a sheet's bottom clearance and
+ * this owns none**, which is also why there is exactly one place to change it.
  *
- * `useStableBottomInset` rather than the live one, for the reason `Screen` uses it: the
- * live inset moves when a keyboard opens, and a sheet that resizes under a reader is the
- * defect that fix exists to prevent. On iOS the inset already covers the home indicator,
- * so the extra spacing is the only difference and there is no wasted band.
+ * Right-aligned rather than centred (founder, 2026-09-25). A centred word reads as the
+ * screen's subject; against the right edge it reads as the way out, which is what it is
+ * and where every other dismissal in the app already lives.
  *
- * The row is a full-width tap target rather than a word with `hitSlop`: Android clips
- * touches outside a parent's box, so slop on a text node is a target that measures
- * generously on iOS and taps at the glyph on Android.
+ * The target is a box rather than a word with `hitSlop`: Android clips touches outside a
+ * parent's box, so slop on a text node measures generously on iOS and taps at the glyph
+ * on Android. It is `minTapTarget` square with the gutter's padding, not a full-width
+ * row — a right-aligned control whose target spans the sheet would swallow taps meant for
+ * the content beside it.
  */
 export function SheetDone({
   onPress,
@@ -46,10 +46,8 @@ export function SheetDone({
   /** Overridable for a sheet whose way out is worded differently. */
   label?: string;
 }) {
-  const bottomInset = useStableBottomInset();
-
   return (
-    <View style={[styles.foot, { paddingBottom: bottomInset + theme.space[3] }]}>
+    <View style={styles.foot} testID="sheet-done">
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
@@ -65,14 +63,20 @@ export function SheetDone({
 }
 
 const styles = StyleSheet.create({
+  /**
+   * It follows the content rather than being held apart from it: no `marginTop: 'auto'`,
+   * no spacer, and no bottom padding — the sheet's own gutter is already below this. A
+   * short sheet ends where its content ends, with the word under it.
+   */
   foot: {
-    paddingTop: theme.space[3],
+    paddingTop: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
   press: {
     minHeight: theme.layout.minTapTarget,
-    alignSelf: 'stretch',
+    minWidth: theme.layout.minTapTarget,
+    paddingHorizontal: theme.space[2],
     alignItems: 'center',
     justifyContent: 'center',
   },

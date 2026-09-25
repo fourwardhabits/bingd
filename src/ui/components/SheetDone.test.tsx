@@ -19,14 +19,30 @@ import { SheetDone } from './SheetDone';
  * screen the loudest thing on it.
  */
 
-it('clears the system navigation, with ordinary spacing on top of the inset', async () => {
+it('adds no bottom inset of its own, because the sheet already paid it', async () => {
+  /**
+   * The regression this replaces (founder, device QA, 2026-09-25): this footer used to
+   * add `inset + space[3]` on top of the inset `Sheet` applies to the sheet body, so on
+   * a phone reporting a 48pt navigation bar the band under one word measured about
+   * 108pt. `Sheet` owns a sheet's bottom clearance; this owns none.
+   */
   const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
 
-  const foot = StyleSheet.flatten(view.getByLabelText('Done').parent?.props.style);
-  // The harness renders a 34pt bottom inset (its `METRICS`), so this is inset + space[3]
-  // rather than either alone. An inset by itself leaves the words against the bar on a
-  // gesture-navigation device, where it is small.
-  expect(foot.paddingBottom).toBe(34 + theme.space[3]);
+  const foot = StyleSheet.flatten(view.getByTestId('sheet-done').props.style);
+  expect(foot.paddingBottom).toBeUndefined();
+  // And it follows the content rather than being held apart from it: no spacer, no
+  // `marginTop: 'auto'`, no reserved region.
+  expect(foot.paddingTop).toBe(theme.space[2]);
+  expect(foot.flex).toBeUndefined();
+  expect(foot.marginTop).toBeUndefined();
+});
+
+it('sits against the right edge, where a way out belongs', async () => {
+  const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
+
+  const foot = StyleSheet.flatten(view.getByTestId('sheet-done').props.style);
+  expect(foot.alignItems).toBe('flex-end');
+  expect(foot.paddingHorizontal).toBe(theme.layout.gutter);
 });
 
 it('is words rather than a filled button', async () => {
@@ -46,14 +62,17 @@ it('is words rather than a filled button', async () => {
   expect(styles.some((s) => s.backgroundColor === theme.semantic.action)).toBe(false);
 });
 
-it('is a full-width target rather than a word with slop around it', async () => {
+it('is a real target rather than a word with slop around it', async () => {
   // Android clips touches outside a parent's box, so `hitSlop` on a text node is a
   // target that measures generously on iOS and taps at the glyph on Android.
   const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
 
   const press = StyleSheet.flatten(view.getByLabelText('Done').props.style);
   expect(press.minHeight).toBe(theme.layout.minTapTarget);
-  expect(press.alignSelf).toBe('stretch');
+  expect(press.minWidth).toBe(theme.layout.minTapTarget);
+  // Not stretched: a right-aligned control whose target spans the sheet would swallow
+  // taps meant for the content beside it.
+  expect(press.alignSelf).toBeUndefined();
 });
 
 it('dismisses', async () => {
