@@ -78,6 +78,12 @@ const KEYS = {
   // waiting behind the other chip.
   reviewsTop: ['title-reviews', TITLE, 'top'],
   reviewsRecent: ['title-reviews', TITLE, 'recent'],
+  // The Reviews **tab label's** number, which is its own read under its own root — and
+  // not a prefix of the two above, which is exactly why it went stale (founder,
+  // 2026-09-25).
+  reviewCount: ['title-review-count', TITLE],
+  // The same number for another film, which an edit here cannot touch.
+  otherTitleReviewCount: ['title-review-count', 'film-2'],
   // The author's own profile Reviews shelf, which reads public_notes under its own key.
   profileNotes: ['profile-notes', USER],
   // One activity opened from a notification, which hydrates its note the same way.
@@ -379,5 +385,44 @@ describe('every current-score consumer shares the ranking invalidation', () => {
         refreshed: true,
       });
     }
+  });
+});
+
+/**
+ * **The Reviews tab's number and its rows are one question** (founder, physical QA,
+ * 2026-09-25).
+ *
+ * A public review turned private left the tab reading `Reviews (1)` with nothing behind
+ * it, through a refresh. Not a server fault — `title_review_count` and
+ * `title_reviews_v2` share a predicate by construction (20260911000100) — and not a write
+ * that failed. The count's key root is `title-review-count` and the list's is
+ * `title-reviews`, so invalidating the list matched the count not at all, and the 60s
+ * global `staleTime` kept the old digit for the whole minute.
+ *
+ * These assert the pairing rather than the number, because the number is the server's to
+ * decide and the pairing is the only part a client can get wrong.
+ */
+describe('the Reviews tab number', () => {
+  const touched = () =>
+    invalidatedBy(all, (client) => invalidateAfterCollectionChange(client, USER, TITLE));
+
+  it('is refreshed whenever the review list is', async () => {
+    const set = touched();
+    // Both, or neither — a count that survives its own list is the bug.
+    expect(has(set, KEYS.reviewsTop)).toBe(true);
+    expect(has(set, KEYS.reviewCount)).toBe(true);
+  });
+
+  it('is left alone for every other title', async () => {
+    expect(has(touched(), KEYS.otherTitleReviewCount)).toBe(false);
+  });
+
+  it('is refreshed after a ranking too, not only after a note edit', async () => {
+    // Both note writers and the ranking come through this one function; a ranking can
+    // change whose review is visible to whom, so the number moves with it.
+    const set = invalidatedBy(all, (client) =>
+      invalidateAfterCollectionChange(client, USER, TITLE, { category: 'movies' }),
+    );
+    expect(has(set, KEYS.reviewCount)).toBe(true);
   });
 });

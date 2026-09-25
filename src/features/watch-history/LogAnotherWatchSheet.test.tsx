@@ -55,9 +55,26 @@ jest.mock('@/features/collection/use-log-state', () => ({
   useLogState: (...args: unknown[]) => mockLogState(...(args as [])),
 }));
 
+/**
+ * The remembered share default — the same `note-visibility-pref` the log sheet reads
+ * (founder, 2026-09-25). `null` is a reader who has never chosen, whose first-ever note
+ * opens shared.
+ */
+let mockRemembered: 'public' | 'private' | null = null;
+const mockRemember = jest.fn();
+jest.mock('@/features/collection/note-visibility-pref', () => ({
+  readNoteVisibilityDefault: () => Promise.resolve(mockRemembered),
+  rememberNoteVisibility: (...args: unknown[]) => {
+    mockRemember(...args);
+    return Promise.resolve();
+  },
+}));
+
 beforeEach(() => {
   mockRewatch.mockClear();
   mockSaveNote.mockClear();
+  mockRemember.mockClear();
+  mockRemembered = null;
 });
 
 const draw = () =>
@@ -81,13 +98,38 @@ it('offers the same two claims as the log sheet', async () => {
   expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
 });
 
-it('opens a note nobody has written private, and says so', async () => {
+it('opens a first-ever note shared, the same as the log sheet', async () => {
   const view = await draw();
 
   await fireEvent.press(view.getByLabelText(/^Note/));
 
-  expect(view.getByText('Only you can read this.')).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      view.getByLabelText('Share this note as a public review').props.accessibilityState
+        .checked,
+    ).toBe(true),
+  );
+  // Opening a composer is not an act: nothing is written until the reader writes.
   expect(mockSaveNote).not.toHaveBeenCalled();
+});
+
+it('follows the reader\u2019s remembered choice for a new note', async () => {
+  mockRemembered = 'private';
+  const view = await draw();
+
+  await fireEvent.press(view.getByLabelText(/^Note/));
+
+  await waitFor(() => expect(view.getByText('Only you can read this.')).toBeTruthy());
+});
+
+it('remembers a new note\u2019s visibility once it actually saves', async () => {
+  const view = await draw();
+
+  await fireEvent.press(view.getByLabelText(/^Note/));
+  await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'Held up.');
+  await fireEvent.press(view.getByLabelText('I liked it'));
+
+  await waitFor(() => expect(mockRemember).toHaveBeenCalledWith('user-1', 'public'));
 });
 
 it('writes the note to the title, not to the watch', async () => {
@@ -102,7 +144,8 @@ it('writes the note to the title, not to the watch', async () => {
     expect.objectContaining({
       mediaItemId: 'film-1',
       note: 'Better second time.',
-      noteVisibility: 'private',
+      // A first-ever note, so the product default — the same one the log sheet opens on.
+      noteVisibility: 'public',
     }),
   );
 

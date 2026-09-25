@@ -1,9 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useCurrentProfile } from '@/features/auth';
 
 import { invalidateAfterCollectionChange } from './invalidate';
+import { readNoteVisibilityDefault, rememberNoteVisibility } from './note-visibility-pref';
 import { useLogState } from './use-log-state';
 import { newOperationId, saveNote, type NoteVisibility } from './writes';
 
@@ -37,28 +38,44 @@ export function useTitleNote(mediaItemId: string | null) {
   const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(null);
   const [spoilersEdit, setSpoilersEdit] = useState<boolean | null>(null);
 
+  /**
+   * What a note nobody has written yet opens on for this reader.
+   *
+   * The same `note-visibility-pref` the log sheet consults, deliberately: the founder's
+   * rule (2026-09-25) is one rule for all three surfaces, so a reader who turned sharing
+   * off in the log sheet finds a new note here off too. Null until the local store
+   * answers; the fallback while it is null is the product default, because a composer
+   * that opened private and flipped a beat later would be worse than either.
+   */
+  const [remembered, setRemembered] = useState<NoteVisibility | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readNoteVisibilityDefault(profile.id).then((value) => {
+      if (live) setRemembered(value);
+    });
+    return () => {
+      live = false;
+    };
+  }, [profile.id]);
+
   const stored = state.data;
   const note = noteEdit ?? stored?.note ?? '';
 
   /**
-   * What the reader just chose, then what the note was *saved* with, then **private**.
+   * Three sources, in priority order: what the reader just chose, then what the note was
+   * *saved* with, then the remembered default for writing that does not exist yet.
    *
-   * The middle term is the promise the founder named explicitly: a note that already exists
-   * opens on its stored value and nothing else, so nothing can republish writing its author
-   * kept private.
+   * The middle term is the promise, and it is the one that has survived every reversal of
+   * the other two: a note that already exists opens on its stored value and nothing else,
+   * so no habit and no default can republish writing its author kept private.
    *
-   * The last term is the one place these surfaces differ from `LogSheet`, deliberately and
-   * pending the founder's confirmation. The sheet's rule (2026-09-06) opens a reader's
-   * *first-ever* note with Share as a review already on, and then remembers what they chose
-   * last. Today's instruction is flatter — "private note remains the default", "Share as a
-   * review must remain an EXPLICIT user action" — and these are the two surfaces where the
-   * reader arrived to record a **watch**, not to write a review. Defaulting private here
-   * cannot publish anything by accident; defaulting public can, and that asymmetry is what
-   * decides it until the founder says otherwise. The remembered preference is deliberately
-   * not read, and deliberately not written: a rewatch must not move the log sheet's default.
+   * There is no `noteIntent` here and there should not be. "Write a review" is a door on
+   * the title page into the log sheet; a reader who opened *Another watch* or went to edit
+   * a watch did not press it, so this surface has nothing explicit to honour and falls to
+   * the habit.
    */
   const visibility: NoteVisibility =
-    visibilityEdit ?? (stored?.note ? stored.noteVisibility : 'private');
+    visibilityEdit ?? (stored?.note ? stored.noteVisibility : (remembered ?? 'public'));
   const spoilers = spoilersEdit ?? stored?.noteSpoilers ?? false;
 
   /** The newest version this surface has seen, so a second save does not fight the first. */
@@ -88,6 +105,16 @@ export function useTitleNote(mediaItemId: string | null) {
     if (result.outcome === 'failed') return;
     if (result.noteVersion) version.current = result.noteVersion;
     dirty.current = false;
+    /**
+     * **The habit, and only for a new composition.**
+     *
+     * A decision about a note that already exists is a decision about *that* note — the
+     * log sheet draws the same line for the same reason: remembering it here is how a
+     * reader who unshared one old private note would find every future note opening
+     * private. Only on an acknowledged success, because a write that did not land says
+     * nothing about what anybody intended.
+     */
+    if (!stored?.note) void rememberNoteVisibility(profile.id, nextVisibility);
     invalidateAfterCollectionChange(queryClient, profile.id, mediaItemId);
   };
 

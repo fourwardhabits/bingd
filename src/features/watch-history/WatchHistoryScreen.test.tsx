@@ -71,6 +71,17 @@ jest.mock('@/features/collection/use-log-state', () => ({
   useLogState: (...args: unknown[]) => mockLogState(...(args as [])),
 }));
 
+// A reader whose habit is "shared", so the stored private value below is being asserted
+// against a default that would otherwise publish it.
+const mockRemember = jest.fn();
+jest.mock('@/features/collection/note-visibility-pref', () => ({
+  readNoteVisibilityDefault: () => Promise.resolve('public'),
+  rememberNoteVisibility: (...args: unknown[]) => {
+    mockRemember(...args);
+    return Promise.resolve();
+  },
+}));
+
 const event = (id: string, watchedOn: string, recordedAt: string) => ({
   id,
   watchedOn,
@@ -237,7 +248,7 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     expect(view.getByLabelText('Share this note as a public review')).toBeTruthy();
   });
 
-  it('opens a stored private note private, and never republishes it by default', async () => {
+  it('never lets the remembered habit republish a stored private note', async () => {
     mockHistory.mockReturnValue({
       isPending: false,
       data: {
@@ -256,6 +267,8 @@ describe('Watch History — a historical feed of this title (founder QA, 2026-09
     expect(view.getByText('Only you can read this.')).toBeTruthy();
     // Opening the composer is not an act: nothing is written until the reader writes.
     expect(mockSaveNote).not.toHaveBeenCalled();
+    // And editing an existing note is not a change of habit either.
+    expect(mockRemember).not.toHaveBeenCalled();
   });
 
   it('publishes only when the reader presses the chip', async () => {

@@ -153,6 +153,30 @@ export function invalidateAfterCollectionChange(
   invalidate(['title-reviews', mediaItemId]);
 
   /**
+   * **The tab's own number, which is a separate read under a separate key.**
+   *
+   * Founder physical finding, 2026-09-25: a public review turned private vanished from
+   * the Reviews tab, as it should, and the label kept saying `Reviews (1)` through a
+   * refresh.
+   *
+   * The server was never wrong. `title_review_count` and `title_reviews_v2` ask the
+   * identical question — `note is not null and note_visibility = 'public'` under
+   * `can_view_profile` — and the migration that added the count (20260911000100) says so
+   * in its comment. What was wrong is one character of key: the count lives under
+   * `['title-review-count', mediaItemId]` and the line above invalidates
+   * `['title-reviews', …]`, which is a **different root** and therefore not a prefix of
+   * it. React Query matched nothing, and the 60s global `staleTime` did the rest — the
+   * sheet opens over the title screen so nothing unmounts, and a refresh inside the
+   * minute refetched a number it still considered fresh.
+   *
+   * This is the third time this module's header has been proved right: a surface added
+   * later was added to the hook that reads it and to no writer's list. The list and the
+   * number are one question, so they are invalidated together, here, where both note
+   * writers already come.
+   */
+  invalidate(['title-review-count', mediaItemId]);
+
+  /**
    * The author's own profile Reviews shelf, which reads `public_notes` under a key of
    * its own and had the identical defect for the identical reason.
    */
