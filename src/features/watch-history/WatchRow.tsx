@@ -135,7 +135,9 @@ export function WatchRow({
               style={styles.edit}
               testID={`watch-edit-${event.id}`}
             >
-              <Ionicons name="pencil" size={11} color={theme.semantic.action} />
+              {/* The word alone (founder, device QA, 2026-09-25). An 11pt pencil beside
+                  a four-letter word is a glyph doing nothing the word was not already
+                  doing, at a size where it reads as lint. */}
               <Text variant="caption" tone="action">
                 Edit
               </Text>

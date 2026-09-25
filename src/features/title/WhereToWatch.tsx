@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { providerLogoUri } from '@/lib/images';
-import { Button, SectionHeader, Sheet, Text } from '@/ui/components';
+import { SectionHeader, Sheet, SheetDone, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { useWatchProviders, type WatchOffer, type WatchProvider } from './use-watch-providers';
@@ -273,11 +273,11 @@ function WhereToWatchSheet({
        * free, the validation is the interesting part, and re-deriving both would be the
        * cost of changing this decision back. Nothing draws it.
        */}
-      <View style={styles.foot}>
-        {/* The labelled way out every sheet carries — `Sheet` hides its scrim from the
-            accessibility tree on the understanding that this exists. */}
-        <Button label="Done" onPress={onClose} />
-      </View>
+      {/* The labelled way out every sheet carries — `Sheet` hides its scrim from the
+          accessibility tree on the understanding that this exists. `SheetDone` since
+          2026-09-25: low-emphasis words rather than a filled Maroon button, and padded
+          clear of the Android navigation bar it was sitting on. */}
+      <SheetDone onPress={onClose} />
     </Sheet>
   );
 }

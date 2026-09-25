@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { diagnose } from '@/lib/diagnose';
-import { Button, EmptyState, Sheet, SkeletonRow, Text } from '@/ui/components';
+import { EmptyState, Sheet, SheetDone, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { AwardRow } from './AwardRow';
@@ -132,9 +132,9 @@ export function AwardsSheet({
         ))}
       </ScrollView>
 
-      <View style={styles.foot}>
-        <Button label="Done" onPress={onClose} />
-      </View>
+      {/* Low-emphasis and clear of the system navigation (2026-09-25): this sheet is a
+          statement, and the only thing to do with it is stop reading it. */}
+      <SheetDone onPress={onClose} />
 
       {/* The titles behind a number, from the same read that produced it — so the
             sheet cannot be open against a count it does not match.

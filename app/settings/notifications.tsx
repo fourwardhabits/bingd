@@ -108,11 +108,37 @@ export function NotificationSettingsButton() {
           size={theme.layout.icon.md}
           color={theme.text.secondary}
         />
-        {/* The filled cut, not the outline: at this size an outlined gear is a smudge. */}
+        {/**
+         * **The plug, which is what #111 was actually reporting.**
+         *
+         * `settings-sharp` is a filled gear with a *hole punched through its middle* —
+         * the glyph is a ring, not a disc. Laid over the bell, the bell's own strokes
+         * showed through that hole, and what a reader saw was not two shapes but one
+         * malformed one. That is the "transparent, punched through" defect, and neither
+         * the disc removal (#62) nor removing the composite (#111) named it.
+         *
+         * A small opaque square of the surface colour sits *behind* the gear and is
+         * sized to the hole rather than to the glyph, so it fills the middle and leaves
+         * no visible ring around the teeth. It is not the disc #62 removed: that one was
+         * larger than the gear and read as a badge bubble; this one is smaller than the
+         * gear and is invisible except through the hole it plugs.
+         */}
+        <View style={styles.gearPlug} />
+        {/**
+         * The filled cut, not the outline: at this size an outlined gear is a smudge.
+         *
+         * **Maroon since 2026-09-25.** Against a grey bell the two glyphs now separate by
+         * hue as well as by shape, which is the separation the composite needed and the
+         * reason it can be small enough not to crowd the bell. It is the app's action
+         * colour on a control that is an action, and at 12pt it reads as an annotation
+         * rather than as emphasis — the founder's "if maroon over-emphasises it, keep
+         * both grey" judgement call, made in favour of maroon because the grey-on-grey
+         * merge is the defect being fixed.
+         */}
         <Ionicons
           name="settings-sharp"
           size={GEAR_BADGE_SIZE}
-          color={theme.text.secondary}
+          color={theme.semantic.action}
           style={styles.gearGlyph}
         />
       </View>
@@ -936,13 +962,30 @@ const styles = StyleSheet.create({
   },
   /**
    * The gear, riding the bell's lower-right shoulder directly — no disc behind it. The
-   * founder's device read the old Paper bubble as a badge background; at this weight the
-   * filled gear separates from the bell's strokes on its own.
+   * founder's device read the old Paper bubble as a badge background; the plug below is
+   * not that, and is deliberately smaller than the gear rather than larger.
    */
   gearGlyph: {
     position: 'absolute',
     right: -GEAR_OVERHANG.x,
     bottom: -GEAR_OVERHANG.y,
+  },
+  /**
+   * Behind the gear's hole and nothing more.
+   *
+   * Centred on the same point as the glyph and sized to roughly the hole's diameter —
+   * `settings-sharp`'s inner circle is about a third of its box — so it cannot show
+   * past the teeth at any density. `surface.base` because that is what a navigation bar
+   * paints; the gear sits on the header's own ground, not on the bell.
+   */
+  gearPlug: {
+    position: 'absolute',
+    right: -GEAR_OVERHANG.x + GEAR_BADGE_SIZE / 3,
+    bottom: -GEAR_OVERHANG.y + GEAR_BADGE_SIZE / 3,
+    width: GEAR_BADGE_SIZE / 3,
+    height: GEAR_BADGE_SIZE / 3,
+    borderRadius: GEAR_BADGE_SIZE / 6,
+    backgroundColor: theme.surface.base,
   },
   unread: { backgroundColor: theme.surface.raised },
 

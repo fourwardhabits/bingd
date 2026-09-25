@@ -87,9 +87,23 @@ describe('the notifications gear', () => {
     expect(glyphSizes).toEqual([24, 12]);
   });
 
-  it('rides the bell bare, with no disc behind it', async () => {
-    // #62's correction, and the one thing about this control that has never been
-    // reversed: a filled circle behind the gear reads as a count badge.
+  it('plugs the gear’s hole without reintroducing a badge disc', async () => {
+    /**
+     * Two rules at once, and they pull in opposite directions.
+     *
+     * **#62:** a filled circle *behind the whole gear* reads as a count badge on a
+     * control that carries no count, so it came off.
+     *
+     * **#111, properly diagnosed (2026-09-25):** `settings-sharp` is a ring, not a disc
+     * — it has a hole punched through its middle, and the bell's strokes showed through
+     * it. That is the "transparent, punched through" defect, and it is why the composite
+     * was removed rather than resized.
+     *
+     * The plug satisfies both by being **smaller than the gear**: big enough to fill the
+     * hole, too small to be seen past the teeth. The assertion is that relationship
+     * rather than the presence or absence of a background, because "no background at
+     * all" is what left the hole transparent.
+     */
     const view = await render(<NotificationSettingsButton />);
 
     type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
@@ -105,8 +119,35 @@ describe('the notifications gear', () => {
     };
     walk(view.toJSON() as Node);
 
-    expect(styles.some((style) => typeof style.backgroundColor === 'string')).toBe(false);
-    expect(styles.some((style) => typeof style.borderRadius === 'number')).toBe(false);
+    const filled = styles.filter((style) => typeof style.backgroundColor === 'string');
+    expect(filled).toHaveLength(1);
+
+    // Strictly smaller than the 12pt gear, so nothing of it shows around the teeth.
+    const plug = filled[0] as { width?: number; height?: number };
+    expect(plug.width).toBeLessThan(12);
+    expect(plug.height).toBeLessThan(12);
+    expect(plug.width).toBeGreaterThan(0);
+  });
+
+  it('separates the gear from the bell by hue as well as by shape', async () => {
+    // Maroon on a grey bell (founder, 2026-09-25). Grey-on-grey at 12pt is the merge
+    // that #111 reported, and colour is what lets the annotation stay small.
+    const view = await render(<NotificationSettingsButton />);
+
+    type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
+    const colours: unknown[] = [];
+    const walk = (node: Node) => {
+      if (!node || typeof node === 'string') return;
+      // An icon renders as text: its colour lands in the style, beside the fontSize
+      // the sizing assertions above read.
+      const style = StyleSheet.flatten(node.props?.style) as { color?: unknown; fontSize?: number };
+      if (style?.color !== undefined && style?.fontSize !== undefined) colours.push(style.color);
+      for (const child of node.children ?? []) walk(child as Node);
+    };
+    walk(view.toJSON() as Node);
+
+    // Two glyphs, two different inks.
+    expect(new Set(colours).size).toBe(2);
   });
 
   it('pulls back exactly the box slack, so the glyph centres on the bar position', async () => {

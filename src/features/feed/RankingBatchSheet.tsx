@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import type { RankingCategory } from '@/features/collection/use-collection';
 import { RankedSummaryRow } from '@/features/ranking/RankedSummary';
 import { supabase } from '@/lib/supabase';
-import { Sheet, SkeletonRow, Text } from '@/ui/components';
+import { Sheet, SheetDone, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -85,6 +85,9 @@ export function RankingBatchSheet({
           </View>
         )}
       </ScrollView>
+      {/* It had none at all (founder QA, 2026-09-25): a long sitting fills the screen,
+          and swipe-to-dismiss alone is a weak way out of something that large. */}
+      <SheetDone onPress={onClose} />
     </Sheet>
   );
 }
