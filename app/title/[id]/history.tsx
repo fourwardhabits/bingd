@@ -269,6 +269,7 @@ export default function WatchHistoryScreen() {
               ) : null}
               <WatchRow
                 event={item}
+                mediaItemId={id}
                 label={labelOf(item)}
                 score={score}
                 note={details?.note}

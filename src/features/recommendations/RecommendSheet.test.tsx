@@ -1,7 +1,9 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { Share, useWindowDimensions } from 'react-native';
 
-import { renderWithProviders } from '@/test-utils/render';
+import { ANDROID_NAV_INSET, renderWithProviders } from '@/test-utils/render';
+import { StyleSheet } from 'react-native';
+import { theme } from '@/ui/tokens';
 
 import { RecommendSheet } from './RecommendSheet';
 import { filterRecipients, type Recipient } from './use-recommend';
@@ -179,15 +181,13 @@ describe('who the sheet offers', () => {
 
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await waitFor(() =>
-      expect(view.getByText('Nobody to recommend to yet')).toBeTruthy(),
-    );
+    await waitFor(() => expect(view.getByText('Follow people from the People tab in Feed to recommend on bingd.')).toBeTruthy());
   });
 
   it('says what makes somebody eligible when nobody is', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await waitFor(() => expect(view.getByText('Nobody to recommend to yet')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Follow people from the People tab in Feed to recommend on bingd.')).toBeTruthy());
     // The off-Bingd path is still offered, because it is the answer to an empty list.
     expect(view.getByText('Share off bingd')).toBeTruthy();
   });
@@ -899,5 +899,132 @@ describe('the note', () => {
 
     await waitFor(() => expect(view.getByText(/Could not send to Bo/)).toBeTruthy());
     expect(view.getByTestId('recommend-note').props.value).toBe('Watch it.');
+  });
+});
+
+/**
+ * **The action row and the Android navigation bar** (founder, physical-device QA,
+ * 2026-09-25): "Recommend / Share off bingd too close to / underneath the Android
+ * system-navigation area".
+ *
+ * These are substantive actions, so `SheetDone` is explicitly not the answer — that is the
+ * dismissal treatment for a utility sheet and this sheet is not one. Nor is a padding
+ * constant added here: this sheet bypasses no primitive, it *is* the last child of
+ * `Sheet`, and `Sheet` is the one thing that owns a sheet's bottom clearance.
+ *
+ * The defect was in that owner. It padded by `Math.max(inset, gutter)`, so on a phone
+ * reporting a 48pt bar the inset won outright and the buttons got no bingd spacing at all.
+ * The assertions here are on this sheet because this sheet is where it was seen, and they
+ * are about the room below the actions rather than about any style this file sets.
+ */
+describe('the action row clears the system navigation', () => {
+  beforeEach(() => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada')];
+    setViewport(412);
+  });
+
+  /** The room below the sheet's last child, which is the action row. */
+  const roomBelowActions = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    StyleSheet.flatten(view.getByTestId('sheet-body').props.style).paddingBottom as number;
+
+  it('leaves the bar its full height and bingd its own spacing, on 3-button navigation', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />, {
+      bottomInset: ANDROID_NAV_INSET,
+    });
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(roomBelowActions(view)).toBe(ANDROID_NAV_INSET + theme.space[4]);
+  });
+
+  it('clears a gesture-navigation inset too, which is small enough to look like none', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />, { bottomInset: 12 });
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    // The old rule returned the gutter here and the buttons sat on the gesture bar.
+    expect(roomBelowActions(view)).toBe(12 + theme.space[4]);
+  });
+
+  it('adds no extra band on a display that reports nothing at the bottom', async () => {
+    // "No excessive iOS whitespace": where there is no hardware to clear, the sheet ends
+    // on the ordinary gutter and not a pt more.
+    const view = await renderWithProviders(<RecommendSheet {...props} />, { bottomInset: 0 });
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(roomBelowActions(view)).toBe(theme.space[4]);
+  });
+
+  it('keeps both actions inside the sheet body that carries the clearance', async () => {
+    // The clearance is only clearance if the actions are above it. A future refactor that
+    // floated this row outside `Sheet` would pass every assertion above and still put the
+    // buttons on the navigation bar.
+    const view = await renderWithProviders(<RecommendSheet {...props} />, {
+      bottomInset: ANDROID_NAV_INSET,
+    });
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    const body = view.getByTestId('sheet-body');
+    const actions = view.getByTestId('recommend-actions');
+    let node = actions.parent;
+    let inside = false;
+    while (node) {
+      if (node === body) {
+        inside = true;
+        break;
+      }
+      node = node.parent;
+    }
+    expect(inside).toBe(true);
+    expect(view.getByText('Recommend')).toBeTruthy();
+    expect(view.getByText('Share off bingd')).toBeTruthy();
+  });
+});
+
+/**
+ * **An account following nobody** (founder, QA, 2026-09-25).
+ *
+ * The sheet showed its title, a page-sized `EmptyState` — illustration, heading, body —
+ * and then Share off bingd. In a sheet whose only other content is two buttons that reads
+ * as content that failed to arrive. One subdued sentence, and the sheet sizes around it.
+ */
+describe('nobody to recommend to', () => {
+  beforeEach(() => {
+    mockOutgoing = [];
+    setViewport(412);
+  });
+
+  it('explains it in one subdued line, where the reader should go', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByTestId('recommend-empty')).toBeTruthy());
+    expect(view.getByText('Follow people from the People tab in Feed to recommend on bingd.')).toBeTruthy();
+  });
+
+  it('draws no empty list region and no illustration', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByTestId('recommend-empty')).toBeTruthy());
+    // The picker and its search are the region that used to be blank. Neither is here,
+    // so the sheet has nothing to size around but the sentence and the actions.
+    expect(view.queryByPlaceholderText('Search your friends')).toBeNull();
+    // The old page-sized state's own words, which must not come back.
+    expect(view.queryByText('Nobody to recommend to yet')).toBeNull();
+  });
+
+  it('still offers the off-platform share, which is the answer to an empty list', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByTestId('recommend-empty')).toBeTruthy());
+    expect(view.getByText('Share off bingd')).toBeTruthy();
+    // And no Recommend button, because there is nobody it could send to.
+    expect(view.queryByText('Recommend')).toBeNull();
+  });
+
+  it('keeps the search and the list the moment somebody is eligible', async () => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada')];
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByPlaceholderText('Search your friends')).toBeTruthy();
+    expect(view.queryByTestId('recommend-empty')).toBeNull();
   });
 });

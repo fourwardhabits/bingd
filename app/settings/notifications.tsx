@@ -153,6 +153,24 @@ const GEAR_BADGE_SIZE = 12;
 const GEAR_OVERHANG = { x: 3, y: 2 };
 
 /**
+ * The plug behind the gear's hole, **measured from the font rather than guessed**
+ * (founder, device QA, 2026-09-25: "a little of the bell is still visible through the
+ * gear's centre").
+ *
+ * `settings-sharp` has two contours in Ionicons.ttf: the gear at 450x460 units of a
+ * 512-unit em, and the hole at 165x164 units centred on it (offset 0.5 and 1.0 units,
+ * which is nothing). At `fontSize: ${GEAR_BADGE_SIZE}` that hole is **3.87pt across**.
+ *
+ * The first plug was `GEAR_BADGE_SIZE / 3` — a 4pt circle over a 3.87pt hole, which is
+ * 0.07pt of margin. That is less than a pixel on any density, so the hole's antialiased
+ * edge was never covered and the bell read through it as a faint ring. This is the same
+ * fix, sized properly: 0.4 of the glyph is 4.8pt, which clears the hole by 0.47pt all
+ * round and still stops 2.6pt short of the gear's own outer edge, so it can never show
+ * past the glyph it hides behind.
+ */
+const GEAR_PLUG_SIZE = GEAR_BADGE_SIZE * 0.4;
+
+/**
  * The three shelves, in the small-caps maroon voice every section on this surface
  * already speaks — "Earlier" was here first, as the one heading under the requests.
  */
@@ -980,11 +998,13 @@ const styles = StyleSheet.create({
    */
   gearPlug: {
     position: 'absolute',
-    right: -GEAR_OVERHANG.x + GEAR_BADGE_SIZE / 3,
-    bottom: -GEAR_OVERHANG.y + GEAR_BADGE_SIZE / 3,
-    width: GEAR_BADGE_SIZE / 3,
-    height: GEAR_BADGE_SIZE / 3,
-    borderRadius: GEAR_BADGE_SIZE / 6,
+    // Centred on the gear, stated as such: the glyph's own hole is centred to within a
+    // unit, so anything else here would be correcting an offset that does not exist.
+    right: -GEAR_OVERHANG.x + (GEAR_BADGE_SIZE - GEAR_PLUG_SIZE) / 2,
+    bottom: -GEAR_OVERHANG.y + (GEAR_BADGE_SIZE - GEAR_PLUG_SIZE) / 2,
+    width: GEAR_PLUG_SIZE,
+    height: GEAR_PLUG_SIZE,
+    borderRadius: GEAR_PLUG_SIZE / 2,
     backgroundColor: theme.surface.base,
   },
   unread: { backgroundColor: theme.surface.raised },

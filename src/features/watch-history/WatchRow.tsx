@@ -8,6 +8,8 @@ import { taggableWith, type Person } from '@/features/collection/use-companions'
 import { theme } from '@/ui/tokens';
 import { Button, ScoreBadge, Text } from '@/ui/components';
 
+import { useTitleNote } from '@/features/collection/use-title-note';
+
 import { WatchDetailsRows } from './WatchDetailsRows';
 import { isFromDiary, type WatchEvent, type WatchRowLabel, type WatchScore } from './watch-history';
 
@@ -23,6 +25,8 @@ export type WatchEdit = {
 
 export type WatchRowProps = {
   event: WatchEvent;
+  /** The title this watch belongs to — the editor writes its one note. */
+  mediaItemId: string;
   label: WatchRowLabel;
   /** The opinion held at THIS watch (`scoresByWatch`) — never the current score. */
   score?: WatchScore | null;
@@ -58,6 +62,7 @@ export type WatchRowProps = {
  */
 export function WatchRow({
   event,
+  mediaItemId,
   label,
   score = null,
   note,
@@ -155,6 +160,7 @@ export function WatchRow({
       {editing ? (
         <WatchEditor
           event={event}
+          mediaItemId={mediaItemId}
           note={note ?? null}
           companions={companions}
           people={people}
@@ -175,6 +181,7 @@ export function WatchRow({
 
 function WatchEditor({
   event,
+  mediaItemId,
   note,
   companions,
   people,
@@ -186,6 +193,7 @@ function WatchEditor({
   onRemove,
 }: {
   event: WatchEvent;
+  mediaItemId: string;
   note: string | null;
   companions: Person[];
   people: Person[];
@@ -197,18 +205,22 @@ function WatchEditor({
   onRemove: () => void;
 }) {
   const [date, setDate] = useState(event.watchedOn);
-  const [draft, setDraft] = useState(note ?? '');
+  // The note here is the title's one note now, not this watch's private line.
+  const titleNote = useTitleNote(mediaItemId);
   const [selected, setSelected] = useState(() => companions.map((person) => person.id));
 
-  const save = () => {
+  const save = async () => {
+    // The note saves through `save_note`, on its own object, before the watch's own edit
+    // goes anywhere — so a failure to write one is never reported as the other.
+    await titleNote.flush();
+
     const edit: WatchEdit = {};
     if (date !== event.watchedOn) edit.watchedOn = date;
-    const nextNote = draft.trim() ? draft.trim() : null;
     const before = companions.map((person) => person.id).sort().join(',');
     const after = [...selected].sort().join(',');
-    if (nextNote !== (note ?? null) || before !== after) {
-      edit.details = { note: nextNote, companionIds: selected };
-    }
+    // `note` is passed through untouched: nothing writes `watch_events.note` any more,
+    // and an edit to companions must not quietly clear a line an older build saved.
+    if (before !== after) edit.details = { note: note ?? null, companionIds: selected };
     onSave(edit);
   };
 
@@ -225,13 +237,12 @@ function WatchEditor({
             current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
           )
         }
-        note={draft}
-        onNote={setDraft}
+        titleNote={titleNote}
       />
 
       <View style={styles.actions}>
         <Button label="Cancel" kind="secondary" size="sm" onPress={onCancel} />
-        <Button label="Save" size="sm" disabled={busy} onPress={save} />
+        <Button label="Save" size="sm" disabled={busy} onPress={() => void save()} />
       </View>
 
       {/**

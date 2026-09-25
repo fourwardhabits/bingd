@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { today } from '@/features/collection/dates';
 import { taggableWith, useTaggablePeople } from '@/features/collection/use-companions';
+import { useTitleNote } from '@/features/collection/use-title-note';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
 import {
@@ -80,7 +81,9 @@ export function LogAnotherWatchSheet({
   // which is exactly what `today_default` records.
   const [chosen, setChosen] = useState(false);
   const [companions, setCompanions] = useState<string[]>([]);
-  const [note, setNote] = useState('');
+  // The title's one note, with its two claims — the same object the log sheet writes
+  // (founder, 2026-09-25). Committing a bucket is this sheet's commit, so it flushes there.
+  const titleNote = useTitleNote(mediaItemId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,12 +96,12 @@ export function LogAnotherWatchSheet({
     if (saving) return;
     setSaving(true);
     setError(null);
+    await titleNote.flush();
     const result = await logRewatch({
       operationId: newOperationId(),
       mediaItemId,
       watchedOn: date,
       basis,
-      note: note.trim() ? note.trim() : null,
       companionIds: companions,
     });
     setSaving(false);
@@ -165,8 +168,7 @@ export function LogAnotherWatchSheet({
               current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
             )
           }
-          note={note}
-          onNote={setNote}
+          titleNote={titleNote}
         />
       </ScrollView>
     </Sheet>

@@ -16,7 +16,17 @@ const METRICS = {
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
 };
 
-const providers = () => {
+/**
+ * A phone with Android 3-button navigation, for the assertions that are about clearing it.
+ *
+ * 48dp is the system bar's own height, which is what a device reports through the bottom
+ * inset under edge-to-edge. The default `METRICS` above is an iPhone's home indicator, and
+ * a fix that clears 34 does not necessarily clear 48 — which is the difference the founder
+ * was looking at on a physical device.
+ */
+export const ANDROID_NAV_INSET = 48;
+
+const providers = (bottomInset?: number) => {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0, staleTime: 0 },
@@ -26,15 +36,26 @@ const providers = () => {
 
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <SafeAreaProvider initialMetrics={METRICS}>{children}</SafeAreaProvider>
+      <SafeAreaProvider
+        initialMetrics={
+          bottomInset === undefined
+            ? METRICS
+            : { ...METRICS, insets: { ...METRICS.insets, bottom: bottomInset } }
+        }
+      >
+        {children}
+      </SafeAreaProvider>
     </QueryClientProvider>
   );
 
   return { client, Wrapper };
 };
 
-export async function renderWithProviders(ui: ReactElement) {
-  const { client, Wrapper } = providers();
+export async function renderWithProviders(
+  ui: ReactElement,
+  options?: { bottomInset?: number },
+) {
+  const { client, Wrapper } = providers(options?.bottomInset);
 
   // Everything in this library is async as of v14: render, rerender and fireEvent all wrap
   // their work in act and have to be awaited, or assertions run against a tree that has not

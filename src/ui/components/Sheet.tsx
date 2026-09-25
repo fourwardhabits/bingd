@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
 import { Text } from './Text';
+import { useStableBottomInset } from './use-stable-bottom-inset';
 import { useKeyboardHeight } from './use-keyboard-height';
 
 export type SheetProps = {
@@ -117,7 +117,7 @@ export type SheetProps = {
  */
 export function Sheet({ visible, onClose, label, children, onDismissed, onShown }: SheetProps) {
   const keyboard = useKeyboardHeight();
-  const insets = useSafeAreaInsets();
+  const bottomInset = useStableBottomInset();
 
   /**
    * The foot of every sheet in the app, decided in one place.
@@ -134,7 +134,7 @@ export function Sheet({ visible, onClose, label, children, onDismissed, onShown 
    * for no reason. Whichever is larger, never less than a gutter — the same rule
    * `Screen` applies to the bottom of a page.
    */
-  const bottomPadding = Math.max(insets.bottom, theme.space[4]);
+  const bottomPadding = bottomInset + theme.space[4];
 
   /**
    * **A dismissal is never asked for before the presentation has finished.**
@@ -225,7 +225,11 @@ export function Sheet({ visible, onClose, label, children, onDismissed, onShown 
           accessibilityElementsHidden
           importantForAccessibility="no"
         />
-        <View style={[styles.sheet, { paddingBottom: bottomPadding }]} accessibilityLabel={label}>
+        <View
+          testID="sheet-body"
+          style={[styles.sheet, { paddingBottom: bottomPadding }]}
+          accessibilityLabel={label}
+        >
           <View
             style={styles.handle}
             accessibilityElementsHidden
