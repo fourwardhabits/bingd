@@ -870,9 +870,9 @@ create table ranking_snoozes (
 >   grouped `ranking_batch` activity. It is a hidden draft until the sitting ends (Done, the queue
 >   running out, Close), and it names the last title completed. A native placement finished inside
 >   the sitting is absorbed into it. It writes no watch event.
-> - **Done and the summary (#208):** Done in the header ends the sitting and shows
->   `RankedSummary`, which lists only what that sitting completed. With nothing completed, Done
->   exits silently. *I don't remember it well* is not in the backlog v1: **Skip** (this
+> - **Done and the summary (#208):** Done in the header shows `RankedSummary`, which lists
+>   only what that sitting completed; *Keep ranking* continues the same sitting, and the
+>   summary's own Done ends it. With nothing completed, header Done exits silently. *I don't remember it well* is not in the backlog v1: **Skip** (this
 >   sitting only) covers it, and the title stays in Unranked.
 > - **Resume, never duplicate:** a placement left mid-comparison — native or backlog — comes back
 >   with its answers from the backlog, from + on a row, or from Rank on the title page.

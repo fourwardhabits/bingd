@@ -1116,10 +1116,11 @@ Three properties this is required to keep:
 >   is derived from it (Display, above). Nothing changed here.
 > - **Unranked (backlog) sittings** (`ranking.backlog_enabled`, on in production). Each sitting
 >   deals seen-but-unranked titles one at a time, and a placement left mid-comparison resumes
->   with its answers. **Done** in the header ends the sitting and shows a summary
->   (`RankedSummary`) of only the titles that sitting completed: poster, title, `#N in Movies`
->   and score. Nothing else is shown. If nothing was completed, Done exits silently. The sitting
->   posts **one** grouped Feed activity, described in §14.
+>   with its answers. **Done** in the header shows a summary (`RankedSummary`) of only the
+>   titles that sitting completed: poster, title, `#N in Movies` and score. *Keep ranking*
+>   continues the same sitting; the summary's own Done (or the queue running out, or Close)
+>   ends it. If nothing was completed, header Done exits silently. The sitting posts **one**
+>   grouped Feed activity when it ends, described in §14.
 > - **Refine** (`ranking.refine_enabled`: **off in production**, on in staging) ends on the same
 >   summary and posts nothing to the Feed.
 > - **Ranking an already-seen title creates no watch event**, on any path. A ranking date is
