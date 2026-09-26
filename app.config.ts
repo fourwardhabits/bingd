@@ -207,7 +207,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // an over-the-air update from `main` has not reached that binary for some time, and the
   // Android device needs a new build regardless. Nothing already installed changes either
   // way: a build keeps the runtime it was compiled with.
-  version: '1.0.1',
+  //
+  // **1.1.0 on 2026-09-26, for store binaries that embed the frozen app at `9d9683a`.**
+  // 1.0.1 (12) has been on the App Store since 2026-09-11, so its train is closed. A minor
+  // rather than a patch: since then come Watch History, native Lists, the Unranked ranking
+  // flow and the grouped feed post. Both platforms move together, because the whole resolved
+  // config is one fingerprint source and even an iOS-only `ios.version` would move Android's
+  // runtime as well. The binaries already installed keep their runtimes (iOS `61efbf17`,
+  // Android `da3c7f47`) and the OTA already published for them, which is the same app.
+  version: '1.1.0',
   orientation: 'portrait',
   scheme: current.scheme,
   userInterfaceStyle: 'light',
