@@ -101,7 +101,7 @@ Status vocabulary:
 
 | Type | Trigger | Value | Deep link | Dedupe | Settings group | Status |
 |---|---|---|---|---|---|---|
-| `comment` | Somebody comments on your activity | You are being spoken to | The conversation (`/activity/[id]`) | Per comment | Social › Comments | LIVE |
+| `comment` | Somebody comments on your activity; somebody replies to your comment; **or the post's author adds a top-level comment to a post you had already commented on** (`payload.participant`, `20261021000100`). A third party's comment notifies the author only (and the parent's author on a reply), never every earlier participant | You are being spoken to | The conversation (`/activity/[id]`) | Per comment, at most one per person; a mention takes precedence | Social › Comments | LIVE |
 | `mention` | You are `@`-named in a comment | Directed at you personally | That conversation | At most one per (comment, person), never re-sent on edit | Social › Comments | LIVE |
 | `reaction` | Somebody reacts to your activity | Somebody responded | That activity | Per reaction; comment reactions write none | Social › Reactions | LIVE |
 | `watch_tag` | Somebody says they watched with you | A claim about your evening | The title | Once only, one writer | Social › Watched with | LIVE |

@@ -37,7 +37,7 @@ Outbox-eligible functions additionally take `p_operation_id uuid` as their first
 | `unlog(p_operation_id, media_item_id)` | Remove from the collection. **Unranked titles only** | **yes**, unranked only |
 | `set_watchlist(p_operation_id, media_item_id, present bool)` | Add or remove from the watchlist | **yes** |
 | `set_season_progress(p_operation_id, media_item_id, progress)` | Mark a season *watching* or *completed* | **yes** |
-| `save_note(p_operation_id, media_item_id, note, p_base_updated_at?)` | Update the private note | **yes** |
+| `save_note(p_operation_id, media_item_id, note, p_base_updated_at?, p_note_visibility?, p_note_spoilers?)` | Update the title's one note (the review): text, `public`/`private`, spoiler flag | **yes** |
 | `clear_watch_date(p_operation_id, media_item_id)` | Set `watched_on` to null, leaving the title logged | **yes** |
 
 **Implemented in `20260813002300_collection_writers.sql`.** Two behaviours the table above does not state, both settled while building it:
@@ -79,6 +79,14 @@ When the client supplies `p_base_updated_at` and it does not match, the function
 - **`save_note` and `log_watched` both return `note_version`.** A client draining two edits to the same note must carry that forward as the next base, or its second edit conflicts with its own first. Coalescing the edits per title in the outbox is the simpler answer and is what `offline-sync.md` §3 asks for. A base version must always be one the server issued for that note — never a locally invented timestamp, which reads as divergence.
 - **A row that has never held a note has a null version**, and any base against it is accepted. There is no text to lose, so there is nothing to ask the user about.
 
+> **Current state (2026-09-26, `9d9683a`): one note per title, written by one composer.** The note and review model is `user_media.note`, `note_visibility` and `note_has_spoilers`, written through `save_note` (or `log_watched` on a first log). Since #210, the log/rank sheet, *Log another watch* and Watch History ▸ edit all write it through the shared `NoteComposer`. `watch_events.note` (`20261014000100`) is an owner-only diary column that no composer writes; `set_watch_details` passes its existing value through unchanged. The client picks what visibility a note opens with; the server does not:
+>
+> - A note that already exists opens on its stored visibility and spoiler flag.
+> - A new note opens on the reader's last explicit choice for a new note. The first-ever note opens shared. This is `note-visibility-pref` (`src/features/collection/note-visibility-pref.ts`): it is kept per account **on the device** (`readPref`/`writePref`) and is not synced, so a new device starts shared again. It is recorded only when a new note saves successfully.
+> - *Write a review* (`noteIntent: 'review'`) always opens shared.
+>
+> The server's NR-1 failsafe is unchanged: when no visibility is sent, a new note is written private. After any note write, `invalidateAfterCollectionChange` refreshes both `['title-reviews', id]` and `['title-review-count', id]`, so making a review private updates the Reviews tab's count along with its rows (#210).
+
 `p_note` is capped at 2000 characters (`BG400`). Nothing in the PRD specifies a length; the cap exists because an uncapped text column is one a modified client can put a megabyte in, per title, the same reasoning that capped `reports.note`.
 
 `p_watched_on` is refused beyond `current_date + 1`, not `current_date`. The server is UTC and the client sends a local date, so east of UTC the local date is a day ahead for the first hours of every day, and refusing tomorrow would reject a correct "watched tonight" depending on longitude.
@@ -97,6 +105,13 @@ When the client supplies `p_base_updated_at` and it does not match, the function
 | `rank_reorder(media_item_id, new_position, operation_id?)` | Manual reorder, clamped to the title's own band |
 | `rank_unrank(media_item_id, operation_id?)` | Remove the position, keep the `user_media` row and its history |
 | `rank_again(media_item_id, bucket, operation_id?)` | Drop the position and open a fresh session, in one transaction |
+| `ranking_backlog(...)` / `rank_backlog_start(...)` | The Unranked backlog: read the queue, and open or resume one title's placement (`20261019000100`, behind `ranking.backlog_enabled`) |
+| `refine_candidates(...)` / `refine_start(...)` | Refine: targets and the `cta` block, and open a `refine`-kind session (`20261019000100`, behind `ranking.refine_enabled`) |
+| `rank_batch_note(p_operation_id, p_sitting, p_media_item_id)` | Add one completed backlog placement to that sitting's hidden draft post (`20261020000100`, `20261023000100`) |
+| `rank_batch_finalize(p_operation_id, p_sitting)` | Publish the sitting's draft as one `ranking_batch` post, or delete it if empty. Called when the sitting ends |
+| `ranking_batch_titles(p_event_id)` | Read: the titles a grouped post covers, with their current position and score |
+
+The rank-batch writers are fire-and-forget from the client: the placement has already committed, so a feed write that fails does not report the ranking as failed. Semantics are in [`ranking.md`](./ranking.md) §7 and §13.
 
 Every one of these is **absent from the outbox allowlist**, which is how PRD §18's rule that no ranking mutation is ever queued is enforced. Offline, the client does not attempt them and says so.
 
@@ -237,6 +252,8 @@ reason the engine gives to be reproducible from stored signals, and a friend's o
 not one.
 
 ## 4. Lists
+
+> **Current state (2026-09-26, `9d9683a`): the table and the limit code below are the v0.6 design, not the build.** Native Lists v1 (`20261010000100`, `20261017000100`) has these writers: `create_list`, `update_list`, `delete_list`, `add_list_item`, `remove_list_item`, `move_list_item` and `add_list_to_watchlist`. The reads are `my_lists`, `my_lists_for_title`, `profile_lists`, `list_view`, `list_items_page`, `list_viewer_progress` and `list_preview`. None of them is queueable. A list holds movies, seasons and whole series. Visibility is `private`, `link` or `public`, and one predicate decides every read (`_list_readable`, [`data-model.md`](./data-model.md) §6). `create_list` **does not refuse** at three lists: it returns `in_app_count_before` for measurement, and the only enforced count is `lists.max_per_user` (100). Spec: [`../product/lists-prd.md`](../product/lists-prd.md).
 
 | Function | Purpose | Queueable |
 |---|---|---|
@@ -651,8 +668,20 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 | `visible_rankings` | Rankings joined to media, filtered by `can_view_profile` |
 | `visible_collection` | Another user's bucketed titles **without** notes, watch dates, or watchlist |
 | `feed` | Followed users' events with reaction counts and the caller's own reaction |
-| `unranked_queue` | The highest-bucket-first queue from [`ranking.md`](./ranking.md) §10 |
+| `unranked_queue` | The highest-bucket-first queue from [`ranking.md`](./ranking.md) §10. **Unused by the client since the backlog** (`ranking_backlog`, §2) |
 | `inbox` | Notifications joined to actor and subject |
+
+### Embeds and the junction trap — Required (2026-09-25, `20261022000100`)
+
+PostgREST works out embeds from the catalogue, and **grants do not affect it**. A table whose primary key is made of foreign keys to two tables counts as a many-to-many junction between those tables, even if every client role is revoked from it. `feed_ranking_titles` was created with `primary key (event_id, media_item_id)`. That gave `feed_events` a second path to `media_items`, and every bare `media_items(...)` embed from `feed_events` failed with `PGRST201` / HTTP 300: the Feed, Profile ▸ Recent activity, the comment page and the Awards reads. The failure happens at schema resolution, before any row is read, and a mocked client or PGlite cannot see it. `20261022000100` fixed it on the server, so bundles already installed kept working: it added a surrogate `id` primary key and moved the membership rule to a unique constraint.
+
+**The rule:**
+
+1. **A new table with foreign keys to two tables that clients already embed gets a surrogate primary key.** Uniqueness goes in a separate `unique (...)` constraint. It must never be a composite primary key made of those two foreign keys.
+2. **Client selects name the relationship explicitly** whenever more than one path could exist: `media_items:media_item_id(...)`, `profiles:actor_id(...)`, or `table!fk_name(...)`. Do not use a bare `media_items(...)` from a table that could gain a second path.
+3. **`supabase/tests/client-embeds.test.mjs`** checks every embed in the client source against the schema, counting junctions. Run it whenever a migration adds a table with two foreign keys. It reproduces all four reads that broke.
+
+`20261014000100` is the same class of failure from the other side (`PGRST200`: no relationship at all between `watch_events` and `media_items`). Embeds are schema contracts and need the same review as an RPC signature.
 
 ### Top Rated — added 2026-09-09 (`20260913000100`)
 

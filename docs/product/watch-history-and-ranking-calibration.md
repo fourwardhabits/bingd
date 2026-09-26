@@ -1,6 +1,40 @@
 # Watch History, Rewatches and Long-Term Ranking Calibration
 
-**Status:** **T0 and T0b are shipped and live. T1 onward is design, not built.**
+**Status (2026-09-23, stopping point): T0–T5 are shipped.** Watch History (T1–T4, with the
+#196 founder-QA migrations `20261014000100`–`20261018000100`) merged to `main` in PR #196
+(`30833d5`); the unified Backlog + Refine (T5) merged in PR #203 (`ceb4f14`). **Production and
+staging are both at 168 migrations, head `20261019000100`.** The production OTA from `a17880d`
+carries the client. Production flags: `goals.count_watch_events`,
+`leaderboard.monthly_from_events` and `ranking.backlog_enabled` are **true**;
+`ranking.refine_enabled` is **false** until the backlog smoke passes (see
+[`../release/stopping-point-cutover.md`](../release/stopping-point-cutover.md)).
+**T6 as a standalone flow is eliminated** (the unified backlog is it); **T6b** (unmatched-import
+repair), **§I.6** (*Add what you've already seen*) and **T7** are **deferred**, and **T6c**
+(Letterboxd Lists import) is a separate, deferred post-freeze feature
+([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)). The body below is the design as
+written; where it differs from what shipped, the notes marked **As shipped** and
+[`refine-rankings-t5.md`](./refine-rankings-t5.md) win.
+
+**Current state (2026-09-26, `9d9683a`).** Since the stopping point, #208–#210 added the following.
+None of it changes the seen / watch / recording model.
+
+- **Recently watched** is the recency sort on Watched and Unranked. It orders by
+  `user_media.watched_on`, the maintained `max(watch_events.watched_on)`. Undated titles sink in
+  both directions. The Watchlist keeps **Recently added** (§L.2; PRD §11).
+- **Ranking writes no watch.** Ranking an already-seen title, through either the individual Rank
+  path or the backlog, creates no `watch_events` row, because `log_title` writes an event only
+  when it creates the seen row. A ranking date is never a watch date.
+- **An Unranked sitting ends in a summary and posts one grouped activity** (§I as amended,
+  §K, [`refine-rankings-t5.md`](./refine-rankings-t5.md)).
+- **Watch History ▸ remove the only watch** performs *Remove from collection*
+  (`removeFromCollection`: unrank if ranked, then `unlog`) and goes back, instead of refusing.
+- **One note composer (#210).** *Log another watch* and Watch History ▸ edit write the title's one
+  note (`user_media.note` via `save_note`, with *Share as a review* and *Contains spoilers*).
+  They no longer write `watch_events.note`, which stays owner-only and is shown read-only where it
+  already holds text. Per-watch companions are unchanged (§D.3).
+- Migrations `20261020000100`–`20261023000100` (#209) follow this epic's head. The next free
+  number is `20261024000100`.
+
 **Written:** 2026-09-19, against `origin/main` at `0468f1c` (PR #170).
 **Revision 2 (2026-09-19):** founder decisions R1–R3 applied. Adds the **seen / watch / recording**
 separation, entry-context defaults, the metrics matrix and the legacy-data policy (§D.0, §D.6,
@@ -14,18 +48,21 @@ lightweight **Review unmatched titles** repair flow with Skip (§I.7).
 entry opening a dedicated, pushed **Watch History screen**, and **no History tab in v1** (§J).
 **No founder decisions remain open in this document.**
 
-**Shipped so far:**
+**Shipped (all on staging and production, 2026-09-23):**
 
 | Tranche | What | Where |
 |---|---|---|
-| **T0b** | Ranking an already-seen title no longer stamps today; *Earlier*; the R4 session carry | PR #174, merged `ed644cb`. Client only, no OTA published. |
-| **T0** | A correction is not a new ranking: `created_at` preserved, chronology-based watchlist rule, re-rating is not "becoming watched" | PR #180, merged `4a88237`, migration **`20261001000100`**, live on staging and production |
-| **T1** | `watch_events` with basis, the R3-compliant backfill, the cache and seen triggers, rebuilt legacy writers, `log_title` / `set_watch_date` | migration **`20261003000100`**. Not applied to either project. |
-| **T2** | `ranking_placements`, the prior-anchored search, clean comparison evidence, `movement` in responses | migration **`20261004000100`**. Not applied. |
-| **T3** | `log_rewatch` / `edit_watch_event` / `delete_watch_event`; feed `again`, enrichment and deletion | migration **`20261005000100`**. Not applied. |
-| **T3b** | Log another watch, the **Watch History screen** and its `Watched N times ›` entry, the When row via `log_title` / `set_watch_date`, private movement copy | client. **No OTA published.** |
-| **T4** | Goals and the monthly board repointed to watch events, both **behind flags that start false** | migration **`20261006000100`** + client. Not applied, flags not flipped. |
-| **T5** | **Unified Backlog + Refine** (founder-approved 2026-09-21): one ranking session with two sources — the unranked backlog (§I, as amended there) and Refine (evidence-driven targets, prior search with tolerance, finite rounds) | migration **`20261019000100`** + client, on `feat/backlog-refine-unified` (restacked on #196 `b9b07c2`). **Behind `ranking.backlog_enabled` and `ranking.refine_enabled`, both false.** Staging only. Built spec: [`refine-rankings-t5.md`](./refine-rankings-t5.md). **T6 (a standalone Rank your imports) is eliminated**: the backlog is that flow. T6b (unmatched-title repair) and T6c (Lists import) stay separate. |
+| **T0b** | Ranking an already-seen title no longer stamps today; *Earlier*; the R4 session carry | PR #174, merged `ed644cb`. Client only. |
+| **T0** | A correction is not a new ranking: `created_at` preserved, chronology-based watchlist rule, re-rating is not "becoming watched" | PR #180, merged `4a88237`, migration **`20261001000100`** |
+| **T1** | `watch_events` with basis, the R3-compliant backfill, the cache and seen triggers, rebuilt legacy writers, `log_title` / `set_watch_date` | migration **`20261003000100`**, in #196 |
+| **T2** | `ranking_placements`, the prior-anchored search, clean comparison evidence, `movement` in responses | migration **`20261004000100`**, in #196 |
+| **T3** | `log_rewatch` / `edit_watch_event` / `delete_watch_event`; feed `again`, enrichment and deletion | migration **`20261005000100`**, in #196 |
+| **T3b** | Log another watch, the **Watch History screen** and its `Watched N times ›` entry, the When row via `log_title` / `set_watch_date`, private movement copy | client, in #196 |
+| **T4** | Goals and the monthly board repointed to watch events | migration **`20261006000100`** + client, in #196. Both flags **on in production** (2026-09-23). |
+| **#196 QA** | per-watch note and companions (`log_rewatch_with_details`, `set_watch_details`; since #210 the note is the title-level one, see the current-state note above); a watch keeps the score it was posted with; a pure correction follows the latest watch; stars never become buckets | `20261014000100`–`20261018000100`, in #196 |
+| **T5** | **Unified Backlog + Refine**: one ranking session with two sources — the unranked backlog (§I, as amended there) and Refine (evidence-driven targets, prior search with tolerance, finite rounds) | migration **`20261019000100`** + client, PR #203. Backlog **on**, Refine **off** in production pending smoke. Built spec: [`refine-rankings-t5.md`](./refine-rankings-t5.md). **T6 (a standalone Rank your imports) is eliminated**: the backlog is that flow. |
+| T6b, §I.6, T7 | unmatched-import repair; *Add what you've already seen*; Undo this move, the star prior and the rest of T7 | **deferred**, not built |
+| T6c | Letterboxd Lists import | **deferred post-freeze**, separate feature ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)) |
 **Supersedes:** [`deferred-roadmap.md`](./deferred-roadmap.md) §19 (rewatch history) and §22
 (per-title watch history). It **resolves** §49 (the historical-unranked exception) for the
 historical contexts named here, builds PRD §12's unbuilt import "anchor session", and gives §34
@@ -101,12 +138,12 @@ second renumbering this epic has needed, which is why the instruction in
 |---|---|---|---|---|---|
 | Log a title I just watched (normal log flow) | becomes seen | 1 event, **Today** unless changed | inserted if ranked | `first` | `title_ranked` (unchanged) |
 | Log a title, When = **Earlier** | becomes seen | 1 event, no date | inserted if ranked | `first` | `title_ranked` (unchanged) |
-| Rank a title that is **already seen** (imported, onboarding, earlier log) | unchanged | **nothing** | inserted | `first` or `import` | first ranking posts; queue mode posts nothing (§I.5) |
+| Rank a title that is **already seen** (imported, onboarding, earlier log) | unchanged | **nothing** | inserted | `first` or `import` | first ranking posts; in a backlog sitting, nothing per title and one grouped post for the sitting (§I.5, #209) |
 | **Log another watch → Keep** | unchanged | +1 event, Today unless changed | untouched | none | one `title_ranked` flagged `again`, if natively dated within 7 days |
 | **Log another watch → Re-check** | unchanged | +1 event | prior-anchored search | `rewatch` (linked) | the **same** single event, enriched with movement |
 | Update your rating (same band / new band) | unchanged | none | prior search / bisection | `correction` | none (unchanged) |
 | Refine your ranking | unchanged | **never** | prior search with tolerance | `refine` | none |
-| Rank what you've watched | unchanged | none | bisection (star prior later) | `import` or `first` | **none** |
+| Rank what you've watched | unchanged | none | bisection (star prior later) | `import` or `first` | **none per title**; one grouped `ranking_batch` per sitting (#209) |
 | Add what you've already seen (bulk) | becomes seen | 1 event, no date | none | none | none |
 | Edit a watch date | unchanged | event updated | untouched | none | none |
 | Remove one watch | unchanged | event deleted (not the last) | untouched | link set null | that watch's post, if any |
@@ -351,9 +388,22 @@ Re-keying `watch_tags` per event adds a notification and privacy surface for "wh
 The rewatch sheet shows no companions, because showing them there would imply per-watch data
 that does not exist.
 
+> **As shipped (#196 QA, `20261014000100`).** Both exist now, and they are different objects.
+> The title-level `watch_tags` keep their social meaning: the tagged person is told, and the Feed
+> says "with …". Each watch can also carry **private** companions in `watch_event_companions`,
+> set from *Log another watch* and Watch History ▸ edit. Only the owner can read them, the
+> companions included, and they reach no Feed, profile or notification.
+
 ### D.4 Notes: **stay title-level**
 
 One current note per title. A later "note at that watch" can reference `watch_event_id` (§22).
+
+> **As shipped, and current at `9d9683a`.** The review is and remains title-level:
+> `user_media.note` + `note_visibility` + `note_has_spoilers`, through `save_note`.
+> `20261014000100` added an owner-only `watch_events.note`. Since #210 no surface writes it: every
+> note composer, on the log/rank sheet, *Log another watch* and Watch History ▸ edit, writes the
+> one title note. The default visibility rules are in
+> [`../architecture/api.md`](../architecture/api.md) §1.
 
 ### D.5 RPC surface
 
@@ -676,6 +726,16 @@ date is not "less confident". Dates and confidence are unrelated.
 
 ## H. Refine your ranking
 
+> **As shipped (T5, [`refine-rankings-t5.md`](./refine-rankings-t5.md)).** The three
+> constraints below hold. The entry, the screen and the rhythm changed. There is one Collection
+> card, *Fine-tune your rankings*, in the unranked card's slot and drawn only on the server's
+> `cta` rule; it has **no overflow row and no timed dismissal**. Not now or Done rests it until
+> three new placements and a strong batch again. The screen is `app/rank-session.tsx?start=refine`,
+> shared with the backlog. There is **no age term**: selection reads evidence gaps, newer
+> contradicting answers, and titles an explicit rerank carried past. There is **no per-title
+> result beat**; a round ends on a summary. The comparison controls are **Can't decide** and
+> **Skip title (left)**.
+
 ### H.1 Name, place, entry
 
 - **Name**: *Refine your ranking* (the session title is *Refine · Movies*). **Home: Collection.**
@@ -806,11 +866,24 @@ create table ranking_snoozes (
 >   (*10 titles ranked.* · Keep going · Done). Not a limit; Skip and Done are always there.
 > - **Rules (§I.5) hold:** nothing per title in the Feed (a backlog placement uses the silent
 >   `import` kind), no recommendation fulfilment. Finishing an abandoned **native** ranking keeps
->   its native behaviour. *I don't remember it well* is not in the backlog v1: **Skip** (this
+>   its native behaviour. **Amended 2026-09-24/25 (#209):** the sitting as a whole posts **one**
+>   grouped `ranking_batch` activity. It is a hidden draft until the sitting ends (Done, the queue
+>   running out, Close), and it names the last title completed. A native placement finished inside
+>   the sitting is absorbed into it. It writes no watch event.
+> - **Done and the summary (#208):** Done in the header shows `RankedSummary`, which lists
+>   only what that sitting completed; *Keep ranking* continues the same sitting, and the
+>   summary's own Done ends it. With nothing completed, header Done exits silently. *I don't remember it well* is not in the backlog v1: **Skip** (this
 >   sitting only) covers it, and the title stays in Unranked.
 > - **Resume, never duplicate:** a placement left mid-comparison — native or backlog — comes back
 >   with its answers from the backlog, from + on a row, or from Rank on the title page.
 > - Seasons still being watched stay in Unranked but are not dealt; series are never dealt.
+> - **Entries as shipped:** Unranked's *Start ranking*. The import summary's existing **Rank
+>   imported movies** (since 2026-09-12) opens Collection ▸ Movies ▸ Unranked, which is where
+>   *Start ranking* is, so imports reach this flow without a second product. The
+>   import-completion notification and §I.6's *Add what you've already seen* in §I.1 below
+>   were **not built** as entries. PR #204 (not merged at `9d9683a`) rewords
+>   that button to *Rank imported titles* and shows it only while the backlog has titles.
+>   §I.6 and §I.7 are deferred.
 
 ### I.1 Shape
 
@@ -868,7 +941,7 @@ top 20", never "290 to go".
 
 ### I.5 Rules
 
-- **Feed**: nothing per title.
+- **Feed**: nothing per title. *(As shipped, #209: one grouped post per sitting; see the §I note.)*
 - **Recommendation fulfilment**: none.
 - **Streak**: counts. It is an engagement metric for ranking acts (§L.2).
 - **Monthly leaderboard**: **no credit** (R2). Ranking writes no watch event, and T4 makes the
@@ -1056,7 +1129,8 @@ LogSheet When row (already-seen title):             Date not recorded · Add dat
 | Rewatch + re-check | **the same single event**, its `score` updated to the new one; `from_*` and `outcome` are **not** put in the payload | | *Ada watched Heat again* · 9.1 |
 | Rewatch backdated, `diary`, or `none` | no | | |
 | Legacy-client rewatch (`none` event) | yes, as today (the act is contemporaneous) | `again: true` | as above |
-| Correction, Refine, queue ranking, bulk seen | no | | |
+| Correction, Refine, bulk seen | no | | |
+| Backlog (queue) ranking *(as shipped, #209)* | **one post per sitting**, published when the sitting ends; nothing per title | `ranking_batch {sitting, count}`; `media_item_id` = last title completed | one title: *Ada ranked Heat* · 8.7 (live score); several: *Ada ranked Heat and 4 more*, no badge |
 | Remove one watch | deletes that watch's post | | |
 
 **No movement chip (founder, 2026-09-19).** The feed and share cards show the verb, the title
@@ -1433,7 +1507,12 @@ consumption metric (§L.2).
 - **Automatic date repair or reclassification** of any in-app date; inferring rewatches from
   feed history.
 - **Partial date precision** (year-only dates) (§D.8).
-- Per-watch companions and notes.
+- ~~Per-watch companions and notes.~~ **Reversed in #196's founder QA (2026-09-21):** a
+  rewatch carries its own note and watched-with (`20261014000100`, `log_rewatch_with_details`,
+  `set_watch_details`). **Narrowed again by #210 (2026-09-25):** the per-watch *companions* remain.
+  The note field on those surfaces now writes the one title-level note, and `watch_events.note`
+  is no longer written. Per-watch **ratings** remain a non-goal; what a watch keeps is the score
+  it was posted with (`20261015000100`), not a separate rating.
 - A Diary tab, past-year stats, recaps: **unblocked**, not built.
 - Public watch counts or dates; another user's placement history.
 - A drag-to-reorder UI; Refine notifications; Refine, queue or bulk-seen activity in the feed.
@@ -1454,7 +1533,11 @@ consumption metric (§L.2).
   only, 30 minutes of logging activity, reset on restart, never persisted, never inferred.
 - **One collection state in the interface** (§D.0): no Logged-versus-Watched split anywhere.
 - **Refine is conditional, finite, and never overlaps the unranked queue** (§H.1).
-- **Notes stay title-level**; per-watch notes remain deferred (§D.4).
+- ~~**Notes stay title-level**; per-watch notes remain deferred (§D.4).~~ **Superseded
+  2026-09-21:** the review stays title-level (`user_media.note`), and each watch may carry its
+  own private companions (`20261014000100`). **Since #210** every note composer writes the
+  title-level note, so in practice notes are title-level again. `watch_events.note` stays in the
+  schema, owner-only and unwritten.
 - **Yearly goals** move to dated watch events **without adding logging friction**: the normal log
   still defaults to Today in one tap, and the goal simply counts what has a date (§L.2, T4).
 - **Unmatched Letterboxd rows** get the lightweight *Review unmatched titles* flow, Skip
@@ -1465,8 +1548,7 @@ consumption metric (§L.2).
   `app/title/[id]/history.tsx`. **No History tab in v1** (§J). A single viewing never reads
   "Watched 1 time".
 
-**Still open: none.** Every decision this design needs has been made. What remains is
-implementation, tranche by tranche, starting at T1.
+**Still open: none.** T0–T5 are built and shipped (see the status block at the top).
 
 ---
 
@@ -1475,26 +1557,23 @@ implementation, tranche by tranche, starting at T1.
 | Tranche | Scope | Size | Ships to users | Gate to proceed |
 |---|---|---|---|---|
 | **T0: Correction hygiene** ✅ **LIVE** | PR #180, merge `4a88237`, migration **`20261001000100`** applied to staging and production 2026-09-19. `created_at` preserved through a correction; the watchlist rule is chronological; a re-rating is not "becoming watched"; #118 closed as superseded | S | streak and Recently ranked stopped lying | done |
-| **T0b: Stop fabricating dates** ✅ **MERGED** | PR #174, merge `ed644cb`. LogSheet stamps only rows it created; *Earlier*; the R4 carry. Client only — **no OTA published yet** | XS | ranking a seen title no longer claims "watched today" | ships with the next OTA or binary |
-| **T1: Watch history foundation** | N1: `watch_events` with basis, backfill (R3-compliant), cache and seen triggers, rebuilt legacy writers, `log_title` / `set_watch_date` | M | nothing visible | verification + diff clean on staging and production |
-| **T2: Placement ledger + prior-anchored rerank** | N2 | M–L | corrections get cheaper, silently | oracle suite, policy fuzz, simulator |
-| **T3: Rewatch server** | N3 | S–M | – | contract tests including legacy paths |
-| **T3b: Rewatch UX + honest logging** | N4: Log another watch, the Watch History screen and its entry line (§J, locked), the When row via `log_title`, private movement copy | M | **yes**, the headline feature | §O.7 items 1–5, 8 |
-| **T4: Readers repoint** | N5: goals (native + diary), monthly board native-only with no fallback (R2), per-account diff | M | correct cross-year goals, an honest monthly board | the diff shows only the expected shifts |
-| **T5: Refine your ranking** | N6 + N7 | L | **yes** | §O.7 item 6 |
-| **T6: Rank what you've watched + Add what you've seen** | N8 | M–L | **yes**, the backfill path for new users | T4 shipped; §O.5 assertions; §O.7 item 7 |
-| **T7: Follow-ups** | N9: *Review watch dates*, Undo this move, v1.1 support, the star prior, `imported_watches` retirement | S each | incremental | per item |
+| **T0b: Stop fabricating dates** ✅ **SHIPPED** | PR #174, merge `ed644cb`. LogSheet stamps only rows it created; *Earlier*; the R4 carry | XS | ranking a seen title no longer claims "watched today" | done |
+| **T1: Watch history foundation** ✅ **SHIPPED** (#196) | N1: `watch_events` with basis, backfill (R3-compliant), cache and seen triggers, rebuilt legacy writers, `log_title` / `set_watch_date` | M | nothing visible | done |
+| **T2: Placement ledger + prior-anchored rerank** ✅ **SHIPPED** (#196) | N2 | M–L | corrections get cheaper, silently | done |
+| **T3: Rewatch server** ✅ **SHIPPED** (#196) | N3 | S–M | – | done |
+| **T3b: Rewatch UX + honest logging** ✅ **SHIPPED** (#196) | N4: Log another watch, the Watch History screen and its entry line (§J, locked), the When row via `log_title`, private movement copy | M | **yes**, the headline feature | done |
+| **T4: Readers repoint** ✅ **SHIPPED** (#196) | N5: goals (native + diary), monthly board native-only with no fallback (R2), per-account diff | M | correct cross-year goals, an honest monthly board | done; both flags on in production |
+| **T5: Unified Backlog + Refine** ✅ **SHIPPED** (#203) | N6 + N7, plus the unified backlog that replaces T6's queue | L | **yes** | Refine's production flag waits on the backlog smoke |
+| ~~**T6: Rank what you've watched + Add what you've seen**~~ | **Eliminated as a standalone flow**: the unified backlog (T5) is the ranking half. *Add what you've already seen* (§I.6) is **deferred** | – | – | – |
+| **T7: Follow-ups** — deferred | N9: *Review watch dates*, Undo this move, v1.1 support, the star prior, `imported_watches` retirement | S each | incremental | per item |
+| **T6b: Review unmatched titles** (§I.7) — deferred | the import repair flow, Skip included | S–M | **yes**, for importers | T1 (done) |
+| **T6c: Letterboxd Lists import** — deferred post-freeze | a separate acquisition/migration feature, not part of this epic's core ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)) | L | **yes**, for importers | #196 + #200 in production (both met), founder go |
 
-| **T6b: Review unmatched titles** (§I.7) | the import repair flow, Skip included | S–M | **yes**, for importers | T1 (so diary dates land as events) |
+**Critical path:** done through T5. What remains (T6b, §I.6, T7) is deferred, not scheduled.
 
-**Critical path:** ~~T0 + T0b~~ (done) → **T1** → T2 → T3 → T3b. T4 can run in parallel after T1.
-T5 needs T2. T6 needs T2, T4, and T5's snooze table. T6b needs T1.
-
-**Migration numbering from here.** Both projects stand at `20261001000100`, which is T0. The
-next migration in this epic — T1's `watch_events` foundation — takes **`20261002000100`**, and
-every tranche after it continues in its own day bucket. Check the applied head on **both**
-projects before choosing a number: this epic has already been renumbered once because staging
-and production moved underneath it (`20260928000100` → `20261001000100`).
-
-T0b is client-only and carries no migration. Its fix is on main and waiting for the next OTA or
-binary; until that ships, installed clients still stamp today onto an already-seen title.
+**Migration numbering from here.** Both projects stood at **`20261019000100`** (168 applied) on
+2026-09-23. #209 has since added `20261020000100`–`20261023000100` to the repository, so the next
+free number at `9d9683a` is **`20261024000100`**. Recheck both projects' applied head
+and every open PR before choosing one: this epic was renumbered three times because the
+projects and other branches moved underneath it (T1 was drafted as `20261002000100` and
+shipped as `20261003000100`; T5 went from `20261013000100` to `20261019000100`).

@@ -35,7 +35,7 @@ All six product decisions that blocked architecture as of v0.5 have been resolve
 | Invitation acceptance semantics | Explicit tap; a **personal** invite connects both parties, both approved (2026-09-08). A referral token stays one-way | Decision log §5 |
 | Invitation token model | One reusable personal link plus short code | Decision log §5 |
 | Notification mechanism | Full system in v1; inbox live; push built but delivery flagged off | Decision log §6 |
-| Lists in public alpha | Ship in v1 with the three-list limit enforced | Decision log §8 |
+| Lists in public alpha | ~~Ship in v1 with the three-list limit enforced~~ Native Lists v1 shipped 2026-09-23 with **no user-visible limit** (`lists-prd.md` §P.1) | Decision log §8, §15 |
 | Letterboxd import stage | **Deprioritized 2026-08-23** — gates neither the friend beta nor either initial store release | Decision log §4, deferred-roadmap §20 |
 
 **READY FOR ARCHITECTURE: YES.** See PRD §31 for the full assessment and the conditions attached.
@@ -46,7 +46,11 @@ All six product decisions that blocked architecture as of v0.5 have been resolve
 
 These are recorded as decisions so work can proceed, but they were **made by the agent, not the founder**. Overturning any of them is cheap now and expensive after implementation.
 
-### ~~INF-1 — Letterboxd rating translation~~ — **RESOLVED 2026-08-12**
+### ~~INF-1 — Letterboxd rating translation~~ — **RESOLVED 2026-08-12**, **SUPERSEDED 2026-09-21**
+
+> **Superseded (founder, canonical, 2026-09-21):** a Letterboxd star is **never** a bingd
+> bucket, position or score. It is provenance only (`20261018000100`; `decision-log.md` §15).
+> The paragraph below is the history.
 
 Confirmed by the founder. Star ratings auto-map to buckets (4.0+ → *I liked it*, 2.5–3.5 → *It was fine*, ≤2.0 → *I didn’t like it*), shown as a single summary line, with no cut-line UI and every bucket editable per title afterward. This is now a founder decision, recorded in `decision-log.md` §4. The threshold values themselves remain Provisional and tunable after real imports.
 
@@ -165,7 +169,7 @@ Not questions so much as work deliberately not done yet, recorded so it is not r
 - **Bucket desync between `set_bucket` and a concurrent ranking.** `set_bucket` checks that the title is unranked and then upserts, with no lock across the two statements, so one account ranking the same title from a second device in that window leaves `user_media.bucket` disagreeing with `rankings.bucket` — an I3 violation. It needs the same account writing twice in the same instant and costs one desynced bucket, no data loss. Closing it means the seven ranking RPCs and `set_bucket`/`unlog` taking a shared advisory lock on `(user_id, media_item_id)`, which is a change across two migrations and was not worth bundling into the collection writers.
 - **`processed_operations` is never pruned.** The index for it exists; the scheduled job does not. A few rows per write per user, so it is an alpha-scale non-problem and a real one later.
 - **The client has no outbox.** `offline-sync.md` describes a queue, a SQLite mirror of the user's own collection, and a pending marker on every unsynced row. None of it is built. Collection writes go straight to the RPC and a failure is shown as one, which is honest but means a bucket chosen without signal is lost rather than queued. Everything the server needs is already there — the writers are idempotent and take an operation id — so this is client work, and it should land before anyone tests the app on a train.
-- **The watch date can only be recorded by writing a note.** `log_watched` carries both, and the log sheet calls it only when the note field is left with something in it, so a user who buckets a title and writes nothing leaves `watched_on` null. There is no date row in the sheet, though PRD §9.4 lists the date as an optional capture and `screens.md` §4 gives it a row of its own. The consequence is small — a null date, not a wrong one — but "I watched this last night" is a thing people will want to say, and the fix is a date control rather than any change to the writers.
+- ~~**The watch date can only be recorded by writing a note.**~~ **Resolved (T0b + Watch History T3b, shipped 2026-09-23):** the log sheet has a When row through `log_title` / `set_watch_date`, and each watch is a `watch_events` row. *Original note:* `log_watched` carries both, and the log sheet calls it only when the note field is left with something in it, so a user who buckets a title and writes nothing leaves `watched_on` null. There is no date row in the sheet, though PRD §9.4 lists the date as an optional capture and `screens.md` §4 gives it a row of its own. The consequence is small — a null date, not a wrong one — but "I watched this last night" is a thing people will want to say, and the fix is a date control rather than any change to the writers.
 - **Wikidata genre strings are not a browsing vocabulary.** The seed carries 247 distinct genres straight from Wikidata's taxonomy — `huis-clos film`, `flashback film`, `crossover fiction` — and one title carries nineteen of them. Nothing is offensive; it was checked. But they are indexed with GIN and will eventually be surfaced, and mapping them onto a small controlled set at generation time is the moment to do it, before a screen depends on the current strings.
 - **Nothing stops a title being logged before it is released.** `user_media.watched_on` is guarded against the future; `media_items.release_date` is not, and the seed contains one unreleased season (Rings of Power S3, dated 2026-11-11). Since seasons are rankable under PRD §10, a tester can rank something nobody has seen. Fine for an alpha, and recorded here so it stays a decision rather than an accident.
 - **The PRD contradicts itself about whether seasons are searchable.** §8's v1 scope line says "TMDB-backed movie, series, **and season** search and detail"; §26.2 AC 1 says search returns movies and series, and AC 2 reaches a season from its series page. `search_titles` implements §26.2, because a result list of bare ordinals — "Season 4", "Season 4", "Season 4" — tells a user nothing about which show each belongs to. Making them searchable properly means indexing the series title alongside the season, which is a real change and not a filter. Resolve it in the PRD rather than by continuing to implement one of the two readings.
@@ -243,8 +247,9 @@ Working numbers, expected to change. Every one must be configurable and versione
 
 | Value | Working default |
 |---|---|
-| Letterboxd → bucket cut lines | 4.0+ / 2.5–3.5 / ≤2.0 |
-| Post-import anchor session size | ~20 titles |
+| ~~Letterboxd → bucket cut lines~~ | **Retired 2026-09-21**: a star is never a bucket (`20261018000100`) |
+| ~~Post-import anchor session size~~ | **Retired**: replaced by the Unified Backlog, whose checkpoint is `ranking.backlog_checkpoint` (10) |
+| Refine thresholds | `ranking.refine_*` in `app_config` (`refine-rankings-t5.md` §8): tunable without a deploy, instrumented to tune |
 | Unranked prompt batch size | 5 |
 | Unranked prompt quiets at | ~50 ranked titles |
 | Max skips before midpoint placement | 3 |
@@ -753,3 +758,34 @@ computes — so it is a surface rather than an architecture. The privacy questio
 to answer first: the aggregate deliberately does not name anybody, and a drilldown does,
 so it needs the same `can_view_profile` gate every other identity surface uses and it
 must not become a way to learn that a private account rated something.
+
+---
+
+## 9. Still open at the stopping point, 2026-09-23
+
+Only questions that are genuinely undecided and belong to the founder. Everything the
+stopping-point release rests on is decided (`decision-log.md` §15).
+
+**Letterboxd Lists import (T6c, deferred post-freeze).** The two blocking decisions are made
+(`letterboxd-lists-import.md` §D.3). These details are left for the build:
+
+- **What order defines "the first 100"** when an archive has more than 100 lists: archive
+  member order, the list `Date`, or file name. It must be stable across re-exports.
+- **The per-account cap.** When an import would push past `lists.max_imported_per_user` (100),
+  for example 60 already imported plus 60 new, does the same "first N, report the rest" rule
+  apply?
+- **Whether editing a list's description or switching Numbered counts as "edited since
+  import".** The decision names rename, visibility, reorder, and add or remove a title.
+- **How the per-import ceiling sits with decision-log §4 *Import list handling*** ("all lists
+  import regardless of the list limit"). As read here, that row is about the in-app tier
+  limit, and the ceiling of 100 is separate. Confirm it.
+
+**Release, not product scope** (recorded in `../release/stopping-point-cutover.md`):
+
+- **When to turn Refine on in production** (`ranking.refine_enabled`, phase 8, after the
+  backlog smoke).
+- **The marketing version:** `1.0.1` as built, or `1.1.0` for a release that adds Watch
+  History, Lists and a ranking flow. Changing it moves the runtime and means rebuilding both
+  binaries.
+- **PR #204's edge:** the import-complete *Rank imported titles* link falls back to
+  `added > 0` when the backlog answers `disabled`. Decide this before #204 ships.

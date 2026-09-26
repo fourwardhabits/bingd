@@ -559,6 +559,8 @@ Own-read only, matching `user_media` rather than `rankings`. No specification ha
 > Its practical reach today is nil, because the only year any screen displays is the current one and a rewatch inside the current year cannot lose a count it is also adding. It becomes visible the day a year-in-review or a past-year selector ships, and that surface must not ship before this is resolved.
 >
 > **Design landed 2026-08-23, still not built.** [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §19 is now the canonical answer: an append-only `watch_events` table, with `user_media.watched_on` kept as a denormalized *last watched* cache so every reader here keeps working and the migration stays reversible. §19.5 is explicit that repointing Goals and Awards at the new table is the step that actually fixes this paragraph, and that it is a **separate, later pass** rather than part of the schema migration. Until then the limitation stands exactly as written above.
+>
+> **Resolved, in production 2026-09-23 (#196).** `watch_events` exists (`20261003000100`, T1), one row per viewing with a nullable date and a `basis`, and `user_media.watched_on` is its latest-known-date cache. Goals and the monthly leaderboard read watch events (`20261006000100`, T4). Both flags, `goals.count_watch_events` and `leaderboard.monthly_from_events`, are on in production. A rewatch in a new year now counts in both years. Per-watch companions: `20261014000100` (`watch_event_companions`, owner-only). That migration also added `watch_events.note`, an owner-only diary line. **Since #210 (`9d9683a`) no surface writes it:** Log another watch and Watch History ▸ edit both write the title's one note through `save_note`, and a Watch History row still shows an existing `watch_events.note` read-only. The placement ledger (`ranking_placements`, `20261004000100`) is described in [`ranking.md`](./ranking.md) §13. The design is [`../product/watch-history-and-ranking-calibration.md`](../product/watch-history-and-ranking-calibration.md).
 
 There is no `watch_goal_progress` RPC, and that is a choice. Both halves are the caller's own rows under policies that already say so (`watch_goals_own`, `user_media_own`), so a function would be either a query with a grant attached or a screen's arithmetic promoted to `security definer` code taking a year from the client. The read is one person's own rows for one year, bounded by a range filter on `watched_on`.
 
@@ -793,6 +795,36 @@ does everywhere else. A **referral** token keeps `20260912000100`'s semantics ex
 invitee's own edge is a request into a private owner, and there is no reverse edge and no
 story. PRD §17's As-built block for 2026-09-08 carries the founder's argument for the change
 and states plainly what it widens.
+
+### `ranking_batch`, one post per Unranked sitting — `20261020000100` … `20261023000100`
+
+A backlog sitting's placements are silent one by one (`import` kind). The sitting as a whole
+posts **one** `feed_events` row, and a membership table holds the titles it placed:
+
+- **`feed_ranking_titles (id, event_id, media_item_id, placed_at)`**, read in `placed_at` order.
+  RLS is on and every client role is revoked, so the only read is `ranking_batch_titles(event_id)`.
+  That function uses the feed row's own `can_view_profile`, and it returns each title's position
+  and score **as they are now**, derived through `band_bounds` / `score_for` the same way
+  `public_scores` does. Membership is unique on `(event_id, media_item_id)`.
+- **The sitting is the client's uuid**, `payload.sitting`, unique per actor across
+  `ranking_batch` and `ranking_batch_draft` (`feed_events_ranking_sitting`). A later sitting is a
+  new uuid and a second post. There is no time window.
+- **Draft, then published** (`20261023000100`). `rank_batch_note` writes a `ranking_batch_draft`.
+  That type is outside `ACTIVITY_TYPES`, so the Feed and both profiles never fetch it, including
+  for its author. It sets `media_item_id` to the newest placement each time.
+  `rank_batch_finalize` changes the type to `ranking_batch`, sets `created_at` and `causal_at` to
+  now, and writes `payload.count`. A draft with no members is deleted. Finalising is idempotent.
+- **A ranking post, not a watch.** It writes no `watch_events` and moves no `watched_on`.
+  `rank_batch_note` refuses a title the caller has not ranked. A one-title sitting's own
+  `title_ranked` (a resumed native session) is absorbed into the sitting (`20261022000100`).
+- **No backfill, deliberately.** A `ranking_batch` published before `20261023000100` keeps its
+  first title as representative. Nothing reconstructs grouped posts for sittings from before
+  `20261020000100`, and an old event renders in the same row shell as a new one.
+
+**`feed_ranking_titles` has a surrogate key on purpose** (`20261022000100`). Its first shape,
+`primary key (event_id, media_item_id)`, made PostgREST read it as a `feed_events` ↔
+`media_items` junction. Every bare `media_items(...)` embed from `feed_events` then failed
+with `PGRST201` (HTTP 300). The rule this sets is in [`api.md`](./api.md) §10, *Embeds*.
 
 
 ### The award loop — `award_unlocks`, `award_tiers`, `award_genre_patterns` — `20260828000100`
