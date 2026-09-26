@@ -21,6 +21,62 @@
 >
 > **Product scope is re-frozen as of 2026-08-19.** No further product feature ships before the friend beta unless a Preview test exposes a blocker, a hardening requirement forces a product behaviour change, or the founder breaks the freeze deliberately.
 
+> ### As built 2026-09-23 — the stopping point
+>
+> The founder broke the freeze deliberately for one release, and it is now in production
+> (168 migrations, head `20261019000100`; the client in the OTA from `a17880d`). The
+> decisions are recorded in [`decision-log.md`](./decision-log.md) §15.
+>
+> **Shipping core:**
+>
+> - **Watch History** (#196): multiple watches and rewatches, the Watch History screen,
+>   per-watch date and watched-with (the note is the title's one note; see below). A **rewatch** (*Log another watch*) is a new watch.
+>   A **rerank** (*Update your rating*) is a correction that writes no watch and no post. Each
+>   watch's feed post keeps the score held at that watch; a correction moves only the latest
+>   watch's post. Design: [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md).
+> - **Native Lists v1** (#196): mixed media, privacy (Only you / Anyone with the link /
+>   Public), custom order, share, Add to list, public web page. [`lists-prd.md`](./lists-prd.md) §R.
+> - **Unified Backlog + Refine** (#203): one ranking flow for everything seen and unranked,
+>   imports included. It **supersedes the separate post-import "anchor session"** in §12 and
+>   any standalone "Rank your imports" flow. Refine Rankings recalibrates what is already
+>   ranked from **evidence gaps, newer contradictions and explicit rerank crossings**, with
+>   **no age-based staleness**. Refine is built and in production, and `ranking.refine_enabled`
+>   stays off until the backlog smoke passes. [`refine-rankings-t5.md`](./refine-rankings-t5.md).
+> - **Exact ordinal ranking is canonical truth.** Approximate placement happens only after
+>   repeated **Can't decide** or exhausted opponents, and is marked `adjustable` in the ledger.
+>   The comparison controls are **Can't decide** and **Skip title (left)**.
+> - **A Letterboxd star is never a bucket, position or score** (2026-09-21). §12's star
+>   mapping is superseded. Larger archives import since #200. **Android** is publicly
+>   distributed (#192).
+>
+> **Deferred:** Letterboxd **Lists** import (T6c, a post-freeze acquisition feature:
+> [`letterboxd-lists-import.md`](./letterboxd-lists-import.md)); predicted score;
+> unmatched-import repair; *add what I've already seen* bulk entry; stats / Wrapped; real
+> release notifications; Watch Next; post-ranking share cards; further Awards. **Still out of scope:**
+> episode-level tracking and whole-series ranking.
+
+> ### Current state — 2026-09-26, `9d9683a` (the frozen production source)
+>
+> The product is frozen at `9d9683a`. Since the stopping point, #206–#210 changed behaviour in
+> these ways and no others:
+>
+> - **An Unranked sitting ends in a summary and is one Feed post.** Done in the session header
+>   shows `RankedSummary`, which lists only what that sitting completed. The sitting posts one
+>   grouped `ranking_batch` activity, hidden until the sitting ends, and it names the last title
+>   completed. A one-title sitting reads as an ordinary ranking with its score. Refine posts
+>   nothing. Details: §10 and §14 below, and [`refine-rankings-t5.md`](./refine-rankings-t5.md).
+> - **Recently watched** (latest real watch date) replaces Recently added on Watched and Unranked.
+>   The Watchlist keeps Recently added (§11).
+> - **One note per title, one composer (#210).** Every surface that writes about a watch writes
+>   `user_media.note` through `save_note`, with *Share as a review* and *Contains spoilers*.
+>   The default visibility rules are in §22 and in `../architecture/api.md` §1.
+> - **Comments:** a post author's own top-level comment notifies everyone who had already
+>   commented. A third party's comment still notifies only the author (§15).
+> - **Performance (#206):** For You no longer waits for anchor fills when any anchor list is
+>   cached, and the first comparison of a ranking session no longer waits on a second read.
+>
+> The deferred list above is unchanged, and none of it is planned next.
+
 ---
 
 ## Table of contents
@@ -637,7 +693,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 - Watched and completed state, watchlist, and separate Movies and TV Seasons rankings.
 - **Three-bucket rating** followed by pairwise comparison within the bucket.
 - **Logged and Ranked collection states**, with a quiet path from one to the other.
-- **Letterboxd import** from uploaded export files, with matching preview, bucket auto-mapping, and a post-import anchor session.
+- **Letterboxd import** from uploaded export files, with matching preview, bucket auto-mapping, and a post-import anchor session. *(**As built 2026-09-23:** no bucket auto-mapping, since a star is never a bucket, and no separate anchor session: imported titles are ranked in the Unified Backlog. Lists are not imported (T6c, deferred).)*
 - User profiles, one-way follow and unfollow, chronological feed, people discovery and leaderboard, match score.
 - **Reactions** on feed activity.
 - **Watch tagging** of Bingd users, with the invite hand-off for non-users.
@@ -906,6 +962,16 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 > the reader asking rather than being asked. A new session may reconsider the pair, which
 > is what makes Rank again a real second opinion.
 
+> ### As built 2026-09-22: **"Can't decide"** replaces "Too tough", and **Skip title** is a separate act
+>
+> Founder QA of the Unified Backlog. Beside the session's own skip, "Too tough" read as a
+> second way to skip, so the label changed on every comparison surface. The mechanics above
+> did not: it is the same `rank_skip`, the same three-skip midpoint, the same `adjustable`
+> mark, and nothing invented. The session's **Skip title (left)** on a comparison (**Skip
+> title** on *How was it?*) is a genuinely different act. It drops that title for the sitting
+> and leaves it unranked, where Can't decide keeps placing the same title. The comparison
+> view itself is the shared, spacious one that sizes its cards from the window.
+
 ### Display — Decided 2026-08-15
 
 Show a **0–10 score with one decimal**, for example `8.7`. It is the primary ranking output everywhere a title appears: collection rows, the title page, the feed, the ranking reveal, and share cards.
@@ -1038,6 +1104,27 @@ Three properties this is required to keep:
 > makes the snapshot honest (a post per correction would be a duplicate of an act that did
 > not happen); **an explicit rewatch may**, because it is a new watch with its own score.
 > Both are `watch-again.test.mjs`. No migration rewrites historic feed scores, deliberately.
+>
+> **As built 2026-09-23.** `20261002000100` (#189) briefly made every card read the live
+> score. #196 restored the snapshot with one canonical refinement (`20261015000100`,
+> `20261016000100`): **earlier watches' posts are frozen**, and a pure correction updates
+> **only the most recently logged watch's** post. See `behavioural-contract.md` §1.2–1.3.
+
+> ### Current state — 2026-09-26, `9d9683a`: how a ranking session ends
+>
+> - **Ordinal is canonical.** `rankings.position` within a category is the truth, and the score
+>   is derived from it (Display, above). Nothing changed here.
+> - **Unranked (backlog) sittings** (`ranking.backlog_enabled`, on in production). Each sitting
+>   deals seen-but-unranked titles one at a time, and a placement left mid-comparison resumes
+>   with its answers. **Done** in the header shows a summary (`RankedSummary`) of only the
+>   titles that sitting completed: poster, title, `#N in Movies` and score. *Keep ranking*
+>   continues the same sitting; the summary's own Done (or the queue running out, or Close)
+>   ends it. If nothing was completed, header Done exits silently. The sitting posts **one**
+>   grouped Feed activity when it ends, described in §14.
+> - **Refine** (`ranking.refine_enabled`: **off in production**, on in staging) ends on the same
+>   summary and posts nothing to the Feed.
+> - **Ranking an already-seen title creates no watch event**, on any path. A ranking date is
+>   never a watch date.
 
 ### Open and provisional
 
@@ -1111,6 +1198,24 @@ A bucket is real partial ordering, not a placeholder. A *I liked it* title is kn
 - The queue is ordered **highest bucket first**, so the part of the list the user cares about gets built first.
 - The card goes quiet once the user has roughly **50 ranked titles**. It remains available but stops prompting.
 - Any Logged title can be ranked directly from its detail page, in `ceil(log2(k + 1))` comparisons against its own band — five or six for the band sizes a real collection produces.
+
+> **Current state (2026-09-26, `9d9683a`).** The card and queue above are replaced by the
+> **Unified Backlog** (founder, 2026-09-21; [`refine-rankings-t5.md`](./refine-rankings-t5.md) §0).
+> The Watched card reads *You have titles left to rank* and shows no count. Collection ▸ Unranked
+> carries *Start ranking* with the exact count, and a sitting shows *7 of 18 ranked*. That count
+> is deliberate and belongs to a job the reader chose to start. It is not a completeness meter on
+> the collection. The ~50-ranked quieting rule is dropped while the backlog is on. The collection
+> half of the watch model:
+>
+> - **Multiple watches.** Each viewing is a `watch_events` row, and *Log another watch* adds one.
+>   The **Watch History** screen is pushed from the title page's personal line.
+> - **Undated watches are first-class.** No date is ever inferred. One undated watch shows **no**
+>   watch line on the title page (only the rank, when there is one). One dated watch shows
+>   *Watched Aug 17, 2026*. From the second watch the line reads *Watched N times*, never
+>   *Watched 1 time*.
+> - **Watched-with.** Title-level tags are social. Each watch can also carry private companions.
+> - **Removing the only watch** in Watch History is *Remove from collection*: it unranks if the
+>   title is ranked, then unlogs, and returns to the title page.
 
 ### Expected effort — informational
 
@@ -1191,13 +1296,24 @@ The Collection's sort chip said **Recently watched** over a wall that was plainl
 
 | Surface | Axes | Default |
 | --- | --- | --- |
-| Collection · Watched | Rating, Recently added, Release year, Title, Shuffle | Rating, highest first |
-| Collection · Watchlist and Unranked | Recently added, Release year, Title, Shuffle | Recently added, newest first |
+| Collection · Watched | Rating, **Recently watched**, Release year, Title, Shuffle | Rating, highest first |
+| Collection · Unranked | **Recently watched**, Release year, Title, Shuffle | Recently watched, newest first |
+| Collection · Watchlist | Recently added, Release year, Title, Shuffle | Recently added, newest first |
 | Profile · See all | Rank, Recently ranked | Rank, highest first |
 
-- **Recently added** is collection *membership* time and is offered on all three collection lists, because all three are backed by a table that stamps `created_at` on insert.
+> **Current state (2026-09-24, #208; frozen at `9d9683a`).** The table above is the current one.
+> On Watched and Unranked, **Recently watched replaced Recently added**: seven hundred titles
+> imported in one minute share an added time, while their watch dates span years. It sorts on
+> `user_media.watched_on`, which is now the maintained `max(watch_events.watched_on)`: the
+> latest real watch. A rewatch moves a title, and a ranking cannot move it, because ranking
+> writes no watch event. Undated titles sink below every dated one in both directions, with an
+> id tiebreak. The Watchlist keeps Recently added, because nothing on it has been watched. The
+> two are never offered together. The two bullets below that say otherwise are the 2026-08-30
+> reasoning, kept for history.
+
+- **Recently added** is collection *membership* time. Since #208 it is offered on the Watchlist only (see above).
 - **Recently ranked** is `rankings.created_at`, and it is the See-all sheet's axis for the privacy reason above.
-- **A watch date is neither**, and there is **no watch-date axis anywhere**. A title logged today and watched in 2011 is a recent *addition* and an old *watch*; conflating them is what produced the photograph. Sorting a collection by watch date is a real thing to want and is on the deferred roadmap — what it needs first is a date on every row, which is a product decision about the Log sheet rather than a comparator.
+- ~~**A watch date is neither**, and there is **no watch-date axis anywhere**.~~ *(Superseded by #208: see the note above.)* A title logged today and watched in 2011 is a recent *addition* and an old *watch*; conflating them is what produced the photograph. Sorting a collection by watch date is a real thing to want and is on the deferred roadmap — what it needs first is a date on every row, which is a product decision about the Log sheet rather than a comparator.
 - **Release year** was two rows reading *Newest* and *Oldest*, sitting directly under a recency axis, with nothing to say whether they meant the film or the library.
 - **Rating is Watched's alone**: nothing on a watchlist has been ranked, so a rating order there would sort by a column that is null on every row. Carrying Rating into the watchlist falls back to Recently added *in its own default direction*, so the chip, the arrow and the rows agree the moment the tab changes.
 
@@ -1236,6 +1352,23 @@ The words in that sentence carry the decisions:
 > release. **The specification below is unchanged and still canonical**; only the stage
 > moved. The reasoning, the surviving policy and the revisit trigger are in
 > [`deferred-roadmap.md`](./deferred-roadmap.md) §20. Free, permanently, whenever it ships.
+
+> **As built 2026-09-23.** The watched-title importer is in production (since 2026-09-14;
+> [`letterboxd-import.md`](./letterboxd-import.md)). Four steps of the flow below are
+> **superseded**:
+>
+> - **Step 3, bucket mapping:** a star is **never** a bucket, position or score
+>   (2026-09-21, `20261018000100`). It is provenance only, and every imported film arrives
+>   unranked with no bucket.
+> - **Step 6, rewatch flags:** diary rows, and their Rewatch flag, become watch events (Watch
+>   History T1, R3).
+> - **Step 7, lists:** not imported. Letterboxd **Lists** import is T6c, a deferred post-freeze
+>   feature ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)).
+> - **Step 9, anchor session:** replaced by the **Unified Backlog**. The summary's *Rank imported
+>   movies* opens Collection ▸ Unranked, where *Start ranking* is. There is no separate "Rank
+>   your imports" flow.
+>
+> Archives up to 1,000 members are accepted (#200).
 
 ### Method — Required by policy
 
@@ -2082,6 +2215,35 @@ series   TV-MA · Drama · Thriller
 > inside the window. Both profile screens now run the same one-actor query, newest
 > first, limit applied *after* the actor filter. The Feed's own windowing is unchanged:
 > it is a different surface making a different claim.
+
+> ### As built — 2026-09-24/25 (#209, `20261020000100`–`20261023000100`): an Unranked sitting is one post
+>
+> **Current at `9d9683a`.** Working through an imported library used to post nothing, by design,
+> because forty `title_ranked` rows in four minutes make a feed nobody can read. The founder's
+> correction is to post **the sitting**, not each title:
+>
+> - **One post per sitting**, `ranking_batch`, on the Feed **and** on the author's profile
+>   Recent activity. It is ranking activity and never a watch: it writes no watch event and moves
+>   no watch date.
+> - **Invisible until the sitting ends.** While the sitting runs, the post is a draft that no
+>   activity read fetches, including the author's own. It is published when the reader ends the
+>   sitting: Done on the summary, the queue running out, Close, or the Refine hand-off. It is dated
+>   at that moment. A force-quit, or the system back gesture, never publishes it. The placements
+>   themselves are already saved.
+> - **The representative is the last title completed.** The row is the ordinary title-activity
+>   row: poster, the actor's avatar in its corner, the same sentence.
+>   - **One title:** it is indistinguishable from an ordinary ranking post, including the score
+>     badge, which comes from the live score (2026-09-25 production QA).
+>   - **Several titles:** *ranked <title> **and** N more*, with no score badge (one title's score
+>     would read as the sitting's). The count opens the full list in placement order, each with
+>     its current position and score.
+> - **Refine, reranks and the ordinary single-title flow never create one.** They keep the feed
+>   rules they always had (Refine and corrections post nothing).
+> - **No historical backfill.** Sittings from before this shipped were silent and stay silent.
+>   Older grouped posts keep their first title as representative. An old event renders in the same
+>   row as a new one.
+>
+> Mechanics: [`../architecture/data-model.md`](../architecture/data-model.md) §6, [`../architecture/ranking.md`](../architecture/ranking.md) §7.
 
 ### Reactions — Decided for public alpha
 
@@ -3503,6 +3665,10 @@ The compact title form is the app's canonical one, so a TV season says which sho
 
 **The invitee's welcome is an inbox row and not a push.** `invite_welcome` leaves `_push_eligible`. The founder's reason: it fires the moment somebody opens Bingd for the first time, so the lock-screen copy arrives while they are already looking at the app that sent it. **Everything else about it is deliberately untouched** — `redeem_invite` still writes exactly one persistent row, it is still exempt from the category gate (like a follow request), it still names the inviter, still routes to their profile, and still carries the Follow / Follow back / Requested / Following control that reports the edge `redeem_invite` created. The inviter's own notifications, the later activation notification, redemption and attribution are all unchanged.
 
+### As built — 2026-09-25 (`20261021000100`): the author answering without tapping Reply
+
+`_add_comment` filed two kinds of `comment` notification. One told the post's owner, and could not fire when the owner was the commenter. The other told a parent comment's author, and needed a parent. So when the **post author** answered with a new **top-level** comment, nobody was told. Now the author's own top-level comment notifies everyone who had already commented on the post. A **third party's** comment still notifies the author alone, plus the parent's author on a reply. "Everyone who once commented hears every later remark" is the thread spam this rule avoids. There is no new type or preference: it is a `comment` row, push-eligible and covered by the Comments preference, and `payload.participant` lets the inbox word it differently. A mention still suppresses the duplicate row, and there is never more than one notification per person per comment.
+
 ## 16. Sharing, deep links, and web fallback
 
 ### Objective
@@ -4242,6 +4408,22 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > relies on it, but the client and the server now disagree about what an unspecified
 > new note means. Closing that is a migration and a founder decision, recorded in
 > `open-questions.md` §8.
+>
+> **Current state (2026-09-26, `9d9683a`): the client default changed twice after this block.**
+> #111 (founder, 2026-09-06) replaced "new notes are private" with a remembered habit, and #210
+> (2026-09-25) restored that habit after a brief private-only revision:
+>
+> - A reader's **first-ever** new note opens with *Share as a review* **on**.
+> - After that, a **new** note opens on the reader's last explicit choice for a new note. The
+>   choice is stored per account **on the device** (`note-visibility-pref`), is not synced, and is
+>   recorded only when a new note saves.
+> - A note that **already exists** always opens on its stored visibility and spoiler flag, as above.
+> - *Write a review* always opens shared.
+>
+> The same rules apply on every surface that writes a note: the log/rank sheet, *Log another
+> watch*, and Watch History ▸ edit. The "left open" server default above was closed by NR-1
+> (`20260825000200`): an unspecified new note is written **private**.
+>
 > **Founder decision, 2026-08-23 — Ranking, Review and Private note.**
 >
 > Three things a person can produce about a title, and the app now names them the way

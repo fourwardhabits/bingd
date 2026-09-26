@@ -297,6 +297,13 @@ rotating anchors and the TV correctness fixes. The exposure-engine work is defer
 7. **At most six upstream fills per slate** (`MAX_FILLS_PER_SLATE` = the old whole limit),
    strongest first. An anchor past the cap with no cached list contributes nothing that
    launch.
+   **Current state (#206, 2026-09-23, client only):** a fill blocks the wall only when there
+   would otherwise be no taste-led wall. If any chosen anchor already has a cached list, the
+   slate draws at once and the fills run without being awaited, landing for the next launch. The
+   wall never redraws when they land. If no anchor has a list, the queryFn waits, three fills at
+   a time (`FILL_CONCURRENCY`) rather than one after another. Trending and social reads now start
+   alongside the cached-list read. Measured on staging: one fill is 561 ms p50, six in series were
+   3,368 ms and six in parallel 1,075 ms. The trending/social chain went from 308 to 209 ms p50.
 8. `anchorSeed` (`session-seed.ts`) is fixed per process and is part of the query key, and
    the selection is memoised per launch and wall (`use-for-you.ts` `selections`), so the
    cache moving under a refetch cannot re-draw it. A **cold launch** draws a new selection;
