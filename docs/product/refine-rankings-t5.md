@@ -1,11 +1,37 @@
 # T5 — Unified Backlog + Refine (as built)
 
-**Status:** built on `feat/backlog-refine-unified`, restacked on #196's frozen head `b9b07c2`
-(founder device QA passed on update `01a0c6da`). #197's own branch, `feat/refine-rankings-t5`,
-is left untouched until #196 merges; this branch is then rebased onto main.
-Migration **`20261019000100`** (renumbered from `20261013000100`; #196 owns 013–018) is applied to
-**staging only**. **`ranking.backlog_enabled` and `ranking.refine_enabled` both ship `false`**,
-so nothing is reachable until an operator flips them. Production is untouched.
+**Status (2026-09-23, stopping point): shipped.** Merged to `main` as PR #203 (`ceb4f14`), on
+top of #196 (`30833d5`). Migration **`20261019000100`** is applied to **staging and
+production** (production: 168 migrations, head `20261019000100`). The production OTA from
+`a17880d` carries the client (Android Play vc12 and iOS TestFlight 1.0.1 builds 8–12; App Store
+1.0.0 users get it with the 1.0.1 (13) binary). Production flags, read 2026-09-23:
+**`ranking.backlog_enabled = true`**; **`ranking.refine_enabled = false`** until the backlog
+smoke passes (cutover phase 8, [`stopping-point-cutover.md`](../release/stopping-point-cutover.md)).
+Refine is finished product that is switched off, not unfinished work. #197 (the pre-unified T5
+draft branch) is superseded by #203.
+
+This is the one ranking flow for everything already seen and not yet ranked. It **supersedes the
+separate "Rank your imports" / standalone T6 concept**: imported titles are simply the backlog's
+largest source. The import summary's existing **Rank imported movies** button opens Collection ▸
+Unranked, where *Start ranking* is. PR #204 (not merged at `9d9683a`) rewords it
+to *Rank imported titles* and shows it only while the backlog has titles. Either way it is a
+shortcut into this same flow, not a second product.
+
+**Current state (2026-09-26, `9d9683a`).** Three changes since the stopping point, none of them to
+the ranking engine or to target selection:
+
+- **Done and the summary (#208).** **Done** replaces the close glyph in both session headers. It
+  opens `RankedSummary`, which is shared by the backlog and Refine and lists only the titles this
+  sitting **completed**: poster, title, `#N in Movies` and the score, with no movement, previous
+  position, watch date or social element. If nothing was completed, Done exits silently. From
+  the summary, the backlog offers **Keep ranking** while titles remain, and otherwise the Refine
+  hand-off if the card rules pass. #209 removed the summary's *You're caught up.* line. The
+  plain caught-up screen still appears when a sitting placed nothing.
+- **One grouped feed post per backlog sitting (#209).** This replaces §0's *a backlog placement
+  posts nothing*: each placement is still silent, and the sitting as a whole posts once (see §0,
+  **Feed**).
+- **Refine** is unchanged in behaviour. Its flag is false in production and on for staging QA.
+  It creates no grouped Feed activity and no feed event of any kind.
 **Design:** [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md)
 §G, §H, and §I as amended there; the unified design approved by the founder on 2026-09-21.
 This file records what was built, the exact rules, and where the build departs from the design.
@@ -37,7 +63,7 @@ manual entry. **Not now** (and Done after a sitting) stores the medium's placeme
 may return only after `ranking.refine_resurface_placements` (3) new placements **and** a strong
 batch again. No time-based return.
 
-**Backend (`20261019000100`, one unapplied-until-now file):** `ranking_backlog` (read) and
+**Backend (`20261019000100`):** `ranking_backlog` (read) and
 `rank_backlog_start` (write, calls the write guard), `refine_candidates` amended (§2, the `cta`
 block, `placements_total`), and `rank_start` gains one branch: an open backlog session in the same
 bucket is resumed as itself rather than restarted, so + on a row and Rank on the title page keep its
@@ -48,9 +74,17 @@ titles only, both media, unused by the client) is left as it is.
 never a bucket; the guarded backfill), `rankingStateOf`, the binary ranked/unranked UI, and the
 first-placement session that survives a close.
 
-**Feed:** a backlog placement posts nothing (founder decision 2). Finishing an abandoned **native**
-ranking — resumed from the backlog or anywhere else — keeps its native kind, so it posts as it
-would have. `ranking-backlog.test.mjs` asserts both.
+**Feed:** ~~a backlog placement posts nothing (founder decision 2).~~ **Amended 2026-09-24/25
+(#209):** a single backlog placement still posts nothing, but **the sitting posts one grouped
+`ranking_batch` activity** (`20261020000100`–`20261023000100`). The post stays a hidden draft
+while the sitting runs. It is published when the sitting ends through Done, the queue running
+out, Close, or the Refine hand-off, and it names the **last** title completed. A force-quit or the
+system back gesture leaves it unpublished. A one-title sitting renders as an ordinary ranking
+activity with its score. A multi-title sitting reads *ranked <title> and N more*, and the count
+opens the list. The sitting writes no watch event. Finishing an abandoned **native** ranking inside
+a sitting keeps its native kind, so recommendation fulfilment still fires, but its own
+`title_ranked` is absorbed into the sitting's post (`20261022000100`). Outside a sitting it posts
+as it would have. `ranking-backlog.test.mjs` and `ranking-batch-feed.test.mjs` assert this.
 
 ---
 
@@ -173,8 +207,10 @@ Measured with `supabase/tests/perf/refine-scale.mjs` on real PostgreSQL 17:
 Evidence-driven selection fixes 1.8× as much disorder per answer. Almost every title it offers
 actually needed a look, so a sitting spends the reader's attention where it changes something.
 Random pairs are worse still: about 96% of them ask a question whose answer is already implied by
-the list. The drifted titles are the honest limit. Their evidence looks fine, so Refine reaches them
-only through the `stale` term, and after a year.
+the list. The drifted titles are the honest limit. Their evidence looks fine, and since the unified
+design removed the `stale` age term (§2), Refine reaches them only if a later answer contradicts
+them or an explicit rerank carries titles past them. That is deliberate: time alone is not
+evidence of a misplacement.
 
 ## 4. Why it stops
 
@@ -285,14 +321,22 @@ also an extreme shape; no real account's size was checked for this note.
 - **Instrumented to tune, not redesign:** the `cta` block returns the counts at both thresholds and
   why the strong titles qualified (`gap` / `contradicted` / `crossed`); each candidate carries
   `signals`; `refine_card_shown` and `refine_target_outcome` report them (analytics.md).
-- **Screen:** `app/rank-session.tsx?start=refine` is full-screen and headerless. It shows Close, _Refine · Movies_ and
-  five round dots. The target stays pinned: _Is this still in the right place?_, then the title,
-  `#18 in Movies`, and the reason line (for example _Never compared with the titles around it_ or
-  _Last placed when you had 34 movies_). Below that is the existing comparison view (Undo, Too tough,
-  Details), then _I don't remember Heat well_.
-- **Result:** private, and exact at any depth: `Moved from #21 → #15 ↑`, `Still #21`, `Kept at #57`,
-  then **Next**. The checkpoint lists the round and offers **Done**, plus **Keep going** while
-  rounds remain **and** card-quality titles are still waiting.
+- **Screen:** `app/rank-session.tsx?start=refine` is full-screen and headerless. It shows Close,
+  _Refine · Movies_ and a progress count (`refine-progress`, pinned when the round is dealt —
+  the draft's five dots are gone). The body is vertically centred, like the backlog's. The target
+  stays pinned: _Is this still in the right place?_, then the title, `#18 in Movies`, and the
+  reason line (for example _Never compared with the titles around it_, _One of your answers
+  disagrees with where it sits_, _Titles near it have moved past it since_, or _Last placed when
+  you had 34 movies_ — a growth signal, never an age). Below that is the shared, spacious
+  comparison view (it sizes its cards from the window, so the pair does not drift between rounds):
+  Undo, **Can't decide**, Details, and **Skip title (left)**, then _I don't remember Heat well_.
+- **No per-title result screen** (founder, 2026-09-22): a later target in the same round can move
+  this one again, so the count goes up and the next target opens. The **round summary** at the
+  checkpoint lists each title as poster, name, a muted `#21 → #15` and its current score. There is
+  no previous score anywhere in the session, so none is shown. The checkpoint offers **Done**, plus
+  **Keep going** only while rounds remain **and** a fresh server read (`probeAfterRound`) still
+  finds card-quality titles. Done quiets the **card** until the resurface rule passes. It does not
+  claim the server has nothing left.
 - **No precision theatre.** There is no percentage, no "accuracy" and no count of what is left. A
   test asserts it.
 
@@ -300,7 +344,7 @@ also an extreme shape; no real account's size was checked for this note.
 
 | §H says                                                                                                | Built                                                                                                                                                         | Why                                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Priority from stale / growth / fragile / newer_neighbours (ledger only); `direct_gap` deferred to v1.1 | **Pairwise evidence first** (the gaps, from the latest answer per pair, legacy answers only when they agree with the order), with stale and fragile as boosts | The brief asks for "sparse comparison evidence" and "inferred placement spans a broad range". The gap measures exactly that, and it gives a crisp "refined enough" rule, which the ledger terms cannot |
+| Priority from stale / growth / fragile / newer_neighbours (ledger only); `direct_gap` deferred to v1.1 | **Pairwise evidence first** (the gaps, from the latest answer per pair, legacy answers only when they agree with the order), with fragile as a boost (the draft's `stale` boost was removed by the unified design: no age term) | The brief asks for "sparse comparison evidence" and "inferred placement spans a broad range". The gap measures exactly that, and it gives a crisp "refined enough" rule, which the ledger terms cannot |
 | Exclude titles first placed < 14 days or confirmed < 60 days ago                                       | Evidence rule plus a 30-day refine cooldown                                                                                                                   | A fresh bisection is already fully evidenced, and an import from yesterday has no evidence, so it should not wait two weeks                                                                            |
 | Band ≥ 3                                                                                               | Band ≥ 2                                                                                                                                                      | Two titles that were never compared are a real, one-question uncertainty                                                                                                                               |
 | First target from the top 50                                                                           | `rank_weight`                                                                                                                                                 | Same effect without a special case                                                                                                                                                                     |
@@ -325,9 +369,10 @@ also an extreme shape; no real account's size was checked for this note.
 - **Client ahead of the backend:** a backend without the function (`PGRST202`/`42883`) reads as
   `disabled`.
 - **Order, after #196 is on the target:**
-  1. Apply `20261019000100` with `db push` (staging: done 2026-09-21).
-  2. Publish the client.
+  1. Apply `20261019000100` with `db push` (staging: 2026-09-21; production: 2026-09-23).
+  2. Publish the client (production OTA from `a17880d`, 2026-09-23).
   3. Flip the flags for the environment under test (`backlog_enabled` first; Refine after).
+     Production: backlog on 2026-09-23; Refine still off, waiting on the backlog smoke.
 
   Rollback is the flag set to `false`. Nothing Refine wrote needs undoing: moves are ordinary
   placements in the ledger.
@@ -357,13 +402,17 @@ imported, unranked Letterboxd titles and 20+ ranked movies covers every step.
 4. **Order:** a film you started ranking in bingd and abandoned comes first, straight into its
    comparisons at the pair you left (no *How was it?*). Then imports by most recent watch date. An
    import asks *How was it?* first.
-5. **Progress:** *7 of 18 ranked* counts up toward a fixed total. **Skip this one** moves on; the
-   skipped title is still in Unranked afterwards.
+5. **Progress:** *7 of 18 ranked* counts up toward a fixed total. **Skip title (left)** on the
+   comparison (**Skip title** on *How was it?*) moves on; the skipped title is still in Unranked
+   afterwards. **Can't decide** is different: it declines that one comparison and keeps placing
+   the same title.
 6. **Checkpoint:** after 10 placed, *10 titles ranked.* — **Keep going** continues, **Done** leaves.
 7. **Close mid-comparison**, then tap + on that title in Search (or Rank on its title page): it
    resumes at the same pair, with no *How was it?* and no restart.
-8. **Feed:** nothing from the backlog titles you placed. (Finishing a film you had abandoned
-   natively may post, as it always would have.)
+8. **Feed** *(amended by #209)*: nothing appears while the sitting runs, not even to you. After
+   Done, **one** post appears, naming the last title you placed: an ordinary ranking row with a
+   score for one title, or *ranked <title> and N more* for several. No per-title posts, including
+   for a film you had abandoned natively and finished inside the sitting.
 9. **Caught up:** *You're caught up.* — with *Refine a few rankings?* only if step 11's card would
    show; otherwise just Done.
 
@@ -373,9 +422,12 @@ imported, unranked Letterboxd titles and 20+ ranked movies covers every step.
     placements* (N ≤ 5). **Refine rankings** opens the session; **Not now** hides it.
 12. **Not now:** stays hidden however long you wait; returns only after 3 new rankings in that
     medium (if the batch is still strong).
-13. **Session:** reason lines never mention age. After 5 titles (or 12 answers) the checkpoint
-    shows outcomes; **Keep going** appears only while strong titles remain; round 3 offers Done only.
-14. **Only answers move a title:** unchanged → *Still #N*; answered against the list → *Moved from
-    #X → #Y*; three Too tough → *Kept at #N*. No feed post, no new viewing, streak unchanged.
+13. **Session:** reason lines never mention age. There is no per-title result page. After 5 titles
+    (or 12 answers) the round summary lists what moved (`#X → #Y` beside the current score);
+    **Keep going** appears only while strong titles remain; round 3 offers Done only.
+14. **Only answers move a title:** an unchanged title keeps its place; an answer against the list
+    moves it; repeated **Can't decide** or running out of eligible opponents leaves it at its
+    uncertainty-safe placement, marked `adjustable` in the ledger (never a guessed winner). No
+    feed post, no new viewing, streak unchanged.
 15. **Movies and TV are separate:** each medium has its own backlog, card and session.
 16. **Lists:** no ranking or refinement cards.

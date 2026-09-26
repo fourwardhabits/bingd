@@ -3,6 +3,18 @@
 **Version:** v1 (public alpha)
 **Specification:** [`../product/PRD.md`](../product/PRD.md) §10, §11 · [`data-model.md`](./data-model.md) §5
 
+> **Stopping point, 2026-09-23.** Everything below still holds, and §13 adds what #196 and
+> #203 built on top of it (in production, head `20261019000100`): the placement ledger, the
+> prior-anchored rerank, the Unified Backlog and Refine. Three passages are superseded, each
+> marked where it stands: the *Too tough* label in §5 (now **Can't decide**), the unranked
+> queue in §10 (now the backlog), and the feed score in §11 (a card keeps the score of its
+> own watch again).
+>
+> **Current state (2026-09-26, `9d9683a`).** #208–#210 changed only what sits around the
+> engine. An Unranked sitting now ends in a summary and posts **one** grouped feed activity
+> (§7, *The feed activity a completion earns*; §13.3). The first comparison of a session is
+> seeded from the cached band (§13.5). Nothing in I1–I7 or the session engine changed.
+
 This is the core mechanic. It is also the part most likely to produce subtle, hard-to-notice corruption, so the invariants are stated first and everything else is written to preserve them.
 
 ---
@@ -171,6 +183,11 @@ This is why bands matter beyond correctness. A user with 400 ranked movies split
 
 ## 5. Too tough and Back
 
+> **Label superseded 2026-09-22: the control reads *Can't decide*** on every comparison
+> surface. The mechanism below is unchanged. The ranking session adds a distinct
+> **Skip title (left)**, which drops the title for the sitting (§13.3), where Can't decide
+> declines one comparison.
+
 **`Too tough` is the label on every comparison surface** since 2026-08-30 — onboarding,
 a first ranking, the Log tab, Rank again, and every re-bucketing path that shows a
 comparison. They are all the same component (`RankingSheet`), the label was
@@ -328,6 +345,13 @@ A placement that replaces a position as a *correction* — `rank_rebucket`, or `
 
 An abandoned session posts nothing because it never reaches finalise, and a retried completion posts nothing because `_claim_operation_result` answers it from the ledger.
 
+> **Current state (2026-09-26, `9d9683a`): the two sessions that are not a single title's own.**
+>
+> - **An Unranked (backlog) sitting** (`20261019000100`, `ranking.backlog_enabled`) opens each fresh placement in the silent `import` kind, so `_rank_finalize` posts nothing per title. Instead the client passes one sitting uuid with every completed placement to `rank_batch_note`, which keeps **one** feed row per sitting (`20261020000100`). The row is a `ranking_batch_draft` — a type no activity read asks for, so it is invisible even to its author — until `rank_batch_finalize` flips it to `ranking_batch` and dates `causal_at` at that moment (`20261023000100`). Finalisation runs from the session screen's `endSitting`: the summary's Done, the queue running out, Close, or the hand-off to Refine. Its `media_item_id` is the **last** title completed; a sitting that completed nothing leaves no row. A resumed native first-ranking session inside a sitting still finalises as `first` (so `recommendation_ranked` still fires), and `rank_batch_note` absorbs the single `title_ranked` that placement wrote (`20261022000100`), so a sitting is one post. It writes no `watch_events` row and moves no `watched_on`.
+> - **Refine** (`ranking.refine_enabled`) finalises `kind = 'refine'` placements and writes no feed event, grouped or otherwise, and no notification.
+>
+> A sitting left any other way — force-quit, or the system back gesture — never reaches `endSitting`, so its draft stays invisible. The placements themselves are already committed.
+
 ### What a correction keeps — `20261001000100`
 
 A correction is not a new ranking act, and since `20261001000100` nothing downstream hears it as one. `_rank_finalize` still performs it as a delete and re-insert of the `rankings` row, but the re-inserted row **keeps the `created_at` the ranking already had**. A first placement and a *Log another watch* are ranking acts and are stamped now. So `rankings.created_at` means the instant of the latest ranking act, which is what the weekly streak, *Recently ranked* and the people suggestions all read it as.
@@ -449,6 +473,8 @@ Sessions themselves need no locking: `(user_id, media_item_id)` is unique, so a 
 
 ## 10. The unranked queue
 
+> **Current state (2026-09-26, `9d9683a`): superseded by the Unified Backlog (§13.3).** The client no longer calls `unranked_queue`; the function (`20260813000700`) is left in place, unused. Collection ▸ Unranked's **Start ranking** opens `app/rank-session.tsx`, which reads `ranking_backlog` and places through `rank_backlog_start` (`20261019000100`, gated by `ranking.backlog_enabled`, on in production since 2026-09-23). The order is incomplete placements first (an open first-ranking session, then a title with a bingd bucket), then latest watch date, then most recently added. Stars never make a bucket (`20261018000100`), so a title with no bucket is asked *How was it?* first. A placement left mid-comparison resumes with its answers, whether it is reopened from the backlog, from + on a row, or from Rank on the title page. The sitting ends in `RankedSummary`, which lists only the titles that sitting completed. The spec is [`../product/refine-rankings-t5.md`](../product/refine-rankings-t5.md); the text below is the original design.
+
 PRD §11 requires a "Rank 5 more" prompt drawing from the highest bucket first, quieting at roughly 50 ranked titles.
 
 ```sql
@@ -504,6 +530,8 @@ A score depends on the *sizes of all three bands* for that user and category, no
 
 ### The feed, which used to be an exception and is not one now
 
+> **Reversed by #196's founder QA (2026-09-21, in production 2026-09-23). Current state at `9d9683a`:** a ranking post shows **its own watch's score**, the `payload.score` it was written with. `20261016000100` keeps the most recent watch's post in step with a pure *Update your rating*, and `20261014000100`/`20261015000100` (`feed_watch_scores`) freeze each earlier viewing's post. `public_scores` is still read once per page, but only for two things: to drop the badge from a post whose title is no longer ranked, and to lend a live score to a post that carries none. The posts that carry none are pre-snapshot `title_ranked` rows and a `ranking_batch` that placed exactly one title (`attachScores` in `src/features/feed/use-feed.ts`). A grouped post covering more than one title shows no badge. The current score lives on the title page, Collection, Search and list rows. The paragraph and argument below record the `20261002000100` interlude.
+
 `_rank_finalize` denormalizes `position` and `score` into `feed_events.payload` (§6), and until `20261002000100` the activity surfaces drew that snapshot. **They now read the current value, through `public_scores`, once per page.** The snapshot is still written and is only a fallback for a client whose live read failed.
 
 The original argument for the snapshot was twofold and both halves were wrong.
@@ -533,3 +561,91 @@ The original argument for the snapshot was twofold and both halves were wrong.
 | Ranking is online-only, never queued | Sessions are server state; no ranking RPC is outbox-eligible |
 | Reranking never deletes viewing history | §7, unranking |
 | Manual reorder stays within the band | §7 |
+
+---
+
+## 13. Since the stopping point (#196, #203; in production 2026-09-23)
+
+The invariants I1–I7 and the session engine above are unchanged. What was added sits
+beside them, never inside them.
+
+### 13.1 The placement ledger (`20261004000100`)
+
+`ranking_placements` is **append-only**: one row per completed placement, with `kind`
+(`first` · `rewatch` · `correction` · `refine` · `import` · `manual` · `backfill`),
+`outcome` (`placed` · `moved` · `unchanged` · `kept`), the category ordinal and score it
+landed at, the live `from_*` state read inside the category lock, `strategy`, `tolerance`,
+`comparisons`, `skips`, **`adjustable`**, and the `watch_event_id` it belongs to.
+
+- **`rankings.position` stays the one canonical ordinal.** The ledger records moves and
+  never decides them. Nothing averages, replays or decays it into a position.
+- **`adjustable`** is set when the title was placed at the uncertainty-safe midpoint,
+  because repeated **Can't decide** or a dry walk left a range, not because a comparison
+  decided it. It is ledger data only: the reveal does not mention it (§5), and Refine reads it
+  as the `fragile` boost.
+- Movement (`Moved from #18 → #7`, `Still #7`) is printed only on the reader's own
+  surfaces, and exact at any depth. The feed carries no ordinal.
+- `assert_placements_valid()` checks the ledger against `rankings`.
+
+### 13.2 Rerank from the current position (the prior-anchored search)
+
+A correction or a rewatch re-check starts at the title's current place (`strategy =
+'prior'`, `next_pivot`): the neighbour just above, then just below, galloping outward
+only when an answer shows the title moved, then bisecting. An unchanged title costs about
+two answers. `ranking.prior_search_enabled` is the kill switch back to plain bisection.
+
+**Rerank vs rewatch** (`20261005000100`): *Log another watch* writes a `watch_events` row and
+a `rewatch` placement. *Update your rating* writes a `correction` placement and no watch, no
+feed event, and keeps `rankings.created_at`. A correction updates only the **most recently
+logged** watch's post (`20261016000100`).
+
+### 13.3 The Unified Backlog (`20261019000100`, `ranking.backlog_enabled`)
+
+- `ranking_backlog(category)` reads the titles seen and not ranked. Incomplete native
+  placements come first, then most recent watch date, then most recently added. A star
+  orders nothing (`20261018000100`).
+- `rank_backlog_start` resumes an open native first-ranking session with its answers, or
+  opens a silent **`import`-kind** placement, which posts nothing per title. `rank_start`
+  gains one branch, so an open backlog session in the same bucket resumes rather than
+  restarts.
+- **Skip title** drops a title for the sitting, and it stays in Unranked. The checkpoint
+  comes every `ranking.backlog_checkpoint` (10).
+- **Done** in the header (#208) shows `RankedSummary`: poster, title, `#N in Movies` and the
+  score, for the titles this sitting completed and nothing else. A skip never completes, and
+  a title left mid-comparison stays an open session. If nothing was completed, Done exits with
+  no summary. The summary offers **Keep ranking** while the backlog still has titles, and
+  otherwise the Refine hand-off if the card rules pass.
+- **One grouped feed activity per sitting** (#209, `20261020000100`–`20261023000100`):
+  `rank_batch_note` / `rank_batch_finalize` and the `ranking_batch` type. It is a hidden draft
+  until the sitting ends, and it shows the last title completed. See §7, *The feed activity a
+  completion earns*, and [`data-model.md`](./data-model.md) §6.
+- It replaces §10's queue in the client and the standalone "Rank your imports" (T6) flow.
+
+### 13.4 Refine (`20261019000100`, `ranking.refine_enabled`)
+
+- `refine_start` opens an ordinary `_rank_start_impl` session with `kind = 'refine'` and a
+  tolerance ±w by depth (0 / 1 / 3 / 7). Every answer goes through the unchanged
+  `rank_answer` / `rank_skip` / `rank_back`. **No second ranking algorithm.**
+- `_refine_support` derives, per title, the **evidence gaps** above and below (distance to
+  the nearest agreeing direct answer), **newer contradicting answers**, and titles an
+  **explicit rerank** carried past it. It is derived and never stored. **There is no age
+  term:** placement age is not evidence.
+- `refine_candidates` returns candidates plus a `cta` block (show the card only at ≥ 20
+  ranked, ≥ 3 strong candidates, nothing left to rank). `ranking_snoozes` holds "I don't
+  remember it" for 180 days. There is a server daily ceiling of 30.
+- Refine never writes `watch_events`, `user_media`, `feed_events` or `rankings.created_at`.
+- **Production state:** built and migrated. The flag is **false** in production until the
+  backlog smoke passes (`../release/stopping-point-cutover.md`); staging runs it on for QA.
+  Refine ends on the same `RankedSummary` as the backlog and posts no grouped activity.
+
+### 13.5 The first comparison without a second read (#206, client only)
+
+`rank_answer`, `rank_skip` and `rank_back` return `pivot_card` (`20260922000100`), but
+`rank_start` does not. So the first comparison of every session used to read `media_items`
+right after the RPC, one call after another. `seedPivotCard` (`src/features/ranking/pivot-card.ts`)
+now takes that card from `useRankedCollection`'s cached band, because every pivot is a title in
+the subject's own band. The server still chooses every pivot. A title the cache does not hold
+falls back to the query. No RPC or migration changed.
+
+Full rules and measurements: [`../product/refine-rankings-t5.md`](../product/refine-rankings-t5.md).
+Design: [`../product/watch-history-and-ranking-calibration.md`](../product/watch-history-and-ranking-calibration.md) §E–§I.

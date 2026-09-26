@@ -1,6 +1,23 @@
 # Letterboxd import
 
-**Status:** Phases 1–3 implemented on `feat/letterboxd-import`. Not merged, not on
+**Current status (2026-09-23, stopping point).** The watched-title importer is **in
+production** (since 2026-09-14, `letterboxd-production-promotion.md`). Since then:
+
+- **#196** routes diary dates into `watch_events` (T1). It also makes a Letterboxd star
+  provenance only (`20261018000100`: the server refuses a bucket from an import, and the
+  backfill cleared the star-derived buckets). Both are live in production.
+- **#200** raised the archive member limit from 50 to 1,000 and stops the listing walk at the
+  limit plus one. Larger archives, including accounts with many lists, now import their
+  watched history. It is in the 2026-09-23 production OTA.
+- **Imported titles are ranked in the Unified Backlog** (#203): *Rank imported movies* opens
+  Collection ▸ Unranked, where *Start ranking* is. There is no separate "Rank your imports"
+  flow.
+- **Deferred:** Letterboxd **Lists** import (T6c, [`letterboxd-lists-import.md`](./letterboxd-lists-import.md))
+  and the **unmatched-title repair** screen (T6b).
+
+The status and staging notes below are the historical record of the build.
+
+**Status (historical):** Phases 1–3 implemented on `feat/letterboxd-import`. Not merged, not on
 production, **not physically tested**.
 
 Staging (`fjxhcbowoxuzulwirzyr`) carries the whole pipeline: 128/128 migrations, the Edge
@@ -657,10 +674,14 @@ its last run succeeded (`import_drain_status()`), and 126/126 on the anon smoke.
 
 ## 8. Deliberately not built
 
-- **Lists.** Custom lists are out of scope for the first import (Contract V3 §11).
+- **Lists.** Custom lists are out of scope for the first import (Contract V3 §11). Designed
+  since as T6c and **deferred post-freeze**. See [`letterboxd-lists-import.md`](./letterboxd-lists-import.md).
+  List files are still never extracted.
 - **Reviews.** They are `user_media.note` in Bingd's model and are somebody's own writing;
   importing them was declined rather than deferred.
 - **A repair screen.** Unresolved rows keep their names for one, and the summary reports
   the count, but the screen that lets somebody place them by hand is not built yet.
+  Designed as *Review unmatched titles* (T6b, `watch-history-and-ranking-calibration.md`
+  §I.7) and **deferred**.
 - **Re-import / merge.** A second import of a changed export is idempotent per row but has
   no reconciliation of removals.
