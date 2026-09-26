@@ -186,13 +186,40 @@ out and back in fixes it.
 
 ## 6. Stopping it
 
+**Once `20260911000200` is applied** (written 2026-09-07, not yet applied — see §10 for why
+the row it makes authoritative was inert until then), the first thing to reach for is the
+switch:
+
+```sql
+update app_config set value = 'false'::jsonb, updated_at = now()
+ where key = 'push.delivery_enabled';
+```
+
+It takes effect on the next tick and the next claim, needs no cron privilege and no deploy.
+While it is off nothing is claimed, no attempt is charged and no lease is taken: the outbox
+**holds**. `push_drain_status()` reports `delivery_enabled: false` and names
+`delivery_disabled` among its problems, so a stopped pipeline is never mistaken for a broken
+one — and the tick returns `{status: 'disabled'}` rather than raising. The only value that
+stops delivery is the JSON boolean `false`; a missing row or anything else is on.
+
+Before switching it back, decide whether the *content* of what was queued was the problem.
+If it was, empty the queue first — those rows will otherwise go out in a burst:
+
+```sql
+delete from push_outbox;                                     -- optional
+update app_config set value = 'true'::jsonb, updated_at = now()
+ where key = 'push.delivery_enabled';
+```
+
+The coarser tool is still there and still works:
+
 ```sql
 select unschedule_push_drain();
 ```
 
-Notifications keep arriving in-app. Only the phone stops buzzing. This is the first thing to
-reach for if the sender is misbehaving — it is reversible with `schedule_push_drain()` and
-costs nothing but delivery latency, because the outbox keeps the work.
+Notifications keep arriving in-app under either. Only the phone stops buzzing. Both are
+reversible (`schedule_push_drain()` for the second) and cost nothing but delivery latency,
+because the outbox keeps the work.
 
 To also stop *enqueueing*, drop the trigger — but prefer the above: an outbox that fills while
 the drain is off drains when it comes back, and a missing enqueue is a notification that never
@@ -350,9 +377,12 @@ Ruled out, so nobody spends a day on them:
   tap and nudges the drain. It is correct and it is the reason the failure is silent.
 - **The backend dispatch.** The trigger, the outbox, the lease and the sender are all in
   place and tested; there is simply nothing addressed to send to.
-- **`push.delivery_enabled`.** It reads `false` on nonprod and **nothing consumes it** — it
-  is seeded by `20260813000100` and never read. A vestigial AD-10 flag, not a switch. Worth
-  deleting or wiring, and it is neither today.
+- **`push.delivery_enabled`.** It reads `false` on nonprod and, until `20260911000200` is
+  applied, **nothing consumes it** — it is seeded by `20260813000100` and was never read. A
+  vestigial AD-10 flag, not a switch. That migration wires it (§6) and, because delivery has
+  been on the whole time the row said `false`, sets it to `true` on apply so nothing changes
+  the moment it lands; the literal is the deployment-time choice and is marked as such in
+  the file. Until it is applied, the row still means nothing.
 
 ### Founder actions, in order
 
