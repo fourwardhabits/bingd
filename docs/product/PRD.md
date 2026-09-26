@@ -21,6 +21,40 @@
 >
 > **Product scope is re-frozen as of 2026-08-19.** No further product feature ships before the friend beta unless a Preview test exposes a blocker, a hardening requirement forces a product behaviour change, or the founder breaks the freeze deliberately.
 
+> ### As built 2026-09-23 — the stopping point
+>
+> The founder broke the freeze deliberately for one release, and it is now in production
+> (168 migrations, head `20261019000100`; the client in the OTA from `a17880d`). The
+> decisions are recorded in [`decision-log.md`](./decision-log.md) §15.
+>
+> **Shipping core:**
+>
+> - **Watch History** (#196): multiple watches and rewatches, the Watch History screen,
+>   per-watch date, note and watched-with. A **rewatch** (*Log another watch*) is a new watch.
+>   A **rerank** (*Update your rating*) is a correction that writes no watch and no post. Each
+>   watch's feed post keeps the score held at that watch; a correction moves only the latest
+>   watch's post. Design: [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md).
+> - **Native Lists v1** (#196): mixed media, privacy (Only you / Anyone with the link /
+>   Public), custom order, share, Add to list, public web page. [`lists-prd.md`](./lists-prd.md) §R.
+> - **Unified Backlog + Refine** (#203): one ranking flow for everything seen and unranked,
+>   imports included. It **supersedes the separate post-import "anchor session"** in §12 and
+>   any standalone "Rank your imports" flow. Refine Rankings recalibrates what is already
+>   ranked from **evidence gaps, newer contradictions and explicit rerank crossings**, with
+>   **no age-based staleness**. Refine is built and in production, and `ranking.refine_enabled`
+>   stays off until the backlog smoke passes. [`refine-rankings-t5.md`](./refine-rankings-t5.md).
+> - **Exact ordinal ranking is canonical truth.** Approximate placement happens only after
+>   repeated **Can't decide** or exhausted opponents, and is marked `adjustable` in the ledger.
+>   The comparison controls are **Can't decide** and **Skip title (left)**.
+> - **A Letterboxd star is never a bucket, position or score** (2026-09-21). §12's star
+>   mapping is superseded. Larger archives import since #200. **Android** is publicly
+>   distributed (#192).
+>
+> **Deferred:** Letterboxd **Lists** import (T6c, a post-freeze acquisition feature:
+> [`letterboxd-lists-import.md`](./letterboxd-lists-import.md)); predicted score;
+> unmatched-import repair; *add what I've already seen* bulk entry; stats / Wrapped; real
+> release notifications; Watch Next; post-ranking share cards. **Still out of scope:**
+> episode-level tracking and whole-series ranking.
+
 ---
 
 ## Table of contents
@@ -637,7 +671,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 - Watched and completed state, watchlist, and separate Movies and TV Seasons rankings.
 - **Three-bucket rating** followed by pairwise comparison within the bucket.
 - **Logged and Ranked collection states**, with a quiet path from one to the other.
-- **Letterboxd import** from uploaded export files, with matching preview, bucket auto-mapping, and a post-import anchor session.
+- **Letterboxd import** from uploaded export files, with matching preview, bucket auto-mapping, and a post-import anchor session. *(**As built 2026-09-23:** no bucket auto-mapping, since a star is never a bucket, and no separate anchor session: imported titles are ranked in the Unified Backlog. Lists are not imported (T6c, deferred).)*
 - User profiles, one-way follow and unfollow, chronological feed, people discovery and leaderboard, match score.
 - **Reactions** on feed activity.
 - **Watch tagging** of Bingd users, with the invite hand-off for non-users.
@@ -906,6 +940,16 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 > the reader asking rather than being asked. A new session may reconsider the pair, which
 > is what makes Rank again a real second opinion.
 
+> ### As built 2026-09-22: **"Can't decide"** replaces "Too tough", and **Skip title** is a separate act
+>
+> Founder QA of the Unified Backlog. Beside the session's own skip, "Too tough" read as a
+> second way to skip, so the label changed on every comparison surface. The mechanics above
+> did not: it is the same `rank_skip`, the same three-skip midpoint, the same `adjustable`
+> mark, and nothing invented. The session's **Skip title (left)** on a comparison (**Skip
+> title** on *How was it?*) is a genuinely different act. It drops that title for the sitting
+> and leaves it unranked, where Can't decide keeps placing the same title. The comparison
+> view itself is the shared, spacious one that sizes its cards from the window.
+
 ### Display — Decided 2026-08-15
 
 Show a **0–10 score with one decimal**, for example `8.7`. It is the primary ranking output everywhere a title appears: collection rows, the title page, the feed, the ranking reveal, and share cards.
@@ -1038,6 +1082,11 @@ Three properties this is required to keep:
 > makes the snapshot honest (a post per correction would be a duplicate of an act that did
 > not happen); **an explicit rewatch may**, because it is a new watch with its own score.
 > Both are `watch-again.test.mjs`. No migration rewrites historic feed scores, deliberately.
+>
+> **As built 2026-09-23.** `20261002000100` (#189) briefly made every card read the live
+> score. #196 restored the snapshot with one canonical refinement (`20261015000100`,
+> `20261016000100`): **earlier watches' posts are frozen**, and a pure correction updates
+> **only the most recently logged watch's** post. See `behavioural-contract.md` §1.2–1.3.
 
 ### Open and provisional
 
@@ -1236,6 +1285,23 @@ The words in that sentence carry the decisions:
 > release. **The specification below is unchanged and still canonical**; only the stage
 > moved. The reasoning, the surviving policy and the revisit trigger are in
 > [`deferred-roadmap.md`](./deferred-roadmap.md) §20. Free, permanently, whenever it ships.
+
+> **As built 2026-09-23.** The watched-title importer is in production (since 2026-09-14;
+> [`letterboxd-import.md`](./letterboxd-import.md)). Four steps of the flow below are
+> **superseded**:
+>
+> - **Step 3, bucket mapping:** a star is **never** a bucket, position or score
+>   (2026-09-21, `20261018000100`). It is provenance only, and every imported film arrives
+>   unranked with no bucket.
+> - **Step 6, rewatch flags:** diary rows, and their Rewatch flag, become watch events (Watch
+>   History T1, R3).
+> - **Step 7, lists:** not imported. Letterboxd **Lists** import is T6c, a deferred post-freeze
+>   feature ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)).
+> - **Step 9, anchor session:** replaced by the **Unified Backlog**. The summary's *Rank imported
+>   movies* opens Collection ▸ Unranked, where *Start ranking* is. There is no separate "Rank
+>   your imports" flow.
+>
+> Archives up to 1,000 members are accepted (#200).
 
 ### Method — Required by policy
 

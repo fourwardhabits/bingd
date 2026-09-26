@@ -1,6 +1,25 @@
 # The stopping-point production cutover
 
-**Prepared 2026-09-23 overnight. Not executed. Every step below needs the founder awake.**
+**Prepared 2026-09-23 overnight. Executed in part the same day — see *Observed state* below.**
+
+## Observed state, 2026-09-23 (read-only, recorded by the docs pass)
+
+Read from production and EAS without changing anything. This is what the system says, not
+a record of who ran which phase or of any smoke result.
+
+| Phase | Observed |
+| --- | --- |
+| 1 — migrations | **Done.** 168 applied, head `20261019000100` (`migration list`) |
+| 2 — #196 flags | **On.** `goals.count_watch_events = true`, `leaderboard.monthly_from_events = true` (updated 14:55 UTC) |
+| 4 — ranking config | Present. `ranking.*` rows exist with the expected values (read at 14:59 UTC) |
+| 5 — backlog | **On.** `ranking.backlog_enabled = true` |
+| 6 / 8 — Refine | **Off.** `ranking.refine_enabled = false`, waiting on the backlog smoke (phase 7) |
+| 9 — production OTA | **Published** from `a17880d` ("Watch History, native Lists, unified Backlog + Refine"): iOS group `27d99142…` on runtime `61efbf17`, Android group `13efeb21…` on runtime `da3c7f47`. Both are the runtimes of the shipped binaries, so it reaches Play vc12 and iOS TestFlight 1.0.1. App Store 1.0.0 users are on `971caf34`, and they get this with the 1.0.1 (13) binary |
+| 3, 7, 10 — smokes | Not observable from here |
+| 11 — store submission | Not verified here |
+| Marketing version | Still the open decision below |
+
+`a17880d` also carries #200 (archives up to 1,000 members) and the #201 docs.
 
 This is the procedure for putting Watch History + native Lists (#196) and the unified
 Backlog + Refine ranking (#203) into production. It is written to be read top to bottom

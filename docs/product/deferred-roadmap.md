@@ -1,6 +1,32 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-28, when §5's notifications half shipped.
+**Status:** current as of 2026-08-28, when §5's notifications half shipped. **Stopping-point
+update, 2026-09-23:** the entries below that have since shipped are marked where they stand.
+The summary is here.
+
+**Shipped since this register was written (live in production 2026-09-23 unless noted):**
+
+| Entry | Shipped as |
+|---|---|
+| §19 Rewatch and repeated viewing history | Watch History (#196): multiple watches, `log_rewatch`, per-watch semantics |
+| §22 Per-title watch history | The Watch History screen (`Watched N times ›`), with a per-watch note and watched-with (#196) |
+| §49 The historical unranked exception | The Unified Backlog (#203): Unranked is a first-class state with *Start ranking* |
+| §50 Lists | Native Lists v1 (#196), mixed media, privacy, custom order, share, Add to list |
+| §41 Android public distribution | PR #192, 2026-09-22 |
+| — | Refine Rankings (#203). It is built and in production, and `ranking.refine_enabled` stays off until the backlog smoke |
+| §20 Letterboxd import | In production since 2026-09-14; the larger-archive fix #200 is in the 2026-09-23 OTA |
+
+**Still deferred at the stopping point (nothing new added here):** Letterboxd **Lists**
+import (T6c, [`letterboxd-lists-import.md`](./letterboxd-lists-import.md)); predicted score
+([`../architecture/recommendations.md`](../architecture/recommendations.md), harness only);
+unmatched-import repair (T6b); the *add what I've already seen* bulk flow (§34); stats and
+Wrapped (§13, §51); real release notifications ([`release-awareness.md`](./release-awareness.md),
+shadow only); Watch Next ([`recommendation-note-and-watch-next.md`](./recommendation-note-and-watch-next.md),
+parked at #183/#184); and post-ranking share cards (specified in
+[`../architecture/client.md`](../architecture/client.md) §6, not built; the reveal carries no Share).
+
+**Deliberately out of scope, unchanged:** episode-level tracking, and ranking a whole series
+(seasons are the TV ranking unit).
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -798,7 +824,11 @@ can tell an improvement from a change, which today's event set cannot.
 
 ## 19. Rewatch and repeated viewing history
 
-**Status: designed, not built.** The design below is canonical as of 2026-08-23 and
+> **SHIPPED 2026-09-23** as Watch History (#196, T1–T4), in production. The design that was
+> built is [`watch-history-and-ranking-calibration.md`](./watch-history-and-ranking-calibration.md),
+> which supersedes this entry. What follows is the historical analysis.
+
+**Status (historical): designed, not built.** The design below is canonical as of 2026-08-23 and
 replaces the sketch that stood here before. It is deliberately *not* implemented in the
 friend-beta tranche — see **19.13** for why, and **19.14** for what the founder still has
 to decide before it can be.
@@ -1128,6 +1158,12 @@ and, for the part users will actually feel, the Goals and Awards repoint in 19.5
 
 ## 20. Letterboxd import
 
+> **SHIPPED** to production 2026-09-14 ([`letterboxd-import.md`](./letterboxd-import.md)).
+> **One thing below is superseded:** the star-to-bucket mapping. Since 2026-09-21 (founder,
+> canonical, `20261018000100`) **a Letterboxd star is never a bingd bucket, position or
+> score**. It is kept as provenance, and imported titles arrive unranked for the Unified
+> Backlog. Letterboxd **Lists** import is deferred post-freeze (T6c).
+
 **Deprioritized 2026-08-23.** It is **not** a requirement for the friend beta, for the
 initial App Store release, or for the initial Google Play production release.
 
@@ -1208,6 +1244,11 @@ downstream of the RC binary.
 ---
 
 ## 22. Per-title watch history — revisiting each watch
+
+> **SHIPPED 2026-09-23** (#196) as the pushed Watch History screen reached from
+> `Watched N times ›`. Each watch keeps its own date, private note, watched-with and the score
+> it was posted with. The review stays title-level. There is no History tab, and no per-watch
+> rating.
 
 **Deferred by the founder, 2026-08-27**, in the tranche that reduced the log sheet to
 one Note row.
@@ -1754,7 +1795,10 @@ readers retain differently" is a measurable claim rather than a plausible one.
 
 ## 41. Android public distribution, after the closed-testing requirement
 
-**Status: deferred, 2026-08-30, and gated on a Google policy clock rather than on work.**
+> **SHIPPED 2026-09-22** (PR #192): Android is publicly distributed on Google Play, and
+> bingd.app's CTAs point there.
+
+**Status (historical): deferred, 2026-08-30, and gated on a Google policy clock rather than on work.**
 
 Google Play requires a personal developer account to run a closed test with a minimum
 number of testers for a continuous period before a production release can be applied for.
@@ -2040,7 +2084,12 @@ Nothing here is built, and the priority ordering is the founder's.
 
 ## 49. The historical unranked exception
 
-**Status: deferred, 2026-09-05. The state already exists; the affordance does not.**
+> **Resolved 2026-09-23** by the Unified Backlog (#203): Collection ▸ Unranked shows the exact
+> count and *Start ranking*, and **Skip title** leaves a title unranked for the sitting. The
+> "I don't remember it well" snooze from the Watch History design (§I.5) is **not** in backlog
+> v1.
+
+**Status (historical): deferred, 2026-09-05. The state already exists; the affordance does not.**
 
 The founder's own case, and one a beta user has already met in a different form: *"I know I
 watched this, but I do not remember it well enough to rank it."* That is a real limit on
@@ -2102,11 +2151,16 @@ specifically. There was nothing to bring to parity.
 
 ## 50. Lists — private organisation and public curation
 
-**Status: BUILT on `feat/lists-v1`, 2026-09-20. Awaiting integration, deploy and device
-QA.** [`lists-prd.md`](./lists-prd.md) is implemented as specified — the §F privacy
-matrix, the §I hybrid IA, the §M analytics, the public web page and the link-preview
-Function. What has **not** happened: the migration reaching any database, any OTA, and the
-device QA of §N.
+**Status: SHIPPED 2026-09-23.** Native Lists v1 merged in #196, and its migrations are on
+staging and production. The founder device QA passed on 2026-09-21, the client is in the
+production OTA from `a17880d`, and the public list page is live on bingd.app.
+[`lists-prd.md`](./lists-prd.md) as amended by its §R is the shipped behaviour. The IA note
+below ("`My lists ›` on the Collection title row") was itself superseded in §R.1: Lists is the
+third mode of Collection's Movies / TV / Lists selector. Letterboxd **Lists import** is a
+separate, deferred post-freeze feature (T6c).
+
+*Historical:* built on `feat/lists-v1`, 2026-09-20, as specified: the §F privacy matrix, the
+§I hybrid IA, the §M analytics, the public web page and the link-preview Function.
 
 This supersedes the previous status ("designed, approved and PARKED, nothing is built").
 The feature was parked behind Watch History T1–T4 and the post-foundation hardening pass;
@@ -2124,9 +2178,8 @@ Watch History. The sequencing note is kept below because it still decides when i
 | **L5** previews | `functions/lists/[id].js` — `list_preview`, generic fallback, five-minute cache, and the owner named only for a public profile |
 | **L6** docs | this entry, `data-model.md` §6, PRD §8 and §20, `web-deployment.md`, `analytics.md`. The PostHog tiles are the remaining half and need the events live first |
 
-**Still ships after** Watch History T1–T4 and the post-foundation hardening/scalability
-pass. Building it early does not move that: the release order is a founder decision about
-what the beta cohort meets next, not about what exists on a branch.
+~~**Still ships after** Watch History T1–T4 and the post-foundation hardening/scalability
+pass.~~ It shipped together with Watch History in the 2026-09-23 stopping-point release.
 
 **The navigation question was settled on 2026-09-19 (founder), and it went the other way
 from the PRD's first draft.** **Collection owns list management; the Profile owns public

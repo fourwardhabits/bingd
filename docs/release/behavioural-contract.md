@@ -1,11 +1,16 @@
 # The behavioural contract of a state-changing action
 
-**Status:** current as of 2026-09-19, against `main` at the Android production audit.
-**Scope:** the shipping core loop only — ranking, logging, the Collection and the
-Watchlist, the Feed's representation of them, direct recommendations, and reactions and
-comments. Watch History T1+, Refine Rankings, Lists, Predicted Score, Watch Next,
-release-awareness real sending and Stats are deliberately absent: see
-`docs/product/deferred-roadmap.md` and the design documents each one has.
+**Status:** written 2026-09-19, against `main` at the Android production audit. **Amended
+2026-09-23 (stopping point)** for the one rule #196 changed in this document's scope, the
+feed score (§1.2, §1.3, §4).
+**Scope:** the shipping core loop — ranking, logging, the Collection and the Watchlist, the
+Feed's representation of them, direct recommendations, and reactions and comments.
+**Watch History, native Lists and the Unified Backlog + Refine now ship too** (#196, #203, in
+production 2026-09-23). Their contracts live in their own documents and tests, not yet in
+this table: [`watch-history-and-ranking-calibration.md`](../product/watch-history-and-ranking-calibration.md),
+[`lists-prd.md`](../product/lists-prd.md), [`refine-rankings-t5.md`](../product/refine-rankings-t5.md).
+Predicted Score, Watch Next, release-awareness real sending and Stats remain **deferred**.
+See `docs/product/deferred-roadmap.md`.
 
 ## Why this document exists
 
@@ -56,7 +61,7 @@ The convention in every row:
 |---|---|
 | Must change | `rankings.position`, and `bucket` on a band change; `user_media.bucket` follows; the **current score of this title and of every other title in the bands involved** |
 | Must not change | `rankings.created_at` — a correction keeps the instant the ranking already had (`20261001000100`) · the weekly streak · *Recently ranked* order · a watchlist entry the reader re-added **after** the ranking's instant · `watched_on` · **the feed: no new event, and the existing one is not re-timed** |
-| Feed effect | **none as an event.** The existing `title_ranked` card stays where it is, at the time it already had, and **shows the corrected score** (`20261002000100`) |
+| Feed effect | **none as an event.** The existing `title_ranked` card stays where it is, at the time it already had. **Only the post of the most recently logged watch** takes the corrected score (`20261016000100`, trigger `ranking_placements_correction_follows_latest_watch`). Posts for earlier watches keep the score they were posted with (`20261015000100`). *Supersedes `20261002000100`'s "every card shows the current score".* |
 | Founder ruling | 2026-09-07 and the T0 tranche of `docs/product/watch-history-and-ranking-calibration.md`: *Update your rating* is a correction, not a watch. A correction is not a thing that happened to anybody else, so it is not an activity |
 | Proved by | `supabase/tests/correction-is-not-a-ranking.test.mjs` (21 cases) · `supabase/tests/feed-score-is-current.test.mjs` · `src/features/feed/use-feed.test.ts` |
 
@@ -66,7 +71,7 @@ The convention in every row:
 |---|---|
 | Must change | everything 1.1 changes except the first placement: stamped `now()`, takes the watchlist entry, re-evaluates the series, posts **one** new `title_ranked` event |
 | Must not change | it fulfils no recommendation (`not v_replaced` is false), because the title was already ranked |
-| Feed effect | a second card for the same title. Both cards now read the **same** current score, which is correct for a badge that means "what they rate it"; score-at-the-time is placement history and does not exist yet (Watch History T2) |
+| Feed effect | a second card for the same title. **Each card keeps the score of its own watch** (`20261015000100`): the earlier watch's card is frozen, and the new card follows later corrections until another watch is logged (`20261016000100`). A rewatch writes a `watch_events` row (`log_rewatch` / `log_rewatch_with_details`), which is the difference from a correction (§1.2): a rerank is not a rewatch. *Supersedes the 2026-09-19 "both cards read the same current score".* |
 
 ### 1.4 Unrank (`rank_unrank`, keeping the title logged)
 
@@ -125,7 +130,8 @@ This is the distinction the fifth report turned on, and it is the rule for every
 
 | Field | Read from | Since |
 |---|---|---|
-| score, band, ordinal | `public_scores` | `20261002000100` |
+| whether the title is still ranked (a card whose title was unranked loses its badge) | `public_scores` | `20261002000100` |
+| the card's score and band | the post's own `payload.score` via `feed_watch_scores`: **historical, not current** (see §1.2–1.3) | `20261015000100`, `20261016000100` |
 | the actor's public note | `public_notes` | `20260816000100` |
 | watched-with companions | `watch_tags` | `20260828…` |
 | comment count | `activity_comment_counts` | — |
@@ -137,9 +143,11 @@ Every one of them is **one call per page**, resolved in a single `Promise.all` i
 `hydrate`. A per-row read of any of them is the N+1 the feed's pagination work exists to
 prevent, and is a review failure rather than a style preference.
 
-`feed_events.payload` still carries `score`, `bucket` and `position`. It is now a
-**fallback**, not the answer: a client whose live read fails — offline, or a bundle newer
-than its backend — draws the snapshot rather than a blank badge. Nothing in SQL reads it.
+`feed_events.payload` carries `score`, `bucket` and `position`. **Since #196 its score is the
+answer**, not a fallback: a card shows the opinion held at that watch. The current score
+belongs to the title page, Collection, Search and list rows. *(The 2026-09-19 text here said
+the payload was only a fallback and that nothing in SQL read it. `feed_watch_scores` and the
+`20261016000100` trigger now do.)*
 
 ---
 

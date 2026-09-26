@@ -1,19 +1,28 @@
 # Lists — PRD (v1)
 
-> **Status: BUILT, 2026-09-20, on `feat/lists-v1`.** The header below is the state this
-> document was written in, and is kept because the rest of it is written against that
-> state. This note is what supersedes it.
+> **Status (2026-09-23, stopping point): SHIPPED — native Lists v1.** Merged to `main` in
+> PR #196 (`30833d5`). Migrations `20261010000100` (Lists), `20261011000100` (list-add lock
+> and FK indexes), `20261012000100` (`can_i_view` self fast path) and `20261017000100`
+> (picker covers) are applied to **staging and production**. The founder device QA passed on
+> 2026-09-21, and the client ships in the production OTA from `a17880d` (2026-09-23). The
+> public list page at `bingd.app/lists/<id>` is live. The shipped behaviour is this document
+> **as amended by §R** (Collection's Movies / TV / Lists mode, covers, the list page, drag
+> reorder, remove from list, mixed media, the three privacy words, Share and Add to list).
+>
+> **Native Lists are not Letterboxd Lists import.** Importing lists from a Letterboxd archive
+> is a separate, **deferred post-freeze** acquisition feature (T6c,
+> [`letterboxd-lists-import.md`](./letterboxd-lists-import.md)). Nothing in native Lists
+> waits on it.
+>
+> The header further below ("BUILD-READY AND PARKED") is the state this document was
+> written in, and is kept because the rest of it is written against that state. This note
+> supersedes it.
 >
 > Everything in §O's six PRs is implemented, in one branch rather than six: the migration
 > is `20261010000100`, its suite is `supabase/tests/lists.test.mjs`, the client is
 > `src/features/lists/` plus `app/lists/`, the web render is in `web/src/page.mjs`,
 > `web/src/router.mjs` and `web/build.mjs`, and the preview Function is
 > `functions/lists/[id].js`.
->
-> **What has not happened**, none of it a code change: the migration has reached no
-> database, no OTA has been published, and the §N device QA has not been run. §O's release
-> order still stands — L1 to production, the client on the staging preview lane, device QA,
-> one OTA to both lanes, the web deploy, then the Function.
 >
 > **Three deliberate departures from the letter of this document**, each recorded where it
 > was made:
@@ -178,7 +187,7 @@ Six bounded PRs (§O). Roughly 2–3 weeks of focused work.
 | Per-item notes | v1.1 | |
 | Group Picks → Save as list | v1.1 | |
 | "Start from my ranking" (a ranked-slice snapshot) | v1.1 | Independent of the ranking once created |
-| Letterboxd `lists/*.csv` import | v1.1 | `source='imported'`, exempt from the 100 ceiling (PRD §12) |
+| Letterboxd `lists/*.csv` import | **Deferred post-freeze (T6c)** | `source='imported'`, exempt from the 100 in-app ceiling (PRD §12); the T6c design adds its own 100 imported-lists cap. See [`letterboxd-lists-import.md`](./letterboxd-lists-import.md) |
 | Save/follow or copy someone's list | v2 | |
 | Watch Next | not designed | Watch Next does not exist. When it does, it is a per-title action on list rows like anywhere else |
 | Collaboration | v2+ | "Film club" in v1 is the organiser's link-only list |
@@ -1065,12 +1074,12 @@ three-list cap.
 **Release:** L1 (production DB) → L2 + L3 on staging preview → device QA (§N) → one OTA
 to both lanes → L4 deployed the same day → L5 once L4 is verified → L6.
 
-**Not yet scheduled.** Implementation is parked behind Watch History T1–T4 and the
-post-foundation hardening/scalability pass (founder, 2026-09-19). L1 does not start until
-that is cleared.
+~~**Not yet scheduled.**~~ **Done:** L1–L5 shipped with #196 (see the status note at the top).
 
-**Later:** v1.1 adds drag, **long-press manipulation inside a list screen**, per-item
-notes, Group Picks → list, "Start from my ranking", and Letterboxd list import. v2 adds
+**Later:** v1.1 adds ~~drag, **long-press manipulation inside a list screen**~~ (**shipped
+early** in §R.1.7), per-item notes, Group Picks → list, and "Start from my ranking".
+**Letterboxd list import** is not a Lists v1.1 item any more. It is T6c, a deferred
+post-freeze import feature ([`letterboxd-lists-import.md`](./letterboxd-lists-import.md)). v2 adds
 save/copy, "In N lists", featured/editorial, the collage OG image, pretty public URLs,
 revocable link tokens and collaboration.
 
