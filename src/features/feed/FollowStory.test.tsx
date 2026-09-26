@@ -1,6 +1,8 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { ActivityRow } from '@/ui/components';
 
 import { followTail } from './activity';
 import { FollowStoryRow } from './FollowStoryRow';
@@ -251,6 +253,83 @@ describe('the list of everyone', () => {
 
     expect(onClose).toHaveBeenCalled();
     expect(onPressPerson).toHaveBeenCalledWith('ravi');
+  });
+});
+
+/**
+ * The row's box, against the row it sits between.
+ *
+ * A follow story is deliberately a *lighter* row than an activity row — fewer elements, a
+ * third of the height — and for a while it was also an *unbounded* one: it carried the
+ * gutters and the vertical padding but not the closing hairline, so on a device it fell into
+ * the whitespace of the ranking beneath it and the feed lost its rhythm exactly where the
+ * list changes subject.
+ *
+ * Asserted by comparing the two rows rather than against literals. The numbers are allowed
+ * to change; what may not change is that they are the *same* numbers, and a test that
+ * restated `theme.layout.gutter` here would go green on the day one row moved and the other
+ * did not.
+ */
+describe('the row sits in the list the same way an activity row does', () => {
+  /**
+   * The row container's resolved style.
+   *
+   * Found by descending rather than read off `toJSON()`, because the root of a rendered
+   * tree here is `SafeAreaProvider`'s own flex box — an unstyled wrapper whose padding is
+   * `undefined`, which is exactly the value that makes two rows look identical to a
+   * comparison while one of them is missing its rule. The row is the first box that
+   * actually sets vertical padding, and both components draw that box first.
+   */
+  const box = (tree: unknown): ViewStyle => {
+    let found: ViewStyle | undefined;
+    const walk = (node: unknown) => {
+      if (found || !node || typeof node !== 'object') return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const element = node as { props?: Record<string, unknown>; children?: unknown[] };
+      const style = (StyleSheet.flatten(element.props?.style) ?? {}) as ViewStyle;
+      if (typeof style.paddingVertical === 'number') {
+        found = style;
+        return;
+      }
+      (element.children ?? []).forEach(walk);
+    };
+    walk(tree);
+    if (!found) throw new Error('no padded row container in the tree');
+    return found;
+  };
+
+  /** An ordinary activity row, with only the props that are not optional. */
+  const activityRow = (
+    <ActivityRow
+      actorName="Abi"
+      verb="ranked"
+      title="Sinners"
+      timeLabel="5m ago"
+      onPressTitle={() => {}}
+    />
+  );
+
+  it('uses the same gutters, vertical padding and closing rule', async () => {
+    const follow = await renderWithProviders(
+      <FollowStoryRow
+        event={story([person('Ravi'), person('Maya')])}
+        onPressActor={() => {}}
+        onPressPerson={() => {}}
+        onOpenList={() => {}}
+      />,
+    );
+    const activity = await renderWithProviders(activityRow);
+
+    const a = box(follow.toJSON());
+    const b = box(activity.toJSON());
+
+    expect(a.paddingHorizontal).toBe(b.paddingHorizontal);
+    expect(a.paddingVertical).toBe(b.paddingVertical);
+    expect(a.borderBottomWidth).toBe(b.borderBottomWidth);
+    expect(a.borderBottomColor).toBe(b.borderBottomColor);
+    // The regression itself, stated plainly: whatever the shared number is, it is a rule
+    // and not zero.
+    expect(Number(a.borderBottomWidth ?? 0)).toBeGreaterThan(0);
   });
 });
 

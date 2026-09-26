@@ -152,6 +152,20 @@ const styles = StyleSheet.create({
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[3],
+    /**
+     * The same closing hairline `ActivityRow` draws, at the same weight and colour.
+     *
+     * It was missing, and what that produced on a device was not a lighter row but an
+     * unbounded one: a follow story fell into the whitespace of the ranking under it and
+     * the feed lost its rhythm exactly where the list changes subject. The gutters and
+     * the vertical padding already matched — this is the third member of that set, and
+     * the one that says where the row ends.
+     *
+     * Density is still the difference between the two rows, and it stays the difference:
+     * this row is a third of an activity row's height whether or not it is closed.
+     */
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomColor: theme.border.hairline,
   },
   copy: { flex: 1, gap: 1 },
   // `ActivityRow`'s own emphasis for a named entity inside the sentence, so an actor's
