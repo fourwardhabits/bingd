@@ -41,6 +41,20 @@ import {
   titlePreview,
   tokenFromPath,
 } from './router.mjs';
+import {
+  DEMO_CHOICES,
+  canSwap,
+  choose,
+  currentPair,
+  demoMoviesFrom,
+  demoResult,
+  demoSource,
+  startDemo,
+  swap,
+  trendingIdsFrom,
+  trendingListRequest,
+  trendingMoviesRequest,
+} from './demo.mjs';
 
 /**
  * Build-time values, written into the page by `build.mjs` as a JSON script block.
@@ -614,12 +628,270 @@ function genericPage(cfg) {
   paintInstall(cfg, platformNow());
 }
 
+/**
+ * `/` — the install row, plus the ranking demo in the hero.
+ *
+ * The install row is painted first and owes the demo nothing: a demo that never loads,
+ * or a visitor who never touches it, leaves exactly the landing page there was before.
+ */
+function homePage(cfg) {
+  paintInstall(cfg, platformNow());
+  wireDemo(cfg);
+}
+
+/**
+ * Rows from a PostgREST select, or an empty array.
+ *
+ * `readOne`'s contract for a set, with a signal so the demo can give up on a slow network
+ * and fall back rather than leave somebody staring at a button that did nothing.
+ */
+async function readRows(url, anonKey, signal) {
+  if (!url || !anonKey) return [];
+  try {
+    const response = await fetch(url, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, Accept: 'application/json' },
+      signal,
+    });
+    if (!response.ok) return [];
+    const rows = await response.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+/** How long the demo waits for today's list before using the fixed one. */
+const DEMO_WAIT_MS = 2500;
+
+/**
+ * Today's trending movies, or an empty array — which `demoSource` turns into the fixed
+ * list. Two selects, both on world-readable catalogue tables, both decided in `demo.mjs`.
+ */
+async function loadDemoMovies(cfg) {
+  const listUrl = trendingListRequest(cfg.supabaseUrl);
+  if (!listUrl || !cfg.supabaseAnonKey) return [];
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), DEMO_WAIT_MS) : null;
+  try {
+    const [row] = await readRows(listUrl, cfg.supabaseAnonKey, controller?.signal);
+    const ids = trendingIdsFrom(row);
+    const moviesUrl = trendingMoviesRequest(cfg.supabaseUrl, ids);
+    if (!moviesUrl) return [];
+    return demoMoviesFrom(ids, await readRows(moviesUrl, cfg.supabaseAnonKey, controller?.signal));
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Whether the visitor has asked the system for less motion. */
+const reducedMotion = () => {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A poster, or the typographic tile it sits on.
+ *
+ * The tile is always there and carries the title, so a movie with no poster, a poster
+ * TMDB no longer serves and the offline fallback all draw the same honest card. The
+ * image is revealed only once it has decoded, and only if it is still the image this
+ * slot is meant to show — a slow poster from the previous pair must not land on the
+ * next one.
+ */
+function paintArt(art, movie) {
+  const tile = art.querySelector('.demo-tile');
+  if (tile) tile.textContent = movie.title;
+
+  const img = art.querySelector('img');
+  if (!img) return;
+  img.hidden = true;
+  img.removeAttribute('src');
+  if (!movie.poster) return;
+  img.onload = () => {
+    if (img.src === movie.poster) img.hidden = false;
+  };
+  img.src = movie.poster;
+}
+
+function paintChoice(button, movie) {
+  const name = button.querySelector('.demo-name');
+  if (name) name.textContent = movie.title;
+  const year = button.querySelector('.demo-year');
+  if (year) year.textContent = movie.year ? String(movie.year) : '';
+  const art = button.querySelector('.demo-art');
+  if (art) paintArt(art, movie);
+}
+
+/** One row of the result: position, art, name and year. Built, never templated. */
+function resultRow(entry) {
+  const item = document.createElement('li');
+  item.className = 'demo-rank';
+  item.style.setProperty('--i', String(entry.position - 1));
+
+  const number = document.createElement('span');
+  number.className = 'demo-rank-n';
+  number.setAttribute('aria-hidden', 'true');
+  number.textContent = String(entry.position);
+  item.append(number);
+
+  const art = document.createElement('span');
+  art.className = 'demo-art demo-rank-art';
+  art.setAttribute('aria-hidden', 'true');
+  const tile = document.createElement('span');
+  tile.className = 'demo-tile';
+  const img = document.createElement('img');
+  img.alt = '';
+  img.width = 92;
+  img.height = 138;
+  art.append(tile, img);
+  paintArt(art, entry);
+  item.append(art);
+
+  const lines = document.createElement('span');
+  lines.className = 'demo-rank-lines';
+  const name = document.createElement('span');
+  name.className = 'demo-rank-name';
+  name.textContent = entry.title;
+  lines.append(name);
+  if (entry.year) {
+    const year = document.createElement('span');
+    year.className = 'demo-rank-year';
+    year.textContent = String(entry.year);
+    lines.append(year);
+  }
+  item.append(lines);
+  return item;
+}
+
+/**
+ * The ranking demo: intro, five choices, result, again.
+ *
+ * ---------------------------------------------------------------------------
+ * NOTHING IS FETCHED UNTIL SOMEBODY REACHES FOR IT
+ * ---------------------------------------------------------------------------
+ *
+ * The trending list is asked for when a pointer or focus arrives at "Try ranking", not
+ * on load. A visitor who reads the page and installs never causes a Supabase request or
+ * a TMDB image load, and the one who does try it has usually started the request a
+ * beat before the tap.
+ *
+ * Every title is written with `textContent` and every poster comes from `posterUrl`
+ * through `demoMoviesFrom`. This function holds no decision: the order, the pair, what a
+ * swap does and when it ends are all `demo.mjs`'s.
+ */
+function wireDemo(cfg) {
+  const el = (id) => document.getElementById(id);
+  const start = el('demo-start');
+  const intro = el('demo-intro');
+  const play = el('demo-play');
+  const result = el('demo-result');
+  const left = el('demo-left');
+  const right = el('demo-right');
+  const swapButton = el('demo-swap');
+  const again = el('demo-again');
+  if (!start || !intro || !play || !result || !left || !right) return;
+
+  let loading = null;
+  const warm = () => (loading ??= loadDemoMovies(cfg).then(demoSource, () => demoSource([])));
+  for (const type of ['pointerenter', 'focus', 'touchstart']) {
+    start.addEventListener(type, warm, { once: true, passive: true });
+  }
+
+  let movies = null;
+  let attempt = 0;
+  let state = null;
+  let pair = null;
+
+  const paintPlay = () => {
+    pair = currentPair(state);
+    if (!pair) return finish();
+    paintChoice(left, pair.left);
+    paintChoice(right, pair.right);
+    text('demo-progress', `Choice ${state.selections + 1} of ${DEMO_CHOICES}`);
+    // The status line is for a screen reader: the two buttons changed names without
+    // moving, and nothing else would say so.
+    text(
+      'demo-status',
+      `Choice ${state.selections + 1} of ${DEMO_CHOICES}: ${pair.left.title} or ${pair.right.title}.`,
+    );
+    if (swapButton) swapButton.disabled = !canSwap(state);
+  };
+
+  const finish = () => {
+    const list = el('demo-list');
+    if (list) list.replaceChildren(...demoResult(state).map(resultRow));
+    text('demo-status', 'Your demo ranking is ready.');
+    play.hidden = true;
+    result.hidden = false;
+
+    const heading = el('demo-result-title');
+    if (heading) {
+      heading.focus({ preventScroll: true });
+      reveal(heading);
+    }
+  };
+
+  /** Smoothly unless the visitor has asked for less motion. */
+  const reveal = (target) => {
+    if (typeof target?.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    }
+  };
+
+  const begin = () => {
+    state = startDemo(movies, attempt);
+    intro.hidden = true;
+    result.hidden = true;
+    play.hidden = false;
+    paintPlay();
+    if (!state.done) left.focus({ preventScroll: true });
+    // The whole card, not just the focused poster: on a phone the pair is taller than
+    // the space left above the sticky store bar, and the swap sits under the posters.
+    reveal(el('demo'));
+  };
+
+  start.addEventListener('click', async () => {
+    if (start.disabled) return;
+    start.disabled = true;
+    const source = await warm();
+    movies = source.movies;
+    // The label says where the movies came from, and the fixed list does not pretend to
+    // be today's trending.
+    text('demo-source', source.live ? 'Trending today, via TMDB' : 'A few well-known films');
+    show('demo-source', true);
+    begin();
+  });
+
+  const pick = (side) => () => {
+    if (!pair) return;
+    state = choose(state, pair[side].id);
+    paintPlay();
+  };
+  left.addEventListener('click', pick('left'));
+  right.addEventListener('click', pick('right'));
+
+  swapButton?.addEventListener('click', () => {
+    state = swap(state);
+    paintPlay();
+  });
+
+  again?.addEventListener('click', () => {
+    attempt += 1;
+    begin();
+  });
+}
+
 const PAGES = {
   invite: invitePage,
   profile: profilePage,
   title: titlePage,
   list: listsPage,
   generic: genericPage,
+  home: homePage,
 };
 
 export function start() {

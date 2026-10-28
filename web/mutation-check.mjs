@@ -59,6 +59,23 @@
  *  16. The title preview spreading the row it was handed, which is how a private field
  *      reaches a public page without anybody writing its name.
  *
+ * Five more arrived with the front page's ranking demo (2026-10-28). Each is a defect the
+ * page would render without complaint:
+ *
+ *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
+ *      one of their five.
+ *  18. A trending poster used as the server sent it rather than through `posterUrl`, so
+ *      a row's value becomes an `img.src` that can leave TMDB's CDN.
+ *  19. The freshness check dropped, so a list nobody has refreshed in months is labelled
+ *      "Today's trending movies".
+ *  20. A demo title written as markup rather than text.
+ *  21. An unfinished last placement put at the bottom, which contradicts a choice the
+ *      visitor just made and reads as the demo not listening.
+ *  22. A production build allowed to ship the staging project, so bingd.app quietly
+ *      reads staging's catalogue and writes invitation opens into staging's funnel.
+ *  23. The anon-role check on the key dropped, so a `service_role` key pasted into the
+ *      public variable is baked into every page.
+ *
  * **The Apple team id is not here, and cannot be.** It has exactly one source in this
  * repository and nothing to cross-check it against, so a wrong value is consistent
  * everywhere and no offline test can see it. It is verified by a link opening on a
@@ -80,8 +97,66 @@ const APP_CONFIG = join(root, 'app.config.ts');
 const BUILD = join(here, 'build.mjs');
 const ROUTER = join(here, 'src', 'router.mjs');
 const DISTRIBUTION = join(here, 'distribution.config.json');
+const DEMO = join(here, 'src', 'demo.mjs');
+const PAGE = join(here, 'src', 'page.mjs');
 
 const MUTANTS = [
+  {
+    name: 'a production build allowed to ship the staging Supabase project',
+    file: BUILD,
+    apply: (s) =>
+      s.replace(
+        "const project = deployTarget === 'production' ? 'production' : 'staging';",
+        "const project = 'staging';",
+      ),
+  },
+  {
+    name: 'the anon-role check dropped, so a service_role key can reach a page',
+    file: BUILD,
+    apply: (s) =>
+      s.replace("if (!claims || claims.role !== 'anon') return withhold", 'if (!claims) return withhold'),
+  },
+  {
+    name: 'a demo swap counted as one of the five choices',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        /(export function swap\(state\) \{\r?\n\s+if \(!canSwap\(state\)\) return state;)/,
+        '$1\n  state = { ...state, selections: state.selections + 1 };',
+      ),
+  },
+  {
+    name: 'a trending poster path used as sent, rather than through posterUrl',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        'poster: posterUrl(row.poster_path),',
+        "poster: typeof row.poster_path === 'string' ? `https://image.tmdb.org/t/p/w342${row.poster_path}` : null,",
+      ),
+  },
+  {
+    name: 'the trending freshness check dropped, so a months-old list is called today\'s',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        'if (Number.isNaN(fetched) || now - fetched > TRENDING_MAX_AGE_MS) return [];',
+        'if (Number.isNaN(fetched)) return [];',
+      ),
+  },
+  {
+    name: 'a demo title written as markup rather than text',
+    file: PAGE,
+    apply: (s) => s.replace('if (name) name.textContent = movie.title;', 'if (name) name.innerHTML = movie.title;'),
+  },
+  {
+    name: 'an unfinished last placement dropped to the bottom, against the visitor\'s choice',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        'const index = settled ? narrowed.lo : Math.floor((narrowed.lo + narrowed.hi) / 2);',
+        'const index = settled ? narrowed.lo : narrowed.ranked.length;',
+      ),
+  },
   {
     /**
      * The Android ordering, put back the way the closed test needed it.

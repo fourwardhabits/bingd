@@ -636,3 +636,85 @@ The Pages project is git-connected, every branch gets a preview at
 deploy without touching the live domain. That was used here: the preview served the new
 page, both `.well-known` files with correct content types, and every router route, before
 anything went near `main`.
+
+---
+
+## The ranking demo on the front page — 2026-10-28
+
+The hero's second column is now a five-choice ranking demo in place of the two collection
+shots (they moved to the new "Your collection" section). Logic is in `web/src/demo.mjs`,
+wiring in `wireDemo` in `web/src/page.mjs`, markup in `DEMO` in `web/build.mjs`.
+
+### Where its movies come from, and why that needed no backend change
+
+Today's `trending.movie.day` list, read the way the app's Trending shelf reads it:
+
+1. `GET /rest/v1/provider_list_cache?list_key=eq.trending.movie.day&select=payload,fetched_at&limit=1`
+2. `GET /rest/v1/media_items?id=in.(<up to 20 uuids>)&kind=eq.movie&select=id,kind,title,release_date,poster_path`
+
+Both tables are `using (true)` (`20260816000900_trending_cache.sql`, `20260813000400`),
+and `anon` keeps `SELECT` on them: `20260813001400` revokes only insert, update and delete.
+The page holds the same `EXPO_PUBLIC_SUPABASE_URL` / `_ANON_KEY` pair the router pages
+already carry. No grant, policy, function or endpoint was added. Posters load from TMDB's
+image CDN through `posterUrl`, as on `/title` and `/lists`. The privacy policy's "Who else
+sees it" already names both Supabase and direct TMDB poster loads.
+
+**Nothing is fetched until a pointer or focus reaches "Try ranking".** A visitor who never
+touches the demo causes no Supabase request and no TMDB image load.
+
+### When it uses the fixed list instead
+
+`FALLBACK_MOVIES` (16 well-known films, no posters, drawn as typographic tiles) is used
+when the build has no Supabase env (every local build), on any network error or a
+2.5-second timeout, or when the cached list is malformed, older than seven days, or yields
+fewer than eight usable movies. The card says which it is showing: *Trending today, via
+TMDB* or *A few well-known films*.
+
+**For the live site to show trending movies, the Pages build environment must have both
+`EXPO_PUBLIC_SUPABASE_*` variables set** (see "Build environment" above). If they are not
+set, the demo still works, on the fixed list.
+
+### Which Supabase project each build may ship
+
+`web/build.mjs` (`publicSupabase`) enforces this at build time, for every page and not
+only the demo:
+
+| Build | Detected by | May ship |
+|---|---|---|
+| Production (bingd.app) | `CF_PAGES=1` and `CF_PAGES_BRANCH=main` | the **production** project only (`abheeqyjzekiowkztfxv`) |
+| Branch preview | `CF_PAGES=1`, any other branch | the **staging** project only (`fjxhcbowoxuzulwirzyr`), if configured |
+| Local | no `CF_PAGES` | the **staging** project only, if configured; usually nothing |
+
+The key must be the **anon** key of the same project: a legacy JWT key is checked for
+`role: anon` and a matching `ref`; `sb_publishable_` keys are accepted by name and
+`sb_secret_` keys refused. **Any mismatch is withheld, not refused**: the build succeeds,
+prints `SUPABASE CONFIG WITHHELD: <reason>`, and ships `null`, so every page falls back
+(the demo to its fixed list, the router pages to their generic copy). A production page
+never queries another environment. `web/router.test.mjs` runs each case as a real
+sandboxed build, and two mutants in `web/mutation-check.mjs` pin it.
+
+So in Cloudflare → Workers & Pages → `bingd` → Settings → Variables, the **Production**
+environment holds the production URL and anon key, and the **Preview** environment holds
+staging's (or nothing). **This assumes the Pages production branch is `main`**, which is
+inferred rather than confirmed (see "How a deploy happens"). If it were another branch,
+production would be classified as a preview and a production pair would be withheld, which
+fails safe. Confirm it in the same settings screen before the first production deploy of
+this change.
+
+### Measurement that would be worth having, and is deliberately not here
+
+No event was added, for the reason in "The site still has no analytics" above: the
+front page has no approved sink, and adding one is a privacy-policy decision before it is
+a code change. If that decision is made, the smallest useful set is:
+
+| Event | Carries | Answers |
+|---|---|---|
+| `demo_started` | platform (`ios`/`android`/`other`), `live` or `fallback` | Does the hero card get used? |
+| `demo_completed` | platform, source, swap count (0–n) | Do people finish five? Are swaps a sign the list is wrong for them? |
+| `store_cta_clicked` | platform, placement (`hero`/`demo_result`/`closer`/`sticky`), whether the demo was completed first | Does finishing the demo move installs? |
+
+None of them would carry a title, a movie id or the visitor's order. Modelled on
+`record_invite_open` (anonymous, returning void, route and platform only), they would
+need a migration and an independent review as a sensitive surface. App Store Connect's
+Web Referrer report remains the free baseline to compare against before and after the
+demo ships.
