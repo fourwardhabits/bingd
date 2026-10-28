@@ -300,6 +300,18 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
           jobId: row.subjectType === 'import_job' && row.subjectId ? row.subjectId : null,
         },
       ];
+
+    /**
+     * The three proactive kinds (20261028000100) are all about one title the reader saved,
+     * and the title page is where the decision lives: Where to Watch, the friends who
+     * ranked it (Following ratings), the Watchlist control. Not one friend's post: a
+     * cluster names several people, and opening one of them would make the others vanish.
+     * `watchlist_resurface` is push-only, so only a tap from the lock screen reaches here.
+     */
+    case 'watchlist_social':
+    case 'theatrical_release':
+    case 'watchlist_resurface':
+      return [...title, unavailable('That title is no longer available.')];
   }
 }
 
@@ -520,4 +532,7 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'import_started',
   'import_completed',
   'import_failed',
+  'watchlist_social',
+  'theatrical_release',
+  'watchlist_resurface',
 ];

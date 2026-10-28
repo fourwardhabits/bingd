@@ -541,6 +541,8 @@ describe('notification preferences', () => {
       { category: 'reactions', enabled: true },
       { category: 'recommendations', enabled: true },
       { category: 'watch_tags', enabled: true },
+      // 20261028000100: the Watching section's one switch, on by omission.
+      { category: 'watchlist_discovery', enabled: true },
     ]);
   });
 

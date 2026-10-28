@@ -436,3 +436,43 @@ defect**, and it is fixed in `20260826000700`:
 2. If it will not run: count `device_tokens` first. Zero means no phone is addressable and
    nothing below it can matter (§10).
 3. Only then look at the drain.
+
+---
+
+## 12. The proactive kill switch — `20261028000100`
+
+Proactive pushes (`watchlist_social`, `theatrical_release`, `watchlist_resurface`;
+[`../product/proactive-notifications.md`](../product/proactive-notifications.md)) have their
+own switch, and it is **separate from everything above**: it stops the app speaking on its
+own, and leaves every push a person caused exactly as it was.
+
+**Emergency off.** One statement, SQL editor, no deploy, no cron change:
+
+```sql
+update app_config set value = 'false'::jsonb where key = 'proactive.push_enabled';
+```
+
+From the next tick, the arbiter selects nothing. From the next drain (within a minute),
+`claim_push_batch` drops any proactive job already queued and records it
+`suppressed / kill_switch`. Reactive delivery does not read the switch.
+
+**Verify:**
+
+```sql
+select proactive_status() -> 'push_enabled';                -- false
+select count(*) from push_outbox o
+  join proactive_candidates c on c.notification_id = o.notification_id;   -- 0 within a minute
+select push_drain_status() -> 'healthy';                    -- still true: reactive unaffected
+```
+
+**Also stop new proactive inbox rows** (the social trigger and the collectors):
+`update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';`
+
+**Back on:** set `proactive.push_enabled` to `'true'::jsonb`. Nothing that expired while it
+was off comes back; candidates that are still timely are considered again at the next
+evening window, under the normal one-per-day budget.
+
+**Fail-closed.** Anything but the JSON boolean `true` is off: a typo stops proactive push
+rather than starting it. The switch ships `false`.
+
+`push.delivery_enabled` is still inert (§10). It is not this switch, and wiring it is #119.

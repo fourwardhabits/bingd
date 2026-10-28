@@ -127,6 +127,9 @@ describe('the event vocabulary', () => {
         'invite_link_created',
         'invite_redeemed',
         'member_search_result_opened',
+        // 2026-10-28, proactive notifications: one name for a tap on a push or an inbox
+        // row. Which one, and what the reader did next, is server-side.
+        'notification_opened',
         'onboarding_completed',
         'onboarding_started',
         'onboarding_step_completed',

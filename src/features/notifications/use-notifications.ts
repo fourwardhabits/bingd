@@ -148,7 +148,25 @@ export type NotificationKind =
    */
   | 'import_started'
   | 'import_completed'
-  | 'import_failed';
+  | 'import_failed'
+  /**
+   * Proactive (20261028000100). Mutual friends watched a title on this reader's
+   * Watchlist: one row per title per fixed seven-day window, updated as friends arrive.
+   * Actorless on the server — who is in it is `cluster`, re-derived at read time — so a
+   * block or an unfollow takes a name out without anybody rewriting the row.
+   */
+  | 'watchlist_social'
+  /** Proactive (20261028000100). A film on the Watchlist opens in US theaters soon (T-7). */
+  | 'theatrical_release'
+  /**
+   * Proactive (20261028000100), and **push only**: `my_notifications` never returns it,
+   * so the inbox never draws it. It is in the union because a tap on the push routes
+   * through the same resolver every other kind does.
+   */
+  | 'watchlist_resurface';
+
+/** One person in a `watchlist_social` cluster, as the inbox may name them. */
+export type ClusterActor = { username: string; name: string; avatarUri: string | null };
 
 export type Notification = {
   id: string;
@@ -270,6 +288,13 @@ export type Notification = {
    * it, with no write and no invalidation to remember.
    */
   viewerRanked: boolean;
+  /**
+   * `watchlist_social` only (20261028000100): up to three people, earliest first, and how
+   * many there are in all. Null on every other kind.
+   */
+  cluster: { count: number; actors: ClusterActor[] } | null;
+  /** `theatrical_release` only (20261028000100): the US opening date, `YYYY-MM-DD`. */
+  opensOn: string | null;
 };
 
 const KINDS = new Set<string>([
@@ -291,6 +316,8 @@ const KINDS = new Set<string>([
   'import_started',
   'import_completed',
   'import_failed',
+  'watchlist_social',
+  'theatrical_release',
 ]);
 
 /**
@@ -308,6 +335,10 @@ const ACTORLESS_KINDS = new Set<string>([
   'import_started',
   'import_completed',
   'import_failed',
+  // Proactive (20261028000100). Nobody did these to the reader; `cluster` names the
+  // friends of a social row, and a film's row is about the film.
+  'watchlist_social',
+  'theatrical_release',
 ]);
 
 /** The import lifecycle kinds, which the inbox draws with the import's own mark. */
@@ -386,7 +417,14 @@ export function useNotifications(viewerId: string) {
             // reader's own comment rather than a remark under their activity.
             reply_to?: string;
             participant?: boolean;
+            // `theatrical_release` (20261028000100).
+            opens_on?: string;
           } | null;
+          // 20261028000100, `watchlist_social` only. Optional for the rollout reason above.
+          cluster_actors?:
+            | { username: string; display_name: string | null; avatar_path: string | null }[]
+            | null;
+          cluster_count?: number | null;
           // 20260830000100. Optional in the type for the same reason `mentions` is in
           // `use-comments`: a bundle can be newer than the database it is pointed at
           // during a rollout, and the absence must read as "no preview" rather than
@@ -399,7 +437,10 @@ export function useNotifications(viewerId: string) {
         .filter(
           (row) =>
             KINDS.has(row.kind) &&
-            (Boolean(row.actor_username) || ACTORLESS_KINDS.has(row.kind)),
+            (Boolean(row.actor_username) || ACTORLESS_KINDS.has(row.kind)) &&
+            // A social row with nobody left in it says nothing true. The server already
+            // drops it; this is the second of two, against a database that predates it.
+            (row.kind !== 'watchlist_social' || (row.cluster_count ?? 0) > 0),
         )
         .map((row) => ({
           id: row.id,
@@ -450,6 +491,23 @@ export function useNotifications(viewerId: string) {
           preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
           previewHidden: row.comment_spoilers === true,
           viewerRanked: row.viewer_ranked === true,
+          cluster:
+            row.kind === 'watchlist_social'
+              ? {
+                  count: Number(row.cluster_count ?? 0),
+                  actors: (row.cluster_actors ?? []).map((a) => ({
+                    username: a.username,
+                    name: a.display_name || a.username,
+                    avatarUri: avatarUri(a.avatar_path),
+                  })),
+                }
+              : null,
+          opensOn:
+            row.kind === 'theatrical_release' &&
+            typeof row.payload?.opens_on === 'string' &&
+            /^\d{4}-\d{2}-\d{2}$/.test(row.payload.opens_on)
+              ? row.payload.opens_on
+              : null,
         }));
     },
   });
@@ -659,7 +717,52 @@ export function verbFor(
       return 'Your Letterboxd history is ready';
     case 'import_failed':
       return 'We couldn’t finish your Letterboxd import';
+    // The fallbacks for a row whose title or people could not be resolved. The rows
+    // themselves are drawn by the inbox from `clusterPhrase` and `opensPhrase` below.
+    case 'watchlist_social':
+      return 'Friends watched something on your Watchlist';
+    case 'theatrical_release':
+      return 'A film on your Watchlist opens soon';
+    case 'watchlist_resurface':
+      return 'Something on your Watchlist';
   }
+}
+
+/**
+ * Who is in a social cluster, at most two by name: "Ravi", "Ravi and Eric",
+ * "Ravi, Eric and 1 other", "Ravi, Eric and 4 others". The same rule the push uses
+ * (`push-sender/copy.ts` `watchersPhrase`), so the lock screen and the row agree.
+ */
+export function clusterPhrase(cluster: Notification['cluster']): string | null {
+  if (!cluster || cluster.count < 1) return null;
+  const [first, second] = cluster.actors.map((a) => a.name).filter(Boolean);
+  const named = second ? 2 : first ? 1 : 0;
+  const total = Math.max(cluster.count, named);
+  const others = (n: number) => `${n} ${n === 1 ? 'other' : 'others'}`;
+  if (!first) return total === 1 ? '1 friend' : `${total} friends`;
+  if (!second || total === 1) return total <= 1 ? first : `${first} and ${others(total - 1)}`;
+  if (total === 2) return `${first} and ${second}`;
+  return `${first}, ${second} and ${others(total - 2)}`;
+}
+
+const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * A film row's date line, rendered at read time so a row read a week later still says
+ * something true: "Opens Fri, May 16" before the day, "Opened May 16" on or after it.
+ * `today` is the reader's local calendar date, injectable so a test does not read the
+ * clock. The date is a calendar date and is read in UTC so no zone can move it a day.
+ */
+export function opensPhrase(opensOn: string | null, today: Date = new Date()): string | null {
+  if (!opensOn || !/^\d{4}-\d{2}-\d{2}$/.test(opensOn)) return null;
+  const opens = new Date(`${opensOn}T00:00:00Z`);
+  if (Number.isNaN(opens.getTime())) return null;
+  const local = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const day = `${SHORT_MONTHS[opens.getUTCMonth()]} ${opens.getUTCDate()}`;
+  return opens.getTime() > local.getTime()
+    ? `Opens ${SHORT_WEEKDAYS[opens.getUTCDay()]}, ${day}`
+    : `Opened ${day}`;
 }
 
 /**
@@ -769,6 +872,19 @@ export function sentenceFor(row: Notification, subject: string | null): InboxSen
         return { lead: 'watched', subject, tail: 'with you' };
       case 'recommendation_ranked':
         return { lead: 'ranked', subject, tail: 'from your recommendation' };
+      // 20261028000100. "Ravi, Eric and 4 others watched Dune": the people come first and
+      // are drawn by the row from `clusterPhrase`, the way an actor's name is.
+      case 'watchlist_social':
+        return { lead: 'watched', subject, tail: null };
+      // "Dune opens Fri, May 16": the title leads, the date is read now, not when written.
+      case 'theatrical_release': {
+        const opens = opensPhrase(row.opensOn);
+        return {
+          lead: '',
+          subject,
+          tail: opens ? opens.charAt(0).toLowerCase() + opens.slice(1) : 'opens soon',
+        };
+      }
       default:
         break;
     }

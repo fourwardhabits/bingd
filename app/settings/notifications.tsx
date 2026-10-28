@@ -7,9 +7,11 @@ import { useCurrentProfile } from '@/features/auth';
 import { AwardBadge } from '@/features/awards/AwardBadge';
 import { badgeFor } from '@/features/awards/badges';
 import { GOAL_LABEL, goalAchievement } from '@/features/goals/goals';
+import { recordNotificationOpen } from '@/features/notifications/open-telemetry';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canRankFromRow,
+  clusterPhrase,
   relationshipActionFor,
   sectionFor,
   sentenceFor,
@@ -431,6 +433,12 @@ export default function NotificationsScreen() {
       );
       return;
     }
+    recordNotificationOpen({
+      notificationId: row.id,
+      kind: row.kind,
+      channel: 'inbox',
+      destination: typeof href === 'string' ? href : href.pathname,
+    });
     router.push(href);
   };
 
@@ -572,7 +580,12 @@ export default function NotificationsScreen() {
                                 // whole clause here, so there is no name to template in
                                 // and no "null" to read aloud.
                                 verbFor(row.kind, row.mediaKind, row.goal)
-                              : `${row.actorName} ${spokenSentence(sentence)}`
+                              : row.kind === 'watchlist_social'
+                                ? // The people are the cluster, not an actor.
+                                  `${clusterPhrase(row.cluster) ?? 'Friends'} ${spokenSentence(sentence)}. On your Watchlist`
+                                : row.kind === 'theatrical_release'
+                                  ? `${spokenSentence(sentence)}. On your Watchlist`
+                                  : `${row.actorName} ${spokenSentence(sentence)}`
                         }${
                           /* Only when the title is *not* already inside the clause.
                              Appending it to "watched 100 Meters with you" is how a
@@ -633,6 +646,23 @@ export default function NotificationsScreen() {
                             earned
                             size={theme.layout.avatar.sm}
                           />
+                        ) : row.kind === 'watchlist_social' ? (
+                          // The first friend's face: the row is about people, and the one
+                          // who started it is who the reader most likely recognises.
+                          <Avatar
+                            size="sm"
+                            uri={row.cluster?.actors[0]?.avatarUri ?? null}
+                            name={row.cluster?.actors[0]?.name ?? ''}
+                          />
+                        ) : row.kind === 'theatrical_release' ? (
+                          // About a film, not a person: the film's mark, not an empty face.
+                          <View style={styles.goalMark}>
+                            <Ionicons
+                              name="film-outline"
+                              size={theme.layout.icon.md}
+                              color={theme.semantic.action}
+                            />
+                          </View>
                         ) : (
                           <Avatar
                             size="sm"
@@ -708,6 +738,33 @@ export default function NotificationsScreen() {
                                 {' '}
                                 🎉
                               </Text>
+                            </Text>
+                          ) : row.kind === 'watchlist_social' ? (
+                            /* "Ravi, Eric and 4 others watched Dune", then "On your
+                             Watchlist" underneath. The people take the emphasis an actor
+                             gets, and the count is read now, so it grows with the row. */
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout">{clusterPhrase(row.cluster) ?? 'Friends'}</Text>
+                              <Text
+                                variant="callout"
+                                tone="secondary"
+                              >{` ${sentence.lead}`}</Text>
+                              {sentence.subject ? (
+                                <Text variant="callout">{` ${sentence.subject}`}</Text>
+                              ) : null}
+                            </Text>
+                          ) : row.kind === 'theatrical_release' ? (
+                            /* "Dune: Part Three opens Fri, May 16". The date is rendered
+                             from the payload at read time, so a row opened after the day
+                             says "opened" rather than something untrue. */
+                            <Text variant="callout" numberOfLines={2}>
+                              {sentence.subject ? (
+                                <Text variant="callout">{sentence.subject}</Text>
+                              ) : null}
+                              <Text
+                                variant="callout"
+                                tone="secondary"
+                              >{` ${sentence.tail ?? ''}`}</Text>
                             </Text>
                           ) : row.kind === 'friendship' && row.mutual ? (
                             /* The mutual acceptance is the other sentence that does not
@@ -814,6 +871,12 @@ export default function NotificationsScreen() {
                           ) : row.kind === 'goal_completed' && row.goal ? (
                             <Text variant="caption" tone="secondary" numberOfLines={1}>
                               {goalAchievement(row.goal.category, row.goal.target)}
+                            </Text>
+                          ) : row.kind === 'watchlist_social' ||
+                            row.kind === 'theatrical_release' ? (
+                            // Why this is for them: they saved it.
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              On your Watchlist
                             </Text>
                           ) : null}
                           {row.preview ? (

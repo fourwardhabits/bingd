@@ -2,7 +2,9 @@ import { Stack } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { PushPermissionCard } from '@/features/notifications/PushPermissionCard';
 import {
+  drawsMaster,
   masterOn,
   SECTIONS,
   useNotificationPreferenceWrites,
@@ -79,6 +81,10 @@ export default function NotificationPreferencesScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={styles.page}>
+          {/* The phone's own answer first: every switch below is moot for push if the
+              operating system says no, and this is the one screen that can say so. */}
+          <PushPermissionCard userId={profile.id} />
+
           <View style={styles.intro}>
             <Text variant="caption" tone="tertiary">
               Turning something off stops it reaching your inbox from now on. Anything
@@ -95,22 +101,27 @@ export default function NotificationPreferencesScreen() {
 
                 <View style={styles.card}>
                   {/* The master, above a divider rather than beside the children, so
-                      it reads as governing them rather than as one more of them. */}
-                  <Row
-                    label={section.masterLabel}
-                    description={
-                      on
-                        ? 'At least one of these is on.'
-                        : 'All of these are off.'
-                    }
-                    value={on}
-                    disabled={busy || unavailable}
-                    unavailable={unavailable}
-                    emphasis
-                    onValueChange={(next) => void toggleSection(section, next)}
-                  />
+                      it reads as governing them rather than as one more of them. Only
+                      where there is more than one child to govern (`drawsMaster`). */}
+                  {drawsMaster(section) ? (
+                    <>
+                      <Row
+                        label={section.masterLabel}
+                        description={
+                          on
+                            ? 'At least one of these is on.'
+                            : 'All of these are off.'
+                        }
+                        value={on}
+                        disabled={busy || unavailable}
+                        unavailable={unavailable}
+                        emphasis
+                        onValueChange={(next) => void toggleSection(section, next)}
+                      />
 
-                  <View style={styles.divider} />
+                      <View style={styles.divider} />
+                    </>
+                  ) : null}
 
                   {section.settings.map((setting) => (
                     <Row

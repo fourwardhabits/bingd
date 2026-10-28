@@ -3,6 +3,18 @@
 **Status:** written 2026-09-06. Canonical. This is the source of truth for what bingd
 sends, what it will not send, and why.
 
+> **2026-10-28: proactive notifications v1 are built** (founder decisions, `decision-log.md`
+> §6) and specified in [`proactive-notifications.md`](./proactive-notifications.md), which
+> supersedes this document where they disagree. In the matrix below:
+> `friend_watched_your_watchlist` is built as **`watchlist_social`** (aggregated per title
+> over a fixed 7-day window, pushed at the second mutual friend); `theatrical_release` is
+> **live behind the kill switch** (no longer shadow-only); `watchlist_aging` is built as
+> **`watchlist_resurface`** (push only, at most once a week); §7's cap is built as the
+> shared ledger, with the founder's numbers (1 per local day, 2 per rolling 7 days, 72h per
+> type, 7 days per title). Season premieres, streaming availability, the streak reminder
+> and the other friend moments are unchanged: still shadow, removed or deferred. The
+> settings now have a fourth section, **Watching**, with one switch.
+
 **Companion documents:** [`PRD.md`](./PRD.md) §15 (the product requirement) ·
 [`analytics.md`](./analytics.md) §notifications (measurement) ·
 [`deferred-roadmap.md`](./deferred-roadmap.md) ·

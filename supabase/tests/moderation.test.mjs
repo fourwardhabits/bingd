@@ -693,6 +693,11 @@ describe('the guard is wired in, not merely present', () => {
     // reach anybody. `register_device_token` — the half that *grants* one — does call
     // the guard, and that asymmetry is the point.
     'revoke_device_token',
+    // 20261028000100. Telemetry about the caller's OWN notification being opened. It takes
+    // a notification id and records nothing unless that row's recipient is `auth.uid()`,
+    // so it reaches nobody; it must never fail the tap it rides on, which the guard would
+    // do for a suspended reader opening their own inbox (which suspension has never hidden).
+    'record_notification_open',
     // 20260826000500, both of them. Suggestion lists for the People segment of For You:
     // pure reads, no argument but a limit, and every row filtered through
     // `can_discover_profile` and `can_view_profile` from the caller's own side. A

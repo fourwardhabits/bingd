@@ -94,6 +94,26 @@ export type PushJob = {
    */
   import_job_id?: string | null;
   import_counts?: { watched?: number; watchlist?: number } | null;
+  /**
+   * `goal_completed` only (20261028000100): which annual goal, and its target. The push had
+   * no copy before this — it is actorless, and only awards and imports had an actorless
+   * branch — so it was claimed and dropped without a word.
+   */
+  goal?: { year?: number | null; category?: string | null; target?: number | null } | null;
+  /**
+   * The three proactive types only (20261028000100), resolved by the claim at the moment
+   * of sending: the film's opening date and the reader's own local date (so "next Friday"
+   * is about their Friday), the resurfacing reason, and the social cluster's size and
+   * first two display names as they stand now. Names, never anything anybody wrote.
+   */
+  proactive?: {
+    type: string;
+    opens_on?: string | null;
+    local_today?: string | null;
+    reason?: string | null;
+    actor_count?: number | null;
+    actor_names?: string[] | null;
+  } | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -391,11 +411,137 @@ function awardContent(job: PushJob): PushContent {
   };
 }
 
+/**
+ * The annual goal's congratulations (20261028000100), the other actorless achievement.
+ *
+ * The same headline the inbox row draws ("You hit your 2026 Movies goal 🎉", `verbFor`)
+ * and the same second line ("Congrats on 50 movies", `goalAchievement`), so the push and
+ * the row say one thing. Before this the job reached `contentFor`, found no actor and no
+ * branch, and was dropped: every goal push since 20260829000200 was silently never sent.
+ */
+const GOAL_LABEL: Record<string, string> = { movies: 'Movies', tv_seasons: 'TV' };
+const GOAL_UNIT: Record<string, { one: string; many: string }> = {
+  movies: { one: 'movie', many: 'movies' },
+  tv_seasons: { one: 'TV season', many: 'TV seasons' },
+};
+
+function goalContent(job: PushJob): PushContent {
+  const year = Number(job.goal?.year) || null;
+  const label = GOAL_LABEL[job.goal?.category ?? ''] ?? null;
+  const unit = GOAL_UNIT[job.goal?.category ?? ''] ?? null;
+  const target = Number(job.goal?.target) || 0;
+
+  return {
+    title: year && label ? `You hit your ${year} ${label} goal 🎉` : 'You hit your goal 🎉',
+    body:
+      unit && target > 0
+        ? `Congrats on ${target} ${target === 1 ? unit.one : unit.many}`
+        : 'See your goals in bingd',
+    data: {
+      notificationId: job.notification_id,
+      kind: job.type,
+      actorUsername: null,
+      mediaItemId: null,
+      feedEventId: null,
+    },
+  };
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A `YYYY-MM-DD` as a calendar date, read in UTC so no timezone can move it a day. */
+function calendarDate(iso: string | null | undefined): Date | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const date = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * "Opens tomorrow." / "Opens next Friday." / "Opens Friday, Sep 26." — release-awareness.md
+ * §G1, exactly. The day, never the hour, and never where: a TMDB date says a film opens,
+ * not that any cinema is showing it.
+ */
+export function opensPhrase(opensOn: string | null | undefined, today: string | null | undefined): string | null {
+  const opens = calendarDate(opensOn);
+  const now = calendarDate(today);
+  if (!opens || !now) return null;
+  const days = Math.round((opens.getTime() - now.getTime()) / 86_400_000);
+  if (days < 1) return null;
+  const weekday = WEEKDAYS[opens.getUTCDay()];
+  if (days === 1) return 'Opens tomorrow.';
+  if (days === 7) return `Opens next ${weekday}.`;
+  return `Opens ${weekday}, ${MONTHS[opens.getUTCMonth()]} ${opens.getUTCDate()}.`;
+}
+
+/**
+ * Who watched it, at most two by name: "Ravi and Eric", "Ravi, Eric and 1 other",
+ * "Ravi, Eric and 4 others". Null below two, which the claim already refuses to send.
+ */
+export function watchersPhrase(names: readonly string[] | null | undefined, count: number | null | undefined): string | null {
+  const shown = (names ?? []).map((n) => n.trim()).filter(Boolean).slice(0, 2);
+  const total = Math.max(Number(count) || 0, shown.length);
+  if (shown.length < 2 || total < 2) return null;
+  if (total === 2) return `${shown[0]} and ${shown[1]}`;
+  const rest = total - 2;
+  return `${shown[0]}, ${shown[1]} and ${rest} ${rest === 1 ? 'other' : 'others'}`;
+}
+
+/**
+ * The three proactive pushes (20261028000100). The title is the film's or season's name,
+ * as every title push's is; the body is one fact and why it is for this reader. No
+ * emoji, no em dash, no exclamation, no marketing voice (release-awareness.md §G1).
+ */
+function proactiveContent(job: PushJob): PushContent | null {
+  const subject = subjectName(job);
+  const facts = job.proactive;
+  if (!subject || !facts) return null;
+
+  let body: string | null = null;
+  switch (facts.type) {
+    case 'theatrical_release': {
+      const opens = opensPhrase(facts.opens_on, facts.local_today);
+      body = opens ? `${opens} You saved it to your Watchlist.` : null;
+      break;
+    }
+    case 'watchlist_social': {
+      const who = watchersPhrase(facts.actor_names, facts.actor_count);
+      body = who ? `${who} watched it. It’s on your Watchlist.` : null;
+      break;
+    }
+    case 'watchlist_resurface':
+      body =
+        facts.reason === 'friends'
+          ? 'Friends have been watching it. It’s on your Watchlist.'
+          : facts.reason === 'trending'
+            ? 'It’s trending this week. It’s on your Watchlist.'
+            : facts.reason === 'recent'
+              ? 'It came out recently. It’s on your Watchlist.'
+              : 'Still meaning to watch it? It’s on your Watchlist.';
+      break;
+  }
+  if (!body) return null;
+
+  return {
+    title: subject,
+    body,
+    data: {
+      notificationId: job.notification_id,
+      kind: job.type,
+      actorUsername: null,
+      mediaItemId: job.media_item_id,
+      feedEventId: null,
+    },
+  };
+}
+
 export function contentFor(job: PushJob): PushContent | null {
   const importPush = importContent(job);
   if (importPush) return importPush;
 
   if (job.type === 'award_earned') return awardContent(job);
+  if (job.type === 'goal_completed') return goalContent(job);
+  if (job.proactive) return proactiveContent(job);
 
   const name = job.actor_name?.trim() || job.actor_username?.trim() || null;
   if (!name && job.type !== 'invite_welcome') return null;

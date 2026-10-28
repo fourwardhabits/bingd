@@ -45,6 +45,8 @@ it('reports once for a signed-in account, however often the auth object re-rende
   expect(mockRpc).toHaveBeenCalledWith('report_device_context', {
     p_timezone: 'Europe/Warsaw',
     p_region: 'PL',
+    // 20261028000100: this build can render the proactive kinds.
+    p_proactive_version: 1,
   });
 });
 

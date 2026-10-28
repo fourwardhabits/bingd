@@ -6,6 +6,7 @@ import { renderWithProviders } from '@/test-utils/render';
 import {
   ALL_CATEGORIES,
   categoriesIn,
+  drawsMaster,
   masterOn,
   SECTION_COVERAGE,
   SECTIONS,
@@ -57,6 +58,7 @@ const DEFAULTS: Record<NotificationCategory, boolean> = {
   recommendations: true,
   invites: true,
   awards: false,
+  watchlist_discovery: true,
 };
 
 const answerWith = (prefs: Partial<Record<NotificationCategory, boolean>> = {}) => {
@@ -132,8 +134,36 @@ describe('the sections cover the vocabulary', () => {
     expect(new Set(SECTION_COVERAGE).size).toBe(SECTION_COVERAGE.length);
   });
 
-  it('is the three groups the founder asked for', () => {
-    expect(SECTIONS.map((s) => s.key)).toEqual(['social', 'recommendations', 'achievements']);
+  // Watching joined on 20261028000100 with one switch for all three proactive kinds.
+  it('is the four groups the founder asked for', () => {
+    expect(SECTIONS.map((s) => s.key)).toEqual([
+      'social',
+      'recommendations',
+      'achievements',
+      'watching',
+    ]);
+  });
+
+  it('adds one category for Watching, and no toggle per internal event', () => {
+    const watching = SECTIONS.find((s) => s.key === 'watching');
+    expect(watching && categoriesIn(watching)).toEqual(['watchlist_discovery']);
+    expect(watching?.settings[0]?.label).toBe('Watchlist & discovery');
+  });
+
+  /**
+   * The guardrail is ten visible controls. Eight switches and three masters were already
+   * eleven; a master over a single child is the same switch twice, so single-child
+   * sections draw none and the count stays at eleven with the ninth category added. A
+   * global "Turn all off" would be a twelfth, which is why it is a recorded follow-up
+   * rather than part of this change.
+   */
+  it('draws a master only over more than one child, and eleven controls in all', () => {
+    expect(SECTIONS.filter(drawsMaster).map((s) => s.key)).toEqual(['social', 'recommendations']);
+    const controls = SECTIONS.reduce(
+      (n, s) => n + s.settings.length + (drawsMaster(s) ? 1 : 0),
+      0,
+    );
+    expect(controls).toBe(11);
   });
 
   it('gives every section a master and at least one child', () => {
@@ -217,9 +247,14 @@ describe('the screen', () => {
     expect(view.getByLabelText('Social')).toBeTruthy();
     expect(view.getByLabelText('Recommendations & invites')).toBeTruthy();
     expect(view.getByLabelText('Achievements')).toBeTruthy();
+    expect(view.getByLabelText('Watching')).toBeTruthy();
 
     for (const section of SECTIONS) {
-      expect(view.getByLabelText(section.masterLabel)).toBeTruthy();
+      if (drawsMaster(section)) {
+        expect(view.getByLabelText(section.masterLabel)).toBeTruthy();
+      } else {
+        expect(view.queryByLabelText(section.masterLabel)).toBeNull();
+      }
       for (const setting of section.settings) {
         expect(view.getByLabelText(setting.label)).toBeTruthy();
       }
@@ -323,12 +358,30 @@ describe('the screen', () => {
   it('leaves other sections alone when one master is used', async () => {
     const view = await renderLoaded();
 
-    fireEvent(view.getByLabelText('All Achievement notifications'), 'valueChange', true);
+    fireEvent(
+      view.getByLabelText('All Recommendations & invites notifications'),
+      'valueChange',
+      false,
+    );
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['awards'],
-        p_enabled: true,
+        p_categories: ['recommendations', 'invites'],
+        p_enabled: false,
+      }),
+    );
+  });
+
+  it('writes the Watching switch as the one category it is', async () => {
+    const view = await renderLoaded();
+
+    expect(view.getByLabelText('Watchlist & discovery').props.value).toBe(true);
+    fireEvent(view.getByLabelText('Watchlist & discovery'), 'valueChange', false);
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('set_notification_preference', {
+        p_category: 'watchlist_discovery',
+        p_enabled: false,
       }),
     );
   });

@@ -17,6 +17,7 @@ import {
   registerPushToken,
   rememberToken,
 } from './push';
+import { recordNotificationOpen } from './open-telemetry';
 import { hrefForPush } from './routing';
 
 /**
@@ -187,7 +188,16 @@ export function usePush() {
 
     const data = response.notification.request.content.data as Record<string, unknown> | null;
     Notifications.clearLastNotificationResponse();
-    router.push(hrefForPush(data));
+    const href = hrefForPush(data);
+    // 20261028000100. The tap is recorded against its own notification, once, server-side
+    // — the only record that can say whether a push led anywhere. Never awaited.
+    recordNotificationOpen({
+      notificationId: data?.notificationId,
+      kind: data?.kind,
+      channel: 'push',
+      destination: typeof href === 'string' ? href : href.pathname,
+    });
+    router.push(href);
   }, [response, userId, router]);
 
   // ---------------------------------------------------------------------------

@@ -834,7 +834,17 @@ const ALLOWED = {
   // returns only whether each was accepted. `account_context` has no read policy, so
   // nothing a client can call reads it back, including this. Every other release
   // function is service_role only and is not on this list.
-  'report_device_context(text,text)': ['authenticated'],
+  //
+  // 20261028000100 added a third, defaulted argument: the proactive-notification version
+  // the build can render, bounded 1-100 and latest-wins. Still the caller's own row only.
+  'report_device_context(text,text,integer)': ['authenticated'],
+
+  // 20261028000100. A tap on one of the caller's OWN notifications, for proactive
+  // attribution. It reads the notification by `id = $1 and recipient_id = auth.uid()` and
+  // writes only then, answering the same `ok` either way, so it is neither an oracle nor
+  // a way to write about anybody else. Everything else proactive (the ledger, the arbiter,
+  // the collectors, the tick, the status) is service_role or internal and is not here.
+  'record_notification_open(uuid,text,text)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

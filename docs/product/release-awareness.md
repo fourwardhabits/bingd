@@ -4,6 +4,12 @@
 `20260930000100` and `20260930000200` plus the `tmdb-adapter` `release-refresh` action.
 Release data refreshes and candidate decisions are recorded. **Real proactive sending is
 OFF and cannot be switched on without a new migration.** See [§S](#s-the-shadow-tranche-as-built).
+**2026-10-28:** that migration exists for **films only**. `20261028000100`/`200` deliver
+`theatrical_release` (watchlisted film, US, T-7, no day-of) through the shared proactive
+ledger, behind `proactive.push_enabled`; see [`proactive-notifications.md`](./proactive-notifications.md) §H.
+The state machine, refresh and shadow ledger in this document are unchanged and still run;
+`release.push_enabled` remains a recorded flag that nothing acts on. **Season premieres stay
+shadow-only** (founder decision E).
 **Audited against:** `origin/main` @ `c77d524` (149 migrations), and re-checked at
 `28aee9a` before the migrations were numbered.
 **Extends:** [`notifications.md`](./notifications.md), the canonical doctrine. This document

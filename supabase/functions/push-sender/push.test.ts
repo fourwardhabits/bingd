@@ -820,3 +820,114 @@ Deno.test('no other push grows an import job id', () => {
   const follow = contentFor(job({ type: 'follow' }))!;
   assertEquals('importJobId' in follow.data, false);
 });
+
+// ---------------------------------------------------------------------------
+// goal_completed (20261028000100): the actorless push that had no copy
+// ---------------------------------------------------------------------------
+
+Deno.test('goal_completed says which goal, in the inbox row\'s own words', () => {
+  const content = contentFor(
+    job({
+      type: 'goal_completed',
+      actor_username: null,
+      actor_name: null,
+      goal: { year: 2031, category: 'movies', target: 50 },
+    }),
+  );
+  assert(content, 'goal_completed produced no push: the bug this fixes');
+  assertEquals(content.title, 'You hit your 2031 Movies goal 🎉');
+  assertEquals(content.body, 'Congrats on 50 movies');
+  assertEquals(content.data.kind, 'goal_completed');
+  assertEquals(content.data.actorUsername, null);
+});
+
+Deno.test('goal_completed still says something from a claim with no goal fields', () => {
+  const content = contentFor(job({ type: 'goal_completed', actor_username: null, actor_name: null }));
+  assert(content);
+  assertEquals(content.title, 'You hit your goal 🎉');
+  const tv = contentFor(
+    job({ type: 'goal_completed', actor_name: null, actor_username: null, goal: { year: 2031, category: 'tv_seasons', target: 1 } }),
+  )!;
+  assertEquals([tv.title, tv.body], ['You hit your 2031 TV goal 🎉', 'Congrats on 1 TV season']);
+});
+
+// ---------------------------------------------------------------------------
+// Proactive pushes (20261028000100)
+// ---------------------------------------------------------------------------
+
+const proactive = (type: string, facts: Record<string, unknown>, overrides: Partial<PushJob> = {}) =>
+  job({
+    type,
+    actor_username: null,
+    actor_name: null,
+    media_item_id: 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm',
+    media_kind: 'movie',
+    media_title: 'Dune: Part Three',
+    proactive: { type, ...facts },
+    ...overrides,
+  });
+
+Deno.test('theatrical: the day, never the hour, and the reason', () => {
+  const at = (opens: string, today: string) =>
+    contentFor(proactive('theatrical_release', { opens_on: opens, local_today: today }))!;
+  // 2031-05-16 is a Friday.
+  assertEquals(at('2031-05-16', '2031-05-09').title, 'Dune: Part Three');
+  assertEquals(at('2031-05-16', '2031-05-09').body, 'Opens next Friday. You saved it to your Watchlist.');
+  assertEquals(at('2031-05-16', '2031-05-12').body, 'Opens Friday, May 16. You saved it to your Watchlist.');
+  assertEquals(at('2031-05-16', '2031-05-15').body, 'Opens tomorrow. You saved it to your Watchlist.');
+});
+
+Deno.test('theatrical: on or after the day there is nothing to say', () => {
+  assertEquals(contentFor(proactive('theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-16' })), null);
+  assertEquals(contentFor(proactive('theatrical_release', { opens_on: null, local_today: '2031-05-16' })), null);
+});
+
+Deno.test('watchlist social: two names at most, counted as sent', () => {
+  const say = (names: string[], count: number) =>
+    contentFor(proactive('watchlist_social', { actor_names: names, actor_count: count }))?.body ?? null;
+  assertEquals(say(['Ravi', 'Eric'], 2), 'Ravi and Eric watched it. It’s on your Watchlist.');
+  assertEquals(say(['Ravi', 'Eric'], 3), 'Ravi, Eric and 1 other watched it. It’s on your Watchlist.');
+  assertEquals(say(['Ravi', 'Eric'], 6), 'Ravi, Eric and 4 others watched it. It’s on your Watchlist.');
+  assertEquals(say(['Ravi'], 1), null, 'one friend is never a push');
+});
+
+Deno.test('resurfacing: one sentence per reason, and a generic one otherwise', () => {
+  const say = (reason: string | null) => contentFor(proactive('watchlist_resurface', { reason }))!.body;
+  assertEquals(say('friends'), 'Friends have been watching it. It’s on your Watchlist.');
+  assertEquals(say('trending'), 'It’s trending this week. It’s on your Watchlist.');
+  assertEquals(say('recent'), 'It came out recently. It’s on your Watchlist.');
+  assertEquals(say('saved'), 'Still meaning to watch it? It’s on your Watchlist.');
+  assertEquals(say(null), 'Still meaning to watch it? It’s on your Watchlist.');
+});
+
+Deno.test('every proactive push opens its title, and nothing names a person in the payload', () => {
+  for (const [type, facts] of [
+    ['theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-09' }],
+    ['watchlist_social', { actor_names: ['Ravi', 'Eric'], actor_count: 2 }],
+    ['watchlist_resurface', { reason: 'saved' }],
+  ] as const) {
+    const content = contentFor(proactive(type, facts))!;
+    assertEquals(content.data.kind, type);
+    assertEquals(content.data.mediaItemId, 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm');
+    assertEquals(content.data.actorUsername, null);
+    assertEquals(content.data.feedEventId, null);
+  }
+});
+
+Deno.test('a proactive push for a season names the show', () => {
+  const content = contentFor(
+    proactive('watchlist_resurface', { reason: 'saved' }, { media_kind: 'season', media_title: 'Season 2', series_title: 'Severance' }),
+  )!;
+  assertEquals(content.title, 'Severance, S2');
+});
+
+Deno.test('copy has no em dash in any proactive push', () => {
+  for (const content of [
+    contentFor(proactive('theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-12' }))!,
+    contentFor(proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 5 }))!,
+    contentFor(proactive('watchlist_resurface', { reason: 'trending' }))!,
+  ]) {
+    assert(!`${content.title} ${content.body}`.includes('—'));
+    assert(!`${content.title} ${content.body}`.includes('!'));
+  }
+});

@@ -48,6 +48,8 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   subjectActivityType: null,
   commentIsReply: false,
   commentIsFollowUp: false,
+  cluster: null,
+  opensOn: null,
   ...over,
 });
 
@@ -110,6 +112,11 @@ describe('the routing matrix', () => {
     import_started: { kind: 'import', jobId: null },
     import_completed: { kind: 'import', jobId: null },
     import_failed: { kind: 'import', jobId: null },
+    // The proactive kinds (20261028000100) open the title the reader saved, never one
+    // friend's post: a cluster names several people.
+    watchlist_social: { kind: 'title', mediaItemId: 'media-1' },
+    theatrical_release: { kind: 'title', mediaItemId: 'media-1' },
+    watchlist_resurface: { kind: 'title', mediaItemId: 'media-1' },
   };
 
   for (const kind of ROUTED_KINDS) {

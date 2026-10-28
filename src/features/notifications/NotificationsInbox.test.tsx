@@ -243,6 +243,80 @@ describe('read is something the reader does', () => {
     expect(view.getByLabelText(/^Unread./)).toBeTruthy();
   });
 });
+
+/**
+ * The proactive rows (20261028000100). Both are actorless on the server, so neither may
+ * be dropped for having no actor, and neither may draw a blank face.
+ */
+describe('proactive rows', () => {
+  const proactiveRow = (overrides: Record<string, unknown>) =>
+    follow({
+      id: 'p1',
+      actor_id: null,
+      actor_username: null,
+      actor_display_name: null,
+      media_item_id: 'dune',
+      media_title: 'Dune',
+      media_kind: 'movie',
+      subject_type: 'media_item',
+      subject_id: 'dune',
+      ...overrides,
+    });
+
+  it('names the friends in a cluster, counts the rest, and says why it is for the reader', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      proactiveRow({
+        kind: 'watchlist_social',
+        type: 'watchlist_social',
+        cluster_count: 6,
+        cluster_actors: [
+          { username: 'ravi', display_name: 'Ravi', avatar_path: null },
+          { username: 'eric', display_name: 'Eric', avatar_path: null },
+          { username: 'mo', display_name: 'Mo', avatar_path: null },
+        ],
+      }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Ravi, Eric and 4 others')).toBeTruthy());
+    expect(view.getByText('On your Watchlist')).toBeTruthy();
+    const label = /Ravi, Eric and 4 others watched Dune\. On your Watchlist/;
+    expect(view.getByLabelText(label)).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText(label));
+    expect(mockPush).toHaveBeenCalledWith('/title/dune');
+  });
+
+  it('draws a film opening with its date, read now', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      proactiveRow({
+        kind: 'theatrical_release',
+        type: 'theatrical_release',
+        payload: { opens_on: '2099-05-15' },
+      }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/opens Fri, May 15/)).toBeTruthy());
+    expect(view.getByText('On your Watchlist')).toBeTruthy();
+  });
+
+  it('never draws a social row with nobody left in it, or a resurfacing row at all', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      proactiveRow({
+        id: 'gone',
+        kind: 'watchlist_social',
+        type: 'watchlist_social',
+        cluster_count: 0,
+        cluster_actors: [],
+      }),
+      proactiveRow({ id: 'hidden', kind: 'watchlist_resurface', type: 'watchlist_resurface' }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Nothing yet')).toBeTruthy());
+  });
+});
 /**
  * **The row a brand-new account opens Bingd to.**
  *

@@ -6,7 +6,8 @@ import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
 /**
- * The eight categories, exactly as `_notification_categories()` names them.
+ * The nine categories, exactly as `_notification_categories()` names them.
+ * `watchlist_discovery` joined on 20261028000100 and governs all three proactive kinds.
  *
  * The union is the enforcement. A string here that the database does not know is a
  * 22023 at runtime; a member missing from `SECTIONS` is a compile error, because
@@ -20,11 +21,12 @@ export type NotificationCategory =
   | 'watch_tags'
   | 'recommendations'
   | 'invites'
-  | 'awards';
+  | 'awards'
+  | 'watchlist_discovery';
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
-export type NotificationSectionKey = 'social' | 'recommendations' | 'achievements';
+export type NotificationSectionKey = 'social' | 'recommendations' | 'achievements' | 'watching';
 
 export type NotificationSetting = {
   key: NotificationCategory;
@@ -136,7 +138,38 @@ export const SECTIONS: readonly NotificationSection[] = [
       },
     ],
   },
+  /**
+   * 20261028000100. One switch for everything the app says on its own about the reader's
+   * Watchlist (founder: "do not create one toggle per internal event"): friends who
+   * watched a saved title, a saved film opening in theaters next week, and an occasional
+   * pick from the Watchlist. Last, because it is the one section nobody else causes.
+   */
+  {
+    key: 'watching',
+    title: 'Watching',
+    masterLabel: 'All Watching notifications',
+    settings: [
+      {
+        key: 'watchlist_discovery',
+        label: 'Watchlist & discovery',
+        description:
+          'Friends watch something you saved, a saved film opens in theaters, or an occasional pick from your Watchlist.',
+      },
+    ],
+  },
 ];
+
+/**
+ * Whether a section draws its master above its children.
+ *
+ * Only when there is more than one child. A master over a single switch is the same
+ * switch drawn twice — it writes exactly the one category beneath it — and the screen was
+ * already at eleven controls against a guardrail of ten. So Achievements and Watching
+ * each draw one row, and the masters that govern something stay (20261028000100).
+ */
+export function drawsMaster(section: NotificationSection): boolean {
+  return section.settings.length > 1;
+}
 
 /** Every category in a section, which is what a master switch writes. */
 export function categoriesIn(section: NotificationSection): NotificationCategory[] {
@@ -166,6 +199,7 @@ const _exhaustive: Record<NotificationCategory, true> = {
   recommendations: true,
   invites: true,
   awards: true,
+  watchlist_discovery: true,
 };
 export const ALL_CATEGORIES = Object.keys(_exhaustive) as NotificationCategory[];
 

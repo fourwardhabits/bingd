@@ -110,7 +110,8 @@ describe('the defaults', () => {
    * unwanted is a setting somebody turns off, and one that never arrives is a bug
    * nobody can see.
    */
-  it('answers for all eight categories, all on', async () => {
+  // `watchlist_discovery` joined on 20261028000100, on by omission like the other eight.
+  it('answers for all nine categories, all on', async () => {
     assert.deepEqual(await prefs(control), {
       follows: true,
       follow_accepted: true,
@@ -120,6 +121,7 @@ describe('the defaults', () => {
       recommendations: true,
       invites: true,
       awards: true,
+      watchlist_discovery: true,
     });
   });
 
