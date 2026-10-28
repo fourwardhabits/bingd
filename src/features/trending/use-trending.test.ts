@@ -132,6 +132,36 @@ describe('reading the trending shelf', () => {
     expect(result.current.data?.items.map((item) => item.mediaItemId)).toEqual(['film-1']);
   });
 
+  it("fills the shelf from today's top ranks, not from the most popular rows", async () => {
+    // Twenty films where rank 17 is by far the most popular, and one of the top six has
+    // left the catalogue. The next film down takes its slot; rank 17 never gets one.
+    const films = Array.from({ length: 20 }, (_, rank) => `film-${rank + 1}`);
+    const shows = Array.from({ length: 20 }, (_, rank) => `show-${rank + 1}`);
+    rows.provider_list_cache = [
+      list('trending.movie.day', films),
+      list('trending.series.day', shows),
+    ];
+    rows.media_items = [
+      ...films
+        .filter((id) => id !== 'film-2')
+        .map((id) => title(id, id === 'film-17' ? 473 : 50)),
+      ...shows.map((id) => title(id, 20)),
+    ];
+
+    const { result } = await renderHookWithProviders(() => useTrending());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const shown = result.current.data?.items.map((item) => item.mediaItemId) ?? [];
+    expect(shown).toHaveLength(12);
+    expect(shown).not.toContain('film-17');
+    expect(shown.filter((id) => id.startsWith('film-')).sort()).toEqual(
+      ['film-1', 'film-3', 'film-4', 'film-5', 'film-6', 'film-7'].sort(),
+    );
+    expect(shown.filter((id) => id.startsWith('show-')).sort()).toEqual(
+      ['show-1', 'show-2', 'show-3', 'show-4', 'show-5', 'show-6'].sort(),
+    );
+  });
+
   it('still serves a list that has just passed its TTL, and says so', async () => {
     rows.provider_list_cache = [
       list('trending.movie.day', ['film-1'], { expires_at: justPassed() }),
