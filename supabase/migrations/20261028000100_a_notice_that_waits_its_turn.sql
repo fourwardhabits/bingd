@@ -42,6 +42,11 @@
 -- being timely), and claim_push_batch drops any proactive job already queued. Reactive
 -- delivery reads neither. No deploy, no cron change, no DDL. app_config has no client
 -- write path, and no `proactive.*` key is `public.`, so clients cannot read it either.
+--
+-- AND A GENERATION SWITCH. `proactive.generation_enabled`, also seeded FALSE: while it is
+-- anything but true, no proactive candidate and no proactive inbox row is created at all.
+-- So applying these two migrations changes nothing any reader can see. Both switches
+-- are turned on deliberately, by a founder, after QA.
 -- ===========================================================================
 
 
@@ -52,9 +57,12 @@
 insert into app_config (key, value) values
   -- THE KILL SWITCH. Off until a founder turns it on after Preview QA.
   ('proactive.push_enabled', 'false'::jsonb),
-  -- Candidate generation and the inbox rows that go with it. Independent of the switch
-  -- above: the inbox is the durable record, the push is transport.
-  ('proactive.generation_enabled', 'true'::jsonb),
+  -- THE GENERATION SWITCH. Candidates and the proactive inbox rows that go with them.
+  -- Also off, so applying these migrations changes nothing anybody can see: no social or
+  -- theatrical inbox row, no resurfacing, no candidate of any kind, until a founder turns
+  -- it on. Independent of the push switch above: the inbox is the record, the push is
+  -- transport, and QA can run either without the other.
+  ('proactive.generation_enabled', 'false'::jsonb),
   -- The local evening window. Proactive pushes go out inside it and nowhere else.
   ('proactive.window_start_hour', '17'::jsonb),
   ('proactive.window_end_hour', '20'::jsonb),
@@ -113,6 +121,20 @@ $$;
 
 comment on function _proactive_push_enabled() is
   'THE proactive kill switch. True only when app_config proactive.push_enabled is the JSON boolean true. Read by _proactive_arbitrate before selecting and by claim_push_batch before sending. Reactive delivery never reads it. Internal.';
+
+-- Fail closed, the same way: generation happens only when the row is exactly true.
+create or replace function _proactive_generation_enabled()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select _proactive_setting('proactive.generation_enabled', 'false'::jsonb) = 'true'::jsonb;
+$$;
+
+comment on function _proactive_generation_enabled() is
+  'THE proactive generation switch. True only when app_config proactive.generation_enabled is the JSON boolean true (seeded false). Read by the feed_events social trigger and by _proactive_tick before any collector runs; while false no proactive candidate or proactive inbox row is created. Reactive notifications never read it. Internal.';
 
 create or replace function _proactive_priority(p_type text)
 returns integer
@@ -229,29 +251,44 @@ comment on function _apply_notification_preference() is
 
 
 -- ---------------------------------------------------------------------------
--- 2. The client says what it can render
+-- 2. Each device says what it can render
 --
 -- A build that predates these kinds hides them in the inbox and routes a tap on one to
--- the inbox, where the row is hidden: a wasted push. Timezone used to be the old-client
--- gate (release-awareness.md I1), and is not any more — every production build now
--- reports one. So the client states a version, and the arbiter will not push to an
--- account that has not reported one at least `proactive.min_client_version`.
+-- the inbox, where the row is hidden: a push that leads nowhere. Timezone used to be the
+-- old-client gate (release-awareness.md I1), and is not any more — every production build
+-- now reports one.
 --
--- Latest report wins, deliberately: an old build signing in reports null and turns the
--- capability back off until the new one reports again. Coarse (per account, not per
--- device), and recorded as such in the design doc.
+-- So the gate is the DEVICE, not the account. A push is delivered to tokens, and one
+-- account can hold a new phone and an old tablet at once; an account-level flag would let
+-- the new phone vouch for the old tablet. Each `device_tokens` row records the
+-- proactive-notification version of the build that registered it, and:
+--
+--   · the arbiter selects only for a recipient with at least one live token at or above
+--     `proactive.min_client_version` (`client_unsupported` otherwise);
+--   · claim_push_batch hands a proactive job ONLY those tokens, so the old tablet never
+--     receives a kind it cannot route; a reactive job still gets every live token, exactly
+--     as before.
+--
+-- Latest registration wins, per token. The client registers once per app process, so an
+-- installation that updates to a capable build reports it on its next launch, and an old
+-- build that registers the same token reports null and turns that one device off again.
+-- A token is an installation, which is the unit that actually runs a given build.
 -- ---------------------------------------------------------------------------
 
-alter table account_context add column if not exists proactive_client_version smallint;
+alter table device_tokens add column if not exists proactive_version smallint;
 
-comment on column account_context.proactive_client_version is
-  'The proactive-notification version the account''s most recent client reported (report_device_context). Null from a build that predates proactive kinds. The arbiter pushes nothing proactive below proactive.min_client_version (20261028000100).';
+comment on column device_tokens.proactive_version is
+  'The proactive-notification version of the build that last registered this token (register_device_token, 20261028000100). Null from a build that predates proactive kinds. claim_push_batch gives proactive jobs only tokens at or above proactive.min_client_version; reactive jobs are unaffected.';
 
-drop function if exists report_device_context(text, text);
+-- Rebuilt from 20260825000300 with one defaulted argument and one column. An old client's
+-- three-argument call resolves to this through the default and records null, which is the
+-- truth about that build.
+drop function if exists register_device_token(uuid, text, text);
 
-create or replace function report_device_context(
-  p_timezone          text,
-  p_region            text,
+create or replace function register_device_token(
+  p_operation_id      uuid,
+  p_token             text,
+  p_platform          text,
   p_proactive_version integer default null
 )
 returns jsonb
@@ -260,47 +297,70 @@ security definer
 set search_path = public
 as $$
 declare
-  v_user     uuid := auth.uid();
-  v_timezone text;
-  v_region   text;
-  v_version  smallint;
+  v_token   text := btrim(coalesce(p_token, ''));
+  -- Bounded, so a client cannot claim a capability from the future.
+  v_version smallint := case when p_proactive_version between 1 and 100 then p_proactive_version end;
 begin
-  if v_user is null then
-    raise exception 'not signed in' using errcode = '42501';
-  end if;
   perform assert_can_write();
 
-  select name into v_timezone from pg_timezone_names where name = nullif(trim(p_timezone), '') limit 1;
-  v_region := case when upper(trim(coalesce(p_region, ''))) ~ '^[A-Z]{2}$'
-                   then upper(trim(p_region)) end;
-  -- Bounded, so a client cannot claim a capability from the future.
-  v_version := case when p_proactive_version between 1 and 100 then p_proactive_version end;
+  if not _claim_operation(p_operation_id, 'register_device_token') then
+    return jsonb_build_object('status', 'already_applied');
+  end if;
 
-  insert into account_context as ac (user_id, timezone, region, proactive_client_version, reported_at)
-  values (v_user, v_timezone, v_region, v_version, now())
-  on conflict (user_id) do update
-     set timezone                 = coalesce(excluded.timezone, ac.timezone),
-         region                   = coalesce(excluded.region, ac.region),
-         proactive_client_version = excluded.proactive_client_version,
-         reported_at              = excluded.reported_at
-   where ac.timezone is distinct from coalesce(excluded.timezone, ac.timezone)
-      or ac.region   is distinct from coalesce(excluded.region, ac.region)
-      or ac.proactive_client_version is distinct from excluded.proactive_client_version
-      or ac.reported_at < now() - interval '1 day';
+  if p_platform is null or p_platform not in ('ios', 'android') then
+    raise exception 'platform must be ios or android' using errcode = '22023';
+  end if;
 
-  return jsonb_build_object(
-    'ok', true,
-    'timezone_accepted', v_timezone is not null,
-    'region_accepted', v_region is not null
-  );
+  -- The provider's own shape, checked here rather than as a column constraint so the
+  -- refusal names the problem. Expo push tokens are `ExponentPushToken[...]`; the older
+  -- `ExpoPushToken[...]` spelling is accepted because the client is not the place to
+  -- decide which of the two the SDK returns.
+  --
+  -- A raw APNs or FCM token would pass a length check and fail silently at the provider,
+  -- which is the failure this refusal exists to convert into an error somebody sees.
+  if v_token !~ '^Expo(nent)?PushToken\[[A-Za-z0-9_%\-]+\]$' then
+    raise exception 'not an Expo push token' using errcode = '22023';
+  end if;
+
+  -- `on conflict (token)` is what moves a device between accounts, and it is one
+  -- statement so there is no window in which the device belongs to nobody or to both.
+  -- `revoked_at = null` un-revokes, which is what re-registering a token that was
+  -- released at sign-out has to mean. `proactive_version` is replaced, not coalesced:
+  -- the build registering now is the build this installation runs.
+  insert into device_tokens (user_id, token, platform, proactive_version)
+  values (auth.uid(), v_token, p_platform, v_version)
+  on conflict (token) do update
+    set user_id           = excluded.user_id,
+        platform          = excluded.platform,
+        proactive_version = excluded.proactive_version,
+        revoked_at        = null,
+        updated_at        = now();
+
+  return jsonb_build_object('status', 'ok');
 end;
 $$;
 
-comment on function report_device_context(text, text, integer) is
-  'Records the caller''s device timezone (an IANA name Postgres knows), locale region (two letters) and, since 20261028000100, the proactive-notification version the build can render. A timezone or region that does not validate is ignored, never blanking a known one; the version is latest-wins, so an older build reporting null turns proactive push back off for the account. Writes only when something changed or the row is a day old. Returns nothing about the stored row. Calls assert_can_write.';
+comment on function register_device_token(uuid, text, text, integer) is
+  'Registers the caller''s device for push, or moves an existing device to the caller. Idempotent through _claim_operation. The token is globally unique, so re-registering a device that another account used transfers it in one statement -- which is what stops a second person on a shared phone inheriting the first one''s notifications. Since 20261028000100 it records the build''s proactive-notification version on the token (null from an older build, bounded 1-100), latest-wins.';
 
-revoke execute on function report_device_context(text, text, integer) from public, anon;
-grant execute on function report_device_context(text, text, integer) to authenticated;
+revoke execute on function register_device_token(uuid, text, text, integer) from public, anon, authenticated;
+grant execute on function register_device_token(uuid, text, text, integer) to authenticated;
+
+-- Live tokens a proactive push may use for this recipient. One definition, used by the
+-- arbiter, the resurfacing collector and the claim, so the three cannot disagree.
+create or replace function _proactive_capable_token(p_token device_tokens)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p_token.revoked_at is null
+     and coalesce(p_token.proactive_version, 0) >= _proactive_int('proactive.min_client_version', 1);
+$$;
+
+comment on function _proactive_capable_token(device_tokens) is
+  'Whether one device token may receive a proactive push: live, and registered by a build at or above proactive.min_client_version. Internal.';
 
 
 -- ---------------------------------------------------------------------------
@@ -594,12 +654,11 @@ declare
   v_type_cd    interval := make_interval(hours => _proactive_int('proactive.type_cooldown_hours', 72));
   v_res_cd     interval := make_interval(days  => _proactive_int('proactive.resurface_cooldown_days', 7));
   v_title_cd   interval := make_interval(days  => _proactive_int('proactive.title_cooldown_days', 7));
-  v_min_ver    integer  := _proactive_int('proactive.min_client_version', 1);
   v_push       boolean  := _proactive_push_enabled();
   v_user       uuid;
   v_tz         text;
-  v_ver        integer;
   v_device     boolean;
+  v_capable    boolean;
   v_local      timestamp;
   v_today      date;
   v_in_window  boolean;
@@ -632,11 +691,11 @@ begin
     -- second sees the first one's selection in its cap counts.
     perform pg_advisory_xact_lock(hashtextextended('bingd.proactive:' || v_user::text, 0));
 
-    select ac.timezone, coalesce(ac.proactive_client_version, 0)
-      into v_tz, v_ver
-      from account_context ac where ac.user_id = v_user;
-    v_ver := coalesce(v_ver, 0);
+    select ac.timezone into v_tz from account_context ac where ac.user_id = v_user;
     v_device := exists (select 1 from device_tokens d where d.user_id = v_user and d.revoked_at is null);
+    -- Per device, not per account: at least one live token from a build that can route
+    -- these kinds. The claim then sends to those tokens only (§6).
+    v_capable := exists (select 1 from device_tokens d where d.user_id = v_user and _proactive_capable_token(d));
     v_picked := false;
     v_today := null;
     v_in_window := false;
@@ -674,8 +733,8 @@ begin
       v_block := case
         when not v_push                then 'kill_switch'
         when v_tz is null              then 'no_timezone'
-        when v_ver < v_min_ver         then 'client_unsupported'
         when not v_device              then 'no_device'
+        when not v_capable             then 'client_unsupported'
         when not v_in_window           then 'quiet_window'
         when v_picked                  then 'higher_priority_selected'
         when v_day_count >= v_daily    then 'daily_cap'
@@ -751,14 +810,15 @@ comment on function _proactive_arbitrate(timestamptz) is
 -- Three additions and nothing else; every reactive branch is carried across verbatim.
 --
 --   a. A proactive job is checked again at the moment it is sent: the kill switch, its
---      state, and _proactive_invalid. One that fails is dropped exactly as a blocked
---      actor's is, and its candidate records why. So switching proactive off stops even
---      what is already in the queue.
+--      state, that a capable device still exists, and _proactive_invalid. One that fails
+--      is dropped exactly as a blocked actor's is, and its candidate records why. So
+--      switching proactive off stops even what is already in the queue.
 --   b. Two new job fields: `goal` (goal_completed, whose push had no copy because it
 --      carries no actor — the bug this fixes) and `proactive` (the type, the film's
 --      date and the reader's local date, the resurfacing reason, and the social
 --      cluster's count and first two names AS OF NOW — the push says who has watched
---      at send time, not at threshold time).
+--      at send time, not at threshold time). And a proactive job's `tokens` are only the
+--      recipient's devices whose build can route it (§2); a reactive job's are unchanged.
 --   c. A claimed proactive candidate becomes `sent`, with the count it went out with.
 -- ---------------------------------------------------------------------------
 
@@ -825,6 +885,11 @@ begin
            case
              when not v_pro_on then 'kill_switch'
              when pc.state not in ('selected', 'sent') then 'expired'
+             -- Per device: the capable phone may have signed out since selection, leaving
+             -- only an old build. Then there is nobody this kind can safely reach.
+             when not exists (select 1 from device_tokens d
+                               where d.user_id = pc.recipient_id and _proactive_capable_token(d))
+               then 'client_unsupported'
              else _proactive_invalid(pc.id, now())
            end as reason
       from proactive_candidates pc
@@ -935,6 +1000,9 @@ begin
                from device_tokens d
               where d.user_id = n.recipient_id
                 and d.revoked_at is null
+                -- 20261028000100 (b). A proactive job goes only to devices whose build can
+                -- route it; a reactive job, as always, to every live device.
+                and (pc.id is null or _proactive_capable_token(d))
            )                                       as tokens
       from notifications n
       join push_outbox o on o.notification_id = n.id
@@ -997,7 +1065,7 @@ end;
 $$;
 
 comment on function claim_push_batch(integer) is
-  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here (kill switch, state, _proactive_invalid) and dropped with their candidate suppressed if they no longer hold, and marked sent when they are returned. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
+  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here (kill switch, state, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate suppressed if they no longer hold, and marked sent when they are returned. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
 
 
 -- ---------------------------------------------------------------------------
@@ -1413,6 +1481,8 @@ comment on function release_status() is
 revoke execute on function _proactive_setting(text, jsonb)                 from public, anon, authenticated;
 revoke execute on function _proactive_int(text, integer)                   from public, anon, authenticated;
 revoke execute on function _proactive_push_enabled()                       from public, anon, authenticated;
+revoke execute on function _proactive_generation_enabled()                 from public, anon, authenticated;
+revoke execute on function _proactive_capable_token(device_tokens)         from public, anon, authenticated;
 revoke execute on function _proactive_priority(text)                       from public, anon, authenticated;
 revoke execute on function _proactive_reasons()                            from public, anon, authenticated;
 revoke execute on function _proactive_title_watched(uuid, uuid)            from public, anon, authenticated;

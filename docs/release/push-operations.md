@@ -465,8 +465,17 @@ select count(*) from push_outbox o
 select push_drain_status() -> 'healthy';                    -- still true: reactive unaffected
 ```
 
-**Also stop new proactive inbox rows** (the social trigger and the collectors):
+**Also stop new proactive inbox rows and candidates** (the social trigger and the
+collectors):
 `update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';`
+
+**Both switches ship `false`.** Applying `20261028000100`/`200` creates no proactive row
+and sends no proactive push. Enabling is two deliberate steps, generation first and then
+push (`proactive-notifications.md` §K).
+
+**Per device.** A proactive push goes only to tokens whose `proactive_version` meets
+`proactive.min_client_version`. An old build on the same account never receives one, and
+reactive pushes still reach every live token.
 
 **Back on:** set `proactive.push_enabled` to `'true'::jsonb`. Nothing that expired while it
 was off comes back; candidates that are still timely are considered again at the next

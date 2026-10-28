@@ -42,6 +42,15 @@ import { theme } from '@/ui/tokens';
 export type PushPlatform = 'ios' | 'android';
 
 /**
+ * The proactive-notification version this build can route and render (20261028000100):
+ * `watchlist_social`, `theatrical_release`, `watchlist_resurface`. Sent with every token
+ * registration and stored on that token, and `claim_push_batch` sends a proactive kind
+ * only to tokens at or above `proactive.min_client_version`. Raise it when a build learns
+ * a new proactive kind, together with the server's minimum.
+ */
+export const PROACTIVE_CLIENT_VERSION = 1;
+
+/**
  * What the operating system currently thinks, reduced to the four cases that lead
  * somewhere different.
  *
@@ -265,6 +274,11 @@ export async function registerPushToken(
     p_operation_id: operationFor(key),
     p_token: token,
     p_platform: platform,
+    // 20261028000100. What THIS installation's build can route, recorded on the token, so
+    // a proactive kind is pushed only to devices that can open it and never to an older
+    // build on the same account. The migration must be applied before a build carrying
+    // this ships: against an older database the four-argument call matches no function.
+    p_proactive_version: PROACTIVE_CLIENT_VERSION,
   });
 
   if (error) {

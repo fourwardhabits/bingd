@@ -30,7 +30,6 @@ let seq = 0;
 
 const at = (iso) => new Date(iso).toISOString();
 const one = async (sql, params) => (await t.sql(`select ${sql} as r`, params)).rows[0].r;
-const uuid = async () => one(`gen_random_uuid()`);
 
 const setConfig = (key, value) =>
   t.sql(
@@ -39,22 +38,31 @@ const setConfig = (key, value) =>
     [key, JSON.stringify(value)],
   );
 
+/**
+ * A reader. `version` is the proactive version of the build that registered their one
+ * device (null: a build that predates proactive kinds).
+ */
 async function user(name, { timezone = 'UTC', region = 'US', device = true, version = 1 } = {}) {
   const id = await t.createUser({ username: `${name}${(seq += 1)}`.slice(0, 20) });
   if (timezone !== undefined || region !== undefined) {
-    await t.sql(
-      `insert into account_context (user_id, timezone, region, proactive_client_version)
-       values ($1, $2, $3, $4)`,
-      [id, timezone, region, version],
-    );
-  }
-  if (device) {
-    await t.sql(`insert into device_tokens (user_id, token, platform) values ($1, $2, 'ios')`, [
+    await t.sql(`insert into account_context (user_id, timezone, region) values ($1, $2, $3)`, [
       id,
-      `ExponentPushToken[${id}]`,
+      timezone,
+      region,
     ]);
   }
+  if (device) await addDevice(id, 'main', version);
   return id;
+}
+
+/** Another device on the same account, from a build of the given proactive version. */
+async function addDevice(u, label, version = 1, platform = 'ios') {
+  const token = `ExponentPushToken[${u}-${label}]`;
+  await t.sql(
+    `insert into device_tokens (user_id, token, platform, proactive_version) values ($1, $2, $3, $4)`,
+    [u, token, platform, version],
+  );
+  return token;
 }
 
 async function movie(title, releaseDate = '2020-01-01') {
@@ -214,6 +222,11 @@ describe('configuration and preferences', () => {
       );
       const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
       assert.equal(cfg['proactive.push_enabled'], false, 'nothing proactive may send on deploy');
+      assert.equal(
+        cfg['proactive.generation_enabled'],
+        false,
+        'nothing proactive may even be generated on deploy',
+      );
       assert.equal(cfg['proactive.window_start_hour'], 17);
       assert.equal(cfg['proactive.window_end_hour'], 20);
       assert.equal(cfg['proactive.daily_cap'], 1);
@@ -283,19 +296,171 @@ describe('configuration and preferences', () => {
     assert.equal((await inbox(u)).length, 0, 'switched off means no inbox row either');
   });
 
-  it('report_device_context still answers a two-argument call, and records the version', async () => {
-    const u = await user('ctx', { timezone: null, region: null, version: null });
+  it('register_device_token records each build on its own token, and an old call still works', async () => {
+    const u = await user('reg', { device: false });
+    const token = `ExponentPushToken[reg-${u}]`;
+    const version = async () =>
+      (await t.sql(`select proactive_version from device_tokens where token = $1`, [token])).rows[0]
+        .proactive_version;
+
     await t.actAs(u);
-    await t.sql(`select report_device_context('Europe/London', 'GB')`);
-    let { rows } = await t.sql(`select * from account_context where user_id = $1`, [u]);
-    assert.equal(rows[0].proactive_client_version, null, 'an old build reports no capability');
-    await t.sql(`select report_device_context('Europe/London', 'GB', 1)`);
-    ({ rows } = await t.sql(`select * from account_context where user_id = $1`, [u]));
-    assert.equal(rows[0].proactive_client_version, 1);
-    await t.sql(`select report_device_context('Europe/London', 'GB', 9999)`);
-    ({ rows } = await t.sql(`select * from account_context where user_id = $1`, [u]));
-    assert.equal(rows[0].proactive_client_version, null, 'an out-of-range claim is no claim');
-    await t.actAs(null);
+    try {
+      // The three-argument call every shipped build makes.
+      await t.sql(`select register_device_token(gen_random_uuid(), $1, 'ios')`, [token]);
+      assert.equal(await version(), null, 'an old build is no claim of capability');
+      await t.sql(`select register_device_token(gen_random_uuid(), $1, 'ios', 1)`, [token]);
+      assert.equal(await version(), 1);
+      // The same installation going back to an old build turns that one device off again.
+      await t.sql(`select register_device_token(gen_random_uuid(), $1, 'ios')`, [token]);
+      assert.equal(await version(), null, 'latest registration wins, per token');
+      await t.sql(`select register_device_token(gen_random_uuid(), $1, 'ios', 9999)`, [token]);
+      assert.equal(await version(), null, 'an out-of-range claim is no claim');
+    } finally {
+      await t.actAs(null);
+    }
+  });
+
+  it('report_device_context is exactly as it was: two arguments, no capability', async () => {
+    const { rows } = await t.sql(
+      `select p.oid::regprocedure::text as sig from pg_proc p where p.proname = 'report_device_context'`,
+    );
+    assert.deepEqual(rows.map((r) => r.sig), ['report_device_context(text,text)']);
+  });
+});
+
+// ===========================================================================
+
+describe('the generation switch (seeded off)', () => {
+  it('off: no social inbox row, no theatrical row, no resurfacing, no candidate at all', async () => {
+    await setConfig('proactive.generation_enabled', false);
+    const r = await user('genoff');
+    const f = await user('genofff');
+    await friends(r, f);
+    const m = await movie('Generation Off');
+    await save(r, m, '2029-01-01T00:00:00Z');
+    const film = await armedFilm('Generation Off Film');
+    await save(r, film);
+
+    await activity(f, m, 'title_ranked');
+    await tick('2031-05-09T17:30:00Z');
+    await tick('2031-07-07T17:05:00Z');
+
+    assert.equal((await candidates(r)).length, 0);
+    assert.equal(
+      (await inbox(r)).filter((n) => ['watchlist_social', 'theatrical_release'].includes(n.kind)).length,
+      0,
+    );
+    assert.equal(await one(`(proactive_status() ->> 'generation_enabled')::boolean`), false);
+  });
+
+  it('is fail-closed: a malformed value is off', async () => {
+    await setConfig('proactive.generation_enabled', 'yes');
+    assert.equal(await one(`_proactive_generation_enabled()`), false);
+    const r = await user('genbad');
+    const f = await user('genbadf');
+    await friends(r, f);
+    const m = await movie('Malformed');
+    await save(r, m);
+    await activity(f, m);
+    assert.equal((await candidates(r)).length, 0);
+  });
+
+  it('off: reactive notifications are written and queued exactly as before', async () => {
+    await setConfig('proactive.generation_enabled', false);
+    const r = await user('genreac');
+    const f = await user('genreacf');
+    await t.sql(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+       values ($1, 'follow', $2, 'profile', $2)`,
+      [r, f],
+    );
+    assert.equal((await outboxFor(r)).length, 1);
+    const jobs = await claimFor(r);
+    assert.deepEqual(jobs.map((j) => j.type), ['follow']);
+  });
+
+  it('on: the same activity creates its cluster', async () => {
+    await setConfig('proactive.generation_enabled', true);
+    const r = await user('genon');
+    const f = await user('genonf');
+    await friends(r, f);
+    const m = await movie('Generation On');
+    await save(r, m);
+    await activity(f, m);
+    assert.equal((await candidates(r, 'watchlist_social')).length, 1);
+  });
+});
+
+// ===========================================================================
+
+describe('per-device compatibility', () => {
+  it('one capable and one old device: the push goes to the capable one only', async () => {
+    const r = await user('multi'); // its main device is capable (version 1)
+    const old = await addDevice(r, 'old-tablet', null, 'android');
+    const m = await movie('Two Devices');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-12-29T09:00:00Z');
+
+    await arbitrate('2031-12-29T17:30:00Z');
+    assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'selected');
+
+    const [job] = (await claimFor(r)).filter((j) => j.proactive);
+    assert.ok(job, 'the capable device makes the reader reachable');
+    const tokens = job.tokens.map((d) => d.token);
+    assert.deepEqual(tokens, [`ExponentPushToken[${r}-main]`]);
+    assert.ok(!tokens.includes(old), 'the old build never receives a kind it cannot route');
+  });
+
+  it('only old devices: held, never sent, and the reason says why', async () => {
+    const r = await user('oldonly', { version: null });
+    await addDevice(r, 'old-2', null, 'android');
+    const m = await movie('Old Only');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-12-29T09:00:00Z');
+    await arbitrate('2031-12-29T17:30:00Z');
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.equal(c.state, 'pending');
+    assert.equal(c.last_block_reason, 'client_unsupported');
+    assert.equal((await outboxFor(r)).length, 0);
+  });
+
+  it('the capable device goes away after selection: dropped at claim, not sent to the old one', async () => {
+    const r = await user('lostcap');
+    await addDevice(r, 'old-3', null);
+    const m = await movie('Lost Capable');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-12-29T09:00:00Z');
+    await arbitrate('2031-12-29T17:30:00Z');
+    await t.sql(`update device_tokens set revoked_at = now() where token = $1`, [
+      `ExponentPushToken[${r}-main]`,
+    ]);
+
+    const jobs = (await claimFor(r)).filter((j) => j.proactive);
+    assert.equal(jobs.length, 0);
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.equal(c.state, 'suppressed');
+    assert.equal(c.suppression_reason, 'client_unsupported');
+  });
+
+  it('reactive pushes still go to every live device, old builds included', async () => {
+    const r = await user('reacmulti');
+    const old = await addDevice(r, 'old-4', null, 'android');
+    const f = await user('reacmultif');
+    await t.sql(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+       values ($1, 'follow', $2, 'profile', $2)`,
+      [r, f],
+    );
+    const [job] = await claimFor(r);
+    assert.equal(job.type, 'follow');
+    assert.deepEqual(job.tokens.map((d) => d.token).sort(), [`ExponentPushToken[${r}-main]`, old].sort());
+  });
+
+  it('resurfacing is not even generated for a reader with only old devices', async () => {
+    const r = await user('resold', { version: null });
+    await save(r, await movie('Resurface Old'), '2029-01-01T00:00:00Z');
+    await tick('2032-01-05T17:05:00Z');
+    assert.equal((await candidates(r, 'watchlist_resurface')).length, 0);
   });
 });
 

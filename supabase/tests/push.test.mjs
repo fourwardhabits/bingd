@@ -137,9 +137,12 @@ describe('register_device_token', () => {
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'public' and p.proname = 'register_device_token'
     `);
+    // 20261028000100 added a fourth argument, and it is a build's capability version, not
+    // an identity: the owner is still auth.uid() and nothing else. Exactly one signature
+    // remains — the three-argument form was dropped, not left beside it.
     assert.deepEqual(
       rows.map((r) => r.signature.replace(/^public\./, '').replace(/,\s+/g, ',')),
-      ['register_device_token(uuid,text,text)'],
+      ['register_device_token(uuid,text,text,integer)'],
     );
   });
 

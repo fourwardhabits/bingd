@@ -160,16 +160,18 @@ export const SECTIONS: readonly NotificationSection[] = [
 ];
 
 /**
- * Whether a section draws its master above its children.
+ * The visible controls on Notification Settings, counted (founder, 2026-10-28: five to
+ * ten in all).
  *
- * Only when there is more than one child. A master over a single switch is the same
- * switch drawn twice — it writes exactly the one category beneath it — and the screen was
- * already at eleven controls against a guardrail of ten. So Achievements and Watching
- * each draw one row, and the masters that govern something stay (20261028000100).
+ * One switch per category and no section masters. A master was never stored — it read
+ * "on" if any child was on and wrote its children in one call — so it governed nothing a
+ * child switch does not, and removing it removes no preference and no behaviour. Nine
+ * switches, plus the permission card's single button (Turn on or Open Settings, and
+ * neither while push is on). `masterLabel`, `masterOn` and `setSection` are kept as the
+ * section's model and its bulk writer, and are not drawn.
  */
-export function drawsMaster(section: NotificationSection): boolean {
-  return section.settings.length > 1;
-}
+export const VISIBLE_SWITCHES = SECTIONS.flatMap((section) => section.settings);
+export const MAX_PERMISSION_CONTROLS = 1;
 
 /** Every category in a section, which is what a master switch writes. */
 export function categoriesIn(section: NotificationSection): NotificationCategory[] {

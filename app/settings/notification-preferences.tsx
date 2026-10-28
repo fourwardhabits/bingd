@@ -4,13 +4,10 @@ import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { PushPermissionCard } from '@/features/notifications/PushPermissionCard';
 import {
-  drawsMaster,
-  masterOn,
   SECTIONS,
   useNotificationPreferenceWrites,
   useNotificationPreferences,
   type NotificationCategory,
-  type NotificationSection,
 } from '@/features/notifications/use-notification-preferences';
 import { EmptyState, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -30,16 +27,17 @@ import { theme } from '@/ui/tokens';
  * retroactive: rows already in the inbox stay. There is no second channel to reason
  * about, because push is dark (AD-10) and nothing on any client writes a device token.
  *
- * **The masters are derived, not stored.** A section's master reads as on when any
- * child under it is on, so "master off" means exactly "every child off" rather than
- * approximately that. Tapping it writes every child in the section in one
- * transaction. There is no third state to keep in step and no way for a master to
- * disagree with what is beneath it.
+ * **One switch per category, and nothing else** (founder, 2026-10-28: five to ten visible
+ * controls). The section masters were never stored state — each was derived from its
+ * children and wrote them in one call — so removing them removes no preference and no
+ * behaviour: every category keeps its own switch, key and default. With the ninth
+ * category the screen is nine switches, plus at most one button on the permission card
+ * (Turn on / Open Settings, never both, and none while push is on): ten at the most.
  */
 export default function NotificationPreferencesScreen() {
   const profile = useCurrentProfile();
   const preferences = useNotificationPreferences(profile.id);
-  const { setPreference, setSection, busy } = useNotificationPreferenceWrites(profile.id);
+  const { setPreference, busy } = useNotificationPreferenceWrites(profile.id);
 
   /**
    * Only ever a value that has been read.
@@ -57,11 +55,6 @@ export default function NotificationPreferencesScreen() {
   const toggleOne = async (category: NotificationCategory, next: boolean) => {
     const result = await setPreference(category, next);
     if (!result.ok) Alert.alert('Could not change that setting', result.message);
-  };
-
-  const toggleSection = async (section: NotificationSection, next: boolean) => {
-    const result = await setSection(section, next);
-    if (!result.ok) Alert.alert('Could not change those settings', result.message);
   };
 
   return (
@@ -93,36 +86,11 @@ export default function NotificationPreferencesScreen() {
           </View>
 
           {SECTIONS.map((section) => {
-            const on = masterOn(section, prefs);
-
             return (
               <View key={section.key} style={styles.section}>
                 <SectionHeader title={section.title} />
 
                 <View style={styles.card}>
-                  {/* The master, above a divider rather than beside the children, so
-                      it reads as governing them rather than as one more of them. Only
-                      where there is more than one child to govern (`drawsMaster`). */}
-                  {drawsMaster(section) ? (
-                    <>
-                      <Row
-                        label={section.masterLabel}
-                        description={
-                          on
-                            ? 'At least one of these is on.'
-                            : 'All of these are off.'
-                        }
-                        value={on}
-                        disabled={busy || unavailable}
-                        unavailable={unavailable}
-                        emphasis
-                        onValueChange={(next) => void toggleSection(section, next)}
-                      />
-
-                      <View style={styles.divider} />
-                    </>
-                  ) : null}
-
                   {section.settings.map((setting) => (
                     <Row
                       key={setting.key}
@@ -227,12 +195,6 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
     backgroundColor: theme.surface.raised,
     paddingVertical: theme.space[2],
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth * 2,
-    backgroundColor: theme.border.hairline,
-    marginVertical: theme.space[2],
-    marginHorizontal: theme.space[4],
   },
   switchRow: {
     flexDirection: 'row',

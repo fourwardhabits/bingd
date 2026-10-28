@@ -1,7 +1,7 @@
 import { track } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 
-import { PROACTIVE_CLIENT_VERSION, recordNotificationOpen } from './open-telemetry';
+import { recordNotificationOpen } from './open-telemetry';
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
 jest.mock('@/lib/supabase', () => ({
@@ -56,9 +56,5 @@ describe('recordNotificationOpen', () => {
     expect(() =>
       recordNotificationOpen({ notificationId: 'n4', kind: 'follow', channel: 'push', destination: '/' }),
     ).not.toThrow();
-  });
-
-  it('reports the version the server gates proactive push on', () => {
-    expect(PROACTIVE_CLIENT_VERSION).toBe(1);
   });
 });

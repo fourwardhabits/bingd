@@ -6,8 +6,9 @@ import { renderWithProviders } from '@/test-utils/render';
 import {
   ALL_CATEGORIES,
   categoriesIn,
-  drawsMaster,
+  MAX_PERMISSION_CONTROLS,
   masterOn,
+  VISIBLE_SWITCHES,
   SECTION_COVERAGE,
   SECTIONS,
   type NotificationCategory,
@@ -151,24 +152,23 @@ describe('the sections cover the vocabulary', () => {
   });
 
   /**
-   * The guardrail is ten visible controls. Eight switches and three masters were already
-   * eleven; a master over a single child is the same switch twice, so single-child
-   * sections draw none and the count stays at eleven with the ninth category added. A
-   * global "Turn all off" would be a twelfth, which is why it is a recorded follow-up
-   * rather than part of this change.
+   * Founder, 2026-10-28: five to ten visible controls. One switch per category and no
+   * section masters (a master stored nothing and governed nothing a child does not), so
+   * nine switches plus at most one permission-card button. A global "Turn all off" would
+   * make eleven, which is why it is a recorded follow-up rather than part of this change.
    */
-  it('draws a master only over more than one child, and eleven controls in all', () => {
-    expect(SECTIONS.filter(drawsMaster).map((s) => s.key)).toEqual(['social', 'recommendations']);
-    const controls = SECTIONS.reduce(
-      (n, s) => n + s.settings.length + (drawsMaster(s) ? 1 : 0),
-      0,
-    );
-    expect(controls).toBe(11);
+  it('is one switch per category, and at most ten controls with the permission card', () => {
+    expect(VISIBLE_SWITCHES.map((s) => s.key)).toEqual([
+      'follows', 'follow_accepted', 'comments', 'reactions', 'watch_tags',
+      'recommendations', 'invites', 'awards', 'watchlist_discovery',
+    ]);
+    const controls = VISIBLE_SWITCHES.length + MAX_PERMISSION_CONTROLS;
+    expect(controls).toBeGreaterThanOrEqual(5);
+    expect(controls).toBeLessThanOrEqual(10);
   });
 
-  it('gives every section a master and at least one child', () => {
+  it('gives every section at least one child', () => {
     for (const section of SECTIONS) {
-      expect(section.masterLabel.length).toBeGreaterThan(0);
       expect(categoriesIn(section).length).toBeGreaterThan(0);
     }
   });
@@ -250,15 +250,14 @@ describe('the screen', () => {
     expect(view.getByLabelText('Watching')).toBeTruthy();
 
     for (const section of SECTIONS) {
-      if (drawsMaster(section)) {
-        expect(view.getByLabelText(section.masterLabel)).toBeTruthy();
-      } else {
-        expect(view.queryByLabelText(section.masterLabel)).toBeNull();
-      }
+      // No section master is drawn (2026-10-28), and every category is.
+      expect(view.queryByLabelText(section.masterLabel)).toBeNull();
       for (const setting of section.settings) {
         expect(view.getByLabelText(setting.label)).toBeTruthy();
       }
     }
+    // The rendered count, not the declared one: nine switches on the screen.
+    expect(view.getAllByRole('switch')).toHaveLength(9);
   });
 
   it('draws the two default-off categories off and the rest on', async () => {
@@ -293,83 +292,25 @@ describe('the screen', () => {
   });
 
   /**
-   * One call, not five. A master applied by several sequential writes has an outcome
-   * for each subset that commits, and the reader is left with a master disagreeing
-   * with its own children — which is exactly the state a section control exists to
-   * make impossible.
+   * The master switches are gone from the screen (2026-10-28), and with them every
+   * multi-category write: each switch writes its own category and nothing else, so no
+   * tap can change a preference the reader is not looking at.
    */
-  it('writes a whole section in one call when the master goes off', async () => {
+  it('never writes more than the one category a switch shows', async () => {
     const view = await renderLoaded();
 
-    fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', false);
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['follows', 'follow_accepted', 'comments', 'reactions', 'watch_tags'],
-        p_enabled: false,
-      }),
-    );
-    expect(
-      mockRpc.mock.calls.filter((c) => c[0] === 'set_notification_preference'),
-    ).toHaveLength(0);
-  });
-
-  it('turns every child on when the master goes on, including one that defaults off', async () => {
-    // "All social notifications" has one deterministic reading, and it does not depend
-    // on which children happened to be off first.
-    answerWith({
-      follows: false,
-      follow_accepted: false,
-      comments: false,
-      reactions: false,
-      watch_tags: false,
-    });
-    const view = await renderLoaded();
-    expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
-
-    fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', true);
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['follows', 'follow_accepted', 'comments', 'reactions', 'watch_tags'],
-        p_enabled: true,
-      }),
-    );
-  });
-
-  it('shows the master off exactly when the whole section is off', async () => {
-    answerWith({
-      follows: false,
-      follow_accepted: false,
-      comments: false,
-      reactions: false,
-      watch_tags: false,
-    });
-    const view = await renderLoaded();
-
-    expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
-    // Recommendations & invites was untouched, so its master is still on. A master
-    // that reported the whole app rather than its own section would fail here.
-    expect(view.getByLabelText('All Recommendations & invites notifications').props.value).toBe(
-      true,
-    );
-  });
-
-  it('leaves other sections alone when one master is used', async () => {
-    const view = await renderLoaded();
-
-    fireEvent(
-      view.getByLabelText('All Recommendations & invites notifications'),
-      'valueChange',
-      false,
-    );
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('set_notification_preferences', {
-        p_categories: ['recommendations', 'invites'],
-        p_enabled: false,
-      }),
-    );
+    for (const setting of VISIBLE_SWITCHES) {
+      fireEvent(view.getByLabelText(setting.label), 'valueChange', false);
+      await waitFor(() =>
+        expect(mockRpc).toHaveBeenCalledWith('set_notification_preference', {
+          p_category: setting.key,
+          p_enabled: false,
+        }),
+      );
+      // One write at a time: the next tap only counts once the screen has settled.
+      await waitFor(() => expect(view.getByLabelText(setting.label).props.disabled).toBe(false));
+    }
+    expect(mockRpc.mock.calls.filter((c) => c[0] === 'set_notification_preferences')).toHaveLength(0);
   });
 
   it('writes the Watching switch as the one category it is', async () => {
@@ -404,14 +345,14 @@ describe('the screen', () => {
    * defect independent review 21e found in four screens.
    */
   it('refetches after an unknown outcome, not only after success', async () => {
-    mockRpcErrors.set_notification_preferences = [{ code: '', message: 'socket died' }];
+    mockRpcErrors.set_notification_preference = [{ code: '', message: 'socket died' }];
     const view = await renderLoaded();
 
     const readsBefore = mockRpc.mock.calls.filter(
       (c) => c[0] === 'my_notification_preferences',
     ).length;
 
-    fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', false);
+    fireEvent(view.getByLabelText('Comments'), 'valueChange', false);
 
     await waitFor(() =>
       expect(

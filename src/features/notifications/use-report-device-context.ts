@@ -4,8 +4,6 @@ import { useAuth } from '@/features/auth';
 import { deviceContext } from '@/lib/device-context';
 import { supabase } from '@/lib/supabase';
 
-import { PROACTIVE_CLIENT_VERSION } from './open-telemetry';
-
 /**
  * Tells the server this device's timezone and region, once per signed-in account per app
  * run (`report_device_context`, migration 20260930000100).
@@ -46,16 +44,7 @@ export async function reportDeviceContext(): Promise<void> {
   try {
     // `rpc` resolves with `{ error }` rather than throwing; there is nothing to do with
     // one. The try is for a transport that throws anyway.
-    //
-    // `p_proactive_version` (20261028000100) says this build can route and render the
-    // proactive kinds, which is the server's gate for pushing one to this account. The
-    // migration must be applied before a build carrying this ships: against an older
-    // database the three-argument call matches no function and is dropped like any error.
-    await supabase.rpc('report_device_context', {
-      p_timezone: timezone,
-      p_region: region,
-      p_proactive_version: PROACTIVE_CLIENT_VERSION,
-    });
+    await supabase.rpc('report_device_context', { p_timezone: timezone, p_region: region });
   } catch {
     // Deliberately silent. See the header.
   }

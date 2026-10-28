@@ -19,8 +19,9 @@
 -- season events.
 --
 -- Nothing is scheduled by applying this. schedule_proactive_notifications() installs the
--- one job, by an operator, and proactive.push_enabled (seeded false) still has to be
--- turned on before anything reaches a phone.
+-- one job, by an operator. proactive.generation_enabled (seeded false) has to be turned
+-- on before any candidate or proactive inbox row exists, and proactive.push_enabled
+-- (seeded false) before anything reaches a phone.
 -- ===========================================================================
 
 
@@ -191,7 +192,8 @@ begin
   if new.created_at < now() - interval '1 day' then
     return null;
   end if;
-  if _proactive_setting('proactive.generation_enabled', 'true'::jsonb) = 'false'::jsonb then
+  -- Fail closed: only an explicit true generates anything (seeded false).
+  if not _proactive_generation_enabled() then
     return null;
   end if;
 
@@ -441,7 +443,6 @@ declare
   v_weekly  integer  := _proactive_int('proactive.weekly_cap', 2);
   v_res_cd  interval := make_interval(days  => _proactive_int('proactive.resurface_cooldown_days', 7));
   v_quiet   interval := make_interval(hours => _proactive_int('proactive.resurface_quiet_hours', 72));
-  v_min_ver integer  := _proactive_int('proactive.min_client_version', 1);
   u         record;
   pick      record;
   v_made    integer := 0;
@@ -456,10 +457,10 @@ begin
       join account_context ac on ac.user_id = p.id
      where p.status = 'active'
        and ac.timezone is not null
-       and coalesce(ac.proactive_client_version, 0) >= v_min_ver
        and (p_now at time zone ac.timezone)::time >= make_time(v_start, 0, 0)
        and (p_now at time zone ac.timezone)::time <  make_time(v_end, 0, 0)
-       and exists (select 1 from device_tokens d where d.user_id = p.id and d.revoked_at is null)
+       -- A device whose build can route the push: per token, never per account.
+       and exists (select 1 from device_tokens d where d.user_id = p.id and _proactive_capable_token(d))
        and exists (select 1 from watchlist w where w.user_id = p.id)
        and _notifies(p.id, 'watchlist_discovery')
        -- Room today, room this week, no resurfacing this week, nothing proactive lately.
@@ -529,7 +530,8 @@ declare
   v_theatrical integer := 0;
   v_resurface  integer := 0;
 begin
-  if _proactive_setting('proactive.generation_enabled', 'true'::jsonb) <> 'false'::jsonb then
+  -- Fail closed: no collector runs unless generation is explicitly on (seeded false).
+  if _proactive_generation_enabled() then
     v_theatrical := _proactive_theatrical_collect(p_now);
     v_resurface  := _proactive_resurface_collect(p_now);
   end if;
@@ -541,7 +543,7 @@ end;
 $$;
 
 comment on function _proactive_tick(timestamptz) is
-  'The scheduled proactive pass: collect theatrical and resurfacing candidates (unless proactive.generation_enabled is false), then arbitrate. One transaction: a failure rolls the whole tick back and the next repeats it; the ledger''s unique keys keep a repeat from doubling anything. Internal; scheduled as bingd-proactive-tick.';
+  'The scheduled proactive pass: collect theatrical and resurfacing candidates (only while proactive.generation_enabled is exactly true; seeded false), then arbitrate. One transaction: a failure rolls the whole tick back and the next repeats it; the ledger''s unique keys keep a repeat from doubling anything. Internal; scheduled as bingd-proactive-tick.';
 
 create or replace function proactive_status()
 returns jsonb
@@ -579,7 +581,7 @@ begin
     'healthy',     cardinality(v_problems) = 0,
     'problems',    to_jsonb(v_problems),
     'push_enabled', _proactive_push_enabled(),
-    'generation_enabled', _proactive_setting('proactive.generation_enabled', 'true'::jsonb) <> 'false'::jsonb,
+    'generation_enabled', _proactive_generation_enabled(),
     'job',         v_job,
     'candidates',  v_counts,
     'selected_not_sent', v_stuck,

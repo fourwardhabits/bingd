@@ -23,14 +23,6 @@ export const PROACTIVE_KINDS: ReadonlySet<string> = new Set([
   'watchlist_resurface',
 ]);
 
-/**
- * The client's proactive-notification version, reported with the device context. The
- * server pushes proactive kinds only to an account whose latest report is at least
- * `proactive.min_client_version`, because a build that predates them hides the row and
- * routes the tap to an inbox that cannot show it.
- */
-export const PROACTIVE_CLIENT_VERSION = 1;
-
 const readString = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
 

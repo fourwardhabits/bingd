@@ -20,6 +20,7 @@ import {
   easProjectId,
   heldToken,
   nudgePushDelivery,
+  PROACTIVE_CLIENT_VERSION,
   pushPermission,
   registerPushToken,
   pushSessionEpoch,
@@ -204,13 +205,17 @@ describe('acquiring a token', () => {
 });
 
 describe('registering', () => {
-  it('sends the token and platform, and nothing else', async () => {
+  it('sends the token, the platform and the build\'s proactive version, and nothing else', async () => {
     expect(await registerPushToken('user-1', TOKEN, 'ios')).toBe('ok');
     expect(mockRpc).toHaveBeenCalledWith('register_device_token', {
       p_operation_id: expect.any(String),
       p_token: TOKEN,
       p_platform: 'ios',
+      // 20261028000100: recorded on this token, so the server gates proactive kinds per
+      // device rather than per account.
+      p_proactive_version: PROACTIVE_CLIENT_VERSION,
     });
+    expect(PROACTIVE_CLIENT_VERSION).toBe(1);
   });
 
   /**

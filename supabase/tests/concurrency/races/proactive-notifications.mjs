@@ -38,8 +38,11 @@ export default function suite() {
   describe('proactive notification races', () => {
     before(async () => {
       await rc.open();
+      // Both switches ship off; these races are about what happens once they are on.
       await ctx.db.sql(
-        `insert into app_config (key, value) values ('proactive.push_enabled', 'true'::jsonb)
+        `insert into app_config (key, value) values
+           ('proactive.push_enabled', 'true'::jsonb),
+           ('proactive.generation_enabled', 'true'::jsonb)
          on conflict (key) do update set value = excluded.value`,
       );
     });
@@ -54,19 +57,15 @@ export default function suite() {
       );
     };
 
-    /** A reader in UTC with a device and a capable client, who has `m` saved. */
+    /** A reader in UTC with one device from a capable build, who has `m` saved. */
     const reader = async (m) => {
       const { db, fx } = ctx;
       const r = await fx.createUser();
+      await db.sql(`insert into account_context (user_id, timezone, region) values ($1, 'UTC', 'US')`, [r]);
       await db.sql(
-        `insert into account_context (user_id, timezone, region, proactive_client_version)
-         values ($1, 'UTC', 'US', 1)`,
-        [r],
+        `insert into device_tokens (user_id, token, platform, proactive_version) values ($1, $2, 'ios', 1)`,
+        [r, `ExponentPushToken[${r}]`],
       );
-      await db.sql(`insert into device_tokens (user_id, token, platform) values ($1, $2, 'ios')`, [
-        r,
-        `ExponentPushToken[${r}]`,
-      ]);
       await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, m]);
       return r;
     };

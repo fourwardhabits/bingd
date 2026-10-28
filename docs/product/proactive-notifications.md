@@ -2,8 +2,10 @@
 
 **Status:** built on `feature/proactive-notifications`, **not applied anywhere**, 2026-10-28.
 Migrations `20261028000100` (ledger, arbiter, kill switch, claim and inbox rebuilds, open
-telemetry) and `20261028000200` (the three types, the tick, scheduling). Ships with the
-kill switch **off**.
+telemetry) and `20261028000200` (the three types, the tick, scheduling). Ships with **both
+switches off**: `proactive.generation_enabled = false` (nothing is created) and
+`proactive.push_enabled = false` (nothing is sent). Applying the migrations changes nothing
+any reader can see.
 
 **Authority:** founder decisions of 2026-10-28, recorded in
 [`decision-log.md`](./decision-log.md) §6 "Proactive notifications v1". They supersede the
@@ -46,24 +48,49 @@ Reactive notifications consume no proactive budget: the caps count only
 
 ## C. Settings
 
-One new section and one new switch, default on, with no backfill:
+Founder requirement: **5–10 visible notification controls in total.** One new section and
+one new switch, default on, with no backfill, and **no section masters**.
 
-| Section | Switches | Master drawn? |
+**Before (`main`, rendered): 11 controls**
+
+| # | Control | Writes |
 |---|---|---|
-| Social | Follows · Follow accepted · Comments · Reactions · Watched with | yes |
-| Recommendations & invites | Recommendations · Friend joined via invite | yes |
-| Achievements | bingd Awards | **no** (one child) |
-| **Watching** | **Watchlist & discovery** | **no** (one child) |
+| 1 | All Social notifications (master) | `follows, follow_accepted, comments, reactions, watch_tags` |
+| 2 | Follows | `follows` |
+| 3 | Follow accepted | `follow_accepted` |
+| 4 | Comments | `comments` (also governs `mention`) |
+| 5 | Reactions | `reactions` |
+| 6 | Watched with | `watch_tags` |
+| 7 | All Recommendations & invites notifications (master) | `recommendations, invites` |
+| 8 | Recommendations | `recommendations` (also `recommendation_ranked`) |
+| 9 | Friend joined via invite | `invites` (`invite_activated`, `invite_joined`) |
+| 10 | All Achievement notifications (master) | `awards` |
+| 11 | bingd Awards | `awards` (also `goal_completed`) |
 
-**Visible controls: 11** (9 switches, 2 masters). Before this change it was 11 too
-(8 switches, 3 masters). A master over a single child is the same switch drawn twice, so
-single-child sections no longer draw one (`drawsMaster`). That is the only change to the
-existing sections, and it is one line to revert.
+**After (this branch, rendered): 9 switches + at most 1 button = 10 at most**
 
-**The global "Turn all off" is not built.** It would be a twelfth control against the
-10-control guardrail. Reaching 10 with it needs the Social / Watching / Progress regroup
-`notifications.md` §5 describes, which is a redesign this change was told not to make.
-Recorded as a follow-up (§V).
+| # | Section | Control | Writes |
+|---|---|---|---|
+| 1 | Social | Follows | `follows` |
+| 2 | Social | Follow accepted | `follow_accepted` |
+| 3 | Social | Comments | `comments` |
+| 4 | Social | Reactions | `reactions` |
+| 5 | Social | Watched with | `watch_tags` |
+| 6 | Recommendations & invites | Recommendations | `recommendations` |
+| 7 | Recommendations & invites | Friend joined via invite | `invites` |
+| 8 | Achievements | bingd Awards | `awards` |
+| 9 | **Watching** | **Watchlist & discovery** | **`watchlist_discovery`** (new; all three proactive types) |
+| (10) | top card | Turn on / Open Settings | OS permission only; shown only while push is off, one or the other, never both |
+
+**Why removing the masters changes no behaviour.** A master was never stored. It read
+"on" if any child was on and wrote its children in one call, so every preference it could
+set is still set by the child switches, with the same keys and defaults. No category was
+removed, merged or re-defaulted. Existing choices are untouched. `masterOn` and the bulk
+writer `set_notification_preferences` stay in the code, undrawn. The rendered count is
+asserted by a test (`getAllByRole('switch')` → 9).
+
+**The global "Turn all off" is not built.** It would be the eleventh control. It needs the
+settings regroup and is recorded as a follow-up (§V).
 
 `watchlist_discovery` governs all three proactive types at creation, through the existing
 before-insert gate: switched off, no inbox row is written and no push can follow (one
@@ -284,16 +311,57 @@ tomorrow's 17:00, if it is still timely. **Unknown timezone means no proactive p
 candidate is held `no_timezone` and expires with that reason, and the inbox row (social,
 theatrical) stays. The 10:00–20:00 release window still governs only the shadow.
 
-**Old clients.** Every production build now reports a timezone, so timezone no longer gates
-old clients. The client also reports `p_proactive_version` (1) through
-`report_device_context`. The arbiter holds anything below `proactive.min_client_version`
-(`client_unsupported`). This is latest-report-wins **per account**: an old build signing in
-turns it off again until the new one reports.
+**Old clients: gated per device, at send time.** Every production build now reports a
+timezone, so timezone no longer gates old clients. A push is delivered to *tokens*, and one
+account can hold a new phone and an old tablet at once, so the gate lives on the token:
 
-## K. The kill switch
+- `device_tokens.proactive_version` records the build that last registered that token.
+  The client sends `p_proactive_version` (1, `PROACTIVE_CLIENT_VERSION`) with
+  `register_device_token`, which it calls once per app process. A build that predates this
+  sends three arguments, reaches the new four-argument function through its default, and
+  records **null**. Latest registration wins per token, so an installation that goes back
+  to an old build turns that one device off again.
+- **The arbiter** selects only for a recipient with at least one live token at or above
+  `proactive.min_client_version`. With live devices but none capable, the candidate is
+  held `client_unsupported`; with no live device, `no_device`.
+- **`claim_push_batch`** gives a proactive job **only** the capable tokens
+  (`_proactive_capable_token`). If none is left at send time (the capable phone signed
+  out), the job is dropped and the candidate suppressed `client_unsupported`. It is never
+  sent to the old device.
+- **Reactive jobs are unchanged:** every live token, old builds included.
 
-`app_config` key `proactive.push_enabled`. It is on only when the value is exactly the JSON
-boolean `true`, so a malformed value means off.
+Old builds also hide the new kinds in their inbox (the existing `KINDS` filter), so an old
+device never draws a row it cannot route. `report_device_context` is untouched.
+
+## K. The two switches
+
+Both are `app_config` rows, **seeded `false`**, and **fail-closed**: on only when the value
+is exactly the JSON boolean `true`, so a malformed value means off. Neither needs a deploy,
+a cron change or DDL, and clients can neither read nor write them.
+
+### Generation: `proactive.generation_enabled`
+
+While off, **nothing proactive is created**:
+
+- no `watchlist_social` cluster or inbox row (the `feed_events` trigger returns at once);
+- no `theatrical_release` candidate or inbox row (`_proactive_tick` skips the collector);
+- no resurfacing candidate;
+- no proactive candidate of any kind.
+
+Reactive notifications never read it. So **applying the migrations makes no proactive
+row appear**, in staging or in production, until this is turned on. Pending candidates
+made while it was on are still arbitrated, under the push switch.
+
+```sql
+-- enable (staging QA first; production only after founder approval)
+update app_config set value = 'true'::jsonb  where key = 'proactive.generation_enabled';
+-- disable
+update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';
+-- check
+select proactive_status() -> 'generation_enabled';
+```
+
+### Push (the kill switch): `proactive.push_enabled`
 
 - **Off:** the arbiter selects nothing (candidates are held `kill_switch`, then expire);
   resurfacing is not generated; `claim_push_batch` drops any proactive job already queued
@@ -361,7 +429,8 @@ tables have RLS enabled, **no policies**, and every privilege revoked from `anon
 | Function | Caller | Definer | Grants | Why no escalation |
 |---|---|---|---|---|
 | `record_notification_open(uuid,text,text)` | app (inbox + push tap) | yes | authenticated | Writes only when `notifications.id = $1 and recipient_id = auth.uid()`. Answers `ok` either way (not an oracle). Channel validated; destination capped at 200 characters; first per channel only. No `assert_can_write`, deliberately: it is the caller's own telemetry and must not fail a suspended reader's tap (moderation exemption recorded) |
-| `report_device_context(text,text,integer)` | app | yes | authenticated | Writes `auth.uid()`'s own row; version bounded 1–100; returns nothing stored. Replaces the 2-argument form, which old clients still reach through the default |
+| `register_device_token(uuid,text,text,integer)` | app | yes | authenticated | Rebuilt from 20260825000300 with one defaulted argument. The owner is still `auth.uid()`, and `assert_can_write` and `_claim_operation` are unchanged. The version is bounded 1–100 and stored on that token only. Replaces the three-argument form, which old clients reach through the default (recording null). Exactly one signature exists (tested) |
+| `_proactive_capable_token(device_tokens)` | arbiter, collector, claim | yes | nobody | A pure predicate over one row: live, and version ≥ the configured minimum |
 | `my_notifications(integer)` | app | yes | authenticated | Unchanged shape plus two columns; cluster members pass `_proactive_social_actors` from `auth.uid()`'s side |
 | `claim_push_batch(integer)` | push-sender | yes | service_role | Unchanged trust model; adds re-checks and copy fields |
 | `_proactive_arbitrate`, `_proactive_tick`, `_proactive_*_collect`, `_proactive_social_add`, `_proactive_social_on_activity` (trigger), `_proactive_invalid`, `_proactive_social_actors`, `_proactive_resurface_pick`, helpers | pg_cron / trigger / each other | yes | **nobody** (tick: service_role) | No client can call any of them; pg_cron runs as the owner |
@@ -388,7 +457,8 @@ The review questions, answered:
 
 ## P. Known limitations (accepted for v1)
 
-- Client capability is per account, not per device (§J).
+- A device updated to a capable build reports it only on its next app launch (the client
+  registers once per process). Until then it is treated as old, which is the safe direction.
 - A film saved more than 48 hours after its T-7 arming is not announced.
 - A season or series on the Watchlist is matched only on that exact item: a friend ranking
   Season 2 does not count toward a saved series.
@@ -410,14 +480,17 @@ The review questions, answered:
 3. `supabase functions deploy push-sender` (goal and proactive copy), **after** the
    migration: the old sender ignores the new fields, and with the switch off no proactive
    job exists.
-4. SQL checks: `select proactive_status();` (`push_enabled: false`);
-   `select release_status();` (healthy); `select push_drain_status();` (healthy). Confirm
-   `_push_eligible` is unchanged.
+4. SQL checks: `select proactive_status();` (`generation_enabled: false`,
+   `push_enabled: false`, no candidates); `select release_status();` (healthy);
+   `select push_drain_status();` (healthy). Confirm `_push_eligible` is unchanged, and
+   that a staging social activity creates **no** proactive row while generation is off.
 5. `select schedule_proactive_notifications();` then confirm the job in `cron.job`.
-6. Publish a **Preview** OTA from this branch (staging backend). Wait for the QA device to
-   report: `account_context.proactive_client_version = 1`.
-7. `update app_config set value = 'true' where key = 'proactive.push_enabled';` (staging
-   only).
+6. Publish a **Preview** OTA from this branch (staging backend). Relaunch the QA device and
+   confirm its token reports `device_tokens.proactive_version = 1`. Keep a second QA device
+   on the store build (version null) signed into the same account, for the multi-device
+   check.
+7. Staging only, in this order: `generation_enabled` → `true`, then `push_enabled` →
+   `true` (the statements are in §K).
 8. Device QA, on staging accounts from `staging-qa-inventory.md`:
    - **Social:** account B (mutual with A) ranks a film on A's Watchlist. A's inbox shows one
      row, no push. Account C ranks it too. At A's next 17:00–20:00 window, one push names B
@@ -427,8 +500,10 @@ The review questions, answered:
    - **Resurfacing:** an account with a Watchlist and no other proactive push this week gets
      one push in the window, with no inbox row.
    - **Goal:** complete a goal and get the "You hit your … goal 🎉" push.
-   - **Settings:** Watching › Watchlist & discovery shows; Achievements shows no duplicate
-     master. Turn the switch off and the next social activity creates nothing.
+   - **Multi-device:** the social push arrives on the Preview device only, never on the
+     store-build device on the same account. A reactive follow push arrives on both.
+   - **Settings:** nine switches and no section masters; Watching › Watchlist & discovery
+     shows. Turn the switch off and the next social activity creates nothing.
    - **Permission card:** check all three states. Deny in OS Settings, return, and see
      "Open Settings".
    - **Kill switch:** set `proactive.push_enabled` to `false` with a candidate selected and
@@ -443,16 +518,18 @@ The review questions, answered:
 **Rollout:**
 
 1. Founder approval of the reviewed PR, then merge.
-2. Production `db push`: the two migrations. The switch is **false**, so nothing proactive
-   sends. Social and theatrical **inbox rows begin** (old clients hide the kinds; new
-   clients draw them).
+2. Production `db push`: the two migrations. **Both switches are false, so nothing
+   proactive is created and nothing is sent.** Verify with
+   `select proactive_status();` (no candidates) and a count of zero
+   `watchlist_social` / `theatrical_release` notifications.
 3. `push-sender` deploy, after the migration.
-4. `select schedule_proactive_notifications();`
+4. `select schedule_proactive_notifications();` (the tick runs and finds nothing to do).
 5. Production OTA from the merged commit, for the 1.1.0 runtimes (and a second publish from
    a 1.0.1 tree if 1.0.1 installs are to receive it, per `production-state.md`). Watch
-   `account_context.proactive_client_version` adoption.
-6. After adoption and a staging pass, the founder flips
-   `proactive.push_enabled = true` in production.
+   adoption as `count(*) filter (where proactive_version >= 1)` over live `device_tokens`.
+6. After a staging pass and founder approval: `proactive.generation_enabled = true`
+   (inbox rows begin). Then, separately, `proactive.push_enabled = true` (pushes begin, to
+   capable devices only).
 7. Watch `proactive_status()`, `proactive_summary` and push-drain health daily for the first
    week.
 
@@ -463,13 +540,13 @@ The review questions, answered:
 | Proactive pushes, now | `update app_config set value = 'false' where key = 'proactive.push_enabled';` | Queued proactive jobs are dropped at claim. Reactive is untouched |
 | New proactive inbox rows too | also `update app_config set value = 'false' where key = 'proactive.generation_enabled';` | Social trigger and collectors write nothing |
 | The scheduled tick | `select unschedule_proactive_notifications();` | Pending candidates expire on their own clocks |
-| A bad `push-sender` | redeploy the previous version | The previous sender ignores `goal` / `proactive`. Goal pushes go back to being dropped; proactive jobs would send with fallback copy, so switch proactive off first |
+| A bad `push-sender` | redeploy the previous version | The previous sender ignores `goal` / `proactive`. Goal pushes go back to being dropped, and proactive jobs (actorless, with no branch in the old copy) are dropped too. Switch proactive push off first so candidates are not marked `sent` for pushes that never go |
 | The schema | a forward migration only | Existing migrations are never edited. The tables are additive; the rebuilt `claim_push_batch` / `my_notifications` / `release_status` / preference gate would be restored from their previous bodies by a new migration |
 
 ## V. Follow-ups, not in this change
 
 - The global "Turn all off", with the settings regroup (§C).
 - Season-premiere delivery (decision E), which can reuse this ledger unchanged.
-- Expo receipt polling, per-token retry, and per-device client capability.
+- Expo receipt polling and per-token retry.
 - Wiring or deleting `push.delivery_enabled` (#119).
 - An "Out now for you" shelf (`release-awareness.md` §G4).

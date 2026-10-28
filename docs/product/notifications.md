@@ -13,7 +13,8 @@ sends, what it will not send, and why.
 > shared ledger, with the founder's numbers (1 per local day, 2 per rolling 7 days, 72h per
 > type, 7 days per title). Season premieres, streaming availability, the streak reminder
 > and the other friend moments are unchanged: still shadow, removed or deferred. The
-> settings now have a fourth section, **Watching**, with one switch.
+> settings now have a fourth section, **Watching**, with one switch, and draw one switch
+> per category with no section masters (nine in all; the founder's limit is 5–10).
 
 **Companion documents:** [`PRD.md`](./PRD.md) §15 (the product requirement) ·
 [`analytics.md`](./analytics.md) §notifications (measurement) ·
