@@ -2777,6 +2777,19 @@ const LANDING_STYLES = `
         body:has(.sticky a.button:not([hidden])) {
           padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
         }
+
+        /* With the sticky bar on screen, the hero's own store row is the same button a
+           second time, sitting between the description and the demo. On a phone the bar
+           does the converting, so the hero goes headline, description, demo — and the
+           demo result's small call to action goes too, because the bar now says
+           "Keep ranking in bingd." itself (page.mjs). Keyed to the bar's own condition,
+           so a phone whose bar never appears (no :has(), no destination) keeps both. */
+        body:has(.sticky a.button:not([hidden])) .hero .split-copy .actions,
+        body:has(.sticky a.button:not([hidden])) .hero .split-copy .fineprint,
+        body:has(.sticky a.button:not([hidden])) .demo-cta {
+          display: none;
+        }
+        body:has(.sticky a.button:not([hidden])) .demo .demo-again { margin-inline-start: auto; }
       }
 `;
 

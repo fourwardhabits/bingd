@@ -59,7 +59,7 @@
  *  16. The title preview spreading the row it was handed, which is how a private field
  *      reaches a public page without anybody writing its name.
  *
- * Eight more arrived with the front page's ranking demo and the build's environment
+ * Eleven more arrived with the front page's ranking demo and the build's environment
  * check (2026-10-28). Each is a defect the page would render without complaint:
  *
  *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
@@ -73,6 +73,12 @@
  *      just made and reads as the demo not listening.
  *  22. The result's reserved rows dropped, so the panel grows on the third pick and the
  *      page moves under the visitor's hand.
+ *  22a. Pairs chosen in list order regardless of genre family, so two superhero films
+ *      face each other when a comedy was waiting.
+ *  22b. The phone's sticky bar left naming the store after the demo, instead of
+ *      "Keep ranking in bingd."
+ *  22c. The hero's in-flow store row kept on a phone, between the description and the
+ *      demo, duplicating the sticky bar.
  *  23. A production build allowed to ship the staging project, so bingd.app quietly
  *      reads staging and writes invitation opens into staging's funnel.
  *  24. The anon-role check on the key dropped, so a `service_role` key pasted into the
@@ -141,8 +147,8 @@ const MUTANTS = [
     file: DEMO,
     apply: (s) =>
       s.replace(
-        'return state.pool.length - state.next >= replaced + stillToDraw;',
-        'return state.pool.length - state.next >= replaced;',
+        'return state.remaining.length >= replaced + stillToDraw;',
+        'return state.remaining.length >= replaced;',
       ),
   },
   {
@@ -157,6 +163,25 @@ const MUTANTS = [
       s.replace(
         'const index = preferred ? pivot : pivot + 1;',
         'const index = preferred ? state.ranked.length : pivot + 1;',
+      ),
+  },
+  {
+    name: 'demo pairs chosen in list order, ignoring genre family',
+    file: DEMO,
+    apply: (s) => s.replace('return index === -1 ? 0 : index;', 'return 0;'),
+  },
+  {
+    name: 'the phone\'s sticky store bar left naming the store after the demo is finished',
+    file: PAGE,
+    apply: (s) => s.replace("sticky.textContent = finished ? 'Keep ranking in bingd.' : stickyLabel;", 'sticky.textContent = stickyLabel;'),
+  },
+  {
+    name: 'the hero\'s in-flow store row kept on a phone, above the demo and under the sticky bar',
+    file: BUILD,
+    apply: (s) =>
+      s.replace(
+        '        body:has(.sticky a.button:not([hidden])) .hero .split-copy .actions,\n',
+        '',
       ),
   },
   {

@@ -680,8 +680,9 @@ function paintChoice(button, movie) {
 }
 
 /**
- * Asks the browser for the next newcomer's poster before it is needed, so the next pair
- * arrives with its art rather than a tile that turns into a poster a beat later.
+ * Asks the browser for a likely next newcomer's poster before it is needed, so the next
+ * pair usually arrives with its art rather than a tile that turns into a poster a beat
+ * later.
  */
 function warmPoster(movie) {
   if (!movie?.poster) return;
@@ -761,11 +762,23 @@ function wireDemo(cfg, platform) {
 
   // On a phone the small call to action is the store link itself. On anything else the
   // two store buttons sit right beside the panel, so it stays a line of text rather than
-  // becoming a link that would have to pick a store for the visitor.
+  // becoming a link that would have to pick a store for the visitor. Where the phone's
+  // sticky store bar is showing, the stylesheet hides it: the bar says the same thing.
   const cta = el('demo-cta');
   const destination =
     platform === 'ios' || platform === 'android' ? destinationFor(platform, cfg.distribution ?? {}) : null;
   if (cta && destination) cta.href = destination.url;
+
+  // The phone's sticky store bar, which `paintInstall` has already filled. Once the demo
+  // is finished it says "Keep ranking in bingd." instead of naming the store; only the
+  // words change; the link stays the one `paintInstall` chose for this platform. A bar
+  // that was never painted (desktop, or no destination) is left alone.
+  const sticky = document.querySelector('.sticky [data-install="primary-install"]');
+  const stickyLabel = sticky?.textContent ?? '';
+  const labelSticky = (finished) => {
+    if (!sticky || sticky.hidden || !stickyLabel) return;
+    sticky.textContent = finished ? 'Keep ranking in bingd.' : stickyLabel;
+  };
 
   let attempt = 0;
   let state = null;
@@ -790,7 +803,7 @@ function wireDemo(cfg, platform) {
     if (!pair) return finish();
     paintChoice(left, pair.left);
     paintChoice(right, pair.right);
-    warmPoster(state.pool[state.next]);
+    for (const movie of state.remaining.slice(0, 2)) warmPoster(movie);
     text('demo-progress', `${state.selections + 1} of ${DEMO_CHOICES}`);
     // The status line is for a screen reader: the two buttons changed names without
     // moving, and nothing else would say so.
@@ -806,6 +819,7 @@ function wireDemo(cfg, platform) {
     if (list) list.replaceChildren(...demoResult(state).map(resultRow));
     text('demo-status', 'Your demo ranking is ready.');
     view(result);
+    labelSticky(true);
     el('demo-result-title')?.focus({ preventScroll: true });
     reveal();
   };
@@ -813,6 +827,7 @@ function wireDemo(cfg, platform) {
   const begin = () => {
     state = startDemo(DEMO_MOVIES, attempt);
     view(play);
+    labelSticky(false);
     paintPlay();
   };
 

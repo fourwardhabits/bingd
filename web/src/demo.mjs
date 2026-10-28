@@ -20,6 +20,11 @@
  * the movies already placed keep their order, and the newcomer's only relation is the
  * one the visitor just stated. Three picks therefore always place four movies.
  *
+ * Which unseen movie comes next prefers a **different genre family** from the one it
+ * will face: "a comedy or an action movie?" is an easier, more telling pick than two
+ * superhero films. Families come from the list, are never shown, and are never asked
+ * about; first match in list order keeps every pair deterministic.
+ *
  * What is deliberately absent is everything that would make the result look more
  * authoritative than three taps can support. No "How was it?" bucket, so no band and
  * **no score**: a 0–10 number here would be invented, and the page would be teaching a
@@ -44,6 +49,9 @@ export const DEMO_CHOICES = 3;
 
 /** One opening movie, plus one newcomer per pick. */
 export const DEMO_RESULT_SIZE = DEMO_CHOICES + 1;
+
+/** The genre families a list may tag a movie with. Used to choose pairs, never shown. */
+export const DEMO_FAMILIES = Object.freeze(['action', 'comedy', 'drama', 'thriller', 'scifi', 'animation', 'romance']);
 
 /**
  * The demo's movies from a list in `demo-movies.mjs`'s shape, built from named fields.
@@ -74,6 +82,7 @@ export function demoMovies(list) {
         title,
         year: Number.isInteger(entry.year) && entry.year >= 1870 && entry.year <= 2100 ? entry.year : null,
         poster: posterUrl(entry.posterPath),
+        family: DEMO_FAMILIES.includes(entry.family) ? entry.family : null,
       }),
     );
   }
@@ -91,8 +100,25 @@ export const DEMO_MOVIES = demoMovies(DEMO_LIST);
 //
 //   ranked     best first — the visitor's demo ranking so far
 //   candidate  the movie being placed
-//   next       where the next candidate is drawn from in `pool`
+//   remaining  the movies not yet shown, in list order
 // ---------------------------------------------------------------------------
+
+/**
+ * Which of `remaining` to show against a movie of `family`: the first one from a
+ * different genre family, or simply the first if there is none (or nothing to compare).
+ *
+ * "A comedy or an action movie?" is an easier, more telling pick than two superhero
+ * films. Families are never shown and the visitor never chooses them; this only decides
+ * which unseen movie comes next. First-match keeps it deterministic.
+ */
+function pickIndex(remaining, family) {
+  if (!family) return 0;
+  const index = remaining.findIndex((movie) => movie.family !== family);
+  return index === -1 ? 0 : index;
+}
+
+/** `remaining` without the movie at `index`. */
+const without = (remaining, index) => [...remaining.slice(0, index), ...remaining.slice(index + 1)];
 
 /**
  * A fresh demo. `attempt` rotates where in the list it starts, so "Try again" opens on
@@ -105,9 +131,16 @@ export function startDemo(movies, attempt = 0) {
   const pool = [...source.slice(shift), ...source.slice(0, shift)];
 
   if (pool.length < 2) {
-    return { pool, ranked: pool.slice(0, 1), candidate: null, next: pool.length, selections: 0, done: true };
+    return { ranked: pool.slice(0, 1), candidate: null, remaining: [], selections: 0, done: true };
   }
-  return { pool, ranked: [pool[0]], candidate: pool[1], next: 2, selections: 0, done: false };
+  return opening(pool, { selections: 0, done: false });
+}
+
+/** The opening pair from `pool`: its first movie, and the best newcomer to set against it. */
+function opening(pool, rest) {
+  const [seed, ...others] = pool;
+  const index = pickIndex(others, seed.family);
+  return { ...rest, ranked: [seed], candidate: others[index], remaining: without(others, index) };
 }
 
 /** The movie the candidate is measured against: the middle of the order so far. */
@@ -127,10 +160,11 @@ export function currentPair(state) {
     : { left: state.candidate, right: pivot };
 }
 
-/** Draws the next candidate, or ends when the list has none. */
+/** Draws the next candidate for the current pivot, or ends when the list has none. */
 function draw(state) {
-  if (state.next >= state.pool.length) return { ...state, candidate: null, done: true };
-  return { ...state, candidate: state.pool[state.next], next: state.next + 1 };
+  if (state.remaining.length === 0) return { ...state, candidate: null, done: true };
+  const index = pickIndex(state.remaining, state.ranked[pivotIndex(state)].family);
+  return { ...state, candidate: state.remaining[index], remaining: without(state.remaining, index) };
 }
 
 /**
@@ -165,7 +199,7 @@ export function canSwap(state) {
   if (!state || state.done || !state.candidate) return false;
   const replaced = state.ranked.length === 1 ? 2 : 1;
   const stillToDraw = DEMO_CHOICES - state.selections - 1;
-  return state.pool.length - state.next >= replaced + stillToDraw;
+  return state.remaining.length >= replaced + stillToDraw;
 }
 
 /**
@@ -179,17 +213,8 @@ export function canSwap(state) {
  */
 export function swap(state) {
   if (!canSwap(state)) return state;
-
-  if (state.ranked.length === 1) {
-    return {
-      ...state,
-      ranked: [state.pool[state.next]],
-      candidate: state.pool[state.next + 1],
-      next: state.next + 2,
-    };
-  }
-
-  return { ...state, candidate: state.pool[state.next], next: state.next + 1 };
+  if (state.ranked.length === 1) return opening(state.remaining, state);
+  return draw(state);
 }
 
 /** The ordered result, best first. Positions only: the demo has no scores to give. */

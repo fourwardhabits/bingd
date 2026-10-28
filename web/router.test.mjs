@@ -31,6 +31,7 @@ import {
 } from './src/router.mjs';
 import {
   DEMO_CHOICES,
+  DEMO_FAMILIES,
   DEMO_MOVIES,
   DEMO_RESULT_SIZE,
   canSwap,
@@ -3393,18 +3394,18 @@ const entry = (n, extra = {}) => ({
 describe('the demo movie list', () => {
   /**
    * The committed list is the contract the monthly "most ranked" list will be written
-   * to, so its shape is pinned here: four named fields per movie and nothing else.
+   * to, so its shape is pinned here: five named fields per movie and nothing else.
    */
   it('is in the shape a generated list will be written to', () => {
     assert.deepEqual(Object.keys(DEMO_LIST).sort(), ['asOf', 'movies', 'source']);
     assert.match(DEMO_LIST.asOf, /^\d{4}-\d{2}-\d{2}$/);
     for (const m of DEMO_LIST.movies) {
-      assert.deepEqual(Object.keys(m).sort(), ['posterPath', 'title', 'tmdbId', 'year'], m.title);
+      assert.deepEqual(Object.keys(m).sort(), ['family', 'posterPath', 'tmdbId', 'title', 'year'].sort(), m.title);
+      assert.ok(DEMO_FAMILIES.includes(m.family), `${m.title} has no known genre family`);
     }
   });
 
-  it('is sixteen distinct, well-known movies, every one with a poster on TMDB\'s CDN', () => {
-    assert.equal(DEMO_MOVIES.length, 16);
+  it('is distinct, recognisable movies, every one with a poster on TMDB\'s CDN', () => {
     assert.equal(DEMO_MOVIES.length, DEMO_LIST.movies.length, 'the committed list lost an entry to validation');
     assert.equal(new Set(DEMO_MOVIES.map((m) => m.id)).size, DEMO_MOVIES.length);
     assert.equal(new Set(DEMO_MOVIES.map((m) => m.title)).size, DEMO_MOVIES.length);
@@ -3415,11 +3416,49 @@ describe('the demo movie list', () => {
     assert.ok(Object.isFrozen(DEMO_MOVIES) && Object.isFrozen(DEMO_MOVIES[0]));
   });
 
+  /**
+   * The founder's familiarity rules (2026-10-28): the question is whether an everyday
+   * movie fan has seen both films, so the list leans recent and wide.
+   */
+  it('keeps to the familiarity rules: size, recency, classics and genre spread', () => {
+    const years = DEMO_MOVIES.map((m) => m.year);
+    assert.ok(DEMO_MOVIES.length >= 12 && DEMO_MOVIES.length <= 16, `${DEMO_MOVIES.length} movies`);
+
+    const modern = years.filter((y) => y >= 2000).length;
+    assert.ok(modern / years.length >= 0.8, `only ${modern} of ${years.length} are from 2000 or later`);
+    assert.ok(years.filter((y) => y < 2000).length <= 2, 'more than two pre-2000 classics');
+    assert.ok(years.filter((y) => y >= 2018).length >= 4, 'too few from the last five to eight years');
+
+    const families = new Set(DEMO_MOVIES.map((m) => m.family));
+    for (const family of ['action', 'comedy', 'drama', 'thriller', 'scifi', 'animation', 'romance']) {
+      assert.ok(families.has(family), `no ${family} movie`);
+    }
+    // No genre family crowds out the rest.
+    for (const family of families) {
+      assert.ok(DEMO_MOVIES.filter((m) => m.family === family).length <= 3, `too many ${family} movies`);
+    }
+
+    assert.ok(!DEMO_MOVIES.some((m) => /jurassic/i.test(m.title)), 'Jurassic Park is back in the pool');
+  });
+
+  it('never puts two films of one genre family next to each other in the list', () => {
+    const list = DEMO_MOVIES;
+    for (let i = 0; i < list.length; i++) {
+      const next = list[(i + 1) % list.length];
+      assert.notEqual(list[i].family, next.family, `${list[i].title} and ${next.title}`);
+    }
+  });
+
   it('names its fields, so nothing extra rides along', () => {
-    const list = { movies: [entry(2, { title: '  Two\n Words ', score: 9.4 }), entry(1, { year: null, posterPath: null })] };
+    const list = {
+      movies: [
+        entry(2, { title: '  Two\n Words ', score: 9.4, family: 'comedy' }),
+        entry(1, { year: null, posterPath: null, family: 'documentary' }),
+      ],
+    };
     assert.deepEqual(demoMovies(list), [
-      { id: 'tmdb-2', title: 'Two Words', year: 2002, poster: 'https://image.tmdb.org/t/p/w342/poster2.jpg' },
-      { id: 'tmdb-1', title: 'Film 1', year: null, poster: null },
+      { id: 'tmdb-2', title: 'Two Words', year: 2002, poster: 'https://image.tmdb.org/t/p/w342/poster2.jpg', family: 'comedy' },
+      { id: 'tmdb-1', title: 'Film 1', year: null, poster: null, family: null },
     ]);
   });
 
@@ -3634,6 +3673,80 @@ describe('the demo ranking', () => {
     assert.deepEqual(currentPair(second), { left: DEMO_MOVIES[4], right: DEMO_MOVIES[5] });
     assert.notDeepEqual(currentPair(first), currentPair(second));
     assert.deepEqual(currentPair(startDemo(DEMO_MOVIES, 1)), currentPair(second));
+  });
+});
+
+describe('the demo\'s pair selection', () => {
+  const film = (id, family) => ({ id, title: id, year: 2020, poster: null, family });
+  const pairFamilies = (state) => {
+    const pair = currentPair(state);
+    return [pair.left.family, pair.right.family];
+  };
+
+  it('opens on films from different genre families when the list allows', () => {
+    // The first two are both superhero films; the opener skips to the comedy.
+    const pool = [film('a1', 'action'), film('a2', 'action'), film('c1', 'comedy'), film('d1', 'drama'), film('r1', 'romance')];
+    const state = startDemo(pool);
+    assert.deepEqual(currentPair(state), { left: pool[0], right: pool[2] });
+    // The skipped film is not lost: it is still waiting, first in line.
+    assert.deepEqual(state.remaining.map((m) => m.id), ['a2', 'd1', 'r1']);
+  });
+
+  it('draws each next newcomer from a different family than the film it faces', () => {
+    const pool = [
+      film('c1', 'comedy'),
+      film('a1', 'action'),
+      film('a2', 'action'),
+      film('c2', 'comedy'),
+      film('a3', 'action'),
+      film('d1', 'drama'),
+    ];
+    let state = startDemo(pool);
+    while (!state.done) {
+      const [left, right] = pairFamilies(state);
+      assert.notEqual(left, right, `${currentPair(state).left.id} v ${currentPair(state).right.id}`);
+      state = choose(state, currentPair(state).left.id);
+    }
+    assert.equal(demoResult(state).length, DEMO_RESULT_SIZE);
+  });
+
+  it('falls back to the next film in line when every one left shares the family', () => {
+    const pool = ['a1', 'a2', 'a3', 'a4', 'a5'].map((id) => film(id, 'action'));
+    const state = startDemo(pool);
+    assert.deepEqual(currentPair(state), { left: pool[0], right: pool[1] });
+  });
+
+  it('swaps in a film from a different family too', () => {
+    const pool = [film('c1', 'comedy'), film('a1', 'action'), film('c2', 'comedy'), film('d1', 'drama'), film('a2', 'action'), film('r1', 'romance')];
+    let state = choose(startDemo(pool), 'c1'); // c1 over a1 → c1, a1; the pivot is a1
+    state = swap(state);
+    assert.notEqual(state.candidate.family, state.ranked[1].family);
+    assert.equal(state.selections, 1);
+  });
+
+  it('pairs different families on every attempt over the committed list', () => {
+    for (let attempt = 0; attempt < DEMO_MOVIES.length; attempt++) {
+      let state = startDemo(DEMO_MOVIES, attempt);
+      while (!state.done) {
+        const [left, right] = pairFamilies(state);
+        assert.notEqual(left, right, `attempt ${attempt}, pick ${state.selections + 1}`);
+        state = choose(state, currentPair(state).right.id);
+      }
+    }
+  });
+
+  it('chooses the same pairs for the same picks', () => {
+    const run = () => {
+      const seen = [];
+      let state = startDemo(DEMO_MOVIES, 2);
+      for (const side of ['left', 'right', 'left']) {
+        const pair = currentPair(state);
+        seen.push(`${pair.left.id}|${pair.right.id}`);
+        state = choose(state, pair[side].id);
+      }
+      return seen;
+    };
+    assert.deepEqual(run(), run());
   });
 });
 
@@ -3917,6 +4030,33 @@ describe('the ranking demo, built', () => {
     assert.match(front, /\.demo-rank-name \{[^}]*white-space: nowrap;/);
   });
 
+  /**
+   * On a phone the hero goes headline, description, demo: no in-flow store row between
+   * them, because the sticky bar is the store button there (founder QA, 2026-10-28).
+   * Hidden on the bar's own condition — phone width *and* a bar that was painted — so
+   * a desktop keeps its pair beside the demo, and a phone with no bar keeps the row.
+   */
+  it('drops the hero\'s in-flow store row on a phone, where the sticky bar takes over', () => {
+    const front = read('index.html');
+    const phone = /@media \(max-width: 55\.99rem\) \{([\s\S]*?)\n      \}/.exec(
+      front.slice(front.indexOf('/* ------------------------------------------------------------- sticky CTA */')),
+    );
+    assert.ok(phone, 'no phone media block after the sticky CTA rules');
+    const when = 'body:has(.sticky a.button:not([hidden]))';
+    for (const target of ['.hero .split-copy .actions', '.hero .split-copy .fineprint', '.demo-cta']) {
+      assert.ok(phone[1].includes(`${when} ${target}`), `${target} is not hidden behind the sticky bar`);
+    }
+    assert.match(phone[1], /\.demo-cta \{\s*display: none;\s*\}/);
+
+    // Nothing outside that block hides the hero's row: the desktop keeps both buttons.
+    const outside = front.replace(phone[0], '');
+    assert.doesNotMatch(outside, /\.hero \.split-copy \.actions[^{]*\{[^}]*display: none/);
+
+    // The markup still carries the hero row, ahead of the demo, for every other case.
+    const hero = front.slice(front.indexOf('<section class="hero'), front.indexOf('</section>'));
+    assert.ok(hero.indexOf('id="primary-install"') < hero.indexOf('id="demo"'));
+  });
+
   it('keeps the store buttons out of the result, and a small call to action in it', () => {
     const demo = demoMarkup();
     assert.doesNotMatch(demo, /data-install=|class="button/, 'the result repeats the store buttons');
@@ -4085,11 +4225,69 @@ describe('the ranking demo, painted', () => {
     }
   });
 
-  it('leaves the call to action as words beside the store buttons on a desktop', async () => {
+  /**
+   * The phone's sticky store bar (founder QA, 2026-10-28): the platform's own wording
+   * until the demo is finished, then "Keep ranking in bingd." — the words only. The link
+   * is still the one `paintInstall` chose, and Try again puts the store's name back.
+   */
+  it('relabels the phone\'s sticky store bar when the demo is finished, and only its words', async () => {
+    const page = await paintHome();
+    try {
+      const sticky = page.document.querySelector('.sticky [data-install="primary-install"]');
+      assert.equal(sticky.hidden, false);
+      assert.equal(sticky.href, PLAY);
+      assert.equal(sticky.textContent, 'Get bingd. on Google Play');
+
+      page.el('demo-left').click();
+      page.el('demo-left').click();
+      assert.equal(sticky.textContent, 'Get bingd. on Google Play', 'relabelled before the demo was finished');
+      page.el('demo-left').click();
+
+      assert.equal(sticky.textContent, 'Keep ranking in bingd.');
+      assert.equal(sticky.href, PLAY, 'the sticky bar lost its destination');
+      // The hero and closing-band buttons keep the store's name.
+      assert.equal(page.el('primary-install').textContent, 'Get bingd. on Google Play');
+      for (const mirror of page.document.querySelectorAll('.closer [data-install="primary-install"]')) {
+        assert.equal(mirror.textContent, 'Get bingd. on Google Play');
+      }
+
+      page.el('demo-again').click();
+      assert.equal(sticky.textContent, 'Get bingd. on Google Play');
+      assert.equal(sticky.href, PLAY);
+    } finally {
+      page.restore();
+    }
+  });
+
+  it('sends an iPhone\'s relabelled sticky bar to the App Store', async () => {
+    const page = await paintHome({ userAgent: IPHONE_UA });
+    try {
+      const sticky = page.document.querySelector('.sticky [data-install="primary-install"]');
+      const store = sticky.href;
+      assert.match(store, /^https:\/\/apps\.apple\.com\//);
+      for (let i = 0; i < DEMO_CHOICES; i++) page.el('demo-left').click();
+      assert.equal(sticky.textContent, 'Keep ranking in bingd.');
+      assert.equal(sticky.href, store);
+    } finally {
+      page.restore();
+    }
+  });
+
+  it('keeps both store buttons on a desktop, and leaves the call to action as words', async () => {
     const page = await paintHome({ userAgent: DESKTOP_UA });
     try {
+      assert.equal(page.el('desktop-choices').hidden, false);
+      assert.equal(page.el('install-ios').hidden, false);
+      assert.equal(page.el('install-android').hidden, false);
+
+      for (let i = 0; i < DEMO_CHOICES; i++) page.el('demo-left').click();
       assert.equal(page.el('demo-cta').hasAttribute('href'), false);
       assert.equal(page.el('demo-cta').textContent, 'Keep ranking in bingd.');
+      // No sticky bar was painted, so there is nothing to relabel.
+      const sticky = page.document.querySelector('.sticky [data-install="primary-install"]');
+      assert.equal(sticky.hidden, true);
+      assert.equal(sticky.textContent, '');
+      assert.equal(page.el('install-ios').hidden, false);
     } finally {
       page.restore();
     }
