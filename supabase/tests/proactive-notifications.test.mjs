@@ -148,11 +148,20 @@ const inbox = async (u) => {
   }
 };
 
-/** Claims everything queued and returns the jobs for one recipient's notifications. */
-async function claimFor(u) {
+/**
+ * Claims everything queued and returns the jobs for one recipient's notifications.
+ *
+ * `iso` is the instant proactive timeliness is judged at (claim_push_batch's p_now). A
+ * test that expects a proactive job to be sent passes a time inside the evening it was
+ * selected for; with none, the real clock decides, which is right for reactive jobs and
+ * for anything that must be dropped whatever the hour.
+ */
+async function claimFor(u, iso = null) {
   const jobs = [];
   for (let i = 0; i < 10; i += 1) {
-    const batch = await one(`claim_push_batch(100)`);
+    const batch = iso
+      ? await one(`claim_push_batch(100, $1::timestamptz)`, [at(iso)])
+      : await one(`claim_push_batch(100)`);
     if (!batch.length) break;
     jobs.push(...batch);
   }
@@ -209,6 +218,7 @@ after(async () => t.close());
 beforeEach(async () => {
   await setConfig('proactive.push_enabled', true);
   await setConfig('proactive.generation_enabled', true);
+  await setConfig('proactive.resurface_enabled', true);
 });
 
 // ===========================================================================
@@ -227,6 +237,7 @@ describe('configuration and preferences', () => {
         false,
         'nothing proactive may even be generated on deploy',
       );
+      assert.equal(cfg['proactive.resurface_enabled'], false, 'resurfacing has its own gate, off');
       assert.equal(cfg['proactive.window_start_hour'], 17);
       assert.equal(cfg['proactive.window_end_hour'], 20);
       assert.equal(cfg['proactive.daily_cap'], 1);
@@ -289,10 +300,8 @@ describe('configuration and preferences', () => {
       [u],
     );
     await addAt(u, f, m, '2031-03-03T12:00:00Z');
-    const [c] = await candidates(u, 'watchlist_social');
-    assert.equal(c.state, 'suppressed');
-    assert.equal(c.suppression_reason, 'preference_off');
-    assert.equal(c.notification_id, null);
+    // Muted means untouched: not even a suppressed placeholder that could later be reused.
+    assert.equal((await candidates(u)).length, 0);
     assert.equal((await inbox(u)).length, 0, 'switched off means no inbox row either');
   });
 
@@ -393,6 +402,250 @@ describe('the generation switch (seeded off)', () => {
 
 // ===========================================================================
 
+describe('Watchlist & discovery transitions (Codex review)', () => {
+  const setPref = (u, on) =>
+    t.sql(
+      `insert into notification_preferences (user_id, category, enabled)
+       values ($1, 'watchlist_discovery', $2)
+       on conflict (user_id, category) do update set enabled = excluded.enabled`,
+      [u, on],
+    );
+
+  it('A: muted with a cluster open, a later friend neither bumps the row nor makes it unread', async () => {
+    const r = await user('tra');
+    const [a, b] = [await user('traa'), await user('trab')];
+    await friends(r, a);
+    await friends(r, b);
+    const m = await movie('Transition A');
+    await save(r, m);
+    await addAt(r, a, m, '2031-04-07T09:00:00Z');
+    const [c] = await candidates(r, 'watchlist_social');
+    await t.sql(`update notifications set read_at = '2031-04-07T10:00:00Z' where id = $1`, [c.notification_id]);
+    const before = (await t.sql(`select created_at, read_at from notifications where id = $1`, [c.notification_id])).rows[0];
+
+    await setPref(r, false);
+    await addAt(r, b, m, '2031-04-08T09:00:00Z');
+
+    const after = (await t.sql(`select created_at, read_at from notifications where id = $1`, [c.notification_id])).rows[0];
+    assert.deepEqual(after, before, 'no bump, no unread');
+    const { rows } = await t.sql(
+      `select count(distinct actor_id)::int people from proactive_cluster_actors where candidate_id = $1`,
+      [c.id],
+    );
+    assert.equal(rows[0].people, 1, 'the muted-time friend was not recorded');
+    const [still] = await candidates(r, 'watchlist_social');
+    assert.equal(still.eligible_at, null, 'and so could not make it push-eligible');
+  });
+
+  it('B: muted activity leaves no history; after re-enabling, the next fresh activity starts a fresh cluster', async () => {
+    const r = await user('trb');
+    const [a, b, c2] = [await user('trba'), await user('trbb'), await user('trbc')];
+    for (const f of [a, b, c2]) await friends(r, f);
+    const m = await movie('Transition B');
+    await save(r, m);
+
+    await setPref(r, false);
+    await addAt(r, a, m, '2031-04-14T09:00:00Z');
+    assert.equal((await candidates(r)).length, 0, 'nothing recorded while muted');
+
+    await setPref(r, true);
+    await addAt(r, b, m, '2031-04-15T09:00:00Z');
+    let cs = await candidates(r, 'watchlist_social');
+    assert.equal(cs.length, 1, 'a fresh cluster');
+    assert.equal(cs[0].state, 'pending');
+    assert.ok(cs[0].notification_id);
+    assert.equal(cs[0].eligible_at, null, 'the muted-time friend is not resurrected toward the threshold');
+
+    await addAt(r, c2, m, '2031-04-15T10:00:00Z');
+    cs = await candidates(r, 'watchlist_social');
+    assert.ok(cs[0].eligible_at, 'two fresh friends make it eligible, normally');
+    const row = (await inbox(r)).find((n) => n.kind === 'watchlist_social');
+    assert.equal(row.cluster_count, 2);
+  });
+
+  it('B2: a cluster the arbiter ended for the preference is not reused after re-enabling', async () => {
+    const r = await user('trb2');
+    const m = await movie('Transition B2');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-04-21T09:00:00Z');
+    await setPref(r, false);
+    await arbitrate('2031-04-21T17:30:00Z');
+    let [c] = await candidates(r, 'watchlist_social');
+    assert.equal(c.suppression_reason, 'preference_off');
+
+    await setPref(r, true);
+    await cluster(r, m, 2, '2031-04-22T09:00:00Z');
+    const cs = await candidates(r, 'watchlist_social');
+    assert.equal(cs.length, 2, 'a new cluster rather than the dead one');
+    c = cs.at(-1);
+    assert.equal(c.state, 'pending');
+    assert.ok(c.eligible_at);
+    await arbitrate('2031-04-22T17:30:00Z');
+    assert.equal((await candidates(r, 'watchlist_social')).at(-1).state, 'selected');
+  });
+
+  it('C: switching Watchlist & discovery off touches no other category', async () => {
+    const r = await user('trc');
+    const f = await user('trcf');
+    await setPref(r, false);
+    await t.sql(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+       values ($1, 'follow', $2, 'profile', $2)`,
+      [r, f],
+    );
+    const kinds = (await inbox(r)).map((n) => n.kind);
+    assert.deepEqual(kinds, ['follow']);
+    await t.actAs(r);
+    const { rows } = await t.sql(`select category, enabled from my_notification_preferences() order by category`);
+    await t.actAs(null);
+    for (const row of rows) {
+      assert.equal(row.enabled, row.category !== 'watchlist_discovery', row.category);
+    }
+  });
+
+  it('theatrical: a reader muted at arming who re-enables inside the two days still hears once', async () => {
+    const r = await user('trt');
+    const film = await armedFilm('Transition Film');
+    await save(r, film);
+    await setPref(r, false);
+    await tick('2031-05-09T12:00:00Z');
+    assert.equal((await candidates(r, 'theatrical_release')).length, 0, 'nothing recorded while muted');
+    await setPref(r, true);
+    await tick('2031-05-09T13:00:00Z');
+    assert.equal((await candidates(r, 'theatrical_release')).length, 1);
+  });
+});
+
+// ===========================================================================
+
+describe('at most once, and caps after a late drop', () => {
+  const selectedAt = async (name, day) => {
+    const r = await user(name);
+    const m = await movie(name);
+    await save(r, m);
+    await cluster(r, m, 2, `${day}T09:00:00Z`);
+    await arbitrate(`${day}T17:30:00Z`);
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.equal(c.state, 'selected');
+    return { r, c };
+  };
+
+  it('a claimed proactive job whose lease expires is never returned again', async () => {
+    const { r, c } = await selectedAt('amo_lease', '2032-04-05');
+    const first = (await claimFor(r, '2032-04-05T17:35:00Z')).filter((j) => j.proactive);
+    assert.equal(first.length, 1);
+
+    // The sender dies: the lease runs out and the row is claimable again.
+    await t.sql(
+      `update push_outbox set claimed_at = now() - interval '10 minutes' where notification_id = $1`,
+      [c.notification_id],
+    );
+    const second = (await claimFor(r, '2032-04-05T17:45:00Z')).filter((j) => j.proactive);
+    assert.equal(second.length, 0, 'at most once: never handed over twice');
+    assert.ok(!(await outboxFor(r)).some((o) => o.notification_id === c.notification_id), 'and the row is gone');
+    assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'sent', 'still recorded as handed over once');
+  });
+
+  it('a retry the sender asked for is not sent either', async () => {
+    const { r, c } = await selectedAt('amo_retry', '2032-04-12');
+    assert.equal((await claimFor(r, '2032-04-12T17:35:00Z')).filter((j) => j.proactive).length, 1);
+    // What settle_push_batch does for a retryable failure: the row goes back to pending.
+    await t.sql(
+      `update push_outbox set state = 'pending', claimed_at = null, failures = failures + 1 where notification_id = $1`,
+      [c.notification_id],
+    );
+    assert.equal((await claimFor(r, '2032-04-12T17:40:00Z')).filter((j) => j.proactive).length, 0);
+  });
+
+  it('reactive retries are unchanged: an expired lease is claimed again', async () => {
+    const r = await user('amo_reactive');
+    const f = await user('amo_reactivef');
+    const { rows: [n] } = await t.sql(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+       values ($1, 'follow', $2, 'profile', $2) returning id`,
+      [r, f],
+    );
+    assert.equal((await claimFor(r)).length, 1);
+    await t.sql(`update push_outbox set claimed_at = now() - interval '10 minutes' where notification_id = $1`, [n.id]);
+    const again = await claimFor(r);
+    assert.deepEqual(again.map((j) => j.notification_id), [n.id], 'at least once, as before');
+  });
+
+  it('a push dropped late does not consume the budget, and the next evening can use it', async () => {
+    const { r } = await selectedAt('amo_caps', '2032-04-19');
+    // The drain stalls until the next morning: dropped, never handed over.
+    assert.equal((await claimFor(r, '2032-04-20T09:00:00Z')).filter((j) => j.proactive).length, 0);
+    const [dead] = await candidates(r, 'watchlist_social');
+    assert.equal(dead.state, 'expired');
+    assert.equal(dead.suppression_reason, 'outside_window');
+    assert.equal(dead.sent_at, null, 'nothing is counted as sent');
+
+    // Only what was handed over counts: the weekly and daily budget are intact.
+    const { rows } = await t.sql(
+      `select count(*)::int n from proactive_candidates
+        where recipient_id = $1 and state in ('selected', 'sent')`,
+      [r],
+    );
+    assert.equal(rows[0].n, 0);
+
+    // Another title that evening is free to go, the type cooldown aside (set to 0 here).
+    await setConfig('proactive.type_cooldown_hours', 0);
+    try {
+      const m2 = await movie('amo_caps second');
+      await save(r, m2);
+      await cluster(r, m2, 2, '2032-04-20T09:00:00Z');
+      await arbitrate('2032-04-20T17:30:00Z');
+      const second = (await candidates(r, 'watchlist_social')).at(-1);
+      assert.equal(second.state, 'selected', 'the dropped push did not take the day or the week');
+      assert.equal((await claimFor(r, '2032-04-20T17:35:00Z')).filter((j) => j.proactive).length, 1);
+    } finally {
+      await setConfig('proactive.type_cooldown_hours', 72);
+    }
+  });
+});
+
+// ===========================================================================
+
+describe('theatrical region, re-checked', () => {
+  it('created while US, now GB: not selected', async () => {
+    const r = await user('reggb');
+    const film = await armedFilm('Region Change');
+    await save(r, film);
+    await tick('2031-05-09T12:00:00Z');
+    assert.equal((await candidates(r, 'theatrical_release'))[0].state, 'pending');
+    await t.sql(`update account_context set region = 'GB' where user_id = $1`, [r]);
+    await tick('2031-05-09T17:30:00Z');
+    const [c] = await candidates(r, 'theatrical_release');
+    assert.equal(c.state, 'suppressed');
+    assert.equal(c.suppression_reason, 'region_mismatch');
+  });
+
+  it('selected while US, GB by the time it is claimed: not sent', async () => {
+    const r = await user('regclaim');
+    const film = await armedFilm('Region At Claim');
+    await save(r, film);
+    await tick('2031-05-09T17:30:00Z');
+    assert.equal((await candidates(r, 'theatrical_release'))[0].state, 'selected');
+    await t.sql(`update account_context set region = 'GB' where user_id = $1`, [r]);
+    assert.equal((await claimFor(r, '2031-05-09T17:35:00Z')).filter((j) => j.proactive).length, 0);
+    const [c] = await candidates(r, 'theatrical_release');
+    assert.equal(c.state, 'suppressed');
+    assert.equal(c.suppression_reason, 'region_mismatch');
+  });
+
+  it('region no longer known: not sent either', async () => {
+    const r = await user('regnull');
+    const film = await armedFilm('Region Gone');
+    await save(r, film);
+    await tick('2031-05-09T12:00:00Z');
+    await t.sql(`update account_context set region = null where user_id = $1`, [r]);
+    await tick('2031-05-09T17:30:00Z');
+    assert.equal((await candidates(r, 'theatrical_release'))[0].suppression_reason, 'region_unknown');
+  });
+});
+
+// ===========================================================================
+
 describe('per-device compatibility', () => {
   it('one capable and one old device: the push goes to the capable one only', async () => {
     const r = await user('multi'); // its main device is capable (version 1)
@@ -404,7 +657,7 @@ describe('per-device compatibility', () => {
     await arbitrate('2031-12-29T17:30:00Z');
     assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'selected');
 
-    const [job] = (await claimFor(r)).filter((j) => j.proactive);
+    const [job] = (await claimFor(r, '2031-12-29T17:35:00Z')).filter((j) => j.proactive);
     assert.ok(job, 'the capable device makes the reader reachable');
     const tokens = job.tokens.map((d) => d.token);
     assert.deepEqual(tokens, [`ExponentPushToken[${r}-main]`]);
@@ -435,7 +688,7 @@ describe('per-device compatibility', () => {
       `ExponentPushToken[${r}-main]`,
     ]);
 
-    const jobs = (await claimFor(r)).filter((j) => j.proactive);
+    const jobs = (await claimFor(r, '2031-12-29T17:35:00Z')).filter((j) => j.proactive);
     assert.equal(jobs.length, 0);
     const [c] = await candidates(r, 'watchlist_social');
     assert.equal(c.state, 'suppressed');
@@ -650,7 +903,7 @@ describe('watchlist social: the seven-day cluster', () => {
     [c] = await candidates(r, 'watchlist_social');
     assert.equal(c.state, 'selected');
 
-    const jobs = (await claimFor(r)).filter((j) => j.proactive);
+    const jobs = (await claimFor(r, '2031-03-05T17:20:00Z')).filter((j) => j.proactive);
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].proactive.actor_count, 3, 'counted at send time, not at threshold time');
     assert.equal(jobs[0].proactive.actor_names.length, 2);
@@ -806,7 +1059,7 @@ describe('theatrical release', () => {
 
     await tick('2031-05-09T17:30:00Z');
     assert.equal((await candidates(r, 'theatrical_release'))[0].state, 'selected');
-    const jobs = (await claimFor(r)).filter((j) => j.proactive);
+    const jobs = (await claimFor(r, '2031-05-09T17:35:00Z')).filter((j) => j.proactive);
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].type, 'theatrical_release');
     assert.equal(jobs[0].media_item_id, m);
@@ -895,7 +1148,7 @@ describe('watchlist resurfacing', () => {
     assert.equal((await outboxFor(r)).length, 1);
     assert.equal((await inbox(r)).length, 0, 'and the reader never sees it in the inbox');
 
-    const jobs = (await claimFor(r)).filter((j) => j.proactive);
+    const jobs = (await claimFor(r, '2031-07-07T17:10:00Z')).filter((j) => j.proactive);
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].type, 'watchlist_resurface');
     assert.equal(jobs[0].proactive.reason, 'saved');
@@ -970,6 +1223,112 @@ describe('watchlist resurfacing', () => {
     await tick('2031-07-07T17:05:00Z');
     assert.equal((await candidates(r, 'watchlist_resurface')).length, 0);
     assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'selected');
+  });
+});
+
+// ===========================================================================
+
+describe('the resurfacing switch (operator-only, seeded off)', () => {
+  it('off: no resurfacing candidate, while social and theatrical still generate', async () => {
+    await setConfig('proactive.resurface_enabled', false);
+    const r = await user('resoff');
+    await save(r, await movie('Resurface Off'), '2029-01-01T00:00:00Z');
+    const f = await user('resofff');
+    await friends(r, f);
+    const m = await movie('Social Still On');
+    await save(r, m);
+    const film = await armedFilm('Theatrical Still On');
+    await save(r, film);
+
+    await activity(f, m);
+    await tick('2031-05-09T12:00:00Z');
+    await tick('2032-02-02T17:05:00Z');
+
+    assert.equal((await candidates(r, 'watchlist_resurface')).length, 0);
+    assert.equal((await candidates(r, 'watchlist_social')).length, 1, 'social is not its business');
+    assert.equal((await candidates(r, 'theatrical_release')).length, 1, 'nor is theatrical');
+    assert.equal(await one(`(proactive_status() ->> 'resurface_enabled')::boolean`), false);
+  });
+
+  it('is fail-closed: anything but true is off', async () => {
+    await setConfig('proactive.resurface_enabled', 'true');
+    assert.equal(await one(`_proactive_resurface_enabled()`), false, 'the string "true" is not true');
+    const r = await user('resbad');
+    await save(r, await movie('Resurface Malformed'), '2029-01-01T00:00:00Z');
+    await tick('2032-02-09T17:05:00Z');
+    assert.equal((await candidates(r, 'watchlist_resurface')).length, 0);
+  });
+
+  it('on, but with push off, still generates nothing: it is push-only', async () => {
+    await setConfig('proactive.push_enabled', false);
+    const r = await user('resnopush');
+    await save(r, await movie('Resurface No Push'), '2029-01-01T00:00:00Z');
+    await tick('2032-02-16T17:05:00Z');
+    assert.equal((await candidates(r, 'watchlist_resurface')).length, 0);
+  });
+
+  it('on, with push on: generated', async () => {
+    const r = await user('reson');
+    await save(r, await movie('Resurface On'), '2029-01-01T00:00:00Z');
+    await tick('2032-02-23T17:05:00Z');
+    assert.equal((await candidates(r, 'watchlist_resurface')).length, 1);
+  });
+});
+
+describe('tick hardening', () => {
+  it('a malformed trending cache entry is skipped, not fatal, and a good id still counts', async () => {
+    const r = await user('trendbad');
+    const trending = await movie('Trending Title');
+    const plain = await movie('Plain Title');
+    await save(r, plain, '2031-01-01T00:00:00Z');
+    await save(r, trending, '2031-01-01T00:00:00Z');
+    await t.sql(
+      `insert into provider_list_cache (list_key, payload, fetched_at, expires_at)
+       values ('trending.movie.week', $1::jsonb, '2032-03-01T00:00:00Z', '2032-03-08T00:00:00Z'),
+              ('trending.series.week', '{"ids": {"not": "an array"}}'::jsonb, '2032-03-01T00:00:00Z', '2032-03-08T00:00:00Z')
+       on conflict (list_key) do update set payload = excluded.payload, fetched_at = excluded.fetched_at`,
+      [JSON.stringify({ ids: ['not-a-uuid', 42, null, trending] })],
+    );
+
+    const pick = (await t.sql(`select * from _proactive_resurface_pick($1, '2032-03-02T17:05:00Z')`, [r])).rows[0];
+    assert.equal(pick.media_item_id, trending, 'the valid id still scores');
+    assert.equal(pick.reason, 'trending');
+
+    const result = await tick('2032-03-02T17:05:00Z');
+    assert.ok(result, 'the whole tick completed');
+    assert.equal((await candidates(r, 'watchlist_resurface')).length, 1);
+  });
+
+  it('proactive_status reports the tick\'s last run, last success and last failure', async () => {
+    const fresh = await createTestDb();
+    try {
+      await fresh.exec(`
+        create schema cron;
+        create table cron.job (jobid bigint primary key, jobname text, schedule text, active boolean);
+        create table cron.job_run_details (
+          runid bigint primary key, jobid bigint, status text,
+          start_time timestamptz, end_time timestamptz, return_message text);
+        insert into cron.job values (7, 'bingd-proactive-tick', '4,19,34,49 * * * *', true);
+        insert into cron.job_run_details values
+          (1, 7, 'succeeded', '2032-01-01T17:04:00Z', '2032-01-01T17:04:01Z', '1 row'),
+          (2, 7, 'failed',    '2032-01-01T17:19:00Z', '2032-01-01T17:19:01Z', 'ERROR: something broke');
+      `);
+      let status = (await fresh.sql(`select proactive_status() as r`)).rows[0].r;
+      assert.equal(status.tick.last_status, 'failed');
+      assert.equal(status.tick.last_failure, 'ERROR: something broke');
+      assert.ok(status.tick.last_success_at);
+      assert.ok(status.problems.includes('last_tick_failed'));
+      assert.equal(status.healthy, false);
+
+      await fresh.exec(`insert into cron.job_run_details values
+        (3, 7, 'succeeded', '2032-01-01T17:34:00Z', '2032-01-01T17:34:01Z', '1 row');`);
+      status = (await fresh.sql(`select proactive_status() as r`)).rows[0].r;
+      assert.equal(status.tick.last_status, 'succeeded');
+      assert.ok(!status.problems.includes('last_tick_failed'), 'a recovered tick is not a problem');
+      assert.ok(status.tick.last_failure_at, 'but the failure is still on record');
+    } finally {
+      await fresh.close();
+    }
   });
 });
 
@@ -1228,7 +1587,7 @@ describe('sending', () => {
     await save(r, m);
     await cluster(r, m, 2, '2031-12-15T09:00:00Z');
     await arbitrate('2031-12-15T17:30:00Z');
-    const jobs = (await claimFor(r)).filter((j) => j.proactive);
+    const jobs = (await claimFor(r, '2031-12-15T17:35:00Z')).filter((j) => j.proactive);
     assert.equal(jobs.length, 1);
     assert.deepEqual(jobs[0].tokens.map((d) => d.platform), ['ios']);
     const [c] = await candidates(r, 'watchlist_social');
@@ -1244,6 +1603,84 @@ describe('sending', () => {
     await cluster(r, m, 2, '2031-12-15T09:00:00Z');
     await arbitrate('2031-12-15T17:30:00Z');
     assert.equal((await candidates(r, 'watchlist_social'))[0].last_block_reason, 'no_device');
+  });
+
+  /**
+   * Fable review, MAJOR. A selected candidate must not be delivered after its evening:
+   * not after expires_at, not outside 17:00-20:00 local, not when a stalled drain
+   * recovers the next morning or the next evening. Tonight or not at all.
+   */
+  describe('tonight or not at all', () => {
+    const selected = async (name, { tz = 'UTC' } = {}) => {
+      const r = await user(name, { timezone: tz });
+      const m = await movie(name);
+      await save(r, m);
+      await cluster(r, m, 2, '2031-12-15T09:00:00Z');
+      await arbitrate('2031-12-15T17:30:00Z');
+      const [c] = await candidates(r, 'watchlist_social');
+      assert.equal(c.state, 'selected', 'selected inside the evening window');
+      return { r, c };
+    };
+
+    const dropped = async (r, iso, reason) => {
+      const jobs = (await claimFor(r, iso)).filter((j) => j.proactive);
+      assert.equal(jobs.length, 0, `no proactive job may be returned at ${iso}`);
+      const [c] = await candidates(r, 'watchlist_social');
+      assert.equal(c.state, 'expired', 'a timeliness failure is terminal');
+      assert.equal(c.suppression_reason, reason);
+      assert.ok(!(await outboxFor(r)).some((o) => o.notification_id === c.notification_id));
+    };
+
+    it('inside the window it claims normally', async () => {
+      const { r } = await selected('tonight_ok');
+      const jobs = (await claimFor(r, '2031-12-15T19:59:00Z')).filter((j) => j.proactive);
+      assert.equal(jobs.length, 1);
+      assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'sent');
+    });
+
+    it('after the window closes the same evening', async () => {
+      const { r } = await selected('tonight_late');
+      await dropped(r, '2031-12-15T20:00:00Z', 'outside_window');
+    });
+
+    it('when a stalled drain recovers the next morning', async () => {
+      const { r } = await selected('tonight_morning');
+      await dropped(r, '2031-12-16T09:00:00Z', 'outside_window');
+    });
+
+    it('the next evening, inside the hours but not the evening it was chosen for', async () => {
+      const { r } = await selected('tonight_nextday');
+      await dropped(r, '2031-12-16T17:30:00Z', 'outside_window');
+    });
+
+    it('after expires_at, even inside the window', async () => {
+      const { r, c } = await selected('tonight_expired');
+      await t.sql(`update proactive_candidates set expires_at = '2031-12-15T17:40:00Z' where id = $1`, [c.id]);
+      await dropped(r, '2031-12-15T17:45:00Z', 'expired');
+    });
+
+    it('in the reader\'s own zone, not UTC', async () => {
+      // Kolkata is UTC+5:30: 17:30 local is 12:00Z, and 20:30 local is 15:00Z.
+      const r = await user('tonight_kol', { timezone: 'Asia/Kolkata' });
+      const m = await movie('Kolkata');
+      await save(r, m);
+      await cluster(r, m, 2, '2031-12-15T03:00:00Z');
+      await arbitrate('2031-12-15T12:00:00Z');
+      assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'selected');
+      await dropped(r, '2031-12-15T15:00:00Z', 'outside_window');
+    });
+
+    it('a reactive push queued alongside is untouched by any of this', async () => {
+      const { r } = await selected('tonight_reactive');
+      const f = await user('tonight_reactivef');
+      await t.sql(
+        `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+         values ($1, 'follow', $2, 'profile', $2)`,
+        [r, f],
+      );
+      const jobs = await claimFor(r, '2031-12-16T09:00:00Z');
+      assert.deepEqual(jobs.map((j) => j.type), ['follow']);
+    });
   });
 
   it('goal_completed: the claim now carries what its push copy needs', async () => {
@@ -1272,13 +1709,13 @@ describe('telemetry', () => {
     const [c] = await candidates(r, 'watchlist_social');
 
     await t.asUser(r, () =>
-      t.sql(`select record_notification_open($1, 'push', '/title/x')`, [c.notification_id]),
+      t.sql(`select record_notification_open($1, 'push', 'title')`, [c.notification_id]),
     );
     await t.asUser(r, () =>
-      t.sql(`select record_notification_open($1, 'push', '/title/x')`, [c.notification_id]),
+      t.sql(`select record_notification_open($1, 'push', 'title')`, [c.notification_id]),
     );
     await t.asUser(r, () =>
-      t.sql(`select record_notification_open($1, 'inbox', '/title/x')`, [c.notification_id]),
+      t.sql(`select record_notification_open($1, 'inbox', 'title')`, [c.notification_id]),
     );
     const answer = await t.asUser(other, () =>
       t.sql(`select record_notification_open($1, 'push', null) as r`, [c.notification_id]),
@@ -1298,6 +1735,33 @@ describe('telemetry', () => {
       ],
     );
     assert.ok(await t.errorFrom(`select record_notification_open($1, 'sms', null)`, [c.notification_id]));
+    assert.deepEqual(rows.map((x) => x.destination), ['title', 'title']);
+  });
+
+  it('stores only a closed destination vocabulary, never caller-supplied text', async () => {
+    const r = await user('opendest');
+    const f = await user('opendestf');
+    const { rows: [n] } = await t.sql(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+       values ($1, 'follow', $2, 'profile', $2) returning id`,
+      [r, f],
+    );
+    for (const bad of [`/u/${f}`, '/title/abc', 'title; drop table x', 'Title', 'x'.repeat(300)]) {
+      const err = await t.asUser(r, () =>
+        t.errorFrom(`select record_notification_open($1, 'inbox', $2)`, [n.id, bad]),
+      );
+      assert.ok(err, `${bad.slice(0, 20)} must be refused`);
+    }
+    await t.asUser(r, () => t.sql(`select record_notification_open($1, 'inbox', 'profile')`, [n.id]));
+    const { rows } = await t.sql(`select destination from notification_opens where notification_id = $1`, [n.id]);
+    assert.deepEqual(rows.map((x) => x.destination), ['profile']);
+    // And the table itself refuses anything else, whoever writes it.
+    assert.ok(
+      await t.errorFrom(
+        `insert into notification_opens (user_id, kind, channel, destination) values ($1, 'follow', 'push', '/u/me')`,
+        [r],
+      ),
+    );
   });
 
   it('the operator views aggregate the ledger', async () => {

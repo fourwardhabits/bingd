@@ -63,6 +63,11 @@ insert into app_config (key, value) values
   -- it on. Independent of the push switch above: the inbox is the record, the push is
   -- transport, and QA can run either without the other.
   ('proactive.generation_enabled', 'false'::jsonb),
+  -- THE RESURFACING SWITCH (operator-only, not a user setting). Watchlist resurfacing is
+  -- the one type that is not caused by an event: switched on, every eligible reader
+  -- becomes a candidate on the same evening. So it has its own gate, off, to be turned on
+  -- only after social and theatrical have been watched in production.
+  ('proactive.resurface_enabled', 'false'::jsonb),
   -- The local evening window. Proactive pushes go out inside it and nowhere else.
   ('proactive.window_start_hour', '17'::jsonb),
   ('proactive.window_end_hour', '20'::jsonb),
@@ -132,6 +137,19 @@ set search_path = public
 as $$
   select _proactive_setting('proactive.generation_enabled', 'false'::jsonb) = 'true'::jsonb;
 $$;
+
+create or replace function _proactive_resurface_enabled()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select _proactive_setting('proactive.resurface_enabled', 'false'::jsonb) = 'true'::jsonb;
+$$;
+
+comment on function _proactive_resurface_enabled() is
+  'The operator switch for Watchlist resurfacing alone. True only when app_config proactive.resurface_enabled is the JSON boolean true (seeded false). Read by _proactive_resurface_collect; social and theatrical do not read it. Not a user setting. Internal.';
 
 comment on function _proactive_generation_enabled() is
   'THE proactive generation switch. True only when app_config proactive.generation_enabled is the JSON boolean true (seeded false). Read by the feed_events social trigger and by _proactive_tick before any collector runs; while false no proactive candidate or proactive inbox row is created. Reactive notifications never read it. Internal.';
@@ -382,7 +400,15 @@ as $$
     'kill_switch', 'no_timezone', 'client_unsupported', 'no_device', 'quiet_window',
     'higher_priority_selected', 'daily_cap', 'weekly_cap', 'type_cooldown', 'title_cooldown',
     -- Expired with nothing in particular holding it.
-    'expired'
+    'expired',
+    -- Selected, but by the time the sender claimed it the reader's evening window (or the
+    -- local day it was selected for) had passed: a stalled drain recovering late. Terminal.
+    'outside_window',
+    -- A US theatrical candidate whose reader no longer reports a US region.
+    'region_mismatch',
+    -- A claim of a job whose candidate was already handed to the sender: at most once.
+    -- Reported by the claim and never written over the `sent` state.
+    'already_sent'
   ]::text[];
 $$;
 
@@ -415,8 +441,8 @@ create table proactive_candidates (
   selected_at         timestamptz,
   -- The recipient's local date at selection: what the one-per-local-day index keys on.
   selected_local_date date,
-  -- When the sender claimed it, i.e. when the push was handed to Expo. Not a delivery
-  -- receipt: bingd does not poll receipts (push-operations.md §9).
+  -- When claim_push_batch handed the job to push-sender. NOT Expo's acceptance and NOT
+  -- delivery: the sender may still drop or fail it, and receipts are not polled (push-operations.md §9).
   sent_at             timestamptz,
   decided_at          timestamptz,
   suppression_reason  text,
@@ -482,7 +508,12 @@ create table notification_opens (
   candidate_id    uuid references proactive_candidates(id) on delete set null,
   kind            text not null,
   channel         text not null check (channel in ('push', 'inbox')),
-  destination     text check (char_length(destination) <= 200),
+  -- WHERE the tap led, as the kind of screen, never as a path: no ids, no usernames, no
+  -- free text. The closed vocabulary is the client's NotificationTarget kinds plus `inbox`
+  -- (the push fallback). Which title is already known from the notification itself.
+  destination     text check (destination in (
+                    'profile', 'title', 'activity', 'awards', 'award-celebration',
+                    'goals', 'import', 'inbox')),
   opened_at       timestamptz not null default now()
 );
 
@@ -570,6 +601,7 @@ declare
   c        proactive_candidates%rowtype;
   e        release_events%rowtype;
   v_tz     text;
+  v_region text;
   v_today  date;
 begin
   select * into c from proactive_candidates where id = p_candidate;
@@ -606,7 +638,15 @@ begin
     if e.last_observed_at < p_now - make_interval(hours => _proactive_int('proactive.theatrical_max_read_age_hours', 36)) then
       return 'release_stale';
     end if;
-    select timezone into v_tz from account_context where user_id = c.recipient_id;
+    -- The reader's CURRENT region (Codex review): a US date is a claim about the US, so a
+    -- reader who has since reported another country, or no country, is not told it.
+    select timezone, region into v_tz, v_region from account_context where user_id = c.recipient_id;
+    if v_region is null then
+      return 'region_unknown';
+    end if;
+    if v_region is distinct from e.region then
+      return 'region_mismatch';
+    end if;
     v_today := (p_now at time zone coalesce(v_tz, 'UTC'))::date;
     -- The point is notice. On the day itself it is a day-of push, which v1 never sends.
     if v_today >= e.scheduled_date then
@@ -619,7 +659,7 @@ end;
 $$;
 
 comment on function _proactive_invalid(uuid, timestamptz) is
-  'Null if a proactive candidate is still true, else the permanent reason it is not: recipient inactive, preference off, title off the Watchlist, already watched, a social cluster below its threshold, or a film whose date moved, went stale or has arrived. Asked before selection and again at send. Internal.';
+  'Null if a proactive candidate is still true, else the permanent reason it is not: recipient inactive, preference off, title off the Watchlist, already watched, a social cluster below its threshold, or a film whose date moved, went stale or has arrived, or whose reader no longer reports a US region (region_mismatch / region_unknown). Asked before selection and again at send. Internal.';
 
 
 -- ---------------------------------------------------------------------------
@@ -820,9 +860,95 @@ comment on function _proactive_arbitrate(timestamptz) is
 --      at send time, not at threshold time). And a proactive job's `tokens` are only the
 --      recipient's devices whose build can route it (§2); a reactive job's are unchanged.
 --   c. A claimed proactive candidate becomes `sent`, with the count it went out with.
+--      `sent` means handed to push-sender by this claim. It is not Expo's acceptance and
+--      not delivery: the sender can still drop the job (live_push_jobs) or fail to submit
+--      it, and receipts are not polled.
+--
+-- TONIGHT OR NOT AT ALL (Fable review, MAJOR). A proactive push was selected for one
+-- evening. If the drain stalls and recovers after that evening's window, or after the
+-- candidate's expires_at, or on a later local day, the job is dropped here and the
+-- candidate ends `expired` (reason `expired`, `outside_window` or `no_timezone`), never
+-- sent late. `_proactive_claim_reason` is the whole rule, and it takes the clock.
+--
+-- `p_now` is the instant proactive timeliness is judged at. It defaults to now() and only
+-- tests pass it; the outbox lease always uses the real clock. The sender's call names
+-- only p_limit, so the old one-argument form is dropped rather than left beside this one.
 -- ---------------------------------------------------------------------------
 
-create or replace function claim_push_batch(p_limit integer default 20)
+/**
+ * Why a queued proactive job must not be sent at `p_now`, or null if it may. In order:
+ * the kill switch; AT MOST ONCE (a candidate already handed to the sender is never handed
+ * over again); the candidate still selected; not past expires_at; the reader's timezone
+ * known; inside 17:00-20:00 local on the same local day it was selected for; a capable
+ * device still live; and _proactive_invalid.
+ *
+ * AT MOST ONCE (founder, 2026-10-28). Reactive pushes are at least once: an expired lease
+ * or a retryable failure puts the outbox row back and the next drain re-sends it. For an
+ * optional engagement push that is the wrong trade, because the ambiguous case (a sender
+ * that dies around its Expo call) would re-send something the reader may already have
+ * on their lock screen. So the first claim makes the candidate `sent`, and any later claim
+ * of the same outbox row (a lease expiry, a settle that asked for a retry) finds it `sent`
+ * and drops it. The cost, accepted deliberately: a crash before or during submission can
+ * lose that one proactive push. A duplicate proactive interruption cannot happen.
+ */
+create or replace function _proactive_claim_reason(p_candidate uuid, p_now timestamptz)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  c       proactive_candidates%rowtype;
+  v_tz    text;
+  v_local timestamp;
+begin
+  select * into c from proactive_candidates where id = p_candidate;
+  if not found then
+    return 'expired';
+  end if;
+
+  if not _proactive_push_enabled() then
+    return 'kill_switch';
+  end if;
+  if c.state = 'sent' then
+    return 'already_sent';
+  end if;
+  if c.state <> 'selected' then
+    return 'expired';
+  end if;
+  if c.expires_at <= p_now then
+    return 'expired';
+  end if;
+
+  select timezone into v_tz from account_context where user_id = c.recipient_id;
+  if v_tz is null then
+    return 'no_timezone';
+  end if;
+  v_local := p_now at time zone v_tz;
+  if v_local::time <  make_time(_proactive_int('proactive.window_start_hour', 17), 0, 0)
+     or v_local::time >= make_time(_proactive_int('proactive.window_end_hour', 20), 0, 0)
+     or v_local::date is distinct from c.selected_local_date then
+    return 'outside_window';
+  end if;
+
+  -- Per device: the capable phone may have signed out since selection, leaving only an
+  -- old build. Then there is nobody this kind can safely reach.
+  if not exists (select 1 from device_tokens d
+                  where d.user_id = c.recipient_id and _proactive_capable_token(d)) then
+    return 'client_unsupported';
+  end if;
+
+  return _proactive_invalid(c.id, p_now);
+end;
+$$;
+
+comment on function _proactive_claim_reason(uuid, timestamptz) is
+  'Null if a queued proactive job may be sent at p_now, else why not: kill_switch, already_sent (at most once: never handed to the sender twice), expired (state, or past expires_at), no_timezone, outside_window (outside 17:00-20:00 local, or a later local day than it was selected for), client_unsupported, or a _proactive_invalid reason. Tonight or not at all. Internal.';
+
+drop function if exists claim_push_batch(integer);
+
+create or replace function claim_push_batch(p_limit integer default 20, p_now timestamptz default now())
 returns jsonb
 language plpgsql
 security definer
@@ -833,7 +959,6 @@ declare
   v_jobs    jsonb;
   v_dead    uuid[];
   v_pro_dead uuid[];
-  v_pro_on  boolean := _proactive_push_enabled();
 begin
   delete from push_outbox o
    where (o.failures >= 3 or o.attempts >= 6)
@@ -879,25 +1004,21 @@ begin
      );
 
   -- 20261028000100 (a). The proactive jobs that must not go, and the candidate told why.
-  -- A retry of one already `sent` is still sendable; only the switch or the facts stop it.
+  -- At most once: a job whose candidate is already `sent` (an expired lease, a retry) is
+  -- dropped and its outbox row deleted below; the candidate stays `sent`. Reactive jobs
+  -- are not in this set and keep their at-least-once retries unchanged.
   with pro as (
     select pc.id, pc.notification_id, pc.state,
-           case
-             when not v_pro_on then 'kill_switch'
-             when pc.state not in ('selected', 'sent') then 'expired'
-             -- Per device: the capable phone may have signed out since selection, leaving
-             -- only an old build. Then there is nobody this kind can safely reach.
-             when not exists (select 1 from device_tokens d
-                               where d.user_id = pc.recipient_id and _proactive_capable_token(d))
-               then 'client_unsupported'
-             else _proactive_invalid(pc.id, now())
-           end as reason
+           _proactive_claim_reason(pc.id, p_now) as reason
       from proactive_candidates pc
      where pc.notification_id = any (v_claimed)
   ),
   settled as (
     update proactive_candidates pc
-       set state = 'suppressed', suppression_reason = pro.reason, decided_at = now()
+       set state              = case when pro.reason in ('expired', 'outside_window', 'no_timezone')
+                                     then 'expired' else 'suppressed' end,
+           suppression_reason = pro.reason,
+           decided_at         = p_now
       from pro
      where pc.id = pro.id and pro.reason is not null and pc.state = 'selected'
     returning pc.id
@@ -976,7 +1097,7 @@ begin
            case when pc.id is not null then jsonb_build_object(
              'type',        pc.type,
              'opens_on',    pc.metadata ->> 'opens_on',
-             'local_today', (now() at time zone coalesce(ac.timezone, 'UTC'))::date,
+             'local_today', (p_now at time zone coalesce(ac.timezone, 'UTC'))::date,
              'reason',      pc.metadata ->> 'reason',
              'actor_count', case when pc.type = 'watchlist_social'
                               then (select count(*) from _proactive_social_actors(pc.id, n.recipient_id)) end,
@@ -1051,7 +1172,7 @@ begin
        select (job ->> 'notification_id')::uuid from jsonb_array_elements(v_jobs) as job
      );
 
-  -- 20261028000100 (c). Handed to the sender: the push is attempted. Not a receipt.
+  -- 20261028000100 (c). Handed to push-sender. Not Expo acceptance, not delivery.
   update proactive_candidates pc
      set state               = 'sent',
          sent_at             = now(),
@@ -1064,8 +1185,8 @@ begin
 end;
 $$;
 
-comment on function claim_push_batch(integer) is
-  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here (kill switch, state, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate suppressed if they no longer hold, and marked sent when they are returned. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
+comment on function claim_push_batch(integer, timestamptz) is
+  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned. p_now defaults to now() and only tests pass it; leases use the real clock. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
 
 
 -- ---------------------------------------------------------------------------
@@ -1250,6 +1371,13 @@ begin
   if p_channel is null or p_channel not in ('push', 'inbox') then
     raise exception 'unknown channel' using errcode = '22023';
   end if;
+  -- A closed vocabulary, not caller-supplied text (Fable review, MINOR): anything else is
+  -- refused rather than stored, so nothing a client sends here can carry an id, a name or
+  -- a path into the table.
+  if p_destination is not null and p_destination not in (
+       'profile', 'title', 'activity', 'awards', 'award-celebration', 'goals', 'import', 'inbox') then
+    raise exception 'unknown destination' using errcode = '22023';
+  end if;
 
   -- Only the caller's own notification. Any other id answers the same `ok` and records
   -- nothing, so this cannot be used to ask whether a notification exists.
@@ -1263,7 +1391,7 @@ begin
   select pc.id into v_cand from proactive_candidates pc where pc.notification_id = p_notification_id;
 
   insert into notification_opens (user_id, notification_id, candidate_id, kind, channel, destination)
-  values (v_user, p_notification_id, v_cand, v_kind, p_channel, left(nullif(trim(p_destination), ''), 200))
+  values (v_user, p_notification_id, v_cand, v_kind, p_channel, p_destination)
   on conflict (notification_id, channel) where notification_id is not null do nothing;
 
   return jsonb_build_object('ok', true);
@@ -1271,7 +1399,7 @@ end;
 $$;
 
 comment on function record_notification_open(uuid, text, text) is
-  'Records that the caller opened one of their own notifications, from a push or from the inbox, and where it led. The first per (notification, channel) only. Any id that is not the caller''s own answers ok and records nothing. Deliberately does not call assert_can_write: it is telemetry about the caller''s own row and must never fail the tap it rides on. authenticated.';
+  'Records that the caller opened one of their own notifications, from a push or from the inbox, and the kind of screen it led to (one of profile, title, activity, awards, award-celebration, goals, import, inbox; anything else is refused with 22023, so no free text is stored). The first per (notification, channel) only. Any id that is not the caller''s own answers ok and records nothing. Deliberately does not call assert_can_write: it is telemetry about the caller''s own row and must never fail the tap it rides on. authenticated.';
 
 revoke execute on function record_notification_open(uuid, text, text) from public, anon;
 grant execute on function record_notification_open(uuid, text, text) to authenticated;
@@ -1327,7 +1455,7 @@ select c.type,
  group by c.type;
 
 comment on view proactive_attribution is
-  'Per proactive type: pushes sent, opened from the push, and the title acted on (ranked or a watch recorded) within 7 days of the open; plus ranked within 7 days with no open, which is the organic baseline the push has to beat. service_role only.';
+  'Per proactive type: pushes sent, opened from the push, and the title acted on (ranked or a watch recorded) within 7 days of the open; plus sent and ranked within 7 days WITHOUT A RECORDED PUSH OPEN. Observational attribution, not causal measurement: a reader who opens a push may have ranked the title anyway, and an open that was not recorded counts as none. service_role only.';
 
 revoke all on proactive_summary, proactive_attribution from anon, authenticated;
 
@@ -1482,6 +1610,7 @@ revoke execute on function _proactive_setting(text, jsonb)                 from 
 revoke execute on function _proactive_int(text, integer)                   from public, anon, authenticated;
 revoke execute on function _proactive_push_enabled()                       from public, anon, authenticated;
 revoke execute on function _proactive_generation_enabled()                 from public, anon, authenticated;
+revoke execute on function _proactive_resurface_enabled()                  from public, anon, authenticated;
 revoke execute on function _proactive_capable_token(device_tokens)         from public, anon, authenticated;
 revoke execute on function _proactive_priority(text)                       from public, anon, authenticated;
 revoke execute on function _proactive_reasons()                            from public, anon, authenticated;
@@ -1491,8 +1620,9 @@ revoke execute on function _proactive_invalid(uuid, timestamptz)           from 
 revoke execute on function _proactive_arbitrate(timestamptz)               from public, anon, authenticated;
 revoke execute on function _notification_categories()                      from public, anon, authenticated;
 revoke execute on function _apply_notification_preference()                from public, anon, authenticated;
-revoke execute on function claim_push_batch(integer)                       from public, anon, authenticated;
+revoke execute on function claim_push_batch(integer, timestamptz)          from public, anon, authenticated;
+revoke execute on function _proactive_claim_reason(uuid, timestamptz)      from public, anon, authenticated;
 revoke execute on function release_status()                                from public, anon, authenticated;
 
-grant execute on function claim_push_batch(integer) to service_role;
+grant execute on function claim_push_batch(integer, timestamptz) to service_role;
 grant execute on function release_status()          to service_role;

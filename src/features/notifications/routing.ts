@@ -476,10 +476,35 @@ const awardSlug = (value: unknown): string | null => {
  * the launch with the least recovery available to it.
  */
 export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
-  if (!payload) return PUSH_FALLBACK_HREF;
+  return pushDestination(payload).href;
+}
+
+/**
+ * The kind of screen a tap led to, for `record_notification_open` (2026-10-28).
+ *
+ * A closed vocabulary — the resolver's own target kinds, plus `inbox` for the push
+ * fallback — and never a path, so the open record carries no id, username or free text.
+ * The server refuses anything outside this list.
+ */
+export type NotificationDestination = Exclude<NotificationTarget['kind'], 'unavailable'> | 'inbox';
+
+/** A tapped push's href and the destination kind it resolved to, from one resolution. */
+export function pushDestination(payload: PushTapPayload | null | undefined): {
+  href: Href;
+  destination: NotificationDestination;
+} {
+  const target = pushTarget(payload);
+  const href = target ? hrefFor(target) : null;
+  return target && href && target.kind !== 'unavailable'
+    ? { href, destination: target.kind }
+    : { href: PUSH_FALLBACK_HREF, destination: 'inbox' };
+}
+
+function pushTarget(payload: PushTapPayload | null | undefined): NotificationTarget | null {
+  if (!payload) return null;
 
   const kind = readString(payload.kind);
-  if (!kind || !ROUTED_KINDS.includes(kind as NotificationKind)) return PUSH_FALLBACK_HREF;
+  if (!kind || !ROUTED_KINDS.includes(kind as NotificationKind)) return null;
 
   /**
    * The event id is reconstituted into the shape `targetChainFor` reads.
@@ -499,7 +524,7 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
   const awardKey = awardSlug(payload.awardKey);
   const awardTier = awardSlug(payload.awardTier);
 
-  const target = targetFor({
+  return targetFor({
     kind: kind as NotificationKind,
     actorUsername: readString(payload.actorUsername),
     mediaItemId: readString(payload.mediaItemId),
@@ -508,8 +533,6 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
     // The inbox row's own shape, so the award resolves through the same chain.
     award: awardKey && awardTier ? { key: awardKey, tierKey: awardTier } : null,
   } as Notification);
-
-  return hrefFor(target) ?? PUSH_FALLBACK_HREF;
 }
 
 /** Every kind, for the tests and for anything that needs to enumerate the matrix. */

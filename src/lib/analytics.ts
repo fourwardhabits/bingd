@@ -4,6 +4,8 @@ import { Platform } from 'react-native';
 import { env } from './env';
 import { releaseContext } from './release';
 
+import type { NotificationKind } from '@/features/notifications/use-notifications';
+
 /**
  * Product analytics, against a first-party event schema (decision log §24).
  *
@@ -862,7 +864,9 @@ export type AnalyticsEvent =
    */
   | {
       name: 'notification_opened';
-      props: { kind: string; channel: 'push' | 'inbox'; proactive: boolean };
+      // `kind` is the closed NotificationKind vocabulary, validated before `track`: a
+      // payload's free text can never reach the vendor under it.
+      props: { kind: NotificationKind; channel: 'push' | 'inbox'; proactive: boolean };
     }
 
   // --- Weekly streak --------------------------------------------------------

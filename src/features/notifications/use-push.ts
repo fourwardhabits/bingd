@@ -18,7 +18,7 @@ import {
   rememberToken,
 } from './push';
 import { recordNotificationOpen } from './open-telemetry';
-import { hrefForPush } from './routing';
+import { pushDestination } from './routing';
 
 /**
  * The push lifecycle, as one hook mounted once under the auth provider.
@@ -80,8 +80,6 @@ export function usePush() {
     }
 
     if (!canReceivePush()) return;
-    if (registeredFor.current === userId) return;
-    registeredFor.current = userId;
 
     /**
      * **Abandoned if the session ends while this is in flight**, which is not a tidiness
@@ -93,14 +91,30 @@ export function usePush() {
      */
     let live = true;
 
-    void (async () => {
+    /**
+     * The latch is set only once permission is actually granted (Codex review, 2026-10-28).
+     * It used to be set before the OS was asked, so an account that started out `blocked`
+     * stayed unregistered for the rest of the process even after somebody turned
+     * notifications on in Settings and came back. Now the same check runs again whenever
+     * the app returns to the foreground, until it finds `granted` and registers once,
+     * through the same guarded, deduplicated path. It still never asks: it only reads.
+     */
+    const attempt = async () => {
+      if (registeredFor.current === userId) return;
       const permission = await pushPermission();
-      if (!live || permission !== 'granted') return;
+      if (!live || permission !== 'granted' || registeredFor.current === userId) return;
+      registeredFor.current = userId;
       await registerThisDevice(userId);
-    })();
+    };
+
+    void attempt();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void attempt();
+    });
 
     return () => {
       live = false;
+      subscription.remove();
     };
   }, [userId]);
 
@@ -188,14 +202,15 @@ export function usePush() {
 
     const data = response.notification.request.content.data as Record<string, unknown> | null;
     Notifications.clearLastNotificationResponse();
-    const href = hrefForPush(data);
+    // One resolution for both: where to go, and the kind of screen that is.
+    const { href, destination } = pushDestination(data);
     // 20261028000100. The tap is recorded against its own notification, once, server-side
     // — the only record that can say whether a push led anywhere. Never awaited.
     recordNotificationOpen({
       notificationId: data?.notificationId,
       kind: data?.kind,
       channel: 'push',
-      destination: typeof href === 'string' ? href : href.pathname,
+      destination,
     });
     router.push(href);
   }, [response, userId, router]);

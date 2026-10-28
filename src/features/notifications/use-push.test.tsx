@@ -9,6 +9,7 @@
  */
 
 import { waitFor } from '@testing-library/react-native';
+import { AppState } from 'react-native';
 import { renderHookWithProviders } from '@/test-utils/render';
 import { usePush } from './use-push';
 
@@ -174,6 +175,7 @@ describe('what it does', () => {
     await renderHookWithProviders(() => usePush());
     expect(push.forgetToken).toHaveBeenCalled();
   });
+
 });
 
 describe('a tap', () => {
@@ -230,5 +232,47 @@ describe('a tap', () => {
     await renderHookWithProviders(() => usePush());
 
     await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/settings/notifications'));
+  });
+});
+
+describe('coming back from Settings', () => {
+  /**
+   * Codex review, 2026-10-28. The reader had denied notifications, opened bingd's page in
+   * the OS Settings from the permission card, turned them on, and came back. Registration
+   * has to happen on that foreground, not at the next cold start, and still without the
+   * app ever asking.
+   */
+  it('registers when the app comes back from Settings with permission newly granted', async () => {
+    const handlers: ((state: string) => void)[] = [];
+    const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
+      handlers.push(handler as (state: string) => void);
+      return { remove: jest.fn() } as unknown as ReturnType<typeof AppState.addEventListener>;
+    });
+    try {
+      push.pushPermission.mockResolvedValue('blocked');
+      signedIn('user-9');
+      const view = await renderHookWithProviders(() => usePush());
+      await waitFor(() => expect(push.pushPermission).toHaveBeenCalled());
+      expect(permission.registerThisDevice).not.toHaveBeenCalled();
+
+      // Still blocked on a foreground: nothing.
+      handlers.forEach((h) => h('active'));
+      await waitFor(() => expect(push.pushPermission).toHaveBeenCalledTimes(2));
+      expect(permission.registerThisDevice).not.toHaveBeenCalled();
+
+      // Granted in Settings, then back to the app: registered, once.
+      push.pushPermission.mockResolvedValue('granted');
+      handlers.forEach((h) => h('active'));
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledWith('user-9'));
+
+      // Later foregrounds do not register again, and nothing ever asked.
+      handlers.forEach((h) => h('active'));
+      handlers.forEach((h) => h('active'));
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(1));
+      expect(notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+      await view.unmount();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

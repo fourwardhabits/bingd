@@ -469,13 +469,20 @@ select push_drain_status() -> 'healthy';                    -- still true: react
 collectors):
 `update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';`
 
-**Both switches ship `false`.** Applying `20261028000100`/`200` creates no proactive row
-and sends no proactive push. Enabling is two deliberate steps, generation first and then
+**All three switches ship `false`** (`generation_enabled`, `resurface_enabled`, `push_enabled`). Applying `20261028000100`/`200` creates no proactive row
+and sends no proactive push. Enabling is deliberate and ordered: generation, then (when chosen) resurfacing, then
 push (`proactive-notifications.md` §K).
 
 **Per device.** A proactive push goes only to tokens whose `proactive_version` meets
 `proactive.min_client_version`. An old build on the same account never receives one, and
 reactive pushes still reach every live token.
+
+**Tonight or not at all, and at most once.** A proactive job claimed after its evening
+window, after `expires_at`, or on a later local day is dropped and its candidate ends
+`expired`, so a drain that recovers in the morning sends nothing stale. A proactive job is
+handed to the sender **once**: an expired lease or a retry after a failure never re-sends
+it (§7's at-least-once retry applies to reactive pushes only). A sender crash around the
+Expo call can therefore lose a proactive push. It can never duplicate one.
 
 **Back on:** set `proactive.push_enabled` to `'true'::jsonb`. Nothing that expired while it
 was off comes back; candidates that are still timely are considered again at the next

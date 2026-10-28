@@ -1,6 +1,8 @@
 import {
   hintFor,
   hrefFor,
+  hrefForPush,
+  pushDestination,
   ROUTED_KINDS,
   targetChainFor,
   targetFor,
@@ -416,5 +418,47 @@ describe('what the row promises before it is tapped', () => {
       hintFor(row({ kind: 'comment', mediaItemId: null, subjectType: null, subjectId: null })),
     ).toBe('No longer available');
     expect(hintFor(row({ kind: 'follow', actorUsername: null }))).toBe('No longer available');
+  });
+});
+
+/**
+ * What a tapped push records as its destination (2026-10-28): the kind of screen, from
+ * the same resolution that produced the href, and never a path. The server refuses
+ * anything outside this vocabulary.
+ */
+describe('push destinations', () => {
+  const VOCABULARY = ['profile', 'title', 'activity', 'awards', 'award-celebration', 'goals', 'import', 'inbox'];
+
+  it('names the screen kind, and agrees with the href it travels with', () => {
+    const title = pushDestination({ kind: 'watchlist_social', mediaItemId: 'm1' });
+    expect(title).toEqual({ href: '/title/m1', destination: 'title' });
+    expect(hrefForPush({ kind: 'watchlist_social', mediaItemId: 'm1' })).toBe('/title/m1');
+
+    expect(pushDestination({ kind: 'follow', actorUsername: 'ada' }).destination).toBe('profile');
+    expect(pushDestination({ kind: 'comment', feedEventId: 'e1' }).destination).toBe('activity');
+  });
+
+  it('falls back to the inbox, never to text, for anything it cannot resolve', () => {
+    for (const payload of [null, {}, { kind: 'nonsense' }, { kind: 'watchlist_social' }]) {
+      expect(pushDestination(payload)).toEqual({
+        href: '/settings/notifications',
+        destination: 'inbox',
+      });
+    }
+  });
+
+  it('only ever produces a word from the closed vocabulary', () => {
+    for (const kind of ROUTED_KINDS) {
+      const { destination } = pushDestination({
+        kind,
+        actorUsername: 'ada',
+        mediaItemId: 'm1',
+        feedEventId: 'e1',
+        importJobId: 'j1',
+        awardKey: 'queue-dragon',
+        awardTier: 'seedling',
+      });
+      expect(VOCABULARY).toContain(destination);
+    }
   });
 });

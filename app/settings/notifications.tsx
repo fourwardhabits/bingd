@@ -426,18 +426,19 @@ export default function NotificationsScreen() {
 
     // Nothing survived. Say so rather than absorbing the tap: a press that does
     // nothing is indistinguishable from one the app missed, and the reader repeats it.
-    if (!href) {
+    if (!href || target.kind === 'unavailable') {
       Alert.alert(
         'No longer available',
         target.kind === 'unavailable' ? target.reason : 'This is no longer available.',
       );
       return;
     }
+    // The kind of screen, never the path: no id or username reaches the open record.
     recordNotificationOpen({
       notificationId: row.id,
       kind: row.kind,
       channel: 'inbox',
-      destination: typeof href === 'string' ? href : href.pathname,
+      destination: target.kind,
     });
     router.push(href);
   };

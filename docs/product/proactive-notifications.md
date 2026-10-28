@@ -153,10 +153,46 @@ returns that type. No reactive path changed to make room for it.
             │                                     ▼
  pending ───┼── held (window, cap, switch…) ──▶ pending ──(past expires_at)──▶ expired (reason = what held it)
             │
-            └── best this tick ──▶ selected ──(claimed)──▶ sent
+            └── best this tick ──▶ selected ──(claimed in time)──▶ sent (handed to push-sender)
                                       │
-                                      └──(kill switch or invalid at claim)──▶ suppressed
+                                      ├──(claimed late: past expires_at, outside 17:00–20:00
+                                      │   local, or a later local day)──▶ expired
+                                      │   (expired / outside_window / no_timezone)
+                                      └──(kill switch, no capable device, or invalid
+                                          at claim)──▶ suppressed
 ```
+
+**Tonight or not at all.** A selected candidate is re-judged when push-sender claims it
+(`_proactive_claim_reason`, at the claim's clock). The claim **drops** it, ending it
+`expired`, if any of these hold:
+
+- it is past `expires_at` (reason `expired`);
+- it is outside 17:00–20:00 in the reader's zone (`outside_window`);
+- it is a later local day than the one it was selected for (`outside_window`), which
+  covers a stalled drain recovering the next evening;
+- the reader no longer has a timezone (`no_timezone`).
+
+A stalled cron or sender that recovers the next morning therefore sends nothing late.
+Reactive jobs in the same batch are untouched.
+
+**A push dropped late consumes no budget.** The caps count only candidates that were
+selected or handed over, and a dropped candidate is `expired` with no `sent_at`. The next
+evening can use the day, and the week does not count it.
+
+**At most once (founder decision, 2026-10-28).** One OS push at most per proactive
+candidate. The first claim makes the candidate `sent`. Any later claim of the same outbox
+row is dropped and the row deleted, whether it comes from an expired lease after a sender
+crash or from a retry the sender asked for after a retryable failure. The candidate stays
+`sent`. Reactive pushes keep their at-least-once retries exactly as before.
+
+The trade, stated plainly:
+
+- a sender that crashes before or around its Expo submission can **lose** that one
+  proactive push;
+- a duplicate proactive interruption **cannot** happen;
+- `sent` never implies Expo accepted it or the phone showed it.
+
+For an optional engagement push, losing one is the better failure.
 
 **Concurrency, in three layers.** (1) The arbiter takes a per-recipient transaction
 advisory lock before reading that reader's budget. (2) A partial unique index on
@@ -238,6 +274,14 @@ friend:
 | more friends after the push | row updated | `sent` stays `sent`; no second push |
 | window closes with one friend | row kept | `expired / below_threshold`, no push |
 | a friend on day 8 | a new row | a new cluster; the 7-day title cooldown still applies |
+| a friend while Watchlist & discovery is **off** | **untouched**: not bumped, not made unread | **nothing recorded**: no member, no placeholder |
+| first friend after turning it back **on** | a fresh row | a fresh cluster; a cluster the arbiter ended `preference_off` is never reused |
+
+**Muted means untouched** (Codex review). Nothing that happens while the preference is off
+is recorded, so it cannot be resurrected later, and it leaves no suppressed history that
+would block the reader after re-enabling. Theatrical follows the same rule: a reader muted
+when a film arms, who re-enables within its two-day collection window, still hears about
+it once. Other categories are unaffected.
 
 Copy, from the claim at send time (names are display names; at most two):
 "**Dune** · Ravi and Eric watched it. It's on your Watchlist." /
@@ -262,9 +306,15 @@ candidate and one inbox row, once ever per (reader, release):
 | unknown | inbox row; candidate suppressed `region_unknown` (no push) |
 | elsewhere | nothing |
 
-At send time `_proactive_invalid` checks again that the event is still `scheduled`, the date
-has not moved, the read is fresh enough, and it is not yet the day in the reader's zone. A
-moved date is `release_changed`; the day itself is `too_late`. Candidates expire at the
+At selection and again at claim, `_proactive_invalid` checks:
+
+- the event is still `scheduled`;
+- the date has not moved (otherwise `release_changed`);
+- the read is fresh enough;
+- it is not yet the day in the reader's zone (otherwise `too_late`);
+- the reader's **current** region is still the release's (Codex review). A reader who now
+  reports another country is `region_mismatch`, and one who reports none is
+  `region_unknown`. A US date is never pushed to somebody who has moved. Candidates expire at the
 earlier of 72 hours or the opening day's local midnight. **There is no day-of push.**
 
 Copy (`release-awareness.md` §G1): "**Dune: Part Three** · Opens next Friday. You saved it to
@@ -333,11 +383,45 @@ account can hold a new phone and an old tablet at once, so the gate lives on the
 Old builds also hide the new kinds in their inbox (the existing `KINDS` filter), so an old
 device never draws a row it cannot route. `report_device_context` is untouched.
 
-## K. The two switches
+## K. The three switches
 
-Both are `app_config` rows, **seeded `false`**, and **fail-closed**: on only when the value
-is exactly the JSON boolean `true`, so a malformed value means off. Neither needs a deploy,
-a cron change or DDL, and clients can neither read nor write them.
+All three are operator-side `app_config` rows (none is a user setting), **seeded
+`false`**, and **fail-closed**: on only when the value is exactly the JSON boolean `true`,
+so a malformed value (including the string `"true"`) means off. None needs a deploy, a cron
+change or DDL, and clients can neither read nor write them.
+
+| Switch | Governs | Off means |
+|---|---|---|
+| `proactive.generation_enabled` | all proactive creation | no candidate, no proactive inbox row |
+| `proactive.resurface_enabled` | Watchlist resurfacing only | no resurfacing candidate; social and theatrical unaffected |
+| `proactive.push_enabled` | proactive delivery | nothing selected; queued proactive jobs dropped at claim |
+
+**Activation order** (staging, then production, each step a founder decision):
+
+1. `generation_enabled = true`. Social and theatrical inbox rows and candidates begin; no
+   push yet.
+2. Validate social and theatrical (inbox rows, `proactive_summary`, no surprises).
+3. `resurface_enabled = true`, when the founder chooses. Resurfacing is push-only, so with
+   push still off **this generates nothing yet**. It only arms the type, so step 4 starts it.
+4. `push_enabled = true`, only when push QA is ready. Social and theatrical pushes begin,
+   and resurfacing starts generating at the next evening window.
+
+Step 3 before step 4 is safe because resurfacing can never generate without push: there
+is no wave of candidates waiting to fire. To keep resurfacing out of the first push
+evenings, leave step 3 until after step 4 has been observed. Either order is safe, and
+resurfacing never runs without both switches on.
+
+### Resurfacing: `proactive.resurface_enabled`
+
+Read only by `_proactive_resurface_collect`. It exists because resurfacing is the one type
+not caused by an event: switched on, every eligible reader becomes a candidate on the same
+evening, and the founder wants social and theatrical observed first.
+
+```sql
+update app_config set value = 'true'::jsonb  where key = 'proactive.resurface_enabled';  -- arm
+update app_config set value = 'false'::jsonb where key = 'proactive.resurface_enabled';  -- stop
+select proactive_status() -> 'resurface_enabled';
+```
 
 ### Generation: `proactive.generation_enabled`
 
@@ -390,6 +474,13 @@ on open and again on every return to the foreground:
 
 It lives on this screen only and does nothing until pressed. No nagging.
 
+**Recovering from Settings without a restart** (Codex review). `usePush` sets its
+"registered" latch only once it has actually seen `granted`, and re-reads permission on
+every return to the foreground. So the sequence denied → Open Settings → turn on → back to
+bingd registers the device on that foreground. It goes through the same guarded,
+deduplicated `registerThisDevice`: session epoch, token upsert, and the token's
+`proactive_version`. It registers once and never asks.
+
 ## M. Telemetry
 
 - **Ledger:** every candidate is recorded with its type, recipient, title, created,
@@ -397,15 +488,29 @@ It lives on this screen only and does nothing until pressed. No nagging.
 - **Opens:** `notification_opens` (the first open per notification per channel, push or
   inbox, with destination and timestamp, linked to the candidate). Written by
   `record_notification_open` on every push tap and inbox tap.
+- **Destination is a closed vocabulary**, never caller-supplied text: one of `profile`,
+  `title`, `activity`, `awards`, `award-celebration`, `goals`, `import`, `inbox`. The
+  client sends the resolver's own target kind (`pushDestination` for a push,
+  `targetFor(row).kind` for an inbox row) rather than a path, so no id or username is ever
+  in it. The function refuses anything else with 22023, and a column check enforces the
+  same list whoever writes. Which title it was is already known from the notification.
 - **Coarse event:** PostHog `notification_opened {kind, channel, proactive}`. Nothing about
-  who or which title.
+  who or which title. **`kind` is closed:** the client sends it only when it is one of the
+  app's `NotificationKind`s (the event's type says so), so an unknown or hostile string
+  from a push payload never reaches the vendor. The server record ignores the client's
+  kind entirely and reads it from the notification row.
 - **Operator views (aggregates):** `proactive_summary` (type × state × reason) and
-  `proactive_attribution` (sent → opened from push → title ranked or a watch recorded
-  within 7 days, plus the organic baseline of ranked within 7 days with no open).
-  `proactive_status()` covers health.
-- **Not pretended:** `sent` means *handed to Expo* by the claim. There is no delivery
-  receipt, because receipts are still not polled (`push-operations.md` §9). "Removed from
-  the Watchlist because consumed" is visible only as the log or rank that removed it.
+  `proactive_attribution`: handed to push-sender → opened from push → title ranked or a
+  watch recorded within 7 days; and beside it, handed over and ranked within 7 days
+  **without a recorded push open**. This is **observational attribution, not causal
+  measurement**: a reader who opened the push might have ranked the title anyway, and an
+  open that was not recorded counts as none. `proactive_status()` covers health.
+- **Not pretended:** `sent` / `sent_at` means **handed to push-sender** by
+  `claim_push_batch`. It is **not** Expo's acceptance and **not** delivery: after the
+  claim, the sender can still drop the job (`live_push_jobs`), a submission to Expo can
+  fail, and Expo's receipts are not polled (`push-operations.md` §9). `proactive_status`'s
+  `sent_24h` counts handovers. "Removed from the Watchlist because consumed" is visible only
+  as the log or rank that removed it.
 
 ## N. `goal_completed`
 
@@ -418,6 +523,12 @@ every goal push since 20260829000200 was claimed and silently dropped. Now:
 
 Deno and DB tests cover it. Nothing else about achievements changed.
 
+**This is a reactive fix, and it is independent of every proactive switch** (founder,
+2026-10-28). `goal_completed` is an ordinary reactive notification, so its push starts
+working as soon as the updated `push-sender` is deployed (rollout step 3). It does **not**
+wait for `generation_enabled`, `resurface_enabled` or `push_enabled`. That is intentional:
+those switches govern proactive kinds only.
+
 ## O. Security and privilege
 
 Every function below sets `search_path = public`. Every internal function is revoked from
@@ -428,7 +539,7 @@ tables have RLS enabled, **no policies**, and every privilege revoked from `anon
 
 | Function | Caller | Definer | Grants | Why no escalation |
 |---|---|---|---|---|
-| `record_notification_open(uuid,text,text)` | app (inbox + push tap) | yes | authenticated | Writes only when `notifications.id = $1 and recipient_id = auth.uid()`. Answers `ok` either way (not an oracle). Channel validated; destination capped at 200 characters; first per channel only. No `assert_can_write`, deliberately: it is the caller's own telemetry and must not fail a suspended reader's tap (moderation exemption recorded) |
+| `record_notification_open(uuid,text,text)` | app (inbox + push tap) | yes | authenticated | Writes only when `notifications.id = $1 and recipient_id = auth.uid()`. Answers `ok` either way (not an oracle). Channel validated; destination must be one of eight fixed words (refused otherwise, and checked by the column too), so it stores no caller text; first per channel only. No `assert_can_write`, deliberately: it is the caller's own telemetry and must not fail a suspended reader's tap (moderation exemption recorded) |
 | `register_device_token(uuid,text,text,integer)` | app | yes | authenticated | Rebuilt from 20260825000300 with one defaulted argument. The owner is still `auth.uid()`, and `assert_can_write` and `_claim_operation` are unchanged. The version is bounded 1–100 and stored on that token only. Replaces the three-argument form, which old clients reach through the default (recording null). Exactly one signature exists (tested) |
 | `_proactive_capable_token(device_tokens)` | arbiter, collector, claim | yes | nobody | A pure predicate over one row: live, and version ≥ the configured minimum |
 | `my_notifications(integer)` | app | yes | authenticated | Unchanged shape plus two columns; cluster members pass `_proactive_social_actors` from `auth.uid()`'s side |
@@ -497,8 +608,12 @@ The review questions, answered:
      and C. Tap opens the title. A fourth friend updates the inbox and sends no push.
    - **Theatrical:** watchlist a film within 7 days of its US release. After the next
      evaluate and proactive tick, the inbox row appears, then the evening push ("Opens …").
-   - **Resurfacing:** an account with a Watchlist and no other proactive push this week gets
-     one push in the window, with no inbox row.
+   - **Resurfacing:** with `resurface_enabled` still false, confirm no resurfacing candidate
+     appears. Then turn it on: an account with a Watchlist and no other proactive push this
+     week gets one push in the window, with no inbox row.
+   - **Late recovery:** with a candidate `selected`, stop the drain until after 20:00 local
+     (`unschedule_push_drain()`), then reschedule it. Confirm no push arrives and the candidate
+     ends `expired / outside_window`.
    - **Goal:** complete a goal and get the "You hit your … goal 🎉" push.
    - **Multi-device:** the social push arrives on the Preview device only, never on the
      store-build device on the same account. A reactive follow push arrives on both.
@@ -518,18 +633,21 @@ The review questions, answered:
 **Rollout:**
 
 1. Founder approval of the reviewed PR, then merge.
-2. Production `db push`: the two migrations. **Both switches are false, so nothing
+2. Production `db push`: the two migrations. **All three switches are false, so nothing
    proactive is created and nothing is sent.** Verify with
    `select proactive_status();` (no candidates) and a count of zero
    `watchlist_social` / `theatrical_release` notifications.
-3. `push-sender` deploy, after the migration.
+3. `push-sender` deploy, after the migration. **This activates the `goal_completed` push
+   fix immediately** (a reactive fix, §N), independent of every proactive switch.
 4. `select schedule_proactive_notifications();` (the tick runs and finds nothing to do).
 5. Production OTA from the merged commit, for the 1.1.0 runtimes (and a second publish from
    a 1.0.1 tree if 1.0.1 installs are to receive it, per `production-state.md`). Watch
    adoption as `count(*) filter (where proactive_version >= 1)` over live `device_tokens`.
-6. After a staging pass and founder approval: `proactive.generation_enabled = true`
-   (inbox rows begin). Then, separately, `proactive.push_enabled = true` (pushes begin, to
-   capable devices only).
+6. After a staging pass and founder approval, in the §K order:
+   `generation_enabled = true` (social and theatrical inbox rows begin) → validate →
+   `resurface_enabled = true` when the founder chooses (arms resurfacing; it generates nothing
+   until push is on) → `push_enabled = true` when push QA is ready (pushes begin, to capable
+   devices only, tonight-or-not-at-all).
 7. Watch `proactive_status()`, `proactive_summary` and push-drain health daily for the first
    week.
 
@@ -538,6 +656,7 @@ The review questions, answered:
 | Want to stop | Do | Effect |
 |---|---|---|
 | Proactive pushes, now | `update app_config set value = 'false' where key = 'proactive.push_enabled';` | Queued proactive jobs are dropped at claim. Reactive is untouched |
+| Resurfacing only | `update app_config set value = 'false' where key = 'proactive.resurface_enabled';` | No new resurfacing candidates; social and theatrical continue |
 | New proactive inbox rows too | also `update app_config set value = 'false' where key = 'proactive.generation_enabled';` | Social trigger and collectors write nothing |
 | The scheduled tick | `select unschedule_proactive_notifications();` | Pending candidates expire on their own clocks |
 | A bad `push-sender` | redeploy the previous version | The previous sender ignores `goal` / `proactive`. Goal pushes go back to being dropped, and proactive jobs (actorless, with no branch in the old copy) are dropped too. Switch proactive push off first so candidates are not marked `sent` for pushes that never go |
@@ -550,3 +669,31 @@ The review questions, answered:
 - Expo receipt polling and per-token retry.
 - Wiring or deleting `push.delivery_enabled` (#119).
 - An "Out now for you" shelf (`release-awareness.md` §G4).
+
+### Hardening debt from the first independent review (Fable, 2026-10-28), deferred by the founder
+
+These are recorded, not fixed, deliberately:
+
+- **MINOR 5: a stuck `selected` carrier.** An edge case where a candidate can remain
+  `selected` (with its outbox row or carrier notification) without being claimed or
+  settled. `proactive_status` surfaces it as `selected_not_sent` after 15 minutes, and the
+  claim-time timeliness rule means a late claim can never send it. Its row is not yet
+  settled automatically. **The at-most-once change does not resolve this**: it governs a
+  candidate that *was* claimed, and this one never is. While stuck it still counts as
+  `selected`, so it occupies that reader's local-day slot and one of their two weekly
+  pushes without having been handed over. That costs at most a missed push, never a
+  duplicate.
+- **MINOR 6: tick lock duration.** The tick holds its per-reader advisory locks inside one
+  transaction across collection and arbitration. A finer-grained transaction structure
+  would shorten them.
+- **The review's NICE items**, as listed in that review.
+
+### Deferred by the founder from the second review round (Fable + Codex, 2026-10-28)
+
+- Lock-duration optimisation (MINOR 6 above).
+- The social inbox row's copy after the title leaves the Watchlist (cosmetic: the row
+  stays, and the push is already suppressed `not_on_watchlist`).
+- Guidance for future imports and backfills beyond what §G documents (the trigger ignores
+  activity older than a day and anything written during an import).
+- `mark_notifications_read`'s count includes hidden `watchlist_resurface` carrier rows.
+- The remaining NICE findings.

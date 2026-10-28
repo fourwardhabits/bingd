@@ -65,13 +65,26 @@ declare
   v_new      integer;
   v_returner boolean;
 begin
+  -- MUTED MEANS UNTOUCHED (Codex review). While Watchlist & discovery is off, an activity
+  -- writes nothing at all: no new cluster, no suppressed placeholder that would later be
+  -- found and reused, no member added to an existing cluster, no inbox row bumped or made
+  -- unread. What happened while muted is never recorded, so it cannot be resurrected
+  -- when the reader turns it back on; the next fresh activity after that starts normally.
+  if not _notifies(p_recipient, 'watchlist_discovery') then
+    return 'preference_off';
+  end if;
+
   perform pg_advisory_xact_lock(
     hashtextextended('bingd.proactive.social:' || p_recipient::text || ':' || p_media::text, 0));
 
+  -- The open cluster to join. One the arbiter ended because the reader had switched the
+  -- preference off is not open: re-enabling starts fresh rather than inheriting a cluster
+  -- that can never push again.
   select * into c
     from proactive_candidates
    where recipient_id = p_recipient and type = 'watchlist_social' and media_item_id = p_media
      and window_ends_at > p_now
+     and not (state = 'suppressed' and suppression_reason = 'preference_off')
    order by created_at desc
    limit 1
      for update;
@@ -94,14 +107,6 @@ begin
       return 'raced';
     end if;
 
-    if not _notifies(p_recipient, 'watchlist_discovery') then
-      update proactive_candidates
-         set state = 'suppressed', suppression_reason = 'preference_off', decided_at = p_now,
-             last_block_reason = null
-       where id = c.id;
-      return 'preference_off';
-    end if;
-
     -- Actorless: who is in it is read from the cluster at read time, so a block or an
     -- unfollow takes a name out of the row without anybody rewriting it.
     insert into notifications (recipient_id, type, subject_type, subject_id, payload, created_at)
@@ -113,8 +118,8 @@ begin
     c.notification_id := v_note;
   end if;
 
-  -- A cluster the reader has switched off, or that otherwise never got an inbox row, has
-  -- nothing to update.
+  -- A cluster that never got an inbox row (the preference gate dropped it in the instant
+  -- since the check above) has nothing to update.
   if c.notification_id is null then
     return 'no_inbox_row';
   end if;
@@ -150,7 +155,7 @@ end;
 $$;
 
 comment on function _proactive_social_add(uuid, uuid, uuid, uuid, timestamptz) is
-  'Adds one qualifying activity to the recipient''s open watchlist_social cluster for the title, opening one (ledger row, then an actorless inbox row) if there is none. A new person bumps the inbox row; the second distinct visible person makes the candidate eligible. Fixed 7-day window. Serialised per (recipient, title) by an advisory lock. Internal.';
+  'Adds one qualifying activity to the recipient''s open watchlist_social cluster for the title, opening one (ledger row, then an actorless inbox row) if there is none. A new person bumps the inbox row; the second distinct visible person makes the candidate eligible. Writes nothing at all while the recipient has Watchlist & discovery off, and never reuses a cluster that was ended for that reason. Fixed 7-day window. Serialised per (recipient, title) by an advisory lock. Internal.';
 
 /**
  * Every ranking and every log is a chance that a friend just watched something on
@@ -282,6 +287,10 @@ begin
        where w.media_item_id = e.media_item_id
          and (ac.region is null or ac.region = e.region)
          and not _proactive_title_watched(w.user_id, e.media_item_id)
+         -- Muted means untouched, as for social: nothing is recorded for a reader with
+         -- Watchlist & discovery off, so turning it back on inside the two days still
+         -- lets this release reach them, once.
+         and _notifies(w.user_id, 'watchlist_discovery')
        order by w.user_id
     loop
       c := null;
@@ -307,13 +316,6 @@ begin
       end if;
       v_made := v_made + 1;
 
-      if not _notifies(r.user_id, 'watchlist_discovery') then
-        update proactive_candidates
-           set state = 'suppressed', suppression_reason = 'preference_off', decided_at = p_now
-         where id = c.id;
-        continue;
-      end if;
-
       insert into notifications (recipient_id, type, subject_type, subject_id, payload, created_at)
       values (r.user_id, 'theatrical_release', 'media_item', e.media_item_id,
               jsonb_build_object('candidate_id', c.id, 'opens_on', e.scheduled_date, 'region', e.region),
@@ -334,7 +336,7 @@ end;
 $$;
 
 comment on function _proactive_theatrical_collect(timestamptz) is
-  'Turns release events that armed their T-7 awareness in the last 48 hours (still scheduled, still in the future, read within proactive.theatrical_max_read_age_hours) into one theatrical_release inbox row and candidate per active watchlister in the US or of unknown region, once ever per (reader, release). Unknown region keeps the inbox row and suppresses the push. Internal.';
+  'Turns release events that armed their T-7 awareness in the last 48 hours (still scheduled, still in the future, read within proactive.theatrical_max_read_age_hours) into one theatrical_release inbox row and candidate per active watchlister in the US or of unknown region, once ever per (reader, release). Nothing is recorded for a reader with Watchlist & discovery off. Unknown region keeps the inbox row and suppresses the push. Internal.';
 
 
 -- ---------------------------------------------------------------------------
@@ -368,11 +370,19 @@ stable
 security definer
 set search_path = public
 as $$
+  -- Defensive (Fable review, MINOR): the cache is written by a scheduled job outside this
+  -- file, and one malformed entry must not abort the whole proactive tick. A payload whose
+  -- `ids` is not an array reads as empty, and an element that is not a uuid is skipped
+  -- before the cast rather than raising on it.
   with trending as (
-    select (jsonb_array_elements_text(l.payload -> 'ids'))::uuid as id
+    select e.id::uuid as id
       from provider_list_cache l
+     cross join lateral jsonb_array_elements_text(
+             case when jsonb_typeof(l.payload -> 'ids') = 'array' then l.payload -> 'ids'
+                  else '[]'::jsonb end) as e(id)
      where l.list_key in ('trending.movie.week', 'trending.series.week')
        and l.fetched_at > p_now - interval '168 hours'
+       and e.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   ),
   eligible as (
     select w.media_item_id, w.created_at as saved_at, m.release_date, m.parent_id
@@ -429,7 +439,10 @@ comment on function _proactive_resurface_pick(uuid, timestamptz) is
  * only when there is room for it, so a day the budget is already spent writes nothing at
  * all rather than a row that is born suppressed.
  *
- * Push-only, so it is not generated while the kill switch is off.
+ * Push-only, so it is not generated while the kill switch is off. And it has its own
+ * operator switch, `proactive.resurface_enabled` (seeded false, fail-closed), because it is
+ * the one type not caused by an event: turned on, every eligible reader becomes a
+ * candidate on the same evening. Social and theatrical never read that switch.
  */
 create or replace function _proactive_resurface_collect(p_now timestamptz default now())
 returns integer
@@ -447,7 +460,7 @@ declare
   pick      record;
   v_made    integer := 0;
 begin
-  if not _proactive_push_enabled() then
+  if not _proactive_resurface_enabled() or not _proactive_push_enabled() then
     return 0;
   end if;
 
@@ -556,6 +569,7 @@ declare
   v_problems text[] := array[]::text[];
   v_counts   jsonb;
   v_stuck    bigint;
+  v_runs     jsonb := null;
 begin
   if to_regclass('cron.job') is not null then
     execute $q$
@@ -564,6 +578,29 @@ begin
     $q$ into v_job;
     if v_job is null then
       v_problems := v_problems || 'tick_job_missing'::text;
+    end if;
+  end if;
+
+  -- The tick's own history, from pg_cron's run log (Fable review, MINOR): the last run,
+  -- the last success, and the last failure with its message. A last run that failed is a
+  -- problem; a tick that raises rolls back, so this is where a broken tick shows.
+  if to_regclass('cron.job_run_details') is not null and to_regclass('cron.job') is not null then
+    execute $q$
+      with runs as (
+        select d.status, d.start_time, d.end_time, d.return_message
+          from cron.job_run_details d join cron.job j on j.jobid = d.jobid
+         where j.jobname = 'bingd-proactive-tick'
+      )
+      select jsonb_build_object(
+        'last_status',     (select status from runs order by start_time desc limit 1),
+        'last_started_at', (select max(start_time) from runs),
+        'last_success_at', (select max(end_time) from runs where status = 'succeeded'),
+        'last_failure_at', (select max(end_time) from runs where status = 'failed'),
+        'last_failure',    (select left(return_message, 300) from runs where status = 'failed'
+                             order by start_time desc limit 1))
+    $q$ into v_runs;
+    if v_runs ->> 'last_status' = 'failed' then
+      v_problems := v_problems || 'last_tick_failed'::text;
     end if;
   end if;
 
@@ -582,7 +619,9 @@ begin
     'problems',    to_jsonb(v_problems),
     'push_enabled', _proactive_push_enabled(),
     'generation_enabled', _proactive_generation_enabled(),
+    'resurface_enabled', _proactive_resurface_enabled(),
     'job',         v_job,
+    'tick',        v_runs,
     'candidates',  v_counts,
     'selected_not_sent', v_stuck,
     'sent_24h',    (select count(*) from proactive_candidates where sent_at > now() - interval '24 hours'),
@@ -594,7 +633,7 @@ end;
 $$;
 
 comment on function proactive_status() is
-  'Proactive delivery at a glance: the kill switch and generation flags, the job, candidate counts by type and state, anything selected but not claimed for 15 minutes (a stalled drain), sends and push opens in 24 hours. service_role only.';
+  'Proactive delivery at a glance: the push, generation and resurfacing switches, the job, the tick''s last run / last success / last failure from cron.job_run_details (last_tick_failed is a problem), candidate counts by type and state, anything selected but not claimed for 15 minutes (a stalled drain), jobs handed to push-sender and push opens in 24 hours. service_role only.';
 
 create or replace function schedule_proactive_notifications()
 returns jsonb

@@ -16,12 +16,12 @@ describe('recordNotificationOpen', () => {
       notificationId: 'n1',
       kind: 'watchlist_social',
       channel: 'push',
-      destination: '/title/x',
+      destination: 'title',
     });
     expect(supabase.rpc).toHaveBeenCalledWith('record_notification_open', {
       p_notification_id: 'n1',
       p_channel: 'push',
-      p_destination: '/title/x',
+      p_destination: 'title',
     });
     expect(track).toHaveBeenCalledWith({
       name: 'notification_opened',
@@ -34,7 +34,7 @@ describe('recordNotificationOpen', () => {
       notificationId: 'n2',
       kind: 'comment',
       channel: 'inbox',
-      destination: '/activity/e',
+      destination: 'activity',
     });
     expect(track).toHaveBeenCalledWith({
       name: 'notification_opened',
@@ -43,10 +43,29 @@ describe('recordNotificationOpen', () => {
   });
 
   it('records nothing for a payload that does not name a notification', () => {
-    recordNotificationOpen({ notificationId: undefined, kind: 'follow', channel: 'push', destination: '/' });
-    recordNotificationOpen({ notificationId: 'n3', kind: 7, channel: 'push', destination: '/' });
+    recordNotificationOpen({ notificationId: undefined, kind: 'follow', channel: 'push', destination: 'inbox' });
     expect(supabase.rpc).not.toHaveBeenCalled();
     expect(track).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Codex review: an unknown or hostile kind from a push payload must never reach the
+   * vendor. The server record still happens, because the server reads the kind from the
+   * notification row and ignores this value.
+   */
+  it('never sends an unknown or hostile kind to analytics', () => {
+    for (const kind of [7, null, '', 'not_a_kind', 'Ravi watched Dune', 'follow; drop', 'FOLLOW']) {
+      recordNotificationOpen({ notificationId: 'n3', kind, channel: 'push', destination: 'inbox' });
+    }
+    expect(track).not.toHaveBeenCalled();
+    expect(supabase.rpc).toHaveBeenCalledTimes(7);
+    for (const call of (supabase.rpc as jest.Mock).mock.calls) {
+      expect(Object.keys(call[1] as object).sort()).toEqual([
+        'p_channel',
+        'p_destination',
+        'p_notification_id',
+      ]);
+    }
   });
 
   it('never throws, even when the transport does', () => {
@@ -54,7 +73,7 @@ describe('recordNotificationOpen', () => {
       throw new Error('offline');
     });
     expect(() =>
-      recordNotificationOpen({ notificationId: 'n4', kind: 'follow', channel: 'push', destination: '/' }),
+      recordNotificationOpen({ notificationId: 'n4', kind: 'follow', channel: 'push', destination: 'inbox' }),
     ).not.toThrow();
   });
 });

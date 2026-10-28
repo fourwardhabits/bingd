@@ -172,8 +172,8 @@ export default function suite() {
       let results;
       try {
         results = await Promise.all([
-          s1.one(`select claim_push_batch(100) as r`),
-          s2.one(`select claim_push_batch(100) as r`),
+          s1.one(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]),
+          s2.one(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]),
         ]);
       } finally {
         await s1.end().catch(() => {});
