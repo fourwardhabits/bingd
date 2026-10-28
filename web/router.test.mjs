@@ -2638,7 +2638,8 @@ describe('the release mode', () => {
    * And the em dash, which is a founder house-style rule for this site's copy and is
    * already enforced on the support page. Scoped to the body, because the `<title>`
    * and the share cards carry one deliberately, and with the founder note left out:
-   * that is the founder's own words, quoted as given on 2026-10-28, em dash included.
+   * that is the founder's own words and attribution ("— Suraj, founder"), quoted as
+   * given on 2026-10-28.
    */
   it('refuses the claims the product contradicts, and the em dash', () => {
     const front = read('index.html');
@@ -3878,7 +3879,7 @@ describe('the ranking demo, built', () => {
 
     const demo = demoMarkup();
     assert.match(demo, /<p class="kicker">Try it here<\/p>/);
-    assert.match(demo, /<p class="demo-prompt" id="demo-prompt">Click the one you liked more\.<\/p>/);
+    assert.match(demo, /<p class="demo-prompt" id="demo-prompt">Click the one you liked more<\/p>/);
     // The founder's QA (2026-10-28): no intro heading, no paragraph, no start button.
     assert.doesNotMatch(demo, /demo-start|demo-intro|Try ranking|Rank a few movies/);
     // The pair is the view on arrival; the result waits, inert.
@@ -3920,7 +3921,7 @@ describe('the ranking demo, built', () => {
     const demo = demoMarkup();
     assert.doesNotMatch(demo, /data-install=|class="button/, 'the result repeats the store buttons');
     assert.match(demo, /<a class="demo-cta" id="demo-cta">Keep ranking in bingd\.<\/a>/);
-    assert.match(demo, /A rough order from 3 picks\./);
+    assert.match(demo, /A rough order from 3 picks</);
     assert.match(demo, /<button type="button" class="demo-again" id="demo-again">Try again<\/button>/);
   });
 
@@ -3942,23 +3943,63 @@ describe('the ranking demo, built', () => {
     assert.match(read('index.html'), /<noscript><style>\.demo \{ display: none !important; \}<\/style><\/noscript>/);
   });
 
-  it('carries the founder note in the founder\'s words, text only', () => {
+  /**
+   * The founder note, as the founder wrote it on 2026-10-28 (second visual QA), set as a
+   * pull quote: two paragraphs, an oversized opening mark from the stylesheet, and a
+   * small "— Suraj, founder". No portrait and no bio.
+   */
+  it('carries the founder note in the founder\'s words, as a pull quote, text only', () => {
     const front = read('index.html');
     const note = front.slice(front.indexOf('<figure class="founder-note">'), front.indexOf('</figure>'));
-    const words = note.replace(/<[^>]+>/g, ' ').replace(/&mdash;/g, '—').replace(/\s+/g, ' ');
-    assert.match(
-      words,
-      new RegExp(
-        [
-          'Beli made me enjoy restaurants differently\\.',
-          'Suddenly, trying a new place was only half the fun—ranking it, remembering it, and sharing it gave the experience a second life\\.',
-          'I started building bingd\\. to bring that same feeling to movies and TV\\.',
-          'The goal is simple: make what happens after the credits as exciting as what happens before them\\.',
-        ].join(' '),
-      ),
-    );
+    const text = (html) =>
+      html.replace(/<[^>]+>/g, ' ').replace(/&rsquo;/g, '\u2019').replace(/&mdash;/g, '\u2014').replace(/\s+/g, ' ').trim();
+
+    const paragraphs = [...note.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => text(m[1]));
+    assert.deepEqual(paragraphs, [
+      'Beli changed the way I experienced restaurants. I went from someone who enjoyed eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively hunted for the next place to try. I built bingd. because I think movies and TV are missing that same post-watch experience.',
+      'My audience is the everyday movie and TV fan. They don\u2019t necessarily want to write reviews or become film critics, but they do want to keep the excitement going after the credits roll. Hope you have as much fun with it as I have, happy binging!',
+    ]);
+    assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), '\u2014 Suraj, founder');
+    assert.match(front, /\.founder-note::before \{\s*content: '\\201C';/, 'no opening quotation mark');
     assert.doesNotMatch(note, /<img/);
     assert.match(front, /your new post-watch ritual/);
+  });
+
+  /**
+   * "Find your next binge", which buried Group Picks mid-paragraph. The second thought
+   * starts its own paragraph.
+   */
+  it('gives Group Picks its own line in "Find your next binge"', () => {
+    const front = read('index.html');
+    const start = front.indexOf('<p class="kicker">Find your next binge</p>');
+    const section = front.slice(start, front.indexOf('</section>', start));
+    const ledes = [...section.matchAll(/<p class="section-lede">([\s\S]*?)<\/p>/g)].map((m) =>
+      m[1].replace(/\s+/g, ' ').trim(),
+    );
+    assert.deepEqual(ledes, [
+      'Save what you want to watch, and get stronger recommendations through a better rating system',
+      'Plus Group Picks generates recommendations based on shared taste (a favorite feature for couples and movie clubs)',
+    ]);
+  });
+
+  /**
+   * The landing page's short blurbs end without a full stop (founder visual QA,
+   * 2026-10-28). Only the blurbs: headings, buttons, the founder quote, alt text,
+   * metadata and the legal pages keep their punctuation, and a full stop inside a blurb
+   * stays where it separates two sentences.
+   */
+  it('ends the landing page blurbs without a full stop', () => {
+    const front = read('index.html');
+    const blurbs = [
+      ...front.matchAll(/<p class="(?:lede|section-lede|demo-prompt|demo-honest)"[^>]*>([\s\S]*?)<\/p>/g),
+    ].map((m) => m[1].replace(/\s+/g, ' ').trim());
+    assert.ok(blurbs.length >= 9, `only ${blurbs.length} blurbs found`);
+    for (const blurb of blurbs) assert.doesNotMatch(blurb, /\.$/, blurb);
+
+    // Sentences inside a blurb keep theirs.
+    assert.match(front, /bingd is your new post-watch ritual\. A movie and TV logging app/);
+    // And the founder quote is quoted, not restyled.
+    assert.match(front, /happy binging!/);
   });
 });
 

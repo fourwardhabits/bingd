@@ -2579,20 +2579,34 @@ const LANDING_STYLES = `
 
       /* ---------------------------------------------------------- founder note */
 
-      /* Editorial and quiet: a narrow measure, the body face at reading size, a hairline
-         above it in place of a portrait, and the name in small caps-sized type. */
-      .founder-note { max-width: 36rem; margin: 0 auto; padding-top: 1.75rem; border-top: 1px solid var(--hairline); }
+      /* An editorial pull quote: room around it, an oversized opening quotation mark in
+         Maroon standing in for a portrait, the founder's words in the brand serif at a
+         size it stays readable at, and a small understated attribution. */
+      .founder-section { padding-block: 5rem; }
+      .founder-note { position: relative; max-width: 40rem; margin: 0 auto; padding-top: 3.25rem; }
+      .founder-note::before {
+        content: '\\201C';
+        position: absolute;
+        top: -1.25rem;
+        left: -0.25rem;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: 7.5rem;
+        line-height: 1;
+        color: var(--maroon);
+        opacity: 0.35;
+      }
       .founder-note blockquote { margin: 0; }
       .founder-note blockquote p {
-        font-size: clamp(1.0625rem, 2.4vw, 1.1875rem);
-        line-height: 1.7;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(1.2rem, 2.8vw, 1.45rem);
+        line-height: 1.5;
+        letter-spacing: -0.005em;
         color: var(--ink);
       }
+      .founder-note blockquote p + p { margin-top: 1.25rem; }
       .founder-note figcaption {
-        margin-top: 1.25rem;
-        font-size: 0.8125rem;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
+        margin-top: 1.75rem;
+        font-size: 0.9375rem;
         color: var(--tertiary);
       }
 
@@ -2905,7 +2919,7 @@ const DEMO_RANK_SLOTS = Array.from(
  * under it — only a small "Keep ranking in bingd." that becomes the store link on a
  * phone.
  *
- * The instruction is "Click the one you liked more.", the founder's wording, which keeps
+ * The instruction is "Click the one you liked more", the founder's wording, which keeps
  * the app's question ("Which did you like more?") without quoting it as a question.
  * It presumes the visitor has seen both, which is what the swap is for.
  *
@@ -2923,13 +2937,13 @@ const DEMO = `          <div class="demo" id="demo">
 ${demoChoice('left')}
 ${demoChoice('right')}
                 </div>
-                <p class="demo-prompt" id="demo-prompt">Click the one you liked more.</p>
+                <p class="demo-prompt" id="demo-prompt">Click the one you liked more</p>
                 <button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both? Swap pair</button>
               </div>
 
               <div class="demo-pane demo-result" id="demo-result" inert>
                 <h2 id="demo-result-title" tabindex="-1">Your demo ranking</h2>
-                <p class="demo-honest">A rough order from 3 picks.</p>
+                <p class="demo-honest">A rough order from 3 picks</p>
                 <ol class="demo-list" id="demo-list">
 ${DEMO_RANK_SLOTS}
                 </ol>
@@ -3139,7 +3153,7 @@ await writeFile(
             <h1><span class="line">Rank what you watch.</span> <span class="line">See where it really lands.</span></h1>
             <p class="lede">
               bingd is your new post-watch ritual. A movie and TV logging app to surface
-              your favorite titles and make watching a shared experience.
+              your favorite titles and make watching a shared experience
             </p>
 
 ${installRow({ primary: true })}
@@ -3158,7 +3172,7 @@ ${DEMO}
             <h2>Stop guessing between 3.5 and 4 stars.</h2>
             <p class="section-lede">
               bingd uses head-to-head comparisons between titles you&rsquo;ve watched to
-              create a ranked list of your favorite watches. No more ambiguous ratings.
+              create a ranked list of your favorite watches. No more ambiguous ratings
             </p>
           </div>
 
@@ -3176,7 +3190,7 @@ ${DEMO}
             <h2>A collection that actually reflects your taste.</h2>
             <p class="section-lede">
               Every movie and TV season you rank takes its place in your collection, so
-              your list reads in the order you really feel about them.
+              your list reads in the order you really feel about them
             </p>
           </div>
 
@@ -3194,8 +3208,11 @@ ${DEMO}
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
               Save what you want to watch, and get stronger recommendations through a better
-              rating system. Plus Group Picks to generate recommendations based on shared
-              taste (a favorite feature for couples and movie clubs).
+              rating system
+            </p>
+            <p class="section-lede">
+              Plus Group Picks generates recommendations based on shared taste (a favorite
+              feature for couples and movie clubs)
             </p>
           </div>
 
@@ -3213,7 +3230,7 @@ ${DEMO}
             <h2>See what your friends are watching.</h2>
             <p class="section-lede">
               Follow friends to comment on and save their latest watches, compare taste,
-              and share recommendations in-app.
+              and share recommendations in-app
             </p>
           </div>
 
@@ -3224,20 +3241,25 @@ ${DEMO}
         </div>
       </section>
 
-      <section class="band">
+      <section class="band founder-section">
         <div class="wrap">
           <figure class="founder-note">
-            <p class="kicker">Why bingd</p>
             <blockquote>
               <p>
-                Beli made me enjoy restaurants differently. Suddenly, trying a new place was
-                only half the fun&mdash;ranking it, remembering it, and sharing it gave the
-                experience a second life. I started building bingd. to bring that same
-                feeling to movies and TV. The goal is simple: make what happens after the
-                credits as exciting as what happens before them.
+                Beli changed the way I experienced restaurants. I went from someone who
+                enjoyed eating out occasionally to someone who ranked every restaurant,
+                compared lists with friends, and actively hunted for the next place to try. I
+                built bingd. because I think movies and TV are missing that same post-watch
+                experience.
+              </p>
+              <p>
+                My audience is the everyday movie and TV fan. They don&rsquo;t necessarily
+                want to write reviews or become film critics, but they do want to keep the
+                excitement going after the credits roll. Hope you have as much fun with it as
+                I have, happy binging!
               </p>
             </blockquote>
-            <figcaption>Suraj, founder</figcaption>
+            <figcaption>&mdash; Suraj, founder</figcaption>
           </figure>
         </div>
       </section>
@@ -3246,7 +3268,7 @@ ${DEMO}
         <div class="wrap">
           <h2>Start with five movies or TV you love.</h2>
           <p class="section-lede">
-            That is enough for bingd. to have an opinion about everything else.
+            That is enough for bingd. to have an opinion about everything else
           </p>
 
 ${installRow({})}
