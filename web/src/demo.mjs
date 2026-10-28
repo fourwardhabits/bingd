@@ -9,15 +9,20 @@
  * WHAT THE DEMO IS, AND WHAT IT DOES NOT CLAIM TO BE
  * ---------------------------------------------------------------------------
  *
- * Five head-to-head choices between movies, turned into an order. The mechanic is the
- * app's own: a title is placed by a **binary search over the list you already have**
- * (`src/features/ranking/session.ts`), one comparison at a time, and a placement that
- * runs out of comparisons lands at the midpoint of what is still possible — which is
- * what the app does when somebody skips too often.
+ * Three picks between two movies, turned into a rough order of four. It exists to show
+ * the interaction — pick the one you liked more, see an order appear — in a few seconds,
+ * and then get out of the way of the store buttons beside it.
+ *
+ * So each newcomer gets **one comparison**, not the app's full binary search
+ * (`src/features/ranking/session.ts`): it is shown against the middle of the order so
+ * far and placed directly above or below that movie, on the side the visitor chose.
+ * That is the least the one answer can claim, and it never contradicts any pick made:
+ * the movies already placed keep their order, and the newcomer's only relation is the
+ * one the visitor just stated. Three picks therefore always place four movies.
  *
  * What is deliberately absent is everything that would make the result look more
- * authoritative than five taps can support. No "How was it?" bucket, so no band and **no
- * score**: a 0–10 number here would be invented, and the page would be teaching a
+ * authoritative than three taps can support. No "How was it?" bucket, so no band and
+ * **no score**: a 0–10 number here would be invented, and the page would be teaching a
  * stranger that bingd's scores are made up. The result is called a demo ranking and is
  * an order, nothing more.
  *
@@ -25,167 +30,58 @@
  * WHERE THE MOVIES COME FROM
  * ---------------------------------------------------------------------------
  *
- * Today's `trending.movie.day` list, read the way the app's Trending shelf reads it
- * (`src/features/trending/use-trending.ts`): one select on `provider_list_cache` for the
- * ordered ids, one on `media_items` for the titles. Both tables are `using (true)` —
- * catalogue data with nobody attached — and both are read with the anon key the router
- * pages already carry. Nothing here writes, calls an RPC or touches TMDB's API.
- *
- * Anything short of a usable list — no Supabase config in a local build, offline, an
- * empty or stale cache, a malformed payload — is one answer: `FALLBACK_MOVIES`.
+ * `demo-movies.mjs`, a committed list. Nothing here reads Supabase or TMDB's API; the
+ * only network the demo causes is the poster images, from TMDB's CDN, through
+ * `posterUrl`. The list is still validated on the way in, because it is meant to be
+ * replaced by a generated one (see that file) and a generator can be wrong.
  */
 
+import { DEMO_LIST } from './demo-movies.mjs';
 import { posterUrl } from './router.mjs';
 
-/** Five successful choices, then the result. Swaps never count toward it. */
-export const DEMO_CHOICES = 5;
+/** Three successful picks, then the result. Swaps never count toward it. */
+export const DEMO_CHOICES = 3;
 
-/** Fewer usable trending movies than this and the fixed list is the better demo. */
-export const MIN_LIVE_MOVIES = 8;
-
-/** The most the demo will draw from one list. TMDB's daily list is twenty long. */
-export const MAX_LIVE_MOVIES = 20;
+/** One opening movie, plus one newcomer per pick. */
+export const DEMO_RESULT_SIZE = DEMO_CHOICES + 1;
 
 /**
- * How stale a trending list may be and still be called trending.
+ * The demo's movies from a list in `demo-movies.mjs`'s shape, built from named fields.
  *
- * The app's `TRENDING_MAX_AGE_MS`, for the app's reason: a list nobody has refreshed in a
- * week is not "today's trending movies", and the fixed list is more honest than a label
- * the data cannot support.
+ * An entry with no positive integer TMDB id, a repeated id, or no usable title is
+ * dropped. The title is collapsed and capped because it is drawn into a fixed card; the
+ * poster is `posterUrl`'s or nothing, so no value in the list can become an `img.src`
+ * that leaves TMDB's CDN.
  */
-export const TRENDING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
- * The deterministic list for a local build, a network failure or an unusable cache.
- *
- * Films most people have an opinion about, across decades, so the first pair is
- * answerable by almost anybody. **No poster paths**, on purpose: the fallback is what
- * renders when the network is the problem, so it must not depend on TMDB's CDN either.
- * The page draws a typographic tile instead.
- */
-export const FALLBACK_MOVIES = Object.freeze(
-  [
-    ['Jurassic Park', 1993],
-    ['Titanic', 1997],
-    ['The Dark Knight', 2008],
-    ['Toy Story', 1995],
-    ['Inception', 2010],
-    ['Barbie', 2023],
-    ['The Matrix', 1999],
-    ['Parasite', 2019],
-    ['Get Out', 2017],
-    ['Back to the Future', 1985],
-    ['Spirited Away', 2001],
-    ['Oppenheimer', 2023],
-    ['Mad Max: Fury Road', 2015],
-    ['Pulp Fiction', 1994],
-    ['La La Land', 2016],
-    ['Everything Everywhere All at Once', 2022],
-  ].map(([title, year], index) =>
-    Object.freeze({ id: `fallback-${index + 1}`, title, year, poster: null }),
-  ),
-);
-
-const SUPABASE_URL = /^https:\/\/[a-z0-9.-]+$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * The select for today's trending movie ids, or null when there is no Supabase to ask.
- *
- * One key, named literally. The `.day` list for the app's reason (`use-trending.ts`):
- * "trending now" over a seven-day window is a weaker claim.
- */
-export function trendingListRequest(supabaseUrl) {
-  if (typeof supabaseUrl !== 'string' || !SUPABASE_URL.test(supabaseUrl)) return null;
-  return (
-    `${supabaseUrl}/rest/v1/provider_list_cache` +
-    '?list_key=eq.trending.movie.day&select=payload,fetched_at&limit=1'
-  );
-}
-
-/**
- * The ordered movie ids from a `provider_list_cache` row, or an empty array.
- *
- * The payload is server data rather than URL data, and it is still validated as if it
- * were neither: every id must be a uuid before it is allowed into the next request's
- * query string, and a row too old to call trending yields nothing.
- */
-export function trendingIdsFrom(row, now = Date.now()) {
-  if (!row || typeof row !== 'object') return [];
-
-  const fetched = Date.parse(typeof row.fetched_at === 'string' ? row.fetched_at : '');
-  if (Number.isNaN(fetched) || now - fetched > TRENDING_MAX_AGE_MS) return [];
-
-  const ids = row.payload && typeof row.payload === 'object' ? row.payload.ids : null;
-  if (!Array.isArray(ids)) return [];
+export function demoMovies(list) {
+  const entries = list && typeof list === 'object' && Array.isArray(list.movies) ? list.movies : [];
 
   const seen = new Set();
-  for (const id of ids) {
-    if (typeof id === 'string' && UUID.test(id)) seen.add(id);
-    if (seen.size === MAX_LIVE_MOVIES) break;
-  }
-  return [...seen];
-}
-
-/**
- * The select for those ids' titles, or null.
- *
- * Named columns, for `titleContextRequest`'s reason: `media_items` is world readable, so
- * a `select=*` would quietly ship whatever column is added to it next. `kind=eq.movie`
- * is belt to `demoMoviesFrom`'s braces — the list is movies by key, and a stray series
- * id would be dropped either way.
- */
-export function trendingMoviesRequest(supabaseUrl, ids) {
-  if (typeof supabaseUrl !== 'string' || !SUPABASE_URL.test(supabaseUrl)) return null;
-  if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_LIVE_MOVIES) return null;
-  if (!ids.every((id) => typeof id === 'string' && UUID.test(id))) return null;
-  return (
-    `${supabaseUrl}/rest/v1/media_items?id=in.(${ids.join(',')})` +
-    '&kind=eq.movie&select=id,kind,title,release_date,poster_path'
-  );
-}
-
-/**
- * The demo's movies, in trending order, built from named fields and nothing else.
- *
- * Every field is checked on the way in. The title is collapsed and capped because it is
- * drawn into a fixed tile; the poster is `posterUrl`'s or nothing, so no value from the
- * row can become an `img.src` that leaves TMDB's CDN. Rows the ids did not ask for are
- * ignored, and an id whose row did not come back is dropped rather than drawn blank.
- */
-export function demoMoviesFrom(ids, rows) {
-  if (!Array.isArray(ids) || !Array.isArray(rows)) return [];
-
-  const byId = new Map();
-  for (const row of rows) {
-    if (row && typeof row === 'object' && typeof row.id === 'string') byId.set(row.id, row);
-  }
-
   const movies = [];
-  for (const id of ids) {
-    const row = byId.get(id);
-    if (!row || row.kind !== 'movie') continue;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
 
-    const title = typeof row.title === 'string' ? row.title.replace(/\s+/g, ' ').trim() : '';
+    const { tmdbId } = entry;
+    if (!Number.isSafeInteger(tmdbId) || tmdbId <= 0 || seen.has(tmdbId)) continue;
+
+    const title = typeof entry.title === 'string' ? entry.title.replace(/\s+/g, ' ').trim() : '';
     if (!title || title.length > 200) continue;
 
-    const year = /^(\d{4})-\d{2}-\d{2}$/.exec(String(row.release_date ?? ''));
-    movies.push({
-      id,
-      title,
-      year: year ? Number(year[1]) : null,
-      poster: posterUrl(row.poster_path),
-    });
+    seen.add(tmdbId);
+    movies.push(
+      Object.freeze({
+        id: `tmdb-${tmdbId}`,
+        title,
+        year: Number.isInteger(entry.year) && entry.year >= 1870 && entry.year <= 2100 ? entry.year : null,
+        poster: posterUrl(entry.posterPath),
+      }),
+    );
   }
-  return movies;
+  return Object.freeze(movies);
 }
 
-/** Live movies if there are enough of them to be a demo, otherwise the fixed list. */
-export function demoSource(movies) {
-  return Array.isArray(movies) && movies.length >= MIN_LIVE_MOVIES
-    ? { live: true, movies }
-    : { live: false, movies: FALLBACK_MOVIES };
-}
+/** The committed list, validated once. */
+export const DEMO_MOVIES = demoMovies(DEMO_LIST);
 
 // ---------------------------------------------------------------------------
 // The ranking itself
@@ -195,34 +91,33 @@ export function demoSource(movies) {
 //
 //   ranked     best first — the visitor's demo ranking so far
 //   candidate  the movie being placed
-//   lo, hi     the insertion indices still consistent with every choice made
 //   next       where the next candidate is drawn from in `pool`
 // ---------------------------------------------------------------------------
 
 /**
- * A fresh demo. `attempt` rotates where in the list it starts, so "Try again" opens on a
- * different pair rather than replaying the last one — and the same attempt always opens
- * on the same pair, so it is deterministic.
+ * A fresh demo. `attempt` rotates where in the list it starts, so "Try again" opens on
+ * movies the last round did not use — and the same attempt always opens on the same
+ * pair, so it is deterministic.
  */
 export function startDemo(movies, attempt = 0) {
   const source = Array.isArray(movies) ? movies.filter(Boolean) : [];
-  const shift = source.length ? (attempt * DEMO_CHOICES) % source.length : 0;
+  const shift = source.length ? (attempt * DEMO_RESULT_SIZE) % source.length : 0;
   const pool = [...source.slice(shift), ...source.slice(0, shift)];
 
   if (pool.length < 2) {
-    return { pool, ranked: pool.slice(0, 1), candidate: null, lo: 0, hi: 0, next: pool.length, selections: 0, done: true };
+    return { pool, ranked: pool.slice(0, 1), candidate: null, next: pool.length, selections: 0, done: true };
   }
-  return { pool, ranked: [pool[0]], candidate: pool[1], lo: 0, hi: 1, next: 2, selections: 0, done: false };
+  return { pool, ranked: [pool[0]], candidate: pool[1], next: 2, selections: 0, done: false };
 }
 
-/** The movie the candidate is measured against: the middle of what is still possible. */
-const pivotIndex = (state) => Math.floor((state.lo + state.hi) / 2);
+/** The movie the candidate is measured against: the middle of the order so far. */
+const pivotIndex = (state) => Math.floor(state.ranked.length / 2);
 
 /**
  * The two movies on screen, or null once the demo is over.
  *
- * Sides alternate with each choice so the newcomer is not always on the same side,
- * which would make "the right one is the new one" a pattern somebody could learn.
+ * Sides alternate with each pick so the newcomer is not always on the same side, which
+ * would make "the right one is the new one" a pattern somebody could learn.
  */
 export function currentPair(state) {
   if (!state || state.done || !state.candidate) return null;
@@ -232,73 +127,53 @@ export function currentPair(state) {
     : { left: state.candidate, right: pivot };
 }
 
-/** Puts the candidate at `index` and draws the next one, or ends when there is none. */
-function place(state, index) {
-  const ranked = [...state.ranked.slice(0, index), state.candidate, ...state.ranked.slice(index)];
-  return draw({ ...state, ranked });
-}
-
+/** Draws the next candidate, or ends when the list has none. */
 function draw(state) {
-  if (state.next >= state.pool.length) {
-    return { ...state, candidate: null, lo: 0, hi: 0, done: true };
-  }
-  return {
-    ...state,
-    candidate: state.pool[state.next],
-    lo: 0,
-    hi: state.ranked.length,
-    next: state.next + 1,
-  };
+  if (state.next >= state.pool.length) return { ...state, candidate: null, done: true };
+  return { ...state, candidate: state.pool[state.next], next: state.next + 1 };
 }
 
 /**
- * One choice. `id` is the movie the visitor preferred; anything not on screen is ignored.
+ * One pick. `id` is the movie the visitor preferred; anything not on screen is ignored.
  *
- * The fifth choice ends the demo. A placement it leaves unfinished lands at the midpoint
- * of the positions every choice still allows — the app's own answer to a search that
- * ran out — so the result never contradicts anything the visitor actually picked.
+ * The candidate lands directly above the pivot if it was preferred and directly below it
+ * if not. The third pick ends the demo.
  */
 export function choose(state, id) {
   const pair = currentPair(state);
   if (!pair || (id !== pair.left.id && id !== pair.right.id)) return state;
 
-  const mid = pivotIndex(state);
+  const pivot = pivotIndex(state);
   const preferred = id === state.candidate.id;
-  const narrowed = {
+  const index = preferred ? pivot : pivot + 1;
+  const placed = {
     ...state,
+    ranked: [...state.ranked.slice(0, index), state.candidate, ...state.ranked.slice(index)],
     selections: state.selections + 1,
-    lo: preferred ? state.lo : mid + 1,
-    hi: preferred ? mid : state.hi,
   };
 
-  const settled = narrowed.lo === narrowed.hi;
-
-  if (narrowed.selections >= DEMO_CHOICES) {
-    const index = settled ? narrowed.lo : Math.floor((narrowed.lo + narrowed.hi) / 2);
-    const ranked = [
-      ...narrowed.ranked.slice(0, index),
-      narrowed.candidate,
-      ...narrowed.ranked.slice(index),
-    ];
-    return { ...narrowed, ranked, candidate: null, lo: 0, hi: 0, done: true };
-  }
-
-  return settled ? place(narrowed, narrowed.lo) : narrowed;
-}
-
-/** Whether there is anything left to swap in. */
-export function canSwap(state) {
-  if (!state || state.done || !state.candidate) return false;
-  const needed = state.ranked.length === 1 ? 2 : 1;
-  return state.pool.length - state.next >= needed;
+  if (placed.selections >= DEMO_CHOICES) return { ...placed, candidate: null, done: true };
+  return draw(placed);
 }
 
 /**
- * "Haven't seen both? Swap pair." Never counts as a choice.
+ * Whether there is anything left to swap in, **without starving the picks still to
+ * come**: a swap may only spend a movie that the remaining picks will not need, so no
+ * number of swaps can leave the result short of four.
+ */
+export function canSwap(state) {
+  if (!state || state.done || !state.candidate) return false;
+  const replaced = state.ranked.length === 1 ? 2 : 1;
+  const stillToDraw = DEMO_CHOICES - state.selections - 1;
+  return state.pool.length - state.next >= replaced + stillToDraw;
+}
+
+/**
+ * "Haven't seen both? Swap pair." Never counts as a pick.
  *
- * The newcomer is set aside and a fresh one drawn, with its search started over. If the
- * list is still the one movie the demo opened with, that one has never been chosen
- * either, so it is replaced too: both films on screen were unseen candidates.
+ * The newcomer is set aside and a fresh one drawn. If the list is still the one movie
+ * the demo opened with, that one has never been chosen either, so it is replaced too:
+ * both films on screen were unseen candidates.
  *
  * A movie already in the list stays, because the visitor put it there by picking it.
  */
@@ -306,24 +181,15 @@ export function swap(state) {
   if (!canSwap(state)) return state;
 
   if (state.ranked.length === 1) {
-    const ranked = [state.pool[state.next]];
     return {
       ...state,
-      ranked,
+      ranked: [state.pool[state.next]],
       candidate: state.pool[state.next + 1],
-      lo: 0,
-      hi: 1,
       next: state.next + 2,
     };
   }
 
-  return {
-    ...state,
-    candidate: state.pool[state.next],
-    lo: 0,
-    hi: state.ranked.length,
-    next: state.next + 1,
-  };
+  return { ...state, candidate: state.pool[state.next], next: state.next + 1 };
 }
 
 /** The ordered result, best first. Positions only: the demo has no scores to give. */

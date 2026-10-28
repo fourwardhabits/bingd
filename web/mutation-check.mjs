@@ -59,21 +59,23 @@
  *  16. The title preview spreading the row it was handed, which is how a private field
  *      reaches a public page without anybody writing its name.
  *
- * Five more arrived with the front page's ranking demo (2026-10-28). Each is a defect the
- * page would render without complaint:
+ * Eight more arrived with the front page's ranking demo and the build's environment
+ * check (2026-10-28). Each is a defect the page would render without complaint:
  *
  *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
- *      one of their five.
- *  18. A trending poster used as the server sent it rather than through `posterUrl`, so
- *      a row's value becomes an `img.src` that can leave TMDB's CDN.
- *  19. The freshness check dropped, so a list nobody has refreshed in months is labelled
- *      "Today's trending movies".
+ *      one of their three.
+ *  18. A demo poster path used as written rather than through `posterUrl`, so a value in
+ *      the movie list becomes an `img.src` that can leave TMDB's CDN.
+ *  19. The swap reserve dropped, so a visitor who swaps often is handed a "ranking" of
+ *      two movies.
  *  20. A demo title written as markup rather than text.
- *  21. An unfinished last placement put at the bottom, which contradicts a choice the
- *      visitor just made and reads as the demo not listening.
- *  22. A production build allowed to ship the staging project, so bingd.app quietly
- *      reads staging's catalogue and writes invitation opens into staging's funnel.
- *  23. The anon-role check on the key dropped, so a `service_role` key pasted into the
+ *  21. A preferred newcomer put at the bottom, which contradicts the pick the visitor
+ *      just made and reads as the demo not listening.
+ *  22. The result's reserved rows dropped, so the panel grows on the third pick and the
+ *      page moves under the visitor's hand.
+ *  23. A production build allowed to ship the staging project, so bingd.app quietly
+ *      reads staging and writes invitation opens into staging's funnel.
+ *  24. The anon-role check on the key dropped, so a `service_role` key pasted into the
  *      public variable is baked into every page.
  *
  * **The Apple team id is not here, and cannot be.** It has exactly one source in this
@@ -117,7 +119,7 @@ const MUTANTS = [
       s.replace("if (!claims || claims.role !== 'anon') return withhold", 'if (!claims) return withhold'),
   },
   {
-    name: 'a demo swap counted as one of the five choices',
+    name: 'a demo swap counted as one of the three picks',
     file: DEMO,
     apply: (s) =>
       s.replace(
@@ -126,21 +128,21 @@ const MUTANTS = [
       ),
   },
   {
-    name: 'a trending poster path used as sent, rather than through posterUrl',
+    name: 'a demo poster path used as written, rather than through posterUrl',
     file: DEMO,
     apply: (s) =>
       s.replace(
-        'poster: posterUrl(row.poster_path),',
-        "poster: typeof row.poster_path === 'string' ? `https://image.tmdb.org/t/p/w342${row.poster_path}` : null,",
+        'poster: posterUrl(entry.posterPath),',
+        "poster: typeof entry.posterPath === 'string' ? `https://image.tmdb.org/t/p/w342${entry.posterPath}` : null,",
       ),
   },
   {
-    name: 'the trending freshness check dropped, so a months-old list is called today\'s',
+    name: 'the swap reserve dropped, so swaps can leave the result short of four',
     file: DEMO,
     apply: (s) =>
       s.replace(
-        'if (Number.isNaN(fetched) || now - fetched > TRENDING_MAX_AGE_MS) return [];',
-        'if (Number.isNaN(fetched)) return [];',
+        'return state.pool.length - state.next >= replaced + stillToDraw;',
+        'return state.pool.length - state.next >= replaced;',
       ),
   },
   {
@@ -149,13 +151,18 @@ const MUTANTS = [
     apply: (s) => s.replace('if (name) name.textContent = movie.title;', 'if (name) name.innerHTML = movie.title;'),
   },
   {
-    name: 'an unfinished last placement dropped to the bottom, against the visitor\'s choice',
+    name: 'a preferred newcomer dropped to the bottom, against the visitor\'s pick',
     file: DEMO,
     apply: (s) =>
       s.replace(
-        'const index = settled ? narrowed.lo : Math.floor((narrowed.lo + narrowed.hi) / 2);',
-        'const index = settled ? narrowed.lo : narrowed.ranked.length;',
+        'const index = preferred ? pivot : pivot + 1;',
+        'const index = preferred ? state.ranked.length : pivot + 1;',
       ),
+  },
+  {
+    name: 'the result\'s reserved rows dropped, so the demo panel grows on the third pick',
+    file: BUILD,
+    apply: (s) => s.replace('const DEMO_RANK_SLOTS = Array.from(\n  { length: 4 },', 'const DEMO_RANK_SLOTS = Array.from(\n  { length: 0 },'),
   },
   {
     /**

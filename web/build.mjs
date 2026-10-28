@@ -454,12 +454,12 @@ await writeFile(
 // ---------------------------------------------------------------------------
 
 /**
- * Supabase, for the invitation page's open metric, the router pages' context and the
- * front page's ranking demo.
+ * Supabase, for the invitation page's open metric and the router pages' context. The
+ * front page carries none: its ranking demo plays a committed list (`demo-movies.mjs`).
  *
  * Read from the environment and **optional**. Absent, every page still renders: the
- * invitation records no open, the router pages keep their generic copy, and the demo
- * uses its fixed list. That is what a local `npm run build:web` does. The anon key is
+ * invitation records no open and the router pages keep their generic copy. That is
+ * what a local `npm run build:web` does. The anon key is
  * public by construction — it is in the mobile bundle already, and it is bounded by row
  * level security — so there is no secret here to leak by baking it in.
  *
@@ -480,8 +480,8 @@ await writeFile(
  * The target is read from `CF_PAGES` and `CF_PAGES_BRANCH`, which Pages sets on every
  * build and which carry no secret. **A pair that does not fit its target is withheld
  * rather than refused**: the build succeeds, every page gets `null`, and the site falls
- * back as it does with no config at all. A deploy that silently stops showing trending
- * movies is a defect somebody notices in the build log; a production page quietly
+ * back as it does with no config at all. A deploy whose invitation pages silently stop
+ * counting opens is a defect somebody notices in the build log; a production page quietly
  * reading staging is one nobody would.
  *
  * The key is checked as well as the URL. A legacy Supabase key is a JWT whose payload
@@ -2240,8 +2240,8 @@ for (const route of ROUTES) {
  *
  * Having no token to resolve is a reason to skip the *context* block, not the install
  * row. So the row is here, wired by the same `page.mjs` the router pages use, now through
- * `page: 'home'`: `paintInstall`, plus the ranking demo's read of the trending cache on
- * use. No context fetch, no account read, no handle in the URL. `destinationFor` then says what is actually
+ * `page: 'home'`: `paintInstall` plus the ranking demo, which plays a committed list. No
+ * context fetch, no Supabase read, no handle in the URL. `destinationFor` then says what is actually
  * available per platform — the App Store on iOS, the public Play listing on Android —
  * instead of one sentence trying to describe both.
  */
@@ -2343,9 +2343,9 @@ const LANDING_STYLES = `
       @media (min-width: 56rem) {
         .hero .split { grid-template-columns: minmax(0, 1fr); }
       }
-      /* align-items: start, because the demo card grows as somebody plays it. Centred, the
-         headline and the store buttons slid ~220px down the moment the result appeared,
-         moving the install button out from under the cursor. */
+      /* align-items: start keeps the headline at the top of its column beside the demo
+         panel. The panel no longer changes height between its two views (see .demo-stage),
+         so nothing beside it moves when the result appears. */
       @media (min-width: 64rem) {
         .hero .split { grid-template-columns: minmax(37rem, 1fr) minmax(0, 1fr); gap: 3rem; align-items: start; }
       }
@@ -2362,12 +2362,12 @@ const LANDING_STYLES = `
       /* The ranking demo takes the hero's second column, where the two collection shots
          used to sit; they moved one section down, to the section about the collection.
          On a phone it follows the install row directly, so the first screen is the
-         headline, the store button and the start of the demo, in that order. */
+         headline, the store button and the first pair, in that order. */
       .demo {
         width: 100%;
         max-width: 30rem;
         margin-inline: auto;
-        padding: 1.25rem;
+        padding: 1rem 1.125rem 1.125rem;
         border-radius: 1rem;
         background: var(--parchment);
         border: 1px solid var(--hairline);
@@ -2379,9 +2379,14 @@ const LANDING_STYLES = `
       @media (max-width: 55.99rem) {
         .demo { scroll-margin-block-end: calc(7rem + env(safe-area-inset-bottom)); }
       }
-      .demo h2 { font-size: clamp(1.5rem, 4.6vw, 1.85rem); }
-      .demo .kicker { margin-bottom: 0.375rem; }
-      .demo-copy { margin-top: 0.625rem; color: var(--secondary); font-size: 1rem; }
+
+      /* The two views share one grid cell, so the panel is always as tall as the taller
+         of them and finishing the demo moves nothing. The inactive view is inert, which
+         takes it out of the tab order and the accessibility tree; visibility hides it
+         without giving up the space it holds. */
+      .demo-stage { display: grid; }
+      .demo-pane { grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; }
+      .demo-pane[inert] { visibility: hidden; }
 
       .demo button {
         font: inherit;
@@ -2389,44 +2394,22 @@ const LANDING_STYLES = `
         cursor: pointer;
         -webkit-tap-highlight-color: transparent;
       }
-      .demo button:focus-visible { outline: 2px solid var(--maroon); outline-offset: 3px; }
+      .demo button:focus-visible, .demo a:focus-visible { outline: 2px solid var(--maroon); outline-offset: 3px; }
       .demo button:disabled { cursor: default; }
 
-      .demo .demo-start, .demo .demo-again {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 52px;
-        margin-top: 1.25rem;
-        padding: 0.875rem 1.5rem;
-        border-radius: 0.5rem;
-        border: 1px solid var(--maroon);
-        background: var(--maroon);
-        color: var(--inverse);
-        font-size: 1.0625rem;
-        font-weight: 500;
-      }
-      .demo .demo-again { background: transparent; color: var(--maroon); border-color: rgba(119, 55, 68, 0.65); }
-
-      .demo-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem 1rem; align-items: baseline; }
-      .demo-progress { white-space: nowrap; font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--maroon); }
-      .demo-source { font-size: 0.8125rem; color: var(--tertiary); text-align: right; }
-      .demo-prompt {
-        margin-top: 0.375rem;
-        font-family: 'DM Serif Display', Georgia, serif;
-        font-size: clamp(1.4rem, 4.4vw, 1.7rem);
-        line-height: 1.15;
-      }
+      .demo-top { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+      .demo .kicker { margin: 0; }
+      .demo-progress { white-space: nowrap; font-size: 0.8125rem; font-weight: 600; color: var(--tertiary); font-variant-numeric: tabular-nums; }
 
       /* Two posters, side by side at every width: on a 360pt phone each is still about
-         150px wide, which is a thumb-sized target with room to spare. */
-      .demo-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem; }
+         140px wide, which is a thumb-sized target with room to spare. */
+      .demo-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
       .demo-choice {
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.375rem;
         min-width: 0;
-        padding: 0.5rem 0.5rem 0.625rem;
+        padding: 0.4375rem 0.4375rem 0.5rem;
         border-radius: 0.75rem;
         border: 1px solid var(--hairline);
         background: var(--paper);
@@ -2437,8 +2420,8 @@ const LANDING_STYLES = `
       .demo-choice:active { transform: scale(0.97); }
 
       /* The tile is the poster's floor: the title set in the brand serif on Maroon. It is
-         all a fallback movie ever shows, and what a live one shows until its poster has
-         decoded, so there is never an empty frame or a broken-image icon. */
+         what shows until a poster has decoded, and what stays if TMDB stops serving one,
+         so there is never an empty frame or a broken-image icon. */
       .demo-art {
         position: relative;
         display: block;
@@ -2462,39 +2445,53 @@ const LANDING_STYLES = `
       .demo-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
       .demo-name {
         display: -webkit-box;
-        -webkit-line-clamp: 2;
+        -webkit-line-clamp: 1;
         -webkit-box-orient: vertical;
         overflow: hidden;
         font-weight: 600;
-        font-size: 0.9375rem;
+        font-size: 0.875rem;
         line-height: 1.3;
         overflow-wrap: anywhere;
       }
-      .demo-year { font-size: 0.8125rem; color: var(--tertiary); line-height: 1.2; }
+      .demo-year { font-size: 0.75rem; color: var(--tertiary); line-height: 1.2; }
+
+      .demo-prompt {
+        margin-top: 0.75rem;
+        text-align: center;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(1.2rem, 4vw, 1.375rem);
+        line-height: 1.2;
+      }
 
       /* The escape hatch is deliberately quiet: text, not a third poster-sized target. It
          still keeps a 44px touch height. */
       .demo .demo-swap {
         display: block;
         min-height: 44px;
-        margin: 0.375rem auto 0;
+        margin: 0.125rem auto -0.5rem;
         padding: 0.5rem 0.75rem;
         border: 0;
         background: none;
         color: var(--secondary);
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
         text-decoration: underline;
         text-underline-offset: 3px;
       }
       .demo .demo-swap:disabled { opacity: 0.5; text-decoration: none; }
 
-      .demo-list { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+      /* The result: a quiet line about what it is, four compact rows of one fixed height
+         each, and one row of actions. No store buttons — those are beside the panel
+         already. Every row is one line of title, so no title can make the result taller
+         than the four empty rows it replaces (DEMO_RANK_SLOTS). */
+      .demo-result h2 { font-size: clamp(1.35rem, 4.2vw, 1.6rem); line-height: 1.15; }
+      .demo-result h2:focus { outline: none; }
+      .demo-list { list-style: none; margin: 0.625rem 0 0; padding: 0; display: grid; gap: 0.375rem; }
       .demo-rank {
         display: grid;
-        grid-template-columns: 1.75rem 2.75rem minmax(0, 1fr);
+        grid-template-columns: 1.25rem 2rem minmax(0, 1fr) auto;
         align-items: center;
-        gap: 0.75rem;
-        padding: 0.5rem 0.75rem 0.5rem 0.5rem;
+        gap: 0.625rem;
+        padding: 0.3125rem 0.75rem 0.3125rem 0.5rem;
         border-radius: 0.625rem;
         background: var(--paper);
         border: 1px solid var(--hairline);
@@ -2503,26 +2500,57 @@ const LANDING_STYLES = `
       }
       .demo-rank-n {
         font-family: 'DM Serif Display', Georgia, serif;
-        font-size: 1.6rem;
+        font-size: 1.375rem;
         line-height: 1;
         color: var(--maroon);
         text-align: center;
       }
-      .demo-rank-art { width: 2.75rem; border-radius: 0.3rem; }
+      .demo-rank-art { width: 2rem; border-radius: 0.25rem; }
       .demo-rank-art .demo-tile { font-size: 0; padding: 0; }
-      .demo-rank-lines { display: flex; flex-direction: column; min-width: 0; }
-      .demo-rank-name { font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-      .demo-rank-year { font-size: 0.8125rem; color: var(--tertiary); }
-
-      .demo-honest { margin-top: 1rem; font-size: 0.875rem; color: var(--secondary); }
-      .demo-cta {
-        margin-top: 1.25rem;
-        font-family: 'DM Serif Display', Georgia, serif;
-        font-size: 1.4rem;
-        line-height: 1.2;
+      .demo-rank-name {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-weight: 600;
+        font-size: 0.9375rem;
+        line-height: 1.25;
       }
-      .demo-result .actions { margin-top: 0.75rem; }
-      .demo-result h2:focus { outline: none; }
+      .demo-rank-year { font-size: 0.8125rem; color: var(--tertiary); font-variant-numeric: tabular-nums; }
+      /* On the narrowest phones the year gives its room to the title. */
+      @media (max-width: 22.5rem) { .demo-rank-year { display: none; } }
+
+      .demo-honest { margin-top: 0.25rem; font-size: 0.8125rem; line-height: 1.4; color: var(--tertiary); }
+      /* One row at every width: the call to action may wrap onto a second line of its own,
+         which still fits inside the button's height, rather than pushing the button down. */
+      .demo-end {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: auto;
+        padding-top: 0.625rem;
+      }
+      /* A link to the store on a phone; plain words beside the store buttons elsewhere. */
+      .demo-cta {
+        min-width: 0;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(1rem, 3.4vw, 1.2rem);
+        line-height: 1.15;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .demo-cta[href] { color: var(--maroon); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+      .demo .demo-again {
+        flex: none;
+        min-height: 44px;
+        padding: 0.5rem 0.875rem;
+        border-radius: 0.5rem;
+        border: 1px solid rgba(119, 55, 68, 0.65);
+        background: transparent;
+        color: var(--maroon);
+        font-size: 0.9375rem;
+        font-weight: 500;
+      }
 
       @keyframes demo-rise {
         from { opacity: 0; transform: translateY(6px); }
@@ -2530,7 +2558,7 @@ const LANDING_STYLES = `
       }
 
       /* Reduced motion: the order appears at once and nothing scales under a finger. The
-         result's scroll into view reads the same preference in page.mjs. */
+         scroll into view reads the same preference in page.mjs. */
       @media (prefers-reduced-motion: reduce) {
         .demo-choice { transition: none; }
         .demo-choice:active { transform: none; }
@@ -2551,15 +2579,22 @@ const LANDING_STYLES = `
 
       /* ---------------------------------------------------------- founder note */
 
-      .founder-note { max-width: 38rem; margin: 0 auto; }
+      /* Editorial and quiet: a narrow measure, the body face at reading size, a hairline
+         above it in place of a portrait, and the name in small caps-sized type. */
+      .founder-note { max-width: 36rem; margin: 0 auto; padding-top: 1.75rem; border-top: 1px solid var(--hairline); }
       .founder-note blockquote { margin: 0; }
       .founder-note blockquote p {
-        font-family: 'DM Serif Display', Georgia, serif;
-        font-size: clamp(1.3rem, 3.6vw, 1.6rem);
-        line-height: 1.35;
+        font-size: clamp(1.0625rem, 2.4vw, 1.1875rem);
+        line-height: 1.7;
         color: var(--ink);
       }
-      .founder-note figcaption { margin-top: 1rem; font-size: 0.9375rem; color: var(--secondary); }
+      .founder-note figcaption {
+        margin-top: 1.25rem;
+        font-size: 0.8125rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--tertiary);
+      }
 
       /* ---------------------------------------------------------------- buttons */
 
@@ -2837,62 +2872,72 @@ const installRow = ({ primary = false } = {}) => {
  * and year `page.mjs` writes into it; the art is hidden from assistive technology
  * because the tile only repeats the title.
  */
-const demoChoice = (side) => `                <button type="button" class="demo-choice" id="demo-${side}">
-                  <span class="demo-art" aria-hidden="true"><span class="demo-tile"></span><img alt="" width="342" height="513" hidden /></span>
-                  <span class="demo-name"></span>
-                  <span class="demo-year"></span>
-                </button>`;
+const demoChoice = (side) => `                  <button type="button" class="demo-choice" id="demo-${side}">
+                    <span class="demo-art" aria-hidden="true"><span class="demo-tile"></span><img alt="" width="342" height="513" hidden /></span>
+                    <span class="demo-name"></span>
+                    <span class="demo-year"></span>
+                  </button>`;
+
+/**
+ * Four empty rows the result is born with, one per movie a finished demo ranks
+ * (`DEMO_RESULT_SIZE`). The result view is inert and invisible until the end, but it is
+ * laid out from the start, so these rows are what make the panel the result's height on
+ * arrival rather than growing into it on the third pick. `page.mjs` replaces them with
+ * rows of the same shape and the same fixed height.
+ */
+const DEMO_RANK_SLOTS = Array.from(
+  { length: 4 },
+  () =>
+    '                  <li class="demo-rank" aria-hidden="true"><span class="demo-rank-n">&nbsp;</span><span class="demo-art demo-rank-art"></span><span class="demo-rank-name">&nbsp;</span></li>',
+).join('\n');
 
 /**
  * The ranking demo in the hero. See `web/src/demo.mjs` for what it does and what it
  * deliberately does not claim, and `wireDemo` in `page.mjs` for the wiring.
  *
- * Three states in one card, swapped with `hidden`: the invitation, the five choices, and
- * the result with the install row under it. The result's row is a mirror like the
- * closing band's, so the store decision is still made once.
+ * **No gate.** The first pair is on screen the moment the module runs, under one line
+ * of instruction; there is no intro, no explanation and no "start" button between the
+ * visitor and the first pick.
  *
- * The question is the app's own, **"Which did you like more?"**, and is held to that by
- * the quote check in `router.test.mjs`. It presumes the visitor has seen both, which is
- * what the swap is for.
+ * Two views in one grid cell, swapped with `inert`: the pair, and the result. Sharing
+ * the cell is what keeps the panel one size (see `.demo-stage`). The result carries no
+ * store buttons — the hero's are right beside it, and on a phone the sticky bar is
+ * under it — only a small "Keep ranking in bingd." that becomes the store link on a
+ * phone.
+ *
+ * The instruction is "Click the one you liked more.", the founder's wording, which keeps
+ * the app's question ("Which did you like more?") without quoting it as a question.
+ * It presumes the visitor has seen both, which is what the swap is for.
  *
  * A browser without JavaScript never sees the card at all (the `<noscript>` style in the
- * head), rather than a "Try ranking" button that does nothing.
+ * head), rather than two empty frames that do nothing.
  */
 const DEMO = `          <div class="demo" id="demo">
-            <div id="demo-intro">
-              <p class="kicker">Try it here</p>
-              <h2>Rank a few movies, right now.</h2>
-              <p class="demo-copy">
-                Pick the one you liked more, five times, and see your order. No account,
-                nothing to sign up for.
-              </p>
-              <button type="button" class="demo-start" id="demo-start">Try ranking</button>
-            </div>
-
-            <div id="demo-play" hidden>
-              <div class="demo-top">
-                <p class="demo-progress" id="demo-progress"></p>
-                <p class="demo-source" id="demo-source" hidden></p>
-              </div>
-              <p class="demo-prompt" id="demo-prompt">Which did you like more?</p>
-              <div class="demo-choices" role="group" aria-labelledby="demo-prompt">
+            <div class="demo-stage">
+              <div class="demo-pane" id="demo-play">
+                <div class="demo-top">
+                  <p class="kicker">Try it here</p>
+                  <p class="demo-progress" id="demo-progress"></p>
+                </div>
+                <div class="demo-choices" role="group" aria-labelledby="demo-prompt">
 ${demoChoice('left')}
 ${demoChoice('right')}
+                </div>
+                <p class="demo-prompt" id="demo-prompt">Click the one you liked more.</p>
+                <button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both? Swap pair</button>
               </div>
-              <button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both? Swap pair</button>
-            </div>
 
-            <div id="demo-result" class="demo-result" hidden>
-              <p class="kicker">Here&rsquo;s where it landed</p>
-              <h2 id="demo-result-title" tabindex="-1">Your demo ranking</h2>
-              <ol class="demo-list" id="demo-list"></ol>
-              <p class="demo-honest">
-                A rough order from a handful of choices, so no scores here. In bingd, every
-                movie and season you rank finds its exact place and gets a score.
-              </p>
-              <p class="demo-cta">Keep ranking in bingd.</p>
-${installRow({})}
-              <button type="button" class="demo-again" id="demo-again">Try again</button>
+              <div class="demo-pane demo-result" id="demo-result" inert>
+                <h2 id="demo-result-title" tabindex="-1">Your demo ranking</h2>
+                <p class="demo-honest">A rough order from 3 picks.</p>
+                <ol class="demo-list" id="demo-list">
+${DEMO_RANK_SLOTS}
+                </ol>
+                <div class="demo-end">
+                  <a class="demo-cta" id="demo-cta">Keep ranking in bingd.</a>
+                  <button type="button" class="demo-again" id="demo-again">Try again</button>
+                </div>
+              </div>
             </div>
 
             <p class="visually-hidden" id="demo-status" role="status" aria-live="polite"></p>
@@ -3029,11 +3074,10 @@ const SOFTWARE_APPLICATION = {
  *     lets the Feed be shown at all. See `SHOT`.
  *   - **It still carries no analytics.** That would need the privacy policy edited
  *     first, which is a document rather than a detail.
- *   - **The ranking demo adds two origins, and only on use.** When somebody reaches for
- *     "Try ranking", the page reads today's trending movies from Supabase and loads
- *     their posters from TMDB's CDN: the same two requests `/title` and `/lists` already
- *     make, both named in the privacy policy ("Who else sees it"). Nothing is fetched
- *     for a visitor who never touches the demo.
+ *   - **The ranking demo adds one origin: TMDB's image CDN.** Its movies are a committed
+ *     list, so the page reads nothing from Supabase; it loads the posters on screen (and
+ *     the next one) from TMDB, as `/title` and `/lists` already do and as the privacy
+ *     policy says ("Who else sees it"). The TMDB credit is in the footer.
  */
 await writeFile(
   join(dist, 'index.html'),
@@ -3186,10 +3230,11 @@ ${DEMO}
             <p class="kicker">Why bingd</p>
             <blockquote>
               <p>
-                I was never someone who tracked restaurants. Then Beli made ranking them part
-                of going out. I wanted that same ritual after a movie or a season: a way to
-                remember what actually stuck, finally work through my watchlist, and see what
-                my friends were watching. That&rsquo;s why I started bingd.
+                Beli made me enjoy restaurants differently. Suddenly, trying a new place was
+                only half the fun&mdash;ranking it, remembering it, and sharing it gave the
+                experience a second life. I started building bingd. to bring that same
+                feeling to movies and TV. The goal is simple: make what happens after the
+                credits as exciting as what happens before them.
               </p>
             </blockquote>
             <figcaption>Suraj, founder</figcaption>
@@ -3243,15 +3288,11 @@ ${installRow({})}
     -->
     ${NOSCRIPT_INSTALL}
 
-    <!-- page: 'home' is the install row plus the ranking demo. The Supabase URL and anon
-         key are here for the demo's two reads of world-readable catalogue tables, and
-         for nothing else: the same public pair the router pages carry, bounded by RLS.
-         Without them (a local build) the demo uses its fixed list. -->
+    <!-- page: 'home' is the install row plus the ranking demo. No Supabase config: the
+         demo's movies are committed in demo-movies.mjs, and this page reads no table. -->
     <script type="application/json" id="bingd-config">${jsonBlock({
       page: 'home',
       distribution: shippedDistribution,
-      supabaseUrl,
-      supabaseAnonKey,
     })}</script>
     <script type="module" src="/page.mjs"></script>
 
@@ -3498,7 +3539,6 @@ if (supabaseConfig.withheld) {
 } else if (!supabaseUrl || !supabaseAnonKey) {
   console.log('');
   console.log('  EXPO_PUBLIC_SUPABASE_URL / _ANON_KEY were not set, so the invitation page');
-  console.log('  records no opens, and the front page demo uses its fixed movie list instead');
-  console.log('  of today\'s trending. Everything is otherwise complete. Set both in the deploy');
-  console.log('  environment to turn the top of the invite funnel and the live demo on.');
+  console.log('  records no opens. The page is otherwise complete. Set both in the deploy');
+  console.log('  environment to turn the top of the invite funnel on.');
 }

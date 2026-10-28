@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   allDestinations,
@@ -31,22 +31,17 @@ import {
 } from './src/router.mjs';
 import {
   DEMO_CHOICES,
-  FALLBACK_MOVIES,
-  MAX_LIVE_MOVIES,
-  MIN_LIVE_MOVIES,
-  TRENDING_MAX_AGE_MS,
+  DEMO_MOVIES,
+  DEMO_RESULT_SIZE,
   canSwap,
   choose,
   currentPair,
-  demoMoviesFrom,
+  demoMovies,
   demoResult,
-  demoSource,
   startDemo,
   swap,
-  trendingIdsFrom,
-  trendingListRequest,
-  trendingMoviesRequest,
 } from './src/demo.mjs';
+import { DEMO_LIST } from './src/demo-movies.mjs';
 
 /**
  * The bingd.app router.
@@ -1357,7 +1352,7 @@ describe('the built site', () => {
      * destination is baked in at build time; nothing here reads `location.search`,
      * `document.referrer` or a hash.
      */
-    for (const file of ['index.html', 'i.html', 'u.html', 'title.html', 'page.mjs', 'router.mjs', 'demo.mjs']) {
+    for (const file of ['index.html', 'i.html', 'u.html', 'title.html', 'page.mjs', 'router.mjs', 'demo.mjs', 'demo-movies.mjs']) {
       const source = read(...file.split('/'));
       assert.doesNotMatch(source, /location\.search|URLSearchParams|document\.referrer/);
       assert.doesNotMatch(source, /location\.href\s*=/);
@@ -2503,13 +2498,13 @@ describe('the release mode', () => {
     // And the mirror is resolved by the module that paints, not by hope.
     assert.match(read('page.mjs'), /data-install=/, 'page.mjs does not read the mirrors');
 
-    // The four places: hero, the ranking demo's result, closing band, sticky bar. The
-    // demo's result became the fourth on 2026-10-28: the moment somebody has just seen
-    // their own order is the moment the install is most worth offering.
+    // The three places: hero, closing band, sticky bar. The ranking demo's result held a
+    // fourth for one review round (2026-10-28) and gave it back: the hero's buttons sit
+    // right beside the demo, so a second pair inside it only made the panel grow.
     assert.equal(
       (front.match(/data-install="primary-install"/g) ?? []).length,
-      3,
-      'the primary install button is not mirrored into the demo result, the closer and the sticky bar',
+      2,
+      'the primary install button is not mirrored into both the closer and the sticky bar',
     );
   });
 
@@ -2642,7 +2637,8 @@ describe('the release mode', () => {
    *
    * And the em dash, which is a founder house-style rule for this site's copy and is
    * already enforced on the support page. Scoped to the body, because the `<title>`
-   * and the share cards carry one deliberately.
+   * and the share cards carry one deliberately, and with the founder note left out:
+   * that is the founder's own words, quoted as given on 2026-10-28, em dash included.
    */
   it('refuses the claims the product contradicts, and the em dash', () => {
     const front = read('index.html');
@@ -2666,7 +2662,9 @@ describe('the release mode', () => {
       assert.doesNotMatch(body, claim, `the front page claims something false: ${why}`);
     }
 
-    assert.doesNotMatch(body, /&mdash;|\u2014/, 'an em dash reached the front page copy');
+    const note = /<figure class="founder-note">[\s\S]*?<\/figure>/;
+    assert.match(body, note, 'the founder note moved, so this exemption no longer finds it');
+    assert.doesNotMatch(body.replace(note, ''), /&mdash;|\u2014/, 'an em dash reached the front page copy');
   });
 
   /**
@@ -2693,33 +2691,32 @@ describe('the release mode', () => {
   });
 
   /**
-   * The front page carries the public pair and nothing more.
+   * The front page reads no account data and no table, so it is handed no key.
    *
-   * Until 2026-10-28 this asserted the front page carried **no** Supabase config, because
-   * `page: 'generic'` made no request. The ranking demo reads today's trending movies,
-   * so the page now carries exactly what the router pages carry: the URL and the anon
-   * key, which ship in the mobile bundle already and are bounded by RLS. The rule this
-   * test always stood for still holds, restated: a page carries no credential beyond
-   * what it uses, and never a privileged one.
+   * `page: 'home'` runs `paintInstall` and the ranking demo, whose movies are committed
+   * in `demo-movies.mjs`. For one review round (2026-10-28) the demo read today's
+   * trending list and the page carried the public pair for it; the demo no longer
+   * fetches, so the page is back to carrying no Supabase config at all. A page that needs
+   * no credential should not carry one, and the router pages that genuinely resolve
+   * context are where those belong.
    *
-   *   - The config block holds four known keys and no fifth.
+   *   - The config block holds the page name and the distribution, and nothing else.
    *   - Nothing on the site names the service role or a TMDB API credential.
-   *   - The build reads no environment variable but the two public ones, so a secret
-   *     added to the deploy environment cannot reach a page by accident.
+   *   - The build reads no environment variable but the two public ones and the two
+   *     Cloudflare build facts, so a secret added to the deploy environment cannot reach
+   *     a page by accident.
    */
-  it('gives the front page only the public Supabase pair, and no privileged credential', () => {
+  it('gives the front page no Supabase credentials, and the site no privileged one', () => {
     const front = read('index.html');
+    assert.doesNotMatch(front, /supabaseAnonKey/);
+    assert.doesNotMatch(front, /supabase\.co/);
+
     const block = /<script type="application\/json" id="bingd-config">(.*?)<\/script>/s.exec(front);
     assert.ok(block, 'the front page has no config block');
-    assert.deepEqual(Object.keys(JSON.parse(block[1])).sort(), [
-      'distribution',
-      'page',
-      'supabaseAnonKey',
-      'supabaseUrl',
-    ]);
+    assert.deepEqual(Object.keys(JSON.parse(block[1])).sort(), ['distribution', 'page']);
     assert.equal(JSON.parse(block[1]).page, 'home');
 
-    for (const file of ['index.html', 'page.mjs', 'router.mjs', 'demo.mjs']) {
+    for (const file of ['index.html', 'page.mjs', 'router.mjs', 'demo.mjs', 'demo-movies.mjs']) {
       const source = read(file);
       assert.doesNotMatch(source, /service[_-]?role/i, `${file} names the service role`);
       assert.doesNotMatch(source, /api\.themoviedb\.org|TMDB_(?:API|TOKEN|KEY)/i, `${file} talks to TMDB's API`);
@@ -3368,8 +3365,8 @@ describe('the front page, painted', () => {
       assert.equal(button.hidden, false);
     }
 
-    // The front page reads no account, and reads the catalogue only once somebody
-    // reaches for the demo, so loading it makes no request at all.
+    // The front page reads no account and no table: the demo's movies are committed, so
+    // loading it makes no request at all.
     assert.deepEqual(page.requested, []);
   });
 });
@@ -3384,105 +3381,66 @@ describe('the front page, painted', () => {
 
 const movie = (n) => ({ id: `m${n}`, title: `Movie ${n}`, year: 2000 + n, poster: null });
 const POOL = Array.from({ length: 8 }, (_, i) => movie(i + 1));
-const NOW = Date.parse('2026-10-28T12:00:00Z');
-const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const DEMO_SUPA = 'https://example.supabase.co';
-
-describe('the demo requests', () => {
-  it('asks for one list by its literal key, with named columns', () => {
-    assert.equal(
-      trendingListRequest(DEMO_SUPA),
-      `${DEMO_SUPA}/rest/v1/provider_list_cache?list_key=eq.trending.movie.day&select=payload,fetched_at&limit=1`,
-    );
-  });
-
-  it('refuses a Supabase URL that is not a bare https origin', () => {
-    for (const bad of [null, '', 'http://example.supabase.co', 'https://evil.example/x', 'javascript:alert(1)']) {
-      assert.equal(trendingListRequest(bad), null, String(bad));
-      assert.equal(trendingMoviesRequest(bad, [uuid(1)]), null, String(bad));
-    }
-  });
-
-  it('asks for the titles by uuid only, movies only, named columns only', () => {
-    assert.equal(
-      trendingMoviesRequest(DEMO_SUPA, [uuid(1), uuid(2)]),
-      `${DEMO_SUPA}/rest/v1/media_items?id=in.(${uuid(1)},${uuid(2)})&kind=eq.movie` +
-        '&select=id,kind,title,release_date,poster_path',
-    );
-  });
-
-  it('refuses any id that could reshape the query', () => {
-    for (const ids of [[], [uuid(1), '1)&select=*'], [`${uuid(1)},x`], [42], 'nope', null]) {
-      assert.equal(trendingMoviesRequest(DEMO_SUPA, ids), null, JSON.stringify(ids));
-    }
-    const tooMany = Array.from({ length: MAX_LIVE_MOVIES + 1 }, (_, i) => uuid(i));
-    assert.equal(trendingMoviesRequest(DEMO_SUPA, tooMany), null);
-  });
+const entry = (n, extra = {}) => ({
+  tmdbId: n,
+  title: `Film ${n}`,
+  year: 2000 + n,
+  posterPath: `/poster${n}.jpg`,
+  ...extra,
 });
 
-describe('trendingIdsFrom', () => {
-  const fresh = new Date(NOW - 3 * 60 * 60 * 1000).toISOString();
-
-  it('returns the uuids in order, deduplicated, and nothing else', () => {
-    const row = { fetched_at: fresh, payload: { ids: [uuid(2), 'nope', uuid(1), uuid(2), 7, null, uuid(3)] } };
-    assert.deepEqual(trendingIdsFrom(row, NOW), [uuid(2), uuid(1), uuid(3)]);
-  });
-
-  it('caps the list at twenty', () => {
-    const ids = Array.from({ length: 30 }, (_, i) => uuid(i));
-    assert.equal(trendingIdsFrom({ fetched_at: fresh, payload: { ids } }, NOW).length, MAX_LIVE_MOVIES);
-  });
-
-  it('calls a list older than a week not trending', () => {
-    const stale = new Date(NOW - TRENDING_MAX_AGE_MS - 1).toISOString();
-    assert.deepEqual(trendingIdsFrom({ fetched_at: stale, payload: { ids: [uuid(1)] } }, NOW), []);
-  });
-
-  it('reads every malformed row as empty', () => {
-    for (const row of [
-      null,
-      undefined,
-      'x',
-      [],
-      {},
-      { fetched_at: fresh },
-      { fetched_at: fresh, payload: null },
-      { fetched_at: fresh, payload: { ids: 'x' } },
-      { fetched_at: fresh, payload: { ids: { 0: uuid(1) } } },
-      { fetched_at: 'yesterday', payload: { ids: [uuid(1)] } },
-      { fetched_at: 12, payload: { ids: [uuid(1)] } },
-    ]) {
-      assert.deepEqual(trendingIdsFrom(row, NOW), [], JSON.stringify(row));
+describe('the demo movie list', () => {
+  /**
+   * The committed list is the contract the monthly "most ranked" list will be written
+   * to, so its shape is pinned here: four named fields per movie and nothing else.
+   */
+  it('is in the shape a generated list will be written to', () => {
+    assert.deepEqual(Object.keys(DEMO_LIST).sort(), ['asOf', 'movies', 'source']);
+    assert.match(DEMO_LIST.asOf, /^\d{4}-\d{2}-\d{2}$/);
+    for (const m of DEMO_LIST.movies) {
+      assert.deepEqual(Object.keys(m).sort(), ['posterPath', 'title', 'tmdbId', 'year'], m.title);
     }
   });
-});
 
-describe('demoMoviesFrom', () => {
-  const ids = [uuid(1), uuid(2), uuid(3), uuid(4)];
+  it('is sixteen distinct, well-known movies, every one with a poster on TMDB\'s CDN', () => {
+    assert.equal(DEMO_MOVIES.length, 16);
+    assert.equal(DEMO_MOVIES.length, DEMO_LIST.movies.length, 'the committed list lost an entry to validation');
+    assert.equal(new Set(DEMO_MOVIES.map((m) => m.id)).size, DEMO_MOVIES.length);
+    assert.equal(new Set(DEMO_MOVIES.map((m) => m.title)).size, DEMO_MOVIES.length);
+    for (const m of DEMO_MOVIES) {
+      assert.match(m.poster ?? '', /^https:\/\/image\.tmdb\.org\/t\/p\/w342\/[A-Za-z0-9]+\.jpg$/, m.title);
+      assert.ok(Number.isInteger(m.year), m.title);
+    }
+    assert.ok(Object.isFrozen(DEMO_MOVIES) && Object.isFrozen(DEMO_MOVIES[0]));
+  });
 
-  it('keeps trending order and names its fields, so nothing extra rides along', () => {
-    const rows = [
-      { id: uuid(2), kind: 'movie', title: '  Two\n Words ', release_date: '2026-09-01', poster_path: '/two.jpg', score: 9.4 },
-      { id: uuid(1), kind: 'movie', title: 'One', release_date: null, poster_path: null, note: 'private' },
-    ];
-    assert.deepEqual(demoMoviesFrom(ids, rows), [
-      { id: uuid(1), title: 'One', year: null, poster: null },
-      { id: uuid(2), title: 'Two Words', year: 2026, poster: 'https://image.tmdb.org/t/p/w342/two.jpg' },
+  it('names its fields, so nothing extra rides along', () => {
+    const list = { movies: [entry(2, { title: '  Two\n Words ', score: 9.4 }), entry(1, { year: null, posterPath: null })] };
+    assert.deepEqual(demoMovies(list), [
+      { id: 'tmdb-2', title: 'Two Words', year: 2002, poster: 'https://image.tmdb.org/t/p/w342/poster2.jpg' },
+      { id: 'tmdb-1', title: 'Film 1', year: null, poster: null },
     ]);
   });
 
-  it('drops series, blank titles, missing rows and rows nobody asked for', () => {
-    const rows = [
-      { id: uuid(1), kind: 'series', title: 'A show', poster_path: '/s.jpg' },
-      { id: uuid(2), kind: 'movie', title: '   ' },
-      { id: uuid(9), kind: 'movie', title: 'Not in the list' },
-      { id: uuid(4), kind: 'movie', title: 'x'.repeat(201) },
-    ];
-    assert.deepEqual(demoMoviesFrom(ids, rows), []);
+  it('drops a bad id, a repeated id and a blank or overlong title', () => {
+    const list = {
+      movies: [
+        entry(1),
+        entry(1, { title: 'Again' }),
+        entry(0),
+        entry(-3),
+        entry(2.5),
+        { ...entry(3), tmdbId: '3' },
+        entry(4, { title: '   ' }),
+        entry(5, { title: 'x'.repeat(201) }),
+        entry(6, { title: 42 }),
+      ],
+    };
+    assert.deepEqual(demoMovies(list).map((m) => m.id), ['tmdb-1']);
   });
 
   it('never lets a poster leave TMDB\'s CDN', () => {
-    for (const poster_path of [
+    for (const posterPath of [
       'javascript:alert(1)',
       'https://evil.example/x.jpg',
       '//evil.example/x.jpg',
@@ -3491,39 +3449,20 @@ describe('demoMoviesFrom', () => {
       '/x.svg',
       42,
     ]) {
-      const [movie_] = demoMoviesFrom([uuid(1)], [{ id: uuid(1), kind: 'movie', title: 'T', poster_path }]);
-      assert.equal(movie_.poster, null, String(poster_path));
+      const [only] = demoMovies({ movies: [entry(1, { posterPath })] });
+      assert.equal(only.poster, null, String(posterPath));
     }
   });
 
   it('reads garbage as nothing', () => {
-    assert.deepEqual(demoMoviesFrom(null, []), []);
-    assert.deepEqual(demoMoviesFrom(ids, null), []);
-    assert.deepEqual(demoMoviesFrom(ids, [null, 'x', 7, { id: 5 }]), []);
-  });
-});
-
-describe('demoSource and the fallback', () => {
-  it('uses the live list only when there is enough of it to be a demo', () => {
-    assert.deepEqual(demoSource(POOL.slice(0, MIN_LIVE_MOVIES)), { live: true, movies: POOL.slice(0, MIN_LIVE_MOVIES) });
-    assert.equal(demoSource(POOL.slice(0, MIN_LIVE_MOVIES - 1)).live, false);
-    assert.equal(demoSource(null).movies, FALLBACK_MOVIES);
-  });
-
-  it('is a fixed, offline list: distinct, posterless and frozen', () => {
-    assert.ok(FALLBACK_MOVIES.length >= 12);
-    assert.equal(new Set(FALLBACK_MOVIES.map((m) => m.id)).size, FALLBACK_MOVIES.length);
-    assert.equal(new Set(FALLBACK_MOVIES.map((m) => m.title)).size, FALLBACK_MOVIES.length);
-    for (const m of FALLBACK_MOVIES) {
-      assert.equal(m.poster, null, `${m.title} depends on the network`);
-      assert.ok(Number.isInteger(m.year));
+    for (const list of [null, undefined, 'x', [], {}, { movies: 'x' }, { movies: [null, 'x', 7, {}] }]) {
+      assert.deepEqual(demoMovies(list), [], JSON.stringify(list));
     }
-    assert.ok(Object.isFrozen(FALLBACK_MOVIES) && Object.isFrozen(FALLBACK_MOVIES[0]));
   });
 });
 
 describe('the demo ranking', () => {
-  /** Plays a script of choices: 'new' prefers the candidate, 'old' the pivot, 'swap' swaps. */
+  /** Plays a script of picks: 'new' prefers the candidate, 'old' the pivot, 'swap' swaps. */
   const play = (script, movies = POOL, attempt = 0) => {
     let state = startDemo(movies, attempt);
     for (const step of script) {
@@ -3538,13 +3477,18 @@ describe('the demo ranking', () => {
     return state;
   };
 
+  it('is three picks and a result of four', () => {
+    assert.equal(DEMO_CHOICES, 3);
+    assert.equal(DEMO_RESULT_SIZE, 4);
+  });
+
   it('opens on the first two movies of the attempt', () => {
     const state = startDemo(POOL);
     assert.deepEqual(currentPair(state), { left: POOL[0], right: POOL[1] });
     assert.equal(state.selections, 0);
   });
 
-  it('reaches the result on the fifth choice, and not before', () => {
+  it('reaches the result on the third pick, and not before', () => {
     let state = startDemo(POOL);
     for (let i = 1; i <= DEMO_CHOICES; i++) {
       assert.equal(state.done, false, `done after ${i - 1}`);
@@ -3559,61 +3503,70 @@ describe('the demo ranking', () => {
 
   /**
    * One script, worked by hand, so the order is a fact rather than whatever the code
-   * happened to produce:
+   * happened to produce. Each newcomer is shown against the middle of the order so far
+   * and lands directly beside it:
    *
-   *   1. M2 over M1                       → M2, M1
-   *   2. M1 over M3                       → M2, M1, M3
-   *   3. M4 over M1, search continues
-   *   4. M2 over M4                       → M2, M4, M1, M3
-   *   5. M5 over M1, search unfinished    → midpoint of positions 1..3 → M2, M5, M4, M1, M3
+   *   1. M2 over M1                → M2, M1
+   *   2. M1 (the middle) over M3   → M2, M1, M3
+   *   3. M4 over M1 (the middle)   → M2, M4, M1, M3
    */
-  it('produces the same order for the same choices, every time', () => {
-    const script = ['new', 'old', 'new', 'old', 'new'];
-    const expected = ['m2', 'm5', 'm4', 'm1', 'm3'];
+  it('produces the same order for the same picks, every time', () => {
     for (let run = 0; run < 3; run++) {
-      const result = demoResult(play(script));
-      assert.deepEqual(result.map((r) => r.id), expected);
-      assert.deepEqual(result.map((r) => r.position), [1, 2, 3, 4, 5]);
+      const result = demoResult(play(['new', 'old', 'new']));
+      assert.deepEqual(result.map((r) => r.id), ['m2', 'm4', 'm1', 'm3']);
+      assert.deepEqual(result.map((r) => r.position), [1, 2, 3, 4]);
+    }
+  });
+
+  it('ranks four distinct movies whatever the three picks were', () => {
+    for (const a of ['new', 'old']) {
+      for (const b of ['new', 'old']) {
+        for (const c of ['new', 'old']) {
+          const ids = demoResult(play([a, b, c])).map((r) => r.id);
+          assert.equal(ids.length, DEMO_RESULT_SIZE, `${a} ${b} ${c}`);
+          assert.equal(new Set(ids).size, DEMO_RESULT_SIZE, `${a} ${b} ${c}`);
+        }
+      }
     }
   });
 
   it('gives positions and never a score', () => {
-    for (const entry of demoResult(play(['new', 'new', 'new', 'new', 'new']))) {
-      assert.deepEqual(Object.keys(entry).sort(), ['id', 'position', 'poster', 'title', 'year']);
+    for (const row of demoResult(play(['new', 'new', 'new']))) {
+      assert.deepEqual(Object.keys(row).sort(), ['id', 'position', 'poster', 'title', 'year']);
     }
   });
 
   /**
-   * The property the result exists to keep: nothing in it contradicts a choice the
-   * visitor made. Two hundred scripted visits, with swaps, over the fixed list.
+   * The property the result exists to keep: nothing in it contradicts a pick the visitor
+   * made. Two hundred scripted visits, with swaps, over the committed list.
    */
-  it('never contradicts a choice, across many visits', () => {
+  it('never contradicts a pick, and always ranks four, across many visits', () => {
     let seed = 7;
     const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
 
     for (let visit = 0; visit < 200; visit++) {
-      let state = startDemo(FALLBACK_MOVIES, visit);
-      const choices = [];
+      let state = startDemo(DEMO_MOVIES, visit);
+      const picks = [];
       while (!state.done) {
-        if (next() < 0.2 && canSwap(state)) {
+        if (next() < 0.3 && canSwap(state)) {
           state = swap(state);
           continue;
         }
         const pair = currentPair(state);
         const [winner, loser] = next() < 0.5 ? [pair.left, pair.right] : [pair.right, pair.left];
-        choices.push([winner.id, loser.id]);
+        picks.push([winner.id, loser.id]);
         state = choose(state, winner.id);
       }
       assert.equal(state.selections, DEMO_CHOICES);
       const order = demoResult(state).map((r) => r.id);
-      for (const [winner, loser] of choices) {
-        if (!order.includes(winner) || !order.includes(loser)) continue;
+      assert.equal(order.length, DEMO_RESULT_SIZE, `visit ${visit}`);
+      for (const [winner, loser] of picks) {
         assert.ok(order.indexOf(winner) < order.indexOf(loser), `visit ${visit}: ${winner} over ${loser}`);
       }
     }
   });
 
-  it('swaps without counting a choice', () => {
+  it('swaps without counting a pick', () => {
     let state = startDemo(POOL);
     state = swap(state);
     assert.equal(state.selections, 0);
@@ -3628,55 +3581,85 @@ describe('the demo ranking', () => {
     assert.equal(state.candidate.id, 'm6');
   });
 
-  it('still takes five real choices after any number of swaps', () => {
-    const state = play(['swap', 'new', 'swap', 'old', 'swap', 'new', 'new', 'old'], FALLBACK_MOVIES);
-    assert.equal(state.done, true);
-    assert.equal(state.selections, DEMO_CHOICES);
+  /**
+   * The reserve. A swap may only spend a movie the remaining picks will not need, so
+   * swapping at every chance still ends in four. Over eight movies that is two swaps at
+   * the start and none after.
+   */
+  it('never lets swaps starve the result', () => {
+    let state = startDemo(POOL);
+    let swaps = 0;
+    while (!state.done) {
+      if (canSwap(state)) {
+        state = swap(state);
+        swaps += 1;
+        continue;
+      }
+      state = choose(state, currentPair(state).left.id);
+    }
+    assert.equal(swaps, 2);
+    assert.equal(demoResult(state).length, DEMO_RESULT_SIZE);
+
+    // Exactly enough movies for one result leaves nothing to swap in.
+    const tight = startDemo(POOL.slice(0, DEMO_RESULT_SIZE));
+    assert.equal(canSwap(tight), false);
+    assert.equal(swap(tight), tight);
   });
 
-  it('refuses a swap when the list has nothing left to offer', () => {
-    const state = startDemo(POOL.slice(0, 3));
-    assert.equal(canSwap(state), false);
-    assert.equal(swap(state), state);
+  it('still takes three real picks after any number of swaps', () => {
+    const state = play(['swap', 'new', 'swap', 'old', 'swap', 'new'], DEMO_MOVIES);
+    assert.equal(state.done, true);
+    assert.equal(state.selections, DEMO_CHOICES);
+    assert.equal(demoResult(state).length, DEMO_RESULT_SIZE);
   });
 
   it('ends early rather than stall when the movies run out', () => {
-    // M2 over M1; M3 over M1, search continues; M3 over M2. Nothing left to draw.
-    const state = play(['new', 'new', 'new'], POOL.slice(0, 3));
+    // M2 over M1; M3 over M1, the middle, lands just above it. Nothing left to draw.
+    const state = play(['new', 'new'], POOL.slice(0, 3));
     assert.equal(state.done, true);
-    assert.equal(state.selections, 3);
-    assert.deepEqual(demoResult(state).map((r) => r.id), ['m3', 'm2', 'm1']);
+    assert.equal(state.selections, 2);
+    assert.deepEqual(demoResult(state).map((r) => r.id), ['m2', 'm3', 'm1']);
   });
 
-  it('ignores a choice for a movie that is not on screen', () => {
+  it('ignores a pick for a movie that is not on screen', () => {
     const state = startDemo(POOL);
     assert.equal(choose(state, 'm7'), state);
     assert.equal(choose(state, undefined), state);
   });
 
-  it('opens Try again on a different pair, deterministically', () => {
-    const first = currentPair(startDemo(FALLBACK_MOVIES, 0));
-    const second = currentPair(startDemo(FALLBACK_MOVIES, 1));
-    assert.notDeepEqual(first, second);
-    assert.deepEqual(currentPair(startDemo(FALLBACK_MOVIES, 1)), second);
+  it('opens Try again on movies the last round did not use, deterministically', () => {
+    const first = startDemo(DEMO_MOVIES, 0);
+    const second = startDemo(DEMO_MOVIES, 1);
+    assert.deepEqual(currentPair(second), { left: DEMO_MOVIES[4], right: DEMO_MOVIES[5] });
+    assert.notDeepEqual(currentPair(first), currentPair(second));
+    assert.deepEqual(currentPair(startDemo(DEMO_MOVIES, 1)), currentPair(second));
   });
 });
 
 /**
- * The front page with a scripted network, kept live for the whole case.
+ * The front page, kept live for the whole case.
  *
  * `paint` restores the globals the moment the module has run, which is right for pages
  * that paint once. The demo paints on every click, so this hands the case a `restore`
  * and the case calls it when it is done.
+ *
+ * `list` swaps in a different `demo-movies.mjs`: the shipped modules are copied to a
+ * sandbox with that one file replaced, so a case can play a hostile list through the
+ * real page without the real list ever being edited.
  */
-async function paintHome({ userAgent = ANDROID_UA, respond = () => [], reduceMotion = false } = {}) {
-  const source = readFileSync(join(dist, 'index.html'), 'utf8');
-  const block = /<script type="application\/json" id="bingd-config">(.*?)<\/script>/s;
-  const config = { ...JSON.parse(block.exec(source)[1]), supabaseUrl: DEMO_SUPA, supabaseAnonKey: 'anon' };
-  const html = source.replace(
-    block,
-    () => `<script type="application/json" id="bingd-config">${JSON.stringify(config)}</script>`,
-  );
+async function paintHome({ userAgent = ANDROID_UA, reduceMotion = false, list = null } = {}) {
+  const html = readFileSync(join(dist, 'index.html'), 'utf8');
+
+  let pageModule = './src/page.mjs';
+  if (list) {
+    const sandbox = mkdtempSync(join(tmpdir(), 'bingd-demo-list-'));
+    demoSandboxes.push(sandbox);
+    for (const file of ['page.mjs', 'router.mjs', 'demo.mjs']) {
+      cpSync(join(here, 'src', file), join(sandbox, file));
+    }
+    writeFileSync(join(sandbox, 'demo-movies.mjs'), `export const DEMO_LIST = ${JSON.stringify(list)};\n`);
+    pageModule = pathToFileURL(join(sandbox, 'page.mjs')).href;
+  }
 
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM(html, { url: 'https://bingd.app/' });
@@ -3704,14 +3687,13 @@ async function paintHome({ userAgent = ANDROID_UA, respond = () => [], reduceMot
   globalThis.matchMedia = (query) => ({
     matches: query === '(prefers-reduced-motion: reduce)' && reduceMotion,
   });
+  // The demo must not fetch anything; a request is recorded and refused.
   globalThis.fetch = async (target, init = {}) => {
-    requested.push({ url: String(target), method: init.method ?? 'GET', body: init.body });
-    const answer = await respond(String(target));
-    if (answer instanceof Error) throw answer;
-    return { ok: true, json: async () => answer };
+    requested.push({ url: String(target), method: init.method ?? 'GET' });
+    throw new Error('the front page made a request');
   };
 
-  await import('./src/page.mjs?case=' + ++paintRun);
+  await import(`${pageModule}?case=${++paintRun}`);
 
   const restore = () => {
     globalThis.document = saved.document;
@@ -3724,32 +3706,14 @@ async function paintHome({ userAgent = ANDROID_UA, respond = () => [], reduceMot
 
   const doc = dom.window.document;
   const el = (id) => doc.getElementById(id);
-  const settle = async () => {
-    for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
-  };
-  const start = async () => {
-    el('demo-start').click();
-    await settle();
-  };
-  return { window: dom.window, document: doc, el, requested, scrolled, restore, settle, start };
+  const name = (side) => el(`demo-${side}`).querySelector('.demo-name').textContent;
+  return { window: dom.window, document: doc, el, name, requested, scrolled, restore };
 }
 
-/** Today's list and its titles, as PostgREST would answer them. */
-const liveNetwork = (rows, { fetchedAt = new Date().toISOString() } = {}) => (url) => {
-  if (url.includes('/provider_list_cache')) {
-    return [{ fetched_at: fetchedAt, payload: { ids: rows.map((r) => r.id) } }];
-  }
-  if (url.includes('/media_items')) return rows;
-  return new Error(`unexpected request ${url}`);
-};
-
-const LIVE_ROWS = Array.from({ length: 10 }, (_, i) => ({
-  id: uuid(i + 1),
-  kind: 'movie',
-  title: `Trending ${i + 1}`,
-  release_date: '2026-10-01',
-  poster_path: `/poster${i + 1}.jpg`,
-}));
+const demoSandboxes = [];
+after(() => {
+  for (const dir of demoSandboxes) rmSync(dir, { recursive: true, force: true });
+});
 
 /**
  * Which Supabase project each build may ship.
@@ -3811,27 +3775,35 @@ describe('the Supabase environment a build may ship', () => {
     const everything = ['index.html', 'i.html', 'u.html', 'title.html', 'lists.html']
       .map((file) => readFileSync(join(dist_, file), 'utf8'))
       .join('\n');
-    return { output, home: config('index.html'), invite: config('i.html'), everything };
+    return { output, home: config('index.html'), invite: config('i.html'), title: config('title.html'), everything };
   };
 
+  // The front page carries no Supabase config in any environment: its demo is a
+  // committed list. The router pages are what each case is about.
+  const noneOnTheFrontPage = (result) => {
+    assert.deepEqual(Object.keys(result.home).sort(), ['distribution', 'page']);
+  };
   const shipped = (result, ref) => {
-    for (const cfg of [result.home, result.invite]) {
+    for (const cfg of [result.invite, result.title]) {
       assert.equal(cfg.supabaseUrl, url(ref));
       assert.ok(cfg.supabaseAnonKey);
     }
+    noneOnTheFrontPage(result);
   };
   const withheld = (result, why) => {
-    for (const cfg of [result.home, result.invite]) {
+    for (const cfg of [result.invite, result.title]) {
       assert.equal(cfg.supabaseUrl, null);
       assert.equal(cfg.supabaseAnonKey, null);
     }
+    noneOnTheFrontPage(result);
     assert.match(result.output, /SUPABASE CONFIG WITHHELD/);
     if (why) assert.match(result.output, why);
   };
 
   it('ships nothing, and says nothing alarming, when nothing is configured', () => {
     const result = buildWith(LOCAL, null);
-    assert.equal(result.home.supabaseUrl, null);
+    assert.equal(result.invite.supabaseUrl, null);
+    noneOnTheFrontPage(result);
     assert.doesNotMatch(result.output, /WITHHELD/);
   });
 
@@ -3888,35 +3860,74 @@ describe('the Supabase environment a build may ship', () => {
 
 describe('the ranking demo, built', () => {
   const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+  const demoMarkup = () => {
+    const front = read('index.html');
+    return front.slice(front.indexOf('<div class="demo" id="demo">'), front.indexOf('id="demo-status"'));
+  };
 
-  it('ships the module the page imports, byte for byte', () => {
-    assert.equal(read('demo.mjs'), readFileSync(join(here, 'src', 'demo.mjs'), 'utf8'));
+  it('ships the modules the page imports, byte for byte', () => {
+    for (const file of ['demo.mjs', 'demo-movies.mjs']) {
+      assert.equal(read(file), readFileSync(join(here, 'src', file), 'utf8'), file);
+    }
   });
 
-  it('puts the demo in the hero, after the install row and before the first section', () => {
+  it('puts the pair in the hero, after the install row, with no gate in front of it', () => {
     const front = read('index.html');
     const hero = front.slice(front.indexOf('<section class="hero'), front.indexOf('</section>'));
     assert.ok(hero.indexOf('id="primary-install"') < hero.indexOf('id="demo"'), 'the store button is not first');
-    assert.match(hero, /<button type="button" class="demo-start" id="demo-start">Try ranking<\/button>/);
+
+    const demo = demoMarkup();
+    assert.match(demo, /<p class="kicker">Try it here<\/p>/);
+    assert.match(demo, /<p class="demo-prompt" id="demo-prompt">Click the one you liked more\.<\/p>/);
+    // The founder's QA (2026-10-28): no intro heading, no paragraph, no start button.
+    assert.doesNotMatch(demo, /demo-start|demo-intro|Try ranking|Rank a few movies/);
+    // The pair is the view on arrival; the result waits, inert.
+    assert.doesNotMatch(demo, /id="demo-play"[^>]*inert/);
+    assert.match(demo, /id="demo-result" inert>/);
   });
 
   it('gives the two choices native button semantics, inside a labelled group', () => {
-    const front = read('index.html');
-    assert.match(front, /<p class="demo-prompt" id="demo-prompt">Which did you like more\?<\/p>/);
-    assert.match(front, /class="demo-choices" role="group" aria-labelledby="demo-prompt"/);
+    const demo = demoMarkup();
+    assert.match(demo, /class="demo-choices" role="group" aria-labelledby="demo-prompt"/);
     for (const side of ['left', 'right']) {
-      assert.match(front, new RegExp(`<button type="button" class="demo-choice" id="demo-${side}">`));
+      assert.match(demo, new RegExp(`<button type="button" class="demo-choice" id="demo-${side}">`));
     }
     // The art repeats the title, so it is hidden from assistive technology.
-    assert.equal((front.match(/class="demo-art" aria-hidden="true"/g) ?? []).length, 2);
-    assert.match(front, /id="demo-status" role="status" aria-live="polite"/);
-    assert.match(front, /<h2 id="demo-result-title" tabindex="-1">Your demo ranking<\/h2>/);
+    assert.equal((demo.match(/class="demo-art" aria-hidden="true"/g) ?? []).length, 2);
+    assert.match(read('index.html'), /id="demo-status" role="status" aria-live="polite"/);
+    assert.match(demo, /<h2 id="demo-result-title" tabindex="-1">Your demo ranking<\/h2>/);
+  });
+
+  /**
+   * One panel, one size. The two views share a grid cell, the inactive one keeps its
+   * space, and the result is born with as many rows as it will ever have — so the panel
+   * is the result's height on arrival and does not grow on the third pick.
+   */
+  it('holds the panel at one size between the pair and the result', () => {
+    const front = read('index.html');
+    assert.match(front, /\.demo-stage \{ display: grid; \}/);
+    assert.match(front, /\.demo-pane \{ grid-area: 1 \/ 1;/);
+    assert.match(front, /\.demo-pane\[inert\] \{ visibility: hidden; \}/);
+
+    const slots = demoMarkup().match(/<li class="demo-rank" aria-hidden="true">/g) ?? [];
+    assert.equal(slots.length, DEMO_RESULT_SIZE, 'the result does not reserve a row per ranked movie');
+
+    // Every row is one line of title, so no title can make a row taller than its slot.
+    assert.match(front, /\.demo-rank-name \{[^}]*white-space: nowrap;/);
+  });
+
+  it('keeps the store buttons out of the result, and a small call to action in it', () => {
+    const demo = demoMarkup();
+    assert.doesNotMatch(demo, /data-install=|class="button/, 'the result repeats the store buttons');
+    assert.match(demo, /<a class="demo-cta" id="demo-cta">Keep ranking in bingd\.<\/a>/);
+    assert.match(demo, /A rough order from 3 picks\./);
+    assert.match(demo, /<button type="button" class="demo-again" id="demo-again">Try again<\/button>/);
   });
 
   it('keeps the swap quiet: a text button, not a third choice', () => {
-    const front = read('index.html');
-    assert.match(front, /<button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both\? Swap pair<\/button>/);
-    assert.doesNotMatch(front, /I liked it|I didn&rsquo;t like it|stars?<\/button>|type="range"/);
+    const demo = demoMarkup();
+    assert.match(demo, /<button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both\? Swap pair<\/button>/);
+    assert.doesNotMatch(demo, /I liked it|I didn&rsquo;t like it|stars?<\/button>|type="range"/);
   });
 
   it('honours reduced motion in the stylesheet', () => {
@@ -3931,94 +3942,65 @@ describe('the ranking demo, built', () => {
     assert.match(read('index.html'), /<noscript><style>\.demo \{ display: none !important; \}<\/style><\/noscript>/);
   });
 
-  it('carries the founder note, text only, without the em dash', () => {
+  it('carries the founder note in the founder\'s words, text only', () => {
     const front = read('index.html');
     const note = front.slice(front.indexOf('<figure class="founder-note">'), front.indexOf('</figure>'));
-    assert.match(note, /That&rsquo;s why I started bingd\./);
+    const words = note.replace(/<[^>]+>/g, ' ').replace(/&mdash;/g, '—').replace(/\s+/g, ' ');
+    assert.match(
+      words,
+      new RegExp(
+        [
+          'Beli made me enjoy restaurants differently\\.',
+          'Suddenly, trying a new place was only half the fun—ranking it, remembering it, and sharing it gave the experience a second life\\.',
+          'I started building bingd\\. to bring that same feeling to movies and TV\\.',
+          'The goal is simple: make what happens after the credits as exciting as what happens before them\\.',
+        ].join(' '),
+      ),
+    );
     assert.doesNotMatch(note, /<img/);
     assert.match(front, /your new post-watch ritual/);
   });
 });
 
 describe('the ranking demo, painted', () => {
-  it('makes no request until somebody reaches for it, then plays the fallback offline', async () => {
-    const page = await paintHome({ respond: () => new Error('offline') });
+  it('shows the first pair on arrival, with posters, and moves nothing', async () => {
+    const page = await paintHome();
     try {
+      assert.equal(page.name('left'), DEMO_MOVIES[0].title);
+      assert.equal(page.name('right'), DEMO_MOVIES[1].title);
+      for (const [side, m] of [['left', DEMO_MOVIES[0]], ['right', DEMO_MOVIES[1]]]) {
+        assert.equal(page.el(`demo-${side}`).querySelector('img').getAttribute('src'), m.poster);
+      }
+      assert.equal(page.el('demo-progress').textContent, `1 of ${DEMO_CHOICES}`);
+      assert.equal(page.el('demo-play').hasAttribute('inert'), false);
+      assert.equal(page.el('demo-result').hasAttribute('inert'), true);
+
+      // Arriving must not move the reader: no focus taken, nothing scrolled.
+      assert.equal(page.document.activeElement, page.document.body);
+      assert.deepEqual(page.scrolled, []);
+
+      // Nothing fetched, and the install row is exactly what it would have been.
       assert.deepEqual(page.requested, []);
-      assert.equal(page.el('demo-play').hidden, true);
-
-      await page.start();
-
-      // One attempt at today's list, and a GET with no body.
-      assert.deepEqual(page.requested, [
-        {
-          url: `${DEMO_SUPA}/rest/v1/provider_list_cache?list_key=eq.trending.movie.day&select=payload,fetched_at&limit=1`,
-          method: 'GET',
-          body: undefined,
-        },
-      ]);
-      assert.equal(page.el('demo-intro').hidden, true);
-      assert.equal(page.el('demo-play').hidden, false);
-      assert.equal(page.el('demo-source').textContent, 'A few well-known films');
-      assert.equal(page.el('demo-left').querySelector('.demo-name').textContent, FALLBACK_MOVIES[0].title);
-      assert.equal(page.el('demo-right').querySelector('.demo-name').textContent, FALLBACK_MOVIES[1].title);
-      assert.equal(page.el('demo-progress').textContent, 'Choice 1 of 5');
-
-      // And the install row is exactly what it would have been without the demo.
       assert.equal(page.el('primary-install').href, PLAY);
     } finally {
       page.restore();
     }
   });
 
-  it('plays today\'s trending movies when the cache is usable, with posters from TMDB', async () => {
-    const page = await paintHome({ respond: liveNetwork(LIVE_ROWS) });
-    try {
-      await page.start();
-      assert.equal(page.requested.length, 2);
-      assert.ok(page.requested.every((r) => r.method === 'GET' && r.body === undefined));
-      assert.match(page.requested[1].url, /\/rest\/v1\/media_items\?id=in\.\(/);
-      assert.equal(page.el('demo-source').textContent, 'Trending today, via TMDB');
-      assert.equal(page.el('demo-left').querySelector('.demo-name').textContent, 'Trending 1');
-      assert.equal(
-        page.el('demo-left').querySelector('img').getAttribute('src'),
-        'https://image.tmdb.org/t/p/w342/poster1.jpg',
-      );
-    } finally {
-      page.restore();
-    }
-  });
-
-  it('falls back on a malformed, stale or thin cache', async () => {
-    const cases = [
-      () => [{ fetched_at: new Date().toISOString(), payload: { ids: 'nope' } }],
-      () => [],
-      () => ({ not: 'an array' }),
-      liveNetwork(LIVE_ROWS, { fetchedAt: '2020-01-01T00:00:00Z' }),
-      liveNetwork(LIVE_ROWS.slice(0, MIN_LIVE_MOVIES - 1)),
-    ];
-    for (const respond of cases) {
-      const page = await paintHome({ respond });
-      try {
-        await page.start();
-        assert.equal(page.el('demo-source').textContent, 'A few well-known films');
-        assert.equal(page.el('demo-left').querySelector('.demo-name').textContent, FALLBACK_MOVIES[0].title);
-      } finally {
-        page.restore();
-      }
-    }
-  });
-
   it('writes a hostile title as text and drops a hostile poster', async () => {
     const hostile = '<img src=x onerror="globalThis.pwned=1"><b>Bold</b>';
-    const rows = LIVE_ROWS.map((row, i) =>
-      i === 0 ? { ...row, title: hostile, poster_path: 'javascript:alert(1)' } : row,
-    );
-    const page = await paintHome({ respond: liveNetwork(rows) });
+    const list = {
+      source: 'curated',
+      asOf: '2026-10-28',
+      movies: [
+        { tmdbId: 1, title: hostile, year: 2001, posterPath: 'javascript:alert(1)' },
+        ...Array.from({ length: 7 }, (_, i) => entry(i + 2)),
+      ],
+    };
+    const page = await paintHome({ list });
     try {
-      await page.start();
       const left = page.el('demo-left');
-      assert.equal(left.querySelector('.demo-name').textContent, hostile);
+      assert.equal(page.name('left'), hostile);
       assert.equal(left.querySelector('.demo-tile').textContent, hostile);
       assert.equal(page.document.querySelectorAll('#demo b, #demo img[onerror]').length, 0);
       assert.equal(left.querySelector('img').hasAttribute('src'), false);
@@ -4033,48 +4015,51 @@ describe('the ranking demo, painted', () => {
     }
   });
 
-  it('reaches the result after five choices, focuses it, and offers the store', async () => {
-    const page = await paintHome({ respond: () => new Error('offline') });
+  it('reaches the result after three picks, focuses it, and links the store on a phone', async () => {
+    const page = await paintHome();
     try {
-      await page.start();
-      assert.equal(page.document.activeElement, page.el('demo-left'));
-
       for (let i = 1; i <= DEMO_CHOICES; i++) {
-        assert.equal(page.el('demo-result').hidden, true, `result shown after ${i - 1}`);
+        assert.equal(page.el('demo-result').hasAttribute('inert'), true, `result shown after ${i - 1}`);
         page.el('demo-left').click();
-        // The choice keeps focus, so a keyboard user can keep pressing Enter.
-        if (i < DEMO_CHOICES) {
-          assert.equal(page.document.activeElement, page.el('demo-left'));
-          assert.equal(page.el('demo-progress').textContent, `Choice ${i + 1} of 5`);
-        }
+        if (i < DEMO_CHOICES) assert.equal(page.el('demo-progress').textContent, `${i + 1} of ${DEMO_CHOICES}`);
       }
 
-      assert.equal(page.el('demo-play').hidden, true);
-      assert.equal(page.el('demo-result').hidden, false);
+      assert.equal(page.el('demo-play').hasAttribute('inert'), true);
+      assert.equal(page.el('demo-result').hasAttribute('inert'), false);
       assert.equal(page.document.activeElement, page.el('demo-result-title'));
 
+      // Four real rows in place of the four reserved ones.
       const rows = [...page.el('demo-list').children];
-      assert.ok(rows.length >= 4, `only ${rows.length} movies in the result`);
-      assert.ok(rows.every((li) => li.tagName === 'LI'));
-      assert.equal(rows[0].querySelector('.demo-rank-n').textContent, '1');
-
-      const store = page.el('demo-result').querySelector('[data-install="primary-install"]');
-      assert.equal(store.href, PLAY);
-      assert.equal(store.hidden, false);
-      assert.match(page.el('demo-result').textContent, /Keep ranking in bingd\./);
+      assert.equal(rows.length, DEMO_RESULT_SIZE);
+      assert.ok(rows.every((li) => li.tagName === 'LI' && !li.hasAttribute('aria-hidden')));
+      assert.deepEqual(rows.map((li) => li.querySelector('.demo-rank-n').textContent), ['1', '2', '3', '4']);
+      assert.ok(rows.every((li) => li.querySelector('img').getAttribute('src')?.startsWith('https://image.tmdb.org/t/p/w342/')));
       assert.doesNotMatch(page.el('demo-list').textContent, /\d\.\d/, 'the result shows a score');
+
+      // On a phone the small call to action is this platform's store link.
+      assert.equal(page.el('demo-cta').href, PLAY);
+      assert.equal(page.el('demo-result').querySelectorAll('[data-install], .button').length, 0);
     } finally {
       page.restore();
     }
   });
 
-  it('paints the same result for the same choices', async () => {
+  it('leaves the call to action as words beside the store buttons on a desktop', async () => {
+    const page = await paintHome({ userAgent: DESKTOP_UA });
+    try {
+      assert.equal(page.el('demo-cta').hasAttribute('href'), false);
+      assert.equal(page.el('demo-cta').textContent, 'Keep ranking in bingd.');
+    } finally {
+      page.restore();
+    }
+  });
+
+  it('paints the same result for the same picks', async () => {
     const orders = [];
     for (let run = 0; run < 2; run++) {
-      const page = await paintHome({ respond: () => new Error('offline') });
+      const page = await paintHome();
       try {
-        await page.start();
-        for (const side of ['left', 'right', 'right', 'left', 'right']) page.el(`demo-${side}`).click();
+        for (const side of ['left', 'right', 'right']) page.el(`demo-${side}`).click();
         orders.push(page.el('demo-list').textContent);
       } finally {
         page.restore();
@@ -4084,71 +4069,67 @@ describe('the ranking demo, painted', () => {
   });
 
   it('swaps without advancing the count', async () => {
-    const page = await paintHome({ respond: () => new Error('offline') });
+    const page = await paintHome();
     try {
-      await page.start();
       page.el('demo-swap').click();
-      assert.equal(page.el('demo-progress').textContent, 'Choice 1 of 5');
-      assert.equal(page.el('demo-left').querySelector('.demo-name').textContent, FALLBACK_MOVIES[2].title);
+      assert.equal(page.el('demo-progress').textContent, `1 of ${DEMO_CHOICES}`);
+      assert.equal(page.name('left'), DEMO_MOVIES[2].title);
 
       page.el('demo-left').click();
       page.el('demo-swap').click();
       page.el('demo-swap').click();
-      assert.equal(page.el('demo-progress').textContent, 'Choice 2 of 5');
+      assert.equal(page.el('demo-progress').textContent, `2 of ${DEMO_CHOICES}`);
+      assert.equal(page.el('demo-result').hasAttribute('inert'), true);
     } finally {
       page.restore();
     }
   });
 
   it('starts again without a reload', async () => {
-    const page = await paintHome({ respond: () => new Error('offline') });
+    const page = await paintHome();
     try {
-      await page.start();
       const firstPair = page.el('demo-status').textContent;
       for (let i = 0; i < DEMO_CHOICES; i++) page.el('demo-left').click();
 
       page.el('demo-again').click();
-      assert.equal(page.el('demo-result').hidden, true);
-      assert.equal(page.el('demo-play').hidden, false);
-      assert.equal(page.el('demo-progress').textContent, 'Choice 1 of 5');
+      assert.equal(page.el('demo-result').hasAttribute('inert'), true);
+      assert.equal(page.el('demo-play').hasAttribute('inert'), false);
+      assert.equal(page.el('demo-progress').textContent, `1 of ${DEMO_CHOICES}`);
       assert.notEqual(page.el('demo-status').textContent, firstPair, 'Try again replayed the same pair');
       assert.equal(page.document.activeElement, page.el('demo-left'));
-      // No second network round trip for the same list.
-      assert.equal(page.requested.length, 1);
+      assert.deepEqual(page.requested, []);
     } finally {
       page.restore();
     }
   });
 
   it('announces each pair to a screen reader', async () => {
-    const page = await paintHome({ respond: () => new Error('offline') });
+    const page = await paintHome();
     try {
-      await page.start();
       assert.equal(
         page.el('demo-status').textContent,
-        `Choice 1 of 5: ${FALLBACK_MOVIES[0].title} or ${FALLBACK_MOVIES[1].title}.`,
+        `Pick 1 of ${DEMO_CHOICES}: ${DEMO_MOVIES[0].title} or ${DEMO_MOVIES[1].title}.`,
       );
       // Each choice's accessible name is its title and year, from its own text.
-      assert.match(page.el('demo-left').textContent.replace(/\s+/g, ' '), new RegExp(`${FALLBACK_MOVIES[0].title} ${FALLBACK_MOVIES[0].year}`));
+      assert.match(
+        page.el('demo-left').textContent.replace(/\s+/g, ' '),
+        new RegExp(`${DEMO_MOVIES[0].title} ${DEMO_MOVIES[0].year}`),
+      );
     } finally {
       page.restore();
     }
   });
 
-  it('scrolls the result into view without animation when motion is reduced', async () => {
+  it('scrolls the panel into view at the end, without animation when motion is reduced', async () => {
     for (const [reduceMotion, behavior] of [
       [true, 'auto'],
       [false, 'smooth'],
     ]) {
-      const page = await paintHome({ respond: () => new Error('offline'), reduceMotion });
+      const page = await paintHome({ reduceMotion });
       try {
-        await page.start();
         for (let i = 0; i < DEMO_CHOICES; i++) page.el('demo-left').click();
-        // Once to bring the card into view on start, once for the result.
-        assert.deepEqual(page.scrolled, [
-          { block: 'nearest', behavior },
-          { block: 'nearest', behavior },
-        ]);
+        // Nothing on arrival or on a pick; once for the result.
+        assert.deepEqual(page.scrolled, [{ block: 'nearest', behavior }]);
       } finally {
         page.restore();
       }

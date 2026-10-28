@@ -641,43 +641,78 @@ anything went near `main`.
 
 ## The ranking demo on the front page — 2026-10-28
 
-The hero's second column is now a five-choice ranking demo in place of the two collection
-shots (they moved to the new "Your collection" section). Logic is in `web/src/demo.mjs`,
-wiring in `wireDemo` in `web/src/page.mjs`, markup in `DEMO` in `web/build.mjs`.
+The hero's second column is a three-pick ranking demo in place of the two collection
+shots, which moved to the new "Your collection" section. Code locations:
 
-### Where its movies come from, and why that needed no backend change
+- Logic: `web/src/demo.mjs`.
+- Movie list: `web/src/demo-movies.mjs`.
+- Wiring: `wireDemo` in `web/src/page.mjs`.
+- Markup: `DEMO` in `web/build.mjs`.
 
-Today's `trending.movie.day` list, read the way the app's Trending shelf reads it:
+Revised the same day after founder visual QA:
 
-1. `GET /rest/v1/provider_list_cache?list_key=eq.trending.movie.day&select=payload,fetched_at&limit=1`
-2. `GET /rest/v1/media_items?id=in.(<up to 20 uuids>)&kind=eq.movie&select=id,kind,title,release_date,poster_path`
+- **No start gate.** The first pair is on screen as soon as the page loads.
+- **Three picks instead of five.**
+- **A fixed-height panel.** The panel keeps one size between the pair and the result.
+- **No store buttons in the result.**
+- **No live Trending.** The demo plays a committed list with real posters.
 
-Both tables are `using (true)` (`20260816000900_trending_cache.sql`, `20260813000400`),
-and `anon` keeps `SELECT` on them: `20260813001400` revokes only insert, update and delete.
-The page holds the same `EXPO_PUBLIC_SUPABASE_URL` / `_ANON_KEY` pair the router pages
-already carry. No grant, policy, function or endpoint was added. Posters load from TMDB's
-image CDN through `posterUrl`, as on `/title` and `/lists`. The privacy policy's "Who else
-sees it" already names both Supabase and direct TMDB poster loads.
+### What it does
 
-**Nothing is fetched until a pointer or focus reaches "Try ranking".** A visitor who never
-touches the demo causes no Supabase request and no TMDB image load.
+- **On arrival:** "Try it here", two posters, and *Click the one you liked more.* Nothing is
+  focused or scrolled on arrival.
+- **The picks:** each pick places one newcomer, by comparing it once against the middle of
+  the order so far. The newcomer lands directly above or below that movie, so no pick is
+  ever contradicted. Three picks always rank four movies.
+- **The result:** shown as "Your demo ranking", *A rough order from 3 picks.* It has four
+  compact rows (position, small poster, title, year) and no score.
+- **Keep ranking in bingd.:** on a phone this is the store link. On a desktop it stays plain
+  text, because the store buttons are right beside it.
+- **Try again** opens on the next four movies of the list.
+- **"Haven't seen both? Swap pair"** never counts as a pick. It holds back enough movies for
+  the remaining picks, so no number of swaps can leave the result short.
 
-### When it uses the fixed list instead
+**Fixed height:** the two views share one grid cell. The result is built with four empty
+rows of the same fixed height as real ones. The panel is therefore the same height on
+arrival and at the result, at every width. The store buttons beside it never move.
 
-`FALLBACK_MOVIES` (16 well-known films, no posters, drawn as typographic tiles) is used
-when the build has no Supabase env (every local build), on any network error or a
-2.5-second timeout, or when the cached list is malformed, older than seven days, or yields
-fewer than eight usable movies. The card says which it is showing: *Trending today, via
-TMDB* or *A few well-known films*.
+### Where its movies come from
 
-**For the live site to show trending movies, the Pages build environment must have both
-`EXPO_PUBLIC_SUPABASE_*` variables set** (see "Build environment" above). If they are not
-set, the demo still works, on the fixed list.
+`web/src/demo-movies.mjs` holds `DEMO_LIST`, a list of `{ tmdbId, title, year, posterPath }`
+plus `source` and `asOf`.
+
+- **No data requests:** the page makes no Supabase or TMDB API request. The front page
+  ships no Supabase config at all, as before the demo.
+- **Posters:** they load from TMDB's image CDN through `posterUrl`, as on `/title` and
+  `/lists`. That covers the two on screen, plus the next newcomer's, fetched slightly ahead.
+- **Privacy and TMDB credit:** the privacy policy's "Who else sees it" already names direct
+  TMDB poster loads. The footer carries the TMDB credit and the not-endorsed notice.
+- **Validation:** `demo.mjs` still validates the list (`demoMovies`). Ids must be positive
+  integers with no repeats, titles are collapsed and capped, and a poster path is only ever
+  turned into a URL by `posterUrl`. This is because the file is meant to be generated.
+
+Today's list is the earlier fallback list of 16 well-known films, with poster paths read
+on 2026-10-28 from the staging catalogue. That read used the public anon key against
+`media_items`, a world-readable table, and every path was checked to return an image from
+`image.tmdb.org/t/p/w342`. *Get Out* and *La La Land* are not in that catalogue, so they
+were replaced by *Interstellar* and *Spider-Man: Into the Spider-Verse* rather than given
+poster paths nobody had checked.
+
+**Planned, not built: a monthly "most ranked on bingd" list.** It would be written over
+`demo-movies.mjs` in the same shape, so the demo and page do not change.
+
+- **Definition:** the movies ranked by the greatest number of **distinct users**, not the
+  most ranking events.
+- **Generation:** an offline step, run by someone with read access to the ranking data. It
+  should exclude movies with fewer than a threshold of distinct rankers, and include no
+  per-user data in the file.
+- **Review:** the generated list is committed through the normal review path.
 
 ### Which Supabase project each build may ship
 
-`web/build.mjs` (`publicSupabase`) enforces this at build time, for every page and not
-only the demo:
+`web/build.mjs` (`publicSupabase`) enforces this at build time. It now applies only to the
+router pages (`/i`, `/u`, `/title`, `/lists`), since the front page carries no Supabase
+config.
 
 | Build | Detected by | May ship |
 |---|---|---|
@@ -685,20 +720,28 @@ only the demo:
 | Branch preview | `CF_PAGES=1`, any other branch | the **staging** project only (`fjxhcbowoxuzulwirzyr`), if configured |
 | Local | no `CF_PAGES` | the **staging** project only, if configured; usually nothing |
 
-The key must be the **anon** key of the same project: a legacy JWT key is checked for
-`role: anon` and a matching `ref`; `sb_publishable_` keys are accepted by name and
-`sb_secret_` keys refused. **Any mismatch is withheld, not refused**: the build succeeds,
-prints `SUPABASE CONFIG WITHHELD: <reason>`, and ships `null`, so every page falls back
-(the demo to its fixed list, the router pages to their generic copy). A production page
-never queries another environment. `web/router.test.mjs` runs each case as a real
-sandboxed build, and two mutants in `web/mutation-check.mjs` pin it.
+**Key check:** the key must be the **anon** key of the same project.
 
-So in Cloudflare → Workers & Pages → `bingd` → Settings → Variables, the **Production**
-environment holds the production URL and anon key, and the **Preview** environment holds
-staging's (or nothing). **This assumes the Pages production branch is `main`**, which is
-inferred rather than confirmed (see "How a deploy happens"). If it were another branch,
-production would be classified as a preview and a production pair would be withheld, which
-fails safe. Confirm it in the same settings screen before the first production deploy of
+- A legacy JWT key is checked for `role: anon` and a matching `ref`.
+- `sb_publishable_` keys are accepted by name.
+- `sb_secret_` keys are refused.
+
+**Any mismatch is withheld, not refused.** The build succeeds, prints
+`SUPABASE CONFIG WITHHELD: <reason>`, and ships `null`, so the router pages fall back to
+their generic copy. A production page never queries another environment. Enforcement is
+tested two ways:
+
+- `web/router.test.mjs` runs each case as a real sandboxed build.
+- Two mutants in `web/mutation-check.mjs` pin the behaviour.
+
+**Cloudflare settings:** in Cloudflare → Workers & Pages → `bingd` → Settings → Variables,
+the **Production** environment holds the production URL and anon key. The **Preview**
+environment holds staging's, or nothing.
+
+**This assumes the Pages production branch is `main`.** That is inferred, not confirmed
+(see "How a deploy happens"). If production were actually built from another branch, a
+production pair would be classified as a preview and withheld, which fails safe. Confirm
+the production branch in the same settings screen before the first production deploy of
 this change.
 
 ### Measurement that would be worth having, and is deliberately not here
@@ -709,9 +752,9 @@ a code change. If that decision is made, the smallest useful set is:
 
 | Event | Carries | Answers |
 |---|---|---|
-| `demo_started` | platform (`ios`/`android`/`other`), `live` or `fallback` | Does the hero card get used? |
-| `demo_completed` | platform, source, swap count (0–n) | Do people finish five? Are swaps a sign the list is wrong for them? |
-| `store_cta_clicked` | platform, placement (`hero`/`demo_result`/`closer`/`sticky`), whether the demo was completed first | Does finishing the demo move installs? |
+| `demo_started` | platform (`ios`/`android`/`other`), on the first pick | Does the hero card get used? |
+| `demo_completed` | platform, list `source`, swap count (0–n) | Do people finish three? Are swaps a sign the list is wrong for them? |
+| `store_cta_clicked` | platform, placement (`hero`/`demo_cta`/`closer`/`sticky`), whether the demo was completed first | Does finishing the demo move installs? |
 
 None of them would carry a title, a movie id or the visitor's order. Modelled on
 `record_invite_open` (anonymous, returning void, route and platform only), they would
