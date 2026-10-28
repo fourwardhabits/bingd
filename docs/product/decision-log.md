@@ -1,7 +1,7 @@
 # Bingd — Decision Log
 
 **Version:** v0.6
-**Last updated:** 2026-09-26 (current-state amendments against `9d9683a`; §15, the stopping point, 2026-09-23)
+**Last updated:** 2026-10-28 (§10, Trending Now shelf; current-state amendments against `9d9683a`, 2026-09-26; §15, the stopping point, 2026-09-23)
 **Companion documents:** [`PRD.md`](./PRD.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md)
 
 ---
@@ -230,6 +230,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Free alpha status | Required | Policy | A free alpha for a product with declared subscription intent is **not assumed to be noncommercial.** The position below does not depend on it being so | — |
 | Image rights | Required | Policy | CDN sizes plus device cache. **No rehosting on Bingd infrastructure**, which means v1 Open Graph link previews are typographic and carry no artwork — a server-rendered preview image is served from Bingd's own infrastructure, and that is rehosting. On-device share cards stay poster-forward: the compositing happens on the user's phone and the user shares the result | When the commercial plan is active and the question has a definite answer |
 | Alpha catalogue | **Decided 2026-08-13** | Engineering | The catalogue for private testing is **seeded from Wikidata**, not fetched from TMDB: ~380 films, ~190 series, ~1,400 seasons, CC0, shipped as a generated migration. Chosen because nothing could enter `media_items` at all while the adapter was unwritten, and because a CC0 catalogue carries no attribution obligation, no retention window and no licence question to settle first. Every film and series keeps its `tmdb_id` and every row keeps its Wikidata id, so the adapter later enriches these rows in place rather than starting again; seasons have no TMDB id to keep, because Wikidata publishes none, and match through their parent series and number | When the adapter ships, or the catalogue's coverage stops being enough to test with |
+| Trending Now shelf | **Decided 2026-10-28** | Founder | One mixed shelf of 12 from TMDB's **daily** movie and series trending lists, read from `provider_list_cache`. **Who:** the top 6 usable films and top 6 usable series by daily trend rank ("usable" = has a `media_items` row); if one kind has fewer than 6, the other backfills in its own trend order. **Order:** film #1, series #1, film #2, series #2, …, counted by position among usable titles, with backfilled titles following in trend order. TMDB `popularity` plays **no part** in who is shown or in what order. Replaces the 2026-08-16 rule, which sorted all forty rows by `popularity` and so showed the same long-running blockbusters for weeks. Considered and rejected the same day: TMDB's combined `trending/all/day` list, alone or weighted against the per-kind lists. Simulation showed it tracked an outside benchmark no better, and the combined list leans heavily towards films; the limit is TMDB's signal, not the formula. `mixTrending` takes a size argument, but sizes other than 12 are accepted, untested debt | If the shelf size changes, a non-TMDB trend source is adopted, or internal momentum has the volume to be a signal |
 
 ### Why the TMDB gate was closed — Required reading before reopening it
 

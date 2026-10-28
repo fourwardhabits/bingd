@@ -103,7 +103,7 @@ describe('reading the trending shelf', () => {
     expect(client.getQueryData(queryKeys.trending())).toBeDefined();
   });
 
-  it('mixes the two lists into one shelf', async () => {
+  it('mixes the two lists into one shelf, film #1 first however popular the show is', async () => {
     rows.provider_list_cache = [
       list('trending.movie.day', ['film-1']),
       list('trending.series.day', ['show-1']),
@@ -114,10 +114,22 @@ describe('reading the trending shelf', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data?.items.map((item) => item.mediaItemId)).toEqual([
-      'show-1',
       'film-1',
+      'show-1',
     ]);
-    expect(result.current.data?.items.map((item) => item.kind)).toEqual(['series', 'movie']);
+    expect(result.current.data?.items.map((item) => item.kind)).toEqual(['movie', 'series']);
+  });
+
+  it('does not read popularity from the catalogue', async () => {
+    // The shelf is ordered by daily trend rank alone (2026-10-28). Not selecting the
+    // column is what keeps it from drifting back in.
+    rows.provider_list_cache = [list('trending.movie.day', ['film-1'])];
+    rows.media_items = [title('film-1', 50)];
+
+    const { result } = await renderHookWithProviders(() => useTrending());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(readOf('media_items')?.columns).not.toMatch(/popularity/);
   });
 
   it('drops a cached id whose title is no longer in the catalogue', async () => {
@@ -152,14 +164,13 @@ describe('reading the trending shelf', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const shown = result.current.data?.items.map((item) => item.mediaItemId) ?? [];
-    expect(shown).toHaveLength(12);
     expect(shown).not.toContain('film-17');
-    expect(shown.filter((id) => id.startsWith('film-')).sort()).toEqual(
-      ['film-1', 'film-3', 'film-4', 'film-5', 'film-6', 'film-7'].sort(),
-    );
-    expect(shown.filter((id) => id.startsWith('show-')).sort()).toEqual(
-      ['show-1', 'show-2', 'show-3', 'show-4', 'show-5', 'show-6'].sort(),
-    );
+    // In daily trend order, film first at each position. film-3 is the second usable
+    // film, so it sits beside show-2 rather than leaving a hole where film-2 was.
+    expect(shown).toEqual([
+      'film-1', 'show-1', 'film-3', 'show-2', 'film-4', 'show-3',
+      'film-5', 'show-4', 'film-6', 'show-5', 'film-7', 'show-6',
+    ]);
   });
 
   it('still serves a list that has just passed its TTL, and says so', async () => {

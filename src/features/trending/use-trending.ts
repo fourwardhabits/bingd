@@ -90,14 +90,14 @@ export function useTrending() {
         if (!kind) continue;
         const ids = ((row.payload as { ids?: unknown })?.ids ?? []) as unknown[];
         ids.forEach((id, rank) => {
-          if (typeof id === 'string') candidates.push({ mediaItemId: id, kind, rank, popularity: null });
+          if (typeof id === 'string') candidates.push({ mediaItemId: id, kind, rank });
         });
       }
       if (candidates.length === 0) return { items: [], stale: false };
 
       const { data: titles, error: titlesError } = await supabase
         .from('media_items')
-        .select('id, title, release_date, poster_path, popularity, kind')
+        .select('id, title, release_date, poster_path, kind')
         .in(
           'id',
           candidates.map((candidate) => candidate.mediaItemId),
@@ -115,7 +115,6 @@ export function useTrending() {
         return [
           {
             ...candidate,
-            popularity: (row.popularity as number | null) ?? null,
             title: row.title as string,
             year: yearOf(row.release_date as string | null),
             posterPath: (row.poster_path as string | null) ?? null,

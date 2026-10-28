@@ -6,27 +6,33 @@
  * of a trending *season*, and the cache key says `series` for that reason
  * (20260816000900).
  *
- * TREND RANK DECIDES WHO IS ON THE SHELF; POPULARITY ONLY ORDERS THEM
+ * DAILY TREND RANK DECIDES WHO IS ON THE SHELF AND THE ORDER THEY APPEAR IN
  *
- * Founder decision, 2026-10-28, replacing the 2026-08-16 merge rule. That rule sorted
+ * Founder decisions, 2026-10-28, replacing the 2026-08-16 merge rule. That rule sorted
  * all forty rows of both lists by `popularity` and kept twelve. `popularity` is a
  * slow-moving figure that accumulates over weeks, so a blockbuster at daily trend rank
  * 17 outranked whatever was #1 today — the shelf showed the same big titles for weeks
  * and left out what was actually trending now.
  *
- * Now the daily trend rank decides who gets on the shelf: the top six usable films and
- * the top six usable series. If one kind has fewer than six, the other fills the gap in
- * its own trend order, so a short list still gives a full shelf. Nothing below
- * that cut can displace a title above it, however popular it is.
+ * Who: the top six usable films and the top six usable series by daily trend rank. If
+ * one kind has fewer than six, the other fills the gap in its own trend order, so a
+ * short list still gives a full shelf. Nothing below that cut can displace a title
+ * above it.
  *
- * `popularity` then orders those twelve for presentation. It is the one figure TMDB
- * publishes on the same scale for both kinds, and it is already on `media_items`
- * because the adapter wrote it in the same request that produced these lists.
+ * Order: film #1, series #1, film #2, series #2, and so on, then whatever the backfill
+ * added, still in trend order. A first version ordered the twelve by `popularity`, and
+ * QA found it made the shelf read as "what has been big for weeks" rather than "what is
+ * trending now": today's #1 film sat eighth. A combined movie-and-TV ranking was
+ * simulated and rejected the same day, because it tracked the outside world no better
+ * and TMDB's combined list leans heavily towards films.
  *
- * Trend rank breaks ties and covers the case where popularity is missing, so a row
- * seeded from Wikidata and never enriched sinks to the bottom of the shelf instead of
- * to a random place in it. Kind and then id break whatever is left, so equal inputs
- * always render in the same order.
+ * "#1" means the first *usable* title of its kind, not the provider's raw position. An
+ * id with no `media_items` row is dropped before this runs, leaving a gap in `rank`;
+ * counting position within the kind means a missing film does not push every later
+ * film a slot behind the series beside it.
+ *
+ * Popularity has no part in either step, and is not on `TrendingCandidate` so that it
+ * cannot quietly come back.
  */
 
 export type TrendingCandidate = {
@@ -34,7 +40,6 @@ export type TrendingCandidate = {
   kind: 'movie' | 'series';
   /** 0-based position in its own provider list. Lower is more trending. */
   rank: number;
-  popularity: number | null;
 };
 
 /** Enough to fill a shelf twice over without the Feed becoming a discovery page.
@@ -44,11 +49,10 @@ export const TRENDING_SHELF_SIZE = 12;
 /** How many of each kind the trend rank admits before the other kind backfills. */
 export const TRENDING_PER_KIND = TRENDING_SHELF_SIZE / 2;
 
-/** Trend rank, then film before series, then id — so equal inputs render identically
- *  whatever order the two lists happened to arrive in. */
-function tieBreak(a: TrendingCandidate, b: TrendingCandidate) {
+/** Trend rank, then id — so one kind's titles line up identically whatever order the
+ *  list happened to arrive in. */
+function byTrendRank(a: TrendingCandidate, b: TrendingCandidate) {
   if (a.rank !== b.rank) return a.rank - b.rank;
-  if (a.kind !== b.kind) return a.kind === 'movie' ? -1 : 1;
   return a.mediaItemId < b.mediaItemId ? -1 : a.mediaItemId > b.mediaItemId ? 1 : 0;
 }
 
@@ -57,30 +61,32 @@ export function mixTrending<T extends TrendingCandidate>(
   limit: number = TRENDING_SHELF_SIZE,
 ): T[] {
   const perKind = Math.min(TRENDING_PER_KIND, limit);
-  const films = candidates.filter((item) => item.kind === 'movie').sort(tieBreak);
-  const series = candidates.filter((item) => item.kind === 'series').sort(tieBreak);
+  const films = candidates.filter((item) => item.kind === 'movie').sort(byTrendRank);
+  const series = candidates.filter((item) => item.kind === 'series').sort(byTrendRank);
 
-  // Each kind's quota by trend rank, then whatever is left over fills the remaining
-  // slots, still in trend order. Only a kind with more than its quota has anything left
-  // over, so the backfill comes from the other kind whenever one falls short.
-  const chosen = [...films.slice(0, perKind), ...series.slice(0, perKind)];
-  const spare = [...films.slice(perKind), ...series.slice(perKind)];
-  chosen.push(...spare.slice(0, Math.max(0, limit - chosen.length)));
+  // Each kind's quota by trend rank, then whatever slots are left go to whichever kind
+  // has titles to spare. Only a kind with more than its quota has any, so the backfill
+  // comes from the other kind whenever one falls short.
+  let filmCount = Math.min(films.length, perKind);
+  let seriesCount = Math.min(series.length, perKind);
+  let open = Math.max(0, limit - filmCount - seriesCount);
+  const extraFilms = Math.min(open, films.length - filmCount);
+  filmCount += extraFilms;
+  open -= extraFilms;
+  seriesCount += Math.min(open, series.length - seriesCount);
 
-  return chosen
-    .sort((a, b) => {
-      // Missing popularity sorts last rather than as zero-and-therefore-tied. Zero
-      // would place an unenriched row *above* nothing and below everything, which is
-      // where it belongs — but it would also tie two unenriched rows and leave them
-      // ordered against each other by a rank that means different things on each
-      // side. Sorting them together at the end keeps that comparison from happening.
-      if (a.popularity == null && b.popularity == null) return tieBreak(a, b);
-      if (a.popularity == null) return 1;
-      if (b.popularity == null) return -1;
-      if (a.popularity !== b.popularity) return b.popularity - a.popularity;
-      return tieBreak(a, b);
-    })
-    .slice(0, limit);
+  // Film before series at each position. Once the shorter kind runs out, the longer one
+  // carries on alone, so backfilled titles follow everything the quota chose.
+  const shownFilms = films.slice(0, filmCount);
+  const shownSeries = series.slice(0, seriesCount);
+  const shelf: T[] = [];
+  for (let position = 0; position < Math.max(filmCount, seriesCount); position++) {
+    const film = shownFilms[position];
+    const show = shownSeries[position];
+    if (film) shelf.push(film);
+    if (show) shelf.push(show);
+  }
+  return shelf.slice(0, limit);
 }
 
 /**
