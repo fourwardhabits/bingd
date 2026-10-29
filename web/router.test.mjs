@@ -4226,6 +4226,58 @@ describe('the ranking demo, painted', () => {
   });
 
   /**
+   * Codex review, 2026-10-28: each pick repaints the same two buttons with the next pair,
+   * so a double-click's second click (`detail` 2) used to answer a comparison the visitor
+   * had not seen. Keyboard activation (`detail` 0) and separate clicks (`detail` 1) count.
+   */
+  it('records a double-click on a poster as exactly one pick', async () => {
+    const page = await paintHome();
+    try {
+      const click = (side, detail) =>
+        page.el(`demo-${side}`).dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+      const doubleClick = (side) => {
+        click(side, 1);
+        click(side, 2);
+        page.el(`demo-${side}`).dispatchEvent(new page.window.MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+      };
+      // What one pick on that side leads to, from the demo's own logic.
+      let expected = startDemo(DEMO_MOVIES, 0);
+      const expect = (side) => {
+        expected = choose(expected, currentPair(expected)[side].id);
+      };
+      const onScreen = () => [page.name('left'), page.name('right')];
+      const shouldShow = () => [currentPair(expected).left.title, currentPair(expected).right.title];
+
+      doubleClick('left');
+      expect('left');
+      assert.equal(page.el('demo-progress').textContent, `2 of ${DEMO_CHOICES}`);
+      assert.deepEqual(onScreen(), shouldShow(), 'the second click answered the next pair');
+
+      // A separate click and a keyboard activation still count, through to the result.
+      click('right', 1);
+      expect('right');
+      assert.equal(page.el('demo-progress').textContent, `3 of ${DEMO_CHOICES}`);
+      page.el('demo-left').click();
+      expect('left');
+      assert.equal(page.el('demo-result').hasAttribute('inert'), false);
+      assert.deepEqual(
+        [...page.el('demo-list').querySelectorAll('.demo-rank-name')].map((title) => title.textContent),
+        demoResult(expected).map((movie) => movie.title),
+      );
+
+      // The same after Try again, where the review reproduced it.
+      page.el('demo-again').click();
+      expected = startDemo(DEMO_MOVIES, 1);
+      doubleClick('right');
+      expect('right');
+      assert.equal(page.el('demo-progress').textContent, `2 of ${DEMO_CHOICES}`);
+      assert.deepEqual(onScreen(), shouldShow(), 'the second click answered the next pair after Try again');
+    } finally {
+      page.restore();
+    }
+  });
+
+  /**
    * The phone's sticky store bar (founder QA, 2026-10-28): the platform's own wording
    * until the demo is finished, then "Keep ranking in bingd." — the words only. The link
    * is still the one `paintInstall` chose, and Try again puts the store's name back.

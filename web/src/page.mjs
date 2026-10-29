@@ -831,8 +831,11 @@ function wireDemo(cfg, platform) {
     paintPlay();
   };
 
-  const pick = (side) => () => {
-    if (!pair) return;
+  // The second click of a double-click (`detail` 2) would land on the pair this repaint
+  // just put on screen, answering a comparison nobody looked at. Keyboard activation
+  // reports 0, and separate taps each report 1, so both still count.
+  const pick = (side) => (event) => {
+    if (!pair || event.detail > 1) return;
     state = choose(state, pair[side].id);
     paintPlay();
   };

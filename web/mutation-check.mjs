@@ -59,7 +59,7 @@
  *  16. The title preview spreading the row it was handed, which is how a private field
  *      reaches a public page without anybody writing its name.
  *
- * Eleven more arrived with the front page's ranking demo and the build's environment
+ * Twelve more arrived with the front page's ranking demo and the build's environment
  * check (2026-10-28). Each is a defect the page would render without complaint:
  *
  *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
@@ -79,6 +79,8 @@
  *      "Keep ranking in bingd."
  *  22c. The hero's in-flow store row kept on a phone, between the description and the
  *      demo, duplicating the sticky bar.
+ *  22d. The double-click guard dropped, so the second click of a double-click answers
+ *      the next pair before the visitor has seen it.
  *  23. A production build allowed to ship the staging project, so bingd.app quietly
  *      reads staging and writes invitation opens into staging's funnel.
  *  24. The anon-role check on the key dropped, so a `service_role` key pasted into the
@@ -183,6 +185,11 @@ const MUTANTS = [
         '        body:has(.sticky a.button:not([hidden])) .hero .split-copy .actions,\n',
         '',
       ),
+  },
+  {
+    name: 'a double-click on a poster answering the next pair too',
+    file: PAGE,
+    apply: (s) => s.replace('if (!pair || event.detail > 1) return;', 'if (!pair) return;'),
   },
   {
     name: 'the result\'s reserved rows dropped, so the demo panel grows on the third pick',
