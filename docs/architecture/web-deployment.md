@@ -636,3 +636,171 @@ The Pages project is git-connected, every branch gets a preview at
 deploy without touching the live domain. That was used here: the preview served the new
 page, both `.well-known` files with correct content types, and every router route, before
 anything went near `main`.
+
+---
+
+## The ranking demo on the front page — 2026-10-28
+
+The hero's second column is a three-pick ranking demo in place of the two collection
+shots, which moved to the new "Your collection" section. Code locations:
+
+- Logic: `web/src/demo.mjs`.
+- Movie list: `web/src/demo-movies.mjs`.
+- Wiring: `wireDemo` in `web/src/page.mjs`.
+- Markup: `DEMO` in `web/build.mjs`.
+
+Revised the same day after three rounds of founder visual QA:
+
+- **No start gate.** The first pair is on screen as soon as the page loads.
+- **Three picks instead of five.**
+- **A fixed-height panel.** The panel keeps one size between the pair and the result.
+- **No store buttons in the result.**
+- **No live Trending.** The demo plays a committed list with real posters.
+- **A familiarity-first movie pool.** Pairs are drawn across different genre families.
+- **A phone hero without its own store row.** The sticky bar converts on phones and
+  relabels itself when the demo is finished.
+
+### What it does
+
+- **On arrival:** "Try it here", two posters, and *Click the one you liked more.* Nothing is
+  focused or scrolled on arrival.
+- **The picks:** each pick places one newcomer, by comparing it once against the middle of
+  the order so far. The newcomer lands directly above or below that movie, so no pick is
+  ever contradicted. Three picks always rank four movies.
+- **Pair selection:** the next unseen movie is the first in list order from a **different
+  genre family** than the movie it will face. If none is left, it is simply the next in
+  line. Families are never shown or asked about.
+- **The result:** shown as "Your demo ranking", *A rough order from 3 picks.* It has four
+  compact rows (position, small poster, title, year) and no score.
+- **Try again** opens on the next four movies of the list.
+- **"Haven't seen both? Swap pair"** never counts as a pick. It holds back enough movies for
+  the remaining picks, so no number of swaps can leave the result short.
+
+**Fixed height:** the two views share one grid cell. The result is built with four empty
+rows of the same fixed height as real ones. The panel is therefore the same height on
+arrival and at the result, at every width. The store buttons beside it never move.
+
+### Store calls to action, phone and desktop
+
+- **Desktop:** the hero keeps both store buttons beside the demo. The result's small
+  *Keep ranking in bingd.* is plain text, because the buttons are right there.
+- **Phone (the sticky bar is showing):** the hero is headline, description, then demo. The
+  hero's in-flow store row and the result's small call to action are hidden, and the
+  sticky bar is the store button.
+- **Sticky bar label:** before and during the demo it reads the platform's own wording
+  ("Get bingd. on Google Play" / "…on the App Store"). Once the third pick is made it reads
+  *Keep ranking in bingd.* and keeps the same destination. *Try again* puts the store's
+  name back.
+- **How "phone" is decided:** the hiding rule uses the sticky bar's own condition, so it
+  applies exactly when the bar is visible. That condition is phone width plus a bar that
+  `page.mjs` has painted. On a phone where the bar never appears (no store destination, or
+  a browser without `:has()`), the hero row stays.
+
+### Where its movies come from
+
+`web/src/demo-movies.mjs` holds `DEMO_LIST`: a list of
+`{ tmdbId, title, year, posterPath, family }` plus `source` and `asOf`.
+
+- **No data requests:** the page makes no Supabase or TMDB API request. The front page
+  ships no Supabase config at all, as before the demo.
+- **Posters:** they load from TMDB's image CDN through `posterUrl`, as on `/title` and
+  `/lists`. That covers the two on screen, plus the next two in line, fetched slightly
+  ahead.
+- **Privacy and TMDB credit:** the privacy policy's "Who else sees it" already names direct
+  TMDB poster loads. The footer carries the TMDB credit and the not-endorsed notice.
+- **Validation:** `demo.mjs` still validates the list (`demoMovies`). Ids must be positive
+  integers with no repeats, titles are collapsed and capped, an unknown family becomes
+  `null`, and a poster path is only ever turned into a URL by `posterUrl`. This is because
+  the file is meant to be generated.
+
+**The current list optimises for familiarity:** how likely is an everyday movie fan to
+have seen both films on screen? It has 14 movies, two per genre family, with one
+pre-2000 classic (*Titanic*), 13 from 2000 or later, and 5 from 2018 or later. There is
+one film per franchise, and no two films of the same family sit next to each other in the
+list. `router.test.mjs` enforces these rules:
+
+- 12–16 movies
+- at least 80% from 2000 or later
+- at most two films before 2000
+- at least four from 2018 or later
+- every family present
+- no family with more than three films
+- no *Jurassic Park*
+
+Poster paths were read on 2026-10-28 from the staging catalogue. That read used the public
+anon key against `media_items`, a world-readable table, and every path was checked to
+return an image from `image.tmdb.org/t/p/w342`. Films missing from that catalogue (for
+example *Get Out*, *La La Land*, *Top Gun: Maverick*, *Frozen*) were left out rather than
+given poster paths nobody had checked.
+
+**Planned, not built: a monthly "most ranked on bingd" list.** It would be written over
+`demo-movies.mjs` in the same shape, so the demo and page do not change.
+
+1. **Candidates:** movies ordered by `count(distinct user_id)` over bingd rankings, not by
+   number of ranking events. One person re-ranking a favourite ten times is one vote.
+   Exclude anything under a minimum number of distinct rankers.
+2. **Constraints:** apply the familiarity and diversity rules above to the candidates. That
+   means the size, recency mix, cap on classics, one film per franchise, every genre family
+   represented, and an order that alternates families. Then attach each film's TMDB poster
+   path and family.
+3. **Output:** the file holds only catalogue facts (TMDB id, title, year, poster path,
+   family). It holds no counts and no per-user data.
+4. **Run:** offline, by someone with read access to the ranking data, outside the website.
+   The generated list is committed through the normal review path, and the build tests
+   must pass on it.
+5. **The browser never queries ranking aggregates.** The landing page gets no database
+   access of any kind, production or otherwise.
+
+### Which Supabase project each build may ship
+
+`web/build.mjs` (`publicSupabase`) enforces this at build time. It now applies only to the
+router pages (`/i`, `/u`, `/title`, `/lists`), since the front page carries no Supabase
+config.
+
+| Build | Detected by | May ship |
+|---|---|---|
+| Production (bingd.app) | `CF_PAGES=1` and `CF_PAGES_BRANCH=main` | the **production** project only (`abheeqyjzekiowkztfxv`) |
+| Branch preview | `CF_PAGES=1`, any other branch | the **staging** project only (`fjxhcbowoxuzulwirzyr`), if configured |
+| Local | no `CF_PAGES` | the **staging** project only, if configured; usually nothing |
+
+**Key check:** the key must be the **anon** key of the same project.
+
+- A legacy JWT key is checked for `role: anon` and a matching `ref`.
+- `sb_publishable_` keys are accepted by name.
+- `sb_secret_` keys are refused.
+
+**Any mismatch is withheld, not refused.** The build succeeds, prints
+`SUPABASE CONFIG WITHHELD: <reason>`, and ships `null`, so the router pages fall back to
+their generic copy. A production page never queries another environment. Enforcement is
+tested two ways:
+
+- `web/router.test.mjs` runs each case as a real sandboxed build.
+- Two mutants in `web/mutation-check.mjs` pin the behaviour.
+
+**Cloudflare settings:** in Cloudflare → Workers & Pages → `bingd` → Settings → Variables,
+the **Production** environment holds the production URL and anon key. The **Preview**
+environment holds staging's, or nothing.
+
+**This assumes the Pages production branch is `main`.** That is inferred, not confirmed
+(see "How a deploy happens"). If production were actually built from another branch, a
+production pair would be classified as a preview and withheld, which fails safe. Confirm
+the production branch in the same settings screen before the first production deploy of
+this change.
+
+### Measurement that would be worth having, and is deliberately not here
+
+No event was added, for the reason in "The site still has no analytics" above: the
+front page has no approved sink, and adding one is a privacy-policy decision before it is
+a code change. If that decision is made, the smallest useful set is:
+
+| Event | Carries | Answers |
+|---|---|---|
+| `demo_started` | platform (`ios`/`android`/`other`), on the first pick | Does the hero card get used? |
+| `demo_completed` | platform, list `source`, swap count (0–n) | Do people finish three? Are swaps a sign the list is wrong for them? |
+| `store_cta_clicked` | platform, placement (`hero`/`demo_cta`/`closer`/`sticky`), whether the demo was completed first | Does finishing the demo move installs? |
+
+None of them would carry a title, a movie id or the visitor's order. Modelled on
+`record_invite_open` (anonymous, returning void, route and platform only), they would
+need a migration and an independent review as a sensitive surface. App Store Connect's
+Web Referrer report remains the free baseline to compare against before and after the
+demo ships.

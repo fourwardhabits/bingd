@@ -59,6 +59,33 @@
  *  16. The title preview spreading the row it was handed, which is how a private field
  *      reaches a public page without anybody writing its name.
  *
+ * Twelve more arrived with the front page's ranking demo and the build's environment
+ * check (2026-10-28). Each is a defect the page would render without complaint:
+ *
+ *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
+ *      one of their three.
+ *  18. A demo poster path used as written rather than through `posterUrl`, so a value in
+ *      the movie list becomes an `img.src` that can leave TMDB's CDN.
+ *  19. The swap reserve dropped, so a visitor who swaps often is handed a "ranking" of
+ *      two movies.
+ *  20. A demo title written as markup rather than text.
+ *  21. A preferred newcomer put at the bottom, which contradicts the pick the visitor
+ *      just made and reads as the demo not listening.
+ *  22. The result's reserved rows dropped, so the panel grows on the third pick and the
+ *      page moves under the visitor's hand.
+ *  22a. Pairs chosen in list order regardless of genre family, so two superhero films
+ *      face each other when a comedy was waiting.
+ *  22b. The phone's sticky bar left naming the store after the demo, instead of
+ *      "Keep ranking in bingd."
+ *  22c. The hero's in-flow store row kept on a phone, between the description and the
+ *      demo, duplicating the sticky bar.
+ *  22d. The double-click guard dropped, so the second click of a double-click answers
+ *      the next pair before the visitor has seen it.
+ *  23. A production build allowed to ship the staging project, so bingd.app quietly
+ *      reads staging and writes invitation opens into staging's funnel.
+ *  24. The anon-role check on the key dropped, so a `service_role` key pasted into the
+ *      public variable is baked into every page.
+ *
  * **The Apple team id is not here, and cannot be.** It has exactly one source in this
  * repository and nothing to cross-check it against, so a wrong value is consistent
  * everywhere and no offline test can see it. It is verified by a link opening on a
@@ -80,8 +107,95 @@ const APP_CONFIG = join(root, 'app.config.ts');
 const BUILD = join(here, 'build.mjs');
 const ROUTER = join(here, 'src', 'router.mjs');
 const DISTRIBUTION = join(here, 'distribution.config.json');
+const DEMO = join(here, 'src', 'demo.mjs');
+const PAGE = join(here, 'src', 'page.mjs');
 
 const MUTANTS = [
+  {
+    name: 'a production build allowed to ship the staging Supabase project',
+    file: BUILD,
+    apply: (s) =>
+      s.replace(
+        "const project = deployTarget === 'production' ? 'production' : 'staging';",
+        "const project = 'staging';",
+      ),
+  },
+  {
+    name: 'the anon-role check dropped, so a service_role key can reach a page',
+    file: BUILD,
+    apply: (s) =>
+      s.replace("if (!claims || claims.role !== 'anon') return withhold", 'if (!claims) return withhold'),
+  },
+  {
+    name: 'a demo swap counted as one of the three picks',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        /(export function swap\(state\) \{\r?\n\s+if \(!canSwap\(state\)\) return state;)/,
+        '$1\n  state = { ...state, selections: state.selections + 1 };',
+      ),
+  },
+  {
+    name: 'a demo poster path used as written, rather than through posterUrl',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        'poster: posterUrl(entry.posterPath),',
+        "poster: typeof entry.posterPath === 'string' ? `https://image.tmdb.org/t/p/w342${entry.posterPath}` : null,",
+      ),
+  },
+  {
+    name: 'the swap reserve dropped, so swaps can leave the result short of four',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        'return state.remaining.length >= replaced + stillToDraw;',
+        'return state.remaining.length >= replaced;',
+      ),
+  },
+  {
+    name: 'a demo title written as markup rather than text',
+    file: PAGE,
+    apply: (s) => s.replace('if (name) name.textContent = movie.title;', 'if (name) name.innerHTML = movie.title;'),
+  },
+  {
+    name: 'a preferred newcomer dropped to the bottom, against the visitor\'s pick',
+    file: DEMO,
+    apply: (s) =>
+      s.replace(
+        'const index = preferred ? pivot : pivot + 1;',
+        'const index = preferred ? state.ranked.length : pivot + 1;',
+      ),
+  },
+  {
+    name: 'demo pairs chosen in list order, ignoring genre family',
+    file: DEMO,
+    apply: (s) => s.replace('return index === -1 ? 0 : index;', 'return 0;'),
+  },
+  {
+    name: 'the phone\'s sticky store bar left naming the store after the demo is finished',
+    file: PAGE,
+    apply: (s) => s.replace("sticky.textContent = finished ? 'Keep ranking in bingd.' : stickyLabel;", 'sticky.textContent = stickyLabel;'),
+  },
+  {
+    name: 'the hero\'s in-flow store row kept on a phone, above the demo and under the sticky bar',
+    file: BUILD,
+    apply: (s) =>
+      s.replace(
+        '        body:has(.sticky a.button:not([hidden])) .hero .split-copy .actions,\n',
+        '',
+      ),
+  },
+  {
+    name: 'a double-click on a poster answering the next pair too',
+    file: PAGE,
+    apply: (s) => s.replace('if (!pair || event.detail > 1) return;', 'if (!pair) return;'),
+  },
+  {
+    name: 'the result\'s reserved rows dropped, so the demo panel grows on the third pick',
+    file: BUILD,
+    apply: (s) => s.replace('const DEMO_RANK_SLOTS = Array.from(\n  { length: 4 },', 'const DEMO_RANK_SLOTS = Array.from(\n  { length: 0 },'),
+  },
   {
     /**
      * The Android ordering, put back the way the closed test needed it.

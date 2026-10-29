@@ -454,15 +454,87 @@ await writeFile(
 // ---------------------------------------------------------------------------
 
 /**
- * Supabase, for the one call the invitation page makes.
+ * Supabase, for the invitation page's open metric and the router pages' context. The
+ * front page carries none: its ranking demo plays a committed list (`demo-movies.mjs`).
  *
- * Read from the environment and **optional**. Absent, the page still renders and
- * simply records no open, which is what a local `npm run build:web` does. The anon key
- * is public by construction — it is in the mobile bundle already, and it is bounded by
- * row level security — so there is no secret here to leak by baking it in.
+ * Read from the environment and **optional**. Absent, every page still renders: the
+ * invitation records no open and the router pages keep their generic copy. That is
+ * what a local `npm run build:web` does. The anon key is
+ * public by construction — it is in the mobile bundle already, and it is bounded by row
+ * level security — so there is no secret here to leak by baking it in.
+ *
+ * ---------------------------------------------------------------------------
+ * WHICH PROJECT A BUILD MAY SHIP, AND WHAT HAPPENS OTHERWISE (2026-10-28)
+ * ---------------------------------------------------------------------------
+ *
+ * The page talks to whatever project it is handed, so the handing-over is where the
+ * environments are kept apart:
+ *
+ *   - **Production** (Cloudflare Pages building the production branch, `main`) may ship
+ *     the production project and nothing else. bingd.app must never read staging.
+ *   - **A branch preview, or a local build**, may ship staging and nothing else, and only
+ *     when it has been configured on purpose. Preview and local builds are where staging
+ *     is meant to be exercised, and keeping production out of them keeps a test page
+ *     from writing invitation opens into the real funnel.
+ *
+ * The target is read from `CF_PAGES` and `CF_PAGES_BRANCH`, which Pages sets on every
+ * build and which carry no secret. **A pair that does not fit its target is withheld
+ * rather than refused**: the build succeeds, every page gets `null`, and the site falls
+ * back as it does with no config at all. A deploy whose invitation pages silently stop
+ * counting opens is a defect somebody notices in the build log; a production page quietly
+ * reading staging is one nobody would.
+ *
+ * The key is checked as well as the URL. A legacy Supabase key is a JWT whose payload
+ * names its project and its role, so a key for another project, or a `service_role` key
+ * pasted into the wrong variable, is caught here before it can reach a page. The newer
+ * `sb_publishable_` keys are public by name and `sb_secret_` keys are refused by name.
+ *
+ * The two project refs are public: they are the hostnames the apps already call.
  */
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? null;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? null;
+const SUPABASE_PROJECTS = { production: 'abheeqyjzekiowkztfxv', staging: 'fjxhcbowoxuzulwirzyr' };
+const PRODUCTION_BRANCH = 'main';
+
+const deployTarget =
+  process.env.CF_PAGES === '1'
+    ? process.env.CF_PAGES_BRANCH === PRODUCTION_BRANCH
+      ? 'production'
+      : 'preview'
+    : 'local';
+
+/** The configured pair if it is the right project's public pair, and why not otherwise. */
+function publicSupabase(url, key) {
+  if (!url && !key) return { url: null, key: null, withheld: null };
+  const project = deployTarget === 'production' ? 'production' : 'staging';
+  const withhold = (why) => ({ url: null, key: null, withheld: why });
+
+  const host = /^https:\/\/([a-z0-9]{20})\.supabase\.co$/.exec(url ?? '');
+  if (!host) return withhold('EXPO_PUBLIC_SUPABASE_URL is not a Supabase project URL');
+  if (host[1] !== SUPABASE_PROJECTS[project]) {
+    return withhold(`a ${deployTarget} build may only ship the ${project} project, and was given ${host[1]}`);
+  }
+
+  if (typeof key !== 'string' || !key) return withhold('the anon key is missing');
+  if (key.startsWith('sb_secret_')) return withhold('the key is a secret key, not a public one');
+  if (!key.startsWith('sb_publishable_')) {
+    let claims = null;
+    try {
+      claims = JSON.parse(Buffer.from(key.split('.')[1] ?? '', 'base64url').toString('utf8'));
+    } catch {
+      /* not a JWT */
+    }
+    if (!claims || claims.role !== 'anon') return withhold('the key is not an anon key');
+    if (claims.ref !== host[1]) return withhold('the key belongs to a different project than the URL');
+  }
+
+  return { url, key, withheld: null };
+}
+
+const supabaseConfig = publicSupabase(
+  process.env.EXPO_PUBLIC_SUPABASE_URL ?? null,
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? null,
+);
+const supabaseUrl = supabaseConfig.url;
+const supabaseAnonKey = supabaseConfig.key;
 
 /**
  * The distribution config with its `$comment` keys dropped.
@@ -2167,9 +2239,9 @@ for (const route of ROUTES) {
  * offered nothing to tap.
  *
  * Having no token to resolve is a reason to skip the *context* block, not the install
- * row. So the row is here, wired by the same `page.mjs` the router pages use through
- * `page: 'generic'`, which is `paintInstall` and nothing else: no context fetch, no
- * Supabase read, no handle in the URL. `destinationFor` then says what is actually
+ * row. So the row is here, wired by the same `page.mjs` the router pages use, now through
+ * `page: 'home'`: `paintInstall` plus the ranking demo, which plays a committed list. No
+ * context fetch, no Supabase read, no handle in the URL. `destinationFor` then says what is actually
  * available per platform — the App Store on iOS, the public Play listing on Android —
  * instead of one sentence trying to describe both.
  */
@@ -2271,8 +2343,11 @@ const LANDING_STYLES = `
       @media (min-width: 56rem) {
         .hero .split { grid-template-columns: minmax(0, 1fr); }
       }
+      /* align-items: start keeps the headline at the top of its column beside the demo
+         panel. The panel no longer changes height between its two views (see .demo-stage),
+         so nothing beside it moves when the result appears. */
       @media (min-width: 64rem) {
-        .hero .split { grid-template-columns: minmax(37rem, 1fr) minmax(0, 1fr); gap: 3rem; }
+        .hero .split { grid-template-columns: minmax(37rem, 1fr) minmax(0, 1fr); gap: 3rem; align-items: start; }
       }
 
       .hero .lede {
@@ -2280,6 +2355,263 @@ const LANDING_STYLES = `
         font-size: clamp(1.0625rem, 2.6vw, 1.1875rem);
         color: var(--secondary);
         max-width: 34rem;
+      }
+
+      /* ------------------------------------------------------------------- demo */
+
+      /* The ranking demo takes the hero's second column, where the two collection shots
+         used to sit; they moved one section down, to the section about the collection.
+         On a phone it follows the install row directly, so the first screen is the
+         headline, the store button and the first pair, in that order. */
+      .demo {
+        width: 100%;
+        max-width: 30rem;
+        margin-inline: auto;
+        padding: 1rem 1.125rem 1.125rem;
+        border-radius: 1rem;
+        background: var(--parchment);
+        border: 1px solid var(--hairline);
+        box-shadow: 0 18px 44px var(--shadow);
+        scroll-margin-block: 1rem;
+      }
+      /* On a phone the sticky store bar covers the bottom of the viewport, so bringing the
+         card into view must stop short of it or the choices land underneath. */
+      @media (max-width: 55.99rem) {
+        .demo { scroll-margin-block-end: calc(7rem + env(safe-area-inset-bottom)); }
+      }
+
+      /* The two views share one grid cell, so the panel is always as tall as the taller
+         of them and finishing the demo moves nothing. The inactive view is inert, which
+         takes it out of the tab order and the accessibility tree; visibility hides it
+         without giving up the space it holds. */
+      .demo-stage { display: grid; }
+      .demo-pane { grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; }
+      .demo-pane[inert] { visibility: hidden; }
+
+      .demo button {
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .demo button:focus-visible, .demo a:focus-visible { outline: 2px solid var(--maroon); outline-offset: 3px; }
+      .demo button:disabled { cursor: default; }
+
+      .demo-top { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+      .demo .kicker { margin: 0; }
+      .demo-progress { white-space: nowrap; font-size: 0.8125rem; font-weight: 600; color: var(--tertiary); font-variant-numeric: tabular-nums; }
+
+      /* Two posters, side by side at every width: on a 360pt phone each is still about
+         140px wide, which is a thumb-sized target with room to spare. */
+      .demo-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+      .demo-choice {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+        min-width: 0;
+        padding: 0.4375rem 0.4375rem 0.5rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--hairline);
+        background: var(--paper);
+        text-align: left;
+        transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+      }
+      .demo-choice:hover { border-color: rgba(119, 55, 68, 0.65); box-shadow: 0 8px 22px var(--shadow); }
+      .demo-choice:active { transform: scale(0.97); }
+
+      /* The tile is the poster's floor: the title set in the brand serif on Maroon. It is
+         what shows until a poster has decoded, and what stays if TMDB stops serving one,
+         so there is never an empty frame or a broken-image icon. */
+      .demo-art {
+        position: relative;
+        display: block;
+        aspect-ratio: 2 / 3;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        background: linear-gradient(160deg, #8a4553, var(--maroon) 60%, #5e2a35);
+      }
+      .demo-tile {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: flex-end;
+        padding: 0.75rem;
+        color: var(--inverse);
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(1rem, 3.6vw, 1.25rem);
+        line-height: 1.12;
+        overflow-wrap: anywhere;
+      }
+      .demo-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .demo-name {
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        font-weight: 600;
+        font-size: 0.875rem;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+      }
+      .demo-year { font-size: 0.75rem; color: var(--tertiary); line-height: 1.2; }
+
+      .demo-prompt {
+        margin-top: 0.75rem;
+        text-align: center;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(1.2rem, 4vw, 1.375rem);
+        line-height: 1.2;
+      }
+
+      /* The escape hatch is deliberately quiet: text, not a third poster-sized target. It
+         still keeps a 44px touch height. */
+      .demo .demo-swap {
+        display: block;
+        min-height: 44px;
+        margin: 0.125rem auto -0.5rem;
+        padding: 0.5rem 0.75rem;
+        border: 0;
+        background: none;
+        color: var(--secondary);
+        font-size: 0.8125rem;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .demo .demo-swap:disabled { opacity: 0.5; text-decoration: none; }
+
+      /* The result: a quiet line about what it is, four compact rows of one fixed height
+         each, and one row of actions. No store buttons — those are beside the panel
+         already. Every row is one line of title, so no title can make the result taller
+         than the four empty rows it replaces (DEMO_RANK_SLOTS). */
+      .demo-result h2 { font-size: clamp(1.35rem, 4.2vw, 1.6rem); line-height: 1.15; }
+      .demo-result h2:focus { outline: none; }
+      .demo-list { list-style: none; margin: 0.625rem 0 0; padding: 0; display: grid; gap: 0.375rem; }
+      .demo-rank {
+        display: grid;
+        grid-template-columns: 1.25rem 2rem minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.625rem;
+        padding: 0.3125rem 0.75rem 0.3125rem 0.5rem;
+        border-radius: 0.625rem;
+        background: var(--paper);
+        border: 1px solid var(--hairline);
+        animation: demo-rise 320ms ease both;
+        animation-delay: calc(var(--i, 0) * 70ms);
+      }
+      .demo-rank-n {
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: 1.375rem;
+        line-height: 1;
+        color: var(--maroon);
+        text-align: center;
+      }
+      .demo-rank-art { width: 2rem; border-radius: 0.25rem; }
+      .demo-rank-art .demo-tile { font-size: 0; padding: 0; }
+      .demo-rank-name {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-weight: 600;
+        font-size: 0.9375rem;
+        line-height: 1.25;
+      }
+      .demo-rank-year { font-size: 0.8125rem; color: var(--tertiary); font-variant-numeric: tabular-nums; }
+      /* On the narrowest phones the year gives its room to the title. */
+      @media (max-width: 22.5rem) { .demo-rank-year { display: none; } }
+
+      .demo-honest { margin-top: 0.25rem; font-size: 0.8125rem; line-height: 1.4; color: var(--tertiary); }
+      /* One row at every width: the call to action may wrap onto a second line of its own,
+         which still fits inside the button's height, rather than pushing the button down. */
+      .demo-end {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: auto;
+        padding-top: 0.625rem;
+      }
+      /* A link to the store on a phone; plain words beside the store buttons elsewhere. */
+      .demo-cta {
+        min-width: 0;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(1rem, 3.4vw, 1.2rem);
+        line-height: 1.15;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .demo-cta[href] { color: var(--maroon); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+      .demo .demo-again {
+        flex: none;
+        min-height: 44px;
+        padding: 0.5rem 0.875rem;
+        border-radius: 0.5rem;
+        border: 1px solid rgba(119, 55, 68, 0.65);
+        background: transparent;
+        color: var(--maroon);
+        font-size: 0.9375rem;
+        font-weight: 500;
+      }
+
+      @keyframes demo-rise {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: none; }
+      }
+
+      /* Reduced motion: the order appears at once and nothing scales under a finger. The
+         scroll into view reads the same preference in page.mjs. */
+      @media (prefers-reduced-motion: reduce) {
+        .demo-choice { transition: none; }
+        .demo-choice:active { transform: none; }
+        .demo-rank { animation: none; }
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* ---------------------------------------------------------- founder note */
+
+      /* An editorial pull quote kept to a short read: an oversized opening quotation mark
+         in Maroon as the one accent, the founder's words in the body sans at reading size,
+         tight paragraphs and a quiet attribution. Under half a desktop viewport, so the
+         section after it is already in view. */
+      .founder-section { padding-block: 2.75rem; }
+      .founder-note { position: relative; max-width: 36rem; margin: 0 auto; padding-top: 2.25rem; }
+      .founder-note::before {
+        content: '\\201C';
+        position: absolute;
+        top: -0.75rem;
+        left: -0.125rem;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: 4.5rem;
+        line-height: 1;
+        color: var(--maroon);
+        opacity: 0.35;
+      }
+      .founder-note blockquote { margin: 0; }
+      .founder-note blockquote p {
+        font-size: 1.0625rem;
+        line-height: 1.6;
+        color: var(--ink);
+      }
+      .founder-note blockquote p + p { margin-top: 0.75rem; }
+      .founder-note figcaption {
+        margin-top: 0.25rem;
+        font-size: 0.9375rem;
+        color: var(--tertiary);
+      }
+      @media (max-width: 30rem) {
+        .founder-section { padding-block: 2.25rem; }
+        .founder-note { padding-top: 2rem; }
+        .founder-note blockquote p { font-size: 1rem; }
       }
 
       /* ---------------------------------------------------------------- buttons */
@@ -2449,6 +2781,19 @@ const LANDING_STYLES = `
         body:has(.sticky a.button:not([hidden])) {
           padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
         }
+
+        /* With the sticky bar on screen, the hero's own store row is the same button a
+           second time, sitting between the description and the demo. On a phone the bar
+           does the converting, so the hero goes headline, description, demo — and the
+           demo result's small call to action goes too, because the bar now says
+           "Keep ranking in bingd." itself (page.mjs). Keyed to the bar's own condition,
+           so a phone whose bar never appears (no :has(), no destination) keeps both. */
+        body:has(.sticky a.button:not([hidden])) .hero .split-copy .actions,
+        body:has(.sticky a.button:not([hidden])) .hero .split-copy .fineprint,
+        body:has(.sticky a.button:not([hidden])) .demo-cta {
+          display: none;
+        }
+        body:has(.sticky a.button:not([hidden])) .demo .demo-again { margin-inline-start: auto; }
       }
 `;
 
@@ -2551,6 +2896,83 @@ const installRow = ({ primary = false } = {}) => {
 
           <p class="fineprint"${name('no-destination')} hidden>${UNAVAILABLE}</p>`;
 };
+
+/**
+ * One of the demo's two choices: a real `<button>`, so Enter, Space, focus order and a
+ * screen reader's "button" all come from the platform. Its accessible name is the title
+ * and year `page.mjs` writes into it; the art is hidden from assistive technology
+ * because the tile only repeats the title.
+ */
+const demoChoice = (side) => `                  <button type="button" class="demo-choice" id="demo-${side}">
+                    <span class="demo-art" aria-hidden="true"><span class="demo-tile"></span><img alt="" width="342" height="513" hidden /></span>
+                    <span class="demo-name"></span>
+                    <span class="demo-year"></span>
+                  </button>`;
+
+/**
+ * Four empty rows the result is born with, one per movie a finished demo ranks
+ * (`DEMO_RESULT_SIZE`). The result view is inert and invisible until the end, but it is
+ * laid out from the start, so these rows are what make the panel the result's height on
+ * arrival rather than growing into it on the third pick. `page.mjs` replaces them with
+ * rows of the same shape and the same fixed height.
+ */
+const DEMO_RANK_SLOTS = Array.from(
+  { length: 4 },
+  () =>
+    '                  <li class="demo-rank" aria-hidden="true"><span class="demo-rank-n">&nbsp;</span><span class="demo-art demo-rank-art"></span><span class="demo-rank-name">&nbsp;</span></li>',
+).join('\n');
+
+/**
+ * The ranking demo in the hero. See `web/src/demo.mjs` for what it does and what it
+ * deliberately does not claim, and `wireDemo` in `page.mjs` for the wiring.
+ *
+ * **No gate.** The first pair is on screen the moment the module runs, under one line
+ * of instruction; there is no intro, no explanation and no "start" button between the
+ * visitor and the first pick.
+ *
+ * Two views in one grid cell, swapped with `inert`: the pair, and the result. Sharing
+ * the cell is what keeps the panel one size (see `.demo-stage`). The result carries no
+ * store buttons — the hero's are right beside it, and on a phone the sticky bar is
+ * under it — only a small "Keep ranking in bingd." that becomes the store link on a
+ * phone.
+ *
+ * The instruction is "Click the one you liked more", the founder's wording, which keeps
+ * the app's question ("Which did you like more?") without quoting it as a question.
+ * It presumes the visitor has seen both, which is what the swap is for.
+ *
+ * A browser without JavaScript never sees the card at all (the `<noscript>` style in the
+ * head), rather than two empty frames that do nothing.
+ */
+const DEMO = `          <div class="demo" id="demo">
+            <div class="demo-stage">
+              <div class="demo-pane" id="demo-play">
+                <div class="demo-top">
+                  <p class="kicker">Try it here</p>
+                  <p class="demo-progress" id="demo-progress"></p>
+                </div>
+                <div class="demo-choices" role="group" aria-labelledby="demo-prompt">
+${demoChoice('left')}
+${demoChoice('right')}
+                </div>
+                <p class="demo-prompt" id="demo-prompt">Click the one you liked more</p>
+                <button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both? Swap pair</button>
+              </div>
+
+              <div class="demo-pane demo-result" id="demo-result" inert>
+                <h2 id="demo-result-title" tabindex="-1">Your demo ranking</h2>
+                <p class="demo-honest">A rough order from 3 picks</p>
+                <ol class="demo-list" id="demo-list">
+${DEMO_RANK_SLOTS}
+                </ol>
+                <div class="demo-end">
+                  <a class="demo-cta" id="demo-cta">Keep ranking in bingd.</a>
+                  <button type="button" class="demo-again" id="demo-again">Try again</button>
+                </div>
+              </div>
+            </div>
+
+            <p class="visually-hidden" id="demo-status" role="status" aria-live="polite"></p>
+          </div>`;
 
 /**
  * What the page says under the buttons about where it can actually be installed from.
@@ -2681,9 +3103,12 @@ const SOFTWARE_APPLICATION = {
  *     invented one is the fastest way to lose the exact reader this page is for.
  *   - **The screenshots are real and unretouched except for the blur**, which is what
  *     lets the Feed be shown at all. See `SHOT`.
- *   - **It still carries no analytics and no third-party origin but the font host.**
- *     Either would need the privacy policy edited first, which is a document rather
- *     than a detail.
+ *   - **It still carries no analytics.** That would need the privacy policy edited
+ *     first, which is a document rather than a detail.
+ *   - **The ranking demo adds one origin: TMDB's image CDN.** Its movies are a committed
+ *     list, so the page reads nothing from Supabase; it loads the posters on screen (and
+ *     the next one) from TMDB, as `/title` and `/lists` already do and as the privacy
+ *     policy says ("Who else sees it"). The TMDB credit is in the footer.
  */
 await writeFile(
   join(dist, 'index.html'),
@@ -2727,6 +3152,9 @@ await writeFile(
     />
 
     <style>${LANDING_STYLES}</style>
+    <!-- The ranking demo needs the module. Without it, no card, rather than a button
+         that does nothing. -->
+    <noscript><style>.demo { display: none !important; }</style></noscript>
   </head>
 
   <body>
@@ -2742,7 +3170,7 @@ await writeFile(
             <h1><span class="line">Rank what you watch.</span> <span class="line">See where it really lands.</span></h1>
             <p class="lede">
               bingd is your new post-watch ritual. A movie and TV logging app to surface
-              your favorite titles and make watching a shared experience.
+              your favorite titles and make watching a shared experience
             </p>
 
 ${installRow({ primary: true })}
@@ -2750,10 +3178,7 @@ ${installRow({ primary: true })}
             <p class="fineprint">${AVAILABILITY}</p>
           </div>
 
-          <div class="phone-pair stack-narrow">
-            ${shot('movies', { eager: true })}
-            ${shot('tv', { eager: true })}
-          </div>
+${DEMO}
         </div>
       </section>
 
@@ -2764,7 +3189,7 @@ ${installRow({ primary: true })}
             <h2>Stop guessing between 3.5 and 4 stars.</h2>
             <p class="section-lede">
               bingd uses head-to-head comparisons between titles you&rsquo;ve watched to
-              create a ranked list of your favorite watches. No more ambiguous ratings.
+              create a ranked list of your favorite watches. No more ambiguous ratings
             </p>
           </div>
 
@@ -2778,17 +3203,17 @@ ${installRow({ primary: true })}
       <section>
         <div class="wrap split">
           <div class="split-copy">
-            <p class="kicker">A social experience</p>
-            <h2>See what your friends are watching.</h2>
+            <p class="kicker">Your collection</p>
+            <h2>A collection that actually reflects your taste.</h2>
             <p class="section-lede">
-              Follow friends to comment on and save their latest watches, compare taste,
-              and share recommendations in-app.
+              Every movie and TV season you rank takes its place in your collection, so
+              your list reads in the order you really feel about them
             </p>
           </div>
 
           <div class="phone-pair stack-narrow">
-            ${shot('feed')}
-            ${shot('comments')}
+            ${shot('movies')}
+            ${shot('tv')}
           </div>
         </div>
       </section>
@@ -2799,9 +3224,12 @@ ${installRow({ primary: true })}
             <p class="kicker">Find your next binge</p>
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
-              Stronger recommendations through a better rating system. Plus Group Picks to
-              generate recommendations based on shared taste (a favorite feature for couples
-              and movie clubs).
+              Save what you want to watch, and get stronger recommendations through a better
+              rating system
+            </p>
+            <p class="section-lede">
+              Plus Group Picks generates recommendations based on shared taste (a favorite
+              feature for couples and movie clubs)
             </p>
           </div>
 
@@ -2812,11 +3240,50 @@ ${installRow({ primary: true })}
         </div>
       </section>
 
+      <section>
+        <div class="wrap split">
+          <div class="split-copy">
+            <p class="kicker">A social experience</p>
+            <h2>See what your friends are watching.</h2>
+            <p class="section-lede">
+              Follow friends to comment on and save their latest watches, compare taste,
+              and share recommendations in-app
+            </p>
+          </div>
+
+          <div class="phone-pair stack-narrow">
+            ${shot('feed')}
+            ${shot('comments')}
+          </div>
+        </div>
+      </section>
+
+      <section class="band founder-section">
+        <div class="wrap">
+          <figure class="founder-note">
+            <blockquote>
+              <p>
+                Beli changed the way I experienced restaurants. I went from eating out
+                occasionally to ranking every place, comparing lists with friends, and hunting
+                for the next spot.
+              </p>
+              <p>
+                I built bingd because I wanted that same post-watch ritual for movies and TV:
+                rank what you watch, compare taste with friends, and keep the fun going after
+                the credits roll.
+              </p>
+              <p>Hope you enjoy it as much as I do. Happy binging,</p>
+            </blockquote>
+            <figcaption>Suraj, founder</figcaption>
+          </figure>
+        </div>
+      </section>
+
       <section class="closer">
         <div class="wrap">
           <h2>Start with five movies or TV you love.</h2>
           <p class="section-lede">
-            That is enough for bingd. to have an opinion about everything else.
+            That is enough for bingd. to have an opinion about everything else
           </p>
 
 ${installRow({})}
@@ -2858,8 +3325,10 @@ ${installRow({})}
     -->
     ${NOSCRIPT_INSTALL}
 
+    <!-- page: 'home' is the install row plus the ranking demo. No Supabase config: the
+         demo's movies are committed in demo-movies.mjs, and this page reads no table. -->
     <script type="application/json" id="bingd-config">${jsonBlock({
-      page: 'generic',
+      page: 'home',
       distribution: shippedDistribution,
     })}</script>
     <script type="module" src="/page.mjs"></script>
@@ -3097,7 +3566,14 @@ if (configured.length === 0) {
   console.log('  invitation links, are needed when they arrive.');
 }
 
-if (!supabaseUrl || !supabaseAnonKey) {
+console.log(`  supabase                    ${deployTarget} build, ${supabaseUrl ? 'configured' : 'none shipped'}`);
+
+if (supabaseConfig.withheld) {
+  console.warn('');
+  console.warn(`  SUPABASE CONFIG WITHHELD: ${supabaseConfig.withheld}.`);
+  console.warn('  Every page was built with no Supabase config and falls back safely. Set the');
+  console.warn(`  ${deployTarget === 'production' ? 'production' : 'staging'} project's URL and anon key for this build environment.`);
+} else if (!supabaseUrl || !supabaseAnonKey) {
   console.log('');
   console.log('  EXPO_PUBLIC_SUPABASE_URL / _ANON_KEY were not set, so the invitation page');
   console.log('  records no opens. The page is otherwise complete. Set both in the deploy');
