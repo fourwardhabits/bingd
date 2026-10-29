@@ -4065,7 +4065,7 @@ describe('the ranking demo, built', () => {
 
   it('keeps the swap quiet: a text button, not a third choice', () => {
     const demo = demoMarkup();
-    assert.match(demo, /<button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both\? Swap pair<\/button>/);
+    assert.match(demo, /<button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen one\? Refresh\.<\/button>/);
     assert.doesNotMatch(demo, /I liked it|I didn&rsquo;t like it|stars?<\/button>|type="range"/);
   });
 

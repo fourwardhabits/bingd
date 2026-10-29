@@ -673,7 +673,7 @@ Revised the same day after three rounds of founder visual QA:
 - **The result:** shown as "Your demo ranking", *A rough order from 3 picks.* It has four
   compact rows (position, small poster, title, year) and no score.
 - **Try again** opens on the next four movies of the list.
-- **"Haven't seen both? Swap pair"** never counts as a pick. It holds back enough movies for
+- **"Haven't seen one? Refresh."** never counts as a pick. It holds back enough movies for
   the remaining picks, so no number of swaps can leave the result short.
 
 **Fixed height:** the two views share one grid cell. The result is built with four empty
