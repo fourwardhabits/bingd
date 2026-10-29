@@ -277,16 +277,20 @@ begin
   perform pg_advisory_xact_lock(
     hashtextextended('bingd.proactive.social_pref:' || new.user_id::text, 0));
 
-  -- Then the arbiter's own per-reader lock, before any row (LOCK ORDER, 20261028000100
+  -- Then the arbiter's own per-reader lock, before any row (LOCK HIERARCHY, 20261028000100
   -- section 5). An arbiter working on this reader holds it while it holds their rows, so
   -- the mute waits here, holding no row, instead of locking some rows and waiting on the
   -- rest while the arbiter waits on these: the deadlock both final reviews found.
+  --
+  -- The cost, stated plainly: reader locks are transaction-scoped, so a tick that has
+  -- already arbitrated this reader keeps the lock until the WHOLE tick commits, and the
+  -- preference write waits for the rest of that tick (Fable final review).
   perform pg_advisory_xact_lock(
     hashtextextended('bingd.proactive:' || new.user_id::text, 0));
 
-  -- Then the rows, in id order: the order claim_push_batch and the arbiter lock
-  -- candidates in. If a claim holds one, this waits for it (the claim takes no advisory
-  -- lock, so it never waits on this); the update below then sees it sent and leaves it.
+  -- Then the rows, in id order, as the arbiter takes them. If a claim holds one, this
+  -- waits for it (the claim never waits on anything, so this cannot cycle); the update
+  -- below then sees it sent and leaves it.
   perform 1
      from proactive_candidates
     where recipient_id = new.user_id
@@ -624,6 +628,12 @@ declare
   v_theatrical integer := 0;
   v_resurface  integer := 0;
 begin
+  -- The global arbiter lock first (LOCK HIERARCHY, 20261028000100 section 5), before the
+  -- collectors write anything: an overlapping tick waits here holding no candidate row,
+  -- not after its collectors have inserted some. _proactive_arbitrate takes it again,
+  -- which is a no-op inside the same transaction.
+  perform pg_advisory_xact_lock(hashtextextended('bingd.proactive.arbiter', 0));
+
   -- Fail closed: no collector runs unless generation is explicitly on (seeded false).
   if _proactive_generation_enabled() then
     v_theatrical := _proactive_theatrical_collect(p_now);

@@ -492,6 +492,16 @@ proactive message already past it just before submission (the drain response's `
 count). A proactive job without a deadline is never sent. Reactive messages carry no
 `expiration`. Deploy this push-sender before `proactive.push_enabled` is turned on.
 
+**Concurrency, for an operator.** Proactive ticks serialise on one global lock
+(`bingd.proactive.arbiter`), so a manual `_proactive_tick()` during a cron run simply waits
+for it. A drain never waits on a proactive candidate: one that is busy is put back in the
+queue and sent (or dropped) by the next drain. A reader who switches Watchlist & discovery
+off while a tick is running can wait for the **rest of that tick**, because reader locks
+last until it commits. If the app role's statement timeout cuts that write off, it rolls
+back, the settings screen shows an error with the real setting, and the reader can retry.
+Keep tick duration in `proactive_status` well under that timeout
+(`proactive-notifications.md` §E).
+
 **Back on:** set `proactive.push_enabled` to `'true'::jsonb`. Nothing that expired while it
 was off comes back; candidates that are still timely are considered again at the next
 evening window, under the normal one-per-day budget.

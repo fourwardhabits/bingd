@@ -35,18 +35,28 @@ import { raceContext } from './_shared.mjs';
  * takes it EXCLUSIVE, so either the mute lands first and the activity records nothing,
  * or the activity lands first and the mute closes the cluster it wrote. Never an open
  * cluster carrying an activity from across the boundary.
- * **PA5.** A mute racing a CLAIM (Codex final review, MAJOR). claim_push_batch locks each
- * proactive candidate before judging it and holds the lock until it is marked sent, and
- * returns a proactive job only if its candidate went selected -> sent in that claim. So a
- * mute that holds the row first makes the claim wait, then return nothing, leave nothing
- * queued and spend no budget; a claim that holds it first sends once, and the mute that
- * follows leaves the candidate sent and produces no second push.
+ * **PA5.** A mute racing a CLAIM (Codex final reviews, MAJOR). claim_push_batch locks each
+ * proactive candidate (FOR UPDATE SKIP LOCKED) before judging it and holds the lock until
+ * it is marked sent, and returns a proactive job only if its candidate went selected ->
+ * sent in that claim. A mute that holds the row first makes the claim SKIP it, not wait:
+ * the job goes back to the queue untouched, and the next drain drops it once the mute has
+ * committed, with no budget spent. A claim that holds it first sends once, and the mute
+ * that follows leaves the candidate sent and produces no second push.
  * **PA6.** A mute racing the ARBITER (Codex + Fable final reviews). The arbiter walks a
  * reader's due rows in priority order; the mute used to lock the same rows by id, so a
  * reader with two clusters whose eligibility order inverts their id order could leave each
  * holding one row and waiting on the other. Now both take the reader's arbiter lock before
  * any row, and the arbiter locks every due row by id before its walk. So one waits on the
  * reader lock holding nothing, whichever arrives first, and neither is ever aborted.
+ * **PA7.** Two overlapping TICKS with different clocks (Codex + Fable final reviews). The
+ * old bulk expiry held another reader's row while the later tick waited for a reader lock
+ * the earlier tick held, and the earlier tick then waited on that row. Now one global
+ * arbiter lock makes the later tick wait before it touches any row, and expiry happens per
+ * reader under that reader's lock.
+ * **PA8.** A claim racing one social activity that touches TWO readers' clusters (Codex
+ * final review). The activity holds both rows; the claim skips them rather than waiting, so
+ * it cannot close a cycle with any writer's order, and the jobs go back to the queue to be
+ * judged and sent, once, by the next drain.
  */
 export default function suite() {
   const rc = raceContext();
@@ -66,6 +76,21 @@ export default function suite() {
     after(() => rc.close());
 
     const EVENING = '2031-03-03T17:30:00Z';
+
+    /** Resolves as `p` does, or fails if it takes longer than `ms`: "it did not wait". */
+    const within = async (p, ms, label) => {
+      let timer;
+      try {
+        return await Promise.race([
+          p,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label}: still waiting after ${ms}ms`)), ms);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
 
     const friends = async (a, b) => {
       await ctx.db.sql(
@@ -233,7 +258,7 @@ export default function suite() {
           [id],
         ))[0];
 
-      it('the mute first: the claim waits, then returns nothing, queues nothing, spends nothing', async () => {
+      it('the mute first: the claim skips without waiting, requeues, and the next drain drops it', async () => {
         const { db } = ctx;
         const { r, c } = await selected('PA5 mute first');
         const s1 = await db.session('mute');
@@ -241,32 +266,39 @@ export default function suite() {
         let claimed;
         try {
           // B. The preference-off transaction, held open. Its trigger has already
-          // suppressed the selected candidate, uncommitted.
+          // suppressed the selected candidate, uncommitted, and holds its row.
           await s1.q('begin');
           await s1.q(mute, [r]);
-          // C/D. The claim starts and genuinely waits on the candidate row.
-          const pending = s2.start(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
-          const seen = await s2.awaitBlocked();
-          assert.equal(seen.wait_event_type, 'Lock', 'PA5: the claim waits on a lock');
-          // On the mute's transaction specifically, and on a row lock rather than an
-          // advisory one: the claim takes no advisory lock, so this is the candidate row
-          // the mute's trigger has just suppressed.
-          assert.equal(seen.wait_event, 'transactionid', 'PA5: a row lock, not an advisory one');
-          const [{ by }] = await db.rows(`select pg_blocking_pids($1) as by`, [s2.pid]);
-          assert.deepEqual(by, [s1.pid], 'PA5: blocked by the mute, and nothing else');
+          // C/D. The claim runs to completion while the mute is still open: it skips the
+          // row it cannot lock rather than waiting on it.
+          claimed = (await within(s2.one(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]),
+            5000, 'PA5 claim during an open mute')).r;
+          assert.equal(
+            claimed.filter((j) => j.notification_id === c.notification_id).length,
+            0,
+            'PA5: nothing is sent for a candidate the mute holds',
+          );
+          // The job is back in the queue exactly as before the claim.
+          const [o] = await db.rows(
+            `select state, claimed_at, attempts from push_outbox where notification_id = $1`,
+            [c.notification_id],
+          );
+          assert.deepEqual([o.state, o.claimed_at, o.attempts], ['pending', null, 0], 'PA5: requeued, clean');
+          const [mid] = await db.rows(`select state, sent_at from proactive_candidates where id = $1`, [c.id]);
+          assert.deepEqual([mid.state, mid.sent_at], ['selected', null], 'PA5: nothing charged by the skip');
           // E. The mute commits.
           await s1.q('commit');
-          claimed = (await pending).rows[0].r;
         } finally {
           await s1.end().catch(() => {});
           await s2.end().catch(() => {});
         }
 
-        // F. No proactive job for this reader's notification.
+        // F. The next drain judges it afresh and drops it.
+        const [{ r: next }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
         assert.equal(
-          claimed.filter((j) => j.notification_id === c.notification_id).length,
+          next.filter((j) => j.notification_id === c.notification_id).length,
           0,
-          'PA5: the muted push is not returned',
+          'PA5: the muted push is never returned',
         );
         // G. Still suppressed for the preference.
         const after = await candidate(c.id);
@@ -435,10 +467,10 @@ export default function suite() {
           const [{ n: rowsHeld }] = await db.rows(
             `select count(*)::int n from pg_locks l
                join pg_class c on c.oid = l.relation
-              where l.pid = $1 and l.granted and c.relname = 'proactive_candidates' and l.mode = 'RowShareLock'`,
+              where l.pid = $1 and l.granted and c.relname = 'proactive_candidates'`,
             [mut.pid],
           );
-          assert.equal(rowsHeld, 0, 'PA6: the waiting mute holds no candidate row lock');
+          assert.equal(rowsHeld, 0, 'PA6: the waiting mute holds no lock of any mode on proactive_candidates');
 
           await hold.q('rollback');
           await settle('PA6 arbiter first', arbiting, muting);
@@ -509,6 +541,293 @@ export default function suite() {
           }
           await assertMutedCleanly(r, `PA6 free round ${i}`);
         }
+      });
+    });
+
+    describe('PA7: overlapping ticks with different clocks', () => {
+      const T1 = '2031-03-03T17:30:00Z'; // the earlier tick
+      const T2 = '2031-03-03T17:50:00Z'; // the later one
+      const BETWEEN = '2031-03-03T17:40:00Z'; // expired for T2, still timely for T1
+      const globalKey = async () =>
+        (await ctx.db.rows(`select hashtextextended('bingd.proactive.arbiter', 0)::text as k`))[0].k;
+      const readerKey = async (r) =>
+        (await ctx.db.rows(`select hashtextextended('bingd.proactive:' || $1::text, 0)::text as k`, [r]))[0].k;
+
+      /**
+       * Two readers in recipient order. `low` (visited first) has a cluster that will be
+       * selected; `high` has one that is due but held (no device) and expires BETWEEN the
+       * two clocks: the row the old bulk expiry of the later tick took, then held.
+       */
+      const world = async (name) => {
+        const { db, fx } = ctx;
+        const ma = await fx.createMovie(`${name} a`);
+        const mb = await fx.createMovie(`${name} b`);
+        const ra = await reader(ma);
+        const rb = await reader(mb);
+        const [low, high] = ra < rb ? [{ r: ra, m: ma }, { r: rb, m: mb }] : [{ r: rb, m: mb }, { r: ra, m: ma }];
+        await eligibleCluster(low.r, low.m);
+        await eligibleCluster(high.r, high.m);
+        await db.sql(`delete from device_tokens where user_id = $1`, [high.r]);
+        await db.sql(`update proactive_candidates set expires_at = $2 where recipient_id = $1`, [high.r, BETWEEN]);
+        const [lc] = await db.rows(`select id, notification_id from proactive_candidates where recipient_id = $1`, [low.r]);
+        const [hc] = await db.rows(`select id from proactive_candidates where recipient_id = $1`, [high.r]);
+        return { low: { ...low, c: lc }, high: { ...high, c: hc } };
+      };
+
+      const settle = async (label, ...pending) => {
+        for (const res of await Promise.allSettled(pending)) {
+          if (res.status === 'rejected') {
+            assert.fail(`${label}: ${res.reason?.code ?? ''} ${res.reason?.message ?? res.reason}`);
+          }
+        }
+      };
+
+      const candidateLocks = async (pid) =>
+        (await ctx.db.rows(
+          `select count(*)::int n from pg_locks l join pg_class c on c.oid = l.relation
+            where l.pid = $1 and l.granted and c.relname = 'proactive_candidates'`,
+          [pid],
+        ))[0].n;
+
+      /** The one valid outcome, whichever tick ran first. */
+      const assertValid = async (w, label) => {
+        const { db } = ctx;
+        const [lc] = await db.rows(
+          `select state, sent_at, selected_local_date from proactive_candidates where id = $1`, [w.low.c.id]);
+        assert.equal(lc.state, 'selected', `${label}: low selected`);
+        assert.equal(lc.sent_at, null, `${label}: nothing sent by arbitration`);
+        const [hc] = await db.rows(
+          `select state, suppression_reason, sent_at from proactive_candidates where id = $1`, [w.high.c.id]);
+        // Expired by whichever tick reached it past BETWEEN: with the reason that held it
+        // (no_device) if the earlier tick had arbitrated it first, else plain `expired`.
+        assert.equal(hc.state, 'expired', `${label}: high expired`);
+        assert.ok(['no_device', 'expired'].includes(hc.suppression_reason), `${label}: ${hc.suppression_reason}`);
+        assert.equal(hc.sent_at, null);
+        const [{ n }] = await db.rows(`select count(*)::int n from push_outbox where recipient_id = $1`, [w.low.r]);
+        assert.equal(n, 1, `${label}: one push queued for low, not two`);
+        const [{ h }] = await db.rows(`select count(*)::int h from push_outbox where recipient_id = $1`, [w.high.r]);
+        assert.equal(h, 0, `${label}: nothing queued for high`);
+        // And the drain sends low once, and nothing twice.
+        const [{ r: jobs }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [T1]);
+        assert.equal(jobs.filter((j) => j.notification_id === w.low.c.notification_id).length, 1, `${label}: sent once`);
+        const [after] = await db.rows(`select state, sent_at from proactive_candidates where id = $1`, [w.low.c.id]);
+        assert.equal(after.state, 'sent');
+        assert.ok(after.sent_at);
+      };
+
+      /**
+       * The first tick is frozen inside its walk of `low` (an uncommitted outbox insert for
+       * low's notification), holding the global lock and low's reader lock. The second
+       * tick, with the other clock, then starts. Before the fix it expired `high`'s row,
+       * held it, waited for low's reader lock, and the first tick then waited on that row.
+       */
+      const overlap = async (name, firstClock, secondClock) => {
+        const { db } = ctx;
+        const w = await world(name);
+        const hold = await db.session('outbox-holder');
+        const first = await db.session('tick-first');
+        const second = await db.session('tick-second');
+        try {
+          await hold.q('begin');
+          await hold.q(`insert into push_outbox (notification_id, recipient_id) values ($1, $2)`,
+            [w.low.c.notification_id, w.low.r]);
+          const one = first.start(`select _proactive_arbitrate($1::timestamptz)`, [firstClock]);
+          await first.awaitBlocked();
+
+          const two = second.start(`select _proactive_arbitrate($1::timestamptz)`, [secondClock]);
+          // The second tick waits on the GLOBAL lock, before touching any candidate.
+          await second.awaitBlocked({ advisoryKey: await globalKey() });
+          assert.equal(await candidateLocks(second.pid), 0, 'PA7: the waiting tick holds no candidate lock');
+          // And high's row is free: nothing has locked it outside high's reader lock.
+          const probe = await db.session('probe');
+          try {
+            await probe.q('begin');
+            const err = await probe.errorFrom(
+              `select id from proactive_candidates where id = $1 for update nowait`, [w.high.c.id]);
+            assert.equal(err, null, 'PA7: no tick holds high\'s row while waiting');
+            await probe.q('rollback');
+          } finally {
+            await probe.end().catch(() => {});
+          }
+
+          await hold.q('rollback');
+          await settle(`PA7 ${name}`, one, two);
+        } finally {
+          await hold.end().catch(() => {});
+          await first.end().catch(() => {});
+          await second.end().catch(() => {});
+        }
+        await assertValid(w, `PA7 ${name}`);
+      };
+
+      it('the earlier tick first, then the later: the later waits on the global lock, no deadlock', async () => {
+        await overlap('earlier first', T1, T2);
+      });
+
+      it('the later tick first, then the earlier: the same, and the expiry is not undone', async () => {
+        await overlap('later first', T2, T1);
+      });
+
+      it('expiry happens under the reader\'s own lock, not before it', async () => {
+        const { db } = ctx;
+        const w = await world('PA7 per reader');
+        const ctl = await db.session('reader-lock-holder');
+        const tick = await db.session('tick');
+        try {
+          // Somebody (a mute, say) holds high's reader lock.
+          await ctl.q(`select pg_advisory_lock(hashtextextended('bingd.proactive:' || $1::text, 0))`, [w.high.r]);
+          const running = tick.start(`select _proactive_arbitrate($1::timestamptz)`, [T2]);
+          await tick.awaitBlocked({ advisoryKey: await readerKey(w.high.r) });
+          // The tick has not expired, or even locked, high's row yet.
+          const probe = await db.session('probe');
+          try {
+            await probe.q('begin');
+            const err = await probe.errorFrom(
+              `select id from proactive_candidates where id = $1 for update nowait`, [w.high.c.id]);
+            assert.equal(err, null, 'PA7: high\'s row is untouched until its reader lock is held');
+            await probe.q('rollback');
+          } finally {
+            await probe.end().catch(() => {});
+          }
+          await ctl.q(`select pg_advisory_unlock(hashtextextended('bingd.proactive:' || $1::text, 0))`, [w.high.r]);
+          await settle('PA7 per reader', running);
+        } finally {
+          await ctl.end().catch(() => {});
+          await tick.end().catch(() => {});
+        }
+        const [hc] = await db.rows(`select state, suppression_reason from proactive_candidates where id = $1`, [w.high.c.id]);
+        assert.deepEqual([hc.state, hc.suppression_reason], ['expired', 'expired'], 'PA7: then expired, by that tick');
+      });
+
+      it('stays deadlock-free over repeated rounds, choreographed and free-running', async () => {
+        const { db } = ctx;
+        for (let i = 0; i < 3; i += 1) {
+          await overlap(`rep e${i}`, T1, T2);
+          await overlap(`rep l${i}`, T2, T1);
+        }
+        for (let i = 0; i < 10; i += 1) {
+          const w = await world(`PA7 free ${i}`);
+          const a = await db.session('tick-a');
+          const b = await db.session('tick-b');
+          try {
+            await settle(`PA7 free round ${i}`,
+              a.q(`select _proactive_tick($1::timestamptz)`, [T1]),
+              b.q(`select _proactive_tick($1::timestamptz)`, [T2]));
+          } finally {
+            await a.end().catch(() => {});
+            await b.end().catch(() => {});
+          }
+          await assertValid(w, `PA7 free round ${i}`);
+        }
+      });
+    });
+
+    describe('PA8: a claim racing a social activity that touches two readers', () => {
+      /**
+       * Two readers who both have `m` saved, each with a cluster for it selected tonight
+       * and queued, and a friend of both (`y`) who is about to rank `m`.
+       */
+      const world = async (name) => {
+        const { db, fx } = ctx;
+        const m = await fx.createMovie(name);
+        const a = await reader(m);
+        const b = await reader(m);
+        await eligibleCluster(a, m);
+        await eligibleCluster(b, m);
+        await db.sql(`select _proactive_arbitrate($1::timestamptz)`, [EVENING]);
+        const rows = await db.rows(
+          `select id, notification_id, recipient_id, state from proactive_candidates
+            where recipient_id = any ($1::uuid[]) order by recipient_id`,
+          [[a, b]],
+        );
+        assert.deepEqual(rows.map((r) => r.state), ['selected', 'selected'], 'both selected for tonight');
+        const y = await fx.createUser();
+        await friends(a, y);
+        await friends(b, y);
+        return { m, y, cs: rows };
+      };
+
+      const notes = (w) => new Set(w.cs.map((c) => c.notification_id));
+
+      const runRound = async (name) => {
+        const { db } = ctx;
+        const w = await world(name);
+        const writer = await db.session('activity');
+        const sender = await db.session('claim');
+        try {
+          // One activity transaction, holding BOTH readers' cluster rows (its trigger
+          // visits every reader who has the title saved).
+          await writer.q('begin');
+          await writer.q(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`,
+            [w.y, w.m]);
+          const [{ n: members }] = await db.rows(
+            `select count(*)::int n from proactive_cluster_actors where candidate_id = any ($1::uuid[])`,
+            [w.cs.map((c) => c.id)],
+          );
+          assert.equal(members, 4, 'PA8: the new friend is not committed yet');
+
+          // The claim finishes while the activity is open: it skips, it does not wait.
+          const [{ r: during }] = [await within(
+            sender.one(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]),
+            5000, `PA8 ${name} claim during the activity`)];
+          assert.equal(during.filter((j) => notes(w).has(j.notification_id)).length, 0,
+            'PA8: neither locked candidate is sent');
+          const queued = await db.rows(
+            `select state, claimed_at, attempts from push_outbox where notification_id = any ($1::uuid[])`,
+            [[...notes(w)]],
+          );
+          assert.equal(queued.length, 2, 'PA8: both jobs are still queued, not lost');
+          for (const o of queued) {
+            assert.deepEqual([o.state, o.claimed_at, o.attempts], ['pending', null, 0], 'PA8: requeued, clean');
+          }
+          const mid = await db.rows(
+            `select state, sent_at from proactive_candidates where id = any ($1::uuid[])`,
+            [w.cs.map((c) => c.id)],
+          );
+          for (const c of mid) {
+            assert.deepEqual([c.state, c.sent_at], ['selected', null], 'PA8: nothing charged by the skip');
+          }
+          await writer.q('commit');
+        } finally {
+          await writer.end().catch(() => {});
+          await sender.end().catch(() => {});
+        }
+
+        // The next drain judges both afresh and sends each once, counting the new friend.
+        const [{ r: next }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
+        const mine = next.filter((j) => notes(w).has(j.notification_id));
+        assert.equal(mine.length, 2, 'PA8: each sent by the next drain');
+        assert.equal(new Set(mine.map((j) => j.notification_id)).size, 2, 'PA8: once each');
+        const after = await db.rows(
+          `select state, sent_at, actor_count_at_send from proactive_candidates where id = any ($1::uuid[])`,
+          [w.cs.map((c) => c.id)],
+        );
+        for (const c of after) {
+          assert.equal(c.state, 'sent');
+          assert.ok(c.sent_at);
+          assert.equal(c.actor_count_at_send, 3, 'PA8: with the friend the activity added');
+        }
+
+        // And never again, even once the lease has run out.
+        await db.sql(
+          `update push_outbox set claimed_at = now() - interval '6 minutes' where notification_id = any ($1::uuid[])`,
+          [[...notes(w)]],
+        );
+        const [{ r: again }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
+        assert.equal(again.filter((j) => notes(w).has(j.notification_id)).length, 0, 'PA8: no second push');
+        const [{ n_left: remaining }] = await db.rows(
+          `select count(*)::int n_left from push_outbox where notification_id = any ($1::uuid[])`,
+          [[...notes(w)]],
+        );
+        assert.equal(remaining, 0);
+      };
+
+      it('the claim skips both locked candidates, then the next drain sends each once', async () => {
+        await runRound('PA8');
+      });
+
+      it('repeated, on fresh readers each round', async () => {
+        for (let i = 0; i < 5; i += 1) await runRound(`PA8 rep ${i}`);
       });
     });
 

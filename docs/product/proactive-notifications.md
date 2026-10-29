@@ -219,28 +219,64 @@ advisory lock before reading that reader's budget. (2) A partial unique index on
 proactive push on one local day impossible, not merely unlikely. (3) `push_outbox`'s
 primary key is the notification. The social writer has its own per-(reader, title)
 advisory lock, so two friends finishing a film at once join one cluster. All three are
-exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–6).
+exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–8).
 
-**The claim locks before it judges** (Codex final review, MAJOR). `claim_push_batch` locks
-every proactive candidate behind its batch (`for update`, in id order) **before** any
-check, and holds the lock until the candidate is marked `sent`. A proactive job is returned
-**only** if its candidate went `selected → sent` in that claim; anything withheld is
-removed from the queue. So a reader muting Watchlist & discovery at the same moment as a
-drain is serialised against it: if the mute holds the row first, the claim waits, then
-returns nothing, leaves no outbox row and spends no budget; if the claim holds it first,
-the push goes out once and the mute leaves the candidate `sent`. The mute trigger locks the
-same rows in the same order, so the two cannot deadlock (race PA5, both orders).
+**The claim locks before it judges, and never waits** (Codex final reviews, MAJOR).
+`claim_push_batch` locks every proactive candidate behind its batch **before** any check
+(`for update skip locked`, in id order), and holds the lock until the candidate is marked
+`sent`. A proactive job is returned **only** if its candidate went `selected → sent` in
+that claim.
 
-**One lock order for every proactive path** (Codex + Fable final reviews). Preference lock
-→ the reader's arbiter lock (`bingd.proactive:<reader>`) → candidate rows by id. The mute
-takes the arbiter's per-reader lock before any row, and the arbiter locks all of a reader's
-due rows by id before its priority-ordered walk, so a mute and an arbiter over one reader
-take turns on that lock and never hold rows against each other. The claim takes rows by id
-and no advisory lock. The arbiter's bulk expiry uses `skip locked`, so it never waits (a
-row it skips stays pending one more tick, and the walk and the claim both still refuse
-anything past `expires_at`). Race PA6 covers both orders, with the arbiter frozen mid-walk,
-repeated, and free-running. One cost: a reader switching Watchlist & discovery off while a
-tick is arbitrating waits for that tick to commit.
+A candidate that another transaction holds at that instant (a reader muting Watchlist &
+discovery, a friend joining that cluster) is **skipped, not waited on**:
+
+- no job is built or returned, the candidate is not marked `sent`, and no `sent_at`,
+  daily, weekly or title budget is spent;
+- its outbox row goes back exactly as it was before the claim: `pending`, no lease, the
+  attempt given back;
+- the next drain judges it afresh with every check. Muted, suppressed or expired
+  meanwhile: dropped, no push. Still selected and valid: sent, once.
+
+So the claim can never be part of a lock cycle, whatever order any writer takes rows in.
+The cost is a push sent one drain later, or missed if that drain falls after 20:00. For an
+optional push, late or missed is preferred to blocked, deadlocked or duplicated. If the
+claim holds the row first, a mute waits for it, the push goes out once, and the mute
+leaves the candidate `sent` (races PA5 and PA8).
+
+**One lock hierarchy for every proactive path** (Codex + Fable final reviews). Locks are
+only ever taken downwards:
+
+1. the global arbiter lock (`bingd.proactive.arbiter`);
+2. the reader's preference lock (`bingd.proactive.social_pref:<reader>`);
+3. the reader's arbiter lock (`bingd.proactive:<reader>`);
+4. candidate rows within one reader, by id.
+
+| Path | Takes | Readers / titles / rows per transaction | Waits on rows? |
+|---|---|---|---|
+| `_proactive_tick`, `_proactive_arbitrate` | 1 first, before the collectors or any row; then per reader in recipient order: 3, that reader's expired and due rows by id, expiry, then the walk | many readers, many titles; rows only under each reader's lock | yes, but only rows of a reader whose lock (3) it holds |
+| mute (`_proactive_social_on_mute`) | 2 exclusive, 3, that reader's open social rows by id | one reader, many titles | yes, rows of that reader only |
+| social writer (`_proactive_social_on_activity` → `_proactive_social_add`) | per reader in recipient order: 2 shared, then that reader's one cluster row | many readers, **one title** (`_rank_finalize`, `log_rewatch` each write one qualifying event) | yes, one row per reader |
+| theatrical / resurfacing collectors | inside the tick, after 1: insert new rows only | many readers | no |
+| claim (`claim_push_batch`) | candidate rows `skip locked`, after its outbox work and before any check; no advisory lock | many readers | **never** on a candidate row |
+| `settle_push_batch`, `live_push_jobs` | outbox rows only / reads only | many | no candidate rows |
+
+Overlapping cron or manual ticks queue on (1) holding nothing. A mute and an arbiter on one
+reader take turns on (3), and whichever waits holds no row. Expiry happens per reader under
+(3), so no tick holds another reader's row while waiting for a reader lock. Because the
+claim never waits, the design does not depend on every writer agreeing on a cross-reader
+row order. Races: PA5 (claim against mute), PA6 (mute against arbiter), PA7 (overlapping
+ticks with different clocks), PA8 (claim against an activity spanning two readers).
+
+**A cost that is real, stated plainly** (Fable final review). Reader locks are
+transaction-scoped, so a tick keeps every reader lock it has taken until the **whole** tick
+commits. A reader who switches Watchlist & discovery off while a tick is running, after
+that tick has reached them, waits for the rest of the tick, not just their own part of it.
+If the app's database role has a statement timeout and the tick outlasts it, the switch
+write is cancelled and rolled back. The preference is unchanged and no cluster is closed.
+The settings screen does not flip optimistically: it shows the error, reloads the real
+setting, and the reader can try again. Supabase's default timeout for that role is reported
+as 8 seconds; this has **not** been verified on our projects. Watch tick duration in
+`proactive_status` before the reader count grows.
 
 `proactive_cluster_actors` holds one row per qualifying activity, with that activity's
 foreign key, so deleting the activity removes the membership. `notification_opens` holds
@@ -633,7 +669,7 @@ The review questions, answered:
 - **Private activity leakage.** A friend's activity reaches only mutual followers who
   `can_view_profile` them, rechecked at read and at send. The push names display names
   only, the same class of fact the reactive pushes carry.
-- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4. A mute racing a claim: PA5. A mute racing the arbiter: PA6.
+- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4. A mute racing a claim: PA5. A mute racing the arbiter: PA6. Overlapping ticks: PA7. A claim racing an activity across two readers: PA8.
 - **Service-role exposure.** Unchanged. The drain still reads the key from Vault; nothing
   new holds it.
 - **Client-triggered send bypass.** No client-callable function writes `push_outbox`,
