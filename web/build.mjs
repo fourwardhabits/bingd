@@ -2579,35 +2579,39 @@ const LANDING_STYLES = `
 
       /* ---------------------------------------------------------- founder note */
 
-      /* An editorial pull quote: room around it, an oversized opening quotation mark in
-         Maroon standing in for a portrait, the founder's words in the brand serif at a
-         size it stays readable at, and a small understated attribution. */
-      .founder-section { padding-block: 5rem; }
-      .founder-note { position: relative; max-width: 40rem; margin: 0 auto; padding-top: 3.25rem; }
+      /* An editorial pull quote kept to a short read: an oversized opening quotation mark
+         in Maroon as the one accent, the founder's words in the body sans at reading size,
+         tight paragraphs and a quiet attribution. Under half a desktop viewport, so the
+         section after it is already in view. */
+      .founder-section { padding-block: 2.75rem; }
+      .founder-note { position: relative; max-width: 36rem; margin: 0 auto; padding-top: 2.25rem; }
       .founder-note::before {
         content: '\\201C';
         position: absolute;
-        top: -1.25rem;
-        left: -0.25rem;
+        top: -0.75rem;
+        left: -0.125rem;
         font-family: 'DM Serif Display', Georgia, serif;
-        font-size: 7.5rem;
+        font-size: 4.5rem;
         line-height: 1;
         color: var(--maroon);
         opacity: 0.35;
       }
       .founder-note blockquote { margin: 0; }
       .founder-note blockquote p {
-        font-family: 'DM Serif Display', Georgia, serif;
-        font-size: clamp(1.2rem, 2.8vw, 1.45rem);
-        line-height: 1.5;
-        letter-spacing: -0.005em;
+        font-size: 1.0625rem;
+        line-height: 1.6;
         color: var(--ink);
       }
-      .founder-note blockquote p + p { margin-top: 1.25rem; }
+      .founder-note blockquote p + p { margin-top: 0.75rem; }
       .founder-note figcaption {
-        margin-top: 1.75rem;
+        margin-top: 0.25rem;
         font-size: 0.9375rem;
         color: var(--tertiary);
+      }
+      @media (max-width: 30rem) {
+        .founder-section { padding-block: 2.25rem; }
+        .founder-note { padding-top: 2rem; }
+        .founder-note blockquote p { font-size: 1rem; }
       }
 
       /* ---------------------------------------------------------------- buttons */
@@ -3259,20 +3263,18 @@ ${DEMO}
           <figure class="founder-note">
             <blockquote>
               <p>
-                Beli changed the way I experienced restaurants. I went from someone who
-                enjoyed eating out occasionally to someone who ranked every restaurant,
-                compared lists with friends, and actively hunted for the next place to try. I
-                built bingd. because I think movies and TV are missing that same post-watch
-                experience.
+                Beli changed the way I experienced restaurants. I went from eating out
+                occasionally to ranking every place, comparing lists with friends, and hunting
+                for the next spot.
               </p>
               <p>
-                My audience is the everyday movie and TV fan. They don&rsquo;t necessarily
-                want to write reviews or become film critics, but they do want to keep the
-                excitement going after the credits roll. Hope you have as much fun with it as
-                I have, happy binging!
+                I built bingd because I wanted that same post-watch ritual for movies and TV:
+                rank what you watch, compare taste with friends, and keep the fun going after
+                the credits roll.
               </p>
+              <p>Hope you enjoy it as much as I do. Happy binging,</p>
             </blockquote>
-            <figcaption>&mdash; Suraj, founder</figcaption>
+            <figcaption>Suraj, founder</figcaption>
           </figure>
         </div>
       </section>

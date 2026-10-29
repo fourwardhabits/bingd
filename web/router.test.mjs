@@ -2638,9 +2638,9 @@ describe('the release mode', () => {
    *
    * And the em dash, which is a founder house-style rule for this site's copy and is
    * already enforced on the support page. Scoped to the body, because the `<title>`
-   * and the share cards carry one deliberately, and with the founder note left out:
-   * that is the founder's own words and attribution ("— Suraj, founder"), quoted as
-   * given on 2026-10-28.
+   * and the share cards carry one deliberately. The founder note is covered too: its
+   * final wording (2026-10-28) signs off "Suraj, founder" with no dash, so the exemption
+   * it needed for "— Suraj, founder" is gone.
    */
   it('refuses the claims the product contradicts, and the em dash', () => {
     const front = read('index.html');
@@ -2664,9 +2664,7 @@ describe('the release mode', () => {
       assert.doesNotMatch(body, claim, `the front page claims something false: ${why}`);
     }
 
-    const note = /<figure class="founder-note">[\s\S]*?<\/figure>/;
-    assert.match(body, note, 'the founder note moved, so this exemption no longer finds it');
-    assert.doesNotMatch(body.replace(note, ''), /&mdash;|\u2014/, 'an em dash reached the front page copy');
+    assert.doesNotMatch(body, /&mdash;|\u2014/, 'an em dash reached the front page copy');
   });
 
   /**
@@ -4084,25 +4082,49 @@ describe('the ranking demo, built', () => {
   });
 
   /**
-   * The founder note, as the founder wrote it on 2026-10-28 (second visual QA), set as a
-   * pull quote: two paragraphs, an oversized opening mark from the stylesheet, and a
-   * small "— Suraj, founder". No portrait and no bio.
+   * The founder note, in the founder's final wording (2026-10-28), set as a compact pull
+   * quote: three short paragraphs, an oversized opening mark from the stylesheet, and a
+   * quiet "Suraj, founder". No portrait, no bio, no heading.
    */
   it('carries the founder note in the founder\'s words, as a pull quote, text only', () => {
     const front = read('index.html');
-    const note = front.slice(front.indexOf('<figure class="founder-note">'), front.indexOf('</figure>'));
-    const text = (html) =>
-      html.replace(/<[^>]+>/g, ' ').replace(/&rsquo;/g, '\u2019').replace(/&mdash;/g, '\u2014').replace(/\s+/g, ' ').trim();
+    const start = front.indexOf('<section class="band founder-section">');
+    const section = front.slice(start, front.indexOf('</section>', start));
+    const note = section.slice(section.indexOf('<figure class="founder-note">'), section.indexOf('</figure>'));
+    const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
     const paragraphs = [...note.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => text(m[1]));
     assert.deepEqual(paragraphs, [
-      'Beli changed the way I experienced restaurants. I went from someone who enjoyed eating out occasionally to someone who ranked every restaurant, compared lists with friends, and actively hunted for the next place to try. I built bingd. because I think movies and TV are missing that same post-watch experience.',
-      'My audience is the everyday movie and TV fan. They don\u2019t necessarily want to write reviews or become film critics, but they do want to keep the excitement going after the credits roll. Hope you have as much fun with it as I have, happy binging!',
+      'Beli changed the way I experienced restaurants. I went from eating out occasionally to ranking every place, comparing lists with friends, and hunting for the next spot.',
+      'I built bingd because I wanted that same post-watch ritual for movies and TV: rank what you watch, compare taste with friends, and keep the fun going after the credits roll.',
+      'Hope you enjoy it as much as I do. Happy binging,',
     ]);
-    assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), '\u2014 Suraj, founder');
+    assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), 'Suraj, founder');
     assert.match(front, /\.founder-note::before \{\s*content: '\\201C';/, 'no opening quotation mark');
-    assert.doesNotMatch(note, /<img/);
+    assert.doesNotMatch(section, /<img|<h[1-6]|class="kicker"/, 'a portrait or heading came back');
     assert.match(front, /your new post-watch ritual/);
+  });
+
+  /**
+   * And small (founder QA, 2026-10-28): the previous treatment set the note in the display
+   * serif at near-headline size and took more than a desktop screen. The words are body
+   * copy now, in the body sans, with the serif kept for the quotation mark.
+   */
+  it('sets the founder note as body copy, not a headline', () => {
+    const front = read('index.html');
+    const rule = (selector) => {
+      const start = front.indexOf(`${selector} {`);
+      assert.ok(start >= 0, `${selector} has no rule`);
+      return front.slice(start, front.indexOf('}', start));
+    };
+    const rem = (block, property) => Number(new RegExp(`${property}: ([\\d.]+)rem;`).exec(block)?.[1]);
+
+    const words = rule('.founder-note blockquote p');
+    assert.doesNotMatch(words, /font-family|clamp\(/, 'the note is set in a display face or a fluid headline size');
+    assert.ok(rem(words, 'font-size') <= 1.125, 'the note is larger than body copy');
+    assert.ok(rem(rule('.founder-section'), 'padding-block') <= 3, 'the note has headline-sized room around it');
+    assert.ok(rem(rule('.founder-note blockquote p + p'), 'margin-top') <= 1, 'the paragraphs are loosely spaced');
+    assert.match(rule('.founder-note::before'), /'DM Serif Display'/, 'the quotation mark lost its serif');
   });
 
   /**
@@ -4139,7 +4161,7 @@ describe('the ranking demo, built', () => {
     // Sentences inside a blurb keep theirs.
     assert.match(front, /bingd is your new post-watch ritual\. A movie and TV logging app/);
     // And the founder quote is quoted, not restyled.
-    assert.match(front, /happy binging!/);
+    assert.match(front, /Happy binging,<\/p>/);
   });
 });
 
