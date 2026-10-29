@@ -110,6 +110,13 @@ export type PushJob = {
     type: string;
     opens_on?: string | null;
     local_today?: string | null;
+    /**
+     * The last instant this push may reach a phone, as an ISO timestamp: the earlier of the
+     * candidate's expiry and 20:00 local on the evening it was selected for. Sent to Expo
+     * as the message's `expiration` (see `messagesFor`). A proactive job without a usable
+     * one is not sent at all.
+     */
+    deliver_by?: string | null;
     reason?: string | null;
     actor_count?: number | null;
     actor_names?: string[] | null;

@@ -22,7 +22,15 @@ import {
   sendChunk,
   type ExpoTicket,
 } from './expo.ts';
-import { stillQueued, summarise, type Addressed } from './batch.ts';
+import {
+  expirationFor,
+  lateResults,
+  messagesFor,
+  partitionByDeadline,
+  stillQueued,
+  summarise,
+  type Addressed,
+} from './batch.ts';
 
 const job = (overrides: Partial<PushJob> = {}): PushJob => ({
   notification_id: '11111111-1111-1111-1111-111111111111',
@@ -930,4 +938,103 @@ Deno.test('copy has no em dash in any proactive push', () => {
     assert(!`${content.title} ${content.body}`.includes('—'));
     assert(!`${content.title} ${content.body}`.includes('!'));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Tonight or not at all, at the provider (Codex re-review, MAJOR)
+//
+// The claim refuses a stale proactive job, but Expo keeps an undelivered message for
+// about a month unless the message says otherwise, so a phone offline at 19:59 would be
+// woken the next morning. Every proactive message carries the claim's `deliver_by` as
+// Expo's documented `expiration` (seconds since the epoch), and a message already past it
+// is never submitted. A reactive message is built exactly as before.
+// ---------------------------------------------------------------------------
+
+const socialAt = (deliverBy: string | null) =>
+  proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 2, deliver_by: deliverBy });
+
+Deno.test('a proactive message carries its deadline as the Expo expiration, in seconds', () => {
+  const [entry] = messagesFor([socialAt('2031-12-15T20:00:00+00:00')]);
+  assertEquals(entry.message.expiration, Date.UTC(2031, 11, 15, 20, 0, 0) / 1000);
+  // A zone the claim states in its own offset is the same instant.
+  const [kolkata] = messagesFor([socialAt('2031-12-16T01:30:00+05:30')]);
+  assertEquals(kolkata.message.expiration, Date.UTC(2031, 11, 15, 20, 0, 0) / 1000);
+});
+
+Deno.test('the expiration is the deadline the claim chose, whichever bound it was', () => {
+  // The claim sends the earlier of the candidate's expiry and 20:00 local; the sender
+  // carries that instant whole and rounds down, so the provider never holds it longer.
+  assertEquals(
+    expirationFor(socialAt('2031-12-15T17:40:00.900+00:00')),
+    Date.UTC(2031, 11, 15, 17, 40, 0) / 1000,
+  );
+  assertEquals(
+    expirationFor(proactive('theatrical_release', {
+      opens_on: '2031-05-16', local_today: '2031-05-15', deliver_by: '2031-05-16T00:00:00+00:00',
+    })),
+    Date.UTC(2031, 4, 16) / 1000,
+  );
+});
+
+Deno.test('every device of a proactive job gets the same expiration', () => {
+  const two = socialAt('2031-12-15T20:00:00Z');
+  two.tokens = [
+    { token: 'ExponentPushToken[one]', platform: 'ios' },
+    { token: 'ExponentPushToken[two]', platform: 'android' },
+  ];
+  const built = messagesFor([two]);
+  assertEquals(built.length, 2);
+  assertEquals(new Set(built.map((b) => b.message.expiration)).size, 1);
+});
+
+Deno.test('a proactive job without a usable deadline is not sent at all', () => {
+  assertEquals(messagesFor([socialAt(null)]), []);
+  assertEquals(messagesFor([socialAt('not a date')]), []);
+  assertEquals(messagesFor([proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 2 })]), []);
+});
+
+Deno.test('a reactive message is unchanged: no expiration, the same shape as before', () => {
+  const [entry] = messagesFor([job()]);
+  assert(!('expiration' in entry.message));
+  assertEquals(Object.keys(entry.message).sort(), [
+    'body', 'channelId', 'data', 'priority', 'sound', 'title', 'to',
+  ]);
+  // And a reactive job beside a proactive one in the same batch keeps it that way.
+  const [reactive, pro] = messagesFor([job(), socialAt('2031-12-15T20:00:00Z')]);
+  assert(!('expiration' in reactive.message));
+  assertEquals(pro.message.expiration, Date.UTC(2031, 11, 15, 20) / 1000);
+});
+
+Deno.test('a message already past its deadline is not submitted; one inside it is', () => {
+  const built = messagesFor([job(), socialAt('2031-12-15T20:00:00Z')]);
+  const before = partitionByDeadline(built, Date.UTC(2031, 11, 15, 19, 59, 59));
+  assertEquals(before.due.length, 2);
+  assertEquals(before.late.length, 0);
+
+  // At the deadline itself, and any time after it: the proactive message is late, and a
+  // reactive message, which has no deadline, is always due.
+  for (const now of [Date.UTC(2031, 11, 15, 20), Date.UTC(2031, 11, 16, 9)]) {
+    const { due, late } = partitionByDeadline(built, now);
+    assertEquals(due.map((d) => d.message.expiration), [undefined]);
+    assertEquals(late.length, 1);
+    assertEquals(late[0].message.expiration, Date.UTC(2031, 11, 15, 20) / 1000);
+  }
+});
+
+Deno.test('a proactive message held back and sent late is still bounded by the evening', () => {
+  // An offline or slow device: whenever Expo next tries, the message says when to give
+  // up, and that is never after 20:00 local on the evening it was chosen for.
+  const [entry] = messagesFor([socialAt('2031-12-15T20:00:00Z')]);
+  assert(entry.message.expiration! * 1000 <= Date.UTC(2031, 11, 15, 20));
+  assert(entry.message.expiration! * 1000 < Date.UTC(2031, 11, 16, 9), 'not the next morning');
+});
+
+Deno.test('a notification whose every message was late is settled once, as nothing to retry', () => {
+  const built = messagesFor([socialAt('2031-12-15T20:00:00Z')]);
+  const { late } = partitionByDeadline(built, Date.UTC(2031, 11, 16, 9));
+  assertEquals(lateResults(late, []), [
+    { notification_id: built[0].notificationId, attempt: 1, delivered: true, error: null },
+  ]);
+  // Already settled from a submitted message: not repeated.
+  assertEquals(lateResults(late, [{ notification_id: built[0].notificationId }]), []);
 });

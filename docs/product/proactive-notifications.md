@@ -175,6 +175,25 @@ returns that type. No reactive path changed to make room for it.
 A stalled cron or sender that recovers the next morning therefore sends nothing late.
 Reactive jobs in the same batch are untouched.
 
+**And not later at the provider either** (Codex re-review, MAJOR). Passing the claim is
+not enough: Expo keeps an undelivered message for about a month unless the message says
+otherwise, so a phone offline at 19:59 would be woken by it the next morning. So:
+
+- every proactive job the claim returns carries `proactive.deliver_by`: the **earlier** of
+  the candidate's `expires_at` and **20:00 local on its `selected_local_date`**;
+- push-sender sends it as Expo's documented `expiration` field (an integer, seconds since
+  the Unix epoch, rounded down). APNs and FCM stop trying to deliver at that instant;
+- immediately before each chunk is submitted, push-sender drops any message whose
+  `expiration` is now or past, and settles its outbox row as nothing to retry (the
+  response's `expired` count);
+- a proactive job without a usable `deliver_by` is never sent;
+- reactive messages carry no `expiration` and keep the provider's default retention,
+  exactly as before.
+
+At most once still holds: the candidate became `sent` at the claim, so a dropped or
+expired message is never claimed again. A theatrical push's deadline is therefore never
+past its selected evening, and never on or after the opening day.
+
 **A push dropped late consumes no budget.** The caps count only candidates that were
 selected or handed over, and a dropped candidate is `expired` with no `sent_at`. The next
 evening can use the day, and the week does not count it.
@@ -200,7 +219,7 @@ advisory lock before reading that reader's budget. (2) A partial unique index on
 proactive push on one local day impossible, not merely unlikely. (3) `push_outbox`'s
 primary key is the notification. The social writer has its own per-(reader, title)
 advisory lock, so two friends finishing a film at once join one cluster. All three are
-exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–3).
+exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–4).
 
 `proactive_cluster_actors` holds one row per qualifying activity, with that activity's
 foreign key, so deleting the activity removes the membership. `notification_opens` holds
@@ -275,13 +294,23 @@ friend:
 | window closes with one friend | row kept | `expired / below_threshold`, no push |
 | a friend on day 8 | a new row | a new cluster; the 7-day title cooldown still applies |
 | a friend while Watchlist & discovery is **off** | **untouched**: not bumped, not made unread | **nothing recorded**: no member, no placeholder |
-| first friend after turning it back **on** | a fresh row | a fresh cluster; a cluster the arbiter ended `preference_off` is never reused |
+| the reader turns it **off** | rows kept as they were | every open window closes now; a cluster not yet pushed (pending, including one friend below the threshold, or selected for tonight) ends `suppressed / preference_off`; a sent one stays `sent` |
+| first friend after turning it back **on** | a fresh row | a fresh cluster counted from one; nothing from before the mute is reused |
 
-**Muted means untouched** (Codex review). Nothing that happens while the preference is off
-is recorded, so it cannot be resurrected later, and it leaves no suppressed history that
-would block the reader after re-enabling. Theatrical follows the same rule: a reader muted
-when a film arms, who re-enables within its two-day collection window, still hears about
-it once. Other categories are unaffected.
+**Muting is a clean boundary** (Codex reviews). Nothing that happens while the preference
+is off is recorded, so it cannot be resurrected later. And switching it off closes what was
+open at that moment (`_proactive_social_on_mute`, a trigger on `notification_preferences`),
+so a one-friend cluster the arbiter never looked at cannot be reopened by a friend after
+re-enabling and go out with two. Turning it off and straight back on before the evening
+does not send a cluster that was already selected for tonight. Switching it on, or
+switching any other category, closes nothing.
+
+The mute and the social writer share a per-reader advisory lock (the writer shared, the
+mute exclusive), so an activity racing the switch is either refused or closed by it, never
+left open across the boundary (race PA4).
+
+Theatrical: a reader muted when a film arms, who re-enables within its two-day collection
+window, still hears about it once. Other categories are unaffected.
 
 Copy, from the claim at send time (names are display names; at most two):
 "**Dune** · Ravi and Eric watched it. It's on your Watchlist." /
@@ -321,6 +350,21 @@ Copy (`release-awareness.md` §G1): "**Dune: Part Three** · Opens next Friday. 
 your Watchlist." / "Opens Friday, May 16." / "Opens tomorrow." Inbox: "Dune: Part Three opens
 Fri, May 16 · On your Watchlist", with the date rendered at read time ("opened May 16"
 afterwards). Tap → the title page.
+
+**The inbox date is the release's date now, not the one it was written with** (Codex
+re-review). `my_notifications` reads each theatrical row's `opens_on` from its release
+event at read time:
+
+| Release event | Inbox row |
+|---|---|
+| still `scheduled` | its **current** scheduled date (a postponement shows the new date) |
+| `released` | the day it opened |
+| `withdrawn`, date cleared (`announced`), or gone | **not drawn** |
+
+There is always at most one row per (reader, release). A postponed film's push is still
+suppressed (`release_changed`, below), and the once-per-release rule still holds: a new
+date shows on the same row and never creates a second row or a second candidate. A
+withdrawn release that later comes back with a date reappears on that one row.
 
 `release_status()` still flags any **season-premiere** notification as a leak.
 Theatrical rows are expected now.
@@ -474,12 +518,21 @@ on open and again on every return to the foreground:
 
 It lives on this screen only and does nothing until pressed. No nagging.
 
-**Recovering from Settings without a restart** (Codex review). `usePush` sets its
-"registered" latch only once it has actually seen `granted`, and re-reads permission on
-every return to the foreground. So the sequence denied → Open Settings → turn on → back to
-bingd registers the device on that foreground. It goes through the same guarded,
-deduplicated `registerThisDevice`: session epoch, token upsert, and the token's
-`proactive_version`. It registers once and never asks.
+**Recovering from Settings without a restart** (Codex reviews). `usePush` keeps two
+states apart:
+
+- **in flight**, local to the session's effect: set before an attempt, cleared when it ends
+  however it ends (success, failure, a thrown error, or abandonment by a sign-out). A burst
+  of foregrounds starts one attempt, not several;
+- **registered**, per account: set **only** when `registerThisDevice` reports `registered`.
+
+It re-reads permission on every return to the foreground until the device is registered.
+So denied → Open Settings → turn on → back to bingd registers on that foreground, and if
+that attempt fails (offline, Expo or the RPC refusing) the next foreground tries again
+while permission is still granted. Once it succeeds, foregrounds do nothing more. This is
+the one device registration, so reactive pushes recover the same way. It goes through the
+same guarded, deduplicated `registerThisDevice` (session epoch, token upsert, the token's
+`proactive_version`) and never asks.
 
 ## M. Telemetry
 
@@ -559,7 +612,7 @@ The review questions, answered:
 - **Private activity leakage.** A friend's activity reaches only mutual followers who
   `can_view_profile` them, rechecked at read and at send. The push names display names
   only, the same class of fact the reactive pushes carry.
-- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3.
+- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4.
 - **Service-role exposure.** Unchanged. The drain still reads the key from Vault; nothing
   new holds it.
 - **Client-triggered send bypass.** No client-callable function writes `push_outbox`,
@@ -590,7 +643,8 @@ The review questions, answered:
    Re-run `migration list`.
 3. `supabase functions deploy push-sender` (goal and proactive copy), **after** the
    migration: the old sender ignores the new fields, and with the switch off no proactive
-   job exists.
+   job exists. This sender must be live **before** `proactive.push_enabled` is ever turned
+   on: it is the one that sets the Expo `expiration` from `deliver_by` (§E).
 4. SQL checks: `select proactive_status();` (`generation_enabled: false`,
    `push_enabled: false`, no candidates); `select release_status();` (healthy);
    `select push_drain_status();` (healthy). Confirm `_push_eligible` is unchanged, and

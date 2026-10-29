@@ -92,19 +92,41 @@ export function usePush() {
     let live = true;
 
     /**
-     * The latch is set only once permission is actually granted (Codex review, 2026-10-28).
-     * It used to be set before the OS was asked, so an account that started out `blocked`
-     * stayed unregistered for the rest of the process even after somebody turned
-     * notifications on in Settings and came back. Now the same check runs again whenever
-     * the app returns to the foreground, until it finds `granted` and registers once,
-     * through the same guarded, deduplicated path. It still never asks: it only reads.
+     * Whether an attempt is running, for this session's effect only. Separate from the
+     * latch, and local rather than a ref, so an attempt abandoned by a sign-out cannot hold
+     * up the next session's.
+     */
+    let attempting = false;
+
+    /**
+     * Two states, kept apart (Codex reviews, 2026-10-28). `attempting` stops a burst of
+     * foregrounds from starting overlapping attempts; `registeredFor` is set ONLY when
+     * `registerThisDevice` reports `registered`. So:
+     *
+     *   · an account that started out `blocked` registers on the first foreground after
+     *     somebody turns notifications on in Settings, not at the next cold start;
+     *   · a registration that fails (offline, Expo or the RPC refusing), is abandoned, or
+     *     throws leaves the latch unset, and the next foreground tries again while
+     *     permission is still granted;
+     *   · once it has succeeded, later foregrounds do nothing.
+     *
+     * This is the device registration every push depends on, reactive and proactive alike.
+     * It still never asks for permission: it only reads.
      */
     const attempt = async () => {
-      if (registeredFor.current === userId) return;
-      const permission = await pushPermission();
-      if (!live || permission !== 'granted' || registeredFor.current === userId) return;
-      registeredFor.current = userId;
-      await registerThisDevice(userId);
+      if (attempting || registeredFor.current === userId) return;
+      attempting = true;
+      try {
+        const permission = await pushPermission();
+        if (!live || permission !== 'granted') return;
+        const outcome = await registerThisDevice(userId);
+        if (live && outcome === 'registered') registeredFor.current = userId;
+      } catch {
+        // Nothing to do but leave the latch unset, which is what makes the next foreground
+        // try again. The permission read and the registration record their own failures.
+      } finally {
+        attempting = false;
+      }
     };
 
     void attempt();

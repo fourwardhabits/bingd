@@ -484,6 +484,14 @@ handed to the sender **once**: an expired lease or a retry after a failure never
 it (§7's at-least-once retry applies to reactive pushes only). A sender crash around the
 Expo call can therefore lose a proactive push. It can never duplicate one.
 
+**And not late at the provider.** Each proactive job carries `proactive.deliver_by` (the
+earlier of `expires_at` and 20:00 local on its selected evening). push-sender sends it as
+the Expo message's `expiration` (seconds since the epoch), so APNs/FCM give up at that
+instant rather than holding the message for weeks for an offline phone, and it drops any
+proactive message already past it just before submission (the drain response's `expired`
+count). A proactive job without a deadline is never sent. Reactive messages carry no
+`expiration`. Deploy this push-sender before `proactive.push_enabled` is turned on.
+
 **Back on:** set `proactive.push_enabled` to `'true'::jsonb`. Nothing that expired while it
 was off comes back; candidates that are still timely are considered again at the next
 evening window, under the normal one-per-day budget.

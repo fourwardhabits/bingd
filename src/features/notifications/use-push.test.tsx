@@ -8,7 +8,7 @@
  * the registration path would look like tidying.
  */
 
-import { waitFor } from '@testing-library/react-native';
+import { act, waitFor } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import { renderHookWithProviders } from '@/test-utils/render';
 import { usePush } from './use-push';
@@ -42,7 +42,7 @@ jest.mock('./push', () => ({
 
 jest.mock('./push-permission', () => ({
   __esModule: true,
-  registerThisDevice: jest.fn(() => Promise.resolve()),
+  registerThisDevice: jest.fn(() => Promise.resolve('registered')),
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -79,6 +79,7 @@ beforeEach(() => {
   mockAuth = { status: 'signed-out' };
   push.pushPermission.mockResolvedValue('granted');
   push.canReceivePush.mockReturnValue(true);
+  permission.registerThisDevice.mockResolvedValue('registered');
   notifications.useLastNotificationResponse.mockReturnValue(null);
 });
 
@@ -270,6 +271,95 @@ describe('coming back from Settings', () => {
       handlers.forEach((h) => h('active'));
       await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(1));
       expect(notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+      await view.unmount();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /**
+   * Codex re-review, 2026-10-28, MAJOR. The latch used to be set before the registration
+   * returned, so a first attempt that failed (offline on the way back from Settings) left
+   * every later foreground stopped at the latch, with push dead until a restart while the
+   * settings card said it was on. It is the one device registration, so reactive pushes
+   * were lost too.
+   */
+  it('retries a failed registration on a later foreground, then stops once it succeeds', async () => {
+    const handlers: ((state: string) => void)[] = [];
+    const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
+      handlers.push(handler as (state: string) => void);
+      return { remove: jest.fn() } as unknown as ReturnType<typeof AppState.addEventListener>;
+    });
+    // Each foreground, then everything it started allowed to finish, so the next one finds
+    // the attempt over rather than still running.
+    const foreground = async () => {
+      handlers.forEach((h) => h('active'));
+      await act(async () => {});
+    };
+    try {
+      // A: blocked at launch; Settings; granted; back to the app; the registration fails.
+      push.pushPermission.mockResolvedValue('blocked');
+      signedIn('user-11');
+      const view = await renderHookWithProviders(() => usePush());
+      await waitFor(() => expect(push.pushPermission).toHaveBeenCalled());
+      expect(permission.registerThisDevice).not.toHaveBeenCalled();
+
+      push.pushPermission.mockResolvedValue('granted');
+      permission.registerThisDevice.mockResolvedValueOnce('failed');
+      await foreground();
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(1));
+
+      // B: a later foreground tries again, and so does one after a thrown error.
+      permission.registerThisDevice.mockRejectedValueOnce(new Error('network'));
+      await foreground();
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(2));
+
+      // An abandoned one (a sign-out raced it) is not a success either.
+      permission.registerThisDevice.mockResolvedValueOnce('abandoned');
+      await foreground();
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(3));
+
+      // C: this one succeeds.
+      await foreground();
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(4));
+      expect(permission.registerThisDevice).toHaveBeenLastCalledWith('user-11');
+
+      // D: and after that, foregrounds register nothing more.
+      await foreground();
+      await foreground();
+      await waitFor(() => expect(push.pushPermission).toHaveBeenCalledTimes(5));
+      expect(permission.registerThisDevice).toHaveBeenCalledTimes(4);
+      expect(notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+      await view.unmount();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('a burst of foregrounds while one attempt is running starts no second one', async () => {
+    const handlers: ((state: string) => void)[] = [];
+    const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => {
+      handlers.push(handler as (state: string) => void);
+      return { remove: jest.fn() } as unknown as ReturnType<typeof AppState.addEventListener>;
+    });
+    try {
+      let finish: (outcome: string) => void = () => {};
+      permission.registerThisDevice.mockImplementationOnce(
+        () => new Promise((resolve) => (finish = resolve)),
+      );
+      signedIn('user-12');
+      const view = await renderHookWithProviders(() => usePush());
+      await waitFor(() => expect(permission.registerThisDevice).toHaveBeenCalledTimes(1));
+
+      handlers.forEach((h) => h('active'));
+      handlers.forEach((h) => h('active'));
+      expect(permission.registerThisDevice).toHaveBeenCalledTimes(1);
+
+      await act(async () => finish('registered'));
+      handlers.forEach((h) => h('active'));
+      await act(async () => {});
+      await waitFor(() => expect(push.pushPermission).toHaveBeenCalledTimes(1));
+      expect(permission.registerThisDevice).toHaveBeenCalledTimes(1);
       await view.unmount();
     } finally {
       spy.mockRestore();

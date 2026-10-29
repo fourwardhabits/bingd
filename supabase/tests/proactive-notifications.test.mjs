@@ -503,6 +503,136 @@ describe('Watchlist & discovery transitions (Codex review)', () => {
     }
   });
 
+  /**
+   * Codex re-review, MINOR. A one-friend cluster is below the threshold, so the arbiter
+   * never looks at it, and it used to survive a mute: one friend, off, a tick, on, one
+   * fresh friend, and the old cluster went eligible with two. Muting is now a clean
+   * boundary: the switch itself closes every open window.
+   */
+  it('D: one friend, a mute, a tick, an unmute, one fresh friend: a fresh one-person cluster', async () => {
+    const r = await user('trd');
+    const [a, b] = [await user('trda'), await user('trdb')];
+    await friends(r, a);
+    await friends(r, b);
+    const m = await movie('Transition D');
+    await save(r, m);
+    await addAt(r, a, m, '2031-04-28T09:00:00Z');
+    const [old] = await candidates(r, 'watchlist_social');
+    assert.equal(old.eligible_at, null, 'one friend: below the threshold');
+
+    await setPref(r, false);
+    let [closed] = await candidates(r, 'watchlist_social');
+    assert.equal(closed.state, 'suppressed', 'the switch itself ends the open cluster');
+    assert.equal(closed.suppression_reason, 'preference_off');
+    assert.ok(closed.window_ends_at <= new Date(), 'and closes its window');
+
+    await arbitrate('2031-04-28T17:30:00Z');
+    await setPref(r, true);
+    await addAt(r, b, m, '2031-04-29T09:00:00Z');
+
+    const cs = await candidates(r, 'watchlist_social');
+    assert.equal(cs.length, 2, 'a fresh cluster, not the old one reopened');
+    [closed] = cs;
+    const fresh = cs[1];
+    assert.equal(closed.state, 'suppressed', 'the old one stays ended');
+    assert.equal(fresh.state, 'pending');
+    assert.equal(fresh.eligible_at, null, 'NOT two-person eligible: the pre-mute friend does not count');
+    const { rows } = await t.sql(
+      `select count(distinct actor_id)::int people from proactive_cluster_actors where candidate_id = $1`,
+      [fresh.id],
+    );
+    assert.equal(rows[0].people, 1);
+    const row = (await inbox(r)).find((n) => n.id === fresh.notification_id);
+    assert.equal(row.cluster_count, 1);
+    await arbitrate('2031-04-29T17:30:00Z');
+    assert.equal((await outboxFor(r)).length, 0, 'and nothing is pushed');
+  });
+
+  it('E: an eligible cluster, muted: a later friend adds no member, no bump, no unread', async () => {
+    const r = await user('tre');
+    const m = await movie('Transition E');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-05-05T09:00:00Z');
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.ok(c.eligible_at);
+    await t.sql(`update notifications set read_at = '2031-05-05T10:00:00Z' where id = $1`, [c.notification_id]);
+    const before = (await t.sql(`select created_at, read_at from notifications where id = $1`, [c.notification_id])).rows[0];
+
+    await setPref(r, false);
+    const late = await user('trel');
+    await friends(r, late);
+    await addAt(r, late, m, '2031-05-05T12:00:00Z');
+
+    const after = (await t.sql(`select created_at, read_at from notifications where id = $1`, [c.notification_id])).rows[0];
+    assert.deepEqual(after, before);
+    const { rows } = await t.sql(
+      `select count(distinct actor_id)::int people from proactive_cluster_actors where candidate_id = $1`,
+      [c.id],
+    );
+    assert.equal(rows[0].people, 2);
+    const cs = await candidates(r, 'watchlist_social');
+    assert.equal(cs.length, 1, 'and no new cluster either');
+    assert.equal(cs[0].suppression_reason, 'preference_off');
+  });
+
+  it('F: a cluster selected for tonight, muted and unmuted before the claim, is not sent', async () => {
+    const r = await user('trf');
+    const m = await movie('Transition F');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-05-12T09:00:00Z');
+    await arbitrate('2031-05-12T17:30:00Z');
+    assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'selected');
+
+    await setPref(r, false);
+    await setPref(r, true);
+    const jobs = (await claimFor(r, '2031-05-12T17:35:00Z')).filter((j) => j.proactive);
+    assert.equal(jobs.length, 0, 'the old cluster does not go out after the boundary');
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.deepEqual([c.state, c.suppression_reason], ['suppressed', 'preference_off']);
+  });
+
+  it('G: a cluster already sent stays sent; only its window closes', async () => {
+    const r = await user('trg');
+    const m = await movie('Transition G');
+    await save(r, m);
+    await cluster(r, m, 2, '2031-05-19T09:00:00Z');
+    await arbitrate('2031-05-19T17:30:00Z');
+    await claimFor(r, '2031-05-19T17:35:00Z');
+    assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'sent');
+
+    await setPref(r, false);
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.equal(c.state, 'sent', 'history is not rewritten');
+    assert.ok(c.sent_at);
+    assert.ok(c.window_ends_at <= new Date(), 'but nothing joins it after the boundary');
+
+    await setPref(r, true);
+    const f = await user('trgf');
+    await friends(r, f);
+    await addAt(r, f, m, '2031-05-20T09:00:00Z');
+    const cs = await candidates(r, 'watchlist_social');
+    assert.equal(cs.length, 2);
+    assert.equal(cs[1].eligible_at, null, 'a fresh cluster, counted from one');
+  });
+
+  it('H: switching it ON, or switching another category off, closes nothing', async () => {
+    const r = await user('trh');
+    const m = await movie('Transition H');
+    await save(r, m);
+    const f = await user('trhf');
+    await friends(r, f);
+    await addAt(r, f, m, '2031-05-26T09:00:00Z');
+    await setPref(r, true);
+    await t.sql(
+      `insert into notification_preferences (user_id, category, enabled) values ($1, 'comments', false)
+       on conflict (user_id, category) do update set enabled = excluded.enabled`,
+      [r],
+    );
+    const [c] = await candidates(r, 'watchlist_social');
+    assert.equal(c.state, 'pending');
+    assert.ok(c.window_ends_at > new Date());
+  });
+
   it('theatrical: a reader muted at arming who re-enables inside the two days still hears once', async () => {
     const r = await user('trt');
     const film = await armedFilm('Transition Film');
@@ -1108,6 +1238,90 @@ describe('theatrical release', () => {
     assert.equal((await candidates(r, 'theatrical_release')).length, 0);
   });
 
+  it('its push can only be delivered that evening, and never on or after the day', async () => {
+    const r = await user('filmdeadline');
+    const m = await armedFilm('Deadline Film');
+    await save(r, m);
+    await tick('2031-05-09T12:00:00Z');
+    await tick('2031-05-09T17:30:00Z');
+    const [c] = await candidates(r, 'theatrical_release');
+    const [job] = (await claimFor(r, '2031-05-09T17:35:00Z')).filter((j) => j.proactive);
+    const by = new Date(job.proactive.deliver_by);
+    assert.equal(by.toISOString(), '2031-05-09T20:00:00.000Z', 'the selected evening');
+    assert.ok(by <= new Date(c.expires_at), 'never past the candidate expiry');
+    assert.ok(by < new Date('2031-05-16T00:00:00Z'), 'never on the opening day');
+  });
+
+  /**
+   * Codex re-review, MINOR. The inbox row used to keep the date it was written with, so a
+   * postponed film still said it opened on the old day. The row now reads the release
+   * event's date as it stands, and is not drawn while the release has none.
+   */
+  describe('the inbox date follows the release', () => {
+    const filmRow = async (r) => (await inbox(r)).filter((n) => n.kind === 'theatrical_release');
+
+    it('postponed: the row says the new date, never the old one, and stays one row', async () => {
+      const r = await user('postponed');
+      const m = await armedFilm('Postponed');
+      await save(r, m);
+      await tick('2031-05-09T12:00:00Z');
+      assert.equal((await filmRow(r))[0].payload.opens_on, '2031-05-16');
+
+      await observeMovie(m, '2031-06-20', '2031-05-09T13:00:00Z');
+      await tick('2031-05-09T17:30:00Z');
+      const [c] = await candidates(r, 'theatrical_release');
+      assert.equal(c.suppression_reason, 'release_changed', 'no push for a moved date');
+      const rows = await filmRow(r);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].payload.opens_on, '2031-06-20');
+      assert.ok(!JSON.stringify(rows[0].payload).includes('2031-05-16'), 'the old date is nowhere');
+    });
+
+    it('cancelled, or its date cleared: the row is not drawn at all', async () => {
+      const axed = await user('axed');
+      const m1 = await armedFilm('Axed');
+      await save(axed, m1);
+      await tick('2031-05-09T12:00:00Z');
+      await observeMovie(m1, '2031-05-16', '2031-05-09T13:00:00Z', { status: 'Canceled' });
+      assert.equal((await filmRow(axed)).length, 0, 'withdrawn');
+
+      const undated = await user('undated');
+      const m2 = await armedFilm('Undated');
+      await save(undated, m2);
+      await tick('2031-05-09T12:00:00Z');
+      await observeMovie(m2, null, '2031-05-09T13:00:00Z');
+      assert.equal((await filmRow(undated)).length, 0, 'no date');
+      await tick('2031-05-09T17:30:00Z');
+      assert.equal((await candidates(undated, 'theatrical_release'))[0].state, 'suppressed');
+    });
+
+    it('a new future date after that: the same row comes back with it, and no second row', async () => {
+      const r = await user('restored');
+      const m = await armedFilm('Restored');
+      await save(r, m);
+      await tick('2031-05-09T12:00:00Z');
+      await observeMovie(m, '2031-05-16', '2031-05-09T13:00:00Z', { status: 'Canceled' });
+      assert.equal((await filmRow(r)).length, 0);
+
+      await observeMovie(m, '2031-07-04', '2031-05-10T13:00:00Z');
+      await tick('2031-05-10T14:00:00Z');
+      const rows = await filmRow(r);
+      assert.equal(rows.length, 1, 'one row, whatever the date did');
+      assert.equal(rows[0].payload.opens_on, '2031-07-04');
+      assert.equal((await candidates(r, 'theatrical_release')).length, 1, 'and one candidate: once per release');
+    });
+
+    it('after it opens, the row states the day it opened', async () => {
+      const r = await user('opened');
+      const m = await armedFilm('Opened');
+      await save(r, m);
+      await tick('2031-05-09T12:00:00Z');
+      await observeMovie(m, '2031-05-16', '2031-05-16T12:00:00Z', { status: 'Released' });
+      const [row] = await filmRow(r);
+      assert.equal(row.payload.opens_on, '2031-05-16');
+    });
+  });
+
   it('a date that moves before the push suppresses it, and nothing is sent on the day', async () => {
     const moved = await user('moved');
     const m1 = await armedFilm('Moved');
@@ -1668,6 +1882,51 @@ describe('sending', () => {
       await arbitrate('2031-12-15T12:00:00Z');
       assert.equal((await candidates(r, 'watchlist_social'))[0].state, 'selected');
       await dropped(r, '2031-12-15T15:00:00Z', 'outside_window');
+    });
+
+    /**
+     * Codex re-review, MAJOR. The claim's check ends at the claim; Expo would hold an
+     * undelivered message for weeks. So every proactive job carries `deliver_by`, which
+     * push-sender sends as the Expo expiration: the earlier of the candidate's expiry and
+     * 20:00 local on the evening it was selected for.
+     */
+    const iso = (v) => new Date(v).toISOString();
+
+    it('a job claimed inside the window carries 20:00 local that evening as its deadline', async () => {
+      const { r } = await selected('deadline_utc');
+      const [job] = (await claimFor(r, '2031-12-15T19:59:00Z')).filter((j) => j.proactive);
+      assert.equal(iso(job.proactive.deliver_by), '2031-12-15T20:00:00.000Z');
+    });
+
+    it("the candidate's own expiry when that comes first", async () => {
+      const { r, c } = await selected('deadline_exp');
+      await t.sql(`update proactive_candidates set expires_at = '2031-12-15T17:50:00Z' where id = $1`, [c.id]);
+      const [job] = (await claimFor(r, '2031-12-15T17:45:00Z')).filter((j) => j.proactive);
+      assert.equal(iso(job.proactive.deliver_by), '2031-12-15T17:50:00.000Z');
+    });
+
+    it("20:00 in the reader's zone, not UTC", async () => {
+      const r = await user('deadline_kol', { timezone: 'Asia/Kolkata' });
+      const m = await movie('Deadline Kolkata');
+      await save(r, m);
+      await cluster(r, m, 2, '2031-12-15T03:00:00Z');
+      await arbitrate('2031-12-15T12:00:00Z');
+      const [job] = (await claimFor(r, '2031-12-15T12:05:00Z')).filter((j) => j.proactive);
+      // 20:00 IST is 14:30Z.
+      assert.equal(iso(job.proactive.deliver_by), '2031-12-15T14:30:00.000Z');
+    });
+
+    it('a reactive job carries no deadline of any kind', async () => {
+      const r = await user('deadline_reactive');
+      const f = await user('deadline_reactivef');
+      await t.sql(
+        `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+         values ($1, 'follow', $2, 'profile', $2)`,
+        [r, f],
+      );
+      const [job] = await claimFor(r);
+      assert.equal(job.type, 'follow');
+      assert.equal(job.proactive, null);
     });
 
     it('a reactive push queued alongside is untouched by any of this', async () => {

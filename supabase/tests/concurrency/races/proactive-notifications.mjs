@@ -30,6 +30,11 @@ import { raceContext } from './_shared.mjs';
  * **PA2.** Two concurrent qualifying activities: one cluster, one inbox row, two members,
  * and the candidate eligible.
  * **PA3.** Two concurrent claims: the proactive job is returned once.
+ * **PA4.** A mute of Watchlist & discovery racing a qualifying activity (Codex re-review):
+ * `_proactive_social_add` takes the reader's preference lock SHARED and the mute trigger
+ * takes it EXCLUSIVE, so either the mute lands first and the activity records nothing,
+ * or the activity lands first and the mute closes the cluster it wrote. Never an open
+ * cluster carrying an activity from across the boundary.
  */
 export default function suite() {
   const rc = raceContext();
@@ -183,6 +188,85 @@ export default function suite() {
       assert.equal(hits.length, 1, 'PA3: claimed exactly once');
       const [{ state }] = await db.rows(`select state from proactive_candidates where notification_id = $1`, [note]);
       assert.equal(state, 'sent');
+    });
+
+    describe('PA4: a mute racing a qualifying activity', () => {
+      const prefKey = async (r) =>
+        (await ctx.db.rows(`select hashtextextended('bingd.proactive.social_pref:' || $1::text, 0)::text as k`, [r]))[0].k;
+      const mute = `insert into notification_preferences (user_id, category, enabled)
+                    values ($1, 'watchlist_discovery', false)
+                    on conflict (user_id, category) do update set enabled = excluded.enabled`;
+      const rank = `insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`;
+
+      /** A reader with one friend already in an open cluster for `m`, and a second friend. */
+      const world = async (name) => {
+        const { db, fx } = ctx;
+        const m = await fx.createMovie(name);
+        const r = await reader(m);
+        const [f1, f2] = [await fx.createUser(), await fx.createUser()];
+        await friends(r, f1);
+        await friends(r, f2);
+        await db.sql(rank, [f1, m]);
+        const [c] = await db.rows(`select id from proactive_candidates where recipient_id = $1`, [r]);
+        assert.ok(c, 'the first friend opened a cluster');
+        return { r, m, f2 };
+      };
+
+      const people = async (r) =>
+        (await ctx.db.rows(
+          `select count(distinct a.actor_id)::int n from proactive_cluster_actors a
+             join proactive_candidates c on c.id = a.candidate_id where c.recipient_id = $1`,
+          [r],
+        ))[0].n;
+      const open = async (r) =>
+        ctx.db.rows(
+          `select id from proactive_candidates
+            where recipient_id = $1 and window_ends_at > now() and state not in ('suppressed', 'expired')`,
+          [r],
+        );
+
+      it('the mute first: the activity waits for it, then records nothing', async () => {
+        const { r, m, f2 } = await world('PA4 mute first');
+        const s1 = await ctx.db.session('mute');
+        const s2 = await ctx.db.session('activity');
+        try {
+          await s1.q('begin');
+          await s1.q(mute, [r]);
+          const pending = s2.start(rank, [f2, m]);
+          await s2.awaitBlocked({ advisoryKey: await prefKey(r) });
+          await s1.q('commit');
+          await pending;
+        } finally {
+          await s1.end().catch(() => {});
+          await s2.end().catch(() => {});
+        }
+        assert.equal(await people(r), 1, 'PA4: the muted-time friend is not recorded');
+        assert.equal((await open(r)).length, 0, 'PA4: nothing open across the boundary');
+      });
+
+      it('the activity first: the mute waits for it, then closes what it wrote', async () => {
+        const { r, m, f2 } = await world('PA4 activity first');
+        const s1 = await ctx.db.session('activity');
+        const s2 = await ctx.db.session('mute');
+        try {
+          await s1.q('begin');
+          await s1.q(rank, [f2, m]);
+          const pending = s2.start(mute, [r]);
+          await s2.awaitBlocked({ advisoryKey: await prefKey(r) });
+          await s1.q('commit');
+          await pending;
+        } finally {
+          await s1.end().catch(() => {});
+          await s2.end().catch(() => {});
+        }
+        assert.equal(await people(r), 2, 'PA4: the activity landed before the mute');
+        assert.equal((await open(r)).length, 0, 'PA4: and the mute closed it');
+        const [c] = await ctx.db.rows(
+          `select state, suppression_reason from proactive_candidates where recipient_id = $1`,
+          [r],
+        );
+        assert.deepEqual([c.state, c.suppression_reason], ['suppressed', 'preference_off']);
+      });
     });
   });
 }

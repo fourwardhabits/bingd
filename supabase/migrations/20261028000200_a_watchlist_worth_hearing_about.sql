@@ -65,6 +65,13 @@ declare
   v_new      integer;
   v_returner boolean;
 begin
+  -- Shared with every other activity for this reader, exclusive with the reader switching
+  -- Watchlist & discovery off (_proactive_social_on_mute). So the preference read below is
+  -- never stale against a mute: either the mute committed first and this sees it, or this
+  -- commits first and the mute then closes whatever it wrote.
+  perform pg_advisory_xact_lock_shared(
+    hashtextextended('bingd.proactive.social_pref:' || p_recipient::text, 0));
+
   -- MUTED MEANS UNTOUCHED (Codex review). While Watchlist & discovery is off, an activity
   -- writes nothing at all: no new cluster, no suppressed placeholder that would later be
   -- found and reused, no member added to an existing cluster, no inbox row bumped or made
@@ -77,9 +84,9 @@ begin
   perform pg_advisory_xact_lock(
     hashtextextended('bingd.proactive.social:' || p_recipient::text || ':' || p_media::text, 0));
 
-  -- The open cluster to join. One the arbiter ended because the reader had switched the
-  -- preference off is not open: re-enabling starts fresh rather than inheriting a cluster
-  -- that can never push again.
+  -- The open cluster to join. Switching the preference off closes every open window
+  -- (_proactive_social_on_mute), so nothing from before a mute is found here after it.
+  -- One the arbiter ended for the preference is excluded as well, belt and braces.
   select * into c
     from proactive_candidates
    where recipient_id = p_recipient and type = 'watchlist_social' and media_item_id = p_media
@@ -234,6 +241,60 @@ drop trigger if exists feed_events_watchlist_social on feed_events;
 create trigger feed_events_watchlist_social
   after insert on feed_events
   for each row execute function _proactive_social_on_activity();
+
+/**
+ * MUTING IS A CLEAN BOUNDARY (Codex re-review, MINOR). Switching Watchlist & discovery off
+ * closes every social aggregation window the reader has open, at that moment:
+ *
+ *   · each window ends now (window_ends_at), whatever state the cluster is in, so no
+ *     later activity can join it, and after re-enabling only fresh activity forms a new
+ *     cluster, counted from zero;
+ *   · a cluster not yet pushed (pending, which includes one friend below the threshold
+ *     that the arbiter never sees, or selected for tonight) ends `suppressed`,
+ *     `preference_off`, so re-enabling before the evening cannot send the old one.
+ *
+ * A cluster already sent stays sent: that is history, and only its window closes. The
+ * inbox rows stay what they were; the gate on notifications already stops new ones.
+ * Theatrical and resurfacing candidates are not touched: they carry no muted-period
+ * activity, and the arbiter and the claim re-check the preference before sending them.
+ *
+ * Exclusive with the shared lock _proactive_social_add takes, so an activity in flight
+ * at the moment of the mute is either refused or closed here, never left open.
+ */
+create or replace function _proactive_social_on_mute()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.category <> 'watchlist_discovery' or new.enabled then
+    return null;
+  end if;
+
+  perform pg_advisory_xact_lock(
+    hashtextextended('bingd.proactive.social_pref:' || new.user_id::text, 0));
+
+  update proactive_candidates
+     set window_ends_at     = now(),
+         state              = case when state in ('pending', 'selected') then 'suppressed' else state end,
+         suppression_reason = case when state in ('pending', 'selected') then 'preference_off' else suppression_reason end,
+         decided_at         = case when state in ('pending', 'selected') then now() else decided_at end
+   where recipient_id = new.user_id
+     and type = 'watchlist_social'
+     and window_ends_at > now();
+
+  return null;
+end;
+$$;
+
+comment on function _proactive_social_on_mute() is
+  'After-write trigger on notification_preferences: when a reader switches watchlist_discovery off, every open watchlist_social window of theirs closes now, and any cluster not yet pushed (pending or selected) ends suppressed / preference_off. Re-enabling therefore starts from fresh activity only. Internal.';
+
+drop trigger if exists notification_preferences_watchlist_mute on notification_preferences;
+create trigger notification_preferences_watchlist_mute
+  after insert or update of enabled on notification_preferences
+  for each row execute function _proactive_social_on_mute();
 
 
 -- ---------------------------------------------------------------------------
@@ -702,6 +763,7 @@ comment on function unschedule_proactive_notifications() is
 
 revoke execute on function _proactive_social_add(uuid, uuid, uuid, uuid, timestamptz) from public, anon, authenticated;
 revoke execute on function _proactive_social_on_activity()                       from public, anon, authenticated;
+revoke execute on function _proactive_social_on_mute()                           from public, anon, authenticated;
 revoke execute on function _proactive_theatrical_collect(timestamptz)            from public, anon, authenticated;
 revoke execute on function _proactive_resurface_pick(uuid, timestamptz)          from public, anon, authenticated;
 revoke execute on function _proactive_resurface_collect(timestamptz)             from public, anon, authenticated;

@@ -67,6 +67,18 @@ export function stillQueued(addressed: Addressed[], live: readonly string[]): Ad
   return addressed.filter((entry) => alive.has(entry.notificationId));
 }
 
+/**
+ * A proactive job's delivery deadline as Expo's `expiration`: whole seconds since the
+ * epoch, rounded down so the provider never holds it past the instant the claim named.
+ * Null when the job carries none or an unreadable one.
+ */
+export function expirationFor(job: PushJob): number | null {
+  const at = job.proactive?.deliver_by;
+  if (typeof at !== 'string') return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
 export function messagesFor(jobs: PushJob[]): Addressed[] {
   const out: Addressed[] = [];
 
@@ -75,6 +87,18 @@ export function messagesFor(jobs: PushJob[]): Addressed[] {
     // A job whose actor cannot be named. `claim_push_batch` already refuses these, so
     // this is the second of two — and the cheaper one to be wrong about.
     if (!content) continue;
+
+    /**
+     * TONIGHT OR NOT AT ALL, AT THE PROVIDER TOO (Codex re-review, MAJOR). A proactive
+     * message carries the claim's deadline as Expo's `expiration`, so a phone that is
+     * offline when it is sent is not woken by it the next morning. One without a usable
+     * deadline is not sent: without `expiration` the provider would keep it for weeks,
+     * which is exactly the failure this exists to prevent. Its candidate is already
+     * `sent` (handed over), so it is never claimed again either. A reactive message is
+     * built exactly as before, with no `expiration`.
+     */
+    const expiration = job.proactive ? expirationFor(job) : null;
+    if (job.proactive && expiration === null) continue;
 
     for (const device of job.tokens ?? []) {
       out.push({
@@ -91,11 +115,53 @@ export function messagesFor(jobs: PushJob[]): Addressed[] {
           // `expo-notifications` creates for us, and the client sets its name.
           channelId: 'default',
           priority: 'high',
+          ...(expiration !== null ? { expiration } : {}),
         },
       });
     }
   }
 
+  return out;
+}
+
+/**
+ * The messages still worth submitting at `nowMs`, and the ones whose deadline has passed.
+ *
+ * Called on each chunk immediately before it is submitted, so the time spent building,
+ * checking the queue and sending earlier chunks is all inside the check. A message whose
+ * `expiration` is now or past is not submitted: it would arrive after its evening, or be
+ * refused by the provider. A message without one (every reactive message) is always due.
+ */
+export function partitionByDeadline(
+  addressed: Addressed[],
+  nowMs: number,
+): { due: Addressed[]; late: Addressed[] } {
+  const nowSeconds = nowMs / 1000;
+  const due: Addressed[] = [];
+  const late: Addressed[] = [];
+  for (const entry of addressed) {
+    const expiration = entry.message.expiration;
+    if (expiration !== undefined && nowSeconds >= expiration) late.push(entry);
+    else due.push(entry);
+  }
+  return { due, late };
+}
+
+/**
+ * Settlement rows for notifications whose every message missed its deadline, so their
+ * queue rows leave the queue rather than wait for a lease to expire. `delivered: true`
+ * means what it means in `summarise`: there is nothing worth retrying. A retry could not
+ * be on time, and at most once (`claim_push_batch`) would drop it anyway. A notification
+ * that also had a message submitted is already in `settled` and is not repeated.
+ */
+export function lateResults(late: Addressed[], settled: readonly { notification_id: string }[]) {
+  const seen = new Set(settled.map((row) => row.notification_id));
+  const out: { notification_id: string; attempt: number; delivered: true; error: null }[] = [];
+  for (const entry of late) {
+    if (seen.has(entry.notificationId)) continue;
+    seen.add(entry.notificationId);
+    out.push({ notification_id: entry.notificationId, attempt: entry.attempt, delivered: true, error: null });
+  }
   return out;
 }
 

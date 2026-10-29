@@ -870,6 +870,14 @@ comment on function _proactive_arbitrate(timestamptz) is
 -- candidate ends `expired` (reason `expired`, `outside_window` or `no_timezone`), never
 -- sent late. `_proactive_claim_reason` is the whole rule, and it takes the clock.
 --
+-- AND NOT LATER AT THE PROVIDER (Codex re-review, MAJOR). A job claimed at 19:59 is
+-- timely here, but Expo holds an undelivered message for weeks unless told otherwise, so
+-- a phone that comes back online the next morning would still be woken by it. Every
+-- proactive job therefore carries `proactive.deliver_by`, the earlier of expires_at and
+-- 20:00 local on its selected_local_date, and push-sender sends it as Expo's documented
+-- `expiration` (seconds since the epoch) and drops the message itself once it has passed.
+-- Reactive jobs carry no deadline and keep the provider's default retention.
+--
 -- `p_now` is the instant proactive timeliness is judged at. It defaults to now() and only
 -- tests pass it; the outbox lease always uses the real clock. The sender's call names
 -- only p_limit, so the old one-argument form is dropped rather than left beside this one.
@@ -1098,6 +1106,16 @@ begin
              'type',        pc.type,
              'opens_on',    pc.metadata ->> 'opens_on',
              'local_today', (p_now at time zone coalesce(ac.timezone, 'UTC'))::date,
+             -- The last instant this push may reach a phone (Codex re-review, MAJOR): the
+             -- earlier of the candidate's own expiry and the close of the evening it was
+             -- selected for, in the reader's zone. push-sender sends it to Expo as the
+             -- message's `expiration`, so a phone that is offline at 19:59 is not woken
+             -- by it the next morning, and drops the message itself if it is already past.
+             'deliver_by',  least(
+                              pc.expires_at,
+                              (pc.selected_local_date
+                                 + make_time(_proactive_int('proactive.window_end_hour', 20), 0, 0))
+                                at time zone coalesce(ac.timezone, 'UTC')),
              'reason',      pc.metadata ->> 'reason',
              'actor_count', case when pc.type = 'watchlist_social'
                               then (select count(*) from _proactive_social_actors(pc.id, n.recipient_id)) end,
@@ -1186,13 +1204,13 @@ end;
 $$;
 
 comment on function claim_push_batch(integer, timestamptz) is
-  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned. p_now defaults to now() and only tests pass it; leases use the real clock. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
+  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned, each with proactive.deliver_by (the earlier of expires_at and 20:00 local on its selected day), which push-sender sends as the Expo expiration. p_now defaults to now() and only tests pass it; leases use the real clock. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
 
 
 -- ---------------------------------------------------------------------------
 -- 7. The inbox, rebuilt from 20260901000100
 --
--- Two columns and two filters added; every join, ownership rule and excerpt condition is
+-- Two columns, three filters and one read-time date added; every join, ownership rule and excerpt condition is
 -- carried across whole.
 --
 --   cluster_actors / cluster_count   for watchlist_social: up to three people and the
@@ -1201,6 +1219,9 @@ comment on function claim_push_batch(integer, timestamptz) is
 --   hidden                           watchlist_resurface rows (the push-only type's
 --                                    carrier) are never returned, and a social row whose
 --                                    every member has dropped out is not drawn.
+--   theatrical date                  a theatrical_release row's payload.opens_on is the
+--                                    release event's CURRENT date, and a row whose
+--                                    release was withdrawn or lost its date is not drawn.
 -- ---------------------------------------------------------------------------
 
 drop function if exists my_notifications(integer);
@@ -1256,7 +1277,11 @@ as $$
          m.kind,
          m.title,
          parent.title,
-         n.payload,
+         -- A theatrical row states the release's date as it stands NOW, not the date it
+         -- was written with (Codex re-review): see the filter below.
+         case when n.type = 'theatrical_release'
+              then n.payload || jsonb_build_object('opens_on', rel.opens_on)
+              else n.payload end,
          case
            when n.type in ('comment', 'mention') then (
              select left(c.body, 140)
@@ -1317,8 +1342,24 @@ as $$
     left join media_items parent
            on parent.id = m.parent_id
     left join proactive_candidates pc
-           on n.type = 'watchlist_social'
+           on n.type in ('watchlist_social', 'theatrical_release')
           and pc.notification_id = n.id
+    /**
+     * theatrical_release: the date the release event holds now. A film still scheduled
+     * opens on its current scheduled date; one that has opened, on the day it did. One
+     * that was withdrawn, lost its date, or is gone has none, and its row is not drawn
+     * (Codex re-review): a postponed film must not keep saying the old date, and a
+     * cancelled one must not keep saying it opens at all. Read-time, so it is true
+     * whenever the inbox is read, before or after the push, with one row throughout.
+     */
+    left join lateral (
+      select case
+               when re.state = 'scheduled' then re.scheduled_date
+               when re.state = 'released'  then coalesce(re.released_on, re.scheduled_date)
+             end as opens_on
+        from release_events re
+       where re.id = (pc.metadata ->> 'release_event_id')::uuid
+    ) rel on pc.type = 'theatrical_release'
     left join lateral (
       select count(*)::integer as n,
              jsonb_agg(jsonb_build_object('username', s.username,
@@ -1327,7 +1368,7 @@ as $$
                        order by s.first_joined, s.actor_id) filter (where s.rn <= 3) as actors
         from (select a.*, row_number() over (order by a.first_joined, a.actor_id) as rn
                 from _proactive_social_actors(pc.id, auth.uid()) a) s
-    ) cl on pc.id is not null
+    ) cl on pc.type = 'watchlist_social'
    where n.recipient_id = auth.uid()
      and (n.actor_id is null
           or (p.id is not null and can_discover_profile(auth.uid(), n.actor_id)))
@@ -1335,12 +1376,14 @@ as $$
      and n.type <> 'watchlist_resurface'
      -- And a social row nobody is left in says nothing true.
      and (n.type <> 'watchlist_social' or coalesce(cl.n, 0) > 0)
+     -- And a theatrical row whose release no longer has a date says nothing true.
+     and (n.type <> 'theatrical_release' or rel.opens_on is not null)
    order by n.created_at desc
    limit least(greatest(coalesce(p_limit, 50), 1), 200);
 $$;
 
 comment on function my_notifications(integer) is
-  'The caller''s own inbox, with the actor named, the subject title resolved and the row''s payload carried through. Definer for the same reason my_blocks is. Takes no recipient and cannot be asked about anybody else. Filters actors through can_discover_profile since 20260819000300. The feed-event join resolves the recipient''s own event for comment and reaction rows, the actor''s own for recommendation_ranked (20260827000600), and the event''s own for mention (20260830000100). Returns one line of the comment (20260830000100), viewer_ranked for watch_tag, and the subject event''s type (20260901000100). Since 20261028000100: cluster_actors / cluster_count for watchlist_social (re-derived at read time through _proactive_social_actors), never returns watchlist_resurface rows, and drops a social row with nobody left in it.';
+  'The caller''s own inbox, with the actor named, the subject title resolved and the row''s payload carried through. Definer for the same reason my_blocks is. Takes no recipient and cannot be asked about anybody else. Filters actors through can_discover_profile since 20260819000300. The feed-event join resolves the recipient''s own event for comment and reaction rows, the actor''s own for recommendation_ranked (20260827000600), and the event''s own for mention (20260830000100). Returns one line of the comment (20260830000100), viewer_ranked for watch_tag, and the subject event''s type (20260901000100). Since 20261028000100: cluster_actors / cluster_count for watchlist_social (re-derived at read time through _proactive_social_actors), never returns watchlist_resurface rows, drops a social row with nobody left in it, and states a theatrical_release row''s opens_on from the release event as it is now (dropping the row once that release is withdrawn or has no date).';
 
 revoke execute on function my_notifications(integer) from public, anon;
 grant execute on function my_notifications(integer) to authenticated;
