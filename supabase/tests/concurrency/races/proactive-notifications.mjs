@@ -41,6 +41,12 @@ import { raceContext } from './_shared.mjs';
  * mute that holds the row first makes the claim wait, then return nothing, leave nothing
  * queued and spend no budget; a claim that holds it first sends once, and the mute that
  * follows leaves the candidate sent and produces no second push.
+ * **PA6.** A mute racing the ARBITER (Codex + Fable final reviews). The arbiter walks a
+ * reader's due rows in priority order; the mute used to lock the same rows by id, so a
+ * reader with two clusters whose eligibility order inverts their id order could leave each
+ * holding one row and waiting on the other. Now both take the reader's arbiter lock before
+ * any row, and the arbiter locks every due row by id before its walk. So one waits on the
+ * reader lock holding nothing, whichever arrives first, and neither is ever aborted.
  */
 export default function suite() {
   const rc = raceContext();
@@ -241,7 +247,13 @@ export default function suite() {
           // C/D. The claim starts and genuinely waits on the candidate row.
           const pending = s2.start(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
           const seen = await s2.awaitBlocked();
-          assert.equal(seen.wait_event_type, 'Lock', 'PA5: the claim waits on the mute');
+          assert.equal(seen.wait_event_type, 'Lock', 'PA5: the claim waits on a lock');
+          // On the mute's transaction specifically, and on a row lock rather than an
+          // advisory one: the claim takes no advisory lock, so this is the candidate row
+          // the mute's trigger has just suppressed.
+          assert.equal(seen.wait_event, 'transactionid', 'PA5: a row lock, not an advisory one');
+          const [{ by }] = await db.rows(`select pg_blocking_pids($1) as by`, [s2.pid]);
+          assert.deepEqual(by, [s1.pid], 'PA5: blocked by the mute, and nothing else');
           // E. The mute commits.
           await s1.q('commit');
           claimed = (await pending).rows[0].r;
@@ -303,9 +315,200 @@ export default function suite() {
         assert.equal(after.state, 'sent', 'PA5: the mute does not rewrite a sent candidate');
         assert.ok(after.sent_at);
         assert.equal(after.suppression_reason, null);
-        // No second effect: a later drain returns nothing for it.
+        // No second effect, and not because of the lease: a sender that crashed holding
+        // it would let the row be re-claimed once the five minutes pass. Expire the lease,
+        // as that crash would, and claim again: at most once still returns nothing, and
+        // the row leaves the queue.
+        await db.sql(
+          `update push_outbox set claimed_at = now() - interval '6 minutes' where notification_id = $1`,
+          [c.notification_id],
+        );
+        const [{ eligible }] = await db.rows(
+          `select count(*)::int eligible from push_outbox
+            where notification_id = $1 and state = 'claimed' and claimed_at < now() - interval '5 minutes'`,
+          [c.notification_id],
+        );
+        assert.equal(eligible, 1, 'PA5: the lease really has expired, so the row is claimable');
         const [{ r: again }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
-        assert.equal(again.filter((j) => j.notification_id === c.notification_id).length, 0);
+        assert.equal(
+          again.filter((j) => j.notification_id === c.notification_id).length,
+          0,
+          'PA5: a re-claimed row is never sent twice',
+        );
+        const [{ n: left }] = await db.rows(
+          `select count(*)::int n from push_outbox where notification_id = $1`,
+          [c.notification_id],
+        );
+        assert.equal(left, 0, 'PA5: and it leaves the queue');
+        assert.equal((await candidate(c.id)).state, 'sent');
+      });
+    });
+
+    describe('PA6: a mute racing the arbiter', () => {
+      const mute = `insert into notification_preferences (user_id, category, enabled)
+                    values ($1, 'watchlist_discovery', false)
+                    on conflict (user_id, category) do update set enabled = excluded.enabled`;
+      const arbKey = async (r) =>
+        (await ctx.db.rows(`select hashtextextended('bingd.proactive:' || $1::text, 0)::text as k`, [r]))[0].k;
+
+      /**
+       * A reader with two due social clusters whose eligibility order is the inverse of
+       * their id order: `first` (eligible earlier, so the arbiter's walk reaches it
+       * first) has the HIGHER id, and `second` the lower. That is the shape the old lock
+       * orders disagreed on.
+       */
+      const inverted = async (name) => {
+        const { db, fx } = ctx;
+        const m1 = await fx.createMovie(`${name} 1`);
+        const m2 = await fx.createMovie(`${name} 2`);
+        const r = await reader(m1);
+        await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, m2]);
+        await eligibleCluster(r, m1);
+        await eligibleCluster(r, m2);
+        const [low, high] = await db.rows(
+          `select id, notification_id from proactive_candidates where recipient_id = $1 order by id`,
+          [r],
+        );
+        await db.sql(`update proactive_candidates set eligible_at = '2031-03-03T10:00:00Z' where id = $1`, [high.id]);
+        await db.sql(`update proactive_candidates set eligible_at = '2031-03-03T11:00:00Z' where id = $1`, [low.id]);
+        return { r, first: high, second: low };
+      };
+
+      /** Settles every racer and fails on any error, a deadlock (40P01) above all. */
+      const settle = async (label, ...pending) => {
+        const results = await Promise.allSettled(pending);
+        for (const res of results) {
+          if (res.status === 'rejected') {
+            assert.fail(`${label}: ${res.reason?.code ?? ''} ${res.reason?.message ?? res.reason}`);
+          }
+        }
+      };
+
+      /** The valid final state after a mute, whichever side went first. */
+      const assertMutedCleanly = async (r, label) => {
+        const { db } = ctx;
+        const rows = await db.rows(
+          `select state, suppression_reason, sent_at from proactive_candidates where recipient_id = $1`,
+          [r],
+        );
+        assert.equal(rows.length, 2);
+        for (const c of rows) {
+          assert.deepEqual([c.state, c.suppression_reason, c.sent_at], ['suppressed', 'preference_off', null], label);
+        }
+        // Whatever the arbiter queued is not sendable: the next drain drops it and
+        // nothing is left behind.
+        const [{ r: jobs }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
+        const mine = await db.rows(`select id from notifications where recipient_id = $1`, [r]);
+        const ids = new Set(mine.map((n) => n.id));
+        assert.equal(jobs.filter((j) => ids.has(j.notification_id)).length, 0, `${label}: no push`);
+        const [{ n }] = await db.rows(`select count(*)::int n from push_outbox where recipient_id = $1`, [r]);
+        assert.equal(n, 0, `${label}: no outbox row left`);
+      };
+
+      /**
+       * The old deadlock, reproduced deterministically. A third session holds an
+       * uncommitted outbox insert for `first`'s notification, so the arbiter stops inside
+       * its walk at exactly the point where it has `first` and has not reached `second`.
+       * The mute then arrives. Before the fix it locked `second` (lower id) and waited on
+       * `first`; releasing the arbiter sent it to `second`, and Postgres aborted one of
+       * them. Now the arbiter already holds both rows, and the mute waits on the reader
+       * lock holding none.
+       */
+      const arbiterFirst = async (name) => {
+        const { db } = ctx;
+        const { r, first } = await inverted(name);
+        const hold = await db.session('outbox-holder');
+        const arb = await db.session('arbiter');
+        const mut = await db.session('mute');
+        try {
+          await hold.q('begin');
+          await hold.q(`insert into push_outbox (notification_id, recipient_id) values ($1, $2)`, [
+            first.notification_id,
+            r,
+          ]);
+          const arbiting = arb.start(`select _proactive_arbitrate($1::timestamptz)`, [EVENING]);
+          await arb.awaitBlocked();
+
+          const muting = mut.start(mute, [r]);
+          // The mute waits on the reader's arbiter lock, holding no candidate row.
+          await mut.awaitBlocked({ advisoryKey: await arbKey(r) });
+          const [{ n: rowsHeld }] = await db.rows(
+            `select count(*)::int n from pg_locks l
+               join pg_class c on c.oid = l.relation
+              where l.pid = $1 and l.granted and c.relname = 'proactive_candidates' and l.mode = 'RowShareLock'`,
+            [mut.pid],
+          );
+          assert.equal(rowsHeld, 0, 'PA6: the waiting mute holds no candidate row lock');
+
+          await hold.q('rollback');
+          await settle('PA6 arbiter first', arbiting, muting);
+        } finally {
+          await hold.end().catch(() => {});
+          await arb.end().catch(() => {});
+          await mut.end().catch(() => {});
+        }
+        await assertMutedCleanly(r, 'PA6 arbiter first');
+      };
+
+      const muteFirst = async (name) => {
+        const { db } = ctx;
+        const { r } = await inverted(name);
+        const mut = await db.session('mute');
+        const arb = await db.session('arbiter');
+        try {
+          await mut.q('begin');
+          await mut.q(mute, [r]);
+          const arbiting = arb.start(`select _proactive_arbitrate($1::timestamptz) as r`, [EVENING]);
+          // The arbiter waits on the reader lock the mute holds, before touching a row.
+          await arb.awaitBlocked({ advisoryKey: await arbKey(r) });
+          await mut.q('commit');
+          await settle('PA6 mute first', arbiting);
+        } finally {
+          await mut.end().catch(() => {});
+          await arb.end().catch(() => {});
+        }
+        await assertMutedCleanly(r, 'PA6 mute first');
+        const [{ n }] = await ctx.db.rows(
+          `select count(*)::int n from proactive_candidates where recipient_id = $1 and selected_at is not null`,
+          [r],
+        );
+        assert.equal(n, 0, 'PA6: nothing was selected after the mute');
+      };
+
+      it('the arbiter mid-walk, then a mute: the mute waits on the reader lock, no deadlock', async () => {
+        await arbiterFirst('PA6 arbiter first');
+      });
+
+      it('a mute, then the arbiter: the arbiter waits on the reader lock, no deadlock', async () => {
+        await muteFirst('PA6 mute first');
+      });
+
+      /**
+       * Repeated, both orders, then the two fired together with no choreography, on a
+       * fresh reader each round. Any lock cycle would surface here as a 40P01.
+       */
+      it('stays deadlock-free over repeated rounds, choreographed and free-running', async () => {
+        const { db } = ctx;
+        for (let i = 0; i < 5; i += 1) {
+          await arbiterFirst(`PA6 rep a${i}`);
+          await muteFirst(`PA6 rep m${i}`);
+        }
+        for (let i = 0; i < 15; i += 1) {
+          const { r } = await inverted(`PA6 free ${i}`);
+          const a = await db.session('arbiter');
+          const b = await db.session('mute');
+          try {
+            await settle(
+              `PA6 free round ${i}`,
+              a.q(`select _proactive_arbitrate($1::timestamptz)`, [EVENING]),
+              b.q(mute, [r]),
+            );
+          } finally {
+            await a.end().catch(() => {});
+            await b.end().catch(() => {});
+          }
+          await assertMutedCleanly(r, `PA6 free round ${i}`);
+        }
       });
     });
 

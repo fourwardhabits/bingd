@@ -219,7 +219,7 @@ advisory lock before reading that reader's budget. (2) A partial unique index on
 proactive push on one local day impossible, not merely unlikely. (3) `push_outbox`'s
 primary key is the notification. The social writer has its own per-(reader, title)
 advisory lock, so two friends finishing a film at once join one cluster. All three are
-exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–5).
+exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–6).
 
 **The claim locks before it judges** (Codex final review, MAJOR). `claim_push_batch` locks
 every proactive candidate behind its batch (`for update`, in id order) **before** any
@@ -230,6 +230,17 @@ drain is serialised against it: if the mute holds the row first, the claim waits
 returns nothing, leaves no outbox row and spends no budget; if the claim holds it first,
 the push goes out once and the mute leaves the candidate `sent`. The mute trigger locks the
 same rows in the same order, so the two cannot deadlock (race PA5, both orders).
+
+**One lock order for every proactive path** (Codex + Fable final reviews). Preference lock
+→ the reader's arbiter lock (`bingd.proactive:<reader>`) → candidate rows by id. The mute
+takes the arbiter's per-reader lock before any row, and the arbiter locks all of a reader's
+due rows by id before its priority-ordered walk, so a mute and an arbiter over one reader
+take turns on that lock and never hold rows against each other. The claim takes rows by id
+and no advisory lock. The arbiter's bulk expiry uses `skip locked`, so it never waits (a
+row it skips stays pending one more tick, and the walk and the claim both still refuse
+anything past `expires_at`). Race PA6 covers both orders, with the arbiter frozen mid-walk,
+repeated, and free-running. One cost: a reader switching Watchlist & discovery off while a
+tick is arbitrating waits for that tick to commit.
 
 `proactive_cluster_actors` holds one row per qualifying activity, with that activity's
 foreign key, so deleting the activity removes the membership. `notification_opens` holds
@@ -622,7 +633,7 @@ The review questions, answered:
 - **Private activity leakage.** A friend's activity reaches only mutual followers who
   `can_view_profile` them, rechecked at read and at send. The push names display names
   only, the same class of fact the reactive pushes carry.
-- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4. A mute racing a claim: PA5.
+- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4. A mute racing a claim: PA5. A mute racing the arbiter: PA6.
 - **Service-role exposure.** Unchanged. The drain still reads the key from Vault; nothing
   new holds it.
 - **Client-triggered send bypass.** No client-callable function writes `push_outbox`,

@@ -259,7 +259,9 @@ create trigger feed_events_watchlist_social
  * activity, and the arbiter and the claim re-check the preference before sending them.
  *
  * Exclusive with the shared lock _proactive_social_add takes, so an activity in flight
- * at the moment of the mute is either refused or closed here, never left open.
+ * at the moment of the mute is either refused or closed here, never left open. Then the
+ * arbiter's per-reader lock, then the rows by id: the one lock order every proactive path
+ * follows (20261028000100 section 5), so a mute cannot deadlock with an arbiter or a claim.
  */
 create or replace function _proactive_social_on_mute()
 returns trigger
@@ -275,9 +277,16 @@ begin
   perform pg_advisory_xact_lock(
     hashtextextended('bingd.proactive.social_pref:' || new.user_id::text, 0));
 
-  -- The rows first, in id order: the order claim_push_batch locks candidates in, so a
-  -- mute and a claim over the same reader serialise on the row and never deadlock. If a
-  -- claim holds one, this waits for it; the update below then sees it sent and leaves it.
+  -- Then the arbiter's own per-reader lock, before any row (LOCK ORDER, 20261028000100
+  -- section 5). An arbiter working on this reader holds it while it holds their rows, so
+  -- the mute waits here, holding no row, instead of locking some rows and waiting on the
+  -- rest while the arbiter waits on these: the deadlock both final reviews found.
+  perform pg_advisory_xact_lock(
+    hashtextextended('bingd.proactive:' || new.user_id::text, 0));
+
+  -- Then the rows, in id order: the order claim_push_batch and the arbiter lock
+  -- candidates in. If a claim holds one, this waits for it (the claim takes no advisory
+  -- lock, so it never waits on this); the update below then sees it sent and leaves it.
   perform 1
      from proactive_candidates
     where recipient_id = new.user_id

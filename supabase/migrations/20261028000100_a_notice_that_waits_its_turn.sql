@@ -678,6 +678,23 @@ comment on function _proactive_invalid(uuid, timestamptz) is
 --          takes today's one slot
 --   3. Losers are not queued. They wait while they are timely and expire when they are
 --      not, so nothing "catches up" on Thursday about Monday.
+--
+-- LOCK ORDER (Codex + Fable final reviews). Every path that locks proactive_candidates
+-- rows takes them in one order, so no two can wait on each other in a cycle:
+--
+--   reader preference lock  ->  reader arbiter lock  ->  candidate rows, by id
+--   ('bingd.proactive.social_pref:' || reader)   ('bingd.proactive:' || reader)
+--
+--   · the arbiter: the reader lock, then that reader's due rows by id, all of them,
+--     before the priority-ordered walk below (which then waits on nothing);
+--   · the mute (_proactive_social_on_mute): the preference lock, then this same reader
+--     lock, then its rows by id. So a mute and an arbiter over one reader take turns on
+--     the reader lock and never hold rows against each other;
+--   · the claim: candidate rows by id, and no advisory lock at all;
+--   · the social writer: the preference lock (shared), then one row;
+--   · the bulk expiry below: SKIP LOCKED, so it never waits on a row and cannot close a
+--     cycle. A row it skips stays pending one more tick; the walk never selects it,
+--     because it also requires expires_at > p_now, and the claim re-checks expiry.
 -- ---------------------------------------------------------------------------
 
 create or replace function _proactive_arbitrate(p_now timestamptz default now())
@@ -714,11 +731,19 @@ declare
   v_suppressed integer := 0;
   v_held       integer := 0;
 begin
-  update proactive_candidates
+  -- Never waits (see LOCK ORDER above): a row another transaction holds is left for the
+  -- next tick.
+  with doomed as (
+    select id from proactive_candidates
+     where state = 'pending' and expires_at <= p_now
+       for update skip locked
+  )
+  update proactive_candidates pc
      set state              = 'expired',
-         suppression_reason = coalesce(last_block_reason, 'expired'),
+         suppression_reason = coalesce(pc.last_block_reason, 'expired'),
          decided_at         = p_now
-   where state = 'pending' and expires_at <= p_now;
+    from doomed
+   where pc.id = doomed.id;
   get diagnostics v_expired = row_count;
 
   for v_user in
@@ -730,6 +755,16 @@ begin
     -- One arbiter per reader at a time. Two ticks overlapping take turns here, and the
     -- second sees the first one's selection in its cap counts.
     perform pg_advisory_xact_lock(hashtextextended('bingd.proactive:' || v_user::text, 0));
+
+    -- This reader's due rows, all of them and by id, before the walk below visits them in
+    -- priority order. The walk then waits on nothing it has not already got, so its order
+    -- cannot invert anybody else's (LOCK ORDER above).
+    perform 1
+       from proactive_candidates
+      where recipient_id = v_user and state = 'pending'
+        and eligible_at is not null and eligible_at <= p_now and expires_at > p_now
+      order by id
+        for update;
 
     select ac.timezone into v_tz from account_context ac where ac.user_id = v_user;
     v_device := exists (select 1 from device_tokens d where d.user_id = v_user and d.revoked_at is null);
@@ -758,6 +793,7 @@ begin
       select *
         from proactive_candidates
        where recipient_id = v_user and state = 'pending' and eligible_at is not null and eligible_at <= p_now
+         and expires_at > p_now
        order by _proactive_priority(type), eligible_at, id
          for update
     loop
@@ -841,7 +877,7 @@ end;
 $$;
 
 comment on function _proactive_arbitrate(timestamptz) is
-  'The central proactive budget (20261028000100). Expires untimely candidates; then per recipient, under an advisory lock, revalidates each due candidate (suppressing what is no longer true), holds what the kill switch, timezone, client version, device, the 17:00-20:00 local window, the daily cap (1 per local day), weekly cap (2 per rolling 7 days), type cooldown (72h; 7 days for resurfacing) or 7-day title cooldown forbid, and selects the single best remaining one by proactive.priority, enqueuing its notification. Losers are not queued. Internal; scheduled through _proactive_tick.';
+  'The central proactive budget (20261028000100). Expires untimely candidates (skip locked); then per recipient, under an advisory lock and with that recipient''s due rows locked in id order first, revalidates each due candidate (suppressing what is no longer true), holds what the kill switch, timezone, client version, device, the 17:00-20:00 local window, the daily cap (1 per local day), weekly cap (2 per rolling 7 days), type cooldown (72h; 7 days for resurfacing) or 7-day title cooldown forbid, and selects the single best remaining one by proactive.priority, enqueuing its notification. Losers are not queued. Internal; scheduled through _proactive_tick.';
 
 
 -- ---------------------------------------------------------------------------
@@ -1001,7 +1037,14 @@ begin
     return jsonb_build_array();
   end if;
 
-  -- 20261028000100. LOCK FIRST, THEN JUDGE (Codex final review, MAJOR). Every proactive
+  -- 20261028000100. LOCK FIRST, THEN JUDGE (Codex final review, MAJOR).
+  --
+  -- THIS DEPENDS ON claim_push_batch STAYING VOLATILE (the default; do not mark it stable
+  -- or immutable). Under READ COMMITTED a volatile function takes a fresh snapshot for
+  -- each statement, so the checks after this lock see whatever committed while it waited.
+  -- A stable function shares one snapshot across its whole body, and the checks would
+  -- read the state from before the wait again. PA5 is the test that would catch it.
+  -- Every proactive
   -- candidate behind this batch is locked before anything about it is checked, and stays
   -- locked until it is marked sent at the end of this transaction. Without it, a reader
   -- switching Watchlist & discovery off (_proactive_social_on_mute) could suppress a
@@ -1239,7 +1282,7 @@ end;
 $$;
 
 comment on function claim_push_batch(integer, timestamptz) is
-  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned, each with proactive.deliver_by (the earlier of expires_at and 20:00 local on its selected day), which push-sender sends as the Expo expiration. Proactive candidates are locked (for update, in id order) before they are judged and stay locked until marked sent, and a proactive job is returned only if its candidate went selected -> sent in this claim; anything withheld is removed from the queue. p_now defaults to now() and only tests pass it; leases use the real clock. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
+  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned, each with proactive.deliver_by (the earlier of expires_at and 20:00 local on its selected day), which push-sender sends as the Expo expiration. Proactive candidates are locked (for update, in id order) before they are judged and stay locked until marked sent, and a proactive job is returned only if its candidate went selected -> sent in this claim; anything withheld is removed from the queue. p_now defaults to now() and only tests pass it; leases use the real clock. Must stay VOLATILE: the post-lock checks rely on a fresh statement snapshot. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
 
 
 -- ---------------------------------------------------------------------------
