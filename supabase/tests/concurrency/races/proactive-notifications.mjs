@@ -35,6 +35,12 @@ import { raceContext } from './_shared.mjs';
  * takes it EXCLUSIVE, so either the mute lands first and the activity records nothing,
  * or the activity lands first and the mute closes the cluster it wrote. Never an open
  * cluster carrying an activity from across the boundary.
+ * **PA5.** A mute racing a CLAIM (Codex final review, MAJOR). claim_push_batch locks each
+ * proactive candidate before judging it and holds the lock until it is marked sent, and
+ * returns a proactive job only if its candidate went selected -> sent in that claim. So a
+ * mute that holds the row first makes the claim wait, then return nothing, leave nothing
+ * queued and spend no budget; a claim that holds it first sends once, and the mute that
+ * follows leaves the candidate sent and produces no second push.
  */
 export default function suite() {
   const rc = raceContext();
@@ -188,6 +194,119 @@ export default function suite() {
       assert.equal(hits.length, 1, 'PA3: claimed exactly once');
       const [{ state }] = await db.rows(`select state from proactive_candidates where notification_id = $1`, [note]);
       assert.equal(state, 'sent');
+    });
+
+    describe('PA5: a mute racing a claim', () => {
+      const mute = `insert into notification_preferences (user_id, category, enabled)
+                    values ($1, 'watchlist_discovery', false)
+                    on conflict (user_id, category) do update set enabled = excluded.enabled`;
+
+      /** A reader whose social cluster is selected for tonight, with its push queued. */
+      const selected = async (name) => {
+        const { db, fx } = ctx;
+        const m = await fx.createMovie(name);
+        const r = await reader(m);
+        await eligibleCluster(r, m);
+        await db.sql(`select _proactive_arbitrate($1::timestamptz)`, [EVENING]);
+        const [c] = await db.rows(
+          `select id, notification_id, state from proactive_candidates where recipient_id = $1`,
+          [r],
+        );
+        assert.equal(c.state, 'selected', 'selected for tonight');
+        const [{ n }] = await db.rows(
+          `select count(*)::int n from push_outbox where notification_id = $1`,
+          [c.notification_id],
+        );
+        assert.equal(n, 1, 'and queued');
+        return { r, c };
+      };
+
+      const candidate = async (id) =>
+        (await ctx.db.rows(
+          `select state, suppression_reason, sent_at, selected_local_date from proactive_candidates where id = $1`,
+          [id],
+        ))[0];
+
+      it('the mute first: the claim waits, then returns nothing, queues nothing, spends nothing', async () => {
+        const { db } = ctx;
+        const { r, c } = await selected('PA5 mute first');
+        const s1 = await db.session('mute');
+        const s2 = await db.session('claim');
+        let claimed;
+        try {
+          // B. The preference-off transaction, held open. Its trigger has already
+          // suppressed the selected candidate, uncommitted.
+          await s1.q('begin');
+          await s1.q(mute, [r]);
+          // C/D. The claim starts and genuinely waits on the candidate row.
+          const pending = s2.start(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
+          const seen = await s2.awaitBlocked();
+          assert.equal(seen.wait_event_type, 'Lock', 'PA5: the claim waits on the mute');
+          // E. The mute commits.
+          await s1.q('commit');
+          claimed = (await pending).rows[0].r;
+        } finally {
+          await s1.end().catch(() => {});
+          await s2.end().catch(() => {});
+        }
+
+        // F. No proactive job for this reader's notification.
+        assert.equal(
+          claimed.filter((j) => j.notification_id === c.notification_id).length,
+          0,
+          'PA5: the muted push is not returned',
+        );
+        // G. Still suppressed for the preference.
+        const after = await candidate(c.id);
+        assert.deepEqual([after.state, after.suppression_reason], ['suppressed', 'preference_off']);
+        // H. Nothing left that a later drain could send.
+        const [{ n }] = await db.rows(
+          `select count(*)::int n from push_outbox where notification_id = $1`,
+          [c.notification_id],
+        );
+        assert.equal(n, 0, 'PA5: no outbox row survives');
+        // I. No sent_at, so no budget consumed: nothing selected or sent holds the day.
+        assert.equal(after.sent_at, null);
+        const [{ held }] = await db.rows(
+          `select count(*)::int held from proactive_candidates
+            where recipient_id = $1 and state in ('selected', 'sent')`,
+          [r],
+        );
+        assert.equal(held, 0, 'PA5: the day and the week are free');
+      });
+
+      it('the claim first: sent once, and the mute after it changes nothing that was sent', async () => {
+        const { db } = ctx;
+        const { r, c } = await selected('PA5 claim first');
+        const s1 = await db.session('claim');
+        const s2 = await db.session('mute');
+        let claimed;
+        try {
+          await s1.q('begin');
+          claimed = (await s1.one(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING])).r;
+          // The mute arrives while the claim's transaction still holds the candidate.
+          const pending = s2.start(mute, [r]);
+          await s2.awaitBlocked();
+          await s1.q('commit');
+          await pending;
+        } finally {
+          await s1.end().catch(() => {});
+          await s2.end().catch(() => {});
+        }
+
+        assert.equal(
+          claimed.filter((j) => j.notification_id === c.notification_id).length,
+          1,
+          'PA5: the claim that held the row sends it, once',
+        );
+        const after = await candidate(c.id);
+        assert.equal(after.state, 'sent', 'PA5: the mute does not rewrite a sent candidate');
+        assert.ok(after.sent_at);
+        assert.equal(after.suppression_reason, null);
+        // No second effect: a later drain returns nothing for it.
+        const [{ r: again }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [EVENING]);
+        assert.equal(again.filter((j) => j.notification_id === c.notification_id).length, 0);
+      });
     });
 
     describe('PA4: a mute racing a qualifying activity', () => {

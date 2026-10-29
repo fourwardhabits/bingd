@@ -275,6 +275,17 @@ begin
   perform pg_advisory_xact_lock(
     hashtextextended('bingd.proactive.social_pref:' || new.user_id::text, 0));
 
+  -- The rows first, in id order: the order claim_push_batch locks candidates in, so a
+  -- mute and a claim over the same reader serialise on the row and never deadlock. If a
+  -- claim holds one, this waits for it; the update below then sees it sent and leaves it.
+  perform 1
+     from proactive_candidates
+    where recipient_id = new.user_id
+      and type = 'watchlist_social'
+      and window_ends_at > now()
+    order by id
+      for update;
+
   update proactive_candidates
      set window_ends_at     = now(),
          state              = case when state in ('pending', 'selected') then 'suppressed' else state end,

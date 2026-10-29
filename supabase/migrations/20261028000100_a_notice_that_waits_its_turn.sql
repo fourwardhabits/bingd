@@ -967,6 +967,7 @@ declare
   v_jobs    jsonb;
   v_dead    uuid[];
   v_pro_dead uuid[];
+  v_sent    uuid[];
 begin
   delete from push_outbox o
    where (o.failures >= 3 or o.attempts >= 6)
@@ -999,6 +1000,23 @@ begin
   if array_length(v_claimed, 1) is null then
     return jsonb_build_array();
   end if;
+
+  -- 20261028000100. LOCK FIRST, THEN JUDGE (Codex final review, MAJOR). Every proactive
+  -- candidate behind this batch is locked before anything about it is checked, and stays
+  -- locked until it is marked sent at the end of this transaction. Without it, a reader
+  -- switching Watchlist & discovery off (_proactive_social_on_mute) could suppress a
+  -- selected candidate after this claim had judged it from the previous committed state;
+  -- the sent update below would then match nothing, and the job built from the stale view
+  -- would still have gone out, despite the mute and outside every cap. Now the two
+  -- serialise on the row: a mute that got there first is committed before the checks
+  -- below read anything (each statement takes a fresh snapshot), so the job is dropped;
+  -- a claim that got there first finishes, and the mute then finds the candidate sent and
+  -- leaves it so. Locked in id order, as the mute does, so the two cannot deadlock.
+  perform 1
+     from proactive_candidates pc
+    where pc.notification_id = any (v_claimed)
+    order by pc.id
+      for update;
 
   select coalesce(array_agg(n.id), '{}'::uuid[]) into v_dead
     from notifications n
@@ -1184,27 +1202,44 @@ begin
        and (p.id is not null or n.actor_id is null)
   ) j;
 
+  -- 20261028000100 (c). Handed to push-sender. Not Expo acceptance, not delivery.
+  with sent as (
+    update proactive_candidates pc
+       set state               = 'sent',
+           sent_at             = now(),
+           actor_count_at_send = (job -> 'proactive' ->> 'actor_count')::integer
+      from jsonb_array_elements(v_jobs) as job
+     where pc.notification_id = (job ->> 'notification_id')::uuid
+       and pc.state = 'selected'
+    returning pc.notification_id
+  )
+  select coalesce(array_agg(notification_id), '{}'::uuid[]) into v_sent from sent;
+
+  -- A proactive job goes out ONLY if its candidate went selected -> sent in this claim.
+  -- Under the lock above that is every proactive job that passed the checks; this is the
+  -- guarantee written down rather than inferred, so no future path can return a proactive
+  -- job whose ledger row does not say it was sent (and so counted against the caps).
+  -- Reactive jobs carry no proactive facts and are untouched.
+  select coalesce(jsonb_agg(job order by ord), jsonb_build_array())
+    into v_jobs
+    from jsonb_array_elements(v_jobs) with ordinality as e(job, ord)
+   where jsonb_typeof(job -> 'proactive') is distinct from 'object'
+      or (job ->> 'notification_id')::uuid = any (v_sent);
+
+  -- Everything claimed and not returned leaves the queue, including a proactive job the
+  -- line above withheld, so it cannot be claimed again and leak later.
   delete from push_outbox o
    where o.notification_id = any (v_claimed)
      and o.notification_id not in (
        select (job ->> 'notification_id')::uuid from jsonb_array_elements(v_jobs) as job
      );
 
-  -- 20261028000100 (c). Handed to push-sender. Not Expo acceptance, not delivery.
-  update proactive_candidates pc
-     set state               = 'sent',
-         sent_at             = now(),
-         actor_count_at_send = (job -> 'proactive' ->> 'actor_count')::integer
-    from jsonb_array_elements(v_jobs) as job
-   where pc.notification_id = (job ->> 'notification_id')::uuid
-     and pc.state = 'selected';
-
   return v_jobs;
 end;
 $$;
 
 comment on function claim_push_batch(integer, timestamptz) is
-  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned, each with proactive.deliver_by (the earlier of expires_at and 20:00 local on its selected day), which push-sender sends as the Expo expiration. p_now defaults to now() and only tests pass it; leases use the real clock. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
+  'Claims up to p_limit queued pushes and returns everything needed to send them, recipients and tokens resolved server-side. Takes no recipient and cannot be pointed at one. Applies can_discover_profile exactly as my_notifications does, so a notification that raced a block is not pushed; an actorless notification (award_earned, 20260828000100) has nobody to check and survives -- a predicate 20260830000100 dropped by accident and 20260904000100 restored, with a test behind it. Five-minute lease with skip locked, so delivery is at least once, bounded at three settled failures and six claims. Reaps rows that have hit either ceiling. Carries feed_event_id since 20260826000600, comment_excerpt since 20260827000300, the actor''s own event for recommendation_ranked since 20260827000600, the mention branch since 20260830000100, import_job_id / import_counts since 20260917001500, and award_key / award_tier / award_family / award_tier_label for award_earned since 20260920000200 (the names under keys the pre-20260920000200 sender does not read, because it read award_name as the earned title). Since 20261028000100: goal for goal_completed; proactive for the three proactive types, which are re-checked here by _proactive_claim_reason at p_now (kill switch, state, expires_at, the reader''s 17:00-20:00 window on the local day it was selected for, a capable device, _proactive_invalid), sent only to tokens _proactive_capable_token admits, and dropped with their candidate ended (expired for timeliness, suppressed otherwise) if they no longer hold, and marked sent (handed to push-sender; not Expo acceptance or delivery) when they are returned, each with proactive.deliver_by (the earlier of expires_at and 20:00 local on its selected day), which push-sender sends as the Expo expiration. Proactive candidates are locked (for update, in id order) before they are judged and stay locked until marked sent, and a proactive job is returned only if its candidate went selected -> sent in this claim; anything withheld is removed from the queue. p_now defaults to now() and only tests pass it; leases use the real clock. A job it returns may still be dropped before dispatch by live_push_jobs (20260904000100).';
 
 
 -- ---------------------------------------------------------------------------

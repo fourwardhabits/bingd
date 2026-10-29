@@ -219,7 +219,17 @@ advisory lock before reading that reader's budget. (2) A partial unique index on
 proactive push on one local day impossible, not merely unlikely. (3) `push_outbox`'s
 primary key is the notification. The social writer has its own per-(reader, title)
 advisory lock, so two friends finishing a film at once join one cluster. All three are
-exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–4).
+exercised by real-Postgres races (`concurrency/races/proactive-notifications.mjs`, PA1–5).
+
+**The claim locks before it judges** (Codex final review, MAJOR). `claim_push_batch` locks
+every proactive candidate behind its batch (`for update`, in id order) **before** any
+check, and holds the lock until the candidate is marked `sent`. A proactive job is returned
+**only** if its candidate went `selected → sent` in that claim; anything withheld is
+removed from the queue. So a reader muting Watchlist & discovery at the same moment as a
+drain is serialised against it: if the mute holds the row first, the claim waits, then
+returns nothing, leaves no outbox row and spends no budget; if the claim holds it first,
+the push goes out once and the mute leaves the candidate `sent`. The mute trigger locks the
+same rows in the same order, so the two cannot deadlock (race PA5, both orders).
 
 `proactive_cluster_actors` holds one row per qualifying activity, with that activity's
 foreign key, so deleting the activity removes the membership. `notification_opens` holds
@@ -612,7 +622,7 @@ The review questions, answered:
 - **Private activity leakage.** A friend's activity reaches only mutual followers who
   `can_view_profile` them, rechecked at read and at send. The push names display names
   only, the same class of fact the reactive pushes carry.
-- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4.
+- **Duplicate or racing sends.** §E's three layers, plus PA1–PA3. A mute racing a qualifying activity: PA4. A mute racing a claim: PA5.
 - **Service-role exposure.** Unchanged. The drain still reads the key from Vault; nothing
   new holds it.
 - **Client-triggered send bypass.** No client-callable function writes `push_outbox`,
