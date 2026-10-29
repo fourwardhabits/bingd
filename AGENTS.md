@@ -36,15 +36,55 @@ This list is wider than PRD §24 on purpose (see the precedence note above). The
 5. **The reviewer does not modify files.** Report only.
 6. Implementer addresses the findings.
 7. A fix gets a fresh re-review if it addresses a BLOCKER or MAJOR finding, or if it touches a sensitive surface. **When uncertain, re-review.**
-8. The founder explicitly approves the merge.
+8. The founder explicitly approves the merge (see "Merging to `main`" below).
 
 BLOCKER and MAJOR findings block merge unless the founder explicitly accepts the risk. **No agent merges without founder approval.**
+
+## Merging to `main`
+
+**Default:** no agent merges a pull request or pushes directly to `main` without the founder's explicit approval, and no agent deploys production without it.
+
+**Founder-approved PR merge.** If the founder explicitly approves merging a specific pull request, an agent may merge that pull request into `main`.
+
+- **The approval must identify the PR,** or refer unmistakably to the PR under discussion.
+  - Valid: "Approved to merge PR #215 once CI is green."
+  - Not valid on its own: "Looks good." or "Ship when ready." Treat a statement like these as approval only if the context makes both the PR and the merge unmistakable.
+- **The approval is single-use.** It covers that one merge and authorizes no other PR.
+- **Before merging, confirm all of these.** If any fails, stop, and ask for renewed approval once it is resolved.
+  - The PR being merged is the exact PR approved.
+  - Required CI and checks are green.
+  - There are no merge conflicts.
+  - The head SHA is the one reviewed and has not unexpectedly changed.
+  - The PR's scope has not materially changed since review or approval.
+- **Merge method:** use the repository's default merge strategy unless the founder names another.
+  - Never force-push `main`.
+  - Never bypass required checks or branch protection.
+
+**The deployment a merge causes.** If merging the approved PR triggers the normal automatic production deployment, the founder's approval of that merge also authorizes that deployment. It does not authorize:
+
+- manually triggering any other production deployment
+- deploying additional commits
+- modifying production infrastructure or configuration
+- changing secrets
+- bypassing deployment protections
+- a rollback or any other production mutation
+
+Each of these stays under "Founder-only" below, or needs separate approval.
+
+**After merging:**
+
+- Report the merge commit and the resulting `main` SHA.
+- Observe the normal production deployment.
+- Run any read-only smoke checks already authorized.
+- If production fails, report it. Do not patch it or roll it back unless separately authorized.
+
+**Precedence.** This section records a founder decision of 2026-10-28. The decision log, PRD §24 and the README still say agents may not deploy, with no approval path. Because they outrank this file, the deployment exception above takes effect only once they record it too. Until then, an agent may merge a founder-approved PR only where the merge triggers no production deployment.
 
 ## Founder-only — no agent approval path
 
 No agent may do any of these, whether autonomously or because another agent approved it. Only the founder can (decision log, "Agent authority — hard limits", widened here as a local safeguard):
 
-- deploy to production
+- deploy to production, except the automatic deployment caused by a founder-approved merge (see "Merging to `main`")
 - run a production migration
 - create, modify or delete production data
 - access, alter or create production secrets, or change production configuration
