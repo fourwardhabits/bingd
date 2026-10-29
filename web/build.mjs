@@ -2955,7 +2955,7 @@ ${demoChoice('left')}
 ${demoChoice('right')}
                 </div>
                 <p class="demo-prompt" id="demo-prompt">Click the one you liked more</p>
-                <button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen both? Swap pair</button>
+                <button type="button" class="demo-swap" id="demo-swap">Haven&rsquo;t seen one? Refresh.</button>
               </div>
 
               <div class="demo-pane demo-result" id="demo-result" inert>

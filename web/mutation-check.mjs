@@ -62,8 +62,8 @@
  * Twelve more arrived with the front page's ranking demo and the build's environment
  * check (2026-10-28). Each is a defect the page would render without complaint:
  *
- *  17. A swap counted as a choice, so "Haven't seen both?" quietly costs the visitor
- *      one of their three.
+ *  17. A swap counted as a choice, so "Haven't seen one? Refresh." quietly costs the
+ *      visitor one of their three.
  *  18. A demo poster path used as written rather than through `posterUrl`, so a value in
  *      the movie list becomes an `img.src` that can leave TMDB's CDN.
  *  19. The swap reserve dropped, so a visitor who swaps often is handed a "ranking" of
