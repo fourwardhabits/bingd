@@ -738,7 +738,9 @@ claim-time recheck and Expo `expiration`.
 Because confirmation can come up to ~14 hours before UTC midnight, and a truthful
 verification is written after the season is really available, the useful delivery window
 after Los Angeles midnight is roughly 24 to 38 hours, and the second-local-day clock rarely
-binds (Fable re-review). Operators should verify promptly on release day.
+binds (Fable re-review). Operators should verify promptly on release day, and the
+verification must still be valid at the first tick after both midnights: one that lapses
+before then yields nothing at all for that reader (fail closed).
 
 **The season before** is numbered from the series' latest observation
 (`release_subjects.facts.seasons`, what TMDB listed), not from whichever seasons are in our
@@ -853,8 +855,13 @@ migration-parity audit reconciled; staging credentials for the operator
    - **Theatrical:** watchlist a film within 7 days of its US release. After the next
      evaluate and proactive tick, the inbox row appears, then the evening push ("Opens …").
    - **Seasons, with explicit staging fixtures** (staging cannot prove source reliability):
-     turn `season_enabled` → `true`; for a series with a season released today on staging,
-     write a verification row by hand (`proactive_season_availability`, US, today, 24h);
+     turn `season_enabled` → `true`, **then force a fresh read of the series** (set its
+     `release_subjects.next_check_at` to now and let the refresh run, or call
+     `release_observe`): the six-hourly post-release cadence applies only while the switch is
+     on, so a release observed before it was flipped is next read days later and the 12-hour
+     read-age check silently refuses it (Fable re-review, MINOR). For a series with a season
+     released today on staging, write a verification row by hand
+     (`proactive_season_availability`, US, today, 24h);
      confirm an account that saved the series gets the inbox row and the evening push
      ("Season N is now available in the US."), tap opens the season, a caught-up account
      without a save gets it too, and an account only behind gets nothing. Delete the

@@ -1106,6 +1106,7 @@ declare
   v_avail  date;
   v_until  timestamptz;
   v_prior  uuid;
+  v_interest text;
   v_window interval := make_interval(hours => _proactive_int('proactive.season_collect_hours', 48));
 begin
   if not _proactive_season_enabled() then
@@ -1138,38 +1139,39 @@ begin
     v_prior := _proactive_season_prior(e.id);
 
     for r in
-      select q.*
+      select i.user_id, ac.region, ac.timezone
         from (
-          select i.user_id, ac.region, ac.timezone,
-                 _proactive_season_interest(i.user_id, e.id) as interest
-            from (
-              select w.user_id from watchlist w where w.media_item_id in (e.media_item_id, e.subject_id)
-              union
-              select rk.user_id from rankings rk where v_prior is not null and rk.media_item_id = v_prior
-              union
-              select um.user_id from user_media um
-               where v_prior is not null and um.media_item_id = v_prior
-                 and (um.bucket is not null or um.watched_on is not null or um.progress = 'completed')
-            ) i
-            join profiles p on p.id = i.user_id and p.status = 'active'
-            left join account_context ac on ac.user_id = i.user_id
-           where (ac.region is null or ac.region = 'US')
-             -- NOTHING BEFORE THE DAY (Codex re-review, MAJOR). The release state machine
-             -- counts a date as reached from the earliest zone's midnight, 14 hours before
-             -- UTC's, so a season can be `released` while it is still the day before in the
-             -- US. Neither the candidate nor the inbox row is written until the date has
-             -- begun in BOTH Los Angeles and the reader's own zone (UTC when unknown); a
-             -- later tick collects them, inside the same 48 hours, under the same dedupe.
-             and p_now >= v_avail::timestamp at time zone 'America/Los_Angeles'
-             and p_now >= v_avail::timestamp at time zone coalesce(ac.timezone, 'UTC')
-             and not _proactive_season_touched(i.user_id, e.media_item_id)
-             -- Muted means untouched, as for a film: nothing is recorded, so turning the
-             -- preference back on inside the two days still lets this release reach them once.
-             and _notifies(i.user_id, 'watchlist_discovery')
-        ) q
-       where q.interest is not null
-       order by q.user_id
+          select w.user_id from watchlist w where w.media_item_id in (e.media_item_id, e.subject_id)
+          union
+          select rk.user_id from rankings rk where v_prior is not null and rk.media_item_id = v_prior
+          union
+          select um.user_id from user_media um
+           where v_prior is not null and um.media_item_id = v_prior
+             and (um.bucket is not null or um.watched_on is not null or um.progress = 'completed')
+        ) i
+        join profiles p on p.id = i.user_id and p.status = 'active'
+        left join account_context ac on ac.user_id = i.user_id
+       where (ac.region is null or ac.region = 'US')
+         -- NOTHING BEFORE THE DAY (Codex re-review, MAJOR). The release state machine
+         -- counts a date as reached from the earliest zone's midnight, 14 hours before
+         -- UTC's, so a season can be `released` while it is still the day before in the
+         -- US. Neither the candidate nor the inbox row is written until the date has
+         -- begun in BOTH Los Angeles and the reader's own zone (UTC when unknown); a
+         -- later tick collects them, inside the same 48 hours, under the same dedupe.
+         and p_now >= v_avail::timestamp at time zone 'America/Los_Angeles'
+         and p_now >= v_avail::timestamp at time zone coalesce(ac.timezone, 'UTC')
+         and not _proactive_season_touched(i.user_id, e.media_item_id)
+         -- Muted means untouched, as for a film: nothing is recorded, so turning the
+         -- preference back on inside the two days still lets this release reach them once.
+         and _notifies(i.user_id, 'watchlist_discovery')
+       order by i.user_id
     loop
+      -- Asked once per reader, here, rather than in the query, where the planner is free
+      -- to evaluate it twice (Codex and Fable re-reviews, NICE).
+      v_interest := _proactive_season_interest(r.user_id, e.id);
+      if v_interest is null then
+        continue;
+      end if;
       c := null;
       insert into proactive_candidates (
         recipient_id, type, dedupe_key, media_item_id, priority, state, metadata,
@@ -1178,7 +1180,7 @@ begin
         r.user_id, 'season_premiere', e.id::text, e.media_item_id,
         _proactive_priority('season_premiere'), 'pending',
         jsonb_build_object('release_event_id', e.id, 'available_on', v_avail, 'region', 'US',
-                           'season_number', e.season_number, 'interest', r.interest),
+                           'season_number', e.season_number, 'interest', v_interest),
         -- Eligible now: the date has begun in both zones (the reader filter above).
         p_now, p_now,
         least(e.released_observed_at + v_window,

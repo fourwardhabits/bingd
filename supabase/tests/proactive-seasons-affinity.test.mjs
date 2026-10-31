@@ -1182,17 +1182,20 @@ describe('_proactive_affinity: the rest of the weights, and visibility (Codex re
   it('opening a recommendation is the light response, and a re-send adds nothing', async () => {
     const { r, a } = await pair();
     const m = await movie('Opened');
+    // Sent and opened 30 days ago: each counts at half weight.
     await t.sql(
       `insert into title_recommendations (sender_id, recipient_id, media_item_id, created_at, recommended_at, opened_at, state)
        values ($1, $2, $3, $4, $4, $4, 'delivered')`,
-      [a, r, m, at(NOW)],
+      [a, r, m, daysAgo(30)],
     );
-    // in: 0.5 × 3 for the send; out: 1 for the reader opening it.
-    assert.equal(Number(await affinity(r, a)), 3.0);
+    // 0.5 baseline; in: 0.5 x 3 x 1/2 for the send; out: 1 x 1/2 for the reader opening it.
+    assert.equal(Number(await affinity(r, a)), 1.75);
+    // Recommended again today: only recommended_at moves. Credit stays on the original
+    // created_at; an implementation that dated the send by recommended_at would read 2.5.
     await t.sql(`update title_recommendations set recommended_at = $3 where sender_id = $1 and recipient_id = $2`, [
       a, r, at(NOW),
     ]);
-    assert.equal(Number(await affinity(r, a)), 3.0, 'recommended again: still one send');
+    assert.equal(Number(await affinity(r, a)), 1.75, 'recommended again: still one send, at its first date');
   });
 
   it('forgets a reaction on a comment once the activity under it is no longer viewable', async () => {
@@ -1236,5 +1239,115 @@ describe('release_status: a misrouted season row is a leak (Codex re-review)', (
     assert.ok(status.problems.includes('release_notifications_exist'));
     await t.sql(`update notifications set recipient_id = $1 where recipient_id = $2 and type = 'season_premiere'`, [r, other]);
     assert.equal((await one(`release_status()`)).release_notifications, 0);
+  });
+});
+
+// ===========================================================================
+// Every type pair, live candidates competing on one evening (Codex re-review 2)
+// ===========================================================================
+
+describe('arbitration: every type pair, both candidates live and due', () => {
+  /** A live, due resurfacing candidate, as _proactive_resurface_collect writes one. */
+  async function liveResurface(r, m, iso = EVENING) {
+    const local = new Date(iso).toISOString().slice(0, 10);
+    await t.sql(
+      `insert into proactive_candidates
+         (recipient_id, type, dedupe_key, media_item_id, priority, state, metadata, created_at, eligible_at, expires_at)
+       values ($1, 'watchlist_resurface', $2, $3, 4, 'pending', '{"reason":"saved","score":1,"friends":0}',
+               $4::timestamptz - interval '1 hour', $4::timestamptz - interval '1 hour', $4::timestamptz + interval '2 hours')`,
+      [r, local, m, at(iso)],
+    );
+  }
+  async function socialCluster(reader, m, iso) {
+    await setConfig('proactive.generation_enabled', false);
+    try {
+      for (let i = 0; i < 2; i += 1) {
+        const f = await user(`px${i}_`);
+        await friends(reader, f);
+        const ev = (
+          await t.sql(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2) returning id`, [f, m])
+        ).rows[0].id;
+        await one(`_proactive_social_add($1, $2, $3, $4, $5::timestamptz)`, [reader, f, m, ev, at(iso)]);
+      }
+    } finally {
+      await setConfig('proactive.generation_enabled', true);
+    }
+  }
+  /** A film opening on 05-23, armed at T-7 this morning, on the reader's Watchlist. */
+  async function armedFilm(r) {
+    const film = await movie('Pair film', '2031-05-23');
+    await track(film, 'movie');
+    await observeMovie(film, '2031-05-23', '2031-05-16T06:00:00Z');
+    await one(`_release_evaluate($1::timestamptz)`, [at('2031-05-16T06:00:00Z')]);
+    await save(r, film);
+    return film;
+  }
+  const outcome = async (r) =>
+    Object.fromEntries((await candidates(r)).map((c) => [c.type, [c.state, c.last_block_reason]]));
+
+  it('season over resurfacing', async () => {
+    const r = await user('p_sr');
+    const old = await movie('Old save');
+    await save(r, old);
+    await liveResurface(r, old);
+    const s = await seasonRelease();
+    await save(r, s.id);
+    await tick(EVENING);
+    const o = await outcome(r);
+    assert.deepEqual(o.season_premiere, ['selected', null]);
+    assert.deepEqual(o.watchlist_resurface, ['pending', 'higher_priority_selected']);
+  });
+
+  it('theatrical over social', async () => {
+    const r = await user('p_ts');
+    const m = await movie('Pair social');
+    await save(r, m);
+    await socialCluster(r, m, '2031-05-16T09:00:00Z');
+    await armedFilm(r);
+    await tick(EVENING);
+    const o = await outcome(r);
+    assert.deepEqual(o.theatrical_release, ['selected', null]);
+    assert.deepEqual(o.watchlist_social, ['pending', 'higher_priority_selected']);
+  });
+
+  it('theatrical over resurfacing', async () => {
+    const r = await user('p_tr');
+    const old = await movie('Old save');
+    await save(r, old);
+    await liveResurface(r, old);
+    await armedFilm(r);
+    await tick(EVENING);
+    const o = await outcome(r);
+    assert.deepEqual(o.theatrical_release, ['selected', null]);
+    assert.deepEqual(o.watchlist_resurface, ['pending', 'higher_priority_selected']);
+  });
+
+  it('social over resurfacing', async () => {
+    const r = await user('p_so');
+    const m = await movie('Pair social');
+    const old = await movie('Old save');
+    await save(r, m);
+    await save(r, old);
+    await socialCluster(r, m, '2031-05-16T09:00:00Z');
+    await liveResurface(r, old);
+    await arbitrate(EVENING);
+    const o = await outcome(r);
+    assert.deepEqual(o.watchlist_social, ['selected', null]);
+    assert.deepEqual(o.watchlist_resurface, ['pending', 'higher_priority_selected']);
+  });
+
+  it('a higher candidate that is invalid does not block a lower one', async () => {
+    const r = await user('p_inv');
+    const old = await movie('Old save');
+    await save(r, old);
+    await liveResurface(r, old);
+    const s = await seasonRelease();
+    await save(r, s.id);
+    await tick('2031-05-16T15:00:00Z'); // the season is collected
+    await unsave(r, s.id); // and is no longer wanted by the evening
+    await arbitrate(EVENING);
+    const o = await outcome(r);
+    assert.equal(o.season_premiere[0], 'suppressed');
+    assert.deepEqual(o.watchlist_resurface, ['selected', null]);
   });
 });
