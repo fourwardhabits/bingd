@@ -470,9 +470,20 @@ describe('season_premiere: only what is verified', () => {
     assert.equal(await one(`(select state from release_events where id = $1)`, [s.event]), 'released');
     const r = await user('early', { timezone: 'Pacific/Kiritimati' });
     await save(r, s.id);
+    // Already the 16th in Kiritimati, still the 15th in Los Angeles: nothing at all, not
+    // even the inbox row (Codex re-review, MAJOR).
     await tick('2031-05-15T12:30:00Z');
+    assert.equal((await candidates(r)).length, 0);
+    assert.equal((await inbox(r)).length, 0);
+    // A fresh read before midnight there (the first one is 19 hours old by then).
+    await observeSeries(s.id, { 0: '2020-01-01', 1: '2022-02-18', 2: '2025-01-17', 3: RELEASE }, '2031-05-16T06:00:00Z');
+    await tick('2031-05-16T06:59:00Z');
+    assert.equal((await inbox(r)).length, 0, 'one minute before midnight in Los Angeles');
+    // Los Angeles midnight (07:00 UTC): collected and eligible at once.
+    await tick('2031-05-16T07:00:00Z');
     const [c] = await candidates(r, 'season_premiere');
     assert.equal(c.eligible_at.toISOString(), '2031-05-16T07:00:00.000Z');
+    assert.equal((await inbox(r)).length, 1);
   });
 
   it('a date moved after release suppresses the candidate and hides the row', async () => {
@@ -536,18 +547,25 @@ describe('season_premiere: once, on time', () => {
     await tick('2031-05-16T07:45:00Z');
     const [c] = await candidates(tokyo, 'season_premiere');
     assert.equal(c.eligible_at.toISOString(), '2031-05-16T07:45:00.000Z');
-    // Los Angeles midnight is 07:00 UTC, so the tick's own clock is the later of the three.
+    // Before Los Angeles midnight (07:00 UTC) a Tokyo reader, already well into the day,
+    // gets nothing; the first tick after it collects them, eligible at that tick.
     const s2 = await seasonRelease({ observedAt: '2031-05-16T05:00:00Z' });
+    assert.equal(await one(`(select state from release_events where id = $1)`, [s2.event]), 'released');
     const tokyo2 = await user('tyo2', { timezone: 'Asia/Tokyo' });
     await save(tokyo2, s2.id);
-    // _release_reached decides when a season counts as released; it is released here only
-    // if the observe confirmed it, which this asserts rather than assumes.
-    const state = await one(`(select state from release_events where id = $1)`, [s2.event]);
-    if (state === 'released') {
-      await tick('2031-05-16T05:10:00Z');
-      const [c2] = await candidates(tokyo2, 'season_premiere');
-      assert.equal(c2.eligible_at.toISOString(), '2031-05-16T07:00:00.000Z');
-    }
+    await tick('2031-05-16T05:10:00Z');
+    assert.equal((await candidates(tokyo2)).length, 0);
+    await tick('2031-05-16T07:04:00Z');
+    const [c2] = await candidates(tokyo2, 'season_premiere');
+    assert.equal(c2.eligible_at.toISOString(), '2031-05-16T07:04:00.000Z');
+    // A reader west of Los Angeles waits for their own midnight (Honolulu: 10:00 UTC).
+    const s3 = await seasonRelease({ observedAt: '2031-05-16T07:30:00Z' });
+    const hnl = await user('hnl', { timezone: 'Pacific/Honolulu' });
+    await save(hnl, s3.id);
+    await tick('2031-05-16T09:59:00Z');
+    assert.equal((await candidates(hnl)).length, 0);
+    await tick('2031-05-16T10:00:00Z');
+    assert.equal((await candidates(hnl, 'season_premiere')).length, 1);
   });
 
   it('expires at the earliest of +48h, the end of the second local day, and the verification', async () => {
@@ -987,5 +1005,236 @@ describe('release_status', () => {
     assert.equal(status.release_notifications, 1);
     assert.ok(status.problems.includes('release_notifications_exist'));
     await t.sql(`delete from notifications where type = 'season_premiere' and payload = '{}'::jsonb`);
+  });
+});
+
+// ===========================================================================
+// Codex re-review (2026-10-31): the reproduced defects, and the rest of the matrix
+// ===========================================================================
+
+describe('season_premiere: predecessor, interest and release changes (Codex re-review)', () => {
+  it('a predecessor missing from the catalogue makes nobody caught up; a save still counts', async () => {
+    // TMDB lists Seasons 1, 2 and 3; our catalogue never fetched Season 2.
+    const s = await series('Gap', { 1: '2022-02-18', 3: RELEASE });
+    await track(s.id, 'series');
+    await observeSeries(s.id, { 1: '2022-02-18', 2: '2025-01-17', 3: RELEASE }, OBSERVED);
+    const event = await one(`(select id from release_events where media_item_id = $1)`, [s.seasons[3]]);
+    await verify(event);
+    const s1Only = await user('gap1');
+    await logged(s1Only, s.seasons[1]);
+    const saved = await user('gapsv');
+    await logged(saved, s.seasons[1]);
+    await save(saved, s.id);
+    await tick(EVENING);
+    assert.equal((await candidates(s1Only)).length, 0, 'Season 1 is not the season before Season 3');
+    assert.equal(await one(`_proactive_season_interest($1, $2)`, [s1Only, event]), null);
+    assert.equal((await candidates(saved, 'season_premiere'))[0].metadata.interest, 'watchlist');
+  });
+
+  it('a save removed after selection stops the claim', async () => {
+    const s = await seasonRelease();
+    const r = await user('unclaim');
+    await save(r, s.id);
+    await tick(EVENING);
+    assert.equal((await candidates(r, 'season_premiere'))[0].state, 'selected');
+    await unsave(r, s.id);
+    assert.equal((await claimFor(r, CLAIM)).length, 0);
+    const [c] = await candidates(r, 'season_premiere');
+    assert.deepEqual([c.state, c.suppression_reason], ['suppressed', 'no_season_interest']);
+  });
+
+  it('a series cancelled, a season gone from the listing, or a date cleared, all suppress', async () => {
+    const cases = [
+      ['cancelled', (s) => observeSeries(s.id, { 1: '2022-02-18', 2: '2025-01-17', 3: RELEASE }, '2031-05-16T16:00:00Z', { status: 'Canceled' })],
+      ['gone', (s) => observeSeries(s.id, { 1: '2022-02-18', 2: '2025-01-17' }, '2031-05-16T16:00:00Z')],
+      ['cleared', (s) => observeSeries(s.id, { 1: '2022-02-18', 2: '2025-01-17', 3: null }, '2031-05-16T16:00:00Z')],
+    ];
+    for (const [label, change] of cases) {
+      const s = await seasonRelease();
+      const r = await user(`chg${label}`.slice(0, 12));
+      await save(r, s.id);
+      await tick('2031-05-16T15:00:00Z');
+      await change(s);
+      await arbitrate(EVENING);
+      const [c] = await candidates(r, 'season_premiere');
+      assert.deepEqual([c.state, c.suppression_reason], ['suppressed', 'release_changed'], label);
+    }
+  });
+
+  it('a cleared date also hides the inbox row', async () => {
+    const s = await seasonRelease();
+    const r = await user('clrrow');
+    await save(r, s.id);
+    await tick('2031-05-16T15:00:00Z');
+    assert.equal((await inbox(r)).length, 1);
+    await observeSeries(s.id, { 1: '2022-02-18', 2: '2025-01-17', 3: null }, '2031-05-16T16:00:00Z');
+    assert.equal((await inbox(r)).length, 0);
+  });
+});
+
+describe('season_premiere: exact clocks (Codex re-review)', () => {
+  it('collects up to, and not at, 48 hours after the release was confirmed', async () => {
+    for (const [iso, expected] of [['2031-05-18T13:59:00Z', 1], ['2031-05-18T14:00:00Z', 0]]) {
+      const s = await seasonRelease({ verified: false });
+      // A fresh read and a fresh verification two days on; the confirmation stays 05-16 14:00.
+      await observeSeries(s.id, { 1: '2022-02-18', 2: '2025-01-17', 3: RELEASE }, '2031-05-18T13:00:00Z');
+      await verify(s.event, { verifiedAt: '2031-05-18T13:00:00Z' });
+      const r = await user('b48');
+      await save(r, s.id);
+      await tick(iso);
+      assert.equal((await candidates(r, 'season_premiere')).length, expected, iso);
+    }
+  });
+
+  it('each expiry bound can be the one that binds', async () => {
+    // +48h from confirmation binds: confirmed early (05-15 12:00 UTC), verified for 48h.
+    const a = await seasonRelease({ observedAt: '2031-05-15T12:00:00Z', verified: false });
+    await verify(a.event, { verifiedAt: '2031-05-16T07:30:00Z', hours: 48 });
+    await observeSeries(a.id, { 1: '2022-02-18', 2: '2025-01-17', 3: RELEASE }, '2031-05-16T07:30:00Z');
+    const ra = await user('bnd48');
+    await save(ra, a.id);
+    await tick('2031-05-16T08:00:00Z');
+    assert.equal((await candidates(ra, 'season_premiere'))[0].expires_at.toISOString(), '2031-05-17T12:00:00.000Z');
+
+    // The end of the reader's second local day binds: Kiritimati (UTC+14) ends it at 10:00 UTC on the 17th.
+    const b = await seasonRelease({ verified: false });
+    await verify(b.event, { hours: 48 });
+    const rb = await user('bndday', { timezone: 'Pacific/Kiritimati' });
+    await save(rb, b.id);
+    await tick('2031-05-16T15:00:00Z');
+    assert.equal((await candidates(rb, 'season_premiere'))[0].expires_at.toISOString(), '2031-05-17T10:00:00.000Z');
+  });
+
+  it('counts the second local day in the reader\'s zone across a DST change', async () => {
+    // US clocks spring forward on 2031-03-09; the second day ends at 00:00 EDT on 03-11 = 04:00 UTC.
+    const s = await seasonRelease({ release: '2031-03-09', observedAt: '2031-03-09T14:00:00Z', verified: false });
+    await verify(s.event, { availableOn: '2031-03-09', verifiedAt: '2031-03-09T14:00:00Z', hours: 48 });
+    const r = await user('dst', { timezone: 'America/New_York' });
+    await save(r, s.id);
+    await tick('2031-03-09T15:00:00Z');
+    assert.equal((await candidates(r, 'season_premiere'))[0].expires_at.toISOString(), '2031-03-11T04:00:00.000Z');
+  });
+});
+
+describe('arbitration: seasons against the other types (Codex re-review)', () => {
+  async function socialCluster(reader, m, iso) {
+    await setConfig('proactive.generation_enabled', false);
+    try {
+      for (let i = 0; i < 2; i += 1) {
+        const f = await user(`sx${i}_`);
+        await friends(reader, f);
+        const ev = (
+          await t.sql(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2) returning id`, [f, m])
+        ).rows[0].id;
+        await one(`_proactive_social_add($1, $2, $3, $4, $5::timestamptz)`, [reader, f, m, ev, at(iso)]);
+      }
+    } finally {
+      await setConfig('proactive.generation_enabled', true);
+    }
+  }
+
+  it('a season beats an older social cluster the same evening', async () => {
+    const r = await user('svsoc');
+    const film = await movie('Social');
+    await save(r, film);
+    await socialCluster(r, film, '2031-05-16T09:00:00Z');
+    const s = await seasonRelease();
+    await save(r, s.id);
+    await tick(EVENING);
+    const byType = Object.fromEntries((await candidates(r)).map((c) => [c.type, c]));
+    assert.equal(byType.season_premiere.state, 'selected');
+    assert.equal(byType.watchlist_social.last_block_reason, 'higher_priority_selected');
+  });
+
+  it('equal configured priorities fall back to the canonical type order', async () => {
+    await setConfig('proactive.priority', {
+      season_premiere: 1, theatrical_release: 1, watchlist_social: 1, watchlist_resurface: 1,
+    });
+    try {
+      const r = await user('eqpri');
+      const film = await movie('Social2');
+      await save(r, film);
+      await socialCluster(r, film, '2031-05-16T09:00:00Z');
+      const s = await seasonRelease();
+      await save(r, s.id);
+      await tick(EVENING);
+      const sel = (await candidates(r)).find((c) => c.state === 'selected');
+      assert.equal(sel.type, 'season_premiere');
+    } finally {
+      await setConfig('proactive.priority', {
+        season_premiere: 1, theatrical_release: 2, watchlist_social: 3, watchlist_resurface: 4,
+      });
+    }
+  });
+});
+
+describe('_proactive_affinity: the rest of the weights, and visibility (Codex re-review)', () => {
+  it('an active mention counts 2, and an inactive one nothing', async () => {
+    const { r, a } = await pair();
+    const third = await user('aff3');
+    const c = await comment(r, await post(third), NOW);
+    await t.sql(`insert into comment_mentions (comment_id, mentioned_id, active) values ($1, $2, true)`, [c, a]);
+    assert.equal(Number(await affinity(r, a)), 2.5);
+    await t.sql(`update comment_mentions set active = false where comment_id = $1`, [c]);
+    assert.equal(Number(await affinity(r, a)), 0.5);
+  });
+
+  it('opening a recommendation is the light response, and a re-send adds nothing', async () => {
+    const { r, a } = await pair();
+    const m = await movie('Opened');
+    await t.sql(
+      `insert into title_recommendations (sender_id, recipient_id, media_item_id, created_at, recommended_at, opened_at, state)
+       values ($1, $2, $3, $4, $4, $4, 'delivered')`,
+      [a, r, m, at(NOW)],
+    );
+    // in: 0.5 × 3 for the send; out: 1 for the reader opening it.
+    assert.equal(Number(await affinity(r, a)), 3.0);
+    await t.sql(`update title_recommendations set recommended_at = $3 where sender_id = $1 and recipient_id = $2`, [
+      a, r, at(NOW),
+    ]);
+    assert.equal(Number(await affinity(r, a)), 3.0, 'recommended again: still one send');
+  });
+
+  it('forgets a reaction on a comment once the activity under it is no longer viewable', async () => {
+    const { r, a } = await pair();
+    const third = await user('affpriv');
+    const c = await comment(a, await post(third), NOW);
+    await t.sql(`insert into comment_reactions (comment_id, user_id, kind, created_at) values ($1, $2, 'love', $3)`, [
+      c, r, at(NOW),
+    ]);
+    assert.equal(Number(await affinity(r, a)), 0.75);
+    await t.sql(`update profiles set visibility = 'private' where id = $1`, [third]);
+    assert.equal(Number(await affinity(r, a)), 0.5, 'a private owner the reader does not follow');
+  });
+
+  it('forgets a comment on an activity whose owner has since blocked the reader', async () => {
+    const { r, a } = await pair();
+    const third = await user('affblk');
+    await comment(r, await post(third), NOW, null);
+    // The reader's comment on a third person's post is not towards the friend at all…
+    const p = await post(third);
+    const theirs = await comment(a, p, NOW);
+    await comment(r, p, NOW, theirs); // …but a reply to the friend's comment there is (3).
+    assert.equal(Number(await affinity(r, a)), 3.5);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [third, r]);
+    assert.equal(Number(await affinity(r, a)), 0.5);
+  });
+});
+
+describe('release_status: a misrouted season row is a leak (Codex re-review)', () => {
+  it('a season row moved to another recipient is counted', async () => {
+    const s = await seasonRelease();
+    const r = await user('mis');
+    const other = await user('misx');
+    await save(r, s.id);
+    await tick(EVENING);
+    assert.equal((await one(`release_status()`)).release_notifications, 0);
+    await t.sql(`update notifications set recipient_id = $2 where recipient_id = $1 and type = 'season_premiere'`, [r, other]);
+    const status = await one(`release_status()`);
+    assert.ok(status.release_notifications >= 1);
+    assert.ok(status.release_push_outbox >= 1, 'its queued push is to somebody else now');
+    assert.ok(status.problems.includes('release_notifications_exist'));
+    await t.sql(`update notifications set recipient_id = $1 where recipient_id = $2 and type = 'season_premiere'`, [r, other]);
+    assert.equal((await one(`release_status()`)).release_notifications, 0);
   });
 });

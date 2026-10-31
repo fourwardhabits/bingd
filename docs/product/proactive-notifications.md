@@ -503,20 +503,21 @@ change or DDL, and clients can neither read nor write them.
 | `proactive.season_enabled` (`20261031000100`) | season premieres only | no season candidate or inbox row, and a season already selected is dropped at the claim (`season_disabled`); the other types unaffected |
 | `proactive.push_enabled` | proactive delivery | nothing selected; queued proactive jobs dropped at claim |
 
-**Activation order** (staging, then production, each step a founder decision):
+**Activation order** (staging, then production, each step a founder decision). Since
+`20261031000100` (Codex re-review): **generation, then push; seasons and resurfacing each
+separately, later, and never in the initial production rollout.**
 
 1. `generation_enabled = true`. Social and theatrical inbox rows and candidates begin; no
-   push yet.
+   push yet. (Seasons create nothing while `season_enabled` is false; resurfacing creates
+   nothing without push.)
 2. Validate social and theatrical (inbox rows, `proactive_summary`, no surprises).
-3. `resurface_enabled = true`, when the founder chooses. Resurfacing is push-only, so with
-   push still off **this generates nothing yet**. It only arms the type, so step 4 starts it.
-4. `push_enabled = true`, only when push QA is ready. Social and theatrical pushes begin,
-   and resurfacing starts generating at the next evening window.
+3. `push_enabled = true`, only when push QA is ready. Social and theatrical pushes begin.
+4. Later, and only on its own evidence: `season_enabled = true` (§Q's production gate).
+5. Later still, and separately: `resurface_enabled = true`.
 
-Step 3 before step 4 is safe because resurfacing can never generate without push: there
-is no wave of candidates waiting to fire. To keep resurfacing out of the first push
-evenings, leave step 3 until after step 4 has been observed. Either order is safe, and
-resurfacing never runs without both switches on.
+`resurface_enabled = true` before `push_enabled` generates nothing (resurfacing is push-only),
+but it would then start the very evening push is turned on, which the initial rollout forbids.
+So in production it stays false until push has been observed, and is never part of steps 1-3.
 
 ### Resurfacing: `proactive.resurface_enabled`
 
@@ -725,12 +726,24 @@ last 12 hours, the season present in the series' latest read, the series not `Ca
 Never a `scheduled` event whose date has arrived. While the switch is on, a series with a
 season released in the last 48 hours stays on the six-hour refresh (`_release_next_check`).
 
-**Once, on time.** Dedupe key = the release event. Eligible from the start of the date in
-**both** the reader's zone and Los Angeles (the state machine counts a date as reached
-from the earliest zone's midnight, 14 hours before UTC). Expires at the earliest of
-confirmation + 48h, the end of the reader's second local release day, and the
-verification's `valid_until`. Then the ordinary evening window, caps, claim-time recheck and
-Expo `expiration`.
+**Once, on time.** Dedupe key = the release event. **Nothing for a reader, not even the
+inbox row, until the date has begun in both their zone (UTC when unknown) and Los Angeles**
+(Codex re-review): the state machine counts a date as reached from the earliest zone's
+midnight, 14 hours before UTC, so a season can be `released` while it is still the day
+before in the US. The first tick after both midnights collects the reader, eligible at once.
+Expires at the earliest of confirmation + 48h, the end of the reader's second local release
+day, and the verification's `valid_until`. Then the ordinary evening window, caps,
+claim-time recheck and Expo `expiration`.
+
+Because confirmation can come up to ~14 hours before UTC midnight, and a truthful
+verification is written after the season is really available, the useful delivery window
+after Los Angeles midnight is roughly 24 to 38 hours, and the second-local-day clock rarely
+binds (Fable re-review). Operators should verify promptly on release day.
+
+**The season before** is numbered from the series' latest observation
+(`release_subjects.facts.seasons`, what TMDB listed), not from whichever seasons are in our
+catalogue (`_proactive_season_prior`). If TMDB lists 1, 2 and 3 and Season 2 was never
+fetched, nobody is caught up for Season 3 (Codex re-review); a save still counts.
 
 **Region.** US: inbox row and candidate. Unknown: the inbox row (its copy says "in the
 US") and the candidate suppressed `region_unknown`. Elsewhere: nothing. Rechecked at
@@ -741,9 +754,10 @@ selection and claim.
 The row is hidden if its verification is removed or its date moves or is retracted; a
 verification that merely expires keeps the row (a dated fact) and stops delivery.
 
-**Status reporting.** `release_status()` now flags only **unauthorised** season rows (no
-`season_premiere` ledger row links to them), so history does not become a "leak" when the
-switch is turned off. The season shadow now records the `watchlist_discovery` preference.
+**Status reporting.** `release_status()` now flags only **unauthorised** season rows: one
+whose candidate is missing or does not match it on recipient, season and release event, or
+whose queued push is to somebody else (`_proactive_season_row_authorised`). History does not
+become a "leak" when the switch is turned off. The season shadow now records the `watchlist_discovery` preference.
 
 **Before production activation (not done):** an independent review, the founder's
 aggregate reliability review of the season shadow (`moved_after_release`, `date_changed`,
@@ -768,6 +782,13 @@ relationships, states and timestamps only.
 reciprocity when each direction has strong interactions on two distinct days in the last
 30. Not used: opens, invitations, helpful votes, profile visits, posting volume, inferred
 similarity.
+
+Two consequences of the data, recorded (Fable re-review): threads are one level deep and a
+reply's `parent_id` is always the thread's root, so "reply to the other" credits a reply to
+the friend's **root** comment only, not a reply to their reply; and only `delivered`
+recommendations count, so one the recipient dismissed gives the sender no credit either.
+Comments, reactions on comments and the activity under them count only while the reader can
+still view that activity's owner (`can_view_profile`, which covers privacy and blocks).
 
 It decides exactly two things: which competing `watchlist_social` cluster wins the evening
 (the mean of its two strongest visible friends), and which two friends a push and an inbox
@@ -796,75 +817,94 @@ inert.
 
 ## S. Staging application and Preview QA (do not run without approval)
 
-**Precondition:** the separate staging migration-parity audit is reconciled first.
+Rewritten for the second tranche (Codex re-review): three migrations, client version 2,
+four switches.
+
+**Preconditions:** independent reviews with no open BLOCKER or MAJOR; the separate staging
+migration-parity audit reconciled; staging credentials for the operator
+(`npx supabase login`, or `BINGD_STAGING_DB_URL` for `scripts/ops`).
 
 1. `npx supabase link --project-ref fjxhcbowoxuzulwirzyr` then
    `npx supabase migration list --linked`. Confirm staging is at `20261023000100` with no
    drift.
-2. `npx supabase db push --linked`. Applies `20261028000100` and `20261028000200` only.
-   Re-run `migration list`.
-3. `supabase functions deploy push-sender` (goal and proactive copy), **after** the
-   migration: the old sender ignores the new fields, and with the switch off no proactive
-   job exists. This sender must be live **before** `proactive.push_enabled` is ever turned
-   on: it is the one that sets the Expo `expiration` from `deliver_by` (§E).
-4. SQL checks: `select proactive_status();` (`generation_enabled: false`,
-   `push_enabled: false`, no candidates); `select release_status();` (healthy);
-   `select push_drain_status();` (healthy). Confirm `_push_eligible` is unchanged, and
-   that a staging social activity creates **no** proactive row while generation is off.
+2. `npx supabase db push --linked`. Applies `20261028000100`, `20261028000200` and
+   `20261031000100`, nothing else. Re-run `migration list`.
+3. `supabase functions deploy push-sender` (goal, proactive and season copy), **after** the
+   migrations. It must be live before `proactive.push_enabled` is ever turned on: it sets the
+   Expo `expiration` from `deliver_by` (§E).
+4. **Inertness, all four switches.** `select proactive_status();` shows
+   `generation_enabled`, `push_enabled`, `resurface_enabled` and `season_enabled` all
+   `false`, and no candidates. `select release_status();` healthy, `release_notifications` 0.
+   `select push_drain_status();` healthy. A staging social activity and a manual
+   `select _proactive_tick();` create **no** proactive candidate, inbox row or outbox row.
 5. `select schedule_proactive_notifications();` then confirm the job in `cron.job`.
 6. Publish a **Preview** OTA from this branch (staging backend). Relaunch the QA device and
-   confirm its token reports `device_tokens.proactive_version = 1`. Keep a second QA device
-   on the store build (version null) signed into the same account, for the multi-device
-   check.
-7. Staging only, in this order: `generation_enabled` → `true`, then `push_enabled` →
-   `true` (the statements are in §K).
-8. Device QA, on staging accounts from `staging-qa-inventory.md`:
+   confirm its token reports `device_tokens.proactive_version = 2`. Keep a second QA device
+   on an older build (version null or 1) on the same account, for the multi-device check.
+7. `generation_enabled` → `true` only. Inspect social and theatrical inbox rows and the
+   ledger (`proactive_summary`). Seasons and resurfacing still create nothing.
+8. `push_enabled` → `true`, with `season_enabled` and `resurface_enabled` still `false`.
+9. Device QA, on staging accounts from `staging-qa-inventory.md`:
    - **Social:** account B (mutual with A) ranks a film on A's Watchlist. A's inbox shows one
      row, no push. Account C ranks it too. At A's next 17:00–20:00 window, one push names B
      and C. Tap opens the title. A fourth friend updates the inbox and sends no push.
+   - **Affinity:** A comments on C's activity and not B's; with two friends in each of two
+     clusters, the cluster and the names A interacts with win; with no interactions, the older.
    - **Theatrical:** watchlist a film within 7 days of its US release. After the next
      evaluate and proactive tick, the inbox row appears, then the evening push ("Opens …").
-   - **Resurfacing:** with `resurface_enabled` still false, confirm no resurfacing candidate
-     appears. Then turn it on: an account with a Watchlist and no other proactive push this
-     week gets one push in the window, with no inbox row.
+   - **Seasons, with explicit staging fixtures** (staging cannot prove source reliability):
+     turn `season_enabled` → `true`; for a series with a season released today on staging,
+     write a verification row by hand (`proactive_season_availability`, US, today, 24h);
+     confirm an account that saved the series gets the inbox row and the evening push
+     ("Season N is now available in the US."), tap opens the season, a caught-up account
+     without a save gets it too, and an account only behind gets nothing. Delete the
+     verification and confirm the row disappears. Then `season_enabled` → `false`.
+   - **Resurfacing, separately:** turn `resurface_enabled` → `true`; an account with a
+     Watchlist and no other proactive push this week gets one push in the window, with no
+     inbox row. Then `resurface_enabled` → `false`.
    - **Late recovery:** with a candidate `selected`, stop the drain until after 20:00 local
-     (`unschedule_push_drain()`), then reschedule it. Confirm no push arrives and the candidate
-     ends `expired / outside_window`.
+     (`unschedule_push_drain()`), then reschedule it. Confirm no push arrives and the
+     candidate ends `expired / outside_window`.
    - **Goal:** complete a goal and get the "You hit your … goal 🎉" push.
-   - **Multi-device:** the social push arrives on the Preview device only, never on the
-     store-build device on the same account. A reactive follow push arrives on both.
+   - **Multi-device:** the social push arrives on the version-2 device only, never on the
+     older build on the same account. A reactive follow push arrives on both.
+   - **Reactions default:** a fresh staging account gets no reaction notification; one that
+     turns Reactions on does.
    - **Settings:** nine switches and no section masters; Watching › Watchlist & discovery
-     shows. Turn the switch off and the next social activity creates nothing.
-   - **Permission card:** check all three states. Deny in OS Settings, return, and see
-     "Open Settings".
-   - **Kill switch:** set `proactive.push_enabled` to `false` with a candidate selected and
-     unclaimed, then confirm `suppressed / kill_switch` and that a reactive follow push still
-     arrives.
+     shows. Turn it off and the next social activity creates nothing.
+   - **Permission card:** all three states. Deny in OS Settings, return, see "Open Settings".
+   - **Kill switches:** `push_enabled` → `false` with a candidate selected and unclaimed:
+     `suppressed / kill_switch`, and a reactive follow push still arrives.
+     `season_enabled` → `false` with a season selected: `suppressed / season_disabled`.
    - **Telemetry:** taps appear in `notification_opens`; `proactive_summary` and
-     `proactive_attribution` read sensibly.
-9. Leave staging's switch as the founder decides.
+     `proactive_attribution` read sensibly. Record tick duration from `proactive_status`
+     against the app role's statement timeout (the affinity cost gate, §R).
+10. Leave staging with `season_enabled` and `resurface_enabled` `false`; generation and push
+    as the founder decides.
 
 ## T. Production rollout and rollback (do not run without approval)
 
-**Rollout:**
+**Rollout** (each production step is founder-only under `AGENTS.md`):
 
 1. Founder approval of the reviewed PR, then merge.
-2. Production `db push`: the two migrations. **All three switches are false, so nothing
-   proactive is created and nothing is sent.** Verify with
-   `select proactive_status();` (no candidates) and a count of zero
-   `watchlist_social` / `theatrical_release` notifications.
-3. `push-sender` deploy, after the migration. **This activates the `goal_completed` push
+2. Production `db push`: the three migrations. **All four switches are false, so nothing
+   proactive is created and nothing is sent.** Verify with `select proactive_status();`
+   (all four `false`, no candidates) and a count of zero `watchlist_social` /
+   `theatrical_release` / `season_premiere` notifications. The Reactions default changes at
+   this step, and is not behind any switch.
+3. `push-sender` deploy, after the migrations. **This activates the `goal_completed` push
    fix immediately** (a reactive fix, §N), independent of every proactive switch.
 4. `select schedule_proactive_notifications();` (the tick runs and finds nothing to do).
 5. Production OTA from the merged commit, for the 1.1.0 runtimes (and a second publish from
    a 1.0.1 tree if 1.0.1 installs are to receive it, per `production-state.md`). Watch
-   adoption as `count(*) filter (where proactive_version >= 1)` over live `device_tokens`.
-6. After a staging pass and founder approval, in the §K order:
-   `generation_enabled = true` (social and theatrical inbox rows begin) → validate →
-   `resurface_enabled = true` when the founder chooses (arms resurfacing; it generates nothing
-   until push is on) → `push_enabled = true` when push QA is ready (pushes begin, to capable
-   devices only, tonight-or-not-at-all).
-7. Watch `proactive_status()`, `proactive_summary` and push-drain health daily for the first
+   adoption as `count(*) filter (where proactive_version >= 2)` over live `device_tokens`.
+6. After a staging pass: `generation_enabled = true` → validate production candidates and
+   inbox rows → `push_enabled = true` when push QA is ready (social and theatrical pushes
+   begin, to version-2 devices only, tonight-or-not-at-all).
+7. **`season_enabled` and `resurface_enabled` stay `false`.** Each is a separate later
+   decision: seasons after §Q's gate (independent review, the shadow reliability review,
+   market evidence); resurfacing after push has been observed.
+8. Watch `proactive_status()`, `proactive_summary` and push-drain health daily for the first
    week.
 
 **Rollback, in order of reach:**

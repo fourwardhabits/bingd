@@ -1070,34 +1070,174 @@ export default function suite() {
     });
 
     describe('PA10: one qualifying social event per transaction, under a concurrent tick', () => {
-      it('the second event joins nothing, the writer holds one row per reader, and a tick runs through', async () => {
+      /**
+       * Fable re-review, MINOR 2: the arbiter must actually contend with the writer. The
+       * reader has a DUE cluster on m0. The writer's first event joins that cluster (it
+       * holds the m0 row); its second event, on m1, is skipped by the guard. The arbiter
+       * reaches the reader, waits on the m0 row the writer holds, and goes on once it
+       * commits: one wait, no cycle, and only the first event of the transaction counted.
+       */
+      it('the arbiter waits on the one row the writer holds, the second event joins nothing', async () => {
         const { db, fx } = ctx;
-        const m1 = await fx.createMovie('PA10 one');
-        const m2 = await fx.createMovie('PA10 two');
-        const r1 = await reader(m1);
-        const r2 = await reader(m1);
-        for (const r of [r1, r2]) await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, m2]);
+        const m0 = await fx.createMovie('PA10 due');
+        const m1 = await fx.createMovie('PA10 second');
+        const r = await reader(m0);
+        await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, m1]);
+        await eligibleCluster(r, m0);
         const a = await fx.createUser();
-        await friends(r1, a);
-        await friends(r2, a);
+        await friends(r, a);
         const writer = await db.session('writer');
-        const ticker = await db.session('tick');
+        const arbiter = await db.session('arbiter');
         try {
           await writer.q('begin');
+          await writer.q(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`, [a, m0]);
           await writer.q(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`, [a, m1]);
-          await writer.q(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`, [a, m2]);
-          await within(ticker.q(`select _proactive_tick($1::timestamptz)`, ['2031-03-03T17:30:00Z']), 5000, 'PA10 tick');
+          const pending = arbiter.start(`select _proactive_arbitrate($1::timestamptz)`, [EVENING]);
+          await arbiter.awaitBlocked();
           await writer.q('commit');
+          await settle9('PA10', within(pending, 5000, 'PA10 arbiter'));
         } finally {
           await writer.end().catch(() => {});
+          await arbiter.end().catch(() => {});
+        }
+        const rows = await db.rows(
+          `select media_item_id, state from proactive_candidates where recipient_id = $1 and type = 'watchlist_social'`, [r],
+        );
+        assert.deepEqual(rows.map((x) => x.media_item_id), [m0], 'PA10: only the first event of the transaction');
+        assert.equal(rows[0].state, 'selected');
+        const [{ k }] = await db.rows(
+          `select count(distinct a.actor_id)::int k from proactive_cluster_actors a
+             join proactive_candidates c on c.id = a.candidate_id where c.recipient_id = $1`, [r],
+        );
+        assert.equal(k, 3, 'PA10: the first event joined the due cluster');
+      });
+    });
+
+    describe('PA12: season collection overlapping the claim (Codex re-review)', () => {
+      const RELEASE = '2031-05-16';
+      const OBSERVED = '2031-05-16T14:00:00Z';
+      let n = 0;
+
+      before(async () => {
+        await ctx.db.sql(
+          `insert into app_config (key, value) values ('proactive.season_enabled', 'true'::jsonb)
+           on conflict (key) do update set value = excluded.value`,
+        );
+      });
+      after(async () => {
+        await ctx.db.sql(`update app_config set value = 'false'::jsonb where key = 'proactive.season_enabled'`);
+      });
+
+      const releasedSeries = async () => {
+        const { db } = ctx;
+        n += 1;
+        const [s] = await db.rows(
+          `insert into media_items (kind, tmdb_id, title, provenance) values ('series', $1, $2, 'tmdb') returning id`,
+          [1_980_000_000 + n * 10, `PA12 ${n}`],
+        );
+        for (const [k, d] of [[1, '2024-01-01'], [2, RELEASE]]) {
+          await db.sql(
+            `insert into media_items (kind, parent_id, season_number, tmdb_id, title, release_date, provenance)
+             values ('season', $1, $2, $3, $4, $5, 'tmdb')`,
+            [s.id, k, 1_980_000_000 + n * 10 + k, `Season ${k}`, d],
+          );
+        }
+        await db.sql(`insert into release_subjects (media_item_id, subject_kind, next_check_at) values ($1, 'series', $2)`, [
+          s.id, OBSERVED,
+        ]);
+        await db.sql(`select release_observe($1::jsonb, $2::timestamptz)`, [
+          JSON.stringify({
+            media_item_id: s.id, kind: 'series', status: 'Returning Series', in_production: true, read_at: OBSERVED,
+            seasons: [{ season_number: 1, air_date: '2024-01-01' }, { season_number: 2, air_date: RELEASE }],
+          }),
+          OBSERVED,
+        ]);
+        const [e] = await db.rows(
+          `select e.id from release_events e join media_items m on m.id = e.media_item_id
+            where m.parent_id = $1 and m.season_number = 2`, [s.id],
+        );
+        await db.sql(
+          `insert into proactive_season_availability
+             values ($1, 'US', $2, $3, $3::timestamptz + interval '24 hours', 'https://tv.example.com')`,
+          [e.id, RELEASE, OBSERVED],
+        );
+        return s.id;
+      };
+
+      it('a claim during an uncommitted collecting tick neither waits nor double-sends', async () => {
+        const { db } = ctx;
+        const first = await releasedSeries();
+        const r = await reader(first);
+        await db.sql(`select _proactive_tick('2031-05-16T18:00:00Z'::timestamptz)`);
+        const [a] = await db.rows(
+          `select id, notification_id from proactive_candidates where recipient_id = $1 and state = 'selected'`, [r],
+        );
+        assert.ok(a, 'the first season was selected');
+        // A second release for the same reader, collected by a tick that is still open.
+        const second = await releasedSeries();
+        await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, second]);
+
+        const ticker = await db.session('tick');
+        const c1 = await db.session('claim-1');
+        const c2 = await db.session('claim-2');
+        let jobs = [];
+        try {
+          await ticker.q('begin');
+          await ticker.q(`select _proactive_tick('2031-05-16T18:10:00Z'::timestamptz)`);
+          // The open tick holds the global lock, the reader's lock and the new row. The
+          // claims must not wait on any of it.
+          const results = await within(
+            Promise.all([
+              c1.q(`select claim_push_batch(100, '2031-05-16T18:12:00Z'::timestamptz) as r`),
+              c2.q(`select claim_push_batch(100, '2031-05-16T18:12:00Z'::timestamptz) as r`),
+            ]),
+            5000,
+            'PA12 claims',
+          );
+          jobs = results.flatMap((res) => res.rows[0].r);
+          await ticker.q('commit');
+        } finally {
           await ticker.end().catch(() => {});
+          await c1.end().catch(() => {});
+          await c2.end().catch(() => {});
         }
-        for (const r of [r1, r2]) {
-          const titles = (await db.rows(
-            `select media_item_id from proactive_candidates where recipient_id = $1 and type = 'watchlist_social'`, [r],
-          )).map((x) => x.media_item_id);
-          assert.deepEqual(titles, [m1], 'PA10: only the first event of the transaction');
+        assert.equal(jobs.filter((j) => j.notification_id === a.notification_id).length, 1, 'PA12: sent once');
+        const rows = await db.rows(
+          `select state from proactive_candidates where recipient_id = $1 and type = 'season_premiere' order by created_at`, [r],
+        );
+        assert.deepEqual(rows.map((x) => x.state), ['sent', 'pending'], 'PA12: no second selection the same day');
+        const [{ r: again }] = await db.rows(`select claim_push_batch(100, '2031-05-16T18:20:00Z'::timestamptz) as r`);
+        assert.equal(again.filter((j) => j.notification_id === a.notification_id).length, 0, 'PA12: never again');
+      });
+
+      it('a busy season candidate is skipped without waiting, returned clean, then sent once', async () => {
+        const { db } = ctx;
+        const s = await releasedSeries();
+        const r = await reader(s);
+        await db.sql(`select _proactive_tick('2031-05-16T18:00:00Z'::timestamptz)`);
+        const [c] = await db.rows(
+          `select id, notification_id from proactive_candidates where recipient_id = $1 and state = 'selected'`, [r],
+        );
+        const holder = await db.session('holder');
+        const claim = await db.session('claim');
+        try {
+          await holder.q('begin');
+          await holder.q(`select id from proactive_candidates where id = $1 for update`, [c.id]);
+          const res = await within(
+            claim.q(`select claim_push_batch(100, '2031-05-16T18:05:00Z'::timestamptz) as r`), 5000, 'PA12 skip',
+          );
+          assert.equal(res.rows[0].r.filter((j) => j.notification_id === c.notification_id).length, 0);
+          const [o] = await db.rows(`select state, attempts, claimed_at from push_outbox where notification_id = $1`, [
+            c.notification_id,
+          ]);
+          assert.deepEqual([o.state, o.attempts, o.claimed_at], ['pending', 0, null], 'PA12: returned clean');
+          await holder.q('rollback');
+        } finally {
+          await holder.end().catch(() => {});
+          await claim.end().catch(() => {});
         }
+        const [{ r: jobs }] = await db.rows(`select claim_push_batch(100, '2031-05-16T18:06:00Z'::timestamptz) as r`);
+        assert.equal(jobs.filter((j) => j.notification_id === c.notification_id).length, 1, 'PA12: then sent once');
       });
     });
 

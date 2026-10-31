@@ -324,15 +324,52 @@ $$;
  *                whatever their history: a reader behind, or with none, who saved it.
  *   'caught_up'  a meaningful watch signal (_proactive_title_watched: a ranking, or a log
  *                with a bucket, a watch date or progress completed) on the IMMEDIATELY
- *                PRECEDING NORMAL SEASON of the series, as the catalogue numbers it, not the
+ *                PRECEDING NORMAL SEASON of the series (_proactive_season_prior), not the
  *                last season this reader happened to watch. Merely `watching` it is not.
- *                Specials (season 0) never count, and with no earlier normal season in the
- *                catalogue there is nobody caught up.
+ *                Specials (season 0) never count, and with the predecessor unknown or
+ *                missing from the catalogue there is nobody caught up.
  *   null         anything weaker: behind without a save, no history without a save.
  *
  * Asked by the collector, and again before selection and at the claim through
  * _proactive_invalid, so a reader who removes the save in between is not told.
  */
+
+/**
+ * The immediately preceding normal season of a season premiere, or null (Codex
+ * re-review, MAJOR). The NUMBER comes from the series' latest observation
+ * (release_subjects.facts.seasons, what TMDB listed at the last read), never from
+ * whichever lower seasons happen to be in our catalogue: if TMDB lists 1, 2 and 3 and
+ * Season 2 was never fetched, the predecessor of 3 is 2, and with no Season 2 item it is
+ * null. Missing data fails closed rather than making Season 1's viewers "caught up".
+ */
+create or replace function _proactive_season_prior(p_event uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select m.id
+    from release_events e
+    join release_subjects s on s.media_item_id = e.subject_id
+    cross join lateral (
+      select max((x ->> 'season_number')::integer) as n
+        from jsonb_array_elements(
+               case when jsonb_typeof(s.facts -> 'seasons') = 'array' then s.facts -> 'seasons'
+                    else '[]'::jsonb end) x
+       where (x ->> 'season_number') ~ '^[0-9]{1,4}$'
+         and (x ->> 'season_number')::integer between 1 and e.season_number - 1
+    ) p
+    join media_items m
+      on m.parent_id = e.subject_id and m.kind = 'season' and m.season_number = p.n
+   where e.id = p_event
+     and e.event_kind = 'season_premiere'
+     and e.season_number > 1;
+$$;
+
+comment on function _proactive_season_prior(uuid) is
+  'The catalogue item of the season immediately before a season premiere, numbered from the series'' latest observation (release_subjects.facts.seasons); null when that season is unknown or not in the catalogue, so a missing predecessor never makes an earlier season''s viewers caught up. Internal (20261031000100).';
+
 create or replace function _proactive_season_interest(p_user uuid, p_event uuid)
 returns text
 language sql
@@ -344,20 +381,12 @@ as $$
     select ev.media_item_id as season_id, ev.subject_id as series_id, ev.season_number
       from release_events ev
      where ev.id = p_event and ev.event_kind = 'season_premiere' and ev.season_number > 0
-  ),
-  prior as (
-    select m.id
-      from media_items m, e
-     where m.parent_id = e.series_id and m.kind = 'season'
-       and m.season_number > 0 and m.season_number < e.season_number
-     order by m.season_number desc
-     limit 1
   )
   select case
            when exists (select 1 from watchlist w, e
                          where w.user_id = p_user and w.media_item_id in (e.season_id, e.series_id))
              then 'watchlist'
-           when exists (select 1 from prior where _proactive_title_watched(p_user, prior.id))
+           when _proactive_title_watched(p_user, _proactive_season_prior(p_event))
              then 'caught_up'
          end;
 $$;
@@ -447,6 +476,37 @@ $$;
 
 comment on function _proactive_season_verified_on(uuid, text, timestamptz) is
   'The available_on of a valid operator verification for a season''s release event in a market, at p_now, or null when there is none, it has expired, it postdates p_now, or it disagrees with the release event. Internal (20261031000100).';
+
+-- Whether a season_premiere notification is one the ledger wrote: its candidate is the
+-- same recipient's, about the same season, keyed by a season-premiere release event of
+-- that season. release_status counts anything else as a leak.
+create or replace function _proactive_season_row_authorised(p_notification uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+      from notifications n
+      join proactive_candidates pc
+        on pc.notification_id = n.id
+       and pc.type = 'season_premiere'
+       and pc.recipient_id = n.recipient_id
+       and n.subject_type = 'media_item'
+       and pc.media_item_id = n.subject_id
+      join release_events re
+        on re.id::text = pc.dedupe_key
+       and re.id::text = pc.metadata ->> 'release_event_id'
+       and re.event_kind = 'season_premiere'
+       and re.media_item_id = pc.media_item_id
+     where n.id = p_notification
+       and n.type = 'season_premiere');
+$$;
+
+comment on function _proactive_season_row_authorised(uuid) is
+  'Whether a season_premiere notification is correctly linked to the ledger: same recipient, same season, keyed by that season''s release event. release_status counts every other season row as unauthorised. Internal (20261031000100).';
 
 
 -- ---------------------------------------------------------------------------
@@ -554,22 +614,34 @@ as $$
      where at > p_now - interval '90 days' and at <= p_now
      group by media_item_id, (at at time zone 'UTC')::date
   ),
+  -- One arm per direction, each filtered on a single indexed column first (reactions_user,
+  -- comment_reactions_user), so no arm joins the whole table (Fable re-review, MINOR).
+  -- A reaction to a comment counts only while the reader can still view the activity the
+  -- comment is on (Codex re-review, MAJOR): definer code gets no help from RLS here.
   reactions_both as (
-    select case when x.user_id = p_reader then 'out' else 'in' end as dir,
-           0.25::numeric as w,
-           x.created_at as at
+    select 'out' as dir, 0.25::numeric as w, x.created_at as at
       from reactions x
       join feed_events fe on fe.id = x.feed_event_id
-     where (x.user_id = p_reader and fe.actor_id = p_actor)
-        or (x.user_id = p_actor and fe.actor_id = p_reader)
+     where x.user_id = p_reader and fe.actor_id = p_actor
     union all
-    select case when x.user_id = p_reader then 'out' else 'in' end,
-           0.25::numeric,
-           x.created_at
+    select 'in', 0.25::numeric, x.created_at
+      from reactions x
+      join feed_events fe on fe.id = x.feed_event_id
+     where x.user_id = p_actor and fe.actor_id = p_reader
+    union all
+    select 'out', 0.25::numeric, x.created_at
       from comment_reactions x
       join comments c on c.id = x.comment_id and c.deleted_at is null
-     where (x.user_id = p_reader and c.author_id = p_actor)
-        or (x.user_id = p_actor and c.author_id = p_reader)
+      join feed_events fe on fe.id = c.feed_event_id
+     where x.user_id = p_reader and c.author_id = p_actor
+       and can_view_profile(p_reader, fe.actor_id)
+    union all
+    select 'in', 0.25::numeric, x.created_at
+      from comment_reactions x
+      join comments c on c.id = x.comment_id and c.deleted_at is null
+      join feed_events fe on fe.id = c.feed_event_id
+     where x.user_id = p_actor and c.author_id = p_reader
+       and can_view_profile(p_reader, fe.actor_id)
   ),
   evidence as (
     select 'conversation' as family, dir, w, at from conversation where w > 0
@@ -1009,8 +1081,9 @@ comment on function _proactive_arbitrate(timestamptz) is
 --                 not touching the season, region US or unknown (anywhere else: nothing).
 --   once          dedupe key = the release event: one per reader per season release, ever.
 --                 Parts and weekly episodes are not events.
---   when          eligible from the start of the available date in BOTH the reader's zone
---                 and America/Los_Angeles, inside the usual 17:00-20:00 local window.
+--   when          nothing, not even the inbox row, until the available date has begun in
+--                 BOTH the reader's zone and America/Los_Angeles; then eligible at once,
+--                 inside the usual 17:00-20:00 local window.
 --   until         the earliest of the confirmation + 48 hours, the midnight that ends the
 --                 reader's second local release day, and the verification's valid_until.
 --                 Never extended by a later collection.
@@ -1060,35 +1133,42 @@ begin
     select valid_until into v_until
       from proactive_season_availability where release_event_id = e.id and region = 'US';
 
-    -- The immediately preceding normal season, by the catalogue's numbering.
-    select m.id into v_prior
-      from media_items m
-     where m.parent_id = e.subject_id and m.kind = 'season'
-       and m.season_number > 0 and m.season_number < e.season_number
-     order by m.season_number desc
-     limit 1;
+    -- The immediately preceding normal season, numbered from the latest observation; null
+    -- when it is unknown or not in the catalogue (Codex re-review, MAJOR).
+    v_prior := _proactive_season_prior(e.id);
 
     for r in
-      select i.user_id, ac.region, ac.timezone,
-             _proactive_season_interest(i.user_id, e.id) as interest
+      select q.*
         from (
-          select w.user_id from watchlist w where w.media_item_id in (e.media_item_id, e.subject_id)
-          union
-          select rk.user_id from rankings rk where v_prior is not null and rk.media_item_id = v_prior
-          union
-          select um.user_id from user_media um
-           where v_prior is not null and um.media_item_id = v_prior
-             and (um.bucket is not null or um.watched_on is not null or um.progress = 'completed')
-        ) i
-        join profiles p on p.id = i.user_id and p.status = 'active'
-        left join account_context ac on ac.user_id = i.user_id
-       where (ac.region is null or ac.region = 'US')
-         and not _proactive_season_touched(i.user_id, e.media_item_id)
-         -- Muted means untouched, as for a film: nothing is recorded, so turning the
-         -- preference back on inside the two days still lets this release reach them once.
-         and _notifies(i.user_id, 'watchlist_discovery')
-         and _proactive_season_interest(i.user_id, e.id) is not null
-       order by i.user_id
+          select i.user_id, ac.region, ac.timezone,
+                 _proactive_season_interest(i.user_id, e.id) as interest
+            from (
+              select w.user_id from watchlist w where w.media_item_id in (e.media_item_id, e.subject_id)
+              union
+              select rk.user_id from rankings rk where v_prior is not null and rk.media_item_id = v_prior
+              union
+              select um.user_id from user_media um
+               where v_prior is not null and um.media_item_id = v_prior
+                 and (um.bucket is not null or um.watched_on is not null or um.progress = 'completed')
+            ) i
+            join profiles p on p.id = i.user_id and p.status = 'active'
+            left join account_context ac on ac.user_id = i.user_id
+           where (ac.region is null or ac.region = 'US')
+             -- NOTHING BEFORE THE DAY (Codex re-review, MAJOR). The release state machine
+             -- counts a date as reached from the earliest zone's midnight, 14 hours before
+             -- UTC's, so a season can be `released` while it is still the day before in the
+             -- US. Neither the candidate nor the inbox row is written until the date has
+             -- begun in BOTH Los Angeles and the reader's own zone (UTC when unknown); a
+             -- later tick collects them, inside the same 48 hours, under the same dedupe.
+             and p_now >= v_avail::timestamp at time zone 'America/Los_Angeles'
+             and p_now >= v_avail::timestamp at time zone coalesce(ac.timezone, 'UTC')
+             and not _proactive_season_touched(i.user_id, e.media_item_id)
+             -- Muted means untouched, as for a film: nothing is recorded, so turning the
+             -- preference back on inside the two days still lets this release reach them once.
+             and _notifies(i.user_id, 'watchlist_discovery')
+        ) q
+       where q.interest is not null
+       order by q.user_id
     loop
       c := null;
       insert into proactive_candidates (
@@ -1099,10 +1179,8 @@ begin
         _proactive_priority('season_premiere'), 'pending',
         jsonb_build_object('release_event_id', e.id, 'available_on', v_avail, 'region', 'US',
                            'season_number', e.season_number, 'interest', r.interest),
-        p_now,
-        greatest(p_now,
-                 v_avail::timestamp at time zone coalesce(r.timezone, 'UTC'),
-                 v_avail::timestamp at time zone 'America/Los_Angeles'),
+        -- Eligible now: the date has begun in both zones (the reader filter above).
+        p_now, p_now,
         least(e.released_observed_at + v_window,
               (v_avail + 2)::timestamp at time zone coalesce(r.timezone, 'UTC'),
               v_until)
@@ -1991,16 +2069,17 @@ begin
   -- 20261031000100: UNAUTHORISED season premieres only. A season row is delivered through
   -- the proactive ledger now; one that no season_premiere candidate links to is the leak.
   -- Authorised history stays healthy when the season switch is later turned off.
+  -- Authorised means CORRECTLY linked (Codex re-review, MINOR): the candidate is the same
+  -- recipient's, about the same season, keyed by a season-premiere release event of that
+  -- season; and a queued push is to that same recipient.
   select count(*) into v_sent
     from notifications n
    where n.type = 'season_premiere'
-     and not exists (select 1 from proactive_candidates pc
-                      where pc.notification_id = n.id and pc.type = 'season_premiere');
+     and not _proactive_season_row_authorised(n.id);
   select count(*) into v_outbox
     from push_outbox o join notifications n on n.id = o.notification_id
    where n.type = 'season_premiere'
-     and not exists (select 1 from proactive_candidates pc
-                      where pc.notification_id = n.id and pc.type = 'season_premiere');
+     and (not _proactive_season_row_authorised(n.id) or o.recipient_id is distinct from n.recipient_id);
 
   if v_sent > 0 or v_outbox > 0 then
     v_problems := v_problems || 'release_notifications_exist'::text;
@@ -2404,6 +2483,8 @@ revoke execute on function _proactive_season_touched(uuid, uuid)                
 revoke execute on function _proactive_season_interest(uuid, uuid)                      from public, anon, authenticated;
 revoke execute on function _proactive_season_release_reason(uuid, timestamptz)         from public, anon, authenticated;
 revoke execute on function _proactive_season_verified_on(uuid, text, timestamptz)      from public, anon, authenticated;
+revoke execute on function _proactive_season_prior(uuid)                               from public, anon, authenticated;
+revoke execute on function _proactive_season_row_authorised(uuid)                      from public, anon, authenticated;
 revoke execute on function _proactive_affinity(uuid, uuid, timestamptz)                from public, anon, authenticated;
 revoke execute on function _proactive_ranked_social_actors(uuid, uuid, timestamptz)    from public, anon, authenticated;
 revoke execute on function _proactive_cluster_affinity(uuid, uuid, timestamptz)        from public, anon, authenticated;
