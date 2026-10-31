@@ -301,6 +301,48 @@ describe('proactive rows', () => {
     expect(view.getByText('On your Watchlist')).toBeTruthy();
   });
 
+  /**
+   * 20261031000100. The season's own row: the show and the season spelled out, the US date
+   * under it, and a tap that opens the season rather than the show.
+   */
+  const premiereRow = (payload: Record<string, unknown>, overrides: Record<string, unknown> = {}) =>
+    proactiveRow({
+      kind: 'season_premiere',
+      type: 'season_premiere',
+      media_item_id: 'severance-s3',
+      media_title: 'Season 3',
+      media_kind: 'season',
+      series_title: 'Severance',
+      subject_id: 'severance-s3',
+      payload: { candidate_id: 'c1', region: 'US', ...payload },
+      ...overrides,
+    });
+
+  it('draws a new season with the date it became available, and opens that season', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(premiereRow({ available_on: '2026-05-15', season_number: 3 }));
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Severance, Season 3')).toBeTruthy());
+    expect(view.getByText('Available in the US from May 15')).toBeTruthy();
+    // Not claimed as saved: the reader may only have watched the season before.
+    expect(view.queryByText('On your Watchlist')).toBeNull();
+    const label = /Severance, Season 3\. Available in the US from May 15/;
+    expect(view.getByLabelText(label)).toBeTruthy();
+
+    fireEvent.press(view.getByLabelText(label));
+    expect(mockPush).toHaveBeenCalledWith('/title/severance-s3');
+  });
+
+  it('names a season by its own title when the payload has no number', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      premiereRow({ available_on: '2026-05-15' }, { media_title: 'The Final Chapter' }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Severance, The Final Chapter')).toBeTruthy());
+    expect(view.getByText('Available in the US from May 15')).toBeTruthy();
+  });
+
   it('never draws a social row with nobody left in it, or a resurfacing row at all', async () => {
     mockNotifications.length = 0;
     mockNotifications.push(

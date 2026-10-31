@@ -538,7 +538,8 @@ describe('notification preferences', () => {
       { category: 'follow_accepted', enabled: true },
       { category: 'follows', enabled: true },
       { category: 'invites', enabled: true },
-      { category: 'reactions', enabled: true },
+      // 20261031000100: reactions default off again (founder, 2026-10-31).
+      { category: 'reactions', enabled: false },
       { category: 'recommendations', enabled: true },
       { category: 'watch_tags', enabled: true },
       // 20261028000100: the Watching section's one switch, on by omission.

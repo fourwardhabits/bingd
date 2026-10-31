@@ -692,7 +692,7 @@ describe('shadow evaluation: eligibility', () => {
     await watched(u.already, show.seasons[2]);
     await watched(u.already, show.seasons[3]);
     await watched(u.prefOff, show.seasons[2]);
-    await t.sql(`insert into notification_preferences (user_id, category, enabled) values ($1, 'new_seasons', false)`, [u.prefOff]);
+    await t.sql(`insert into notification_preferences (user_id, category, enabled) values ($1, 'watchlist_discovery', false)`, [u.prefOff]);
     await watched(u.suspended, show.seasons[2]);
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [u.suspended]);
     await watched(u.noDevice, show.seasons[2]);

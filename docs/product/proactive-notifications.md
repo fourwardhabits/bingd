@@ -1,6 +1,8 @@
 # Proactive notifications v1
 
-**Status:** built on `feature/proactive-notifications`, **not applied anywhere**, 2026-10-28.
+**Status:** built on `feature/proactive-notifications`, **not applied anywhere**, 2026-10-28;
+second tranche 2026-10-31 (migration `20261031000100`: season premieres switched off,
+internal affinity, four-type priority, Reactions default off, client version 2; §Q, §R).
 Migrations `20261028000100` (ledger, arbiter, kill switch, claim and inbox rebuilds, open
 telemetry) and `20261028000200` (the three types, the tick, scheduling). Ships with **both
 switches off**: `proactive.generation_enabled = false` (nothing is created) and
@@ -27,7 +29,7 @@ older rows they conflict with: the friend-activity exclusion (narrowed, not remo
 | B | Theatrical release notifications for watchlisted films, US wide theatrical, T-7, under the existing freshness and date guards. No day-of follow-up | `theatrical_release`, driven by the release-awareness state machine |
 | C | General Watchlist resurfacing, as a proactive engagement push | `watchlist_resurface`, push only |
 | D | Streaming availability stays deferred | nothing built |
-| E | Season-premiere delivery stays deferred | the shadow keeps running; no season row is written |
+| E | Season-premiere delivery stays deferred. **Amended 2026-10-31:** built, behind its own operator switch, off for the initial rollout | `season_premiere` (§Q) |
 | F | No personalised or ML send time | a fixed 17:00–20:00 local window |
 | G | Shared cross-type limits | one ledger, one arbiter |
 
@@ -293,15 +295,17 @@ Read from `app_config`, all in one place:
 | `proactive.type_cooldown_hours` | 72 |
 | `proactive.resurface_cooldown_days` | 7 |
 | `proactive.title_cooldown_days` | 7 (across types) |
-| `proactive.priority` | `{"theatrical_release":1,"watchlist_social":2,"watchlist_resurface":3}` |
+| `proactive.priority` | `{"season_premiere":1,"theatrical_release":2,"watchlist_social":3,"watchlist_resurface":4}` (since `20261031000100`) |
 | `proactive.window_start_hour` / `window_end_hour` | 17 / 20 |
 
 Each tick, per reader, under the lock:
 
 1. Pending candidates past `expires_at` become `expired`, with `last_block_reason` as the
    reason.
-2. Due candidates (`eligible_at <= now`) are taken best first: priority, then oldest
-   eligible, then id. That is a total order.
+2. Due candidates (`eligible_at <= now`) are taken best first: priority, then the
+   canonical type order, then (seasons) a saved series or season before caught-up-only,
+   then (social) cluster affinity (§R), then oldest eligible, then id. That is a total
+   order. The title cooldown counts a season as its series (`_proactive_cooldown_title`).
 3. Each is revalidated (`_proactive_invalid`: recipient active, preference on, still on
    the Watchlist, not watched, plus the type's own checks). If it is no longer true it is
    **suppressed** with the reason.
@@ -473,7 +477,8 @@ account can hold a new phone and an old tablet at once, so the gate lives on the
   records **null**. Latest registration wins per token, so an installation that goes back
   to an old build turns that one device off again.
 - **The arbiter** selects only for a recipient with at least one live token at or above
-  `proactive.min_client_version`. With live devices but none capable, the candidate is
+  `proactive.min_client_version` (**2** since `20261031000100`, for all four types: the
+  first build that renders `season_premiere`; a version-1 token gets no proactive push). With live devices but none capable, the candidate is
   held `client_unsupported`; with no live device, `no_device`.
 - **`claim_push_batch`** gives a proactive job **only** the capable tokens
   (`_proactive_capable_token`). If none is left at send time (the capable phone signed
@@ -484,7 +489,7 @@ account can hold a new phone and an old tablet at once, so the gate lives on the
 Old builds also hide the new kinds in their inbox (the existing `KINDS` filter), so an old
 device never draws a row it cannot route. `report_device_context` is untouched.
 
-## K. The three switches
+## K. The switches (four since `20261031000100`)
 
 All three are operator-side `app_config` rows (none is a user setting), **seeded
 `false`**, and **fail-closed**: on only when the value is exactly the JSON boolean `true`,
@@ -495,6 +500,7 @@ change or DDL, and clients can neither read nor write them.
 |---|---|---|
 | `proactive.generation_enabled` | all proactive creation | no candidate, no proactive inbox row |
 | `proactive.resurface_enabled` | Watchlist resurfacing only | no resurfacing candidate; social and theatrical unaffected |
+| `proactive.season_enabled` (`20261031000100`) | season premieres only | no season candidate or inbox row, and a season already selected is dropped at the claim (`season_disabled`); the other types unaffected |
 | `proactive.push_enabled` | proactive delivery | nothing selected; queued proactive jobs dropped at claim |
 
 **Activation order** (staging, then production, each step a founder decision):
@@ -688,6 +694,105 @@ The review questions, answered:
   added).
 - One push per local day **across** proactive types means a social cluster that arrives on
   a film's T-7 evening waits a day. That is the founder's policy, working as designed.
+
+## Q. Season premiere (`20261031000100`, switched off)
+
+Founder brief of 2026-10-31; final design by the Codex decision pass. **Built whole and
+off:** `proactive.season_enabled` is seeded false, gates creation (`_proactive_season_collect`),
+selection and the claim (`_proactive_invalid` → `season_disabled`), and stays false for the
+initial production rollout.
+
+**Why it is not trusted to TMDB alone.** A TMDB season `air_date` has no region, and a first
+episode is not a season that is available. So a season is announced only while an operator
+verification row exists in `proactive_season_availability`: release event, market (`US`
+only in v1), `available_on`, `verified_at`, `valid_until` (at most 48 hours later), and an
+`https` evidence URL from the distributor or platform. Nothing fills it automatically. A
+missing, expired, future-dated or disagreeing row fails closed. The table can stay empty.
+
+| Reader | Outcome |
+|---|---|
+| the exact season or its series on the Watchlist | eligible (`interest = watchlist`) |
+| a ranking or a watch signal (bucket, date, completed) on the **immediately preceding normal season**, by catalogue number | eligible (`caught_up`) |
+| behind or no history, but saved | eligible through the save |
+| behind or no history, not saved; only `watching` the previous season; specials only | nothing |
+| already ranked, logged or watching the new season | nothing |
+| inactive, or Watchlist & discovery off | nothing |
+
+**Which events:** `season_premiere`, `state = released`, `season_number > 0`, not
+`skipped_stale`, confirmed in the last 48 hours (`released_observed_at`),
+`scheduled_date = released_on = available_on`, the event and the series both read in the
+last 12 hours, the season present in the series' latest read, the series not `Canceled`.
+Never a `scheduled` event whose date has arrived. While the switch is on, a series with a
+season released in the last 48 hours stays on the six-hour refresh (`_release_next_check`).
+
+**Once, on time.** Dedupe key = the release event. Eligible from the start of the date in
+**both** the reader's zone and Los Angeles (the state machine counts a date as reached
+from the earliest zone's midnight, 14 hours before UTC). Expires at the earliest of
+confirmation + 48h, the end of the reader's second local release day, and the
+verification's `valid_until`. Then the ordinary evening window, caps, claim-time recheck and
+Expo `expiration`.
+
+**Region.** US: inbox row and candidate. Unknown: the inbox row (its copy says "in the
+US") and the candidate suppressed `region_unknown`. Elsewhere: nothing. Rechecked at
+selection and claim.
+
+**Copy.** Push: **Severance** · "Season 3 is now available in the US." Inbox:
+"Severance, Season 3" / "Available in the US from May 16". Tap → the season's title page.
+The row is hidden if its verification is removed or its date moves or is retracted; a
+verification that merely expires keeps the row (a dated fact) and stops delivery.
+
+**Status reporting.** `release_status()` now flags only **unauthorised** season rows (no
+`season_premiere` ledger row links to them), so history does not become a "leak" when the
+switch is turned off. The season shadow now records the `watchlist_discovery` preference.
+
+**Before production activation (not done):** an independent review, the founder's
+aggregate reliability review of the season shadow (`moved_after_release`, `date_changed`,
+stale reads), and real market availability evidence. Staging fixtures cannot establish
+source reliability.
+
+## R. Internal social affinity, and the other second-tranche rules (`20261031000100`)
+
+`_proactive_affinity(reader, friend, now)`: deterministic, computed on demand, never
+stored, never in an RPC result, payload, push job, analytics event or client state. Ids,
+relationships, states and timestamps only.
+
+| Family | Events (base weight) | Cap |
+|---|---|---|
+| Conversation | comment on the other's activity 2; reply to their comment 3; active mention 2 (one comment counts once, at its strongest) | 6 |
+| Recommendations | delivered recommendation sent 3; the recipient's response, opened 1 or fulfilled 3, the stronger only | 6 |
+| Co-watch | live watched-with tag 3; a companion on a watch the **reader** owns 3; one per pair, title and day | 6 |
+| Reactions | feed or comment reaction 0.25 | 1 |
+
+90-day window, 30-day half-life, each family and direction capped at 4 a UTC day
+(reactions 0.5), then OUT + 0.5 × IN, then the family cap. A follow is 0.25 each way. +2
+reciprocity when each direction has strong interactions on two distinct days in the last
+30. Not used: opens, invitations, helpful votes, profile visits, posting volume, inferred
+similarity.
+
+It decides exactly two things: which competing `watchlist_social` cluster wins the evening
+(the mean of its two strongest visible friends), and which two friends a push and an inbox
+row name (`_proactive_ranked_social_actors`, wrapping `_proactive_social_actors`, which stays
+the visibility authority). Counts still include everyone visible. Equal or zero affinity
+falls back to the old order. It creates no notification, suppresses no inbox row, and raises
+no cap. Its query cost must be measured against the staging statement timeout before
+production.
+
+**Watchlist social stays "watched".** The founder's example "Ravi and Eric also want to
+watch Dune" is co-intent; the Codex decision is not to build it in this tranche.
+
+**Reactions default off** (founder, 2026-10-31): every account with no explicit row, existing
+and new, stops getting reaction notifications (inbox and push); explicit choices win; nothing
+is backfilled. Awards stay on (since `20260828000100`).
+
+**One event per transaction** (Fable final review MINOR 1). The social trigger records the
+first qualifying event of a transaction in `bingd.proactive.social_event_id` and skips any
+other with the warning `second_qualifying_event_in_transaction`. Operators changing Watchlist
+& discovery in bulk do it one reader per transaction (MINOR 2; `push-operations.md` §12).
+
+**Inertness, stated precisely.** All four proactive switches seed false, and a manual tick
+creates nothing while generation is off. The Reactions default and the `goal_completed`
+push copy are not behind those switches, so the release as a whole is not behaviourally
+inert.
 
 ## S. Staging application and Preview QA (do not run without approval)
 

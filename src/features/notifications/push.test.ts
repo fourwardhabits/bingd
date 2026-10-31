@@ -215,7 +215,8 @@ describe('registering', () => {
       // device rather than per account.
       p_proactive_version: PROACTIVE_CLIENT_VERSION,
     });
-    expect(PROACTIVE_CLIENT_VERSION).toBe(1);
+    // 20261031000100: the first build that can open `season_premiere`.
+    expect(PROACTIVE_CLIENT_VERSION).toBe(2);
   });
 
   /**

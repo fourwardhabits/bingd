@@ -441,7 +441,8 @@ defect**, and it is fixed in `20260826000700`:
 
 ## 12. The proactive kill switch — `20261028000100`
 
-Proactive pushes (`watchlist_social`, `theatrical_release`, `watchlist_resurface`;
+Proactive pushes (`watchlist_social`, `theatrical_release`, `watchlist_resurface`, and
+`season_premiere` since `20261031000100`;
 [`../product/proactive-notifications.md`](../product/proactive-notifications.md)) have their
 own switch, and it is **separate from everything above**: it stops the app speaking on its
 own, and leaves every push a person caused exactly as it was.
@@ -469,12 +470,33 @@ select push_drain_status() -> 'healthy';                    -- still true: react
 collectors):
 `update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';`
 
-**All three switches ship `false`** (`generation_enabled`, `resurface_enabled`, `push_enabled`). Applying `20261028000100`/`200` creates no proactive row
-and sends no proactive push. Enabling is deliberate and ordered: generation, then (when chosen) resurfacing, then
-push (`proactive-notifications.md` §K).
+**All four switches ship `false`** (`generation_enabled`, `resurface_enabled`, `push_enabled`,
+and `season_enabled` since `20261031000100`). Applying `20261028000100`/`200`/`20261031000100`
+creates no proactive row and sends no proactive push. Enabling is deliberate and ordered:
+generation, then push; resurfacing and seasons each separately and later
+(`proactive-notifications.md` §K, §Q). The Reactions default (off for unset accounts) and the
+`goal_completed` push copy are **not** behind these switches.
+
+**Season premieres, separately.** Off, a season premiere is neither created nor selected,
+and one already selected is dropped at the claim (`suppressed / season_disabled`):
+
+```sql
+update app_config set value = 'false'::jsonb where key = 'proactive.season_enabled';
+select proactive_status() -> 'season_enabled';
+```
+
+Seasons also need a valid operator verification of US availability per release, written by
+hand and good for at most 48 hours (`proactive_season_availability`, §Q). Nothing writes it
+automatically.
+
+**Bulk changes to Watchlist & discovery: one reader per transaction** (Fable final review,
+MINOR 2). The mute trigger fires per row in physical order and takes reader locks; one
+statement switching many readers off can take them out of order and deadlock with a tick.
+An `ORDER BY` in the update's input does not order its triggers. Loop one reader per
+transaction, or pause the tick (`unschedule_proactive_notifications()`) first.
 
 **Per device.** A proactive push goes only to tokens whose `proactive_version` meets
-`proactive.min_client_version`. An old build on the same account never receives one, and
+`proactive.min_client_version` (2 since `20261031000100`). An old build on the same account never receives one, and
 reactive pushes still reach every live token.
 
 **Tonight or not at all, and at most once.** A proactive job claimed after its evening

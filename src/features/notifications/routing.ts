@@ -307,10 +307,14 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      * ranked it (Following ratings), the Watchlist control. Not one friend's post: a
      * cluster names several people, and opening one of them would make the others vanish.
      * `watchlist_resurface` is push-only, so only a tap from the lock screen reaches here.
+     *
+     * `season_premiere` (20261031000100) opens the new **season's** own page, not the
+     * show's: `mediaItemId` is the season, and that page is where it can be watched.
      */
     case 'watchlist_social':
     case 'theatrical_release':
     case 'watchlist_resurface':
+    case 'season_premiere':
       return [...title, unavailable('That title is no longer available.')];
   }
 }
@@ -558,4 +562,5 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'watchlist_social',
   'theatrical_release',
   'watchlist_resurface',
+  'season_premiere',
 ];

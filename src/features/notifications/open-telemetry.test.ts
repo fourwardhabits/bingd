@@ -29,6 +29,19 @@ describe('recordNotificationOpen', () => {
     });
   });
 
+  it('counts a season premiere as proactive (20261031000100)', () => {
+    recordNotificationOpen({
+      notificationId: 'n5',
+      kind: 'season_premiere',
+      channel: 'inbox',
+      destination: 'title',
+    });
+    expect(track).toHaveBeenCalledWith({
+      name: 'notification_opened',
+      props: { kind: 'season_premiere', channel: 'inbox', proactive: true },
+    });
+  });
+
   it('marks a reactive kind as not proactive', () => {
     recordNotificationOpen({
       notificationId: 'n2',

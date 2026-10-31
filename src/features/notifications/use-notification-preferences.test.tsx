@@ -49,7 +49,10 @@ jest.mock('@/features/auth', () => ({
   }),
 }));
 
-/** What the server answers by default: every category at its own default. */
+/**
+ * What the server answers by default: every category at its own default. Reactions is the
+ * one that defaults off (20261031000100); the rest default on.
+ */
 const DEFAULTS: Record<NotificationCategory, boolean> = {
   follows: true,
   follow_accepted: true,
@@ -58,7 +61,7 @@ const DEFAULTS: Record<NotificationCategory, boolean> = {
   watch_tags: true,
   recommendations: true,
   invites: true,
-  awards: false,
+  awards: true,
   watchlist_discovery: true,
 };
 
@@ -93,8 +96,8 @@ const CHECKING = 'Checking your current setting…';
  *
  * **Every switch here reads `false` while the query is in flight**, and that is
  * deliberate: the screen draws `prefs ? prefs[key] : false` rather than inventing a
- * default, because two of these categories genuinely default off and a guessed render is
- * indistinguishable from a confirmed one. Independent review 14 found that defect on the
+ * default, because one of these categories (Reactions) genuinely defaults off and a guessed
+ * render is indistinguishable from a confirmed one. Independent review 14 found that defect on the
  * privacy switch and the screen is written to avoid it.
  *
  * The cost lands in the tests. `false` on this screen is two different statements —
@@ -229,8 +232,8 @@ describe('what a master switch reads', () => {
   /**
    * Undefined is not off. While the query is in flight the screen knows nothing, and
    * drawing a master in the off position asserts a state nobody has confirmed — which
-   * matters most here, because two categories genuinely are off by default and a wrong
-   * render is indistinguishable from a right one.
+   * matters most here, because a category genuinely is off by default (Reactions) and a
+   * wrong render is indistinguishable from a right one.
    */
   it('does not claim to be on before anything has been read', () => {
     expect(masterOn(social, undefined)).toBe(false);
@@ -260,11 +263,11 @@ describe('the screen', () => {
     expect(view.getAllByRole('switch')).toHaveLength(9);
   });
 
-  it('draws the two default-off categories off and the rest on', async () => {
+  it('draws the default-off category off and the rest on', async () => {
     const view = await renderLoaded();
 
     expect(view.getByLabelText('Reactions').props.value).toBe(false);
-    expect(view.getByLabelText('bingd Awards').props.value).toBe(false);
+    expect(view.getByLabelText('bingd Awards').props.value).toBe(true);
     expect(view.getByLabelText('Comments').props.value).toBe(true);
     expect(view.getByLabelText('Follows').props.value).toBe(true);
     expect(view.getByLabelText('Recommendations').props.value).toBe(true);

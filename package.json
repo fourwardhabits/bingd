@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "test": "jest",
     "test:db": "node --test \"supabase/tests/*.test.mjs\"",
-    "test:race": "node --test --test-timeout=60000 \"supabase/tests/concurrency/*.test.mjs\"",
+    "test:race": "node --test --test-timeout=300000 \"supabase/tests/concurrency/*.test.mjs\"",
     "test:race:mutants": "node supabase/tests/concurrency/mutation-check.mjs",
     "test:web": "node --test \"web/router.test.mjs\"",
     "test:web:mutants": "node web/mutation-check.mjs",

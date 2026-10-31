@@ -101,7 +101,7 @@ export type PushJob = {
    */
   goal?: { year?: number | null; category?: string | null; target?: number | null } | null;
   /**
-   * The three proactive types only (20261028000100), resolved by the claim at the moment
+   * The proactive types only (20261028000100), resolved by the claim at the moment
    * of sending: the film's opening date and the reader's own local date (so "next Friday"
    * is about their Friday), the resurfacing reason, and the social cluster's size and
    * first two display names as they stand now. Names, never anything anybody wrote.
@@ -110,6 +110,13 @@ export type PushJob = {
     type: string;
     opens_on?: string | null;
     local_today?: string | null;
+    /**
+     * `season_premiere` only (20261031000100): which season it is, and the US date it
+     * became available. The number is null where the catalogue has none, and the copy
+     * then falls back to the season's own title.
+     */
+    season_number?: number | null;
+    available_on?: string | null;
     /**
      * The last instant this push may reach a phone, as an ISO timestamp: the earlier of the
      * candidate's expiry and 20:00 local on the evening it was selected for. Sent to Expo
@@ -495,15 +502,19 @@ export function watchersPhrase(names: readonly string[] | null | undefined, coun
 }
 
 /**
- * The three proactive pushes (20261028000100). The title is the film's or season's name,
- * as every title push's is; the body is one fact and why it is for this reader. No
- * emoji, no em dash, no exclamation, no marketing voice (release-awareness.md §G1).
+ * The proactive pushes (20261028000100). The title is the film's or season's name, as
+ * every title push's is; the body is one fact and why it is for this reader. No emoji, no
+ * em dash, no exclamation, no marketing voice (release-awareness.md §G1).
+ *
+ * `season_premiere` (20261031000100) is the one whose title is the **show**: "Severance" /
+ * "Season 3 is now available in the US." The season is the news, so it is the body, and
+ * the show is the name the reader saved or watched.
  */
 function proactiveContent(job: PushJob): PushContent | null {
-  const subject = subjectName(job);
   const facts = job.proactive;
-  if (!subject || !facts) return null;
+  if (!facts) return null;
 
+  let title = subjectName(job);
   let body: string | null = null;
   switch (facts.type) {
     case 'theatrical_release': {
@@ -526,11 +537,21 @@ function proactiveContent(job: PushJob): PushContent | null {
               ? 'It came out recently. It’s on your Watchlist.'
               : 'Still meaning to watch it? It’s on your Watchlist.';
       break;
+    case 'season_premiere': {
+      title = job.series_title?.trim() || title;
+      const n = facts.season_number;
+      const own = job.media_title?.trim() || null;
+      // No usable number means the season's own words are all there is ("Severance: The
+      // Final Chapter"), the same rule `subjectName` keeps rather than inventing a number.
+      const season = typeof n === 'number' && Number.isInteger(n) && n > 0 ? `Season ${n}` : own;
+      body = season ? `${season} is now available in the US.` : null;
+      break;
+    }
   }
-  if (!body) return null;
+  if (!title || !body) return null;
 
   return {
-    title: subject,
+    title,
     body,
     data: {
       notificationId: job.notification_id,

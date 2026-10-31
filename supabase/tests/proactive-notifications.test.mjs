@@ -42,7 +42,7 @@ const setConfig = (key, value) =>
  * A reader. `version` is the proactive version of the build that registered their one
  * device (null: a build that predates proactive kinds).
  */
-async function user(name, { timezone = 'UTC', region = 'US', device = true, version = 1 } = {}) {
+async function user(name, { timezone = 'UTC', region = 'US', device = true, version = 2 } = {}) {
   const id = await t.createUser({ username: `${name}${(seq += 1)}`.slice(0, 20) });
   if (timezone !== undefined || region !== undefined) {
     await t.sql(`insert into account_context (user_id, timezone, region) values ($1, $2, $3)`, [
@@ -56,7 +56,7 @@ async function user(name, { timezone = 'UTC', region = 'US', device = true, vers
 }
 
 /** Another device on the same account, from a build of the given proactive version. */
-async function addDevice(u, label, version = 1, platform = 'ios') {
+async function addDevice(u, label, version = 2, platform = 'ios') {
   const token = `ExponentPushToken[${u}-${label}]`;
   await t.sql(
     `insert into device_tokens (user_id, token, platform, proactive_version) values ($1, $2, $3, $4)`,
@@ -245,10 +245,12 @@ describe('configuration and preferences', () => {
       assert.equal(cfg['proactive.type_cooldown_hours'], 72);
       assert.equal(cfg['proactive.title_cooldown_days'], 7);
       assert.equal(cfg['proactive.resurface_cooldown_days'], 7);
+      // 20261031000100: four types, seasons first.
       assert.deepEqual(cfg['proactive.priority'], {
-        theatrical_release: 1,
-        watchlist_social: 2,
-        watchlist_resurface: 3,
+        season_premiere: 1,
+        theatrical_release: 2,
+        watchlist_social: 3,
+        watchlist_resurface: 4,
       });
     } finally {
       await fresh.close();
@@ -269,7 +271,8 @@ describe('configuration and preferences', () => {
         'recommendations', 'watch_tags', 'watchlist_discovery',
       ],
     );
-    assert.ok(rows.every((r) => r.enabled === true));
+    // Reactions alone default off since 20261031000100 (founder, 2026-10-31).
+    for (const row of rows) assert.equal(row.enabled, row.category !== 'reactions', row.category);
   });
 
   it('leaves reactive push eligibility exactly as it was, and no proactive type in it', async () => {
@@ -498,8 +501,9 @@ describe('Watchlist & discovery transitions (Codex review)', () => {
     await t.actAs(r);
     const { rows } = await t.sql(`select category, enabled from my_notification_preferences() order by category`);
     await t.actAs(null);
+    // Every other category is at its default: on, except reactions (20261031000100).
     for (const row of rows) {
-      assert.equal(row.enabled, row.category !== 'watchlist_discovery', row.category);
+      assert.equal(row.enabled, !['watchlist_discovery', 'reactions'].includes(row.category), row.category);
     }
   });
 
@@ -778,7 +782,7 @@ describe('theatrical region, re-checked', () => {
 
 describe('per-device compatibility', () => {
   it('one capable and one old device: the push goes to the capable one only', async () => {
-    const r = await user('multi'); // its main device is capable (version 1)
+    const r = await user('multi'); // its main device is capable (version 2)
     const old = await addDevice(r, 'old-tablet', null, 'android');
     const m = await movie('Two Devices');
     await save(r, m);

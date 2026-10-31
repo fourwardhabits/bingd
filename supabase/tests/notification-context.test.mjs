@@ -165,6 +165,12 @@ describe('the preview', () => {
 
   it('has no excerpt on a kind that is not a comment', async () => {
     const event = await eventOf(alice, await movie('nc_reaction'));
+    // Reactions default off since 20261031000100; Alice has chosen them.
+    await t.sql(
+      `insert into notification_preferences (user_id, category, enabled) values ($1, 'reactions', true)
+       on conflict (user_id, category) do update set enabled = true`,
+      [alice],
+    );
     await t.actAs(bob);
     await t.sql(`select set_reaction(gen_random_uuid(), $1, 'love')`, [event]);
 

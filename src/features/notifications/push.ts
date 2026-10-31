@@ -47,8 +47,12 @@ export type PushPlatform = 'ios' | 'android';
  * registration and stored on that token, and `claim_push_batch` sends a proactive kind
  * only to tokens at or above `proactive.min_client_version`. Raise it when a build learns
  * a new proactive kind, together with the server's minimum.
+ *
+ * 2 since 20261031000100: this is the first build that can route and render
+ * `season_premiere`. The server's minimum rose to 2 with it, so a version-1 token gets no
+ * proactive push at all (reactive pushes are unchanged) rather than one it cannot open.
  */
-export const PROACTIVE_CLIENT_VERSION = 1;
+export const PROACTIVE_CLIENT_VERSION = 2;
 
 /**
  * What the operating system currently thinks, reduced to the four cases that lead

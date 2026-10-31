@@ -229,14 +229,14 @@ export function masterOn(
 /**
  * The caller's own switches.
  *
- * Read from `my_notification_preferences`, which returns all eight every time with
+ * Read from `my_notification_preferences`, which returns all nine every time with
  * each one defaulted by its own category. The screen never assembles a default: a
  * default written in two places is a default that disagrees with itself, and the
  * history of the two late movers — reactions (20260820000100) and awards
  * (20260828000100, when the unlock ledger gave the category its writer) — is
  * exactly what a second copy would have got wrong twice.
  *
- * All eight default on as of `20260828000100`.
+ * Every category defaults on except `reactions`, which `20261031000100` turned off again.
  */
 export function useNotificationPreferences(viewerId: string) {
   return useQuery({
@@ -257,7 +257,8 @@ export function useNotificationPreferences(viewerId: string) {
        * then defaulted *off*, so a build talking to a backend that predates
        * 20260819000300 would have drawn them on, and a reader who then touched
        * anything in that section would have switched on a category they never
-       * chose. Both categories default on today, and the rule stands anyway:
+       * chose. `awards` defaults on today and `reactions` is off again
+       * (20261031000100), and the rule stands either way:
        * guessing a default on the client is the exact duplication
        * `my_notification_preferences` exists to prevent.
        *

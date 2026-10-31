@@ -105,7 +105,7 @@ export default function suite() {
       const r = await fx.createUser();
       await db.sql(`insert into account_context (user_id, timezone, region) values ($1, 'UTC', 'US')`, [r]);
       await db.sql(
-        `insert into device_tokens (user_id, token, platform, proactive_version) values ($1, $2, 'ios', 1)`,
+        `insert into device_tokens (user_id, token, platform, proactive_version) values ($1, $2, 'ios', 2)`,
         [r, `ExponentPushToken[${r}]`],
       );
       await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, m]);
@@ -907,6 +907,271 @@ export default function suite() {
           [r],
         );
         assert.deepEqual([c.state, c.suppression_reason], ['suppressed', 'preference_off']);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // 20261031000100: seasons, the one-event guard, and affinity
+    // -----------------------------------------------------------------------
+
+    const globalKey9 = async () =>
+      (await ctx.db.rows(`select hashtextextended('bingd.proactive.arbiter', 0)::text as k`))[0].k;
+    const readerKey9 = async (r) =>
+      (await ctx.db.rows(`select hashtextextended('bingd.proactive:' || $1::text, 0)::text as k`, [r]))[0].k;
+    const candidateLocks9 = async (pid, mode = null) =>
+      (await ctx.db.rows(
+        `select count(*)::int n from pg_locks l join pg_class c on c.oid = l.relation
+          where l.pid = $1 and l.granted and c.relname = 'proactive_candidates'
+            and ($2::text is null or l.mode = $2)`,
+        [pid, mode],
+      ))[0].n;
+    const settle9 = async (label, ...pending) => {
+      for (const res of await Promise.allSettled(pending)) {
+        if (res.status === 'rejected') assert.fail(`${label}: ${res.reason?.code ?? ''} ${res.reason?.message ?? res.reason}`);
+      }
+    };
+    const mute9 = `insert into notification_preferences (user_id, category, enabled)
+                   values ($1, 'watchlist_discovery', false)
+                   on conflict (user_id, category) do update set enabled = excluded.enabled`;
+
+    describe('PA9: season collection inside overlapping ticks and against a mute', () => {
+      const RELEASE = '2031-05-16';
+      const OBSERVED = '2031-05-16T14:00:00Z';
+      const NIGHT = '2031-05-16T18:00:00Z';
+      const CLAIM = '2031-05-16T18:05:00Z';
+      let n = 0;
+
+      before(async () => {
+        await ctx.db.sql(
+          `insert into app_config (key, value) values ('proactive.season_enabled', 'true'::jsonb)
+           on conflict (key) do update set value = excluded.value`,
+        );
+      });
+      after(async () => {
+        await ctx.db.sql(`update app_config set value = 'false'::jsonb where key = 'proactive.season_enabled'`);
+      });
+
+      /** A series whose Season 2 is released and verified, and a reader who saved the series. */
+      const world = async () => {
+        const { db } = ctx;
+        n += 1;
+        const [s] = await db.rows(
+          `insert into media_items (kind, tmdb_id, title, provenance) values ('series', $1, $2, 'tmdb') returning id`,
+          [1_970_000_000 + n * 10, `PA9 ${n}`],
+        );
+        for (const [k, d] of [[1, '2024-01-01'], [2, RELEASE]]) {
+          await db.sql(
+            `insert into media_items (kind, parent_id, season_number, tmdb_id, title, release_date, provenance)
+             values ('season', $1, $2, $3, $4, $5, 'tmdb')`,
+            [s.id, k, 1_970_000_000 + n * 10 + k, `Season ${k}`, d],
+          );
+        }
+        await db.sql(`insert into release_subjects (media_item_id, subject_kind, next_check_at) values ($1, 'series', $2)`, [
+          s.id, OBSERVED,
+        ]);
+        await db.sql(`select release_observe($1::jsonb, $2::timestamptz)`, [
+          JSON.stringify({
+            media_item_id: s.id, kind: 'series', status: 'Returning Series', in_production: true,
+            read_at: OBSERVED,
+            seasons: [{ season_number: 1, air_date: '2024-01-01' }, { season_number: 2, air_date: RELEASE }],
+          }),
+          OBSERVED,
+        ]);
+        const [e] = await db.rows(
+          `select e.id from release_events e join media_items m on m.id = e.media_item_id
+            where m.parent_id = $1 and m.season_number = 2`,
+          [s.id],
+        );
+        await db.sql(
+          `insert into proactive_season_availability
+             values ($1, 'US', $2, $3, $3::timestamptz + interval '24 hours', 'https://tv.example.com')`,
+          [e.id, RELEASE, OBSERVED],
+        );
+        const r = await reader(s.id);
+        return { r, series: s.id, event: e.id };
+      };
+      const seasonRows = async (r) =>
+        ctx.db.rows(
+          `select state, suppression_reason from proactive_candidates where recipient_id = $1 and type = 'season_premiere'`,
+          [r],
+        );
+      const notes = async (r) =>
+        ctx.db.rows(`select id from notifications where recipient_id = $1 and type = 'season_premiere'`, [r]);
+
+      it('two overlapping ticks collect one season once: the later waits on the global lock holding nothing', async () => {
+        const { db } = ctx;
+        const w = await world();
+        const first = await db.session('tick-first');
+        const second = await db.session('tick-second');
+        try {
+          await first.q('begin');
+          await first.q(`select _proactive_tick($1::timestamptz)`, [NIGHT]);
+          const two = second.start(`select _proactive_tick($1::timestamptz)`, [NIGHT]);
+          await second.awaitBlocked({ advisoryKey: await globalKey9() });
+          assert.equal(await candidateLocks9(second.pid), 0, 'PA9: the waiting tick holds no candidate lock');
+          await first.q('commit');
+          await settle9('PA9 ticks', two);
+        } finally {
+          await first.end().catch(() => {});
+          await second.end().catch(() => {});
+        }
+        const rows = await seasonRows(w.r);
+        assert.deepEqual(rows.map((c) => c.state), ['selected'], 'PA9: one candidate, selected once');
+        const [note, extra] = await notes(w.r);
+        assert.ok(note && !extra, 'PA9: one inbox row');
+        const [{ r: jobs }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [CLAIM]);
+        assert.equal(jobs.filter((j) => j.notification_id === note.id).length, 1, 'PA9: sent once');
+      });
+
+      it('a mute in flight: the tick collects, waits on the reader lock, then suppresses', async () => {
+        const { db } = ctx;
+        const w = await world();
+        const muter = await db.session('mute');
+        const ticker = await db.session('tick');
+        try {
+          await muter.q('begin');
+          await muter.q(mute9, [w.r]);
+          const pending = ticker.start(`select _proactive_tick($1::timestamptz)`, [NIGHT]);
+          await ticker.awaitBlocked({ advisoryKey: await readerKey9(w.r) });
+          await muter.q('commit');
+          await settle9('PA9 mute first', pending);
+        } finally {
+          await muter.end().catch(() => {});
+          await ticker.end().catch(() => {});
+        }
+        const rows = await seasonRows(w.r);
+        assert.deepEqual(rows.map((c) => [c.state, c.suppression_reason]), [['suppressed', 'preference_off']]);
+        const [{ k }] = await db.rows(`select count(*)::int k from push_outbox where recipient_id = $1`, [w.r]);
+        assert.equal(k, 0, 'PA9: nothing queued');
+      });
+
+      it('the tick first: the mute waits for it, and the claim then drops the season', async () => {
+        const { db } = ctx;
+        const w = await world();
+        const ticker = await db.session('tick');
+        const muter = await db.session('mute');
+        try {
+          await ticker.q('begin');
+          await ticker.q(`select _proactive_tick($1::timestamptz)`, [NIGHT]);
+          const pending = muter.start(mute9, [w.r]);
+          await muter.awaitBlocked({ advisoryKey: await readerKey9(w.r) });
+          await ticker.q('commit');
+          await settle9('PA9 tick first', pending);
+        } finally {
+          await ticker.end().catch(() => {});
+          await muter.end().catch(() => {});
+        }
+        const [note] = await notes(w.r);
+        const [{ r: jobs }] = await db.rows(`select claim_push_batch(100, $1::timestamptz) as r`, [CLAIM]);
+        assert.equal(jobs.filter((j) => j.notification_id === note.id).length, 0, 'PA9: no push after the mute');
+        const rows = await seasonRows(w.r);
+        assert.deepEqual(rows.map((c) => [c.state, c.suppression_reason]), [['suppressed', 'preference_off']]);
+      });
+    });
+
+    describe('PA10: one qualifying social event per transaction, under a concurrent tick', () => {
+      it('the second event joins nothing, the writer holds one row per reader, and a tick runs through', async () => {
+        const { db, fx } = ctx;
+        const m1 = await fx.createMovie('PA10 one');
+        const m2 = await fx.createMovie('PA10 two');
+        const r1 = await reader(m1);
+        const r2 = await reader(m1);
+        for (const r of [r1, r2]) await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, m2]);
+        const a = await fx.createUser();
+        await friends(r1, a);
+        await friends(r2, a);
+        const writer = await db.session('writer');
+        const ticker = await db.session('tick');
+        try {
+          await writer.q('begin');
+          await writer.q(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`, [a, m1]);
+          await writer.q(`insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2)`, [a, m2]);
+          await within(ticker.q(`select _proactive_tick($1::timestamptz)`, ['2031-03-03T17:30:00Z']), 5000, 'PA10 tick');
+          await writer.q('commit');
+        } finally {
+          await writer.end().catch(() => {});
+          await ticker.end().catch(() => {});
+        }
+        for (const r of [r1, r2]) {
+          const titles = (await db.rows(
+            `select media_item_id from proactive_candidates where recipient_id = $1 and type = 'watchlist_social'`, [r],
+          )).map((x) => x.media_item_id);
+          assert.deepEqual(titles, [m1], 'PA10: only the first event of the transaction');
+        }
+      });
+    });
+
+    describe('PA11: affinity-ordered arbitration and claims, with interactions being written', () => {
+      it('an uncommitted comment never blocks the arbiter, the closer cluster wins, and it is sent once', async () => {
+        const { db, fx } = ctx;
+        const older = await fx.createMovie('PA11 older');
+        const closer = await fx.createMovie('PA11 closer');
+        const r = await reader(older);
+        await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [r, closer]);
+        // The older cluster first (09:00), then the one with friends the reader talks to.
+        await eligibleCluster(r, older);
+        await db.sql(`update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled'`);
+        const close = [];
+        try {
+          for (let i = 0; i < 2; i += 1) {
+            const f = await fx.createUser();
+            await friends(r, f);
+            close.push(f);
+            const [ev] = await db.rows(
+              `insert into feed_events (actor_id, type, media_item_id) values ($1, 'title_ranked', $2) returning id`, [f, closer],
+            );
+            await db.sql(`select _proactive_social_add($1, $2, $3, $4, '2031-03-03T10:00:00Z')`, [r, f, closer, ev.id]);
+            const [post] = await db.rows(
+              `insert into feed_events (actor_id, type, media_item_id) values ($1, 'watchlist_added', $2) returning id`, [f, closer],
+            );
+            await db.sql(
+              `insert into comments (feed_event_id, author_id, body, created_at) values ($1, $2, 'yes', '2031-03-02T12:00:00Z')`,
+              [post.id, r],
+            );
+          }
+        } finally {
+          await db.sql(`update app_config set value = 'true'::jsonb where key = 'proactive.generation_enabled'`);
+        }
+
+        const commenter = await db.session('commenter');
+        const arbiter = await db.session('arbiter');
+        try {
+          await commenter.q('begin');
+          const post = await commenter.q(
+            `insert into feed_events (actor_id, type, media_item_id) values ($1, 'watchlist_added', $2) returning id`,
+            [close[0], older],
+          );
+          await commenter.q(
+            `insert into comments (feed_event_id, author_id, body, created_at) values ($1, $2, 'more', '2031-03-03T12:00:00Z')`,
+            [post.rows[0].id, r],
+          );
+          await within(arbiter.q(`select _proactive_arbitrate($1::timestamptz)`, [EVENING]), 5000, 'PA11 arbiter');
+          await commenter.q('commit');
+        } finally {
+          await commenter.end().catch(() => {});
+          await arbiter.end().catch(() => {});
+        }
+        const [sel] = await db.rows(
+          `select media_item_id, notification_id from proactive_candidates where recipient_id = $1 and state = 'selected'`, [r],
+        );
+        assert.equal(sel.media_item_id, closer, 'PA11: affinity chose the closer friends');
+
+        const s1 = await db.session('claim-1');
+        const s2 = await db.session('claim-2');
+        let jobs = [];
+        try {
+          const results = await Promise.all([
+            s1.q(`select claim_push_batch(100, '2031-03-03T17:35:00Z'::timestamptz) as r`),
+            s2.q(`select claim_push_batch(100, '2031-03-03T17:35:00Z'::timestamptz) as r`),
+          ]);
+          jobs = results.flatMap((res) => res.rows[0].r);
+        } finally {
+          await s1.end().catch(() => {});
+          await s2.end().catch(() => {});
+        }
+        const mine = jobs.filter((j) => j.notification_id === sel.notification_id);
+        assert.equal(mine.length, 1, 'PA11: sent once');
+        assert.equal(JSON.stringify(mine[0]).includes('affinity'), false);
       });
     });
   });

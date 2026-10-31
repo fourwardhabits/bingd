@@ -19,11 +19,12 @@ import type { NotificationKind } from './use-notifications';
 
 export type OpenChannel = 'push' | 'inbox';
 
-/** The kinds that are the app speaking rather than a person (20261028000100). */
+/** The kinds that are the app speaking rather than a person (20261028000100, 20261031000100). */
 export const PROACTIVE_KINDS: ReadonlySet<string> = new Set([
   'watchlist_social',
   'theatrical_release',
   'watchlist_resurface',
+  'season_premiere',
 ]);
 
 const readString = (value: unknown): string | null =>

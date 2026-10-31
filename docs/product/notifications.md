@@ -357,7 +357,8 @@ compatible clients are live. Two specific hazards:
 - **A new preference category** must default in the direction the reader would expect,
   and `_notification_default` (20260828000100) is the mechanism: absence means the
   default, and an account with a row chose. No backfill — a backfill is exactly what
-  breaks that.
+  breaks that. Since `20261031000100` (founder, 2026-10-31) every category defaults on
+  except **Reactions**, which defaults off for every account without an explicit choice.
 
 The award celebration deep link added on 2026-09-06 follows this rule: the *in-app*
 inbox routes to it because the row already carries the identity, and **push taps are

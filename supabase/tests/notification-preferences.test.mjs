@@ -111,12 +111,13 @@ describe('the defaults', () => {
    * nobody can see.
    */
   // `watchlist_discovery` joined on 20261028000100, on by omission like the other eight.
-  it('answers for all nine categories, all on', async () => {
+  // `reactions` went back off on 20261031000100 (founder, 2026-10-31): the one exception.
+  it('answers for all nine categories, all on but reactions', async () => {
     assert.deepEqual(await prefs(control), {
       follows: true,
       follow_accepted: true,
       comments: true,
-      reactions: true,
+      reactions: false,
       watch_tags: true,
       recommendations: true,
       invites: true,
@@ -138,7 +139,6 @@ describe('the defaults', () => {
       'follow',
       'follow_approved',
       'comment',
-      'reaction',
       'watch_tag',
       'recommendation',
       'invite_activated',
@@ -147,6 +147,9 @@ describe('the defaults', () => {
       await clear(control);
       assert.equal(await deliver(control, type), true, `${type} defaults on`);
     }
+    await clear(control);
+    // And the one default-off kind (20261031000100) is not delivered to an unset account.
+    assert.equal(await deliver(control, 'reaction'), false, 'reaction defaults off');
     await clear(control);
   });
 
@@ -159,17 +162,25 @@ describe('the defaults', () => {
    * property rather than trusting the structure, because the whole class of bug being
    * avoided is a migration that helpfully 'fixes up' existing accounts.
    */
-  it('leaves an account that switched reactions off switched off', async () => {
+  it('leaves an account that switched reactions on switched on', async () => {
     const chose = await t.createUser({ username: 'chose_prefs' });
-    await setOne(chose, 'reactions', false);
+    await setOne(chose, 'reactions', true);
 
-    // The new default is on. This account said otherwise, so it stays off — and the
-    // control beside it proves the gate is still capable of delivering a reaction.
+    // The default is off again (20261031000100). This account said otherwise, so it stays
+    // on — and the control beside it proves the default really is off.
+    assert.equal((await prefs(chose)).reactions, true);
+    await clear(chose);
+    assert.equal(await deliver(chose, 'reaction'), true);
+    await clear(control);
+    assert.equal(await deliver(control, 'reaction'), false);
+  });
+
+  it('leaves an account that switched reactions off switched off', async () => {
+    const chose = await t.createUser({ username: 'chose_prefs_off' });
+    await setOne(chose, 'reactions', false);
     assert.equal((await prefs(chose)).reactions, false);
     await clear(chose);
     assert.equal(await deliver(chose, 'reaction'), false);
-    await clear(control);
-    assert.equal(await deliver(control, 'reaction'), true);
   });
 
   it('leaves an account that switched an already-on category off alone too', async () => {

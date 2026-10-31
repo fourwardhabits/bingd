@@ -10,6 +10,7 @@ import { GOAL_LABEL, goalAchievement } from '@/features/goals/goals';
 import { recordNotificationOpen } from '@/features/notifications/open-telemetry';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
+  availablePhrase,
   canRankFromRow,
   clusterPhrase,
   relationshipActionFor,
@@ -586,7 +587,14 @@ export default function NotificationsScreen() {
                                   `${clusterPhrase(row.cluster) ?? 'Friends'} ${spokenSentence(sentence)}. On your Watchlist`
                                 : row.kind === 'theatrical_release'
                                   ? `${spokenSentence(sentence)}. On your Watchlist`
-                                  : `${row.actorName} ${spokenSentence(sentence)}`
+                                  : row.kind === 'season_premiere'
+                                    ? // Not "On your Watchlist": the reader may have
+                                      // only watched the season before it.
+                                      `${spokenSentence(sentence)}. ${
+                                        availablePhrase(row.availableOn) ??
+                                        'Now available in the US'
+                                      }`
+                                    : `${row.actorName} ${spokenSentence(sentence)}`
                         }${
                           /* Only when the title is *not* already inside the clause.
                              Appending it to "watched 100 Meters with you" is how a
@@ -660,6 +668,15 @@ export default function NotificationsScreen() {
                           <View style={styles.goalMark}>
                             <Ionicons
                               name="film-outline"
+                              size={theme.layout.icon.md}
+                              color={theme.semantic.action}
+                            />
+                          </View>
+                        ) : row.kind === 'season_premiere' ? (
+                          // The same, for a season: the show's mark, not an empty face.
+                          <View style={styles.goalMark}>
+                            <Ionicons
+                              name="tv-outline"
                               size={theme.layout.icon.md}
                               color={theme.semantic.action}
                             />
@@ -766,6 +783,12 @@ export default function NotificationsScreen() {
                                 variant="callout"
                                 tone="secondary"
                               >{` ${sentence.tail ?? ''}`}</Text>
+                            </Text>
+                          ) : row.kind === 'season_premiere' ? (
+                            /* "Severance, Season 3", the season alone on the line: the
+                             date it became available is the line under it, read now. */
+                            <Text variant="callout" numberOfLines={2}>
+                              {sentence.subject ?? sentence.lead}
                             </Text>
                           ) : row.kind === 'friendship' && row.mutual ? (
                             /* The mutual acceptance is the other sentence that does not
@@ -878,6 +901,13 @@ export default function NotificationsScreen() {
                             // Why this is for them: they saved it.
                             <Text variant="caption" tone="secondary" numberOfLines={1}>
                               On your Watchlist
+                            </Text>
+                          ) : row.kind === 'season_premiere' ? (
+                            // When, rather than why: a season premiere is for a reader
+                            // who saved the show or watched the season before, and the
+                            // row does not claim to know which.
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              {availablePhrase(row.availableOn) ?? 'Now available in the US'}
                             </Text>
                           ) : null}
                           {row.preview ? (

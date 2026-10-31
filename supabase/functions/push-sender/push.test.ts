@@ -913,6 +913,7 @@ Deno.test('every proactive push opens its title, and nothing names a person in t
     ['theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-09' }],
     ['watchlist_social', { actor_names: ['Ravi', 'Eric'], actor_count: 2 }],
     ['watchlist_resurface', { reason: 'saved' }],
+    ['season_premiere', { season_number: 3, available_on: '2031-05-16' }],
   ] as const) {
     const content = contentFor(proactive(type, facts))!;
     assertEquals(content.data.kind, type);
@@ -929,11 +930,49 @@ Deno.test('a proactive push for a season names the show', () => {
   assertEquals(content.title, 'Severance, S2');
 });
 
+// Season premiere (20261031000100): the show is the title, the season is the news.
+const premiere = (facts: Record<string, unknown>, overrides: Partial<PushJob> = {}) =>
+  proactive(
+    'season_premiere',
+    { available_on: '2031-05-16', local_today: '2031-05-16', ...facts },
+    { media_kind: 'season', media_title: 'Season 3', series_title: 'Severance', ...overrides },
+  );
+
+Deno.test('season premiere: the show, and which season is now available', () => {
+  const content = contentFor(premiere({ season_number: 3 }))!;
+  assertEquals(content.title, 'Severance');
+  assertEquals(content.body, 'Season 3 is now available in the US.');
+  assertEquals(content.data.kind, 'season_premiere');
+  assertEquals(content.data.mediaItemId, 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm');
+  assertEquals(content.data.actorUsername, null);
+  assertEquals(content.data.feedEventId, null);
+});
+
+Deno.test('season premiere: no usable number falls back to the season’s own title', () => {
+  const named = { media_title: 'The Final Chapter' };
+  for (const season_number of [null, undefined, 0, -1, 2.5, '3']) {
+    assertEquals(
+      contentFor(premiere({ season_number }, named))!.body,
+      'The Final Chapter is now available in the US.',
+    );
+  }
+});
+
+Deno.test('season premiere: without a show it names the season, without any title it says nothing', () => {
+  const orphan = contentFor(premiere({ season_number: 3 }, { series_title: null }))!;
+  assertEquals([orphan.title, orphan.body], ['Season 3', 'Season 3 is now available in the US.']);
+  assertEquals(contentFor(premiere({ season_number: 3 }, { series_title: null, media_title: null })), null);
+  assertEquals(contentFor(premiere({ season_number: 3 }, { series_title: '  ', media_title: '' })), null);
+  // A show but no season title and no number: there is no season to name.
+  assertEquals(contentFor(premiere({ season_number: null }, { media_title: null })), null);
+});
+
 Deno.test('copy has no em dash in any proactive push', () => {
   for (const content of [
     contentFor(proactive('theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-12' }))!,
     contentFor(proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 5 }))!,
     contentFor(proactive('watchlist_resurface', { reason: 'trending' }))!,
+    contentFor(premiere({ season_number: 3 }))!,
   ]) {
     assert(!`${content.title} ${content.body}`.includes('—'));
     assert(!`${content.title} ${content.body}`.includes('!'));
@@ -991,6 +1030,11 @@ Deno.test('a proactive job without a usable deadline is not sent at all', () => 
   assertEquals(messagesFor([socialAt(null)]), []);
   assertEquals(messagesFor([socialAt('not a date')]), []);
   assertEquals(messagesFor([proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 2 })]), []);
+  // Season premiere (20261031000100) is held to the same deadline, and carries it when it has one.
+  assertEquals(messagesFor([premiere({ season_number: 3 })]), []);
+  assertEquals(messagesFor([premiere({ season_number: 3, deliver_by: null })]), []);
+  const [season] = messagesFor([premiere({ season_number: 3, deliver_by: '2031-05-16T20:00:00Z' })]);
+  assertEquals(season.message.expiration, Date.UTC(2031, 4, 16, 20) / 1000);
 });
 
 Deno.test('a reactive message is unchanged: no expiration, the same shape as before', () => {

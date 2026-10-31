@@ -45,9 +45,9 @@ export default function NotificationPreferencesScreen() {
    * The same rule the privacy switch had to learn twice: while the query is in flight
    * the answer is `undefined`, which reads as false and draws every switch in the off
    * position — a settings screen asserting a state nobody has confirmed. Independent
-   * review 14 found that there; it is the same defect here, and two of these
-   * categories genuinely default off, so a wrong render is indistinguishable from a
-   * right one.
+   * review 14 found that there; it is the same defect here, and one of these
+   * categories (Reactions) genuinely defaults off, so a wrong render is
+   * indistinguishable from a right one.
    */
   const prefs = preferences.data;
   const unavailable = preferences.isPending || preferences.isError || prefs === undefined;

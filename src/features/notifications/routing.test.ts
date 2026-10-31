@@ -52,6 +52,8 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   commentIsFollowUp: false,
   cluster: null,
   opensOn: null,
+  availableOn: null,
+  seasonNumber: null,
   ...over,
 });
 
@@ -119,6 +121,8 @@ describe('the routing matrix', () => {
     watchlist_social: { kind: 'title', mediaItemId: 'media-1' },
     theatrical_release: { kind: 'title', mediaItemId: 'media-1' },
     watchlist_resurface: { kind: 'title', mediaItemId: 'media-1' },
+    // 20261031000100: the new season's own page. Asserted with a season below.
+    season_premiere: { kind: 'title', mediaItemId: 'media-1' },
   };
 
   for (const kind of ROUTED_KINDS) {
@@ -175,6 +179,42 @@ describe('a Letterboxd import', () => {
   it('falls back to the importer rather than nowhere when the row has lost its job', () => {
     const target = targetFor(importRow('import_completed', null));
     expect(hrefFor(target)).toEqual({ pathname: '/settings/import' });
+  });
+});
+
+/**
+ * A season premiere (20261031000100) is about the season, not the show: `mediaItemId` is
+ * the season's own media item, from the inbox row and from the push alike, and the
+ * destination recorded for the open is still `title`.
+ */
+describe('a season premiere', () => {
+  const premiere = row({
+    kind: 'season_premiere',
+    actorId: null,
+    actorUsername: null,
+    actorName: null,
+    mediaItemId: 'season-3',
+    mediaTitle: 'Season 3',
+    mediaKind: 'season',
+    seriesTitle: 'Severance',
+    subjectType: 'media_item',
+    subjectId: 'season-3',
+    availableOn: '2031-05-16',
+    seasonNumber: 3,
+  });
+
+  it('opens that exact season, from the inbox and from a push', () => {
+    expect(targetFor(premiere)).toEqual({ kind: 'title', mediaItemId: 'season-3' });
+    expect(hrefFor(targetFor(premiere))).toBe('/title/season-3');
+    expect(pushDestination({ kind: 'season_premiere', mediaItemId: 'season-3' })).toEqual({
+      href: '/title/season-3',
+      destination: 'title',
+    });
+  });
+
+  it('stops safely when the season has left the catalogue', () => {
+    expect(targetFor({ ...premiere, mediaItemId: null }).kind).toBe('unavailable');
+    expect(pushDestination({ kind: 'season_premiere' }).destination).toBe('inbox');
   });
 });
 
