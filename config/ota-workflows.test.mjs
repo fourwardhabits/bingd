@@ -32,7 +32,6 @@ const SHA = 'a'.repeat(40);
 const passing = {
   OTA_LANE: 'production',
   OTA_SHA: SHA,
-  OTA_RUN_SHA: SHA,
   OTA_ANDROID_RUNTIME: 'android-runtime',
   OTA_IOS_RUNTIME: 'ios-runtime',
 };
@@ -184,8 +183,6 @@ describe('the OTA gate', () => {
 
   const refusals = [
     ['a short sha', { env: { OTA_SHA: 'aaaaaaa' } }, /full commit hash/],
-    ['a run on another commit', { env: { OTA_RUN_SHA: 'b'.repeat(40) } }, /The run is on/],
-    ['a run with no commit', { env: { OTA_RUN_SHA: '' } }, /The run is on/],
     ['another checkout', { git: () => 'b'.repeat(40) }, /The checkout is b+, not/],
     [
       'a dirty checkout',
@@ -308,9 +305,10 @@ describe('the OTA gate', () => {
         (await gate({ ...preview, OTA_ANDROID_RUNTIME: 'new' })).fatal.join(),
         /android: runtime new/,
       );
+      const elsewhere = () => 'b'.repeat(40);
       assert.match(
-        (await gate({ ...preview, OTA_RUN_SHA: 'b'.repeat(40) })).fatal.join(),
-        /The run is on/,
+        (await gate(preview, { git: elsewhere })).fatal.join(),
+        /The checkout is b+/,
       );
       const git = (...a) => (a[0] === 'rev-parse' ? SHA : '?? new.ts');
       assert.match((await gate(preview, { git })).fatal.join(), /not clean/);

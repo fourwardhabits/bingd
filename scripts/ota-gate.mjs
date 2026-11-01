@@ -80,10 +80,8 @@ export async function evaluate({ env, git, fetchImpl, live }) {
     return { fatal: [`sha must be a full commit hash, got "${sha}"`], notes };
   }
 
-  // Started from anything but `--ref <sha>`, these disagree, and the code is not the approved
-  // commit. A local upload of a dirty tree is caught by the status check under it.
-  if (env.OTA_RUN_SHA !== sha) fatal.push(`The run is on "${env.OTA_RUN_SHA}", not ${sha}.`);
-
+  // The checkout is the proof of what this run holds. `github.sha` cannot be: Expo documents
+  // it as empty on an `eas workflow:run`, and it was on the runs measured here.
   try {
     const head = git('rev-parse', 'HEAD');
     if (head !== sha) fatal.push(`The checkout is ${head}, not ${sha}.`);

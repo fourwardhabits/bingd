@@ -40,8 +40,8 @@ eas workflow:run .eas/workflows/ota-production.yml --ref $SHA \
 
 **Always pass `--ref`.** It needs the EAS project linked to this GitHub repository, and the
 workflow file present at that commit, so a commit from before these files existed cannot be
-published this way. Without `--ref`, EAS uploads the local directory, and the gate refuses because
-the run has no commit.
+published this way. Without `--ref`, EAS uploads the local directory instead, which is not a
+release path: the gate refuses anything but a clean checkout of `sha`.
 
 ---
 
@@ -53,7 +53,7 @@ refusal.
 
 | Check | Came from | Production | Preview |
 |---|---|---|---|
-| The run, the checkout and `sha` are one commit | `release.mjs` (HEAD) | refuse | refuse |
+| The checkout is exactly `sha` | `release.mjs` (HEAD) | refuse | refuse |
 | The checkout is clean, untracked files included | `release.mjs` | refuse | refuse |
 | The fingerprint is the live binary's runtime | **new** | refuse, both platforms | refuse, Android only |
 | The commit is on `main` | `release.mjs`, narrowed from `main` or `release/*` | refuse | note |

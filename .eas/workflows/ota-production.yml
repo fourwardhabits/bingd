@@ -45,7 +45,6 @@ jobs:
     env:
       OTA_LANE: production
       OTA_SHA: ${{ inputs.sha }}
-      OTA_RUN_SHA: ${{ github.sha }}
       OTA_ANDROID_RUNTIME: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
       OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
     steps:
