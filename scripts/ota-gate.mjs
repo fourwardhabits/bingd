@@ -5,7 +5,11 @@
  * The publish moved off the laptop, so `scripts/release.mjs` no longer stands in front of it.
  * Its checks move here rather than being lost: a clean tree, a commit on `main`, and the
  * release gate on this exact commit. Required CI is added, and so is the native check: the
- * cloud fingerprint has to belong to a store build.
+ * cloud fingerprint has to be the runtime of the live binary, in `config/live-runtimes.json`.
+ *
+ * That file is read from the checkout, so it is the reviewed copy at this exact commit. EAS's
+ * `get-build` job was tried first and returned nothing for this project, and "a build exists"
+ * is a weaker claim than "this is the binary in the stores" anyway.
  *
  * **Unknown is not permission.** As in `release.mjs`, a GitHub read that fails is a refusal.
  * Anything this script cannot prove is a problem, on the production lane.
@@ -15,7 +19,9 @@
  * status and is safe to run again.
  */
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO = 'fourwardhabits/bingd';
 
@@ -60,9 +66,9 @@ async function runProblem(fetchImpl, { name, file, events }, sha) {
 
 /**
  * Pure apart from what it is handed, so every refusal has a test. `git` is the checkout on the
- * EAS machine; `env` is the job's environment.
+ * EAS machine, `env` is the job's environment, and `live` is `config/live-runtimes.json`.
  */
-export async function evaluate({ env, git, fetchImpl }) {
+export async function evaluate({ env, git, fetchImpl, live }) {
   const lane = LANES[env.OTA_LANE];
   if (!lane) return { fatal: [`Unknown lane: ${env.OTA_LANE}`], notes: [] };
 
@@ -88,15 +94,16 @@ export async function evaluate({ env, git, fetchImpl }) {
   }
 
   for (const platform of ['android', 'ios']) {
-    const key = platform.toUpperCase();
-    const runtime = env[`OTA_${key}_RUNTIME`];
-    const build = env[`OTA_${key}_BUILD`];
+    const runtime = env[`OTA_${platform.toUpperCase()}_RUNTIME`];
+    const binary = live[env.OTA_LANE]?.[platform];
     const problem = !runtime
       ? `${platform}: the cloud fingerprint produced nothing.`
-      : !build
-        ? `${platform}: no ${env.OTA_LANE} build has runtime ${runtime}. Anything native has changed, and that needs a binary, not an update.`
-        : null;
-    if (!problem) console.log(`${platform}: runtime ${runtime} is build ${build}`);
+      : !binary
+        ? `${platform}: config/live-runtimes.json lists no ${env.OTA_LANE} binary.`
+        : runtime !== binary.runtime
+          ? `${platform}: runtime ${runtime} is not the live ${binary.version}, ${binary.runtime}. Something native changed, and that needs a binary, not an update.`
+          : null;
+    if (!problem) console.log(`${platform}: runtime ${runtime} is ${binary.version}`);
     else if (lane.platforms.includes(platform)) fatal.push(problem);
     else notes.push(problem);
   }
@@ -123,6 +130,12 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     env: process.env,
     git: (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim(),
     fetchImpl: fetch,
+    live: JSON.parse(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../config/live-runtimes.json'),
+        'utf8',
+      ),
+    ),
   });
   for (const note of notes) console.log(`note: ${note}`);
   if (fatal.length) {

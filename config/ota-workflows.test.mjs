@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 import { REPO, evaluate } from '../scripts/ota-gate.mjs';
+import { scan } from '../scripts/ota-log-scan.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const eas = JSON.parse(readFileSync(join(root, 'eas.json'), 'utf8'));
+const liveRuntimes = JSON.parse(readFileSync(join(root, 'config/live-runtimes.json'), 'utf8'));
 
 const read = (lane) => readFileSync(join(root, `.eas/workflows/ota-${lane}.yml`), 'utf8');
 
@@ -33,8 +35,14 @@ const passing = {
   OTA_RUN_SHA: SHA,
   OTA_ANDROID_RUNTIME: 'android-runtime',
   OTA_IOS_RUNTIME: 'ios-runtime',
-  OTA_ANDROID_BUILD: 'android-build',
-  OTA_IOS_BUILD: 'ios-build',
+};
+
+const live = {
+  production: {
+    android: { runtime: 'android-runtime', version: '1.1.0 (15)' },
+    ios: { runtime: 'ios-runtime', version: '1.1.0 (15)' },
+  },
+  preview: { android: { runtime: 'android-runtime', version: '1.1.0 (10)' } },
 };
 
 const run = (overrides = {}) => ({
@@ -63,7 +71,7 @@ const github =
 const cleanGit = (...args) => (args[0] === 'rev-parse' ? SHA : '');
 
 const gate = (env = {}, { git = cleanGit, fetchImpl = github() } = {}) =>
-  evaluate({ env: { ...passing, ...env }, git, fetchImpl });
+  evaluate({ env: { ...passing, ...env }, git, fetchImpl, live });
 
 describe('the OTA workflows', () => {
   for (const lane of ['preview', 'production']) {
@@ -98,23 +106,34 @@ describe('the OTA workflows', () => {
       assert.match(job(yaml, 'gate'), new RegExp(`OTA_LANE: ${lane}\\n`));
     });
 
-    it(`${lane}: looks the fingerprint up on that lane's own builds`, () => {
-      for (const name of ['android_build', 'ios_build']) {
-        assert.match(job(yaml, name), new RegExp(`profile: ${lane}\\n`));
+    it(`${lane}: the gate is handed both of the job's hashes`, () => {
+      const body = job(yaml, 'gate');
+      assert.match(body, /needs: \[fingerprint\]/);
+      for (const [name, output] of [
+        ['ANDROID', 'android'],
+        ['IOS', 'ios'],
+      ]) {
         assert.match(
-          job(yaml, name),
-          new RegExp(`distribution: ${profile.distribution}\\n`, 'i'),
+          body,
+          new RegExp(
+            `OTA_${name}_RUNTIME: \\$\\{\\{ needs\\.fingerprint\\.outputs\\.${output}_fingerprint_hash \\}\\}\\n`,
+          ),
         );
       }
     });
   }
 
   it('the two differ only in the lane, once the comments are gone', () => {
-    const normal = (lane, distribution) =>
-      withoutComments(read(lane))
-        .replaceAll(lane, 'LANE')
-        .replaceAll(distribution, 'DISTRIBUTION');
-    assert.equal(normal('production', 'store'), normal('preview', 'internal'));
+    const normal = (lane) => withoutComments(read(lane)).replaceAll(lane, 'LANE');
+    assert.equal(normal('production'), normal('preview'));
+  });
+
+  it('names both live store binaries by full runtime', () => {
+    for (const platform of ['android', 'ios']) {
+      assert.match(liveRuntimes.production[platform].runtime, /^[0-9a-f]{40}$/);
+      assert.match(liveRuntimes.production[platform].build, /^[0-9a-f-]{36}$/);
+    }
+    assert.match(liveRuntimes.preview.android.runtime, /^[0-9a-f]{40}$/);
   });
 
   it('the production check can only be started by hand, and cannot publish', () => {
@@ -183,8 +202,13 @@ describe('the OTA gate', () => {
       /Could not read the checkout/,
     ],
     ['no Android fingerprint', { env: { OTA_ANDROID_RUNTIME: '' } }, /android: the cloud/],
-    ['no Android store build', { env: { OTA_ANDROID_BUILD: '' } }, /android: no production/],
-    ['no iOS store build', { env: { OTA_IOS_BUILD: '' } }, /ios: no production/],
+    ['no iOS fingerprint', { env: { OTA_IOS_RUNTIME: '' } }, /ios: the cloud/],
+    [
+      'a native change on Android',
+      { env: { OTA_ANDROID_RUNTIME: 'new' } },
+      /android: runtime new/,
+    ],
+    ['a native change on iOS', { env: { OTA_IOS_RUNTIME: 'new' } }, /ios: runtime new/],
     ['a commit off main', { fetchImpl: github({ compare: 'ahead' }) }, /not on main/],
     ['a diverged commit', { fetchImpl: github({ compare: 'diverged' }) }, /not on main/],
     [
@@ -261,7 +285,9 @@ describe('the OTA gate', () => {
       const fetchImpl = github({ compare: 'ahead', ci: [], gate: [] });
       const { fatal, notes } = await gate(preview, { fetchImpl });
       assert.deepEqual(fatal, []);
-      assert.equal(notes.length, 3);
+      assert.match(notes.join(), /not on main/);
+      assert.match(notes.join(), /No CI run/);
+      assert.match(notes.join(), /No Release gate run/);
     });
 
     it('still reports an unreachable GitHub without refusing', async () => {
@@ -271,16 +297,16 @@ describe('the OTA gate', () => {
       assert.match(notes.join(), /Could not read GitHub/);
     });
 
-    it('reports no iOS build rather than refusing', async () => {
-      const { fatal, notes } = await gate({ ...preview, OTA_IOS_BUILD: '' });
+    it('reports no iOS binary rather than refusing', async () => {
+      const { fatal, notes } = await gate(preview);
       assert.deepEqual(fatal, []);
-      assert.match(notes.join(), /ios: no preview build/);
+      assert.match(notes.join(), /ios: config\/live-runtimes\.json lists no preview binary/);
     });
 
-    it('still refuses no Android build, wrong code and a dirty tree', async () => {
+    it('still refuses another Android runtime, wrong code and a dirty tree', async () => {
       assert.match(
-        (await gate({ ...preview, OTA_ANDROID_BUILD: '' })).fatal.join(),
-        /android: no preview build/,
+        (await gate({ ...preview, OTA_ANDROID_RUNTIME: 'new' })).fatal.join(),
+        /android: runtime new/,
       );
       assert.match(
         (await gate({ ...preview, OTA_RUN_SHA: 'b'.repeat(40) })).fatal.join(),
@@ -289,5 +315,38 @@ describe('the OTA gate', () => {
       const git = (...a) => (a[0] === 'rev-parse' ? SHA : '?? new.ts');
       assert.match((await gate(preview, { git })).fatal.join(), /not clean/);
     });
+  });
+});
+
+describe('the log scan', () => {
+  it('passes what EAS really prints for masked and file variables', () => {
+    const log = [
+      'SENTRY_AUTH_TOKEN=********',
+      'EXPO_TOKEN=********',
+      'GOOGLE_SERVICES_JSON=/home/expo/workingdir/eas-environment-secrets/abc',
+      'EXPO_PUBLIC_SUPABASE_URL=https://example.supabase.co',
+    ].join('\n');
+    assert.deepEqual(scan(log), {});
+  });
+
+  it('finds a secret and hands back no part of it', () => {
+    const value = 'sntrys_abc123';
+    const found = scan(`SENTRY_AUTH_TOKEN=${value}\nAPI AIzaSyA1234567890123456789012345`);
+    assert.deepEqual(found, {
+      'Sentry token': 1,
+      'Google API key': 1,
+      'unmasked token variable': 1,
+    });
+    assert.doesNotMatch(JSON.stringify(found), /abc123|AIza/);
+  });
+
+  it('finds the contents of google-services.json', () => {
+    assert.deepEqual(scan('"mobilesdk_app_id": "1:2:android:3"'), {
+      'google-services.json contents': 1,
+    });
+  });
+
+  it('finds any unmasked token, whatever it looks like', () => {
+    assert.deepEqual(scan('EXPO_TOKEN=abc\n'), { 'unmasked token variable': 1 });
   });
 });

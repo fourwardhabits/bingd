@@ -21,10 +21,9 @@ what may go over the air at all.
 | **`APP_VARIANT` / `BINGD_LANE`** | `preview` / `preview` | `production` / `production` |
 | **Started by** | `eas workflow:run` only | `eas workflow:run` only |
 | **Release checks** | reported | **refuse** |
-| **Build required for** | Android | **Android and iOS** |
+| **Runtime held to the live binary** | Android | **Android and iOS** |
 
-Each runs the same five jobs: `fingerprint`, `android_build`, `ios_build`, `gate`, `publish`.
-`publish` needs `gate`, and `gate` needs the other three.
+Each runs the same three jobs in order: `fingerprint`, `gate`, `publish`.
 
 **Neither has a push trigger, so merging to `main` publishes nothing.** The branch, environment
 and lane are written into each file, not taken as inputs. `config/ota-workflows.test.mjs` runs in
@@ -39,22 +38,24 @@ eas workflow:run .eas/workflows/ota-production.yml --ref $SHA \
   -F sha=$SHA -F message="what changed (${SHA:0:7})" --non-interactive --wait
 ```
 
-**Always pass `--ref`.** Without it, EAS uploads the local directory and the gate refuses,
-because the run is not on the commit named in `sha`. `--ref` needs the workflow file at that
-commit, so a commit from before these files existed cannot be published this way.
+**Always pass `--ref`.** It needs the EAS project linked to this GitHub repository, and the
+workflow file present at that commit, so a commit from before these files existed cannot be
+published this way. Without `--ref`, EAS uploads the local directory, and the gate refuses because
+the run has no commit.
 
 ---
 
 ## What the gate checks
 
 `scripts/ota-gate.mjs` runs on EAS before `publish`, in the `development` environment, because it
-reads only public GitHub data. Anything it cannot prove on Production is a refusal.
+reads only the checkout and public GitHub data. Anything it cannot prove on Production is a
+refusal.
 
 | Check | Came from | Production | Preview |
 |---|---|---|---|
 | The run, the checkout and `sha` are one commit | `release.mjs` (HEAD) | refuse | refuse |
 | The checkout is clean, untracked files included | `release.mjs` | refuse | refuse |
-| The fingerprint belongs to a build of that lane | **new** | refuse, both platforms | refuse, Android only |
+| The fingerprint is the live binary's runtime | **new** | refuse, both platforms | refuse, Android only |
 | The commit is on `main` | `release.mjs`, narrowed from `main` or `release/*` | refuse | note |
 | `ci.yml` passed on this exact commit | **new** | refuse | note |
 | `release-gate.yml` passed on this exact commit | `release.mjs` | refuse | note |
@@ -63,13 +64,33 @@ The fingerprint job runs in the same environment and lane as the publish, so it 
 ship. A commit is "on `main`" if `main` contains it, which is how a pull request head looks after
 an ordinary merge commit. A squash merge creates a new commit, which needs its own gate run.
 
-**A matching build shows a binary with that runtime exists, not that it is the one in the
-stores.** The readiness check below is what connects the two.
+### The live runtimes
+
+`config/live-runtimes.json` names the runtime of each binary an update is meant to reach. **Change
+it in the same pull request that records a new store binary as live.** If it is stale, the gate
+refuses, which is the safe direction.
+
+The file is read at the exact commit being published, so an edit to it has to pass review like
+anything else. EAS's `get-build` job is not used: it succeeded with empty outputs for this project,
+even for a build that exists.
 
 ### What this does not stop
 
 `eas update` and a modified workflow are still things anybody logged in to EAS can run. As with
 `release.mjs`, these checks make a bad publish a deliberate act rather than an accident.
+
+### Secrets in logs
+
+EAS prints each job's variables at the top of its log, and **any variable not stored as `secret`
+appears in full.** That happened to `SENTRY_AUTH_TOKEN` until it was replaced on 2026-11-01. Secret
+variables print as `********`, and a file variable prints as a path. Keep every credential in EAS
+at `secret` visibility; only `EXPO_PUBLIC_*` values belong at `plaintext`.
+
+Do not grep these logs. Use the scanner, which prints only names and counts:
+
+```
+node scripts/ota-log-scan.mjs <workflow run id>
+```
 
 ---
 
@@ -87,9 +108,9 @@ stores.** The readiness check below is what connects the two.
 10. The agent runs read-only production verification.
 11. The founder runs no routine Git or EAS commands.
 
-**A native change stops at step 7.** If the production fingerprint has no matching store build,
-the agent says a binary is required and stops. An OTA approval never covers building or
-submitting a store binary.
+**A native change stops at step 7.** If the production fingerprint is not the live binary's, the
+agent says a binary is required and stops. An OTA approval never covers building or submitting a
+store binary.
 
 ### Status of this model
 
@@ -110,13 +131,13 @@ Report one line, then wait for the approval the policy requires:
 - Preview workflow test status.
 
 `.eas/workflows/ota-production-check.yml` reads the two runtimes in the cloud. It has no publish
-job, so it cannot release anything. Match the build IDs it returns against the versions the stores
-show.
+job, so it cannot release anything. Compare them with `config/live-runtimes.json`, confirm the
+stores still show those versions, and scan the run's logs.
 
 ### After a publish
 
 Check with `eas update:view <group>` that each platform landed on the expected runtime and
-branch, confirm the published commit, and update
+branch, confirm the published commit, scan the run's logs, and update
 [`production-state.md`](./production-state.md).
 
 Rollback is unchanged: [`safe-update-runbook.md`](./safe-update-runbook.md) §4. A rollback is a

@@ -1,0 +1,21 @@
+{
+  "production": {
+    "android": {
+      "runtime": "ec79e1818e57bb6ea8f21e1296286bca881f8aef",
+      "build": "4d71b121-4e13-4560-b6db-82b1314d962c",
+      "version": "1.1.0 (15)"
+    },
+    "ios": {
+      "runtime": "8ea562b7f252462cc2b3f44d0c45d817a18eeddb",
+      "build": "e38d94d9-7496-477e-91e2-318d20f91ddd",
+      "version": "1.1.0 (15)"
+    }
+  },
+  "preview": {
+    "android": {
+      "runtime": "2503ffaa54ee67d81ce4ddcf8028715dbd4a0543",
+      "build": "d63cfd52-1f00-4927-80dc-b1d225e31717",
+      "version": "1.1.0 (10)"
+    }
+  }
+}

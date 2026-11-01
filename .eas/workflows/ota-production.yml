@@ -1,7 +1,7 @@
 # Publishes an over-the-air update to real users, from EAS, in the production environment.
 #
-#   eas workflow:run .eas/workflows/ota-production.yml --ref <sha> \
-#     -F sha=<sha> -F message="what changed (<short sha>)" --non-interactive --wait
+#   eas workflow:run .eas/workflows/ota-production.yml --ref <full sha> \
+#     -F sha=<full sha> -F message="what changed (<short sha>)" --non-interactive --wait
 #
 # It exists because `eas update` on a laptop cannot read the file-typed GOOGLE_SERVICES_JSON
 # that the production lane needs just to resolve app.config.ts. Here EAS supplies it, and it
@@ -28,7 +28,8 @@ on:
         required: true
 
 jobs:
-  # Hashes what the update job is about to publish, with the same environment and lane.
+  # Hashes what the update job is about to publish, with the same environment and lane. The
+  # gate refuses unless this is the runtime of the live store binary.
   fingerprint:
     type: fingerprint
     environment: production
@@ -36,39 +37,17 @@ jobs:
       APP_VARIANT: production
       BINGD_LANE: production
 
-  # A store build with this exact fingerprint is what proves no native change is going over
-  # the air. No matching build leaves the outputs empty, and the gate refuses on that.
-  android_build:
-    type: get-build
-    needs: [fingerprint]
-    params:
-      platform: android
-      profile: production
-      distribution: store
-      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
-
-  ios_build:
-    type: get-build
-    needs: [fingerprint]
-    params:
-      platform: ios
-      profile: production
-      distribution: store
-      fingerprint_hash: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
-
   # Everything `scripts/release.mjs` checks before a guarded lane, moved to where the publish
-  # now happens. It reads only public GitHub data, so it takes no production variables.
+  # now happens. It reads public GitHub data and the repo, so it takes no production variables.
   gate:
     environment: development
-    needs: [fingerprint, android_build, ios_build]
+    needs: [fingerprint]
     env:
       OTA_LANE: production
       OTA_SHA: ${{ inputs.sha }}
       OTA_RUN_SHA: ${{ github.sha }}
       OTA_ANDROID_RUNTIME: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
       OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
-      OTA_ANDROID_BUILD: ${{ needs.android_build.outputs.build_id }}
-      OTA_IOS_BUILD: ${{ needs.ios_build.outputs.build_id }}
     steps:
       - uses: eas/checkout
       - run: node scripts/ota-gate.mjs
