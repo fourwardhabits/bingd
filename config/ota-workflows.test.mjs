@@ -131,8 +131,8 @@ describe('the OTA workflows', () => {
   });
 
   it('the production check hashes what the publish would ship', () => {
-    const yaml = read('production');
-    assert.equal(job(read('production-check'), 'fingerprint'), job(yaml, 'fingerprint'));
+    const fingerprint = (lane) => job(withoutComments(read(lane)), 'fingerprint').trim();
+    assert.equal(fingerprint('production-check'), fingerprint('production'));
   });
 
   it('the production gate job holds no production variables', () => {
