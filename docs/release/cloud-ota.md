@@ -63,8 +63,9 @@ only the checkout and public GitHub data. Anything they cannot prove on Producti
 | `preflight` | `release-gate.yml` passed on this exact commit | `release.mjs` | refuse | note |
 | `runtimes` | The fingerprint is the live binary's runtime | **new** | refuse, both platforms | refuse, Android only |
 
-`ota-production-check.yml` runs `preflight` too, with one difference: the commit need not be on
-`main`, because it reads a reviewed pull request head before the founder decides.
+`ota-production-check.yml` runs both stages too, with one difference: the commit need not be on
+`main`, because it reads a reviewed pull request head before the founder decides. It stops there
+and has no publish job.
 
 The fingerprint job runs in the same environment and lane as the publish, so it hashes what will
 ship. A commit is "on `main`" if `main` contains it, which is how a pull request head looks after
@@ -79,6 +80,14 @@ refuses, which is the safe direction.
 The file is read at the exact commit being published, so an edit to it has to pass review like
 anything else. EAS's `get-build` job is not used: it succeeded with empty outputs for this project,
 even for a build that exists.
+
+### Line endings are part of the runtime
+
+The fingerprint hashes `.gitignore`, `eas.json` and three `config/*.cjs` files byte for byte. The
+live binaries were built from Windows checkouts, so those hashes are of CRLF files. A plain Git
+checkout on EAS has LF, which gave different runtimes for identical source on the first Git-backed
+run. `.gitattributes` pins the five files to CRLF on every checkout, so a laptop and EAS hash the
+same bytes. Do not remove a line unless every live binary already hashes without it.
 
 ### What this does not stop
 

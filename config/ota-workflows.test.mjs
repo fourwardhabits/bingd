@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -174,7 +175,31 @@ describe('the OTA workflows', () => {
     assert.deepEqual(yaml.match(/^ {2}[a-z_]+:$/gm).slice(1), [
       '  preflight:',
       '  fingerprint:',
+      '  runtimes:',
     ]);
+  });
+
+  it('the production check holds both runtimes exactly as a publish would', () => {
+    const runtimes = (lane) => job(withoutComments(read(lane)), 'runtimes').trim();
+    assert.equal(runtimes('production-check'), runtimes('production'));
+  });
+
+  it('pins every file that would otherwise hash differently on an EAS checkout', () => {
+    const paths = [
+      '.gitignore',
+      'config/backends.cjs',
+      'config/production-lane.cjs',
+      'config/push.cjs',
+      'eas.json',
+    ];
+    const attributes = execFileSync('git', ['check-attr', 'eol', '--', ...paths], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.deepEqual(
+      attributes.trim().split('\n'),
+      paths.map((path) => `${path}: eol: crlf`),
+    );
   });
 
   it('the production check admits the commit before it reads a production variable', () => {
