@@ -1,0 +1,77 @@
+# The Preview twin of ota-production.yml, so the cloud path is exercised where only the
+# founder's own build can receive it. `config/ota-workflows.test.mjs` holds the two in step.
+#
+#   eas workflow:run .eas/workflows/ota-preview.yml --ref <sha> \
+#     -F sha=<sha> -F message="what changed (<short sha>)" --non-interactive --wait
+#
+# Manual only, like its twin. Unreleased work belongs on this lane, so the gate reports CI and
+# the release gate here rather than refusing on them, and it requires an Android build only:
+# no iOS Preview binary exists on the current runtime.
+
+name: OTA preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The commit to publish. Must equal the --ref this run was started from.
+        type: string
+        required: true
+      message:
+        description: Update message, including the short SHA.
+        type: string
+        required: true
+
+jobs:
+  fingerprint:
+    type: fingerprint
+    environment: preview
+    env:
+      APP_VARIANT: preview
+      BINGD_LANE: preview
+
+  android_build:
+    type: get-build
+    needs: [fingerprint]
+    params:
+      platform: android
+      profile: preview
+      distribution: internal
+      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+
+  ios_build:
+    type: get-build
+    needs: [fingerprint]
+    params:
+      platform: ios
+      profile: preview
+      distribution: internal
+      fingerprint_hash: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+
+  gate:
+    environment: development
+    needs: [fingerprint, android_build, ios_build]
+    env:
+      OTA_LANE: preview
+      OTA_SHA: ${{ inputs.sha }}
+      OTA_RUN_SHA: ${{ github.sha }}
+      OTA_ANDROID_RUNTIME: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+      OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+      OTA_ANDROID_BUILD: ${{ needs.android_build.outputs.build_id }}
+      OTA_IOS_BUILD: ${{ needs.ios_build.outputs.build_id }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs
+
+  publish:
+    type: update
+    needs: [gate]
+    environment: preview
+    env:
+      APP_VARIANT: preview
+      BINGD_LANE: preview
+    params:
+      branch: preview
+      platform: all
+      message: ${{ inputs.message }}
+      upload_sentry_sourcemaps: false

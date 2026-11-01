@@ -1,0 +1,38 @@
+# Answers "can this commit go over the air?" and publishes nothing: it has no update job, and
+# `config/ota-workflows.test.mjs` fails if one is added.
+#
+#   eas workflow:run .eas/workflows/ota-production-check.yml --ref <sha> --non-interactive --wait
+#
+# Empty build outputs on either platform mean no production build has this runtime, so the
+# commit needs a binary and not an update. Resolves the lane exactly as ota-production.yml does.
+
+name: OTA production check
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  fingerprint:
+    type: fingerprint
+    environment: production
+    env:
+      APP_VARIANT: production
+      BINGD_LANE: production
+
+  android_build:
+    type: get-build
+    needs: [fingerprint]
+    params:
+      platform: android
+      profile: production
+      distribution: store
+      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+
+  ios_build:
+    type: get-build
+    needs: [fingerprint]
+    params:
+      platform: ios
+      profile: production
+      distribution: store
+      fingerprint_hash: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}

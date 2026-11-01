@@ -1,0 +1,89 @@
+# Publishes an over-the-air update to real users, from EAS, in the production environment.
+#
+#   eas workflow:run .eas/workflows/ota-production.yml --ref <sha> \
+#     -F sha=<sha> -F message="what changed (<short sha>)" --non-interactive --wait
+#
+# It exists because `eas update` on a laptop cannot read the file-typed GOOGLE_SERVICES_JSON
+# that the production lane needs just to resolve app.config.ts. Here EAS supplies it, and it
+# never leaves EAS. See docs/release/cloud-ota.md.
+#
+# **There is no push, schedule or pull_request trigger, and that is the safeguard.** A merge
+# to main publishes nothing. `config/ota-workflows.test.mjs` fails if a trigger is added.
+#
+# The branch, the environment and the lane are written here rather than taken as inputs, so
+# no value typed at a run can send this somewhere else. The test holds them to `eas.json`.
+
+name: OTA production
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The commit to publish. Must equal the --ref this run was started from.
+        type: string
+        required: true
+      message:
+        description: Update message, including the short SHA.
+        type: string
+        required: true
+
+jobs:
+  # Hashes what the update job is about to publish, with the same environment and lane.
+  fingerprint:
+    type: fingerprint
+    environment: production
+    env:
+      APP_VARIANT: production
+      BINGD_LANE: production
+
+  # A store build with this exact fingerprint is what proves no native change is going over
+  # the air. No matching build leaves the outputs empty, and the gate refuses on that.
+  android_build:
+    type: get-build
+    needs: [fingerprint]
+    params:
+      platform: android
+      profile: production
+      distribution: store
+      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+
+  ios_build:
+    type: get-build
+    needs: [fingerprint]
+    params:
+      platform: ios
+      profile: production
+      distribution: store
+      fingerprint_hash: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+
+  # Everything `scripts/release.mjs` checks before a guarded lane, moved to where the publish
+  # now happens. It reads only public GitHub data, so it takes no production variables.
+  gate:
+    environment: development
+    needs: [fingerprint, android_build, ios_build]
+    env:
+      OTA_LANE: production
+      OTA_SHA: ${{ inputs.sha }}
+      OTA_RUN_SHA: ${{ github.sha }}
+      OTA_ANDROID_RUNTIME: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+      OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+      OTA_ANDROID_BUILD: ${{ needs.android_build.outputs.build_id }}
+      OTA_IOS_BUILD: ${{ needs.ios_build.outputs.build_id }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs
+
+  publish:
+    type: update
+    needs: [gate]
+    environment: production
+    env:
+      APP_VARIANT: production
+      BINGD_LANE: production
+    params:
+      branch: production
+      platform: all
+      message: ${{ inputs.message }}
+      # The local path never uploaded maps, and this change moves where an update is bundled,
+      # not what happens around it.
+      upload_sentry_sourcemaps: false
