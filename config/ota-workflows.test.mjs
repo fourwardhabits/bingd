@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { REPO, evaluate } from '../scripts/ota-gate.mjs';
+import { REPO, preflight, runtimes } from '../scripts/ota-gate.mjs';
 import { scan, scanRun } from '../scripts/ota-log-scan.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -69,8 +69,15 @@ const github =
 
 const cleanGit = (...args) => (args[0] === 'rev-parse' ? SHA : '');
 
-const gate = (env = {}, { git = cleanGit, fetchImpl = github() } = {}) =>
-  evaluate({ env: { ...passing, ...env }, git, fetchImpl, live });
+/** Both stages, as a publish runs them. */
+const gate = async (env = {}, { git = cleanGit, fetchImpl = github() } = {}) => {
+  const deps = { env: { ...passing, ...env }, git, fetchImpl, live };
+  const [first, second] = [await preflight(deps), await runtimes(deps)];
+  return {
+    fatal: [...first.fatal, ...second.fatal],
+    notes: [...first.notes, ...second.notes],
+  };
+};
 
 describe('the OTA workflows', () => {
   for (const lane of ['preview', 'production']) {
@@ -78,7 +85,7 @@ describe('the OTA workflows', () => {
     const profile = eas.build[lane];
 
     it(`${lane}: can only be started by hand`, () => {
-      const on = yaml.slice(yaml.indexOf('\non:\n'), yaml.indexOf('\njobs:\n'));
+      const on = yaml.slice(yaml.indexOf('\non:\n'), yaml.indexOf('\nconcurrency:\n'));
       assert.match(on, /^\non:\n {2}workflow_dispatch:\n/);
       assert.deepEqual(on.match(/^ {2}[a-z_]+:/gm), ['  workflow_dispatch:']);
     });
@@ -99,15 +106,33 @@ describe('the OTA workflows', () => {
       });
     }
 
-    it(`${lane}: publishes only behind the gate`, () => {
-      assert.match(job(yaml, 'publish'), /needs: \[gate\]/);
-      assert.match(job(yaml, 'gate'), /node scripts\/ota-gate\.mjs/);
-      assert.match(job(yaml, 'gate'), new RegExp(`OTA_LANE: ${lane}\\n`));
+    it(`${lane}: admits the commit before anything reads a ${lane} variable`, () => {
+      assert.doesNotMatch(job(yaml, 'preflight'), /needs:/);
+      assert.match(job(yaml, 'preflight'), /environment: development\n/);
+      assert.match(job(yaml, 'preflight'), /node scripts\/ota-gate\.mjs preflight\n/);
+      assert.match(job(yaml, 'preflight'), new RegExp(`OTA_LANE: ${lane}\\n`));
+      assert.match(job(yaml, 'fingerprint'), /needs: \[preflight\]/);
+    });
+
+    it(`${lane}: publishes only behind the runtime check`, () => {
+      assert.match(job(yaml, 'publish'), /needs: \[runtimes\]/);
+      assert.match(job(yaml, 'runtimes'), /needs: \[fingerprint\]/);
+      assert.match(job(yaml, 'runtimes'), /environment: development\n/);
+      assert.match(job(yaml, 'runtimes'), /node scripts\/ota-gate\.mjs runtimes\n/);
+      assert.match(job(yaml, 'runtimes'), new RegExp(`OTA_LANE: ${lane}\\n`));
+    });
+
+    it(`${lane}: publishes one run at a time, across every commit`, () => {
+      assert.match(
+        yaml,
+        new RegExp(
+          `\\nconcurrency:\\n {2}group: ota-${lane}\\n {2}cancel_in_progress: false\\n`,
+        ),
+      );
     });
 
     it(`${lane}: the gate is handed both of the job's hashes`, () => {
-      const body = job(yaml, 'gate');
-      assert.match(body, /needs: \[fingerprint\]/);
+      const body = job(yaml, 'runtimes');
       for (const [name, output] of [
         ['ANDROID', 'android'],
         ['IOS', 'ios'],
@@ -145,7 +170,19 @@ describe('the OTA workflows', () => {
       ['  workflow_dispatch:'],
     );
     assert.doesNotMatch(yaml, /\b(push|schedule|pull_request):/);
-    assert.doesNotMatch(yaml, /type: update|eas update|\bsteps:/);
+    assert.doesNotMatch(yaml, /type: update|eas update/);
+    assert.deepEqual(yaml.match(/^ {2}[a-z_]+:$/gm).slice(1), [
+      '  preflight:',
+      '  fingerprint:',
+    ]);
+  });
+
+  it('the production check admits the commit before it reads a production variable', () => {
+    const yaml = read('production-check');
+    assert.doesNotMatch(job(yaml, 'preflight'), /needs:/);
+    assert.match(job(yaml, 'preflight'), /environment: development\n/);
+    assert.match(job(yaml, 'preflight'), /OTA_LANE: production-check\n/);
+    assert.match(job(yaml, 'preflight'), /node scripts\/ota-gate\.mjs preflight\n/);
   });
 
   it('the production check hashes what the publish would ship', () => {
@@ -153,12 +190,8 @@ describe('the OTA workflows', () => {
     assert.equal(fingerprint('production-check'), fingerprint('production'));
   });
 
-  it('the production gate job holds no production variables', () => {
-    assert.match(job(read('production'), 'gate'), /environment: development\n/);
-  });
-
   it('commits no secret, and no store of one', () => {
-    for (const lane of ['preview', 'production']) {
+    for (const lane of ['preview', 'production', 'production-check']) {
       assert.doesNotMatch(
         withoutComments(read(lane)),
         /GOOGLE_SERVICES|SENTRY_AUTH|EXPO_TOKEN|secrets\./,
@@ -273,6 +306,46 @@ describe('the OTA gate', () => {
 
   it('refuses a lane it does not know', async () => {
     assert.match((await gate({ OTA_LANE: 'beta' })).fatal.join(), /Unknown lane/);
+  });
+
+  it('refuses an unadmitted commit with no fingerprint in hand', async () => {
+    const env = { OTA_LANE: 'production', OTA_SHA: SHA };
+    const fetchImpl = github({ compare: 'diverged' });
+    const { fatal } = await preflight({ env, git: cleanGit, fetchImpl });
+    assert.match(fatal.join(), /not on main/);
+  });
+
+  it('admits a good commit with no fingerprint in hand', async () => {
+    const env = { OTA_LANE: 'production', OTA_SHA: SHA };
+    const result = await preflight({ env, git: cleanGit, fetchImpl: github() });
+    assert.deepEqual(result, { fatal: [], notes: [] });
+  });
+
+  describe('on the production check, which reads a reviewed head before it merges', () => {
+    const env = { OTA_LANE: 'production-check', OTA_SHA: SHA };
+    const check = (fetchImpl, git = cleanGit) => preflight({ env, git, fetchImpl });
+
+    it('does not need main', async () => {
+      const fetchImpl = github({ compare: 'ahead' });
+      assert.deepEqual(await check(fetchImpl), { fatal: [], notes: [] });
+    });
+
+    it('still refuses without CI or the release gate', async () => {
+      assert.match((await check(github({ ci: [] }))).fatal.join(), /No CI run/);
+      assert.match((await check(github({ gate: [] }))).fatal.join(), /No Release gate run/);
+    });
+
+    it('still refuses another commit or a dirty tree', async () => {
+      const elsewhere = () => 'b'.repeat(40);
+      assert.match((await check(github(), elsewhere)).fatal.join(), /The checkout is b+/);
+      const dirty = (...a) => (a[0] === 'rev-parse' ? SHA : '?? new.ts');
+      assert.match((await check(github(), dirty)).fatal.join(), /not clean/);
+    });
+
+    it('still refuses when GitHub cannot be read', async () => {
+      const fetchImpl = async () => ({ ok: false, status: 403 });
+      assert.match((await check(fetchImpl)).fatal.join(), /Could not read GitHub/);
+    });
   });
 
   describe('on Preview, where unreleased work belongs', () => {

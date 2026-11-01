@@ -27,19 +27,35 @@ on:
         type: string
         required: true
 
+# One publish at a time. Two runs overlapping could land an older commit after a newer one, and
+# the older would become what phones receive.
+concurrency:
+  group: ota-production
+  cancel_in_progress: false
+
 jobs:
-  # Hashes what the update job is about to publish, with the same environment and lane. The
-  # gate refuses unless this is the runtime of the live store binary.
+  # Runs first and outside production: the next job executes this commit with production
+  # variables, so the commit is admitted before that, not after.
+  preflight:
+    environment: development
+    env:
+      OTA_LANE: production
+      OTA_SHA: ${{ inputs.sha }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs preflight
+
+  # Hashes what the update job is about to publish, with the same environment and lane.
   fingerprint:
     type: fingerprint
+    needs: [preflight]
     environment: production
     env:
       APP_VARIANT: production
       BINGD_LANE: production
 
-  # Everything `scripts/release.mjs` checks before a guarded lane, moved to where the publish
-  # now happens. It reads public GitHub data and the repo, so it takes no production variables.
-  gate:
+  # Refuses unless each hash is the runtime of the live store binary. No production variables.
+  runtimes:
     environment: development
     needs: [fingerprint]
     env:
@@ -49,11 +65,11 @@ jobs:
       OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
     steps:
       - uses: eas/checkout
-      - run: node scripts/ota-gate.mjs
+      - run: node scripts/ota-gate.mjs runtimes
 
   publish:
     type: update
-    needs: [gate]
+    needs: [runtimes]
     environment: production
     env:
       APP_VARIANT: production

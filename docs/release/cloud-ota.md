@@ -23,7 +23,11 @@ what may go over the air at all.
 | **Release checks** | reported | **refuse** |
 | **Runtime held to the live binary** | Android | **Android and iOS** |
 
-Each runs the same three jobs in order: `fingerprint`, `gate`, `publish`.
+Each runs the same four jobs in order: `preflight`, `fingerprint`, `runtimes`, `publish`. **Nothing
+reads a production variable until `preflight` has admitted the commit**, because the fingerprint
+job executes it. Each lane runs one publish at a time, so an overlapping run cannot land an older
+commit last. That only covers overlap: dispatching an older commit after a newer one has finished
+still publishes it, so check what is live first.
 
 **Neither has a push trigger, so merging to `main` publishes nothing.** The branch, environment
 and lane are written into each file, not taken as inputs. `config/ota-workflows.test.mjs` runs in
@@ -47,18 +51,20 @@ release path: the gate refuses anything but a clean checkout of `sha`.
 
 ## What the gate checks
 
-`scripts/ota-gate.mjs` runs on EAS before `publish`, in the `development` environment, because it
-reads only the checkout and public GitHub data. Anything it cannot prove on Production is a
-refusal.
+`scripts/ota-gate.mjs` has two stages, both in the `development` environment, because they read
+only the checkout and public GitHub data. Anything they cannot prove on Production is a refusal.
 
-| Check | Came from | Production | Preview |
-|---|---|---|---|
-| The checkout is exactly `sha` | `release.mjs` (HEAD) | refuse | refuse |
-| The checkout is clean, untracked files included | `release.mjs` | refuse | refuse |
-| The fingerprint is the live binary's runtime | **new** | refuse, both platforms | refuse, Android only |
-| The commit is on `main` | `release.mjs`, narrowed from `main` or `release/*` | refuse | note |
-| `ci.yml` passed on this exact commit | **new** | refuse | note |
-| `release-gate.yml` passed on this exact commit | `release.mjs` | refuse | note |
+| Stage | Check | Came from | Production | Preview |
+|---|---|---|---|---|
+| both | The checkout is exactly `sha` | `release.mjs` (HEAD) | refuse | refuse |
+| both | The checkout is clean, untracked files included | `release.mjs` | refuse | refuse |
+| `preflight` | The commit is on `main` | `release.mjs`, narrowed from `main` or `release/*` | refuse | note |
+| `preflight` | `ci.yml` passed on this exact commit | **new** | refuse | note |
+| `preflight` | `release-gate.yml` passed on this exact commit | `release.mjs` | refuse | note |
+| `runtimes` | The fingerprint is the live binary's runtime | **new** | refuse, both platforms | refuse, Android only |
+
+`ota-production-check.yml` runs `preflight` too, with one difference: the commit need not be on
+`main`, because it reads a reviewed pull request head before the founder decides.
 
 The fingerprint job runs in the same environment and lane as the publish, so it hashes what will
 ship. A commit is "on `main`" if `main` contains it, which is how a pull request head looks after

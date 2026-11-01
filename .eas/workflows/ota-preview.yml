@@ -22,15 +22,29 @@ on:
         type: string
         required: true
 
+concurrency:
+  group: ota-preview
+  cancel_in_progress: false
+
 jobs:
+  preflight:
+    environment: development
+    env:
+      OTA_LANE: preview
+      OTA_SHA: ${{ inputs.sha }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs preflight
+
   fingerprint:
     type: fingerprint
+    needs: [preflight]
     environment: preview
     env:
       APP_VARIANT: preview
       BINGD_LANE: preview
 
-  gate:
+  runtimes:
     environment: development
     needs: [fingerprint]
     env:
@@ -40,11 +54,11 @@ jobs:
       OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
     steps:
       - uses: eas/checkout
-      - run: node scripts/ota-gate.mjs
+      - run: node scripts/ota-gate.mjs runtimes
 
   publish:
     type: update
-    needs: [gate]
+    needs: [runtimes]
     environment: preview
     env:
       APP_VARIANT: preview
