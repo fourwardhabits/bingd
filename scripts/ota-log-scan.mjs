@@ -36,30 +36,60 @@ export function scan(text) {
   return found;
 }
 
+/**
+ * Every job in a run, as lines safe to print, and whether all of them were read and clean.
+ *
+ * **A failure prints a fixed sentence and never the error.** `execFileSync` puts captured
+ * stdout on what it throws, and stdout here is the log, so an uncaught failure would print the
+ * very thing this file exists to keep off a screen. An empty log is a failure too: nothing was
+ * read, which is not the same as clean.
+ */
+export function scanRun(run, eas) {
+  const lines = [];
+  let ok = true;
+  let jobs;
+  try {
+    ({ jobs } = JSON.parse(eas('workflow:view', run, '--json')));
+  } catch {
+    return { lines: ['Could not read the run. No log was scanned.'], ok: false };
+  }
+  for (const job of jobs) {
+    let log = '';
+    try {
+      log = eas('workflow:logs', job.id, '--all-steps');
+    } catch {
+      log = '';
+    }
+    if (!log.trim()) {
+      ok = false;
+      lines.push(`${job.key}: NOT SCANNED, no log could be read`);
+      continue;
+    }
+    const found = scan(log);
+    const dirty = Object.keys(found).length > 0;
+    ok &&= !dirty;
+    lines.push(`${job.key}: ${dirty ? JSON.stringify(found) : 'clean'}`);
+  }
+  return { lines, ok };
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [run] = process.argv.slice(2);
-  if (!run) {
+  if (!/^[0-9a-f-]{36}$/.test(run ?? '')) {
     console.error('usage: node scripts/ota-log-scan.mjs <workflow run id>');
     process.exit(2);
   }
-  const eas = (...args) =>
+  const { lines, ok } = scanRun(run, (...args) =>
     execFileSync('eas', args, {
       encoding: 'utf8',
       maxBuffer: 1 << 28,
       shell: process.platform === 'win32',
       stdio: ['ignore', 'pipe', 'ignore'],
-    });
-
-  const { jobs } = JSON.parse(eas('workflow:view', run, '--json'));
-  let dirty = false;
-  for (const job of jobs) {
-    const found = scan(eas('workflow:logs', job.id, '--all-steps'));
-    const names = Object.keys(found);
-    dirty ||= names.length > 0;
-    console.log(`${job.key}: ${names.length ? JSON.stringify(found) : 'clean'}`);
-  }
-  if (dirty) {
-    console.error('\nDo not read these logs. Treat what they name as exposed.');
+    }),
+  );
+  for (const line of lines) console.log(line);
+  if (!ok) {
+    console.error('Not clean. Do not read these logs. Treat what they name as exposed.');
     process.exit(1);
   }
 }

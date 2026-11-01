@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 import { REPO, evaluate } from '../scripts/ota-gate.mjs';
-import { scan } from '../scripts/ota-log-scan.mjs';
+import { scan, scanRun } from '../scripts/ota-log-scan.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const eas = JSON.parse(readFileSync(join(root, 'eas.json'), 'utf8'));
@@ -346,5 +346,56 @@ describe('the log scan', () => {
 
   it('finds any unmasked token, whatever it looks like', () => {
     assert.deepEqual(scan('EXPO_TOKEN=abc\n'), { 'unmasked token variable': 1 });
+  });
+
+  describe('over a whole run', () => {
+    const view = JSON.stringify({ jobs: [{ id: 'job-id', key: 'publish' }] });
+    const fake = 'sntrys_fake_secret_value';
+
+    const eas = (log) => (command) => (command === 'workflow:view' ? view : log());
+
+    it('calls a read, non-empty log clean', () => {
+      const result = scanRun(
+        'run',
+        eas(() => 'EXPO_TOKEN=********\n'),
+      );
+      assert.deepEqual(result, { lines: ['publish: clean'], ok: true });
+    });
+
+    it('fails, naming only what it found', () => {
+      const { lines, ok } = scanRun(
+        'run',
+        eas(() => `SENTRY_AUTH_TOKEN=${fake}\n`),
+      );
+      assert.equal(ok, false);
+      assert.doesNotMatch(lines.join(), /fake_secret/);
+    });
+
+    it('does not repeat a failed command, whose error carries the log', () => {
+      const failing = () => {
+        throw Object.assign(new Error(`Command failed\n${fake}`), { stdout: fake });
+      };
+      const { lines, ok } = scanRun('run', eas(failing));
+      assert.equal(ok, false);
+      assert.deepEqual(lines, ['publish: NOT SCANNED, no log could be read']);
+    });
+
+    it('does not repeat a failed view either', () => {
+      const failing = () => {
+        throw new Error(fake);
+      };
+      const { lines, ok } = scanRun('run', failing);
+      assert.equal(ok, false);
+      assert.doesNotMatch(lines.join(), /fake_secret/);
+    });
+
+    it('does not call an empty log clean', () => {
+      const { lines, ok } = scanRun(
+        'run',
+        eas(() => '  \n'),
+      );
+      assert.equal(ok, false);
+      assert.deepEqual(lines, ['publish: NOT SCANNED, no log could be read']);
+    });
   });
 });
