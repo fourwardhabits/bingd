@@ -26,22 +26,26 @@
 -- `boxd.it` short links, which say nothing about the film, so no count of accounts can
 -- establish that a URI denotes a film. T0 therefore answers only when all three hold:
 --
---   1. the row's own name is the mapped film's title or original title;
+--   1. the row's own name is the film's original title, or its title with no original
+--      title known. A known translation does not qualify, for the reason T1 will not
+--      settle one alone: the film that really bears that name may not be cached;
 --   2. the row's own year is the mapped film's release year exactly;
---   3. nothing else in the cache answers to that name within a year of the row.
+--   3. no other cached film answers to that name, by title or by original title, within a
+--      year of the row.
 --
 -- Anything else falls through to T1, the provider or the person, which is what would have
 -- happened with no mapping at all. A poisoned row in `letterboxd_matches` is inert under
 -- this rule, so no cleanup is needed for the matcher to be safe: every wrong mapping that
 -- already exists stops being read the moment this applies.
 --
--- **What T0 is still for.** Saving a provider request on a row the catalogue can place but
--- T1 will not settle alone: a film known here under its original title, and a translated
--- title with no neighbour in the cache.
+-- **What T0 is still for.** Saving a provider request on a film known here under a title
+-- other than the one the export uses, when the export gives its original title. T1 reads
+-- titles only, so it cannot place that row.
 --
 -- **What it stopped doing, deliberately.** It used to place an alternate title, a
--- year-less row, and one namesake over another. Each of those trusted the URI with nothing
--- behind it, which is the vulnerability. They now cost a provider request or an
+-- year-less row, a known translation, and one namesake over another. Each of those trusted
+-- the URI with nothing behind it, which is the vulnerability. They now cost a provider
+-- request or an
 -- `ambiguous` row the person settles, and a person being asked is the failure this
 -- importer chose over a silently wrong history in `20260917001300`.
 --
@@ -61,7 +65,15 @@
 --
 -- No existing claim or mapping is touched: this changes what is read and written next. See
 -- `docs/ops/letterboxd-match-audit.md` for the read-only audit and the cleanup.
+--
+-- **Why the index.** Condition 3 has to look a name up by original title, which nothing did
+-- before. It only runs for a row that already has a mapping, its name and its exact year.
 -- ===========================================================================
+
+
+create index if not exists media_items_original_squashed
+  on media_items (media_squash(original_title))
+  where kind = 'movie' and original_title is not null;
 
 
 create or replace function _letterboxd_slug_agrees(p_uri text, p_media_item_id uuid)
@@ -203,16 +215,36 @@ begin
     select d.id,
            d.uri,
            d.year,
-           -- T0. A corroborated film **that this row independently names**: its own name
-           -- and its own exact year, read off the catalogue. See the header for why count
-           -- and URI are not evidence. `decided` below applies the third condition.
+           -- T0. A corroborated film **that this row independently names**, and that
+           -- nothing else in the cache could be. See the header for why neither the count
+           -- nor the URI is evidence, and for each of the three conditions.
            (select m.media_item_id
               from letterboxd_matches m
               join media_items mi on mi.id = m.media_item_id
              where m.letterboxd_uri = d.uri
                and d.year is not null
                and extract(year from mi.release_date)::integer = d.year
-               and media_squash(d.name) in (mi.sort_key_squashed, media_squash(mi.original_title))
+               and (
+                 media_squash(mi.original_title) = media_squash(d.name)
+                 or (
+                   mi.sort_key_squashed = media_squash(d.name)
+                   and coalesce(media_squash(mi.original_title), '') = ''
+                 )
+               )
+               and not exists (
+                 select 1
+                   from media_items o
+                  where o.kind = 'movie'
+                    and o.id <> mi.id
+                    and (
+                      o.sort_key_squashed = media_squash(d.name)
+                      or media_squash(o.original_title) = media_squash(d.name)
+                    )
+                    and (
+                      o.release_date is null
+                      or abs(extract(year from o.release_date)::integer - d.year) <= 1
+                    )
+               )
            ) as t0,
            c.local,
            c.exact_n,
@@ -263,17 +295,10 @@ begin
           ) k
       ) c
   ),
-  -- The third condition: nothing else in the cache answers to this name. A mapping never
-  -- chooses between namesakes, so it can only ever agree with what the row already says.
-  guarded as (
-    select r.*,
-           r.t0 is not null and coalesce(r.local, '{}'::uuid[]) <@ array[r.t0] as t0_holds
-      from resolved r
-  ),
   decided as (
     select x.id,
            case
-             when x.t0_holds then x.t0
+             when x.t0 is not null then x.t0
              when x.year is null then
                case when coalesce(array_length(x.local, 1), 0) = 1 then x.local[1] end
              when x.exact_n > 1 and x.exact_native_n = 1 and x.exact_translated_n = x.exact_n - 1
@@ -283,7 +308,7 @@ begin
                then x.local[1]
            end as media_item_id,
            case
-             when x.t0_holds then 'matched'
+             when x.t0 is not null then 'matched'
              when x.year is null then
                case
                  when coalesce(array_length(x.local, 1), 0) = 1 then 'matched'
@@ -308,7 +333,7 @@ begin
              else 'needs_provider'
            end as status,
            x.local
-      from guarded x
+      from resolved x
   ),
   upd as (
     update import_rows r
@@ -352,6 +377,6 @@ $$;
 
 
 comment on function _import_match_batch(uuid, integer) is
-  'One bounded slice of local matching. T0, the shared film-URI cache, answers only when the row''s own name and exact year agree with the mapped film and nothing else in the cache answers to that name within a year (20261024000200): a mapping confirms a row and never overrides or chooses for it, because no tier can establish what a URI denotes. Then the catalogue. With a year on the row, one cached movie in EXACTLY that year wins over its neighbours; several in that year are ambiguous unless exactly one has the exported name as its original title and every other is a known translation (1b, 20260925000100); a translated title (original title known and not the exported name) beside a cached native-titled neighbour is ambiguous, and without one goes to the provider; no exact-year film goes to the provider, except a lone undated one, which matches (T1b). With no year, exactly one title match. The catalogue is a cache, so it never settles on a neighbour it merely happens to hold (20260924000100). Strong matches in THIS slice are recorded as claims; see _import_promote_match. Internal.';
+  'One bounded slice of local matching. T0, the shared film-URI cache, answers only when the row''s own name is the mapped film''s original title, or its title with no original title known, the row''s own year is its release year exactly, and no other cached film answers to that name by title or original title within a year (20261024000200): a mapping confirms a row and never overrides or chooses for it, because no tier can establish what a URI denotes. Then the catalogue. With a year on the row, one cached movie in EXACTLY that year wins over its neighbours; several in that year are ambiguous unless exactly one has the exported name as its original title and every other is a known translation (1b, 20260925000100); a translated title (original title known and not the exported name) beside a cached native-titled neighbour is ambiguous, and without one goes to the provider; no exact-year film goes to the provider, except a lone undated one, which matches (T1b). With no year, exactly one title match. The catalogue is a cache, so it never settles on a neighbour it merely happens to hold (20260924000100). Strong matches in THIS slice are recorded as claims; see _import_promote_match. Internal.';
 
 revoke execute on function _import_match_batch(uuid, integer) from public, anon, authenticated;

@@ -114,8 +114,8 @@ describe('redemptionOperationId', () => {
     let issued = 0;
     const mint = () => `op-${(issued += 1)}`;
 
-    expect(await redemptionOperationId(ME, mint)).toBe('op-1');
-    expect(await redemptionOperationId(ME, mint)).toBe('op-1');
+    expect(await redemptionOperationId(TOKEN, ME, mint)).toBe('op-1');
+    expect(await redemptionOperationId(TOKEN, ME, mint)).toBe('op-1');
     expect(issued).toBe(1);
   });
 
@@ -126,11 +126,11 @@ describe('redemptionOperationId', () => {
     const mint = () => `op-${(issued += 1)}`;
 
     await holdInvite(TOKEN);
-    await redemptionOperationId(ME, mint);
+    await redemptionOperationId(TOKEN, ME, mint);
     await clearPendingInvite();
 
     await holdInvite(OTHER);
-    expect(await redemptionOperationId(ME, mint)).toBe('op-2');
+    expect(await redemptionOperationId(OTHER, ME, mint)).toBe('op-2');
   });
 });
 
@@ -159,10 +159,10 @@ describe('replacePendingInvite', () => {
     const mint = () => `op-${(issued += 1)}`;
 
     await holdInvite(TOKEN);
-    expect(await redemptionOperationId(ME, mint)).toBe('op-1');
+    expect(await redemptionOperationId(TOKEN, ME, mint)).toBe('op-1');
 
     await replacePendingInvite(OTHER);
-    expect(await redemptionOperationId(ME, mint)).toBe('op-2');
+    expect(await redemptionOperationId(OTHER, ME, mint)).toBe('op-2');
   });
 
   it('refuses anything that is not a token, leaving what was held', async () => {
@@ -226,13 +226,13 @@ describe('what counts as a press of Accept', () => {
   it('is nothing at all for a token that was merely held', async () => {
     await holdInvite(TOKEN);
 
-    expect(await acceptedOperationId(ME)).toBeNull();
+    expect(await acceptedOperationId(TOKEN, ME)).toBeNull();
   });
 
   it('is an id, once claimForRedemption has run', async () => {
     await claimForRedemption(TOKEN, ME, () => 'op-1');
 
-    expect(await acceptedOperationId(ME)).toBe('op-1');
+    expect(await acceptedOperationId(TOKEN, ME)).toBe('op-1');
   });
 
   it('ignores an id an older build stored, which its background path minted too', async () => {
@@ -240,7 +240,7 @@ describe('what counts as a press of Accept', () => {
     mockStored['invite.pendingOperation'] = JSON.stringify('op-from-the-old-background-path');
     await holdInvite(TOKEN);
 
-    expect(await acceptedOperationId(ME)).toBeNull();
+    expect(await acceptedOperationId(TOKEN, ME)).toBeNull();
   });
 
   it('belongs to the account that pressed, so a phone that changes hands cannot replay it', async () => {
@@ -248,8 +248,17 @@ describe('what counts as a press of Accept', () => {
     // and it would accept the invitation for somebody who only signed in.
     await claimForRedemption(TOKEN, ME, () => 'op-1');
 
-    expect(await acceptedOperationId(SOMEBODY_ELSE)).toBeNull();
-    expect(await acceptedOperationId(ME)).toBe('op-1');
+    expect(await acceptedOperationId(TOKEN, SOMEBODY_ELSE)).toBeNull();
+    expect(await acceptedOperationId(TOKEN, ME)).toBe('op-1');
+  });
+
+  it('belongs to the invitation it was made on, so an interrupted swap cannot move it', async () => {
+    // The token and the press are separate keys. A process killed between `replacePendingInvite`'s
+    // two writes leaves the new token beside the old press, and that press was not for it.
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+    mockStored['invite.pendingToken'] = JSON.stringify(OTHER);
+
+    expect(await acceptedOperationId(OTHER, ME)).toBeNull();
   });
 
   it('mints that account its own id when it presses Accept itself', async () => {
@@ -263,7 +272,7 @@ describe('what counts as a press of Accept', () => {
 
     await releaseRedemptionOperationId();
 
-    expect(await acceptedOperationId(ME)).toBeNull();
+    expect(await acceptedOperationId(TOKEN, ME)).toBeNull();
     expect(await pendingInvite()).toBe(TOKEN);
   });
 });
@@ -299,19 +308,19 @@ describe('releaseShownInvite', () => {
     await releaseShownInvite(TOKEN, ME);
 
     expect(await pendingInvite()).toBe(TOKEN);
-    expect(await acceptedOperationId(ME)).toBe('op-1');
+    expect(await acceptedOperationId(TOKEN, ME)).toBe('op-1');
   });
 });
 
 describe('clearPendingInvite', () => {
   it('clears the token and its operation id together', async () => {
     await holdInvite(TOKEN);
-    await redemptionOperationId(ME, () => 'op-1');
+    await redemptionOperationId(TOKEN, ME, () => 'op-1');
 
     await clearPendingInvite();
 
     expect(await pendingInvite()).toBeNull();
     // Asserted through the public path: a fresh mint is offered rather than the old id.
-    expect(await redemptionOperationId(ME, () => 'op-2')).toBe('op-2');
+    expect(await redemptionOperationId(TOKEN, ME, () => 'op-2')).toBe('op-2');
   });
 });

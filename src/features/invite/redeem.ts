@@ -226,7 +226,7 @@ export async function resumePendingInvite(userId: string): Promise<string | null
     const token = await pendingInvite();
     if (!token) return null;
 
-    const operationId = await acceptedOperationId(userId);
+    const operationId = await acceptedOperationId(token, userId);
     if (!operationId) return token;
 
     await settle(token, operationId);

@@ -403,6 +403,49 @@ describe('two accounts cannot make a mapping speak for anybody (M-1)', () => {
     assert.equal(placed.media_item_id, null);
   });
 
+  it('never chooses between films that share an original title either', async () => {
+    // T1 reads titles only, so these two are invisible to it and only the provider can tell
+    // them apart. Found by the independent review of this fix.
+    const shared = 'Yhteinen Alkuperainen Nimi';
+    const insert = (title, date) =>
+      t.sql(
+        `insert into media_items (kind, tmdb_id, title, original_title, release_date, provenance)
+         values ('movie', $1, $2, $3, $4, 'manual') returning id`,
+        [-Math.abs(seq++), title, shared, date],
+      );
+    await insert('Localised Title One', '2016-05-01');
+    const { rows } = await insert('Localised Title Two', '2016-06-01');
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 2)`, [URI, rows[0].id]);
+
+    const job = await matchArchive(victim, [row(shared, 2016, URI)]);
+    const placed = await statusOf(job, 'yhteinen alkuperainen nimi|2016');
+
+    assert.equal(placed.status, 'needs_provider');
+    assert.equal(placed.media_item_id, null);
+  });
+
+  it('does not settle a known translation, which T1 refuses to settle on its own', async () => {
+    // The film that really bears this name may not be in the cache at all, and a mapping is
+    // no evidence that it is not.
+    const { rows } = await t.sql(
+      `insert into media_items (kind, tmdb_id, title, original_title, release_date, provenance)
+       values ('movie', $1, 'Kaannetty Nimi Elokuvalle', 'Toisella Kielella Nimetty', '2017-05-01', 'manual')
+       returning id`,
+      [-Math.abs(seq++)],
+    );
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 2)`, [URI, rows[0].id]);
+
+    const job = await matchArchive(victim, [row('Kaannetty Nimi Elokuvalle', 2017, URI)]);
+    const placed = await statusOf(job, 'kaannetty nimi elokuvalle|2017');
+
+    assert.equal(placed.status, 'needs_provider');
+    assert.equal(placed.media_item_id, null);
+  });
+
   it('makes a mapping that already exists inert, so production needs no cleanup to be safe', async () => {
     // Written directly, as a row from before this rule would be.
     await t.sql(

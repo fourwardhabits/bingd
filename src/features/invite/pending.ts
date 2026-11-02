@@ -42,10 +42,12 @@ import { serialiseRedemption } from './serialise';
  * having pressed anything, and reading it would turn that build's silent attempt into a
  * consent.
  *
- * **A press belongs to the account that made it.** The ledger is per account, so an id
- * replayed under a different one looks like a fresh call, and on a shared phone that would
- * accept the invitation for somebody who only signed in. So the account is stored with
- * the id, and an id from any other account is not a press at all.
+ * **A press belongs to the account that made it, and to the invitation it was made on.**
+ * The ledger is per account, so an id replayed under a different one looks like a fresh
+ * call, and on a shared phone that would accept the invitation for somebody who only signed
+ * in. The token is the same question: it lives under its own key, so a process killed
+ * between two writes could leave one invitation beside a press made on another. So the
+ * press records both, in one write, and anything else is not a press at all.
  *
  * ---------------------------------------------------------------------------
  * Why it is a stored value and not a navigation parameter
@@ -76,8 +78,8 @@ import { serialiseRedemption } from './serialise';
 const TOKEN_KEY = 'invite.pendingToken';
 const OPERATION_KEY = 'invite.acceptedOperation';
 
-/** One press of Accept: the id it minted, and the account that pressed it. */
-type AcceptedPress = { id: string; userId: string };
+/** One press of Accept: the id it minted, who pressed it, and on which invitation. */
+type AcceptedPress = { id: string; userId: string; token: string };
 
 /** The shape `create_invite_link` mints: a uuid with the dashes removed. */
 export const isInviteToken = (value: unknown): value is string =>
@@ -141,7 +143,7 @@ export async function claimForRedemption(
   if (!isInviteToken(token)) return null;
   const held = await pendingInvite();
   if (held !== token) await replacePendingInvite(token);
-  return redemptionOperationId(userId, mint);
+  return redemptionOperationId(token, userId, mint);
 }
 
 export async function pendingInvite(): Promise<string | null> {
@@ -167,7 +169,7 @@ export async function clearPendingInvite(): Promise<void> {
 export async function releaseShownInvite(token: string, userId: string): Promise<void> {
   await serialiseRedemption(async () => {
     if ((await pendingInvite()) !== token) return;
-    if (await acceptedOperationId(userId)) return;
+    if (await acceptedOperationId(token, userId)) return;
     await clearPendingInvite();
   });
 }
@@ -189,13 +191,12 @@ export async function releaseRedemptionOperationId(): Promise<void> {
 }
 
 /**
- * The id of this account's press of Accept whose answer never arrived, or null when there
- * was none. Another account's press answers null, which is the whole of why the account
- * is stored: see the header.
+ * The id of this account's press of Accept on this invitation whose answer never arrived,
+ * or null when there was none. Any other press answers null: see the header.
  */
-export async function acceptedOperationId(userId: string): Promise<string | null> {
+export async function acceptedOperationId(token: string, userId: string): Promise<string | null> {
   const held = await readPref<AcceptedPress>(OPERATION_KEY);
-  return held?.userId === userId && held.id.length > 0 ? held.id : null;
+  return held?.userId === userId && held.token === token && held.id.length > 0 ? held.id : null;
 }
 
 /**
@@ -210,10 +211,14 @@ export async function acceptedOperationId(userId: string): Promise<string | null
  *
  * Stored beside the token and cleared with it.
  */
-export async function redemptionOperationId(userId: string, mint: () => string): Promise<string> {
-  const held = await acceptedOperationId(userId);
+export async function redemptionOperationId(
+  token: string,
+  userId: string,
+  mint: () => string,
+): Promise<string> {
+  const held = await acceptedOperationId(token, userId);
   if (held) return held;
   const fresh = mint();
-  await writePref<AcceptedPress>(OPERATION_KEY, { id: fresh, userId });
+  await writePref<AcceptedPress>(OPERATION_KEY, { id: fresh, userId, token });
   return fresh;
 }

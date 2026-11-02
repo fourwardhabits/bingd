@@ -242,7 +242,7 @@ describe('resumePendingInvite', () => {
   /** A press of Accept whose answer never came, as storage records it. */
   const pressed = (token: string, id = 'operation-from-the-press') => {
     hold(token);
-    mockStored['invite.acceptedOperation'] = JSON.stringify({ id, userId: ME });
+    mockStored['invite.acceptedOperation'] = JSON.stringify({ id, userId: ME, token });
   };
 
   it('does nothing, and calls nothing, when this device holds no invitation', async () => {
@@ -300,6 +300,15 @@ describe('resumePendingInvite', () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it('does not replay a press made on a different invitation', async () => {
+    // What a process killed halfway through swapping the held invitation leaves behind.
+    pressed('b'.repeat(32));
+    hold(TOKEN);
+
+    expect(await resumePendingInvite(ME)).toBe(TOKEN);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it('carries the same id into the next launch while the call stays unsettled', async () => {
     pressed(TOKEN);
     answers(null, { code: '', message: 'Network request failed' });
@@ -351,6 +360,7 @@ describe('resumePendingInvite', () => {
     expect(JSON.parse(mockStored['invite.acceptedOperation'] ?? 'null')).toEqual({
       id: 'op-1',
       userId: ME,
+      token: TOKEN,
     });
   });
 });
