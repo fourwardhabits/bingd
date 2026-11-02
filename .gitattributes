@@ -1,0 +1,9 @@
+# The runtime fingerprint hashes these five files byte for byte. The live binaries were built from
+# Windows checkouts, so their runtimes hash CRLF, and an LF checkout on EAS gets a different
+# runtime from identical source. Keep this list until every live binary was built from a checkout
+# with no such difference. Removing a line moves every lane's runtime.
+.gitignore eol=crlf
+config/backends.cjs eol=crlf
+config/production-lane.cjs eol=crlf
+config/push.cjs eol=crlf
+eas.json eol=crlf

@@ -1,0 +1,53 @@
+# Answers "can this commit go over the air?" and publishes nothing: it has no update job, and
+# `config/ota-workflows.test.mjs` fails if one is added.
+#
+#   eas workflow:run .eas/workflows/ota-production-check.yml --ref <full sha> \
+#     -F sha=<full sha> --non-interactive --wait
+#
+# Fails if either hash differs from `config/live-runtimes.json`, which means the commit needs a
+# binary, not an update. Resolves the lane exactly as ota-production.yml does, and its runtimes
+# job is that lane's, so a green run here means a publish would pass the same check.
+#
+# It reads a reviewed pull request head before the founder decides, so unlike ota-production.yml
+# the commit need not be on main yet. CI and the release gate must already have passed on it,
+# because the fingerprint job executes it with production variables.
+
+name: OTA production check
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The commit to check. Must equal the --ref this run was started from.
+        type: string
+        required: true
+
+jobs:
+  preflight:
+    environment: development
+    env:
+      OTA_LANE: production-check
+      OTA_SHA: ${{ inputs.sha }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs preflight
+
+  fingerprint:
+    type: fingerprint
+    needs: [preflight]
+    environment: production
+    env:
+      APP_VARIANT: production
+      BINGD_LANE: production
+
+  runtimes:
+    environment: development
+    needs: [fingerprint]
+    env:
+      OTA_LANE: production
+      OTA_SHA: ${{ inputs.sha }}
+      OTA_ANDROID_RUNTIME: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+      OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs runtimes

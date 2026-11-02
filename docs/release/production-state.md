@@ -1,7 +1,7 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-09-26**, at the product freeze.
+**2026-11-01**, when the store table below was checked against both public listings.
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -28,17 +28,19 @@ which also holds the freeze rule.
 
 ### Store distribution
 
-| | Public today | Submitted 2026-09-26 |
+| | Public today | Previous, still installed on some phones |
 |---|---|---|
-| **iOS** (App Store, `app.bingd`) | **1.0.1 (12)**, released 2026-09-11, built from `89a1d8c`, runtime `61efbf17`, receives OTA `01a0db04` | **1.1.0 (15)**, EAS build `e38d94d9`, runtime `8ea562b7`, uploaded to App Store Connect; App Review submission is the founder's click |
-| **Android** (Google Play, `app.bingd`) | **1.0.1 (vc12)**, built from `6d2f845`, runtime `da3c7f47`, receives OTA `01a0db04` | **1.1.0 (vc15)**, EAS build `4d71b121`, runtime `ec79e181`; uploaded to the production track by hand (no Play service account exists) |
+| **iOS** (App Store, `app.bingd`) | **1.1.0 (15)**, released 2026-09-26, EAS build `e38d94d9`, runtime `8ea562b7` | **1.0.1 (12)**, built from `89a1d8c`, runtime `61efbf17`, receives OTA `01a0db04` |
+| **Android** (Google Play, `app.bingd`) | **1.1.0 (vc15)**, EAS build `4d71b121`, runtime `ec79e181`; uploaded by hand (no Play service account exists) | **1.0.1 (vc12)**, built from `6d2f845`, runtime `da3c7f47`, receives OTA `01a0db04` |
 
-Both new binaries are built from release commit `63694c3` = `9d9683a` + the marketing version
+Both 1.1.0 binaries are built from release commit `63694c3` = `9d9683a` + the marketing version
 (#212). The resolved config differs from `9d9683a` in `version` alone, measured on both lanes.
 They **embed** the frozen app, including the fresh-install reload guard (#198), which no OTA can
 deliver to a first launch.
 
-The public binaries stay live throughout review. Nothing was expired or unpublished.
+Read from the public App Store lookup and Play listing on 2026-11-01. The Play listing shows the
+current version, not rollout percentage. `config/live-runtimes.json` holds the same two runtimes
+for the OTA gate, and changes with this table.
 
 ### OTA and binary roles
 
