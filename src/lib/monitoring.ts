@@ -167,6 +167,24 @@ export function scrubTransaction<T extends Sentry.Event>(event: T): T {
   scrubRequest(event);
   if (event.extra) event.extra = scalarsOnly(event.extra);
   if (event.breadcrumbs) event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumbShape);
+
+  /**
+   * **The spans are where the query strings actually were** (security audit 2026-11-01,
+   * M-5). The React Native SDK traces XHR by default, and every `http.client` span carries
+   * the whole URL as `url` and `http.url`, plus `http.query` and `http.fragment`
+   * (`@sentry/browser` `tracing/request.js`). A PostgREST read's query string names who
+   * and what it was about, so a production trace held handles and title ids beside the
+   * account id, while the privacy page said query strings were stripped.
+   */
+  if (event.spans) {
+    for (const span of event.spans) {
+      if (span.description) span.description = stripQuery(span.description);
+      if (span.data) span.data = scrubUrlData(span.data);
+    }
+  }
+  const trace = event.contexts?.trace;
+  if (trace?.data) trace.data = scrubUrlData(trace.data);
+
   return event;
 }
 
@@ -195,16 +213,38 @@ export function scrubBreadcrumb(breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrum
 }
 
 function scrubBreadcrumbShape(breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrumb {
-  const data = breadcrumb.data;
-  if (data && typeof data.url === 'string') {
-    return { ...breadcrumb, data: { ...data, url: stripQuery(data.url) } };
-  }
-  return breadcrumb;
+  return breadcrumb.data ? { ...breadcrumb, data: scrubUrlData(breadcrumb.data) } : breadcrumb;
 }
 
+/** The SDK's own names for the part of a URL after the path, old and new conventions. */
+const URL_REMAINDER_KEYS = new Set([
+  'http.query',
+  'http.fragment',
+  'url.query',
+  'url.fragment',
+]);
+
+/**
+ * Drops the keys that hold a query or a fragment, and cuts one out of any other value.
+ *
+ * By value as well as by key, so that a URL under a name this list has never heard of is
+ * handled too: an SDK upgrade adding `url.full` beside `http.url` must not reopen this.
+ * Anything without a `?` or a `#` passes through untouched.
+ */
+function scrubUrlData<T extends Record<string, unknown>>(data: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (URL_REMAINDER_KEYS.has(key)) continue;
+    out[key] = typeof value === 'string' ? stripQuery(value) : value;
+  }
+  return out as T;
+}
+
+function stripQuery(url: string): string;
+function stripQuery(url: string | undefined): string | undefined;
 function stripQuery(url: string | undefined): string | undefined {
   if (!url) return url;
-  const cut = url.indexOf('?');
+  const cut = url.search(/[?#]/);
   return cut === -1 ? url : url.slice(0, cut);
 }
 
