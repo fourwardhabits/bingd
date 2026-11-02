@@ -19,6 +19,15 @@ export type FirstFiveShareSheetProps = {
 const SHEET_CHROME = 188;
 /** `Sheet` caps itself at 90% of the screen. */
 const SHEET_MAX_SHARE = 0.9;
+/**
+ * How long this sheet holds still for the text share sheet.
+ *
+ * Only the moment of presenting matters: once the system sheet is up, it covers this one.
+ * A timer and not the promise, because `Share.share` does not always settle on iOS.
+ * Cancelling a follow-up dialog such as Print leaves it open for ever, and a guard tied to
+ * it would trap the reader here. The image path resolves in that case, so it needs no timer.
+ */
+const TEXT_PRESENTATION_HOLD_MS = 1500;
 
 /**
  * Shows the card before anything leaves the phone, then hands it to the system sheet.
@@ -98,11 +107,23 @@ export function FirstFiveShareSheet({ rows, username, onClose }: FirstFiveShareS
 
   const shareText = async () => {
     setBusy(true);
+    presenting.current = true;
+    const hold = setTimeout(() => {
+      presenting.current = false;
+      if (open.current) setBusy(false);
+    }, TEXT_PRESENTATION_HOLD_MS);
+    const release = () => {
+      clearTimeout(hold);
+      presenting.current = false;
+    };
+
     try {
       await shareCardText(firstFiveMessage(rows));
+      release();
       track({ name: 'first_five_shared', props: { kind: 'text' } });
       close();
     } catch {
+      release();
       if (open.current) setBusy(false);
     }
   };

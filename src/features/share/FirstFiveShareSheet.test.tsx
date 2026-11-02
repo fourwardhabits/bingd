@@ -299,6 +299,53 @@ describe('when no image can be made', () => {
   });
 });
 
+describe('while the text share sheet is presenting', () => {
+  const textOffered = async () => {
+    mockCaptureRef.mockRejectedValue(new Error('capture failed'));
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(view.getByTestId('first-five-share-failed')).toBeTruthy());
+    return view;
+  };
+
+  it('holds the preview, then closes once the share sheet answers', async () => {
+    let finish: (value: { action: string }) => void = () => {};
+    (Share.share as jest.Mock).mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const view = await textOffered();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share as text' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => finish({ action: 'sharedAction' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * `Share.share` never settles when a follow-up dialog is cancelled on iOS. The reader must
+   * not be trapped by a promise nobody will answer.
+   */
+  it('lets the reader leave, and try again, when the share sheet never answers', async () => {
+    (Share.share as jest.Mock).mockReturnValue(new Promise(() => {}));
+    const view = await textOffered();
+
+    jest.useFakeTimers();
+    try {
+      await fireEvent.press(view.getByRole('button', { name: 'Share as text' }));
+      await act(async () => {
+        jest.advanceTimersByTime(1500);
+      });
+
+      expect(view.getByRole('button', { name: 'Share as text' })).toBeEnabled();
+      await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe('for a screen reader', () => {
   it('reads the list out rather than announcing an unnamed image', async () => {
     const view = await open();
