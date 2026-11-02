@@ -22,7 +22,15 @@ import {
   sendChunk,
   type ExpoTicket,
 } from './expo.ts';
-import { stillQueued, summarise, type Addressed } from './batch.ts';
+import {
+  expirationFor,
+  lateResults,
+  messagesFor,
+  partitionByDeadline,
+  stillQueued,
+  summarise,
+  type Addressed,
+} from './batch.ts';
 
 const job = (overrides: Partial<PushJob> = {}): PushJob => ({
   notification_id: '11111111-1111-1111-1111-111111111111',
@@ -819,4 +827,258 @@ Deno.test(
 Deno.test('no other push grows an import job id', () => {
   const follow = contentFor(job({ type: 'follow' }))!;
   assertEquals('importJobId' in follow.data, false);
+});
+
+// ---------------------------------------------------------------------------
+// goal_completed (20261028000100): the actorless push that had no copy
+// ---------------------------------------------------------------------------
+
+Deno.test('goal_completed says which goal, in the inbox row\'s own words', () => {
+  const content = contentFor(
+    job({
+      type: 'goal_completed',
+      actor_username: null,
+      actor_name: null,
+      goal: { year: 2031, category: 'movies', target: 50 },
+    }),
+  );
+  assert(content, 'goal_completed produced no push: the bug this fixes');
+  assertEquals(content.title, 'You hit your 2031 Movies goal 🎉');
+  assertEquals(content.body, 'Congrats on 50 movies');
+  assertEquals(content.data.kind, 'goal_completed');
+  assertEquals(content.data.actorUsername, null);
+});
+
+Deno.test('goal_completed still says something from a claim with no goal fields', () => {
+  const content = contentFor(job({ type: 'goal_completed', actor_username: null, actor_name: null }));
+  assert(content);
+  assertEquals(content.title, 'You hit your goal 🎉');
+  const tv = contentFor(
+    job({ type: 'goal_completed', actor_name: null, actor_username: null, goal: { year: 2031, category: 'tv_seasons', target: 1 } }),
+  )!;
+  assertEquals([tv.title, tv.body], ['You hit your 2031 TV goal 🎉', 'Congrats on 1 TV season']);
+});
+
+// ---------------------------------------------------------------------------
+// Proactive pushes (20261028000100)
+// ---------------------------------------------------------------------------
+
+const proactive = (type: string, facts: Record<string, unknown>, overrides: Partial<PushJob> = {}) =>
+  job({
+    type,
+    actor_username: null,
+    actor_name: null,
+    media_item_id: 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm',
+    media_kind: 'movie',
+    media_title: 'Dune: Part Three',
+    proactive: { type, ...facts },
+    ...overrides,
+  });
+
+Deno.test('theatrical: the day, never the hour, and the reason', () => {
+  const at = (opens: string, today: string) =>
+    contentFor(proactive('theatrical_release', { opens_on: opens, local_today: today }))!;
+  // 2031-05-16 is a Friday.
+  assertEquals(at('2031-05-16', '2031-05-09').title, 'Dune: Part Three');
+  assertEquals(at('2031-05-16', '2031-05-09').body, 'Opens next Friday. You saved it to your Watchlist.');
+  assertEquals(at('2031-05-16', '2031-05-12').body, 'Opens Friday, May 16. You saved it to your Watchlist.');
+  assertEquals(at('2031-05-16', '2031-05-15').body, 'Opens tomorrow. You saved it to your Watchlist.');
+});
+
+Deno.test('theatrical: on or after the day there is nothing to say', () => {
+  assertEquals(contentFor(proactive('theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-16' })), null);
+  assertEquals(contentFor(proactive('theatrical_release', { opens_on: null, local_today: '2031-05-16' })), null);
+});
+
+Deno.test('watchlist social: two names at most, counted as sent', () => {
+  const say = (names: string[], count: number) =>
+    contentFor(proactive('watchlist_social', { actor_names: names, actor_count: count }))?.body ?? null;
+  assertEquals(say(['Ravi', 'Eric'], 2), 'Ravi and Eric watched it. It’s on your Watchlist.');
+  assertEquals(say(['Ravi', 'Eric'], 3), 'Ravi, Eric and 1 other watched it. It’s on your Watchlist.');
+  assertEquals(say(['Ravi', 'Eric'], 6), 'Ravi, Eric and 4 others watched it. It’s on your Watchlist.');
+  assertEquals(say(['Ravi'], 1), null, 'one friend is never a push');
+});
+
+Deno.test('resurfacing: one sentence per reason, and a generic one otherwise', () => {
+  const say = (reason: string | null) => contentFor(proactive('watchlist_resurface', { reason }))!.body;
+  assertEquals(say('friends'), 'Friends have been watching it. It’s on your Watchlist.');
+  assertEquals(say('trending'), 'It’s trending this week. It’s on your Watchlist.');
+  assertEquals(say('recent'), 'It came out recently. It’s on your Watchlist.');
+  assertEquals(say('saved'), 'Still meaning to watch it? It’s on your Watchlist.');
+  assertEquals(say(null), 'Still meaning to watch it? It’s on your Watchlist.');
+});
+
+Deno.test('every proactive push opens its title, and nothing names a person in the payload', () => {
+  for (const [type, facts] of [
+    ['theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-09' }],
+    ['watchlist_social', { actor_names: ['Ravi', 'Eric'], actor_count: 2 }],
+    ['watchlist_resurface', { reason: 'saved' }],
+    ['season_premiere', { season_number: 3, available_on: '2031-05-16' }],
+  ] as const) {
+    const content = contentFor(proactive(type, facts))!;
+    assertEquals(content.data.kind, type);
+    assertEquals(content.data.mediaItemId, 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm');
+    assertEquals(content.data.actorUsername, null);
+    assertEquals(content.data.feedEventId, null);
+  }
+});
+
+Deno.test('a proactive push for a season names the show', () => {
+  const content = contentFor(
+    proactive('watchlist_resurface', { reason: 'saved' }, { media_kind: 'season', media_title: 'Season 2', series_title: 'Severance' }),
+  )!;
+  assertEquals(content.title, 'Severance, S2');
+});
+
+// Season premiere (20261031000100): the show is the title, the season is the news.
+const premiere = (facts: Record<string, unknown>, overrides: Partial<PushJob> = {}) =>
+  proactive(
+    'season_premiere',
+    { available_on: '2031-05-16', local_today: '2031-05-16', ...facts },
+    { media_kind: 'season', media_title: 'Season 3', series_title: 'Severance', ...overrides },
+  );
+
+Deno.test('season premiere: the show, and which season is now available', () => {
+  const content = contentFor(premiere({ season_number: 3 }))!;
+  assertEquals(content.title, 'Severance');
+  assertEquals(content.body, 'Season 3 is now available in the US.');
+  assertEquals(content.data.kind, 'season_premiere');
+  assertEquals(content.data.mediaItemId, 'mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm');
+  assertEquals(content.data.actorUsername, null);
+  assertEquals(content.data.feedEventId, null);
+});
+
+Deno.test('season premiere: no usable number falls back to the season’s own title', () => {
+  const named = { media_title: 'The Final Chapter' };
+  for (const season_number of [null, undefined, 0, -1, 2.5, '3']) {
+    assertEquals(
+      contentFor(premiere({ season_number }, named))!.body,
+      'The Final Chapter is now available in the US.',
+    );
+  }
+});
+
+Deno.test('season premiere: without a show it names the season, without any title it says nothing', () => {
+  const orphan = contentFor(premiere({ season_number: 3 }, { series_title: null }))!;
+  assertEquals([orphan.title, orphan.body], ['Season 3', 'Season 3 is now available in the US.']);
+  assertEquals(contentFor(premiere({ season_number: 3 }, { series_title: null, media_title: null })), null);
+  assertEquals(contentFor(premiere({ season_number: 3 }, { series_title: '  ', media_title: '' })), null);
+  // A show but no season title and no number: there is no season to name.
+  assertEquals(contentFor(premiere({ season_number: null }, { media_title: null })), null);
+});
+
+Deno.test('copy has no em dash in any proactive push', () => {
+  for (const content of [
+    contentFor(proactive('theatrical_release', { opens_on: '2031-05-16', local_today: '2031-05-12' }))!,
+    contentFor(proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 5 }))!,
+    contentFor(proactive('watchlist_resurface', { reason: 'trending' }))!,
+    contentFor(premiere({ season_number: 3 }))!,
+  ]) {
+    assert(!`${content.title} ${content.body}`.includes('—'));
+    assert(!`${content.title} ${content.body}`.includes('!'));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Tonight or not at all, at the provider (Codex re-review, MAJOR)
+//
+// The claim refuses a stale proactive job, but Expo keeps an undelivered message for
+// about a month unless the message says otherwise, so a phone offline at 19:59 would be
+// woken the next morning. Every proactive message carries the claim's `deliver_by` as
+// Expo's documented `expiration` (seconds since the epoch), and a message already past it
+// is never submitted. A reactive message is built exactly as before.
+// ---------------------------------------------------------------------------
+
+const socialAt = (deliverBy: string | null) =>
+  proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 2, deliver_by: deliverBy });
+
+Deno.test('a proactive message carries its deadline as the Expo expiration, in seconds', () => {
+  const [entry] = messagesFor([socialAt('2031-12-15T20:00:00+00:00')]);
+  assertEquals(entry.message.expiration, Date.UTC(2031, 11, 15, 20, 0, 0) / 1000);
+  // A zone the claim states in its own offset is the same instant.
+  const [kolkata] = messagesFor([socialAt('2031-12-16T01:30:00+05:30')]);
+  assertEquals(kolkata.message.expiration, Date.UTC(2031, 11, 15, 20, 0, 0) / 1000);
+});
+
+Deno.test('the expiration is the deadline the claim chose, whichever bound it was', () => {
+  // The claim sends the earlier of the candidate's expiry and 20:00 local; the sender
+  // carries that instant whole and rounds down, so the provider never holds it longer.
+  assertEquals(
+    expirationFor(socialAt('2031-12-15T17:40:00.900+00:00')),
+    Date.UTC(2031, 11, 15, 17, 40, 0) / 1000,
+  );
+  assertEquals(
+    expirationFor(proactive('theatrical_release', {
+      opens_on: '2031-05-16', local_today: '2031-05-15', deliver_by: '2031-05-16T00:00:00+00:00',
+    })),
+    Date.UTC(2031, 4, 16) / 1000,
+  );
+});
+
+Deno.test('every device of a proactive job gets the same expiration', () => {
+  const two = socialAt('2031-12-15T20:00:00Z');
+  two.tokens = [
+    { token: 'ExponentPushToken[one]', platform: 'ios' },
+    { token: 'ExponentPushToken[two]', platform: 'android' },
+  ];
+  const built = messagesFor([two]);
+  assertEquals(built.length, 2);
+  assertEquals(new Set(built.map((b) => b.message.expiration)).size, 1);
+});
+
+Deno.test('a proactive job without a usable deadline is not sent at all', () => {
+  assertEquals(messagesFor([socialAt(null)]), []);
+  assertEquals(messagesFor([socialAt('not a date')]), []);
+  assertEquals(messagesFor([proactive('watchlist_social', { actor_names: ['A', 'B'], actor_count: 2 })]), []);
+  // Season premiere (20261031000100) is held to the same deadline, and carries it when it has one.
+  assertEquals(messagesFor([premiere({ season_number: 3 })]), []);
+  assertEquals(messagesFor([premiere({ season_number: 3, deliver_by: null })]), []);
+  const [season] = messagesFor([premiere({ season_number: 3, deliver_by: '2031-05-16T20:00:00Z' })]);
+  assertEquals(season.message.expiration, Date.UTC(2031, 4, 16, 20) / 1000);
+});
+
+Deno.test('a reactive message is unchanged: no expiration, the same shape as before', () => {
+  const [entry] = messagesFor([job()]);
+  assert(!('expiration' in entry.message));
+  assertEquals(Object.keys(entry.message).sort(), [
+    'body', 'channelId', 'data', 'priority', 'sound', 'title', 'to',
+  ]);
+  // And a reactive job beside a proactive one in the same batch keeps it that way.
+  const [reactive, pro] = messagesFor([job(), socialAt('2031-12-15T20:00:00Z')]);
+  assert(!('expiration' in reactive.message));
+  assertEquals(pro.message.expiration, Date.UTC(2031, 11, 15, 20) / 1000);
+});
+
+Deno.test('a message already past its deadline is not submitted; one inside it is', () => {
+  const built = messagesFor([job(), socialAt('2031-12-15T20:00:00Z')]);
+  const before = partitionByDeadline(built, Date.UTC(2031, 11, 15, 19, 59, 59));
+  assertEquals(before.due.length, 2);
+  assertEquals(before.late.length, 0);
+
+  // At the deadline itself, and any time after it: the proactive message is late, and a
+  // reactive message, which has no deadline, is always due.
+  for (const now of [Date.UTC(2031, 11, 15, 20), Date.UTC(2031, 11, 16, 9)]) {
+    const { due, late } = partitionByDeadline(built, now);
+    assertEquals(due.map((d) => d.message.expiration), [undefined]);
+    assertEquals(late.length, 1);
+    assertEquals(late[0].message.expiration, Date.UTC(2031, 11, 15, 20) / 1000);
+  }
+});
+
+Deno.test('a proactive message held back and sent late is still bounded by the evening', () => {
+  // An offline or slow device: whenever Expo next tries, the message says when to give
+  // up, and that is never after 20:00 local on the evening it was chosen for.
+  const [entry] = messagesFor([socialAt('2031-12-15T20:00:00Z')]);
+  assert(entry.message.expiration! * 1000 <= Date.UTC(2031, 11, 15, 20));
+  assert(entry.message.expiration! * 1000 < Date.UTC(2031, 11, 16, 9), 'not the next morning');
+});
+
+Deno.test('a notification whose every message was late is settled once, as nothing to retry', () => {
+  const built = messagesFor([socialAt('2031-12-15T20:00:00Z')]);
+  const { late } = partitionByDeadline(built, Date.UTC(2031, 11, 16, 9));
+  assertEquals(lateResults(late, []), [
+    { notification_id: built[0].notificationId, attempt: 1, delivered: true, error: null },
+  ]);
+  // Already settled from a submitted message: not repeated.
+  assertEquals(lateResults(late, [{ notification_id: built[0].notificationId }]), []);
 });

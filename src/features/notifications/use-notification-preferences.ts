@@ -6,7 +6,8 @@ import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
 /**
- * The eight categories, exactly as `_notification_categories()` names them.
+ * The nine categories, exactly as `_notification_categories()` names them.
+ * `watchlist_discovery` joined on 20261028000100 and governs all three proactive kinds.
  *
  * The union is the enforcement. A string here that the database does not know is a
  * 22023 at runtime; a member missing from `SECTIONS` is a compile error, because
@@ -20,11 +21,12 @@ export type NotificationCategory =
   | 'watch_tags'
   | 'recommendations'
   | 'invites'
-  | 'awards';
+  | 'awards'
+  | 'watchlist_discovery';
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
-export type NotificationSectionKey = 'social' | 'recommendations' | 'achievements';
+export type NotificationSectionKey = 'social' | 'recommendations' | 'achievements' | 'watching';
 
 export type NotificationSetting = {
   key: NotificationCategory;
@@ -136,7 +138,40 @@ export const SECTIONS: readonly NotificationSection[] = [
       },
     ],
   },
+  /**
+   * 20261028000100. One switch for everything the app says on its own about the reader's
+   * Watchlist (founder: "do not create one toggle per internal event"): friends who
+   * watched a saved title, a saved film opening in theaters next week, and an occasional
+   * pick from the Watchlist. Last, because it is the one section nobody else causes.
+   */
+  {
+    key: 'watching',
+    title: 'Watching',
+    masterLabel: 'All Watching notifications',
+    settings: [
+      {
+        key: 'watchlist_discovery',
+        label: 'Watchlist & discovery',
+        description:
+          'Friends watch something you saved, a saved film opens in theaters, or an occasional pick from your Watchlist.',
+      },
+    ],
+  },
 ];
+
+/**
+ * The visible controls on Notification Settings, counted (founder, 2026-10-28: five to
+ * ten in all).
+ *
+ * One switch per category and no section masters. A master was never stored — it read
+ * "on" if any child was on and wrote its children in one call — so it governed nothing a
+ * child switch does not, and removing it removes no preference and no behaviour. Nine
+ * switches, plus the permission card's single button (Turn on or Open Settings, and
+ * neither while push is on). `masterLabel`, `masterOn` and `setSection` are kept as the
+ * section's model and its bulk writer, and are not drawn.
+ */
+export const VISIBLE_SWITCHES = SECTIONS.flatMap((section) => section.settings);
+export const MAX_PERMISSION_CONTROLS = 1;
 
 /** Every category in a section, which is what a master switch writes. */
 export function categoriesIn(section: NotificationSection): NotificationCategory[] {
@@ -166,6 +201,7 @@ const _exhaustive: Record<NotificationCategory, true> = {
   recommendations: true,
   invites: true,
   awards: true,
+  watchlist_discovery: true,
 };
 export const ALL_CATEGORIES = Object.keys(_exhaustive) as NotificationCategory[];
 
@@ -193,14 +229,14 @@ export function masterOn(
 /**
  * The caller's own switches.
  *
- * Read from `my_notification_preferences`, which returns all eight every time with
+ * Read from `my_notification_preferences`, which returns all nine every time with
  * each one defaulted by its own category. The screen never assembles a default: a
  * default written in two places is a default that disagrees with itself, and the
  * history of the two late movers — reactions (20260820000100) and awards
  * (20260828000100, when the unlock ledger gave the category its writer) — is
  * exactly what a second copy would have got wrong twice.
  *
- * All eight default on as of `20260828000100`.
+ * Every category defaults on except `reactions`, which `20261031000100` turned off again.
  */
 export function useNotificationPreferences(viewerId: string) {
   return useQuery({
@@ -221,7 +257,8 @@ export function useNotificationPreferences(viewerId: string) {
        * then defaulted *off*, so a build talking to a backend that predates
        * 20260819000300 would have drawn them on, and a reader who then touched
        * anything in that section would have switched on a category they never
-       * chose. Both categories default on today, and the rule stands anyway:
+       * chose. `awards` defaults on today and `reactions` is off again
+       * (20261031000100), and the rule stands either way:
        * guessing a default on the client is the exact duplication
        * `my_notification_preferences` exists to prevent.
        *

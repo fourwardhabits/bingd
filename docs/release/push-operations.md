@@ -436,3 +436,99 @@ defect**, and it is fixed in `20260826000700`:
 2. If it will not run: count `device_tokens` first. Zero means no phone is addressable and
    nothing below it can matter (§10).
 3. Only then look at the drain.
+
+---
+
+## 12. The proactive kill switch — `20261028000100`
+
+Proactive pushes (`watchlist_social`, `theatrical_release`, `watchlist_resurface`, and
+`season_premiere` since `20261031000100`;
+[`../product/proactive-notifications.md`](../product/proactive-notifications.md)) have their
+own switch, and it is **separate from everything above**: it stops the app speaking on its
+own, and leaves every push a person caused exactly as it was.
+
+**Emergency off.** One statement, SQL editor, no deploy, no cron change:
+
+```sql
+update app_config set value = 'false'::jsonb where key = 'proactive.push_enabled';
+```
+
+From the next tick, the arbiter selects nothing. From the next drain (within a minute),
+`claim_push_batch` drops any proactive job already queued and records it
+`suppressed / kill_switch`. Reactive delivery does not read the switch.
+
+**Verify:**
+
+```sql
+select proactive_status() -> 'push_enabled';                -- false
+select count(*) from push_outbox o
+  join proactive_candidates c on c.notification_id = o.notification_id;   -- 0 within a minute
+select push_drain_status() -> 'healthy';                    -- still true: reactive unaffected
+```
+
+**Also stop new proactive inbox rows and candidates** (the social trigger and the
+collectors):
+`update app_config set value = 'false'::jsonb where key = 'proactive.generation_enabled';`
+
+**All four switches ship `false`** (`generation_enabled`, `resurface_enabled`, `push_enabled`,
+and `season_enabled` since `20261031000100`). Applying `20261028000100`/`200`/`20261031000100`
+creates no proactive row and sends no proactive push. Enabling is deliberate and ordered:
+generation, then push; resurfacing and seasons each separately and later
+(`proactive-notifications.md` §K, §Q). The Reactions default (off for unset accounts) and the
+`goal_completed` push copy are **not** behind these switches.
+
+**Season premieres, separately.** Off, a season premiere is neither created nor selected,
+and one already selected is dropped at the claim (`suppressed / season_disabled`):
+
+```sql
+update app_config set value = 'false'::jsonb where key = 'proactive.season_enabled';
+select proactive_status() -> 'season_enabled';
+```
+
+Seasons also need a valid operator verification of US availability per release, written by
+hand and good for at most 48 hours (`proactive_season_availability`, §Q). Nothing writes it
+automatically.
+
+**Bulk changes to Watchlist & discovery: one reader per transaction** (Fable final review,
+MINOR 2). The mute trigger fires per row in physical order and takes reader locks; one
+statement switching many readers off can take them out of order and deadlock with a tick.
+An `ORDER BY` in the update's input does not order its triggers. Loop one reader per
+transaction, or pause the tick (`unschedule_proactive_notifications()`) first.
+
+**Per device.** A proactive push goes only to tokens whose `proactive_version` meets
+`proactive.min_client_version` (2 since `20261031000100`). An old build on the same account never receives one, and
+reactive pushes still reach every live token.
+
+**Tonight or not at all, and at most once.** A proactive job claimed after its evening
+window, after `expires_at`, or on a later local day is dropped and its candidate ends
+`expired`, so a drain that recovers in the morning sends nothing stale. A proactive job is
+handed to the sender **once**: an expired lease or a retry after a failure never re-sends
+it (§7's at-least-once retry applies to reactive pushes only). A sender crash around the
+Expo call can therefore lose a proactive push. It can never duplicate one.
+
+**And not late at the provider.** Each proactive job carries `proactive.deliver_by` (the
+earlier of `expires_at` and 20:00 local on its selected evening). push-sender sends it as
+the Expo message's `expiration` (seconds since the epoch), so APNs/FCM give up at that
+instant rather than holding the message for weeks for an offline phone, and it drops any
+proactive message already past it just before submission (the drain response's `expired`
+count). A proactive job without a deadline is never sent. Reactive messages carry no
+`expiration`. Deploy this push-sender before `proactive.push_enabled` is turned on.
+
+**Concurrency, for an operator.** Proactive ticks serialise on one global lock
+(`bingd.proactive.arbiter`), so a manual `_proactive_tick()` during a cron run simply waits
+for it. A drain never waits on a proactive candidate: one that is busy is put back in the
+queue and sent (or dropped) by the next drain. A reader who switches Watchlist & discovery
+off while a tick is running can wait for the **rest of that tick**, because reader locks
+last until it commits. If the app role's statement timeout cuts that write off, it rolls
+back, the settings screen shows an error with the real setting, and the reader can retry.
+Keep tick duration in `proactive_status` well under that timeout
+(`proactive-notifications.md` §E).
+
+**Back on:** set `proactive.push_enabled` to `'true'::jsonb`. Nothing that expired while it
+was off comes back; candidates that are still timely are considered again at the next
+evening window, under the normal one-per-day budget.
+
+**Fail-closed.** Anything but the JSON boolean `true` is off: a typo stops proactive push
+rather than starting it. The switch ships `false`.
+
+`push.delivery_enabled` is still inert (§10). It is not this switch, and wiring it is #119.

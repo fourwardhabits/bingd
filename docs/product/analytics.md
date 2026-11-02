@@ -347,6 +347,17 @@ yet earned one.
 `network` is a closed set of five words — `instagram`, `tiktok`, `youtube`, `x`,
 `website`.
 
+### Notification opens — added 2026-10-28
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `notification_opened` | a push was **tapped** (lock screen or notification centre), or an inbox row was tapped and led somewhere | the reader | `kind`, `channel` (`push` / `inbox`), `proactive` |
+
+The coarse count only. The per-notification record, which candidate it was, where it
+led, and whether the title was then ranked or watched, is **server-side** in
+`notification_opens` and `proactive_attribution` (`proactive-notifications.md` §M), so
+none of it reaches a vendor. No title, no person and no id is sent here.
+
 **What deliberately does not travel, and why each is worse than it looks.** Not the
 handle: a handle *is* a username, which is second on the forbidden list, and it would be
 somebody else's username on somebody else's account. Not the URL, which contains the

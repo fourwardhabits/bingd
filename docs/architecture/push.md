@@ -408,10 +408,13 @@ throwing, because that code path is a cold start from a tap.
   `DeviceNotRegistered` synchronously. It self-heals one notification late. That is the
   whole of what receipt polling would buy, and it is why it is not built.
 - **Per-token retry accounting.** §6.
-- **A way back from "Not now".** Settings → Notification Settings is where a "turn on push"
-  row would go.
+- **A way back from "Not now".** *Built 2026-10-28:* Notification Settings opens with
+  `PushPermissionCard`, which states the OS answer and offers Turn on (where the OS can still
+  ask) or Open Settings (where it cannot). See `proactive-notifications.md` §L.
 - **The scheduled nudge** (PRD §15). It ships with push in the PRD's plan and is not in this
-  tranche.
+  tranche. *Superseded 2026-10-28* by watchlist resurfacing through the proactive ledger
+  (`proactive-notifications.md` §I), which is not in `_push_eligible`: proactive pushes are
+  enqueued by `_proactive_arbitrate` alone, never by the after-insert trigger.
 - **Per-channel preferences.** §4 — deliberately, and reversibly.
 - **Push for `follow_approved` and `friendship`.** §4. *(This bullet named `award_earned`
   until 2026-08-28, when `20260828000100` gave it a writer and a place in

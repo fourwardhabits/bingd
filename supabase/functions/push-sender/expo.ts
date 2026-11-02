@@ -66,6 +66,16 @@ export type ExpoMessage = {
   sound?: 'default';
   channelId?: string;
   priority?: 'default' | 'normal' | 'high';
+  /**
+   * Expo's documented message field: a timestamp in **seconds** since the Unix epoch after
+   * which the push services stop trying to deliver. Without it (and without `ttl`), Expo
+   * uses each provider's default retention, about a month, so a phone offline when the
+   * message was sent is still woken by it whenever it reconnects.
+   *
+   * Set only on proactive messages (`messagesFor`), whose promise is "tonight or not at
+   * all". A reactive message never carries one and keeps the default.
+   */
+  expiration?: number;
 };
 
 /** One ticket, as Expo returns it. `id` is a receipt id, which v1 does not poll. */
