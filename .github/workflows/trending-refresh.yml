@@ -41,6 +41,7 @@ name: Trending refresh
 #   * `persist-credentials: false`, so the job's GitHub token is not left on disk;
 #   * `environment: production`, which is restricted to `main`, and which is where the
 #     production secrets belong. A workflow on any other branch cannot reach them there.
+#     The staging job sits in `nonprod`, restricted the same way.
 #
 # config/workflows.test.mjs pins all of it, so losing one is a failed pull request.
 #
@@ -106,6 +107,7 @@ jobs:
     if: >-
       github.event_name == 'schedule' ||
       contains(fromJSON('["nonprod", "both"]'), github.event.inputs.target)
+    environment: nonprod
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:

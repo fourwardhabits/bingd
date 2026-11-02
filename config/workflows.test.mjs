@@ -53,6 +53,27 @@ describe('GitHub Actions', () => {
     }
   });
 
+  it('keeps every staging secret behind the nonprod environment', () => {
+    for (const { name, text } of workflows) {
+      for (const job of jobsOf(text)) {
+        if (!/secrets\.\w*_NONPROD/.test(job)) continue;
+        assert.match(job, /^ {4}environment:.*nonprod/m, `${name} reads a staging secret outside it`);
+      }
+    }
+  });
+
+  it('runs no job with a secret outside an environment', () => {
+    let held = 0;
+    for (const { name, text } of workflows) {
+      for (const job of jobsOf(text)) {
+        if (!job.includes('secrets.')) continue;
+        held += 1;
+        assert.match(job, /^ {4}environment:/m, `${name} holds a secret with no environment`);
+      }
+    }
+    assert.ok(held > 0, 'the scan found no job with a secret, so it is not reading these files');
+  });
+
   it('leaves no job token on disk where a secret is in reach', () => {
     for (const { name, text } of workflows) {
       for (const job of jobsOf(text)) {
