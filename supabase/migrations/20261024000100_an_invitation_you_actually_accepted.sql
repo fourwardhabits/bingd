@@ -39,9 +39,12 @@
 -- accounts under a day old, and independent review was right to reject that: an account's
 -- age does not say how it arrived.
 --
--- It answers `unavailable`, and the word is chosen for what an installed build does with
--- it. That is the one refusal it keeps the token through, so somebody who opens a link in
--- the gap before the update is shown the invitation after it, rather than losing it.
+-- It raises rather than answers, and the code is chosen for what an installed build does
+-- with it. `22023` is on that build's list of certain refusals, so it keeps the token,
+-- counts nothing, and puts this message in front of the person: somebody who opens a link
+-- in the gap before the update is told what to do, and is shown the invitation after it.
+-- An answer of `unavailable` looked equivalent and is not. That build gives up on the fifth,
+-- so a slow update would have lost the invitation.
 --
 -- **The account is part of the call.** `p_accepting_user` says who pressed Accept, and a
 -- call from any other session is refused before anything is spent. The app records a press
@@ -338,12 +341,12 @@ set search_path = public
 as $$
 begin
   perform assert_can_write();
-  return jsonb_build_object('status', 'refused', 'reason', 'unavailable');
+  raise exception 'Update bingd to accept this invitation.' using errcode = '22023';
 end;
 $$;
 
 comment on function redeem_invite(uuid, text) is
-  'The call installed builds make, for an Accept tap and for a background redemption with no tap alike. Indistinguishable, so it does nothing (20261024000100): no edge, no attribution, no notification. Answers unavailable, the one refusal those builds keep the token through, so the invitation is shown after they update. Remove once no supported build sends it.';
+  'The call installed builds make, for an Accept tap and for a background redemption with no tap alike. Indistinguishable, so it does nothing (20261024000100): no edge, no attribution, no notification. Raises 22023 with a message those builds show as it stands, and keep the token through without counting it, so the invitation is shown after they update. Remove once no supported build sends it.';
 
 
 create or replace function invite_preview(p_token text)

@@ -38,10 +38,7 @@ const linkOf = (owner) =>
 
 /** What an installed build sends when the person opens a link and leaves. */
 const silently = (who, token) =>
-  t.asUser(who, async () => {
-    const { rows } = await t.sql(`select redeem_invite($1, $2) as r`, [await op(), token]);
-    return rows[0].r;
-  });
+  t.asUser(who, async () => t.errorFrom(`select redeem_invite($1, $2)`, [await op(), token]));
 
 const accept = (who, token, { id = null, as = who } = {}) =>
   t.asUser(who, async () => {
@@ -131,9 +128,12 @@ describe('B-1: a private account opens a link and leaves', () => {
 
       assert.deepEqual(await reach(attacker, victim), CLOSED, 'the fixture must start closed');
 
-      const answer = await silently(victim, token);
+      const refusal = await silently(victim, token);
 
-      assert.deepEqual(answer, { status: 'refused', reason: 'unavailable' });
+      // `22023` is what an installed build reads as a certain refusal: it keeps the token
+      // without counting it, and shows this sentence. Any other code loses one or the other.
+      assert.equal(refusal?.code, '22023');
+      assert.equal(refusal?.message, 'Update bingd to accept this invitation.');
       assert.deepEqual(await reach(attacker, victim), CLOSED);
       assert.deepEqual(await edges(attacker, victim), []);
       assert.deepEqual(await traces(victim, attacker), NO_TRACE);

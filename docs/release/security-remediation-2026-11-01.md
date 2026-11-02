@@ -20,7 +20,7 @@ Follow this order. The client calls functions that only exist after the migratio
 | Migrations before the website | The website needs `public_profile_card`. The old website's profile read stops working when the migration lands, and it falls back to the generic page until step 4 |
 | Installed apps | Safe from step 3, with no update. `redeem_invite` no longer does anything |
 
-Between steps 3 and 5, nobody can accept an invitation. An old build shows "This invitation cannot be accepted" and keeps the link, and the person sees the invitation once the update arrives. So keep that gap short, but nothing is lost in it.
+Between steps 3 and 5, nobody can accept an invitation. An old build says "Update bingd to accept this invitation. Your invitation has been kept", keeps the link, and shows the invitation once the update arrives. So keep that gap short, but nothing is lost in it.
 
 ### After the migrations
 

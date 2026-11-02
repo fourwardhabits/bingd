@@ -53,6 +53,17 @@ comment on function _cap_device_tokens() is
 
 revoke execute on function _cap_device_tokens() from public, anon, authenticated;
 
+drop trigger if exists device_tokens_cap on device_tokens;
+
+-- `when` is what stops the eviction re-entering: the rows it touches are no longer live.
+create trigger device_tokens_cap
+  after insert or update of user_id, revoked_at on device_tokens
+  for each row
+  when (new.revoked_at is null)
+  execute function _cap_device_tokens();
+
+-- After the trigger, not before. A registration that finished first is visible to this
+-- statement, and one that starts later passes through the trigger, so none falls between.
 update device_tokens d
    set revoked_at = now()
  where d.id in (
@@ -65,15 +76,6 @@ update device_tokens d
      ) r
     where r.n > 10
  );
-
-drop trigger if exists device_tokens_cap on device_tokens;
-
--- `when` is what stops the eviction re-entering: the rows it touches are no longer live.
-create trigger device_tokens_cap
-  after insert or update of user_id, revoked_at on device_tokens
-  for each row
-  when (new.revoked_at is null)
-  execute function _cap_device_tokens();
 
 
 create or replace function create_list(
