@@ -67,9 +67,15 @@ jobs:
   send:
     name: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }} on ${{ github.event_name == 'schedule' && 'production' || github.event.inputs.target }}
     runs-on: ubuntu-latest
+    # Restricted to `main` in the repository settings, and where the production secrets
+    # belong: a workflow on any other branch cannot reach them there. `nonprod` has no
+    # restriction, so a manual dry run keeps working from a branch.
+    environment: ${{ (github.event_name == 'schedule' || github.event.inputs.target == 'production') && 'production' || 'nonprod' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
