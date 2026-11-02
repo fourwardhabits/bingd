@@ -89,3 +89,21 @@ A row here is not proof of anything, because most will be people who tapped Acce
 ### 4. Letterboxd audit
 
 See [letterboxd-match-audit.md](../ops/letterboxd-match-audit.md). The matcher is safe once the migration applies. The audit is only about what may already be wrong.
+
+### 5. Old welcome-email logs
+
+The repository is public, so its Actions logs are too. The worker no longer logs handles, but nine past runs of **Welcome email** still show one or two. Deleting a log cannot be undone, so this was left for you.
+
+For each run below, open `https://github.com/fourwardhabits/bingd/actions/runs/<id>`, open the **⋯** menu and choose **Delete all logs**. The run record stays, and `welcome_emails` still holds who was written to.
+
+```text
+35363614512
+35364208000
+35765305951
+36047171011
+37075746208
+38973914723
+39518374765
+40241193636
+40427285105
+```
