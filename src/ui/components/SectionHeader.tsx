@@ -54,7 +54,13 @@ export function SectionHeader({
       // spells out "T O P  R A N K E D".
       accessibilityLabel={title}
     >
-      <Text variant="sectionHeader" tone="action">
+      <Text
+        variant="sectionHeader"
+        tone="action"
+        // The token itself uppercases, so printing the title as given is not enough: the
+        // style has to be undone as well, or the exception quietly does nothing.
+        style={exactCase ? styles.exactCase : undefined}
+      >
         {exactCase ? title : title.toUpperCase()}
       </Text>
       {actionLabel && onPressAction ? (
@@ -86,4 +92,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
   },
   action: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
+  exactCase: { textTransform: 'none' },
 });
