@@ -219,14 +219,17 @@ describe('claiming a person', () => {
 });
 
 describe('who can read and write a person', () => {
-  it('is readable signed out, like every other catalogue table', async () => {
-    // A filmography is what TMDB publishes on a public page. It says nothing about
-    // any account, and nothing viewer-relative is stored in it.
-    const { rows } = await t.asAnon(() =>
+  it('is readable signed in, and not signed out', async () => {
+    // A filmography says nothing about any account, so this is not a privacy rule. Anon
+    // simply has no reader that needs it (20261024000400).
+    const bob = await t.createUser({ username: 'reader_person' });
+    const { rows } = await t.asUser(bob, () =>
       t.sql(`select tmdb_person_id from person_cache where tmdb_person_id = 1001`),
     );
-
     assert.equal(rows.length, 1);
+
+    const error = await t.asAnon(() => t.errorFrom(`select tmdb_person_id from person_cache`));
+    assert.equal(error?.code, '42501');
   });
 
   it('cannot be written by a signed-in client', async () => {

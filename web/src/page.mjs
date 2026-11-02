@@ -41,6 +41,16 @@ import {
   titlePreview,
   tokenFromPath,
 } from './router.mjs';
+import {
+  DEMO_CHOICES,
+  DEMO_MOVIES,
+  canSwap,
+  choose,
+  currentPair,
+  demoResult,
+  startDemo,
+  swap,
+} from './demo.mjs';
 
 /**
  * Build-time values, written into the page by `build.mjs` as a JSON script block.
@@ -614,12 +624,246 @@ function genericPage(cfg) {
   paintInstall(cfg, platformNow());
 }
 
+/**
+ * `/` — the install row, plus the ranking demo in the hero.
+ *
+ * The install row is painted first and owes the demo nothing: a demo that fails to
+ * paint, or a visitor who never touches it, leaves exactly the landing page there was
+ * before.
+ */
+function homePage(cfg) {
+  const platform = platformNow();
+  paintInstall(cfg, platform);
+  wireDemo(cfg, platform);
+}
+
+/** Whether the visitor has asked the system for less motion. */
+const reducedMotion = () => {
+  try {
+    return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A poster, or the typographic tile it sits on.
+ *
+ * The tile is always there and carries the title, so a poster TMDB no longer serves, or
+ * one that has not arrived yet, draws an honest card rather than an empty frame. The
+ * image is revealed only once it has decoded, and only if it is still the image this
+ * slot is meant to show — a slow poster from the previous pair must not land on the
+ * next one.
+ */
+function paintArt(art, movie) {
+  const tile = art.querySelector('.demo-tile');
+  if (tile) tile.textContent = movie.title;
+
+  const img = art.querySelector('img');
+  if (!img) return;
+  img.hidden = true;
+  img.removeAttribute('src');
+  if (!movie.poster) return;
+  img.onload = () => {
+    if (img.src === movie.poster) img.hidden = false;
+  };
+  img.src = movie.poster;
+}
+
+function paintChoice(button, movie) {
+  const name = button.querySelector('.demo-name');
+  if (name) name.textContent = movie.title;
+  const year = button.querySelector('.demo-year');
+  if (year) year.textContent = movie.year ? String(movie.year) : '';
+  const art = button.querySelector('.demo-art');
+  if (art) paintArt(art, movie);
+}
+
+/**
+ * Asks the browser for a likely next newcomer's poster before it is needed, so the next
+ * pair usually arrives with its art rather than a tile that turns into a poster a beat
+ * later.
+ */
+function warmPoster(movie) {
+  if (!movie?.poster) return;
+  const img = document.createElement('img');
+  img.decoding = 'async';
+  img.src = movie.poster;
+}
+
+/** One row of the result: position, art, name and year. Built, never templated. */
+function resultRow(entry) {
+  const item = document.createElement('li');
+  item.className = 'demo-rank';
+  item.style.setProperty('--i', String(entry.position - 1));
+
+  const number = document.createElement('span');
+  number.className = 'demo-rank-n';
+  number.setAttribute('aria-hidden', 'true');
+  number.textContent = String(entry.position);
+  item.append(number);
+
+  const art = document.createElement('span');
+  art.className = 'demo-art demo-rank-art';
+  art.setAttribute('aria-hidden', 'true');
+  const tile = document.createElement('span');
+  tile.className = 'demo-tile';
+  const img = document.createElement('img');
+  img.alt = '';
+  img.width = 342;
+  img.height = 513;
+  art.append(tile, img);
+  paintArt(art, entry);
+  item.append(art);
+
+  const name = document.createElement('span');
+  name.className = 'demo-rank-name';
+  name.textContent = entry.title;
+  item.append(name);
+
+  if (entry.year) {
+    const year = document.createElement('span');
+    year.className = 'demo-rank-year';
+    year.textContent = String(entry.year);
+    item.append(year);
+  }
+  return item;
+}
+
+/**
+ * The ranking demo: a pair on arrival, three picks, a result, again.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE PANEL, TWO VIEWS, ONE SIZE
+ * ---------------------------------------------------------------------------
+ *
+ * The pair and the result are stacked in the same grid cell and swapped with `inert`,
+ * which the stylesheet turns into `visibility: hidden`. The panel is therefore always
+ * as tall as the taller of the two, and finishing the demo does not move anything on
+ * the page — in particular not the store buttons beside it.
+ *
+ * The pair is painted on load, with no gate in front of it, but nothing is focused or
+ * scrolled until somebody picks: arriving on the page must not move the reader.
+ *
+ * Every title is written with `textContent`, and every poster comes from `posterUrl`
+ * through `demoMovies`. This function holds no decision: the order, the pair, what a
+ * swap does and when it ends are all `demo.mjs`'s.
+ */
+function wireDemo(cfg, platform) {
+  const el = (id) => document.getElementById(id);
+  const card = el('demo');
+  const play = el('demo-play');
+  const result = el('demo-result');
+  const left = el('demo-left');
+  const right = el('demo-right');
+  const swapButton = el('demo-swap');
+  const again = el('demo-again');
+  if (!card || !play || !result || !left || !right) return;
+
+  // On a phone the small call to action is the store link itself. On anything else the
+  // two store buttons sit right beside the panel, so it stays a line of text rather than
+  // becoming a link that would have to pick a store for the visitor. Where the phone's
+  // sticky store bar is showing, the stylesheet hides it: the bar says the same thing.
+  const cta = el('demo-cta');
+  const destination =
+    platform === 'ios' || platform === 'android' ? destinationFor(platform, cfg.distribution ?? {}) : null;
+  if (cta && destination) cta.href = destination.url;
+
+  // The phone's sticky store bar, which `paintInstall` has already filled. Once the demo
+  // is finished it says "Keep ranking in bingd." instead of naming the store; only the
+  // words change; the link stays the one `paintInstall` chose for this platform. A bar
+  // that was never painted (desktop, or no destination) is left alone.
+  const sticky = document.querySelector('.sticky [data-install="primary-install"]');
+  const stickyLabel = sticky?.textContent ?? '';
+  const labelSticky = (finished) => {
+    if (!sticky || sticky.hidden || !stickyLabel) return;
+    sticky.textContent = finished ? 'Keep ranking in bingd.' : stickyLabel;
+  };
+
+  let attempt = 0;
+  let state = null;
+  let pair = null;
+
+  const view = (showing) => {
+    for (const pane of [play, result]) {
+      if (pane === showing) pane.removeAttribute('inert');
+      else pane.setAttribute('inert', '');
+    }
+  };
+
+  /** Smoothly unless the visitor has asked for less motion. */
+  const reveal = () => {
+    if (typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    }
+  };
+
+  const paintPlay = () => {
+    pair = currentPair(state);
+    if (!pair) return finish();
+    paintChoice(left, pair.left);
+    paintChoice(right, pair.right);
+    for (const movie of state.remaining.slice(0, 2)) warmPoster(movie);
+    text('demo-progress', `${state.selections + 1} of ${DEMO_CHOICES}`);
+    // The status line is for a screen reader: the two buttons changed names without
+    // moving, and nothing else would say so.
+    text(
+      'demo-status',
+      `Pick ${state.selections + 1} of ${DEMO_CHOICES}: ${pair.left.title} or ${pair.right.title}.`,
+    );
+    if (swapButton) swapButton.disabled = !canSwap(state);
+  };
+
+  const finish = () => {
+    const list = el('demo-list');
+    if (list) list.replaceChildren(...demoResult(state).map(resultRow));
+    text('demo-status', 'Your demo ranking is ready.');
+    view(result);
+    labelSticky(true);
+    el('demo-result-title')?.focus({ preventScroll: true });
+    reveal();
+  };
+
+  const begin = () => {
+    state = startDemo(DEMO_MOVIES, attempt);
+    view(play);
+    labelSticky(false);
+    paintPlay();
+  };
+
+  // The second click of a double-click (`detail` 2) would land on the pair this repaint
+  // just put on screen, answering a comparison nobody looked at. Keyboard activation
+  // reports 0, and separate taps each report 1, so both still count.
+  const pick = (side) => (event) => {
+    if (!pair || event.detail > 1) return;
+    state = choose(state, pair[side].id);
+    paintPlay();
+  };
+  left.addEventListener('click', pick('left'));
+  right.addEventListener('click', pick('right'));
+
+  swapButton?.addEventListener('click', () => {
+    state = swap(state);
+    paintPlay();
+  });
+
+  again?.addEventListener('click', () => {
+    attempt += 1;
+    begin();
+    if (!state.done) left.focus({ preventScroll: true });
+    reveal();
+  });
+
+  begin();
+}
+
 const PAGES = {
   invite: invitePage,
   profile: profilePage,
   title: titlePage,
   list: listsPage,
   generic: genericPage,
+  home: homePage,
 };
 
 export function start() {

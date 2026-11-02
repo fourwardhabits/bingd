@@ -159,7 +159,9 @@ describe('welcome email: applying the file', () => {
   });
 
   it('hides every switch from clients, which read only public.% keys', async () => {
-    const rows = await t.asAnon(async () => (await t.sql(`select key from app_config where key like 'welcome.%'`)).rows);
+    const someone = await person();
+    const rows = await t.asUser(someone.id, async () =>
+      (await t.sql(`select key from app_config where key like 'welcome.%'`)).rows);
     assert.equal(rows.length, 0);
   });
 });
@@ -1054,6 +1056,11 @@ describe('welcome email: the worker, against the real SQL', () => {
 
     // A refusal message names the variable; a successful run says nothing about it either.
     const printed = lines.join(String.fromCharCode(10));
+    // Nor about the person, or anything that identifies them to somebody reading a public
+    // Actions log (audit m-3).
+    assert.equal(printed.includes('@'), false, 'a handle was printed to the log');
+    assert.equal(/re_\d/.test(printed), false, 'a provider message id was printed to the log');
+    assert.match(printed, /sent\s+attempt 1/);
     assert.equal(printed.includes('Test Road'), false, 'the address was printed to the log');
     assert.equal(printed.includes(address), false, 'the address was printed to the log');
   });
@@ -1076,7 +1083,7 @@ describe('welcome email: the worker, against the real SQL', () => {
     }
   });
 
-  it('dry run: shows who would be claimed, needs no Resend key, and claims nobody', async () => {
+  it('dry run: counts who would be claimed, needs no Resend key, and claims nobody', async () => {
     await t.exec(OPEN_COHORT_SQL);
     const due = await person();
     const w = world();
@@ -1090,7 +1097,9 @@ describe('welcome email: the worker, against the real SQL', () => {
     });
     assert.equal(result.code, 0);
     assert.equal(result.wouldClaim, 1);
-    assert.ok(lines.some((l) => l.includes(`@${due.username}`)));
+    assert.ok(lines.some((l) => /would claim\s+1/.test(l)));
+    // This repository is public, so its Actions logs are too (audit m-3).
+    assert.equal(lines.join('\n').includes(due.username), false, 'no handle in the log');
     assert.equal(lines.join('\n').includes(due.email), false, 'no address in the log');
 
     // WHICH PROJECT, AND NOT THE KEY. The operator rehearsal deliberately shortens the

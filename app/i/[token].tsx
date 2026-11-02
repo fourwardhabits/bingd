@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -6,13 +7,18 @@ import { signOut, useAuth } from '@/features/auth';
 import { newOperationId } from '@/features/collection/writes';
 import {
   claimForRedemption,
+  clearPendingInvite,
   holdInvite,
   isInviteToken,
+  previewInvite,
+  releaseShownInvite,
   replacePendingInvite,
   serialiseRedemption,
   settle,
+  type InvitePreview,
   type RedeemOutcome,
 } from '@/features/invite';
+import { queryKeys } from '@/lib/query';
 import { Button, EmptyState, LoadingScreen, Screen } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -20,49 +26,50 @@ import { theme } from '@/ui/tokens';
  * Invitation acceptance, `https://bingd.app/i/<token>` (PRD §17).
  *
  * ---------------------------------------------------------------------------
+ * The rule this screen exists to keep
+ * ---------------------------------------------------------------------------
+ *
+ * **Accepting is an explicit tap, and nothing else on this path grants anything.** Opening
+ * a link connects nobody. Security audit 2026-11-01, B-1: this screen used to store every
+ * token it was opened with, and the layout redeemed it behind the person, so a private
+ * account that opened an attacker's link and left had made the attacker an approved
+ * follower. The tap is what calls `accept_invite`, and the server takes that call as the
+ * consent, so the screen has to say first who it is from and what it does.
+ *
+ * ---------------------------------------------------------------------------
  * The three ways somebody arrives here, and the one that used to lose them
  * ---------------------------------------------------------------------------
  *
- * **Signed in.** A verified Universal Link opens this screen with the token in hand.
- * Acceptance is an explicit tap, never automatic — PRD §17 — because the account that
- * would be attributed is whichever one happens to be signed in, and silently binding an
- * invitation to it is a decision the person did not make.
+ * **Signed in.** A verified Universal Link opens this screen with the token in hand, and
+ * the route is the only place the token lives. Leaving the screen is the end of it.
  *
  * **Signed out.** `useAuthRouting` replaces this route with `/(auth)/sign-in` the moment
  * it sees no session, and everything after that — a code by email, Apple, Google, then
  * the profile form — rebuilds the stack. So the token is written to device storage
- * *first*, in an effect that runs before any of that, and the redemption happens from
- * the other side of signup. `features/invite/pending.ts` is the whole of that mechanism
- * and states why every alternative loses it.
+ * *first*, in an effect that runs before any of that, and `useResumePendingInvite` brings
+ * the person back here from the other side of signup. `features/invite/pending.ts` is the
+ * whole of that mechanism and states why every alternative loses it.
  *
- * **Signed in as somebody else.** The screen names the account that will be attributed
- * *before* the tap, and offers to change it — §17's "clear disclosure of which account
- * will accept, with an option to switch". The switch is a sign-out that keeps the token
- * held, so the invitation survives it.
+ * **Signed in as somebody else.** The screen names the account that will accept *before*
+ * the tap, and offers to change it — §17's "clear disclosure of which account will accept,
+ * with an option to switch". The switch is a sign-out that keeps the token held, so the
+ * invitation survives it.
  *
  * ---------------------------------------------------------------------------
- * What is not on this screen
+ * Naming the inviter
  * ---------------------------------------------------------------------------
  *
- * The inviter is not named before acceptance. Naming them would need a read of
- * `profiles` keyed on a token held by somebody with no account and no relationship to
- * them, which is a way to learn who an account is from outside every visibility rule
- * the app has. The handle comes back from `redeem_invite` *after* the attribution
- * exists, at which point the two accounts are connected by a fact.
+ * This screen used to withhold the inviter until after acceptance. Consent to "whoever
+ * sent this" is not consent, so `invite_preview` now names them first, and `20261024000100`
+ * records why that is safe to answer. If it cannot be answered, Accept is not offered.
  *
  * ---------------------------------------------------------------------------
  * What acceptance does, and it is §17's list
  * ---------------------------------------------------------------------------
  *
- * The tap calls `redeem_invite`, which writes the attribution **and** creates the
- * one-way follow §17 specifies — a follow *request* when the inviter is private, so the
- * private setting is honoured rather than bypassed — and files the inviter's
- * notification, which is what prompts them to follow back. The inviter is never
- * auto-followed.
- *
- * An earlier version of this screen wrote only the attribution and recorded the
- * omission in the PRD as a deliberate narrowing. Independent review 26 rejected that,
- * and rightly: a specification is not amended by a note saying it was not implemented.
+ * The tap calls `accept_invite`, which writes the attribution, connects the two accounts
+ * — both directions approved for a personal link, or a one-way follow for a referral —
+ * and files the inviter's notification.
  */
 export default function InvitationScreen() {
   const { token } = useLocalSearchParams<{ token: string }>();
@@ -73,18 +80,28 @@ export default function InvitationScreen() {
   const [busy, setBusy] = useState(false);
 
   const valid = isInviteToken(token);
+  const status = auth.status;
+  const userId = status === 'ready' ? auth.userId : null;
 
   /**
-   * Held before anything else can route this screen away.
+   * Held only while there is no account to show this to, because that is the one case the
+   * route will not survive. The effect is what runs before `useAuthRouting` moves them: a
+   * child's effect fires first in the commit that changes `status`.
    *
-   * Unconditional on the auth state, and that is deliberate: by the time the effect
-   * could check, the redirect may already have happened. A token held for a session
-   * that turns out to be signed in costs one storage write and is cleared by the
-   * redemption below.
+   * Once there is an account, the screen has the token and storage lets go of it, so
+   * walking away leaves nothing behind.
    */
   useEffect(() => {
-    if (valid) void holdInvite(token);
-  }, [token, valid]);
+    if (!valid) return;
+    if (status === 'signed-out' || status === 'onboarding') void holdInvite(token);
+    if (userId) void releaseShownInvite(token, userId);
+  }, [status, token, userId, valid]);
+
+  const preview = useQuery({
+    queryKey: queryKeys.invitePreview(userId ?? '', valid ? token : ''),
+    queryFn: () => previewInvite(token),
+    enabled: valid && userId !== null,
+  });
 
   /**
    * One acceptance at a time, and **one redemption at a time in the whole process**.
@@ -96,7 +113,7 @@ export default function InvitationScreen() {
    * being tapped twice while it waits.
    */
   const accept = useCallback(async () => {
-    if (!valid || busy) return;
+    if (!valid || busy || !userId) return;
     setBusy(true);
     try {
       const outcome = await serialiseRedemption(async () => {
@@ -114,17 +131,29 @@ export default function InvitationScreen() {
        * ordinary case, and every retry — the held id is kept, which is what makes a lost
        * reply a replay rather than a second call.
        */
-        const operationId = await claimForRedemption(token, newOperationId);
-        // `settle` owns the keep-or-let-go rule, so this screen and the background hook
-        // cannot drift on what an answer means.
-        return operationId ? settle(token, operationId) : null;
+        const operationId = await claimForRedemption(token, userId, newOperationId);
+        // `settle` owns the keep-or-let-go rule, so this screen and the replay on the next
+        // launch cannot drift on what an answer means.
+        return operationId ? settle(token, operationId, userId) : null;
       });
 
       if (outcome) setResult(outcome);
     } finally {
       setBusy(false);
     }
-  }, [busy, token, valid]);
+  }, [busy, token, userId, valid]);
+
+  /** Saying no is a decision too, so nothing about this invitation stays on the device. */
+  const notNow = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await serialiseRedemption(clearPendingInvite);
+      router.replace('/collection');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, router]);
 
   /**
    * §17's "clear disclosure of which account will accept, **with an option to switch**".
@@ -136,15 +165,13 @@ export default function InvitationScreen() {
    * Signing out is the switch. There is no account picker in this app and adding one is
    * a product decision this run has no authority to take — but **the token stays held**,
    * which is what makes this work: sign-out sends them to `/(auth)/sign-in`, and
-   * `useRedeemPendingInvite` redeems against whichever account they arrive as. The
-   * invitation survives the switch without them having to find the link again.
+   * `useResumePendingInvite` brings whichever account they arrive as back to this screen.
+   * The invitation survives the switch without them having to find the link again.
    *
    * **It claims *this* invitation first, and independent review 26b is why.**
    * `holdInvite` keeps the first token it is given, deliberately: opening a second link
-   * is a link tapped, not a decision, and it must not move an attribution. But acting on
-   * *this* screen is a decision about *this* invitation — so somebody looking at token B
-   * with token A still held would otherwise sign out, sign in as somebody else, and have
-   * the background hook credit A's owner for an invitation they never acted on.
+   * is a link tapped, not a decision. But acting on *this* screen is a decision about
+   * *this* invitation, so it is the one they should come back to.
    */
   const switchAccount = useCallback(async () => {
     if (busy || !valid) return;
@@ -191,18 +218,45 @@ export default function InvitationScreen() {
 
   if (result) return <Outcome result={result} onRetry={accept} busy={busy} />;
 
+  if (preview.isPending) return <LoadingScreen />;
+
+  if (preview.isError) {
+    return (
+      <Screen airy includeBottomInset>
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load this invitation"
+          body="Nothing has been accepted. Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void preview.refetch() }}
+        />
+      </Screen>
+    );
+  }
+
+  const invitation = preview.data;
+  if (invitation.outcome !== 'ready') {
+    return <Outcome result={invitation} onRetry={accept} busy={busy} />;
+  }
+
   return (
     <Screen airy includeBottomInset>
       <EmptyState
         kind="nothingYet"
-        title="You have been invited to bingd"
-        // The account that will be attributed, named before the tap rather than after
-        // it. PRD §17: a person signed into a second account must be able to see which
-        // one is about to accept.
-        body={`Accepting records that you joined on this invitation and follows the person who invited you. You are signed in as @${auth.profile.username}.`}
+        title={invitationTitle(invitation)}
+        // Who it is from, what accepting grants, and the account that would be granting it,
+        // all before the tap. PRD §17: a person signed into a second account must be able
+        // to see which one is about to accept.
+        body={acceptanceBody(invitation, auth.profile)}
         action={{ label: busy ? 'Accepting…' : 'Accept invitation', onPress: () => void accept() }}
       />
       <View style={styles.secondary}>
+        <Button
+          kind="secondary"
+          label="Not now"
+          onPress={() => void notNow()}
+          disabled={busy}
+          disabledReason="Finishing the last attempt."
+        />
         <Button
           kind="tertiary"
           label="Use a different account"
@@ -213,6 +267,38 @@ export default function InvitationScreen() {
       </View>
     </Screen>
   );
+}
+
+type ReadyInvitation = Extract<InvitePreview, { outcome: 'ready' }>;
+
+const invitationTitle = ({ inviterDisplayName, inviterUsername }: ReadyInvitation): string =>
+  inviterDisplayName
+    ? `${inviterDisplayName} (@${inviterUsername}) invited you to bingd`
+    : `@${inviterUsername} invited you to bingd`;
+
+/**
+ * What the tap does, in the words of the person granting it.
+ *
+ * The private case is spelled out because it is the one that widens something: until now
+ * this account decided who could see it one request at a time, and accepting skips that
+ * for this one person.
+ */
+function acceptanceBody(
+  invitation: ReadyInvitation,
+  account: { username: string; visibility: 'public' | 'private' },
+): string {
+  const who = `@${invitation.inviterUsername}`;
+  const signedInAs = `You are signed in as @${account.username}.`;
+
+  if (invitation.kind === 'referral') {
+    return `Accepting records that you joined on this invitation and follows ${who}. ${signedInAs}`;
+  }
+
+  const reach =
+    account.visibility === 'private'
+      ? `Your account is private, and ${who} will be able to see your rankings, watchlist and activity.`
+      : `${who} will see your rankings, watchlist and activity in their feed.`;
+  return `Accepting means you and ${who} follow each other. ${reach} ${signedInAs}`;
 }
 
 /**
@@ -233,10 +319,12 @@ export default function InvitationScreen() {
 function acceptedBody(
   inviterUsername: string | null,
   followState: 'approved' | 'pending' | null,
+  connected: boolean,
 ): string {
   const who = inviterUsername ? `@${inviterUsername}` : 'the person who invited you';
-  const follow =
-    followState === 'pending'
+  const follow = connected
+    ? ` You and ${who} now follow each other.`
+    : followState === 'pending'
       ? ` You have asked to follow ${who}, and they will get the request.`
       : followState === 'approved'
         ? ` You are now following ${who}.`
@@ -249,7 +337,8 @@ function Outcome({
   onRetry,
   busy,
 }: {
-  result: RedeemOutcome;
+  /** A preview that refused is the same answer accepting would have given, one tap sooner. */
+  result: RedeemOutcome | Exclude<InvitePreview, ReadyInvitation>;
   onRetry: () => Promise<void>;
   busy: boolean;
 }) {
@@ -269,7 +358,7 @@ function Outcome({
             // Which of the two follow states happened is said out loud: "following"
             // and "asked to follow" are different, and the person will look for one of
             // them on the inviter's profile a moment later.
-            body={acceptedBody(result.inviterUsername, result.followState)}
+            body={acceptedBody(result.inviterUsername, result.followState, result.connected)}
             action={toCollection}
           />
         </Screen>
@@ -377,11 +466,12 @@ function Outcome({
 }
 
 const styles = StyleSheet.create({
-  // Under the empty state's own action and quieter than it: switching accounts is the
-  // rare path, and the invitation is what the screen is about.
+  // Under the empty state's own action and quieter than it: the invitation is what the
+  // screen is about.
   secondary: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[4],
     alignItems: 'center',
+    gap: theme.space[2],
   },
 });

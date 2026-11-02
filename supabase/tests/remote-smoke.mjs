@@ -260,7 +260,7 @@ console.log(`\nProbing ${url} as an unauthenticated client\n`);
 // A wiring check, not a security one: a 401 here would mean the anon key is
 // wrong and every result below is noise.
 {
-  const res = await get('profiles?select=id&limit=1');
+  const res = await get('media_items?select=id&limit=1');
   report(
     'anon can reach the REST surface at all',
     res.status === 200 ? 'pass' : 'fail',
@@ -284,12 +284,23 @@ for (const table of ['profiles', 'user_media', 'rankings', 'follows', 'reactions
 // That is precisely the kind of thing the local suite cannot answer: it builds its schema
 // from the files as the table owner, for whom the question never arises. Independent
 // review 17i asked for the recreated boundary to be asserted rather than assumed, and this
-// is that assertion — the view must still be readable, because the public profile route
-// and user search both read it.
+// is that assertion.
+//
+// **It is refused to this key now** (20261024000400): an export of every public account was
+// one paged request away. The signed-in route reads the view, and two-user-acceptance.mjs
+// covers that. What the anon key has is one exact handle at a time.
 {
   const res = await get('public_profiles?select=username&limit=1');
   report(
-    'the recreated public_profiles view is still readable, grants and all',
+    'the anon key cannot list accounts through public_profiles',
+    res.status === 401 || res.status === 403 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+{
+  const res = await get('rpc/public_profile_card?p_handle=no_such_handle_probe');
+  report(
+    'the website can still resolve one handle',
     res.status === 200 ? 'pass' : 'fail',
     `${res.status} ${res.body.slice(0, 200)}`,
   );
@@ -543,16 +554,19 @@ expectRefused(
   );
 }
 
-// World-readable *by design*, like media_items and media_cache: it is catalogue
-// metadata and says nothing about any account. Asserted rather than assumed, because
-// the Feed's shelf depends on an unauthenticated-shaped read succeeding.
-// Note what this can and cannot tell you: PostgREST answers a policy denial and an
-// empty table identically, with `200 []`. So this proves the relation exists and is
-// not refused outright; it does not prove a row would come back. The row half is
-// covered once the adapter has been deployed and `npm run trending:refresh` has run.
+// Two columns of this are open to anon, for the freshness check below and for nothing else
+// (20261024000400). The Feed reads the rest signed in. Note what this can and cannot tell
+// you: PostgREST answers a policy denial and an empty table identically, with `200 []`. So
+// this proves the relation exists and is not refused outright; it does not prove a row
+// would come back. The row half is covered once the adapter has been deployed and
+// `npm run trending:refresh` has run.
 expectAllowed(
-  'anon can read the trending cache, by design',
+  'anon can read when the trending cache last moved',
   await get('provider_list_cache?select=list_key&limit=1'),
+);
+expectRefused(
+  'anon cannot read the trending cache itself',
+  await get('provider_list_cache?select=payload&limit=1'),
 );
 
 /**
@@ -656,16 +670,12 @@ expectRefused(
   await rpc('tmdb_claim_person', { p_person_id: 1 }),
 );
 
-// The person cache is world-readable, like every other catalogue table. A filmography
-// is what TMDB publishes on a public page and nothing viewer-relative is stored in it.
-{
-  const res = await get('person_cache?select=tmdb_person_id&limit=1');
-  report(
-    'anon can read the person cache, by design',
-    res.status === 200 ? 'pass' : 'fail',
-    `${res.status} ${res.body.slice(0, 160)}`,
-  );
-}
+// A filmography says nothing about any account, so this is not a privacy rule. Anon simply
+// has no reader that needs it (20261024000400).
+expectRefused(
+  'anon holds no table it has no reader for',
+  await get('person_cache?select=tmdb_person_id&limit=1'),
+);
 
 // Added 2026-08-17 with Settings. Every one of these is about the caller's own account
 // and `auth.uid()` is null for anon, so a grant would buy nothing but a surface --
@@ -852,8 +862,8 @@ expectRefused(
 // is nothing for an anonymous caller to attribute and a grant would only widen the
 // surface. Revocation acts on the caller's own row and has the same answer.
 expectRefused(
-  'anon cannot execute redeem_invite',
-  await rpc('redeem_invite', { p_operation_id: NIL, p_token: '0'.repeat(32) }),
+  'anon cannot execute accept_invite',
+  await rpc('accept_invite', { p_operation_id: NIL, p_token: '0'.repeat(32), p_accepting_user: NIL }),
 );
 expectRefused(
   'anon cannot execute revoke_invite_link',
@@ -932,20 +942,6 @@ expectRefused(
   'anon cannot execute _helpful_target',
   await rpc('_helpful_target', { p_review_id: NIL }),
 );
-
-// The one thing the local suite structurally cannot check: citext is shimmed as a
-// domain in PGlite, so no local function carries an extension dependency and the
-// pg_depend exclusion that keeps 20260813001800's sweep off citext's operator
-// functions is never exercised. If that predicate were wrong, username lookups
-// would break for anon here and nowhere else.
-{
-  const res = await get('profiles?select=id&username=eq.nobody-should-exist');
-  report(
-    'anon can still compare a citext username',
-    res.status === 200 ? 'pass' : 'fail',
-    `${res.status} ${res.body.slice(0, 200)}`,
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Follow activity (20260912000100)

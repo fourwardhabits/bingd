@@ -664,7 +664,7 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 
 | View | Why it exists |
 |---|---|
-| `public_profiles` | Projects only the always-public fields from `profiles`. **Never exposes `date_of_birth`, `invited_by`, or `founding_member`** |
+| `public_profiles` | Projects only the always-public fields from `profiles`. **Never exposes `date_of_birth`, `invited_by`, or `founding_member`**. Signed-in only since `20261024000400`. The anon key has `public_profile_card`, one account by exact handle |
 | `visible_rankings` | Rankings joined to media, filtered by `can_view_profile` |
 | `visible_collection` | Another user's bucketed titles **without** notes, watch dates, or watchlist |
 | `feed` | Followed users' events with reaction counts and the caller's own reaction |

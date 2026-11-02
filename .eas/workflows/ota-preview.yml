@@ -1,0 +1,70 @@
+# The Preview twin of ota-production.yml, so the cloud path is exercised where only the
+# founder's own build can receive it. `config/ota-workflows.test.mjs` holds the two in step.
+#
+#   eas workflow:run .eas/workflows/ota-preview.yml --ref <full sha> \
+#     -F sha=<full sha> -F message="what changed (<short sha>)" --non-interactive --wait
+#
+# Manual only, like its twin. Unreleased work belongs on this lane, so the gate reports CI and
+# the release gate here rather than refusing on them, and it holds only Android's runtime: no
+# iOS Preview binary exists on the current runtime.
+
+name: OTA preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The commit to publish. Must equal the --ref this run was started from.
+        type: string
+        required: true
+      message:
+        description: Update message, including the short SHA.
+        type: string
+        required: true
+
+concurrency:
+  group: ota-preview
+  cancel_in_progress: false
+
+jobs:
+  preflight:
+    environment: development
+    env:
+      OTA_LANE: preview
+      OTA_SHA: ${{ inputs.sha }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs preflight
+
+  fingerprint:
+    type: fingerprint
+    needs: [preflight]
+    environment: preview
+    env:
+      APP_VARIANT: preview
+      BINGD_LANE: preview
+
+  runtimes:
+    environment: development
+    needs: [fingerprint]
+    env:
+      OTA_LANE: preview
+      OTA_SHA: ${{ inputs.sha }}
+      OTA_ANDROID_RUNTIME: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+      OTA_IOS_RUNTIME: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+    steps:
+      - uses: eas/checkout
+      - run: node scripts/ota-gate.mjs runtimes
+
+  publish:
+    type: update
+    needs: [runtimes]
+    environment: preview
+    env:
+      APP_VARIANT: preview
+      BINGD_LANE: preview
+    params:
+      branch: preview
+      platform: all
+      message: ${{ inputs.message }}
+      upload_sentry_sourcemaps: false

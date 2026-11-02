@@ -114,6 +114,11 @@ channel named in its `eas.json` profile. Today: `development → development`,
 > `scripts/release.mjs` supplies both, read from `eas.json`. Independent review 28b found
 > this; it is not hypothetical.
 
+### Production — real users
+
+Published from EAS, not from a laptop, because the production lane needs a file variable that
+only EAS can read. See [`cloud-ota.md`](./cloud-ota.md).
+
 ### Preview — the founder's own build
 
 ```

@@ -6,81 +6,179 @@ import {
   type TrendingCandidate,
 } from './trending';
 
-const candidate = (over: Partial<TrendingCandidate> & { mediaItemId: string }): TrendingCandidate => ({
+/**
+ * Rows carry a `popularity` the way the old ones did, so that every test below can show
+ * it is ignored. It is not part of `TrendingCandidate` any more; `mixTrending` passes
+ * extra fields through untouched and never reads them.
+ */
+type Row = TrendingCandidate & { popularity: number | null };
+
+const candidate = (over: Partial<Row> & { mediaItemId: string }): Row => ({
   kind: 'movie',
   rank: 0,
   popularity: 100,
   ...over,
 });
 
-describe('mixing the two lists', () => {
-  it('orders by popularity across both kinds', () => {
-    const mixed = mixTrending([
-      candidate({ mediaItemId: 'film-a', kind: 'movie', rank: 0, popularity: 50 }),
-      candidate({ mediaItemId: 'show-a', kind: 'series', rank: 0, popularity: 90 }),
-      candidate({ mediaItemId: 'film-b', kind: 'movie', rank: 1, popularity: 70 }),
-    ]);
+/** `count` rows of one kind, at trend ranks 0..count-1, with the given popularity. */
+const ranked = (
+  kind: 'movie' | 'series',
+  count: number,
+  popularity: (rank: number) => number | null = () => 100,
+) =>
+  Array.from({ length: count }, (_, rank) =>
+    candidate({ mediaItemId: `${kind}-${rank}`, kind, rank, popularity: popularity(rank) }),
+  );
 
-    expect(mixed.map((item) => item.mediaItemId)).toEqual(['show-a', 'film-b', 'film-a']);
+const ids = (items: readonly TrendingCandidate[]) => items.map((item) => item.mediaItemId);
+
+/** The normal shelf: film #1, series #1, film #2, series #2, … */
+const INTERLEAVED = [
+  'movie-0', 'series-0', 'movie-1', 'series-1', 'movie-2', 'series-2',
+  'movie-3', 'series-3', 'movie-4', 'series-4', 'movie-5', 'series-5',
+];
+
+/**
+ * Founder decisions, 2026-10-28. `popularity` builds up over weeks, so ranking all forty
+ * rows by it let a blockbuster at daily rank 17 push out what was #1 today, and the
+ * shelf showed the same titles for weeks.
+ */
+describe('trend rank decides who is on the shelf', () => {
+  it("keeps today's top titles when a far more popular title sits at rank 17", () => {
+    // The Spider-Man case: rank 17 with a long-accumulated popularity, against today's
+    // top three with modest figures.
+    const films = ranked('movie', 20, (rank) => (rank === 16 ? 473 : 50 - rank));
+    const mixed = mixTrending([...films, ...ranked('series', 20, () => 10)]);
+
+    expect(ids(mixed)).not.toContain('movie-16');
+    expect(ids(mixed)).toEqual(expect.arrayContaining(['movie-0', 'movie-1', 'movie-2']));
   });
 
-  it('does not alternate the two lists', () => {
-    // A rank merge would produce film, show, film, show regardless of the data. The
-    // decision was explicit that a mixed shelf must come from relevance rather than
-    // from a quota, and this is the shape that would betray one.
-    const mixed = mixTrending([
-      candidate({ mediaItemId: 'film-1', kind: 'movie', rank: 0, popularity: 400 }),
-      candidate({ mediaItemId: 'film-2', kind: 'movie', rank: 1, popularity: 380 }),
-      candidate({ mediaItemId: 'film-3', kind: 'movie', rank: 2, popularity: 300 }),
-      candidate({ mediaItemId: 'show-1', kind: 'series', rank: 0, popularity: 120 }),
-    ]);
+  it('takes exactly the top six of each kind, whatever their popularity', () => {
+    // Popularity rises with rank here, so a popularity cut would take ranks 14–19 of
+    // each list instead — the exact inversion this rule exists to prevent.
+    const films = ranked('movie', 20, (rank) => 100 + rank * 10);
+    const series = ranked('series', 20, (rank) => 105 + rank * 10);
+    const mixed = mixTrending([...series, ...films]);
 
-    expect(mixed.map((item) => item.kind)).toEqual(['movie', 'movie', 'movie', 'series']);
-  });
-
-  it('lets television lead when television is what is trending', () => {
-    const mixed = mixTrending([
-      candidate({ mediaItemId: 'film-1', kind: 'movie', rank: 0, popularity: 30 }),
-      candidate({ mediaItemId: 'show-1', kind: 'series', rank: 0, popularity: 900 }),
-      candidate({ mediaItemId: 'show-2', kind: 'series', rank: 1, popularity: 800 }),
-    ]);
-
-    expect(mixed.slice(0, 2).map((item) => item.mediaItemId)).toEqual(['show-1', 'show-2']);
-  });
-
-  it('sinks an unenriched row to the bottom rather than treating it as unpopular-but-known', () => {
-    const mixed = mixTrending([
-      candidate({ mediaItemId: 'unknown', rank: 0, popularity: null }),
-      candidate({ mediaItemId: 'known', rank: 5, popularity: 1 }),
-    ]);
-
-    expect(mixed.map((item) => item.mediaItemId)).toEqual(['known', 'unknown']);
-  });
-
-  it('orders two unenriched rows by their own trend rank, deterministically', () => {
-    const mixed = mixTrending([
-      candidate({ mediaItemId: 'b', rank: 4, popularity: null }),
-      candidate({ mediaItemId: 'a', rank: 1, popularity: null }),
-    ]);
-
-    expect(mixed.map((item) => item.mediaItemId)).toEqual(['a', 'b']);
-  });
-
-  it('breaks a popularity tie by trend rank', () => {
-    const mixed = mixTrending([
-      candidate({ mediaItemId: 'second', rank: 3, popularity: 10 }),
-      candidate({ mediaItemId: 'first', rank: 1, popularity: 10 }),
-    ]);
-
-    expect(mixed.map((item) => item.mediaItemId)).toEqual(['first', 'second']);
+    expect(mixed).toHaveLength(12);
+    expect([...ids(mixed)].sort()).toEqual([...INTERLEAVED].sort());
   });
 
   it('keeps the shelf shallow', () => {
-    const many = Array.from({ length: 40 }, (_, index) =>
-      candidate({ mediaItemId: `m-${index}`, rank: index, popularity: 100 - index }),
+    expect(mixTrending(ranked('movie', 40))).toHaveLength(TRENDING_SHELF_SIZE);
+  });
+
+  it('shows what there is when both lists are short', () => {
+    const mixed = mixTrending([...ranked('movie', 3), ...ranked('series', 2)]);
+
+    expect(ids(mixed)).toEqual(['movie-0', 'series-0', 'movie-1', 'series-1', 'movie-2']);
+  });
+});
+
+/**
+ * Founder decision, 2026-10-28, after QA of the first version: the shelf is shown in
+ * daily trend order, not re-sorted by popularity. Today's #1 film had been sitting
+ * eighth behind titles that were merely big.
+ */
+describe('trend rank decides the order they appear in', () => {
+  it('interleaves the two lists, film first at each rank', () => {
+    expect(ids(mixTrending([...ranked('movie', 6), ...ranked('series', 6)]))).toEqual(INTERLEAVED);
+  });
+
+  it('shows the higher daily ranks before the lower ones, whatever their popularity', () => {
+    // Popularity rises as trend rank falls — the order a popularity sort would reverse.
+    const films = ranked('movie', 20, (rank) => 100 + rank * 10);
+    const series = ranked('series', 20, (rank) => 105 + rank * 10);
+
+    expect(ids(mixTrending([...series, ...films]))).toEqual(INTERLEAVED);
+  });
+
+  it('does not let a far more popular #4 or #5 jump ahead of #1', () => {
+    // The 2026-10-28 shelf: Clayface at film #4 had nearly twice the popularity of
+    // Verity at #1 and was shown second while Verity sat eighth.
+    const films = ranked('movie', 6, (rank) => (rank === 3 ? 900 : rank === 4 ? 800 : 10));
+    const series = ranked('series', 6, () => 5);
+    const mixed = ids(mixTrending([...films, ...series]));
+
+    expect(mixed[0]).toBe('movie-0');
+    expect(mixed.indexOf('movie-3')).toBeGreaterThan(mixed.indexOf('movie-0'));
+    expect(mixed.indexOf('movie-4')).toBeGreaterThan(mixed.indexOf('movie-0'));
+    expect(mixed).toEqual(INTERLEAVED);
+  });
+
+  it('places a title with no popularity by its rank like any other', () => {
+    // An unenriched row (seeded from Wikidata, never filled in) used to sink to the end.
+    // Popularity is not read any more, so its trend rank alone places it.
+    const films = ranked('movie', 6, (rank) => (rank === 0 ? null : 500));
+
+    expect(ids(mixTrending([...films, ...ranked('series', 6)]))).toEqual(INTERLEAVED);
+  });
+
+  it('gives the same order whatever order the input arrived in', () => {
+    const rows = [...ranked('movie', 6), ...ranked('series', 6)];
+    // Series first, and the films backwards.
+    const shuffled = [...rows.slice(6), ...rows.slice(0, 6).reverse()];
+
+    expect(ids(mixTrending(rows))).toEqual(INTERLEAVED);
+    expect(ids(mixTrending([...rows].reverse()))).toEqual(INTERLEAVED);
+    expect(ids(mixTrending(shuffled))).toEqual(INTERLEAVED);
+  });
+
+  it('breaks a tie within one list by id, deterministically', () => {
+    // Two ids at one rank cannot come from one payload, but nothing upstream forbids it.
+    const twins = [
+      candidate({ mediaItemId: 'b', kind: 'movie', rank: 0 }),
+      candidate({ mediaItemId: 'a', kind: 'movie', rank: 0 }),
+    ];
+
+    expect(ids(mixTrending(twins))).toEqual(['a', 'b']);
+    expect(ids(mixTrending([...twins].reverse()))).toEqual(['a', 'b']);
+  });
+});
+
+describe('a short list, and the other kind filling in', () => {
+  it('backfills from series in trend order when there are fewer than six films', () => {
+    // series-9 is the most popular row here and is still not chosen ahead of series-6 and
+    // series-7. The extra series follow everything the quota chose.
+    const series = ranked('series', 12, (rank) => (rank === 9 ? 999 : 100 - rank));
+    const mixed = mixTrending([...ranked('movie', 4), ...series]);
+
+    expect(ids(mixed)).toEqual([
+      'movie-0', 'series-0', 'movie-1', 'series-1', 'movie-2', 'series-2',
+      'movie-3', 'series-3', 'series-4', 'series-5', 'series-6', 'series-7',
+    ]);
+  });
+
+  it('backfills from films in trend order when there are fewer than six series', () => {
+    const films = ranked('movie', 12, (rank) => (rank === 11 ? 999 : 100 - rank));
+    const mixed = mixTrending([...films, ...ranked('series', 2)]);
+
+    expect(ids(mixed)).toEqual([
+      'movie-0', 'series-0', 'movie-1', 'series-1',
+      'movie-2', 'movie-3', 'movie-4', 'movie-5', 'movie-6', 'movie-7', 'movie-8', 'movie-9',
+    ]);
+  });
+
+  it('counts a gap left by a missing title as neither a slot nor a place in line', () => {
+    // `useTrending` drops ids with no `media_items` row before mixing, which leaves gaps
+    // in rank — film rank 2 is missing here. The quota is six *usable* films, so film
+    // rank 6 takes the place, and film rank 3 is shown as the third film beside the
+    // third series rather than a slot further down.
+    const films = [0, 1, 3, 4, 5, 6, 7].map((rank) =>
+      candidate({ mediaItemId: `movie-${rank}`, kind: 'movie', rank }),
     );
 
-    expect(mixTrending(many)).toHaveLength(TRENDING_SHELF_SIZE);
+    expect(ids(mixTrending([...films, ...ranked('series', 6)]))).toEqual([
+      'movie-0', 'series-0', 'movie-1', 'series-1', 'movie-3', 'series-2',
+      'movie-4', 'series-3', 'movie-5', 'series-4', 'movie-6', 'series-5',
+    ]);
+  });
+
+  it('shows a single kind in its own order when the other list is unusable', () => {
+    expect(ids(mixTrending(ranked('series', 14)))).toEqual(
+      Array.from({ length: 12 }, (_, rank) => `series-${rank}`),
+    );
   });
 });
 
