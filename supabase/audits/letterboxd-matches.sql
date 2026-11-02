@@ -2,8 +2,8 @@
 -- Security audit 2026-11-01, M-1. See docs/ops/letterboxd-match-audit.md.
 --
 -- One SELECT and nothing else. It reads, it writes nothing, and it is safe to run against
--- production inside the read-only transaction the runbook gives. It needs
--- `20261024000200` applied, for `_letterboxd_slug_agrees`.
+-- production as it stands. It needs `20261024000200` applied, for
+-- `_letterboxd_slug_agrees`.
 --
 -- Output, one row per finding. Handles are not selected, because the output is likely to
 -- be pasted somewhere: `user_id` is enough to act on and nothing more.

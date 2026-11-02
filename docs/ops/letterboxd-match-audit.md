@@ -13,13 +13,7 @@ Until `20261024000200`, two free accounts could make a Letterboxd film URI point
 
 ## Running the audit
 
-This reads only. Run it in the Supabase SQL editor for the project, or with `psql`, after `20261024000200` is applied:
-
-```sql
-begin transaction read only;
--- paste supabase/audits/letterboxd-matches.sql here
-rollback;
-```
+Run the whole of `supabase/audits/letterboxd-matches.sql` in the Supabase SQL editor for the project, or with `psql`, after `20261024000200` is applied. It is one `select`, so it cannot change anything.
 
 ## Reading the result
 
@@ -34,14 +28,12 @@ Real exports use `boxd.it` short links, which name nothing, so `slug_disagrees` 
 To look at who claimed a URI, without printing a handle:
 
 ```sql
-begin transaction read only;
 select c.media_item_id, m.title, c.tier, c.claimed_at, c.user_id, p.created_at as account_created
   from letterboxd_match_claims c
   join media_items m on m.id = c.media_item_id
   join profiles p on p.id = c.user_id
  where c.letterboxd_uri = '<uri>'
  order by c.claimed_at;
-rollback;
 ```
 
 Two accounts created close together, claiming the same URI, with no other import history, is the shape of an attack.
