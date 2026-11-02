@@ -207,15 +207,42 @@ describe('a reader who lost access', () => {
 
   it('a push claimed after access went stops the text, even with the row already queued', async () => {
     // The check is at claim, not at write: what matters is the moment the phone would light.
+    // A block would delete the notification and prove nothing, so the author goes private:
+    // the row stands and only the excerpt rule can answer.
     const owner = await user('owner');
     const friend = await user('friend');
     await giveDevice(owner);
     const event = await eventOf(owner);
 
     await comment(friend, event, SAID);
-    await act(owner, `select block($1, $2)`, friend);
+    await act(friend, `select set_profile_visibility($1, 'private')`);
 
-    assert.deepEqual(await pushedTo(owner), [], 'a block removes the notification itself');
+    const jobs = await pushedTo(owner);
+    assert.equal(jobs.length, 1, 'the notification must survive for this to test the excerpt');
+    assert.equal(jobs[0].comment_excerpt, null);
+  });
+
+  it('a block by the activity owner stops a pushed reply too', async () => {
+    const owner = await user('owner');
+    const author = await user('author');
+    const reader = await user('reader');
+    await giveDevice(reader);
+    const event = await eventOf(owner);
+    const parent = await t.asUser(reader, async () => {
+      const { rows } = await t.sql(
+        `select add_comment($1, $2, 'first', false, null, '{}'::uuid[]) as r`,
+        [await op(), event],
+      );
+      return rows[0].r.comment_id;
+    });
+    await t.sql(`delete from push_outbox`);
+
+    await act(author, `select add_comment($1, $2, $3, false, $4, '{}'::uuid[])`, event, SAID, parent);
+    await act(owner, `select block($1, $2)`, reader);
+
+    const jobs = await pushedTo(reader);
+    assert.equal(jobs.length, 1, 'the block names neither actor, so the row must survive');
+    assert.equal(jobs[0].comment_excerpt, null);
   });
 });
 
