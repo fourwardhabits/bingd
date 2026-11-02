@@ -51,7 +51,7 @@ Staging first, then production. All of it is agent work.
 
 | Check | Expected |
 |---|---|
-| `npm run test:remote` | 136 of 136. On staging before the migrations it was 131, with 4 failures and 1 inconclusive, all of them things these migrations change. Production needs `--target production` |
+| `npm run test:remote` | 136 of 136. That is a prediction: a local run reached 133, and the other three need a real project. On staging before the migrations it was 131, with 4 failures and 1 inconclusive, all of them things these migrations change. Production needs `--target production` |
 | The website's own requests | Public profile answers, private and unknown handles answer zero rows, wildcards answer zero rows |
 | An invitation opened and left | No follow in either direction |
 | An invitation accepted | Both accounts follow each other |
