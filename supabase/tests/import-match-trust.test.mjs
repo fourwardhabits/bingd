@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { createTestDb } from './harness.mjs';
 
@@ -254,17 +257,19 @@ describe('a mapping two accounts did agree on', () => {
     assert.equal(promoted.tier, 'local');
   });
 
-  it('is then consumed by a third account through T0, whatever they called the film', async () => {
-    // The point of the cache, and the proof that promotion actually feeds T0: Cara's export
-    // gives a title the local tier cannot match at all. Only the trusted URI can place it.
+  it('does not speak for a row that gives the film another name', async () => {
+    // This used to be the point of the cache, and it was the vulnerability: the row's own
+    // name was never consulted, so whoever established the mapping decided what every later
+    // import of that URI became (security audit 2026-11-01, M-1). A real alternate title
+    // costs a provider request instead.
     await matchArchive(ana, [row('Desert Saga Of Arrakeen', 2021, DUNE_URI)]);
     await matchArchive(ben, [row('Desert Saga Of Arrakeen', 2021, DUNE_URI)]);
 
     const jobId = await matchArchive(cara, [row('Desert Saga Alternate Cut', 2021, DUNE_URI)]);
     const placed = await statusOf(jobId, 'desert saga alternate cut|2021');
 
-    assert.equal(placed.status, 'matched');
-    assert.equal(placed.media_item_id, dune, 'placed by the URI, not by the title');
+    assert.equal(placed.status, 'needs_provider');
+    assert.equal(placed.media_item_id, null);
   });
 
   it('is not unseated by a later pair of accounts claiming something else', async () => {
@@ -312,15 +317,9 @@ describe('a mapping two accounts did agree on', () => {
     assert.equal((await trusted(DUNE_URI)).media_item_id, dune);
   });
 
-  it('still answers a row that carries no year, which is the residual risk', async () => {
-    /**
-     * **What the year guard cannot cover, said out loud.**
-     *
-     * A Letterboxd export row without a year has nothing to disagree with, so T0 applies
-     * the trusted mapping unchecked. That is correct — the mapping is the only evidence
-     * there is — and it is also the surface a poisoned pair still reaches. Recorded here
-     * because the residual belongs in the suite rather than only in a document.
-     */
+  it('does not answer a row that carries no year, which closes the old residual', async () => {
+    // A row with nothing to disagree with used to take the mapping unchecked, and this test
+    // recorded that as the surface a poisoned pair still reached.
     await matchArchive(ana, [row('Desert Saga Of Arrakeen', 2021, DUNE_URI)]);
     await matchArchive(ben, [row('Desert Saga Of Arrakeen', 2021, DUNE_URI)]);
 
@@ -329,7 +328,255 @@ describe('a mapping two accounts did agree on', () => {
       row('Something Else Entirely', 2021, DUNE_URI, { year: null, correlation: 'something else entirely|' }),
     ]);
 
-    assert.equal((await statusOf(jobG, 'something else entirely|')).media_item_id, dune);
+    assert.equal((await statusOf(jobG, 'something else entirely|')).media_item_id, null);
+  });
+});
+
+describe('two accounts cannot make a mapping speak for anybody (M-1)', () => {
+  let attackerA;
+  let attackerB;
+  let victim;
+  let real;
+  let wrong;
+  const URI = 'https://boxd.it/2poison';
+
+  /** Both attackers name the wrong film and attach the real film's URI. */
+  const poison = async (uri = URI) => {
+    await matchArchive(attackerA, [row('Attacker Chosen Film', 2011, uri)]);
+    await matchArchive(attackerB, [row('Attacker Chosen Film', 2011, uri)]);
+  };
+
+  before(async () => {
+    attackerA = await t.createUser({ username: 'poison_a' });
+    attackerB = await t.createUser({ username: 'poison_b' });
+    victim = await t.createUser({ username: 'poison_victim' });
+    real = await movie('Quiet Sunlight Unique', 2011);
+    wrong = await movie('Attacker Chosen Film', 2011);
+  });
+
+  it('places a later importer by their own row, not by the mapping: the audit repro', async () => {
+    await poison();
+    assert.equal((await trusted(URI)).media_item_id, wrong, 'the fixture must actually poison');
+
+    const job = await matchArchive(victim, [row('Quiet Sunlight Unique', 2011, URI)]);
+    const placed = await statusOf(job, 'quiet sunlight unique|2011');
+
+    assert.equal(placed.status, 'matched');
+    assert.equal(placed.media_item_id, real);
+  });
+
+  it('is what the same import gets with no mapping at all', async () => {
+    await poison();
+    const poisoned = await matchArchive(victim, [row('Quiet Sunlight Unique', 2011, URI)]);
+    const first = await statusOf(poisoned, 'quiet sunlight unique|2011');
+
+    await t.sql(`delete from letterboxd_matches`);
+    const clean = await matchArchive(victim, [row('Quiet Sunlight Unique', 2011, URI)]);
+
+    assert.deepEqual(await statusOf(clean, 'quiet sunlight unique|2011'), first);
+  });
+
+  it('refuses a row the film is near but not in, instead of guessing the neighbour', async () => {
+    // A namesake a year away, the real film absent from the cache. The old guard allowed
+    // this, and the provider can see the film the cache cannot.
+    const near = await movie('Adjacent Year Namesake', 2010);
+    await matchArchive(attackerA, [row('Adjacent Year Namesake', 2010, URI)]);
+    await matchArchive(attackerB, [row('Adjacent Year Namesake', 2010, URI)]);
+    assert.equal((await trusted(URI)).media_item_id, near);
+
+    const job = await matchArchive(victim, [row('Adjacent Year Namesake', 2011, URI)]);
+
+    assert.equal((await statusOf(job, 'adjacent year namesake|2011')).status, 'needs_provider');
+  });
+
+  it('never chooses between namesakes, which the row itself cannot separate', async () => {
+    const first = await collidingMovie('Same Name Same Year', 2015);
+    await collidingMovie('Same Name Same Year', 2015);
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 2)`, [URI, first]);
+
+    const job = await matchArchive(victim, [row('Same Name Same Year', 2015, URI)]);
+    const placed = await statusOf(job, 'same name same year|2015');
+
+    assert.equal(placed.status, 'ambiguous', 'the person is asked, which is the safe failure');
+    assert.equal(placed.media_item_id, null);
+  });
+
+  it('makes a mapping that already exists inert, so production needs no cleanup to be safe', async () => {
+    // Written directly, as a row from before this rule would be.
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 2)`, [URI, wrong]);
+
+    const job = await matchArchive(victim, [row('Quiet Sunlight Unique', 2011, URI)]);
+
+    assert.equal((await statusOf(job, 'quiet sunlight unique|2011')).media_item_id, real);
+  });
+
+  it('cannot be reached through another identifier for the same film', async () => {
+    // The key is opaque text, so a differently spelled URI is simply a different key, and
+    // the read rule does not depend on which one it was.
+    for (const uri of ['https://boxd.it/2POISON', 'https://boxd.it/2poison/', 'https://letterboxd.com/film/quiet-sunlight-unique']) {
+      await t.sql(
+        `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+         values ($1, $2, 'local', 2)`, [uri, wrong]);
+      const job = await matchArchive(victim, [row('Quiet Sunlight Unique', 2011, uri)]);
+      assert.equal((await statusOf(job, 'quiet sunlight unique|2011')).media_item_id, real, uri);
+    }
+  });
+
+  it('refuses to promote a URI whose own slug names something else', async () => {
+    const uri = 'https://letterboxd.com/film/quiet-sunlight-unique/';
+    await poison(uri);
+
+    assert.equal(await trusted(uri), null);
+    assert.equal((await claims(uri)).length, 2, 'the claims stand, because they are attributable');
+  });
+
+  it('still promotes a slug that agrees, a namesake suffix included', async () => {
+    for (const uri of [
+      'https://letterboxd.com/film/quiet-sunlight-unique/',
+      'https://letterboxd.com/film/quiet-sunlight-unique-2011/',
+      'https://letterboxd.com/film/quiet-sunlight-unique-1/',
+    ]) {
+      await matchArchive(attackerA, [row('Quiet Sunlight Unique', 2011, uri)]);
+      await matchArchive(attackerB, [row('Quiet Sunlight Unique', 2011, uri)]);
+      assert.equal((await trusted(uri))?.media_item_id, real, uri);
+    }
+  });
+
+  it('does not promote a pair that has not out-claimed its rival', async () => {
+    const honest = await t.createUser({ username: 'poison_honest' });
+    const other = await t.createUser({ username: 'poison_other' });
+    await matchArchive(honest, [row('Quiet Sunlight Unique', 2011, URI)]);
+    await matchArchive(other, [row('Quiet Sunlight Unique', 2011, URI)]);
+    await t.sql(`delete from letterboxd_matches`);
+
+    await poison();
+
+    assert.equal(await trusted(URI), null, 'two against two is a dispute, not a consensus');
+  });
+
+  it('cannot be configured away', async () => {
+    await t.sql(
+      `insert into app_config (key, value) values ('import.match_trust_claims', '50'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 50)`, [URI, wrong]);
+
+    const job = await matchArchive(victim, [row('Quiet Sunlight Unique', 2011, URI)]);
+    await t.sql(
+      `insert into app_config (key, value) values ('import.match_trust_claims', '2'::jsonb)
+       on conflict (key) do update set value = excluded.value`);
+
+    assert.equal(
+      (await statusOf(job, 'quiet sunlight unique|2011')).media_item_id,
+      real,
+      'however many accounts agreed',
+    );
+  });
+});
+
+describe('what a mapping is still for', () => {
+  let ada;
+  let bea;
+  let cal;
+
+  before(async () => {
+    ada = await t.createUser({ username: 'still_ada' });
+    bea = await t.createUser({ username: 'still_bea' });
+    cal = await t.createUser({ username: 'still_cal' });
+  });
+
+  it('saves a provider request on a film known here by its original title', async () => {
+    const { rows } = await t.sql(
+      `insert into media_items (kind, tmdb_id, title, original_title, release_date, provenance)
+       values ('movie', $1, 'Localised Title Here', 'Pealkiri Originaalis', '2018-06-01', 'manual')
+       returning id`,
+      [-Math.abs(seq++)],
+    );
+    const URI = 'https://boxd.it/2original';
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'provider', 2)`, [URI, rows[0].id]);
+
+    const job = await matchArchive(cal, [row('Pealkiri Originaalis', 2018, URI)]);
+    const placed = await statusOf(job, 'pealkiri originaalis|2018');
+
+    assert.equal(placed.status, 'matched', 'the title alone would have gone to the provider');
+    assert.equal(placed.media_item_id, rows[0].id);
+  });
+
+  it('keeps an honest, agreeing row exactly where it was', async () => {
+    const film = await movie('Plainly Correct Film', 2004);
+    const URI = 'https://boxd.it/2plain';
+
+    await matchArchive(ada, [row('Plainly Correct Film', 2004, URI)]);
+    await matchArchive(bea, [row('Plainly Correct Film', 2004, URI)]);
+    const job = await matchArchive(cal, [row('Plainly Correct Film', 2004, URI)]);
+
+    assert.equal((await statusOf(job, 'plainly correct film|2004')).media_item_id, film);
+  });
+});
+
+describe('the read-only audit', () => {
+  const audit = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'audits', 'letterboxd-matches.sql'),
+    'utf8',
+  );
+  const run = async () => {
+    await t.sql(`begin transaction read only`);
+    try {
+      return (await t.sql(audit)).rows;
+    } finally {
+      await t.sql(`rollback`);
+    }
+  };
+
+  it('runs inside a read-only transaction, which proves it writes nothing', async () => {
+    assert.deepEqual(await run(), []);
+  });
+
+  it('finds a slug that disagrees, and a contested URI', async () => {
+    const real = await movie('Audit Real Film', 2009);
+    const wrong = await movie('Audit Wrong Film', 2009);
+    const SLUG = 'https://letterboxd.com/film/audit-real-film/';
+    const OPAQUE = 'https://boxd.it/2audit';
+    const someone = await t.createUser({ username: 'audit_someone' });
+
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $3, 'local', 2), ($2, $3, 'local', 2)`, [SLUG, OPAQUE, wrong]);
+    await t.sql(
+      `insert into letterboxd_match_claims (letterboxd_uri, media_item_id, user_id, tier)
+       values ($1, $2, $3, 'local')`, [OPAQUE, real, someone]);
+
+    const found = (await run()).map((r) => [r.finding, r.letterboxd_uri]);
+
+    assert.deepEqual(found, [['contested', OPAQUE], ['slug_disagrees', SLUG]]);
+  });
+
+  it('finds a collection row placed under a name the film does not have', async () => {
+    const wrong = await movie('Audit Placed Film', 2013);
+    const URI = 'https://boxd.it/2placed';
+    const someone = await t.createUser({ username: 'audit_placed' });
+
+    await t.sql(
+      `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
+       values ($1, $2, 'local', 2)`, [URI, wrong]);
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`,
+      [someone, wrong]);
+    await t.sql(
+      `insert into imported_titles (user_id, media_item_id, letterboxd_uri, source_name, source_year)
+       values ($1, $2, $3, 'What They Actually Watched', 2013)`, [someone, wrong, URI]);
+
+    const [hit] = (await run()).filter((r) => r.finding === 'name_disagrees');
+
+    assert.equal(hit.user_id, someone);
+    assert.equal(hit.imported_name, 'What They Actually Watched');
   });
 });
 
