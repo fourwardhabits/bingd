@@ -354,3 +354,16 @@ Production: 168 migrations, head `20261019000100`, and the client in the OTA fro
 | T6c: more than 100 lists | **Decided 2026-09-23** | Founder | Import the **first 100 deterministically** and report the skipped count. The whole archive is never refused for it. The order that defines "first" is still to be specified | `letterboxd-lists-import.md` §D.3 |
 | Deferred at the stopping point | **Deferred** | Founder | Letterboxd Lists import; predicted score; unmatched-import repair; *add what I've already seen* bulk entry; stats / Wrapped; real release notifications; Watch Next; post-ranking share cards; further Awards. **Still deferred at `9d9683a`, and none of it is planned next** | `deferred-roadmap.md` (stopping-point summary) |
 | Still out of scope | **Unchanged** | Founder | Episode-level tracking; whole-series ranking (seasons are the TV unit) | §2 *Media scope*; §14 |
+
+---
+
+## 16. Security remediation, 2026-11-01
+
+Fixes to the audit of 2026-11-01. **The first row changes a founder decision, so it needs the founder's review on the PR.** The rest follow from the audit and change no product decision.
+
+| Area | Status | Authority | Direction | Source |
+|---|---|---|---|---|
+| Invitation consent | **Proposed, amends *Invitation acceptance is bilateral* (2026-09-08)** | Audit B-1 | A personal invitation still connects both people, in all four visibility combinations, but only after an explicit Accept on a screen that names the inviter and says what is granted. Opening a link grants nothing. `redeem_invite`, which installed builds send, connects nobody. A new account sees the invitation straight after the profile form | `20261024000100`; PRD §17 |
+| Inviter named before acceptance | **Changed** | Audit B-1 | `invite_preview` names the inviter to a signed-in holder of the link. It reverses "the inviter is not named before acceptance": consent to an unnamed person is not consent | `20261024000100` |
+| A shared Letterboxd mapping | **Changed** | Audit M-1 | A mapping confirms what a row says and never overrides it. It applies only when the row's own name and exact year agree and nothing else in the cache has that name. A row it used to place by URI alone now goes to the provider or to the person | `20261024000200` |
+| Signed-out reads | **Changed** | Audit M-3 | The anon key reads the `media_items` columns the title page uses, and one public profile by exact handle. Every other table is refused | `20261024000400` |
