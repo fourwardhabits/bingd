@@ -19,7 +19,7 @@
  * rather than only the name: the reveal, in its own colours, and the sentence the reveal
  * says out loud. Text only. No poster artwork leaves an app screenshot.
  */
-import { readFile, writeFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +43,17 @@ const FONTS = {
   sansMedium: join(repo, 'node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'),
 };
 const FAMILY = { serif: 'DM Serif Display', sans: 'Inter', sansMedium: 'Inter Medium' };
+
+/**
+ * `sharp` does not reject a missing font file. It draws in a fallback and reports success,
+ * which is how the card this replaced came to be set in the wrong type. So a missing font
+ * stops the run before anything is written.
+ */
+for (const file of Object.values(FONTS)) {
+  await access(file).catch(() => {
+    throw new Error(`Missing font ${file}. Run npm ci, then render again.`);
+  });
+}
 
 /** A line of type at an exact pixel size, trimmed to its own ink. */
 async function line({ text, face, px, color }) {
