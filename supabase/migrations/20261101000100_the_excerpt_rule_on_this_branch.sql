@@ -20,6 +20,10 @@
 -- are carried across unchanged. Any later rebuild of either function has to start from
 -- these, and `comment-excerpt-access.test.mjs` fails if one does not.
 --
+-- `20261028000100` and `20261031000100` carry the rule themselves as well, because a push
+-- that stopped between files would otherwise leave a function without it. So this file now
+-- restates what is already there, and `security-before-proactive.test.mjs` pins every state.
+--
 -- `_can_read_comment` is defined here too, identically, so this branch stands alone
 -- before the security PR reaches it. Replacing it with the same body is a no-op, in either
 -- order.

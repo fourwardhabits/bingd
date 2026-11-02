@@ -1220,12 +1220,14 @@ begin
            ) end                                   as proactive,
            -- Comment jobs only, and `mention` is deliberately not one of them.
            -- See the header: a mention push says who and where, never what.
+           -- Only what the recipient could open and read right now.
            case when n.type = 'comment' then (
              select left(c.body, 180)
                from comments c
               where c.id = (n.payload ->> 'comment_id')::uuid
                 and c.deleted_at is null
                 and not c.has_spoilers
+                and _can_read_comment(n.recipient_id, c.id)
            ) end                                   as comment_excerpt,
            (
              select jsonb_agg(jsonb_build_object('token', d.token, 'platform', d.platform))
@@ -1399,7 +1401,7 @@ as $$
               where c.id = (n.payload ->> 'comment_id')::uuid
                 and c.deleted_at is null
                 and not c.has_spoilers
-                and can_view_profile(auth.uid(), c.author_id)
+                and _can_read_comment(auth.uid(), c.id)
            )
          end,
          coalesce(
@@ -1409,7 +1411,7 @@ as $$
                  from comments c
                 where c.id = (n.payload ->> 'comment_id')::uuid
                   and c.deleted_at is null
-                  and can_view_profile(auth.uid(), c.author_id)
+                  and _can_read_comment(auth.uid(), c.id)
              )
            end,
            false
