@@ -386,6 +386,24 @@ Radius 20 top corners, `surface.raised`, `e2`, drag handle, no dimmed backdrop b
 
 The panel is edge to edge and its content brings the gutter. See *Layout invariants* in §5 for the container, content, footer and scroll rules.
 
+### Share card — 2026-11-02
+
+An image a person takes out of the app. `FirstFiveCard` is the first one.
+
+- **Text only.** No poster artwork, because whether artwork may leave an app screenshot is
+  an open licensing question. No image of any kind, the wordmark included, because Android
+  captures to a software canvas that cannot read an image view's hardware bitmap.
+- **4:5, 360 by 450 points, captured at the device's own pixel ratio.** It needs no second
+  version: it fills a feed post, sits whole in a Story, and reads in a message thread.
+  Resizing would soften the type, and the type is the card.
+- **Parchment ground, Maroon invitation band.** Every card ends by telling a stranger what
+  to do and where. Parchment on Maroon is the certified pair, 7.4:1.
+- **Ignores the system text size.** It is an image of fixed proportions.
+- **Shown before it is shared.** The preview is the card itself, scaled, so what somebody
+  approves is exactly what is sent.
+- **Always offered, never pushed.** It sits outlined beside the primary action. It names no
+  platform, and the OS decides where it goes.
+
 ### Empty state
 
 Illustration or large glyph, a `title2` line in DM Serif Display, one `body` line, and exactly one action. Written in the Curious Collector voice: "Nothing here yet" rather than "No results found."
@@ -440,35 +458,33 @@ cell is filled Maroon with `semantic.actionText`, the other is `surface.raised` 
 `text.secondary`. `radiogroup` on the group and `radio` on each cell — never a switch,
 because neither state is "off": the reader is always looking at one of the two.
 
-**One component, two callers, and that is the rule rather than the implementation.**
-Collection's Poster/List control and the Feed's Feed/Leaderboard control are the *same*
-component. They behave differently on purpose — Collection persists its choice across
-launches, the Feed deliberately does not (PRD §11, §14) — which is exactly why they have to
-look identical by construction. Two controls that behave differently and merely look
-similar drift into two dialects of one idea at the next tuning pass.
+**One caller today: Collection's Poster/List control.** The Feed used it too, for
+Feed/Leaderboard and then People, until 2026-11-02 (see below).
 
 **Exactly two options.** Not a limit awaiting removal: at three this stops being a toggle
-and becomes a segmented control, which this system already has with room for labels. A
-glyph-only cell is legible because there are two of them and the pair is a question with
-two answers; a third unlabelled icon is a guess.
+and needs words. A glyph-only cell is legible because there are two of them and the pair is
+a question with two answers; a third unlabelled icon is a guess.
+
+The Feed proved it. Its modes were three glyphs from 2026-09-08, on the reasoning that the
+heading across the row named each one. But a heading names what you are already looking at,
+never where the other two cells lead, and People and Leaderboard are where somebody finds
+their friends. They are `SegmentedTabs` now, reading `Activity · Leaderboard · People`
+(founder, 2026-11-02).
 
 **The left cell is the default.** Whatever a fresh install or a fresh launch opens on sits
 on the left, so the control reads as its own default rather than asking the reader to
 discover that it does.
 
-**Glyphs must not be borrowed across toggles.** Collection's list glyph means "the other
-way of drawing this same thing"; the Feed's left cell means "the ordinary homepage", so it
-takes `newspaper-outline` rather than reusing `list`. Two toggles wearing the same glyph
-would claim they answer the same question.
 
-### The content header row — canonical, 2026-08-29
+### The content header row — canonical, 2026-08-29, revised 2026-11-02
 
-A tab's *content* may have a header of its own, below the app bar: a heading on the left
-naming what is directly beneath it, and at most one control on the right acting on it.
+A tab's *content* may have a header of its own, below the app bar: a heading naming what is
+directly beneath it. On the Feed it sits under the mode tabs, because three words need the
+row's whole width:
 
 ```
-TRENDING NOW                         [Feed] [Trophy]
-THIS MONTH ▼                         [Feed] [Trophy]
+Activity   Leaderboard   People
+TRENDING NOW
 ```
 
 **Controls that switch content belong here, not in the app bar.** The app bar is the one
@@ -477,7 +493,7 @@ it a landmark. A control appearing there on one tab only moves the landmark, and
 decision about content among the chrome. The Feed/Leaderboard toggle spent a day in the
 app bar and was moved for exactly this.
 
-The left occupant is a `SectionHeader` or a section-sized selector (below); both read at
+The heading is a `SectionHeader` or a section-sized selector (below); both read at
 `sectionHeader` weight in Maroon, so the row has one voice whichever is showing. It is
 drawn only when there is something beneath it to name — a heading over an absent shelf is
 a label for nothing.

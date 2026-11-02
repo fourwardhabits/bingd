@@ -88,6 +88,8 @@ The user lands on an empty Collection with one clear next action, never on an em
 - **As built — 2026-09-13 (founder, preview QA Round 3): Already use Letterboxd?** An optional step of its own between *Your First Five* and People (`app/onboarding/letterboxd.tsx`), replacing a passive card on the payoff that went unnoticed. Heading *Already use Letterboxd?*, one line on what comes over (watched movies, ratings, diary dates, watchlist), the importer's privacy line, then **Import from Letterboxd** (primary, straight to the file picker), **Not now** (secondary) and *Need help getting the file?* (the instructions sheet). The real importer runs in place — preview, upload, refusals — with *Not now* on every state short of the upload. Once the server has the import, the step says it keeps running in the background and that we will say when it is done, and offers **Continue**; it never waits for the result. The payoff keeps its single action. See [`letterboxd-import.md`](../product/letterboxd-import.md) §1.
 - **The summary offers Explore For You and Find people.** *See my collection* is gone from the second slot: the Collection is one tap away on the bar for the rest of this person's life, and the moment five films are placed is the one moment the app can say "now find the people whose rankings you will see". Find people lands on **the Feed tab opened on People** (`peopleDiscovery('onboarding')` in `lib/routes.ts`, the tab with `show=people`), which is the existing discovery surface and not a screen of its own. The empty Feed offers the same action to the same place (§7). *It pointed at For You until 2026-09-08, when §A16 moved People onto the Feed beside Feed and Leaderboard; the constant existing is what made that a one-line change at both call sites.*
 
+**As built — 2026-11-02, the payoff can be shared.** *Your First Five* carries **Share**, outlined and side by side with the filled **Continue**, and every title shows on a standard phone: the footer's height and the 84pt posters were clipping the fifth row, which is the reward. Rows use `poster.xs` and the `sm` score badge, so the screen and the card agree. Share opens a sheet with the card itself, and the reader's own five, built from the same `firstFiveRows` as the screen. If no image can be made, the sheet says so and offers the list as text. The card sends a stranger to `bingd.app` and not to an invite link, because a card is posted publicly and a personal invite would attach every stranger who used it to the sender. Only the first-five flow reaches it, so accounts past onboarding do not see it.
+
 **As built — 2026-09-12, what a placement leaves behind.** Since the pick, rank loop (PR #133) onboarding draws no per-title reveal: a placement returns straight to the picker, and *Your First Five* is the first screen that shows scores together. What replaced the reveal was nothing, and on a device that read as a sheet flashing up and away. Now the picker carries one line under the progress, a small poster and *Inception landed at 8.7*, which stays until the next title is chosen: no Done, no timer, and not a sheet. An empty band, which places outright, never presents the comparison sheet at all (while the answer is on its way the same slot reads *Ranking Inception…*); a sheet that asked a question slides out still showing its last pair rather than an empty strip. The fifth placement goes to *Your First Five* exactly as before. The sheet serialisation that keeps two modals from overlapping (`Sheet`'s `onShown` / `onDismissed`) is unchanged.
 
 ---
@@ -345,6 +347,15 @@ Two founder passes on a device, recorded together because both move the top of t
 **The hero frame is `status-bar inset + width ÷ (16:9)`.** The visible image box below the transparent header is exactly the backdrop's own 16:9 on every device, so the full artwork — top edge included — shows with no crop on either axis. The fixed frame ratios that preceded it (1.4, then 1.62, then 1.5) were each a different wrong crop on some device, because any frame that is not the image's own shape forces `cover` to choose an edge to lose. `POSTER_LIFT` went 96 → 120 and the heading gap halved (16 → 8), so the title starts sooner and the score cluster sits higher despite the deeper hero; the collapsed no-backdrop band tracks `POSTER_LIFT` at 120, so the two states keep one geometry.
 
 **The personal cluster is the primary action of this page.** The reader's own score circle is the page's largest (`xl`, 64 — a badge size that exists for this cluster alone), the "Your score" caption is gone — a filled Maroon circle with a number in it, above a button named Rank, does not need a caption to say whose score it is — and Rank/Ranked is full 44pt control height with a `headline` label. **Recommend in the action row is outlined**: filled Maroon marks the primary action of the current context ([`design-system.md`](./design-system.md) §8), and on a title page that is this cluster. Recommend is filled again inside its own sheet, where sending is the point; Watchlist is unchanged; never two equally dominant Maroon CTAs in one view.
+
+### As built — 2026-11-02: the action row moves when it cannot fit
+
+Below about 382pt, or at a larger text size, Rank, Save, List and Recommend sit in one row
+under the identity block and poster rather than in the column beside it. A fourth control
+arrived on 2026-09-21 and left the row with no room: on a 375pt phone `flexWrap` put the last
+glyph on a line of its own. The decision is made from the viewport by `titleActionsFit`,
+always measured against `Ranked`, the wider word, so a title does not change layout at the
+moment it is ranked. The controls, their order and their sizes do not change.
 
 ### As built — 2026-09-05: where to watch, under the scores and over the tabs
 
@@ -1198,6 +1209,14 @@ rather than by a placeholder.
 *From contacts* is the obvious third list and is deliberately not built. It needs an
 address-book permission, which is a decision about what bingd uploads about people who never
 signed up.
+
+### The modes get words — 2026-11-02
+
+The control is `SegmentedTabs` now, reading `Activity · Leaderboard · People`, under the app
+bar and above the heading of whatever is showing. It was three glyphs in the heading row, and
+nothing on screen said where the other two led. Same modes, same order, same behaviour: a
+launch still opens on the left one and nothing about mode is persisted. The sketch above
+shows the old row and is kept for the page shape it describes.
 
 ### Follow activity in the Feed — 2026-09-08
 
