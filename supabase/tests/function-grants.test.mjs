@@ -28,18 +28,24 @@ const ALLOWED = {
   // an identity to check, so a caller can only ask about themselves or about a row
   // that already exists. The two-argument forms they replaced — can_view_profile
   // and blocked_between — were social-graph oracles for exactly that reason, and
-  // are now server-side only. See 20260813001900 and oracles.test.mjs.
-  'can_i_view(uuid)': ['anon', 'authenticated'],
-  'watch_tag_visible(uuid)': ['anon', 'authenticated'],
+  // are now server-side only. See 20260813001900 and oracles.test.mjs. Not anon since
+  // 20261024000400: anon reaches no table these policies guard.
+  'can_i_view(uuid)': ['authenticated'],
+  'watch_tag_visible(uuid)': ['authenticated'],
 
-  // Retrieval by identifier: a shared link has to resolve without an account.
-  'list_by_id(uuid)': ['anon', 'authenticated'],
-  'list_items_by_list(uuid)': ['anon', 'authenticated'],
+  // Security invoker over tables only a signed-in reader may hold. The public list page
+  // uses list_view and list_items_page.
+  'list_by_id(uuid)': ['authenticated'],
+  'list_items_by_list(uuid)': ['authenticated'],
+
+  // 20261024000400. The website's one read about a person: one exact handle, public and
+  // active only, three columns, and no way to list. Anon only, like list_preview.
+  'public_profile_card(text)': ['anon'],
 
   // ---------------------------------------------------------------------------
   // Lists v1 (20261010000100).
   //
-  // The anon set is exactly six, and each one is anon for a stated reason rather than
+  // The anon set is exactly four, and each one is anon for a stated reason rather than
   // by symmetry with its neighbours:
   //
   //   list_view / list_items_page    — the logged-out page at bingd.app/lists/<id> is
@@ -48,8 +54,6 @@ const ALLOWED = {
   //                                    either.
   //   list_preview                   — read by the Cloudflare Pages Function that sets
   //                                    og:title. It holds the anon key and nothing more.
-  //   list_by_id / list_items_by_list — the two that predate this tranche, redefined
-  //                                    onto the same predicate at their existing grants.
   //
   // Every one of them is gated on `_list_readable`, which is granted to **nobody**: it
   // takes a viewer, so a client grant would make it the block-graph and follow-graph
@@ -803,6 +807,12 @@ const ALLOWED = {
   // it exists because 20260819000500 is what made such a link worth anything.
   'record_invite_open(text,text)': ['anon', 'authenticated'],
   'redeem_invite(uuid,text)': ['authenticated'],
+  // 20261024000100. The Accept button. It names no other account either, and the server
+  // takes the call as the consent, so `_redeem_invite`, which holds the flag, has no grant.
+  'accept_invite(uuid,text)': ['authenticated'],
+  // Whose link this is, before anything is granted. Signed in, and it answers one reason
+  // for a block and for an inviter who is gone.
+  'invite_preview(text)': ['authenticated'],
   'revoke_invite_link(uuid)': ['authenticated'],
 
   // Added 2026-08-24 with push delivery (20260825000300). Two writers for a table that
@@ -911,12 +921,13 @@ test('the helpers RLS policies depend on are executable, or every read breaks', 
     // read, which points nowhere near a grant.
     const alice = await t.createUser({ username: 'alice' });
 
-    const visible = await t.asAnon(async () => {
+    const bob = await t.createUser({ username: 'bob' });
+    const visible = await t.asUser(bob, async () => {
       const { rows } = await t.sql(`select id from profiles where id = $1`, [alice]);
       return rows;
     });
 
-    assert.equal(visible.length, 1, 'a signed-out reader should see a public profile');
+    assert.equal(visible.length, 1, 'a signed-in reader should see a public profile');
   } finally {
     await t.close();
   }

@@ -152,12 +152,8 @@ describe('a goal belongs to one account', () => {
   });
 
   it('is invisible signed out', async () => {
-    const rows = await t.asAnon(async () => {
-      const { rows } = await t.sql(`select year, target from watch_goals`);
-      return rows;
-    });
-
-    assert.deepEqual(rows, []);
+    const error = await t.asAnon(() => t.errorFrom(`select year, target from watch_goals`));
+    assert.equal(error?.code, '42501');
   });
 
   it('is written for the caller, not for whoever is named', async () => {
