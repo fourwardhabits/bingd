@@ -165,7 +165,7 @@ type View = Awaited<ReturnType<typeof renderWithProviders>>;
 
 const open = async () => {
   const view = await renderWithProviders(<FeedScreen />);
-  await waitFor(() => expect(view.getByLabelText('Feed')).toBeTruthy());
+  await waitFor(() => expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy());
   return view;
 };
 
@@ -340,6 +340,20 @@ describe('the true end', () => {
     await seeRow(view, 0);
 
     expect(view.queryByRole('button', { name: 'Find your people' })).toBeNull();
+  });
+});
+
+describe('a first page that fails', () => {
+  /** The message said to try again and there was nothing to press. */
+  it('offers Try again, and pressing it reads the feed again', async () => {
+    mockFeedQueue = [{ error: { message: 'network' } }, { rows: fullPage() }];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load activity')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Try again' }));
+
+    await seeRow(view, 0);
+    expect(view.queryByText('Could not load activity')).toBeNull();
   });
 });
 
