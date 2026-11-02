@@ -1,4 +1,4 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -932,6 +932,30 @@ describe('one turn of the loop', () => {
     expect(view.queryByLabelText('Search for a movie')).toBeNull();
 
     releaseReadsOf('rankings');
+  });
+
+  /**
+   * Share is an offer beside the flow's one action, not a fork in it: Continue keeps the
+   * fill, and the card opens over the payoff and comes straight back to it.
+   */
+  it('offers the First Five card beside Continue, built from this reader\u2019s own five', async () => {
+    alreadyRanked(5);
+    const view = await renderWithProviders(<TasteScreen />);
+    await waitFor(() => expect(view.getByText('Your First Five')).toBeTruthy());
+
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+    await fireEvent.press(view.getByRole('button', { name: 'Share your First Five' }));
+
+    await waitFor(() => expect(view.getByTestId('first-five-card')).toBeTruthy());
+    expect(view.getAllByTestId('first-five-card-row')).toHaveLength(5);
+    const card = view.getByTestId('first-five-card');
+    expect(within(card).getByText(/Ranked 1/)).toBeTruthy();
+    expect(within(card).getByText(/Ranked 5/)).toBeTruthy();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    await waitFor(() => expect(view.queryByTestId('first-five-card')).toBeNull());
+    expect(view.getByText('Your First Five')).toBeTruthy();
   });
 
   /**

@@ -420,6 +420,19 @@ about films they chose.
 
 ---
 
+### First Five share card — added 2026-11-02
+
+Not in `ANALYTICS_EVENTS`, the same as the Lists events.
+
+| Event | Fires when | Properties |
+|---|---|---|
+| `first_five_share_opened` | The card's preview opened | None |
+| `first_five_shared` | The system share sheet **opened** | `kind`: `image` or `text` |
+| `first_five_share_failed` | No image could be made, so the text fallback was offered | None |
+
+`first_five_shared` is the opening and not a completed share, for the same reason as
+`list_shared`: the OS does not say what somebody did with the sheet.
+
 ## 3. What each event does **not** mean
 
 This section is the point of the document. Every line here is a number somebody could
