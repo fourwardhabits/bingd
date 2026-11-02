@@ -12,7 +12,7 @@ Follow this order. The client calls functions that only exist after the migratio
 2. Apply the five `20261024*` migrations to staging, then run the staging checks below.
 3. Apply them to production.
 4. Deploy the website.
-5. Publish the app update.
+5. Publish the app update, following [cloud-ota.md](cloud-ota.md). No new binary is needed: the runtime fingerprint is unchanged on both platforms.
 
 | Step | Why it comes here |
 |---|---|
@@ -33,6 +33,15 @@ Run these on staging first, then production.
 | `bingd.app/u/<a private handle>` | Shows the generic page |
 | Open an invite link, leave without tapping | No follow appears in either direction |
 | Open an invite link, tap Accept | Both accounts follow each other |
+
+## Other branches
+
+Merge the security PR before anything else that touches the database.
+
+| Branch | What to do |
+|---|---|
+| `feature/proactive-notifications` | Merge `main` into it after the security PR. It redefines `claim_push_batch` and `my_notifications`, and carries the fix in its own `20261101000100`. `docs/product/decision-log.md` conflicts, and keeping both sections resolves it. Its CI then runs `comment-excerpt-access.test.mjs`, which fails if the fix was lost |
+| PR #119 `fix/push-kill-switch` | **Do not merge as it stands.** It is 420 commits behind and redefines `claim_push_batch(integer)` without the excerpt rule. Rebuild it from the newest definition, or close it |
 
 ## Manual steps
 
