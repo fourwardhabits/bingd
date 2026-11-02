@@ -35,13 +35,16 @@ const SHEET_MAX_SHARE = 0.9;
  * a large text size the heading and the failure line grow while the card does not, and the
  * sheet is capped, so the body scrolls and Share stays reachable.
  *
- * **Leaving cancels.** Capture takes a moment and the reader may change their mind during
- * it. `open` is what stops a finished capture from opening a share sheet they already said
- * no to, and what stops a late answer from closing a sheet that has since been reopened.
+ * **Leaving cancels, until the system sheet has been asked for.** Capture takes a moment and
+ * the reader may change their mind during it. `open` is what stops a finished capture from
+ * opening a share sheet they already said no to, and what stops a late answer from closing a
+ * sheet that has since been reopened. Once `presenting` is set the system sheet cannot be
+ * called back, and it is being presented from this one, so this one stays until it is done.
  */
 export function FirstFiveShareSheet({ rows, username, onClose }: FirstFiveShareSheetProps) {
   const card = useRef<View>(null);
   const open = useRef(true);
+  const presenting = useRef(false);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [busy, setBusy] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -54,7 +57,7 @@ export function FirstFiveShareSheet({ rows, username, onClose }: FirstFiveShareS
   );
 
   const close = () => {
-    if (!open.current) return;
+    if (!open.current || presenting.current) return;
     open.current = false;
     onClose();
   };
@@ -77,7 +80,12 @@ export function FirstFiveShareSheet({ rows, username, onClose }: FirstFiveShareS
         discardCapture(uri);
         return;
       }
-      await presentCard(uri, 'Share your First Five');
+      presenting.current = true;
+      try {
+        await presentCard(uri, 'Share your First Five');
+      } finally {
+        presenting.current = false;
+      }
       track({ name: 'first_five_shared', props: { kind: 'image' } });
       close();
     } catch {

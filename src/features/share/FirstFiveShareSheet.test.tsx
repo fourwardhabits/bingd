@@ -211,6 +211,41 @@ describe('leaving while the image is being made', () => {
   });
 });
 
+describe('leaving once the system sheet has been asked for', () => {
+  /** It cannot be called back, and removing its presenter is what breaks it on iOS. */
+  it('holds the preview until the system sheet is done, then closes once', async () => {
+    let finish: () => void = () => {};
+    mockShareAsync.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)));
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(mockShareAsync).toHaveBeenCalledTimes(1));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => finish());
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockTrack).toHaveBeenCalledWith({ name: 'first_five_shared', props: { kind: 'image' } });
+  });
+
+  it('lets go of the preview if the system sheet fails', async () => {
+    let fail: (error: Error) => void = () => {};
+    mockShareAsync.mockReturnValue(new Promise<void>((_, reject) => (fail = reject)));
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(mockShareAsync).toHaveBeenCalledTimes(1));
+    await act(async () => fail(new Error('no')));
+
+    await waitFor(() => expect(view.getByTestId('first-five-share-failed')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('at a large text size', () => {
   /** The heading and failure line grow while the sheet is capped, so the body must scroll. */
   it('keeps the actions outside the scroll body, where they stay reachable', async () => {
