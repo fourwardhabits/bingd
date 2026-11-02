@@ -51,7 +51,7 @@ import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
-import { TitleActions } from '@/features/title/TitleActions';
+import { TitleActions, titleActionsFit } from '@/features/title/TitleActions';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
 import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
@@ -221,7 +221,7 @@ export default function TitleScreen() {
   const insets = useSafeAreaInsets();
   // The hero is the backdrop's own 16:9, so the width decides where it ends — which is
   // where the navigation has finished becoming a header.
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, fontScale } = useWindowDimensions();
   const hasId = Boolean(id);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1311,6 +1311,73 @@ export default function TitleScreen() {
    * `Ranking` group below for why one entry point is the whole of the change.
    */
 
+
+  /**
+   * **Rank, Save, List, Recommend: beside the poster where they fit, under it where they do
+   * not** (founder, Growth UX sprint, 2026-11-02).
+   *
+   * Decided from the viewport rather than left to `flexWrap`, which on a 375pt phone put the
+   * last glyph on a line of its own under the other three. The controls, their order and
+   * their sizes do not change, only which row they sit in. Measured against the column this
+   * title actually has, and at the reader's text size, so a larger setting moves the row
+   * instead of breaking it.
+   */
+  const identityColumn =
+    screenWidth -
+    theme.layout.gutter * 2 -
+    theme.space[4] -
+    (theme.poster.detail.width + theme.space[1] * 2);
+  const actionsBesidePoster = titleActionsFit(identityColumn, fontScale, {
+    rank: rankable,
+    icons: rankable ? 3 : 2,
+  });
+  const actions = (
+    <TitleActions
+      rank={
+        rankable
+          ? {
+              ranked: Boolean(data.ranked),
+              accessibilityLabel: data.ranked
+                ? 'Ranked. Change or remove this.'
+                : `Rank ${displayTitle ?? title.title}`,
+              accessibilityHint: data.ranked
+                ? 'Opens rating and collection options'
+                : 'Opens the rating sheet',
+              onPress: () => (data.ranked ? setManaging(true) : rank()),
+            }
+          : null
+      }
+      save={{
+        selected: isWatchlisted,
+        // The sentences the labelled control used, unchanged: a screen reader's
+        // name for this control is what says which way the toggle goes.
+        accessibilityLabel: isWatchlisted
+          ? `Remove ${title.title} from your watchlist`
+          : `Add ${title.title} to your watchlist`,
+        onPress: () => void toggleWatchlist(),
+        disabled: watchlistBusy,
+      }}
+      // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
+      // when this is pressed, so there is nothing to serialise against.
+      list={{
+        accessibilityLabel: `Add ${title.title} to a list`,
+        onPress: () => setAddingToList(true),
+      }}
+      recommend={
+        rankable
+          ? {
+              accessibilityLabel: `Recommend ${title.title} to a friend`,
+              onPress: () => {
+                setActionError(null);
+                setRecommendedTo(null);
+                setRecommending(true);
+              },
+            }
+          : null
+      }
+    />
+  );
+
   return (
     <Screen includeBottomInset edges={[]}>
       {/**
@@ -1596,52 +1663,7 @@ export default function TitleScreen() {
              * ranking the same watch again and logging another watch, because that is the
              * menu's job and the distinction is the whole point of it.
              */}
-            <View style={styles.actionsRow}>
-              <TitleActions
-                rank={
-                  rankable
-                    ? {
-                        ranked: Boolean(data.ranked),
-                        accessibilityLabel: data.ranked
-                          ? 'Ranked. Change or remove this.'
-                          : `Rank ${displayTitle ?? title.title}`,
-                        accessibilityHint: data.ranked
-                          ? 'Opens rating and collection options'
-                          : 'Opens the rating sheet',
-                        onPress: () => (data.ranked ? setManaging(true) : rank()),
-                      }
-                    : null
-                }
-                save={{
-                  selected: isWatchlisted,
-                  // The sentences the labelled control used, unchanged: a screen reader's
-                  // name for this control is what says which way the toggle goes.
-                  accessibilityLabel: isWatchlisted
-                    ? `Remove ${title.title} from your watchlist`
-                    : `Add ${title.title} to your watchlist`,
-                  onPress: () => void toggleWatchlist(),
-                  disabled: watchlistBusy,
-                }}
-                // One tap, beside Watchlist (founder QA, 2026-09-21). No sheet is open
-                // when this is pressed, so there is nothing to serialise against.
-                list={{
-                  accessibilityLabel: `Add ${title.title} to a list`,
-                  onPress: () => setAddingToList(true),
-                }}
-                recommend={
-                  rankable
-                    ? {
-                        accessibilityLabel: `Recommend ${title.title} to a friend`,
-                        onPress: () => {
-                          setActionError(null);
-                          setRecommendedTo(null);
-                          setRecommending(true);
-                        },
-                      }
-                    : null
-                }
-              />
-            </View>
+            {actionsBesidePoster ? <View style={styles.actionsRow}>{actions}</View> : null}
           </View>
 
           <View style={styles.posterColumn} testID="title-poster-column">
@@ -1671,6 +1693,11 @@ export default function TitleScreen() {
           </View>
         </View>
 
+        {actionsBesidePoster ? null : (
+          <View style={styles.actionsFullWidth} testID="title-actions-full-width">
+            {actions}
+          </View>
+        )}
 
         {/* Who recommended this, and what they said — below the title and its actions,
             in the flow, whether or not there is artwork (founder F1, 2026-09-19). It sits
@@ -2888,6 +2915,11 @@ const styles = StyleSheet.create({
    * contract this screen holds, not a property of a button cluster.
    */
   actionsRow: { marginTop: theme.space[2] },
+  // The same 12 from whatever is above it, now the taller of the two columns.
+  actionsFullWidth: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
   /**
    * A Paper mat around the artwork, the way a print is framed.
    *

@@ -1,5 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, useWindowDimensions } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -8,6 +8,11 @@ import { theme } from '@/ui/tokens';
 // expo-router's require.context, which has no exclusion for test files. See
 // app-directory.test.ts.
 import TitleScreen, { ErrorBoundary } from '../../../app/title/[id]';
+
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions');
+const mockWindow = useWindowDimensions as unknown as jest.Mock;
+const setViewport = (width: number, fontScale = 1) =>
+  mockWindow.mockReturnValue({ width, height: 844, scale: 3, fontScale });
 
 const mockPush = jest.fn();
 const mockBack = jest.fn();
@@ -260,6 +265,7 @@ const completeSeries = {
 };
 
 beforeEach(() => {
+  setViewport(750);
   mockHeaderOptions = {};
   mockParams = {};
   mockPush.mockReset();
@@ -1220,6 +1226,40 @@ describe('where the action row lives', () => {
     // And not in the poster's column, which is the other way this could be misread.
     const column = view.getByTestId('title-poster-column');
     expect(within(column).queryByTestId('title-actions')).toBeNull();
+  });
+
+  /**
+   * Decided from the viewport, never left to `flexWrap`: at 375pt the last glyph used to
+   * land alone on a line of its own. The controls and their order are unchanged.
+   */
+  it('moves under the poster on a phone too narrow for one line', async () => {
+    setViewport(375);
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+
+    const below = view.getByTestId('title-actions-full-width');
+    expect(within(below).getByTestId('title-actions')).toBeTruthy();
+    expect(within(view.getByTestId('title-identity-copy')).queryByTestId('title-actions')).toBeNull();
+  });
+
+  it('stays beside the poster on a standard 390pt phone', async () => {
+    setViewport(390);
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+
+    expect(within(view.getByTestId('title-identity-copy')).getByTestId('title-actions')).toBeTruthy();
+    expect(view.queryByTestId('title-actions-full-width')).toBeNull();
+  });
+
+  it('moves at a larger text size on that same phone', async () => {
+    setViewport(390, 1.3);
+    rankIt('film-1', 'movies');
+    const view = await openOn(completeFilm, 'Inception');
+    await waitFor(() => expect(view.getByTestId('title-action-ranked')).toBeTruthy());
+
+    expect(view.getByTestId('title-actions-full-width')).toBeTruthy();
   });
 
   it('reserves no fixed height for the identity row', async () => {

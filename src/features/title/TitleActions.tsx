@@ -9,12 +9,31 @@ import { theme } from '@/ui/tokens';
 /**
  * The icon controls' own width; `hitSlop` makes up the rest of the 44pt target.
  *
- * 32 since the fourth control (Add to List, founder QA 2026-09-21): Rank/Ranked plus three
- * icons then fits one line in the identity column from a 375pt phone up. On a narrower
- * column the cluster wraps its icons under Rank rather than truncating the one word the
- * row exists to say — the controls never change shape, only where the line breaks.
+ * 32 since the fourth control (Add to List, founder QA 2026-09-21). The cluster still wraps
+ * as a last resort rather than truncate the one word the row exists to say, but the screen
+ * moves it before that happens: see {@link titleActionsFit}.
  */
 const ICON_BOX = 32;
+
+/** The widest the rank control gets at default type: `Ranked`, with its tick, as rendered. */
+const RANKED_WIDTH = 118;
+
+/**
+ * Whether the cluster fits on one line in a column this wide.
+ *
+ * Decided from the viewport and never from `flexWrap` (design-system.md §8). Left to wrap,
+ * a 375pt phone orphaned the last glyph on a line of its own. Always measured against
+ * `Ranked`, the wider of the two words, so a title does not change layout the moment it is
+ * ranked. A series has no rank control and always fits.
+ */
+export function titleActionsFit(
+  columnWidth: number,
+  fontScale: number,
+  { rank, icons }: { rank: boolean; icons: number },
+): boolean {
+  const glyphs = icons * (ICON_BOX + theme.space[1]);
+  return (rank ? RANKED_WIDTH * fontScale : 0) + glyphs <= columnWidth;
+}
 
 export type RankAction = {
   /** Whether this reader has already ranked it. Decides the word and the treatment. */
