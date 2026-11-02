@@ -302,6 +302,53 @@ describe('revoke_device_token', () => {
   });
 });
 
+describe('how many devices one account can hold', () => {
+  const live = async (who) =>
+    (await t.sql(`select count(*)::int as n from device_tokens where user_id = $1 and revoked_at is null`, [who]))
+      .rows[0].n;
+
+  it('keeps ten, however many are registered, and they are the newest', async () => {
+    await clearTokens();
+    for (let i = 0; i < 25; i += 1) {
+      await register(reader, TOKEN(100 + i));
+      await t.sql(`update device_tokens set updated_at = now() + make_interval(secs => $1) where token = $2`, [i, TOKEN(100 + i)]);
+    }
+
+    assert.equal(await live(reader), 10);
+    assert.equal(await liveOwnerOf(TOKEN(124)), reader, 'the newest device keeps its push');
+    assert.equal(await liveOwnerOf(TOKEN(100)), null, 'the oldest was let go');
+  });
+
+  it('brings an evicted device straight back when it registers again', async () => {
+    await register(reader, TOKEN(100));
+
+    assert.equal(await liveOwnerOf(TOKEN(100)), reader);
+    assert.equal(await live(reader), 10);
+  });
+
+  it('applies to a device moving in from another account', async () => {
+    await register(control, TOKEN(150));
+    await register(reader, TOKEN(150));
+
+    assert.equal(await liveOwnerOf(TOKEN(150)), reader);
+    assert.equal(await live(reader), 10);
+  });
+
+  it('bounds the job the sender is handed, which is what the cap is for', async () => {
+    const fan = await t.createUser({ username: 'push_cap_fan' });
+    await t.sql(`delete from push_outbox`);
+    await t.asUser(fan, async () => {
+      await t.sql(`select follow($1, $2)`, [await uuid(), reader]);
+    });
+
+    const jobs = await t.asRole('service_role', null, async () =>
+      (await t.sql(`select claim_push_batch(50) as j`)).rows[0].j);
+
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].tokens.length, 10);
+  });
+});
+
 describe('device_tokens is not a client surface', () => {
   it('cannot be read by its own owner, or by anyone', async () => {
     await clearTokens();
@@ -310,11 +357,12 @@ describe('device_tokens is not a client surface', () => {
     for (const [name, run] of [
       ['the owner', (q) => t.asUser(reader, q)],
       ['another account', (q) => t.asUser(control, q)],
-      ['anon', (q) => t.asAnon(q)],
     ]) {
       const { rows } = await run(() => t.sql(`select token from device_tokens`));
       assert.deepEqual(rows, [], `${name} could read device tokens`);
     }
+    const anon = await t.asAnon(() => t.errorFrom(`select token from device_tokens`));
+    assert.equal(anon?.code, '42501', 'anon could read device tokens');
   });
 
   it('cannot be written directly', async () => {
