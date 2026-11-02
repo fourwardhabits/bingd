@@ -350,12 +350,12 @@ Two founder passes on a device, recorded together because both move the top of t
 
 ### As built — 2026-11-02: the action row moves when it cannot fit
 
-Below about 382pt, or at a larger text size, Rank, Save, List and Recommend sit in one row
+Below about 385pt, or at a larger text size, Rank, Save, List and Recommend sit in one row
 under the identity block and poster rather than in the column beside it. A fourth control
 arrived on 2026-09-21 and left the row with no room: on a 375pt phone `flexWrap` put the last
 glyph on a line of its own. The decision is made from the viewport by `titleActionsFit`,
 always measured against `Ranked`, the wider word, so a title does not change layout at the
-moment it is ranked. The controls, their order and their sizes do not change.
+moment it is ranked, and only the word scales with the text size. The controls, their order and their sizes do not change.
 
 ### As built — 2026-09-05: where to watch, under the scores and over the tabs
 

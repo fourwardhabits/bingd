@@ -27,6 +27,15 @@ describe('titleActionsFit', () => {
     expect(titleActionsFit(column(390), 1.3, rankable)).toBe(false);
   });
 
+  /** The padding and the tick do not shrink with the word, so 375pt still cannot hold it. */
+  it('does not let a smaller text size talk a narrow phone into wrapping', () => {
+    expect(titleActionsFit(column(375), 0.9, rankable)).toBe(false);
+  });
+
+  it('allows a text size smaller than default on a phone that already fits', () => {
+    expect(titleActionsFit(column(390), 0.9, rankable)).toBe(true);
+  });
+
   it('keeps a series beside the poster at every width, since it has no rank control', () => {
     expect(titleActionsFit(column(320), 1, { rank: false, icons: 2 })).toBe(true);
     expect(titleActionsFit(column(320), 2, { rank: false, icons: 2 })).toBe(true);

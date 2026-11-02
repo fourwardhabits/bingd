@@ -15,8 +15,11 @@ import { theme } from '@/ui/tokens';
  */
 const ICON_BOX = 32;
 
-/** The widest the rank control gets at default type: `Ranked`, with its tick, as rendered. */
-const RANKED_WIDTH = 118;
+/** The word `Ranked` in `headline` at the default text size, as rendered. */
+const RANKED_LABEL = 63;
+
+/** What around the word does not scale: padding, the tick, its gap, the border, the margin. */
+const RANK_CHROME = theme.space[3] * 2 + theme.layout.icon.sm + theme.space[2] + 2 + theme.space[1];
 
 /**
  * Whether the cluster fits on one line in a column this wide.
@@ -32,7 +35,9 @@ export function titleActionsFit(
   { rank, icons }: { rank: boolean; icons: number },
 ): boolean {
   const glyphs = icons * (ICON_BOX + theme.space[1]);
-  return (rank ? RANKED_WIDTH * fontScale : 0) + glyphs <= columnWidth;
+  // Only the word grows with the text size. Scaling the whole control would underestimate it
+  // below 100%, which is exactly where the last glyph used to get stranded.
+  return (rank ? RANK_CHROME + RANKED_LABEL * fontScale : 0) + glyphs <= columnWidth;
 }
 
 export type RankAction = {

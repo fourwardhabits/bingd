@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Share, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -147,6 +147,81 @@ describe('sharing the image', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(mockCaptureRef).not.toHaveBeenCalled();
+  });
+});
+
+describe('leaving while the image is being made', () => {
+  const capturing = () => {
+    let finish: (uri: string) => void = () => {};
+    mockCaptureRef.mockReturnValue(new Promise<string>((resolve) => (finish = resolve)));
+    return (uri: string) => act(async () => finish(uri));
+  };
+
+  /** Found by independent review, which reproduced a share sheet opening after Not now. */
+  it('opens no share sheet, and removes the file that was made', async () => {
+    const captured = capturing();
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(mockCaptureRef).toHaveBeenCalledTimes(1));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await captured('file:///cache/late.png');
+
+    expect(mockShareAsync).not.toHaveBeenCalled();
+    expect(mockReleaseCapture).toHaveBeenCalledWith('file:///cache/late.png');
+    expect(mockTrack).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'first_five_shared' }));
+  });
+
+  it('closes once, however the capture ends', async () => {
+    const captured = capturing();
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(mockCaptureRef).toHaveBeenCalledTimes(1));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await captured('file:///cache/late.png');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does the same when the sheet is taken away rather than dismissed', async () => {
+    const captured = capturing();
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(mockCaptureRef).toHaveBeenCalledTimes(1));
+    await view.unmount();
+    await captured('file:///cache/late.png');
+
+    expect(mockShareAsync).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('reports no failure for an attempt nobody is waiting on', async () => {
+    let fail: (error: Error) => void = () => {};
+    mockCaptureRef.mockReturnValue(new Promise<string>((_, reject) => (fail = reject)));
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Share' }));
+    await waitFor(() => expect(mockCaptureRef).toHaveBeenCalledTimes(1));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await act(async () => fail(new Error('too late')));
+
+    expect(mockTrack).not.toHaveBeenCalled();
+  });
+});
+
+describe('at a large text size', () => {
+  /** The heading and failure line grow while the sheet is capped, so the body must scroll. */
+  it('keeps the actions outside the scroll body, where they stay reachable', async () => {
+    const view = await open();
+    const body = view.getByTestId('first-five-share-body');
+    const actions = view.getByTestId('first-five-share-actions');
+
+    expect(within(body).queryByRole('button', { name: 'Share' })).toBeNull();
+    expect(within(actions).getByRole('button', { name: 'Share' })).toBeTruthy();
+    expect(within(actions).getByRole('button', { name: 'Not now' })).toBeTruthy();
+    expect(StyleSheet.flatten(body.props.style)).toMatchObject({ flexGrow: 0, flexShrink: 1 });
   });
 });
 
