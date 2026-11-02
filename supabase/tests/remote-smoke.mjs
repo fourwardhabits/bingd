@@ -356,10 +356,10 @@ expectRefused(
   await rpc('report', { p_subject_type: 'profile', p_subject_id: NIL, p_reason: 'spam', p_note: null }),
 );
 
-// Deliberately reachable without an account: a shared link has to resolve for
-// someone who is not signed in, and possession of the identifier is the gate.
-expectAllowed('anon can execute list_by_id, by design', await rpc('list_by_id', { target: NIL }));
-expectAllowed('anon can execute list_items_by_list, by design', await rpc('list_items_by_list', { target: NIL }));
+// Closed to anon in 20261024000400. The website's shared list goes through `list_view` and
+// `list_items_page`, so nothing signed out calls these any more.
+expectRefused('anon cannot execute list_by_id', await rpc('list_by_id', { target: NIL }));
+expectRefused('anon cannot execute list_items_by_list', await rpc('list_items_by_list', { target: NIL }));
 
 // The oracles closed in 20260813001900. Both are SECURITY DEFINER and were
 // granted to anon because policies call them; the argument-taking forms let a
@@ -367,9 +367,10 @@ expectAllowed('anon can execute list_items_by_list, by design', await rpc('list_
 expectRefused('anon cannot execute can_view_profile', await rpc('can_view_profile', { viewer: NIL, subject: NIL }));
 expectRefused('anon cannot execute blocked_between', await rpc('blocked_between', { a: NIL, b: NIL }));
 
-// The replacements, which take no identity and so must stay reachable.
-expectAllowed('anon can execute can_i_view, by design', await rpc('can_i_view', { subject: NIL }));
-expectAllowed('anon can execute watch_tag_visible, by design', await rpc('watch_tag_visible', { tag_id: NIL }));
+// The replacements, which take no identity. Closed to anon in 20261024000400 too: a signed-
+// in client still has them, and the policies that call them are no longer reachable by anon.
+expectRefused('anon cannot execute can_i_view', await rpc('can_i_view', { subject: NIL }));
+expectRefused('anon cannot execute watch_tag_visible', await rpc('watch_tag_visible', { tag_id: NIL }));
 
 // ---------------------------------------------------------------------------
 // The TMDB adapter's write path (20260815000000)
