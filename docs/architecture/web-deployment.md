@@ -372,8 +372,9 @@ that would hurt: a plot synopsis on a link preview is a spoiler nobody asked for
 
 **The preview card is generic, and the page is not.** Each page carries `og:site_name`,
 `og:title`, `og:description`, `og:image` and the Twitter equivalents, all static text plus
-one image: `social-card.png`, 1200x630, the wordmark on the brand ground, shipped from
-`web/src/`. It is `summary_large_image`, which the card was built for. It was `summary`
+one image: `social-card.png`, 1200x630, shipped from `web/src/` and rendered by hand with
+`node web/social-card.mjs`. It shows the promise and the reveal (2026-11-02): a stranger who
+is sent a link should learn what the product does, not only what it is called. Text only. It is `summary_large_image`, which the card was built for. It was `summary`
 while the only asset was the square app icon, which every unfurler either letterboxed or
 cropped into a corner of itself.
 

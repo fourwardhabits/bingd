@@ -1059,7 +1059,7 @@ describe('the built site', () => {
         '<meta property="og:description" content="See where it ranks with friends, or rank it yourself." />',
       ),
     );
-    assert.ok(title.includes('<meta property="og:image:alt" content="The bingd. wordmark" />'));
+    assert.ok(title.includes('<meta property="og:image:alt" content="bingd. Rank what you watch. See where it really lands." />'));
     // No poster host anywhere in the card, even though the page loads from one.
     const head = title.slice(0, title.indexOf('</head>'));
     assert.ok(!head.includes('image.tmdb.org'));
@@ -4102,7 +4102,6 @@ describe('the ranking demo, built', () => {
     assert.equal(text(/<figcaption>([\s\S]*?)<\/figcaption>/.exec(note)[1]), 'Suraj, founder');
     assert.match(front, /\.founder-note::before \{\s*content: '\\201C';/, 'no opening quotation mark');
     assert.doesNotMatch(section, /<img|<h[1-6]|class="kicker"/, 'a portrait or heading came back');
-    assert.match(front, /your new post-watch ritual/);
   });
 
   /**
@@ -4159,7 +4158,7 @@ describe('the ranking demo, built', () => {
     for (const blurb of blurbs) assert.doesNotMatch(blurb, /\.$/, blurb);
 
     // Sentences inside a blurb keep theirs.
-    assert.match(front, /bingd is your new post-watch ritual\. A movie and TV logging app/);
+    assert.match(front, /Pick which movie or TV season you liked more\. bingd turns those choices/);
     // And the founder quote is quoted, not restyled.
     assert.match(front, /Happy binging,<\/p>/);
   });
