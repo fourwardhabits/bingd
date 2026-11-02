@@ -93,7 +93,7 @@ const mintLink = async (owner) => {
 
 const redeem = async (invitee, token) => {
   await t.actAs(invitee);
-  const { rows } = await t.sql(`select redeem_invite($1, $2) as answer`, [await uuid(), token]);
+  const { rows } = await t.sql(`select accept_invite($1, $2) as answer`, [await uuid(), token]);
   return rows[0].answer;
 };
 
@@ -533,9 +533,9 @@ describe('a redeemed invite is one relationship', () => {
     const operation = await uuid();
 
     await t.actAs(abi);
-    const first = (await t.sql(`select redeem_invite($1, $2) as answer`, [operation, token]))
+    const first = (await t.sql(`select accept_invite($1, $2) as answer`, [operation, token]))
       .rows[0].answer;
-    const second = (await t.sql(`select redeem_invite($1, $2) as answer`, [operation, token]))
+    const second = (await t.sql(`select accept_invite($1, $2) as answer`, [operation, token]))
       .rows[0].answer;
 
     assert.equal(first.status, 'ok');
@@ -656,7 +656,7 @@ describe('a story is bounded, so the reader never pages one', () => {
    * §1b, and it is two problems with one number. The reader presents its answer as the
    * whole story, and an unbounded membership makes that a lie *and* makes the read sort
    * thousands of rows to return fifty. `follow.max_per_hour` bounds one account's own
-   * follows at sixty, but `redeem_invite` posts the **inviter's** story from the invitee's
+   * follows at sixty, but `accept_invite` posts the **inviter's** story from the invitee's
    * session — so a link in a large group chat appends one member per redemption with no
    * per-actor ceiling anywhere.
    *
@@ -864,7 +864,7 @@ describe('a story is bounded, so the reader never pages one', () => {
      * The first name in the sentence must not move because somebody renamed themselves.
      *
      * `created_at` defaults to transaction-scoped `now()`, so two members appended in one
-     * transaction share a timestamp exactly — which is what `redeem_invite` does. Until
+     * transaction share a timestamp exactly — which is what `accept_invite` does. Until
      * `20260912000500` the tie-break was `username`, editable from Settings, so a rename
      * could reorder somebody else's Feed row. It is `followed_id` now: immutable, and the
      * membership's own key.

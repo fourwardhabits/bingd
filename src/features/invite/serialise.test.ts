@@ -12,7 +12,7 @@
  */
 
 import { claimForRedemption, holdInvite, pendingInvite } from './pending';
-import { redeemPendingInvite } from './redeem';
+import { resumePendingInvite } from './redeem';
 import { resetRedemptionQueueForTests, serialiseRedemption } from './serialise';
 
 jest.mock('@/lib/analytics', () => ({
@@ -109,33 +109,33 @@ describe('serialiseRedemption', () => {
   });
 });
 
-describe('the background hook racing an explicit acceptance', () => {
+describe('a replay racing an explicit acceptance', () => {
   it('never submits two different tokens under one operation id', async () => {
     /**
      * The sequence review 26d described, driven step by step.
      *
-     * Token A is pending — held before signing in — and the background redemption starts.
-     * While it is in flight the person opens invitation B and taps Accept. Unserialised,
-     * both calls reach `redemptionOperationId` with nothing between them and can be
-     * handed the same id for two different tokens; whichever the server sees first takes
-     * the attribution, and the other is answered `already_applied` for somebody else's
-     * invitation.
+     * Token A is pending with a press whose answer was lost, and the replay on launch
+     * starts. While it is in flight the person opens invitation B and taps Accept.
+     * Unserialised, both calls reach `redemptionOperationId` with nothing between them and
+     * can be handed the same id for two different tokens; whichever the server sees first
+     * takes the attribution, and the other is answered `already_applied` for somebody
+     * else's invitation.
      *
      * Serialised, the acceptance waits, and the assertion is the pairing: **no operation
      * id is ever sent with two different tokens.**
      */
-    await holdInvite(A);
+    await claimForRedemption(A, 'user-1', () => 'op-press');
 
-    const background = redeemPendingInvite();
+    const background = resumePendingInvite('user-1');
 
     // The tap, expressed exactly as `app/i/[token].tsx` expresses it.
     const acceptance = serialiseRedemption(async () => {
-      const operationId = await claimForRedemption(B, () => `op-tap-${(mockIssued += 1)}`);
+      const operationId = await claimForRedemption(B, 'user-1', () => `op-tap-${(mockIssued += 1)}`);
       if (!operationId) return null;
       const { supabase } = jest.requireMock('@/lib/supabase') as {
         supabase: { rpc: (n: string, a: Record<string, string>) => Promise<unknown> };
       };
-      return supabase.rpc('redeem_invite', { p_operation_id: operationId, p_token: B });
+      return supabase.rpc('accept_invite', { p_operation_id: operationId, p_token: B });
     });
 
     // Let the first call reach the server and release it; then the second.
@@ -162,15 +162,15 @@ describe('the background hook racing an explicit acceptance', () => {
   it('lets the acceptance claim the pending token rather than racing it', async () => {
     // The second half of the same property: once the queue drains, the pending token is
     // the one the person acted on, not the one that happened to be stored first.
-    await holdInvite(A);
+    await claimForRedemption(A, 'user-1', () => 'op-press');
 
-    const background = redeemPendingInvite();
+    const background = resumePendingInvite('user-1');
     await settled();
     mockCalls[0]?.release();
     await background;
 
     await serialiseRedemption(async () => {
-      await claimForRedemption(B, () => 'op-tap');
+      await claimForRedemption(B, 'user-1', () => 'op-tap');
     });
 
     expect(await pendingInvite()).toBe(B);

@@ -4,20 +4,24 @@ import { supabase } from '@/lib/supabase';
 import { classifyWrite } from '@/lib/write-outcome';
 
 import {
-  claimForRedemption,
+  acceptedOperationId,
   clearPendingInvite,
   pendingInvite,
-  recordRecoverableRefusal,
   releaseRedemptionOperationId,
 } from './pending';
 import { serialiseRedemption } from './serialise';
 
 /**
- * The client half of `redeem_invite` (`20260819000500`).
+ * The client half of `accept_invite` and `invite_preview` (`20261024000100`).
  *
  * The server owns every rule — which tokens are live, who may be attributed to whom,
  * and what a replay means. This owns two things the server cannot: turning its answers
  * into a sentence, and deciding whether the held token should survive the attempt.
+ *
+ * **The server takes the call as the consent**, so `acceptInvite` has exactly two callers:
+ * the Accept button, and `resumePendingInvite` replaying a press of it. `redeem_invite`
+ * is no longer sent from here. It stays on the server for installed builds, and it
+ * connects nobody.
  */
 
 export type RedeemOutcome =
@@ -32,7 +36,13 @@ export type RedeemOutcome =
    * The handle is the inviter's and is safe to show: they are the person who gave this
    * link out, and the attribution now connects the two accounts by a fact.
    */
-  | { outcome: 'redeemed'; inviterUsername: string | null; followState: 'approved' | 'pending' | null }
+  | {
+      outcome: 'redeemed';
+      inviterUsername: string | null;
+      followState: 'approved' | 'pending' | null;
+      /** Both directions came out approved, as read back by the server. */
+      connected: boolean;
+    }
   /**
    * The operation ledger recognised this id. The redemption already happened — or
    * already refused — and either way there is nothing left to do with the token.
@@ -70,8 +80,8 @@ const REASON: Record<string, RedeemOutcome> = {
  * other read "that account is unavailable" would turn a suspension into something a
  * stranger could detect by inviting themselves through somebody else's link.
  */
-export async function redeemInvite(token: string, operationId: string): Promise<RedeemOutcome> {
-  const { data, error } = await supabase.rpc('redeem_invite', {
+export async function acceptInvite(token: string, operationId: string): Promise<RedeemOutcome> {
+  const { data, error } = await supabase.rpc('accept_invite', {
     p_operation_id: operationId,
     p_token: token,
   });
@@ -90,6 +100,7 @@ export async function redeemInvite(token: string, operationId: string): Promise<
     attributed?: boolean;
     inviter_username?: string | null;
     follow_state?: string | null;
+    connected?: boolean;
   } | null;
 
   if (!result) {
@@ -137,117 +148,120 @@ export async function redeemInvite(token: string, operationId: string): Promise<
     outcome: 'redeemed',
     inviterUsername: result.inviter_username ?? null,
     followState,
+    connected: result.connected === true,
   };
 }
 
+/** What `invite_preview` says about a token, before anything is granted. */
+export type InvitePreview =
+  | {
+      outcome: 'ready';
+      kind: 'personal' | 'referral';
+      inviterUsername: string;
+      inviterDisplayName: string | null;
+    }
+  | { outcome: 'invalid' }
+  | { outcome: 'self' }
+  | { outcome: 'unavailable' }
+  | { outcome: 'already_attributed' };
+
 /**
- * Redeems whatever this device is holding, if anything.
+ * Whose invitation this is. A throw means the question went unanswered, and the screen
+ * must not offer Accept on that basis: consent to a person it could not name is not
+ * consent.
+ */
+export async function previewInvite(token: string): Promise<InvitePreview> {
+  const { data, error } = await supabase.rpc('invite_preview', { p_token: token });
+  if (error) throw error;
+
+  const result = data as {
+    status?: string;
+    reason?: string;
+    kind?: string;
+    inviter_username?: string;
+    inviter_display_name?: string | null;
+  } | null;
+
+  if (result?.status === 'ok' && result.inviter_username) {
+    return {
+      outcome: 'ready',
+      kind: result.kind === 'referral' ? 'referral' : 'personal',
+      inviterUsername: result.inviter_username,
+      inviterDisplayName: result.inviter_display_name ?? null,
+    };
+  }
+
+  switch (result?.reason) {
+    case 'self':
+    case 'unavailable':
+    case 'already_attributed':
+      return { outcome: result.reason };
+    default:
+      return { outcome: 'invalid' };
+  }
+}
+
+/**
+ * What a signed-in session does with whatever this device is holding.
  *
- * Called once a session is `ready` — after sign-in *and* after profile creation, which
- * is the ordering `redeem_invite` requires and PRD §17 states: "the recipient must have
- * an account". Calling it during onboarding would be answered `28000` by
- * `assert_can_write`, or worse, attributed to an account that then abandons signup.
+ * Returns the token to show the person, or null when there is nothing to show — which is
+ * the overwhelming majority of launches and costs one read of device storage.
  *
- * Returns null when there was nothing to redeem, which is the overwhelming majority of
- * launches and costs one read of device storage.
- *
- * **What is kept, and what is let go.** The question is not "did this commit" — that
- * is `changed`, and it decides whether the operation id is reused. The question here is
- * **"could this succeed later"**, and there are three answers.
- *
- * *Final.* `invalid`, `self` and `already_attributed` never become true later. The
- * token is dropped; keeping it would replay a settled answer on every cold start.
- *
- * *Recoverable, and bounded.* `unavailable` is the one the first version of this file
- * got wrong, and independent review 26 caught it. It covers a block in either direction
- * and a suspended inviter — **both of which get lifted** — so a recipient who completed
- * signup during a temporary block was losing their invitation permanently. It is now
- * retried on later launches, up to `MAX_RECOVERABLE_ATTEMPTS`, because the same answer
- * also covers a deleted inviter, which never recovers.
- *
- * *Unsettled.* `failed` is always kept — including when `changed` is false, which
- * reaches here as `53400` from the rate limiter or `42501` from the caller's own
- * suspension. Both stop being true. Discarding somebody's invitation because they were
- * briefly over a ceiling is the failure this beta can least afford, and the cost of
- * keeping it is one call on the next launch.
- *
- * ---------------------------------------------------------------------------
- * The operation id is a second decision, and it is the opposite one
- * ---------------------------------------------------------------------------
- *
- * Whether to keep the **token** asks *could this succeed later*. Whether to keep the
- * **id** asks *did the server already record this attempt*, and the two answers do not
- * line up — which is the defect independent review 26b found in the first version.
- *
- * `unavailable` is settled, so `_claim_operation` committed and that id is **spent**. A
- * retry carrying it is answered `already_applied`; the server never reconsiders the
- * token, the block or the suspension. So the five recoverable attempts were five
- * identical non-answers, and the mechanism was inert.
- *
- * The rule, from `lib/operation-intent.ts` and now actually followed: **the id is
- * dropped the moment the server answers anything, and held only when the outcome was
- * never established.** So it is released on `unavailable`, released on a `failed` that
- * was certainly refused, and held only on a `failed` that may have committed.
+ * **It never accepts anything on its own.** A held token with no operation id was opened
+ * and never answered, so all this does is hand it back for the invitation screen. The one
+ * thing it sends is a replay: an id is only ever minted by a press of Accept, so a token
+ * with this account's id is a press whose answer was lost, and the retry has to carry that
+ * same id for `_claim_operation` to recognise it.
  *
  * ---------------------------------------------------------------------------
  * Inside the queue, and the token is read inside it too
  * ---------------------------------------------------------------------------
  *
- * Independent review 26d. This call and an explicit tap on the invitation screen can be
- * in flight at once — the hook stands down when the route changes, but the promise it has
- * already started does not stop — and reading the token and taking an id are two separate
- * awaits over storage. Interleaved, the two could be handed the **same** operation id
- * while each still held a *different* token, and whichever request reached the server
- * first would take an attribution that never moves.
- *
- * So the whole body runs inside `serialiseRedemption`, and the token is read **within**
- * it rather than before it. A queued attempt therefore sees whatever the attempt ahead of
- * it left behind: if that was an acceptance of a different invitation, this one re-reads
- * the pending token and is either a no-op or the redemption of a token still waiting.
- *
- * `claimForRedemption` rather than `redemptionOperationId`, so there is exactly one way
- * in this app to obtain an id for a redemption, and it always pairs that id with the
- * token it was taken for.
+ * Independent review 26d. This call and a tap on the invitation screen can be in flight
+ * at once, and reading the token and reading its id are two separate awaits over storage.
+ * Run in the queue, a queued attempt sees whatever the attempt ahead of it left behind.
  */
-export async function redeemPendingInvite(): Promise<RedeemOutcome | null> {
+export async function resumePendingInvite(userId: string): Promise<string | null> {
   return serialiseRedemption(async () => {
     const token = await pendingInvite();
     if (!token) return null;
 
-    const operationId = await claimForRedemption(token, newOperationId);
-    if (!operationId) return null;
+    const operationId = await acceptedOperationId(userId);
+    if (!operationId) return token;
 
-    return settle(token, operationId);
+    await settle(token, operationId);
+    return null;
   });
 }
 
 /**
- * Runs one redemption and applies the keep-or-let-go rule above.
+ * Runs one acceptance and applies the keep-or-let-go rule.
  *
- * Shared by the background path and the invitation screen so the two cannot drift on what
- * an answer means — the screen used to carry its own copy of this branch, and two copies
- * of a rule this fiddly is how they end up disagreeing about `unavailable`.
+ * Shared by the replay above and the invitation screen so the two cannot drift on what an
+ * answer means.
+ *
+ * Whether to keep the **id** asks *did the server already record this attempt*. The rule,
+ * from `lib/operation-intent.ts`: **the id is dropped the moment the server answers
+ * anything, and held only when the outcome was never established.** So it is held only on
+ * a `failed` that may have committed.
+ *
+ * Every settled answer lets the token go, `unavailable` included. That one covers a block
+ * and a suspended inviter, both of which get lifted, and it used to be retried on later
+ * launches. That retry would now connect two accounts days after the screen told the
+ * person it could not, so they open the link again instead.
  *
  * **Assumes it is already inside `serialiseRedemption`.** Both callers put it there, and
  * that is the invariant review 26d's race turns on: reading the token, taking an id for
  * it, and sending the two together has to be one critical section.
  */
 export async function settle(token: string, operationId: string): Promise<RedeemOutcome> {
-  const result = await redeemInvite(token, operationId);
+  const result = await acceptInvite(token, operationId);
 
   if (result.outcome === 'failed') {
     // A refusal that certainly did not commit rolled its claim back with the raise, so
     // the id was never spent and the next attempt is a genuine new one. Only an
     // unestablished outcome keeps it.
     if (!result.changed) await releaseRedemptionOperationId();
-    return result;
-  }
-
-  // The one recoverable refusal. Kept while attempts remain — with a fresh id, or the
-  // retry is answered `already_applied` and nothing is reconsidered. Let go when they
-  // run out, so a permanently dead invitation stops costing a request on every launch.
-  if (result.outcome === 'unavailable') {
-    if (!(await recordRecoverableRefusal())) await clearPendingInvite();
     return result;
   }
 

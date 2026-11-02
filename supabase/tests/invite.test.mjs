@@ -53,7 +53,7 @@ const mintLink = async (owner) => {
   return result.token;
 };
 
-const redeem = (token) => call(`redeem_invite(gen_random_uuid(), $1)`, [token]);
+const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1)`, [token]);
 
 const attribution = async (invitee) => {
   const { rows } = await t.sql(
@@ -169,7 +169,7 @@ describe('the token', () => {
      * Tapping Invite friends mints a link and opens the share sheet, which the person may
      * dismiss. Neither is an invitation accepted: `create_invite_link` writes the token
      * and one `invite_link_creations` row per accepted call, and attribution belongs to
-     * `redeem_invite` alone. A mint that wrote an attribution would credit an inviter
+     * `accept_invite` alone. A mint that wrote an attribution would credit an inviter
      * for opening a sheet.
      */
     const owner = await newUser('sharetapper');
@@ -193,7 +193,7 @@ describe('the token', () => {
   });
 });
 
-describe('redeem_invite', () => {
+describe('accept_invite', () => {
   it('attributes an invitee to the token owner, once', async () => {
     const inviter = await newUser('inviter1');
     const invitee = await newUser('invitee1');
@@ -295,7 +295,7 @@ describe('redeem_invite', () => {
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [invitee]);
 
     await t.actAs(invitee);
-    const error = await t.errorFrom(`select redeem_invite(gen_random_uuid(), $1)`, [token]);
+    const error = await t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, [token]);
     assert.equal(error?.code, '42501');
   });
 
@@ -306,9 +306,9 @@ describe('redeem_invite', () => {
     const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
 
     await t.actAs(invitee);
-    assert.equal((await call(`redeem_invite($1, $2)`, [op, token])).status, 'ok');
+    assert.equal((await call(`accept_invite($1, $2)`, [op, token])).status, 'ok');
 
-    const replay = await call(`redeem_invite($1, $2)`, [op, token]);
+    const replay = await call(`accept_invite($1, $2)`, [op, token]);
     assert.deepEqual(replay, { status: 'already_applied', attributed: true });
 
     const { rows } = await t.sql(
@@ -373,7 +373,7 @@ describe('redeem_invite', () => {
       assert.deepEqual(await redeem('0'.repeat(32)), { status: 'refused', reason: 'invalid' });
     }
 
-    const error = await t.errorFrom(`select redeem_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]);
+    const error = await t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]);
     assert.equal(error?.code, '53400', 'a wrong token must count against the ceiling');
 
     await t.sql(`update app_config set value = '10'::jsonb
@@ -400,7 +400,7 @@ describe('redeem_invite', () => {
 
     const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
     await t.actAs(invitee);
-    assert.deepEqual(await call(`redeem_invite($1, $2)`, [op, token]), {
+    assert.deepEqual(await call(`accept_invite($1, $2)`, [op, token]), {
       status: 'refused',
       reason: 'blocked',
     });
@@ -411,7 +411,7 @@ describe('redeem_invite', () => {
     await t.actAs(invitee);
 
     // The same id learns nothing.
-    assert.deepEqual(await call(`redeem_invite($1, $2)`, [op, token]), {
+    assert.deepEqual(await call(`accept_invite($1, $2)`, [op, token]), {
       status: 'already_applied',
       attributed: false,
     });
@@ -426,7 +426,7 @@ describe('redeem_invite', () => {
     // PRD §17: the recipient must have an account. There is nothing for an anonymous
     // caller to attribute, and a grant would only widen the surface.
     const error = await t.asAnon(() =>
-      t.errorFrom(`select redeem_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]),
+      t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]),
     );
     assert.equal(error?.code, '42501');
   });
@@ -436,7 +436,7 @@ describe('acceptance semantics (PRD §17)', () => {
   /**
    * Added after independent review 26.
    *
-   * The first version of `redeem_invite` wrote the attribution and stopped, and the
+   * The first version of `accept_invite` wrote the attribution and stopped, and the
    * omission was recorded in the PRD as a deliberate narrowing. That was rejected, and
    * correctly: a specification is not amended by a note saying it was not implemented.
    * These are §17's clauses 2, 3 and 4, one test each.

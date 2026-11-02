@@ -244,7 +244,7 @@ test('an invitation still activates at five when the bar is not configured', asy
 
     await t.actAs(invitee);
     const redeemed = (
-      await t.sql(`select redeem_invite(gen_random_uuid(), $1) as r`, [minted.token])
+      await t.sql(`select accept_invite(gen_random_uuid(), $1) as r`, [minted.token])
     ).rows[0].r;
     assert.equal(redeemed.status, 'ok');
 

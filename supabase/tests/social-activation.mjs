@@ -225,7 +225,7 @@ try {
     JSON.stringify(link),
   );
 
-  const redeemed = await rpc(abi.token, 'redeem_invite', {
+  const redeemed = await rpc(abi.token, 'accept_invite', {
     p_operation_id: uuid(),
     p_token: link.body?.token,
   });
@@ -507,7 +507,7 @@ try {
   }
 
   const privLink = await rpc(pi.token, 'create_invite_link', { p_operation_id: uuid() });
-  const privRedeem = await rpc(pj.token, 'redeem_invite', {
+  const privRedeem = await rpc(pj.token, 'accept_invite', {
     p_operation_id: uuid(),
     p_token: privLink.body?.token,
   });

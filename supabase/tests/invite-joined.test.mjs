@@ -6,7 +6,7 @@ import { createTestDb } from './harness.mjs';
 /**
  * The inviter's half of an acceptance, 20260831000100.
  *
- * When `redeem_invite` told the inviter something, until this migration it told them the
+ * When `accept_invite` told the inviter something, until this migration it told them the
  * wrong thing: a plain `follow` row — "Ada Lovelace started following you" — with nothing
  * in it saying this person came through their invitation. The sentence that says so,
  * "joined bingd. from your invite", belonged to `invite_activated`, which fires once the
@@ -60,7 +60,7 @@ const mintLink = async (owner) => {
   return result.token;
 };
 
-const redeem = (token) => call(`redeem_invite(gen_random_uuid(), $1)`, [token]);
+const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1)`, [token]);
 
 /** Every notification one account holds *about* another, in the order they were filed. */
 const noticesTo = async (recipient, actor) => {
@@ -192,8 +192,8 @@ describe('the row an acceptance files for the inviter', () => {
     const operation = await call(`gen_random_uuid()`);
 
     await t.actAs(invitee);
-    await call(`redeem_invite($1, $2)`, [operation, token]);
-    const again = await call(`redeem_invite($1, $2)`, [operation, token]);
+    await call(`accept_invite($1, $2)`, [operation, token]);
+    const again = await call(`accept_invite($1, $2)`, [operation, token]);
 
     assert.equal(again.status, 'already_applied');
     assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
@@ -321,9 +321,9 @@ describe('one arrival, one notice', () => {
 
     await t.actAs(invitee);
     const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
-    await call(`redeem_invite($1, $2)`, [op, token]);
+    await call(`accept_invite($1, $2)`, [op, token]);
     // A lost reply retried with the same operation, and a fresh second attempt.
-    await call(`redeem_invite($1, $2)`, [op, token]);
+    await call(`accept_invite($1, $2)`, [op, token]);
     await redeem(token);
 
     await rankTitles(invitee, 8, 100);

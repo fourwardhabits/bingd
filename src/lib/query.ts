@@ -10,6 +10,9 @@ import { AppState } from 'react-native';
  */
 export const queryKeys = {
   capabilities: () => ['capabilities'] as const,
+  // Whose invitation this is, as this account would be told. Keyed by the account because
+  // the answer depends on it: their own link, a block, an attribution they already have.
+  invitePreview: (userId: string, token: string) => ['invite-preview', userId, token] as const,
   // Keyed by user id so a sign-out followed by a different sign-in cannot read the
   // previous account's profile out of the cache.
   myProfile: (userId: string) => ['my-profile', userId] as const,
