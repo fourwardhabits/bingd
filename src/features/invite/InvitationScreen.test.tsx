@@ -113,9 +113,10 @@ describe('accepting an invitation', () => {
     await pressAccept();
 
     await waitFor(() => expect(acceptances()).toHaveLength(1));
-    const [name, args] = acceptances()[0] as [string, { p_token: string }];
+    const [name, args] = acceptances()[0] as [string, { p_token: string; p_accepting_user: string }];
     expect(name).toBe('accept_invite');
     expect(args.p_token).toBe(B);
+    expect(args.p_accepting_user).toBe('user-1');
   });
 
   it('makes the accepted invitation the pending one, so nothing redeems the other after it', async () => {

@@ -92,7 +92,7 @@ export const isInviteToken = (value: unknown): value is string =>
  * link in a group chat, then a second from somebody else — and the person who is about
  * to sign up made a decision when they tapped the first one. Overwriting silently would
  * hand the attribution to whichever link they happened to tap last, which is not a
- * choice anybody made. `redeem_invite`'s primary key enforces the same rule on the
+ * choice anybody made. `accept_invite`'s primary key enforces the same rule on the
  * server; this makes the client agree rather than race it.
  */
 export async function holdInvite(token: string): Promise<void> {

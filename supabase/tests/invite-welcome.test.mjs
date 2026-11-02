@@ -50,7 +50,7 @@ const mintLink = async (owner) => {
   return result.token;
 };
 
-const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1)`, [token]);
+const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1, auth.uid())`, [token]);
 
 /** Every welcome this account holds, which should never be more than one row. */
 const welcomes = async (recipient) => {
@@ -132,8 +132,8 @@ describe('the welcome an invitation writes back', () => {
     const operation = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
 
     await t.actAs(invitee);
-    const first = await call(`accept_invite($1, $2)`, [operation, token]);
-    const second = await call(`accept_invite($1, $2)`, [operation, token]);
+    const first = await call(`accept_invite($1, $2, auth.uid())`, [operation, token]);
+    const second = await call(`accept_invite($1, $2, auth.uid())`, [operation, token]);
 
     assert.equal(first.status, 'ok');
     assert.equal(second.status, 'already_applied');
@@ -197,7 +197,7 @@ describe('a redemption that is refused writes no welcome', () => {
     const invitee = await newUser('unknown_token_invitee');
     await t.actAs(invitee);
 
-    const result = await call(`accept_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]);
+    const result = await call(`accept_invite(gen_random_uuid(), $1, auth.uid())`, ['0'.repeat(32)]);
 
     assert.equal(result.reason, 'invalid');
     assert.deepEqual(await welcomes(invitee), []);

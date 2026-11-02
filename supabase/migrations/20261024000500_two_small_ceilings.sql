@@ -12,7 +12,9 @@
 -- refusing limit would lose push on the phone in their hand to keep a dead one.
 --
 -- Ten live tokens, newest kept. The eviction is the same act as a sign-out releasing the
--- device, so re-registering brings a token straight back.
+-- device, so re-registering brings a token straight back. An account already over the
+-- ceiling is brought under it here, because the trigger only runs on the next registration
+-- and every push until then would still go out oversized.
 --
 -- **The one rate limit a null id could step around.** `create_list` counts its daily ceiling
 -- from the operation ledger, and `_claim_operation_result` lets a null id through without
@@ -50,6 +52,19 @@ comment on function _cap_device_tokens() is
   'Keeps one account to ten live device tokens, the newest ten, by revoking the rest. Every live token is copied into every push job, so this is what bounds the sender. A trigger so that it holds whichever writer registered the token. Internal.';
 
 revoke execute on function _cap_device_tokens() from public, anon, authenticated;
+
+update device_tokens d
+   set revoked_at = now()
+ where d.id in (
+   select r.id
+     from (
+       select t.id,
+              row_number() over (partition by t.user_id order by t.updated_at desc, t.id desc) as n
+         from device_tokens t
+        where t.revoked_at is null
+     ) r
+    where r.n > 10
+ );
 
 drop trigger if exists device_tokens_cap on device_tokens;
 

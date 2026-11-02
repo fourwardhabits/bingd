@@ -27,7 +27,7 @@ const established = async (prefix, visibility = 'public') => {
   await t.sql(`update profiles set created_at = now() - interval '30 days' where id = $1`, [id]);
   return id;
 };
-const fresh = (prefix, visibility = 'public') =>
+const brandNew = (prefix, visibility = 'public') =>
   t.createUser({ username: name(prefix), visibility });
 
 const linkOf = (owner) =>
@@ -43,9 +43,13 @@ const silently = (who, token) =>
     return rows[0].r;
   });
 
-const accept = (who, token, id = null) =>
+const accept = (who, token, { id = null, as = who } = {}) =>
   t.asUser(who, async () => {
-    const { rows } = await t.sql(`select accept_invite($1, $2) as r`, [id ?? (await op()), token]);
+    const { rows } = await t.sql(`select accept_invite($1, $2, $3) as r`, [
+      id ?? (await op()),
+      token,
+      as,
+    ]);
     return rows[0].r;
   });
 
@@ -95,6 +99,8 @@ const traces = async (invitee, inviter) => ({
   ).rows[0].n,
 });
 
+const NO_TRACE = { attribution: 0, invitedBy: null, notices: 0, stories: 0 };
+
 const seedPrivateActivity = async (victim) => {
   const film = await t.createMovie(`Secret Film ${seq}`, 7_000_000 + (seq += 1));
   const listed = await t.createMovie(`Listed Film ${seq}`, 7_000_000 + (seq += 1));
@@ -112,40 +118,51 @@ after(async () => {
   await t.close();
 });
 
-describe('B-1: an established private account opens a link and leaves', () => {
-  it('gives the attacker nothing, and leaves no trace on either account', async () => {
-    const attacker = await established('attacker');
-    const victim = await established('victim', 'private');
-    await seedPrivateActivity(victim);
-    const token = await linkOf(attacker);
+describe('B-1: a private account opens a link and leaves', () => {
+  for (const [who, create] of [
+    ['an established account', established],
+    ['a brand-new account', brandNew],
+  ]) {
+    it(`gives the attacker nothing, and leaves no trace, for ${who}`, async () => {
+      const attacker = await established('attacker');
+      const victim = await create('victim', 'private');
+      await seedPrivateActivity(victim);
+      const token = await linkOf(attacker);
 
-    const before = await reach(attacker, victim);
-    assert.deepEqual(before, CLOSED, 'the fixture must start closed');
+      assert.deepEqual(await reach(attacker, victim), CLOSED, 'the fixture must start closed');
 
-    const answer = await silently(victim, token);
+      const answer = await silently(victim, token);
 
-    assert.deepEqual(answer, { status: 'refused', reason: 'consent_required' });
-    assert.deepEqual(await reach(attacker, victim), CLOSED);
-    assert.deepEqual(await edges(attacker, victim), []);
-    assert.deepEqual(await traces(victim, attacker), {
-      attribution: 0,
-      invitedBy: null,
-      notices: 0,
-      stories: 0,
+      assert.deepEqual(answer, { status: 'refused', reason: 'unavailable' });
+      assert.deepEqual(await reach(attacker, victim), CLOSED);
+      assert.deepEqual(await edges(attacker, victim), []);
+      assert.deepEqual(await traces(victim, attacker), NO_TRACE);
     });
-  });
+  }
 
-  it('leaves the account free to accept an invitation it actually wants', async () => {
-    // The old redemption burned the one attribution an account ever has on the attacker.
+  it('leaves the account free to accept the invitation it actually wants', async () => {
+    // An attribution happens once, so a silent one would spend it on the attacker. This is
+    // why account age was not enough to keep attribution on this path.
     const attacker = await established('attacker');
     const friend = await established('friend');
-    const victim = await established('victim', 'private');
+    const newcomer = await brandNew('newcomer', 'private');
 
-    await silently(victim, await linkOf(attacker));
-    const answer = await accept(victim, await linkOf(friend));
+    await silently(newcomer, await linkOf(attacker));
+    const answer = await accept(newcomer, await linkOf(friend));
 
     assert.equal(answer.status, 'ok');
     assert.equal(answer.connected, true);
+  });
+
+  it('leaves the same invitation open to accept after the app updates', async () => {
+    const inviter = await established('inviter');
+    const newcomer = await brandNew('newcomer');
+    const token = await linkOf(inviter);
+
+    await silently(newcomer, token);
+
+    assert.equal((await preview(newcomer, token)).status, 'ok');
+    assert.equal((await accept(newcomer, token)).connected, true);
   });
 
   it('does not approve a request the attacker already had open', async () => {
@@ -168,50 +185,28 @@ describe('B-1: an established private account opens a link and leaves', () => {
     assert.equal(rows[0].n, 1, 'their request is still there to be answered');
   });
 
-  it('does not force a public account into a mutual follow or a wrong attribution either', async () => {
+  it('does not force a public account into a mutual follow or a wrong attribution', async () => {
     const attacker = await established('attacker');
     const victim = await established('victim');
 
-    assert.equal((await silently(victim, await linkOf(attacker))).reason, 'consent_required');
+    await silently(victim, await linkOf(attacker));
 
     assert.deepEqual(await edges(attacker, victim), []);
-    assert.equal((await traces(victim, attacker)).attribution, 0);
-  });
-});
-
-describe('B-1: an account too new to be anything but a signup through the link', () => {
-  it('is attributed, and still grants nobody anything', async () => {
-    const inviter = await established('inviter');
-    const newcomer = await fresh('newcomer', 'private');
-    await seedPrivateActivity(newcomer);
-
-    const answer = await silently(newcomer, await linkOf(inviter));
-
-    assert.equal(answer.status, 'ok');
-    assert.equal(answer.connected, false);
-    assert.equal(answer.follow_state, null, 'an installed build then says nothing about following');
-    assert.deepEqual(await reach(inviter, newcomer), CLOSED);
-    assert.deepEqual(await edges(inviter, newcomer), []);
-
-    const left = await traces(newcomer, inviter);
-    assert.equal(left.attribution, 1);
-    assert.equal(left.invitedBy, inviter);
-    assert.equal(left.stories, 0, 'a story would announce a relationship that does not exist');
-    assert.equal(left.notices, 2, 'one welcome, one invite_joined');
+    assert.deepEqual(await traces(victim, attacker), NO_TRACE);
   });
 
-  it('still refuses what it always refused', async () => {
-    const inviter = await established('inviter');
-    const newcomer = await fresh('newcomer');
-    const token = await linkOf(inviter);
+  it('is still refused to a suspended account and an anonymous caller', async () => {
+    const anon = await t.asAnon(() =>
+      t.errorFrom(`select redeem_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]),
+    );
+    assert.equal(anon?.code, '42501');
 
-    assert.equal((await silently(inviter, token)).reason, 'self');
-    assert.equal((await silently(newcomer, '0'.repeat(32))).reason, 'invalid');
-
-    await t.asUser(newcomer, async () => {
-      await t.sql(`select block($1, $2)`, [await op(), inviter]);
-    });
-    assert.equal((await silently(newcomer, token)).reason, 'blocked');
+    const suspended = await established('suspended');
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [suspended]);
+    const error = await t.asUser(suspended, () =>
+      t.errorFrom(`select redeem_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]),
+    );
+    assert.ok(error, 'a suspended account reached it');
   });
 });
 
@@ -236,38 +231,61 @@ describe('B-1: pressing Accept', () => {
     const token = await linkOf(inviter);
     const id = await op();
 
-    assert.equal((await accept(invitee, token, id)).status, 'ok');
-    assert.deepEqual(await accept(invitee, token, id), { status: 'already_applied', attributed: true });
+    assert.equal((await accept(invitee, token, { id })).status, 'ok');
+    assert.deepEqual(await accept(invitee, token, { id }), {
+      status: 'already_applied',
+      attributed: true,
+    });
     assert.equal((await edges(inviter, invitee)).length, 2);
-  });
-
-  it('cannot reach the internal entry from a client', async () => {
-    // `p_accepted` is the consent, so whoever could call this could assert it for themselves
-    // and nobody else, but the grant would still be a second door to review.
-    const someone = await established('someone');
-    for (const run of [(q) => t.asUser(someone, q), (q) => t.asAnon(q)]) {
-      const error = await run(() =>
-        t.errorFrom(`select _redeem_invite(gen_random_uuid(), $1, 'accept_invite', true)`, ['0'.repeat(32)]),
-      );
-      assert.equal(error?.code, '42501');
-    }
   });
 
   it('is refused to an anonymous caller', async () => {
     const error = await t.asAnon(() =>
-      t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]),
+      t.errorFrom(`select accept_invite(gen_random_uuid(), $1, null)`, ['0'.repeat(32)]),
     );
     assert.equal(error?.code, '42501');
   });
+});
 
-  it('keeps a spent legacy id from answering an acceptance, and the other way round', async () => {
+describe('B-1: a press belongs to the account that made it', () => {
+  it('is refused under a session that is not that account, and grants nothing', async () => {
+    // A request goes out under whichever session is current when it runs. Account A pressed
+    // Accept, and a replay queued across a switch to account B would otherwise connect B.
+    const inviter = await established('inviter');
+    const whoPressed = await established('presser');
+    const whoIsSignedIn = await established('bystander', 'private');
+    const token = await linkOf(inviter);
+
+    const answer = await accept(whoIsSignedIn, token, { as: whoPressed });
+
+    assert.deepEqual(answer, { status: 'refused', reason: 'wrong_account' });
+    assert.deepEqual(await edges(inviter, whoIsSignedIn), []);
+    assert.deepEqual(await reach(inviter, whoIsSignedIn), CLOSED);
+    assert.deepEqual(await traces(whoIsSignedIn, inviter), NO_TRACE);
+  });
+
+  it('is refused when the call does not say who is accepting', async () => {
     const inviter = await established('inviter');
     const invitee = await established('invitee');
+
+    const answer = await accept(invitee, await linkOf(inviter), { as: null });
+
+    assert.equal(answer.reason, 'wrong_account');
+  });
+
+  it('spends nothing when refused, so the rightful account’s replay still works', async () => {
+    const inviter = await established('inviter');
+    const presser = await established('presser');
+    const bystander = await established('bystander');
     const token = await linkOf(inviter);
     const id = await op();
 
-    assert.equal((await silently(invitee, token)).reason, 'consent_required');
-    assert.equal((await accept(invitee, token, id)).status, 'ok');
+    await accept(bystander, token, { id, as: presser });
+    const { rows } = await t.sql(
+      `select count(*)::int as n from processed_operations where operation_id = $1`, [id]);
+    assert.equal(rows[0].n, 0);
+
+    assert.equal((await accept(presser, token, { id })).status, 'ok');
   });
 });
 

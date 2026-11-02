@@ -53,7 +53,7 @@ const mintLink = async (owner) => {
   return result.token;
 };
 
-const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1)`, [token]);
+const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1, auth.uid())`, [token]);
 
 const attribution = async (invitee) => {
   const { rows } = await t.sql(
@@ -295,7 +295,7 @@ describe('accept_invite', () => {
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [invitee]);
 
     await t.actAs(invitee);
-    const error = await t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, [token]);
+    const error = await t.errorFrom(`select accept_invite(gen_random_uuid(), $1, auth.uid())`, [token]);
     assert.equal(error?.code, '42501');
   });
 
@@ -306,9 +306,9 @@ describe('accept_invite', () => {
     const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
 
     await t.actAs(invitee);
-    assert.equal((await call(`accept_invite($1, $2)`, [op, token])).status, 'ok');
+    assert.equal((await call(`accept_invite($1, $2, auth.uid())`, [op, token])).status, 'ok');
 
-    const replay = await call(`accept_invite($1, $2)`, [op, token]);
+    const replay = await call(`accept_invite($1, $2, auth.uid())`, [op, token]);
     assert.deepEqual(replay, { status: 'already_applied', attributed: true });
 
     const { rows } = await t.sql(
@@ -373,7 +373,7 @@ describe('accept_invite', () => {
       assert.deepEqual(await redeem('0'.repeat(32)), { status: 'refused', reason: 'invalid' });
     }
 
-    const error = await t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]);
+    const error = await t.errorFrom(`select accept_invite(gen_random_uuid(), $1, auth.uid())`, ['0'.repeat(32)]);
     assert.equal(error?.code, '53400', 'a wrong token must count against the ceiling');
 
     await t.sql(`update app_config set value = '10'::jsonb
@@ -400,7 +400,7 @@ describe('accept_invite', () => {
 
     const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
     await t.actAs(invitee);
-    assert.deepEqual(await call(`accept_invite($1, $2)`, [op, token]), {
+    assert.deepEqual(await call(`accept_invite($1, $2, auth.uid())`, [op, token]), {
       status: 'refused',
       reason: 'blocked',
     });
@@ -411,7 +411,7 @@ describe('accept_invite', () => {
     await t.actAs(invitee);
 
     // The same id learns nothing.
-    assert.deepEqual(await call(`accept_invite($1, $2)`, [op, token]), {
+    assert.deepEqual(await call(`accept_invite($1, $2, auth.uid())`, [op, token]), {
       status: 'already_applied',
       attributed: false,
     });
@@ -426,7 +426,7 @@ describe('accept_invite', () => {
     // PRD §17: the recipient must have an account. There is nothing for an anonymous
     // caller to attribute, and a grant would only widen the surface.
     const error = await t.asAnon(() =>
-      t.errorFrom(`select accept_invite(gen_random_uuid(), $1)`, ['0'.repeat(32)]),
+      t.errorFrom(`select accept_invite(gen_random_uuid(), $1, auth.uid())`, ['0'.repeat(32)]),
     );
     assert.equal(error?.code, '42501');
   });

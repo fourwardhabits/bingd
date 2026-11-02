@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
-import { createTestDb } from './harness.mjs';
+import { createTestDb, createTestDbBefore } from './harness.mjs';
 
 /**
  * Push delivery, 20260825000300.
@@ -346,6 +346,35 @@ describe('how many devices one account can hold', () => {
 
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].tokens.length, 10);
+  });
+});
+
+describe('an account already over the ceiling when it arrives', () => {
+  it('is brought under it by the migration, with no registration to trigger it', async () => {
+    const MIGRATION = '20261024000500_two_small_ceilings.sql';
+    const t2 = await createTestDbBefore(MIGRATION);
+    try {
+      const flooded = await t2.createUser({ username: 'push_flooded' });
+      for (let i = 0; i < 15; i += 1) {
+        await t2.sql(
+          `insert into device_tokens (user_id, token, platform, updated_at)
+           values ($1, $2, 'ios', now() + make_interval(secs => $3))`,
+          [flooded, TOKEN(300 + i), i],
+        );
+      }
+
+      await t2.applyMigration(MIGRATION);
+
+      const { rows } = await t2.sql(
+        `select token from device_tokens where user_id = $1 and revoked_at is null order by updated_at desc`,
+        [flooded],
+      );
+      assert.equal(rows.length, 10);
+      assert.equal(rows[0].token, TOKEN(314), 'the newest device keeps its push');
+      assert.equal(rows[9].token, TOKEN(305));
+    } finally {
+      await t2.close();
+    }
   });
 });
 

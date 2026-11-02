@@ -228,6 +228,7 @@ try {
   const redeemed = await rpc(abi.token, 'accept_invite', {
     p_operation_id: uuid(),
     p_token: link.body?.token,
+    p_accepting_user: abi.id,
   });
   report(
     'the invitee redeems it',
@@ -510,6 +511,7 @@ try {
   const privRedeem = await rpc(pj.token, 'accept_invite', {
     p_operation_id: uuid(),
     p_token: privLink.body?.token,
+    p_accepting_user: pj.id,
   });
   report(
     'a private invitee redeeming a private inviter`s personal link comes out connected',

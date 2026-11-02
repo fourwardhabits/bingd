@@ -20,8 +20,8 @@ import { serialiseRedemption } from './serialise';
  *
  * **The server takes the call as the consent**, so `acceptInvite` has exactly two callers:
  * the Accept button, and `resumePendingInvite` replaying a press of it. `redeem_invite`
- * is no longer sent from here. It stays on the server for installed builds, and it
- * connects nobody.
+ * is no longer sent from here. It stays on the server for installed builds, and it does
+ * nothing.
  */
 
 export type RedeemOutcome =
@@ -80,10 +80,17 @@ const REASON: Record<string, RedeemOutcome> = {
  * other read "that account is unavailable" would turn a suspension into something a
  * stranger could detect by inviting themselves through somebody else's link.
  */
-export async function acceptInvite(token: string, operationId: string): Promise<RedeemOutcome> {
+export async function acceptInvite(
+  token: string,
+  operationId: string,
+  userId: string,
+): Promise<RedeemOutcome> {
   const { data, error } = await supabase.rpc('accept_invite', {
     p_operation_id: operationId,
     p_token: token,
+    // Who pressed Accept. The request carries whichever session is current when it runs, so
+    // this is what stops one that outlived an account switch accepting for somebody else.
+    p_accepting_user: userId,
   });
 
   if (error) {
@@ -229,7 +236,7 @@ export async function resumePendingInvite(userId: string): Promise<string | null
     const operationId = await acceptedOperationId(token, userId);
     if (!operationId) return token;
 
-    await settle(token, operationId);
+    await settle(token, operationId, userId);
     return null;
   });
 }
@@ -254,8 +261,12 @@ export async function resumePendingInvite(userId: string): Promise<string | null
  * that is the invariant review 26d's race turns on: reading the token, taking an id for
  * it, and sending the two together has to be one critical section.
  */
-export async function settle(token: string, operationId: string): Promise<RedeemOutcome> {
-  const result = await acceptInvite(token, operationId);
+export async function settle(
+  token: string,
+  operationId: string,
+  userId: string,
+): Promise<RedeemOutcome> {
+  const result = await acceptInvite(token, operationId, userId);
 
   if (result.outcome === 'failed') {
     // A refusal that certainly did not commit rolled its claim back with the raise, so

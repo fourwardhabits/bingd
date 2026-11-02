@@ -30,28 +30,24 @@
 --
 -- `redeem_invite` keeps its name and signature for installed builds, which send it for an
 -- Accept tap and for the silent background redemption alike. **The server cannot tell those
--- two apart, so it must treat every one as the silent one.** It creates no edge in either
--- direction, upgrades no pending edge, clears no request, releases nothing and posts no
--- story. This is what makes an installed client safe before it receives any update.
+-- two apart, so it must treat every one as the silent one, and it now does nothing.** That
+-- is what makes an installed client safe before it receives any update.
 --
--- What is left of it is attribution, and only for an account too new to have been opened
--- up to anybody: a person who signed up through a link is the legitimate case attribution
--- exists for, and writing that fact grants nobody anything. An established account is
--- refused with `consent_required` and nothing is written, because an attribution is
--- permanent and it would otherwise be one more thing a stranger could do to an account by
--- sending it a link. An installed build reads that unknown reason as `invalid` and drops
--- the token, which is the correct outcome: nothing retries it.
+-- Nothing includes attribution. An attribution is written once and never moves, so writing
+-- one on a call nobody can show was a decision would spend the only one an account gets,
+-- and block the invitation it actually wanted. An early version of this file kept it for
+-- accounts under a day old, and independent review was right to reject that: an account's
+-- age does not say how it arrived.
 --
--- ===========================================================================
--- ONE BODY
+-- It answers `unavailable`, and the word is chosen for what an installed build does with
+-- it. That is the one refusal it keeps the token through, so somebody who opens a link in
+-- the gap before the update is shown the invitation after it, rather than losing it.
 --
--- Both entry points run `_redeem_invite`, so the token checks, the refusals and the
--- attribution cannot drift apart. The body below is `20260912000200` §4 carried across
--- whole, with the two `p_accepted` branches as the only change to what it does.
---
--- The operation ledger and the daily ceiling are keyed on the entry point. A legacy call
--- and an acceptance are different requests, and an id spent on one must not answer the
--- other with `already_applied`.
+-- **The account is part of the call.** `p_accepting_user` says who pressed Accept, and a
+-- call from any other session is refused before anything is spent. The app records a press
+-- against the account that made it, but a request goes out under whichever session is
+-- current when it runs, so a replay queued across an account switch on a shared phone would
+-- otherwise accept for somebody who only signed in. Independent review found that too.
 --
 -- ===========================================================================
 -- NAMING THE INVITER
@@ -70,11 +66,10 @@
 -- ===========================================================================
 
 
-create or replace function _redeem_invite(
-  p_operation_id uuid,
-  p_token        text,
-  p_entry        text,
-  p_accepted     boolean
+create or replace function accept_invite(
+  p_operation_id   uuid,
+  p_token          text,
+  p_accepting_user uuid
 )
 returns jsonb
 language plpgsql
@@ -95,7 +90,14 @@ declare
   v_before_in  follow_state;
   v_mutual     boolean := false;
 begin
-  if not _claim_operation(p_operation_id, p_entry) then
+  perform assert_can_write();
+
+  -- Before the claim, so a call refused here spends nothing. See the header.
+  if p_accepting_user is distinct from v_self then
+    return jsonb_build_object('status', 'refused', 'reason', 'wrong_account');
+  end if;
+
+  if not _claim_operation(p_operation_id, 'accept_invite') then
     -- A replay answers with what the original produced, so a client whose reply was
     -- lost can retry and be told what actually happened rather than a status it has
     -- nothing to do with. The inviter is not named: on the refusal branches the
@@ -106,7 +108,7 @@ begin
     return jsonb_build_object('status', 'already_applied', 'attributed', v_prior is not null);
   end if;
 
-  perform _assert_operation_rate(p_entry, 'invite.max_redeem_attempts_per_day', 10);
+  perform _assert_operation_rate('accept_invite', 'invite.max_redeem_attempts_per_day', 10);
 
   select coalesce((select value #>> '{}' from app_config where key = 'env.name'), 'nonprod')
     into v_env;
@@ -149,16 +151,6 @@ begin
     return jsonb_build_object('status', 'refused', 'reason', 'unavailable');
   end if;
 
-  -- The legacy entry cannot prove anybody chose this, and an attribution never moves, so an
-  -- established account is left exactly as it was. Past the block and token checks so an
-  -- installed client's answers for those are unchanged. See the header.
-  if not p_accepted and not exists (
-    select 1 from profiles p
-     where p.id = v_self and p.created_at > now() - interval '24 hours'
-  ) then
-    return jsonb_build_object('status', 'refused', 'reason', 'consent_required');
-  end if;
-
   insert into invite_attributions (invitee_id, inviter_id, token_id, accepted_at)
   values (v_self, v_inviter, v_token_id, now())
   on conflict (invitee_id) do nothing;
@@ -187,12 +179,7 @@ begin
   insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
   values (v_self, 'invite_welcome', v_inviter, 'profile', v_inviter);
 
-  if not p_accepted then
-    -- Attribution and nothing else: no edge, no story, no released recommendation. The
-    -- inviter still hears that the person arrived, which needs no relationship.
-    v_notify := 'invite_joined';
-    v_state  := null;
-  elsif v_kind = 'personal' then
+  if v_kind = 'personal' then
     -- ---------------------------------------------------------------------------
     -- (a) and (b). Two edges, both approved, neither downgraded
     -- ---------------------------------------------------------------------------
@@ -218,8 +205,8 @@ begin
      where follows.state = 'pending';
 
     -- The inviter's edge into the invitee. Approved whatever the *invitee's* visibility
-    -- says, because this branch is only reached from `accept_invite`: the invitee pressed
-    -- Accept, on a screen that named the inviter and said what it grants.
+    -- says, because this call means the invitee pressed Accept, on a screen that named the
+    -- inviter and said what it grants.
     insert into follows (follower_id, followee_id, state, approved_at)
     values (v_inviter, v_self, 'approved', now())
     on conflict (follower_id, followee_id) do update
@@ -305,7 +292,7 @@ begin
     values (v_inviter, v_notify, v_self, 'profile', v_self);
   end if;
 
-  if p_accepted and v_kind = 'personal' then
+  if v_kind = 'personal' then
     -- One story for one relationship (§A14), authored by the inviter because that is the
     -- direction with an audience. Posted unconditionally rather than only when the insert
     -- was new: an inviter who already followed this person has still just had them join,
@@ -336,29 +323,11 @@ begin
 end;
 $$;
 
-comment on function _redeem_invite(uuid, text, text, boolean) is
-  'The one body behind accept_invite and redeem_invite. Attribution (once per account, for ever), invited_by, and the invitee''s invite_welcome row on both paths. Only p_accepted, which accept_invite alone sets, creates or upgrades a follow edge, clears a request, releases held recommendations or posts a Feed story. Internal: p_accepted is the consent, so a client grant would let anybody assert it through any entry. Since 20261024000100.';
+comment on function accept_invite(uuid, text, uuid) is
+  'The caller pressed Accept on an invitation. The only client entry that can connect two accounts. Refused unless p_accepting_user is the caller, so a request that outlived an account switch cannot accept for whoever is signed in now. Writes the attribution (once per account, for ever), invited_by and the invitee''s invite_welcome. A valid personal token ends with BOTH directed edges approved, in all four combinations of the two accounts'' visibility (20260912000200): minting a personal link is the inviter acting, and this call is the invitee acting. A pending edge in either direction is upgraded, the follow_request it answered is cleared both ways, and held recommendations are released both ways. Each party is told exactly once: the invitee by invite_welcome, and the inviter by invite_joined when their invitee''s own edge moved, or by follow_approved when the invitee already followed them and this approved the inviter''s own pending request. One Feed story is posted with the inviter as actor (§A14). Answers with connected: whether both edges came out approved, read back. A referral token keeps 20260912000100''s semantics: a one-way follow, or a request into a private inviter. Unknown, revoked and foreign-environment tokens are one refusal, as are self, a block in either direction, and a suspended or missing inviter. Idempotent through the operation ledger. Call it from an explicit tap and nowhere else: the server takes the call as the consent.';
 
-revoke execute on function _redeem_invite(uuid, text, text, boolean) from public, anon, authenticated;
-
-
-create or replace function accept_invite(p_operation_id uuid, p_token text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  perform assert_can_write();
-  return _redeem_invite(p_operation_id, p_token, 'accept_invite', true);
-end;
-$$;
-
-comment on function accept_invite(uuid, text) is
-  'The caller pressed Accept on an invitation. The only client entry that can connect two accounts. A valid personal token ends with BOTH directed edges approved, in all four combinations of the two accounts'' visibility (20260912000200): minting a personal link is the inviter acting, and this call is the invitee acting. A pending edge in either direction is upgraded, the follow_request it answered is cleared both ways, and held recommendations are released both ways. Each party is told exactly once: the invitee by invite_welcome, and the inviter by invite_joined when their invitee''s own edge moved, or by follow_approved when the invitee already followed them and this approved the inviter''s own pending request. One Feed story is posted with the inviter as actor (§A14). Answers with connected: whether both edges came out approved, read back. A referral token keeps 20260912000100''s semantics: a one-way follow, or a request into a private inviter. Unknown, revoked and foreign-environment tokens are one refusal, as are self, a block in either direction, and a suspended or missing inviter. Idempotent through the operation ledger. Call it from an explicit tap and nowhere else: the server takes the call as the consent.';
-
-revoke execute on function accept_invite(uuid, text) from public, anon, authenticated;
-grant  execute on function accept_invite(uuid, text) to authenticated;
+revoke execute on function accept_invite(uuid, text, uuid) from public, anon, authenticated;
+grant  execute on function accept_invite(uuid, text, uuid) to authenticated;
 
 
 create or replace function redeem_invite(p_operation_id uuid, p_token text)
@@ -369,12 +338,12 @@ set search_path = public
 as $$
 begin
   perform assert_can_write();
-  return _redeem_invite(p_operation_id, p_token, 'redeem_invite', false);
+  return jsonb_build_object('status', 'refused', 'reason', 'unavailable');
 end;
 $$;
 
 comment on function redeem_invite(uuid, text) is
-  'The call installed builds make, for an Accept tap and for a background redemption with no tap alike. Indistinguishable, so it is treated as the second (20261024000100): it never creates or upgrades a follow edge in either direction, never clears a request, releases nothing and posts no story. An account under 24 hours old is attributed, gets invite_welcome and its inviter gets invite_joined; connected is false and follow_state null. An established account is refused with consent_required and nothing is written. Remove once no supported build sends it.';
+  'The call installed builds make, for an Accept tap and for a background redemption with no tap alike. Indistinguishable, so it does nothing (20261024000100): no edge, no attribution, no notification. Answers unavailable, the one refusal those builds keep the token through, so the invitation is shown after they update. Remove once no supported build sends it.';
 
 
 create or replace function invite_preview(p_token text)

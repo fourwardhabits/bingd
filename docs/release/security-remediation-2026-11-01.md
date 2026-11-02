@@ -18,9 +18,9 @@ Follow this order. The client calls functions that only exist after the migratio
 |---|---|
 | Migrations before the update | The update calls `accept_invite` and `invite_preview`. Without them, Accept fails |
 | Migrations before the website | The website needs `public_profile_card`. The old website's profile read stops working when the migration lands, and it falls back to the generic page until step 4 |
-| Installed apps | Safe from step 3, with no update. `redeem_invite` no longer connects anybody |
+| Installed apps | Safe from step 3, with no update. `redeem_invite` no longer does anything |
 
-Between steps 3 and 5, an established account tapping Accept in an old build sees "This invitation is not valid". A brand-new account is attributed but not connected. Keep that gap short.
+Between steps 3 and 5, nobody can accept an invitation. An old build shows "This invitation cannot be accepted" and keeps the link, and the person sees the invitation once the update arrives. So keep that gap short, but nothing is lost in it.
 
 ### After the migrations
 
@@ -64,9 +64,9 @@ In the repository, go to **Settings → Environments → production → Add envi
 - `RESEND_API_KEY_WELCOME`
 - `WELCOME_POSTAL_ADDRESS`
 
-Run **Trending refresh** by hand with target `production`, and confirm it passes. Then delete `SUPABASE_URL_PRODUCTION` and `SUPABASE_SERVICE_ROLE_KEY_PRODUCTION` from **Settings → Secrets and variables → Actions**.
+Merge the security PR first, because the workflows only read the Environment once they name it. Then run **Trending refresh** by hand with target `production`, and confirm it passes. Then delete `SUPABASE_URL_PRODUCTION` and `SUPABASE_SERVICE_ROLE_KEY_PRODUCTION` from **Settings → Secrets and variables → Actions**.
 
-Keep `RESEND_API_KEY_WELCOME` and `WELCOME_POSTAL_ADDRESS` at repository level as well, because the nonprod welcome run reads them.
+Add `RESEND_API_KEY_WELCOME` and `WELCOME_POSTAL_ADDRESS` to the `nonprod` Environment too, then delete those two from repository level as well. The welcome job always runs in one of the two Environments.
 
 This is not a rotation. The audit found no sign the key was exposed.
 

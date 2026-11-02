@@ -807,9 +807,9 @@ const ALLOWED = {
   // it exists because 20260819000500 is what made such a link worth anything.
   'record_invite_open(text,text)': ['anon', 'authenticated'],
   'redeem_invite(uuid,text)': ['authenticated'],
-  // 20261024000100. The Accept button. It names no other account either, and the server
-  // takes the call as the consent, so `_redeem_invite`, which holds the flag, has no grant.
-  'accept_invite(uuid,text)': ['authenticated'],
+  // 20261024000100. The Accept button. It names no other account: the third argument has to
+  // be the caller, and it is there for the app's own sake, not as an authority.
+  'accept_invite(uuid,text,uuid)': ['authenticated'],
   // Whose link this is, before anything is granted. Signed in, and it answers one reason
   // for a block and for an inviter who is gone.
   'invite_preview(text)': ['authenticated'],

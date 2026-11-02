@@ -93,7 +93,7 @@ const mintLink = async (owner) => {
 
 const redeem = async (invitee, token) => {
   await t.actAs(invitee);
-  const { rows } = await t.sql(`select accept_invite($1, $2) as answer`, [await uuid(), token]);
+  const { rows } = await t.sql(`select accept_invite($1, $2, auth.uid()) as answer`, [await uuid(), token]);
   return rows[0].answer;
 };
 
@@ -533,9 +533,9 @@ describe('a redeemed invite is one relationship', () => {
     const operation = await uuid();
 
     await t.actAs(abi);
-    const first = (await t.sql(`select accept_invite($1, $2) as answer`, [operation, token]))
+    const first = (await t.sql(`select accept_invite($1, $2, auth.uid()) as answer`, [operation, token]))
       .rows[0].answer;
-    const second = (await t.sql(`select accept_invite($1, $2) as answer`, [operation, token]))
+    const second = (await t.sql(`select accept_invite($1, $2, auth.uid()) as answer`, [operation, token]))
       .rows[0].answer;
 
     assert.equal(first.status, 'ok');

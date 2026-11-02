@@ -63,12 +63,13 @@ describe('acceptInvite', () => {
   it('sends the call that means somebody pressed Accept, and only that one', async () => {
     answers({ status: 'ok', inviter_username: 'ada' });
 
-    await acceptInvite(TOKEN, 'op-1');
+    await acceptInvite(TOKEN, 'op-1', ME);
 
     expect(mockRpc).toHaveBeenCalledTimes(1);
     expect(mockRpc).toHaveBeenCalledWith('accept_invite', {
       p_operation_id: 'op-1',
       p_token: TOKEN,
+      p_accepting_user: ME,
     });
   });
 
@@ -80,7 +81,7 @@ describe('acceptInvite', () => {
       follow_state: 'approved',
     });
 
-    expect(await acceptInvite(TOKEN, 'op-1')).toEqual({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({
       outcome: 'redeemed',
       inviterUsername: 'ada',
       followState: 'approved',
@@ -98,16 +99,16 @@ describe('acceptInvite', () => {
      * somebody approved months ago that they have "asked to follow" would be wrong.
      */
     answers({ status: 'ok', inviter_username: 'ada', follow_state: 'pending' });
-    expect(await acceptInvite(TOKEN, 'op-1')).toMatchObject({ followState: 'pending' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ followState: 'pending' });
 
     // A backend that predates the acceptance semantics answers without the key. Null,
     // not a guess: the screen then says the invitation was recorded and nothing about
     // following, which is the only honest thing it can say.
     answers({ status: 'ok', inviter_username: 'ada' });
-    expect(await acceptInvite(TOKEN, 'op-1')).toMatchObject({ followState: null });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ followState: null });
 
     answers({ status: 'ok', inviter_username: 'ada', follow_state: 'something_else' });
-    expect(await acceptInvite(TOKEN, 'op-1')).toMatchObject({ followState: null });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ followState: null });
   });
 
   it('sends the token to nobody', async () => {
@@ -115,7 +116,7 @@ describe('acceptInvite', () => {
     // it, and `FORBIDDEN_PROPERTY_KEYS` names it — this asserts it is not offered.
     answers({ status: 'ok', inviter_username: 'ada' });
 
-    await acceptInvite(TOKEN, 'op-1');
+    await acceptInvite(TOKEN, 'op-1', ME);
 
     for (const call of [...mockTrack.mock.calls, ...mockSetAcquisition.mock.calls]) {
       expect(JSON.stringify(call)).not.toContain(TOKEN);
@@ -128,7 +129,7 @@ describe('acceptInvite', () => {
     // same operation id. Counting it again would report two arrivals from one person.
     answers({ status: 'already_applied', attributed: true });
 
-    expect(await acceptInvite(TOKEN, 'op-1')).toEqual({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({
       outcome: 'already_applied',
       attributed: true,
     });
@@ -141,7 +142,7 @@ describe('acceptInvite', () => {
       mockTrack.mockClear();
       answers({ status: 'refused', reason });
 
-      const result = await acceptInvite(TOKEN, 'op-1');
+      const result = await acceptInvite(TOKEN, 'op-1', ME);
 
       expect(result.outcome).not.toBe('redeemed');
       expect(mockTrack).not.toHaveBeenCalled();
@@ -156,10 +157,10 @@ describe('acceptInvite', () => {
      * redeeming a link they were forwarded.
      */
     answers({ status: 'refused', reason: 'blocked' });
-    expect(await acceptInvite(TOKEN, 'op-1')).toEqual({ outcome: 'unavailable' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({ outcome: 'unavailable' });
 
     answers({ status: 'refused', reason: 'unavailable' });
-    expect(await acceptInvite(TOKEN, 'op-1')).toEqual({ outcome: 'unavailable' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({ outcome: 'unavailable' });
   });
 
   it('treats a refusal it does not recognise as invalid rather than as success', async () => {
@@ -167,14 +168,14 @@ describe('acceptInvite', () => {
     // work", not "assume it did".
     answers({ status: 'refused', reason: 'something_new' });
 
-    expect(await acceptInvite(TOKEN, 'op-1')).toEqual({ outcome: 'invalid' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({ outcome: 'invalid' });
     expect(mockTrack).not.toHaveBeenCalled();
   });
 
   it('reads an unanswered call as possibly committed', async () => {
     answers(null, { code: '', message: 'Network request failed' });
 
-    expect(await acceptInvite(TOKEN, 'op-1')).toEqual({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({
       outcome: 'failed',
       message: 'Network request failed',
       changed: true,
@@ -185,7 +186,7 @@ describe('acceptInvite', () => {
   it('reads a raised refusal as a refusal, so the retry may mint a fresh id', async () => {
     answers(null, { code: '53400', message: 'too many' });
 
-    expect(await acceptInvite(TOKEN, 'op-1')).toMatchObject({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({
       outcome: 'failed',
       changed: false,
     });
@@ -194,7 +195,7 @@ describe('acceptInvite', () => {
   it('treats a 200 with no body as a change, because the request was answered', async () => {
     answers(null);
 
-    expect(await acceptInvite(TOKEN, 'op-1')).toMatchObject({ outcome: 'failed', changed: true });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ outcome: 'failed', changed: true });
   });
 });
 
@@ -287,6 +288,7 @@ describe('resumePendingInvite', () => {
     expect(mockRpc).toHaveBeenCalledWith('accept_invite', {
       p_operation_id: 'operation-from-the-press',
       p_token: TOKEN,
+      p_accepting_user: ME,
     });
     expect(held()).toBeNull();
   });

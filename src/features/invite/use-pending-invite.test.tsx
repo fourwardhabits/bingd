@@ -130,6 +130,7 @@ describe('a press of Accept whose answer never arrived', () => {
     expect(mockRpc).toHaveBeenCalledWith('accept_invite', {
       p_operation_id: 'op-from-the-press',
       p_token: TOKEN,
+      p_accepting_user: 'victim',
     });
     expect(mockPush).not.toHaveBeenCalled();
   });

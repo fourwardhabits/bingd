@@ -60,7 +60,7 @@ const mintLink = async (owner) => {
   return result.token;
 };
 
-const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1)`, [token]);
+const redeem = (token) => call(`accept_invite(gen_random_uuid(), $1, auth.uid())`, [token]);
 
 /** Every notification one account holds *about* another, in the order they were filed. */
 const noticesTo = async (recipient, actor) => {
@@ -192,8 +192,8 @@ describe('the row an acceptance files for the inviter', () => {
     const operation = await call(`gen_random_uuid()`);
 
     await t.actAs(invitee);
-    await call(`accept_invite($1, $2)`, [operation, token]);
-    const again = await call(`accept_invite($1, $2)`, [operation, token]);
+    await call(`accept_invite($1, $2, auth.uid())`, [operation, token]);
+    const again = await call(`accept_invite($1, $2, auth.uid())`, [operation, token]);
 
     assert.equal(again.status, 'already_applied');
     assert.deepEqual(await noticesTo(inviter, invitee), ['invite_joined']);
@@ -321,9 +321,9 @@ describe('one arrival, one notice', () => {
 
     await t.actAs(invitee);
     const op = (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
-    await call(`accept_invite($1, $2)`, [op, token]);
+    await call(`accept_invite($1, $2, auth.uid())`, [op, token]);
     // A lost reply retried with the same operation, and a fresh second attempt.
-    await call(`accept_invite($1, $2)`, [op, token]);
+    await call(`accept_invite($1, $2, auth.uid())`, [op, token]);
     await redeem(token);
 
     await rankTitles(invitee, 8, 100);

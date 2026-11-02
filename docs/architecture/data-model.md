@@ -784,7 +784,7 @@ rather than one that has not.
 
 `invite_tokens.kind` (`personal` | `referral`, defaulted, `referral` declared with no
 writer) is the gate on the mutual auto-follow a redeemed invitation now creates. It is a
-property of the token rather than a branch inside `_redeem_invite`, so a future public
+property of the token rather than a branch inside `accept_invite`, so a future public
 campaign link is a writer plus a product decision rather than an `if` somebody has to notice.
 
 Since `20260912000200` a valid **personal** token ends with **both** edges `approved`, in all

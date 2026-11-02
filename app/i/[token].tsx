@@ -134,7 +134,7 @@ export default function InvitationScreen() {
         const operationId = await claimForRedemption(token, userId, newOperationId);
         // `settle` owns the keep-or-let-go rule, so this screen and the replay on the next
         // launch cannot drift on what an answer means.
-        return operationId ? settle(token, operationId) : null;
+        return operationId ? settle(token, operationId, userId) : null;
       });
 
       if (outcome) setResult(outcome);

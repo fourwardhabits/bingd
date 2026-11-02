@@ -109,8 +109,8 @@ export default function suite() {
         await t2.actAs(ravi);
 
         const [r1, r2] = await Promise.all([
-          call(t1, `accept_invite($1, $2)`, [await newOp(db), token]),
-          call(t2, `accept_invite($1, $2)`, [await newOp(db), token]),
+          call(t1, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]),
+          call(t2, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]),
         ]);
 
         // Two different people, so both redemptions succeed — unlike R1 in
@@ -161,11 +161,11 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('story');
-        const p1 = fire(t1, `accept_invite($1, $2)`, [await newOp(db), token]);
+        const p1 = fire(t1, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]);
         await t1.awaitBlocked();
 
         await t2.begin();
-        const p2 = fire(t2, `accept_invite($1, $2)`, [await newOp(db), token]);
+        const p2 = fire(t2, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]);
         /**
          * Correlated against the actor's own key rather than against "a lock", which is
          * review 25's lesson: a test that accepts any wait will accept the wrong reason.

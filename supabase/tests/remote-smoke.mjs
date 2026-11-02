@@ -863,7 +863,7 @@ expectRefused(
 // surface. Revocation acts on the caller's own row and has the same answer.
 expectRefused(
   'anon cannot execute accept_invite',
-  await rpc('accept_invite', { p_operation_id: NIL, p_token: '0'.repeat(32) }),
+  await rpc('accept_invite', { p_operation_id: NIL, p_token: '0'.repeat(32), p_accepting_user: NIL }),
 );
 expectRefused(
   'anon cannot execute revoke_invite_link',
