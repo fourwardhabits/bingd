@@ -12,19 +12,6 @@ export type SectionHeaderProps = {
    */
   actionAccessibilityLabel?: string;
   onPressAction?: () => void;
-  /**
-   * Print the title exactly as given instead of upper-casing it.
-   *
-   * **One caller, and it is a brand exception the founder made deliberately**: the
-   * profile's awards shelf reads `bingd AWARDS`, because the product's name is
-   * lower-case and `BINGD AWARDS` spells it wrong. Everything else on every surface
-   * stays upper-cased, which is what makes this an exception rather than a second style.
-   * (Plain text writes the name without the wordmark's period, founder 2026-09-13.)
-   *
-   * The spoken name is `title` either way — uppercasing was always a style and never a
-   * spelling, which is why `accessibilityLabel` has never been derived from it.
-   */
-  exactCase?: boolean;
   /** `title` names something to browse. The default names a block of data. */
   level?: 'label' | 'title';
 };
@@ -46,7 +33,6 @@ export function SectionHeader({
   actionLabel,
   actionAccessibilityLabel,
   onPressAction,
-  exactCase = false,
   level = 'label',
 }: SectionHeaderProps) {
   const asTitle = level === 'title';
@@ -66,9 +52,9 @@ export function SectionHeader({
         tone={asTitle ? 'primary' : 'action'}
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.
-        style={exactCase || asTitle ? styles.exactCase : undefined}
+        style={asTitle ? styles.exactCase : undefined}
       >
-        {exactCase || asTitle ? title : title.toUpperCase()}
+        {asTitle ? title : title.toUpperCase()}
       </Text>
       </View>
       {actionLabel && onPressAction ? (

@@ -467,7 +467,7 @@ export default function ProfileScreen() {
         />
 
         <View style={styles.section}>
-          <SectionHeader title="Recent activity" />
+          <SectionHeader title="Recent activity" level="title" />
           {feed.isPending ? (
             <SkeletonRow count={2} />
           ) : feed.isError && recent.length === 0 ? (

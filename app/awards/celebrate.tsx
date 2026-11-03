@@ -1,5 +1,6 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -164,6 +165,15 @@ export default function AwardCelebrationScreen() {
   };
 
   const grid = current ? gridFor(current) : null;
+  // Light only while this screen is showing and only over the poster wall, which carries
+  // a 72% Ink wash. The Paper fallback keeps the dark default.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
   const last = page >= pages.length - 1;
   /**
    * Whether See titles has anything behind it.
@@ -202,6 +212,7 @@ export default function AwardCelebrationScreen() {
      */
     <Screen edges={['left', 'right']}>
       {grid && grid.posters.length ? <CelebrationBackdrop grid={grid} /> : null}
+      {focused && grid && grid.posters.length ? <StatusBar style="light" /> : null}
       <View style={styles.body}>
         {pages.length > 1 ? (
           <ScrollView

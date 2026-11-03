@@ -693,11 +693,9 @@ describe('their notes', () => {
     mockRpcResults.public_notes = [note];
     const view = await open();
 
-    // `SectionHeader` uppercases what it draws and keeps the real title as its
-    // accessible name, so both are asserted — the word somebody sees and the word
-    // somebody hears.
+    // Both are asserted: the word somebody sees and the word somebody hears.
     await waitFor(() => expect(view.getByLabelText('Reviews')).toBeTruthy());
-    expect(view.getByText('REVIEWS')).toBeTruthy();
+    expect(view.getByText('Reviews')).toBeTruthy();
     expect(view.queryByLabelText('Notes')).toBeNull();
     expect(view.queryByText('NOTES')).toBeNull();
   });

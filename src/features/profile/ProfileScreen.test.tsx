@@ -167,7 +167,7 @@ jest.mock('@/features/awards/ProfileAwards', () => {
   return {
     ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
       <View>
-        <Text>bingd AWARDS</Text>
+        <Text>bingd Awards</Text>
         <Pressable accessibilityRole="button" onPress={onSeeAll}>
           <Text>See all</Text>
         </Pressable>
@@ -852,8 +852,8 @@ describe('the shape of the page', () => {
       // section now and Invite friends took the slot — see `ProfileActions`.
       'Invite friends',
       // `SectionHeader` upper-cases, so both shelves are matched on what they render.
-      'YOUR 2026',
-      'bingd AWARDS',
+      'Your 2026',
+      'bingd Awards',
       // Top ranked’s empty state, which is its only marker on an empty account.
       'Nothing ranked yet',
     ]);
@@ -891,8 +891,8 @@ describe('the shape of the page', () => {
 
       const view = await open();
 
-      await waitFor(() => expect(view.getByText(/🔥 1 week streak/)).toBeTruthy());
-      const found = positions(view, ['YOUR 2026', '🔥', 'bingd AWARDS']);
+      await waitFor(() => expect(view.getByText(/1 week streak/)).toBeTruthy());
+      const found = positions(view, ['Your 2026', 'week streak', 'bingd Awards']);
       for (const piece of found)
         expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
       const order = found.map((piece) => piece.at);
@@ -920,10 +920,10 @@ describe('the shape of the page', () => {
     ];
 
     const view = await open();
-    await waitFor(() => expect(view.getByText('WATCHLIST')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Watchlist')).toBeTruthy());
 
     // `SectionHeader` upper-cases, so these are the headings as they appear in the tree.
-    const found = positions(view, ['TOP RANKED', 'WATCHLIST', 'RECENT ACTIVITY']);
+    const found = positions(view, ['Top ranked', 'Watchlist', 'Recent activity']);
     for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
     const [top, watchlist, activity] = found.map((piece) => piece.at);
     expect(top).toBeLessThan(watchlist!);
@@ -935,8 +935,8 @@ describe('the shape of the page', () => {
     // section. On somebody else's profile this is also the privacy behaviour — see
     // `ProfileWatchlist.test.tsx`.
     const view = await open();
-    await waitFor(() => expect(view.getByText('TOP RANKED')).toBeTruthy());
-    expect(view.queryByText('WATCHLIST')).toBeNull();
+    await waitFor(() => expect(view.getByText('Top ranked')).toBeTruthy());
+    expect(view.queryByText('Watchlist')).toBeNull();
   });
 
   it('keeps the bio out of the name column, where it used to wrap early', async () => {

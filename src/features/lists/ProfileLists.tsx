@@ -69,6 +69,7 @@ export function ProfileLists({
     <View style={styles.section}>
       <SectionHeader
         title="Lists"
+        level="title"
         actionLabel={isOwner ? 'Manage' : showSeeAll ? 'See all' : undefined}
         actionAccessibilityLabel={isOwner ? 'Manage your lists' : 'See all lists'}
         onPressAction={isOwner ? onManage : showSeeAll ? onSeeAll : undefined}

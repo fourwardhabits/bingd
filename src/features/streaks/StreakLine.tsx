@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -137,13 +138,15 @@ export function StreakLine({ userId }: StreakLineProps) {
        * a lost one and does not need announcing; the streak itself is unchanged, and the
        * grace it runs on still lives in `streak.ts`.
        */}
+      <Ionicons name="flame" size={theme.layout.icon.sm} color={theme.semantic.emphasis} />
       <Text
         variant="callout"
+        style={styles.copy}
         // The flame is decoration beside a number that already says it. Read out, it
         // would be "fire, four week streak".
         accessibilityLabel={state ? `${run}. ${state}` : run}
       >
-        {lapsed ? '🔥 0 weeks' : `🔥 ${data.weeks} week streak`}
+        {lapsed ? '0 weeks' : `${data.weeks} week streak`}
         {state ? (
           <Text variant="callout" tone="secondary">
             {` · ${state}`}
@@ -157,5 +160,13 @@ export function StreakLine({ userId }: StreakLineProps) {
 const styles = StyleSheet.create({
   // Under the goal bars, at the section's own gutter. No top section padding: it
   // belongs to the block above it rather than starting a new one.
-  row: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  row: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+  },
+  // Wraps beside the flame: the lapsed sentence is longer than a 320pt row.
+  copy: { flex: 1 },
 });

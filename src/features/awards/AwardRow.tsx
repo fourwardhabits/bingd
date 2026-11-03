@@ -64,6 +64,7 @@ export type AwardRowProps = {
  */
 export function AwardRow({ award, onPress }: AwardRowProps) {
   const earned = award.earnedTier != null;
+  const toNext = award.nextTier ? Math.min(1, award.value / award.nextTier.threshold) : null;
 
   // One announcement, in the order the row reads. Without this a screen reader gives
   // four fragments and the count lands last, detached from the goal it is counting
@@ -108,12 +109,17 @@ export function AwardRow({ award, onPress }: AwardRowProps) {
          * after it keeps it there, while the title itself changes to the tier's name on
          * a creative track exactly as before.
          */}
-        <Text variant="callout" tone={earned ? 'primary' : 'secondary'}>
+        <Text variant="title3" tone={earned ? 'primary' : 'secondary'}>
           {award.title}
         </Text>
         <Text variant="footnote" tone="secondary">
           {award.detailLine}
         </Text>
+        {toNext != null && !award.unavailable ? (
+          <View style={styles.track}>
+            <View style={[styles.fill, { width: `${Math.round(toNext * 100)}%` }]} />
+          </View>
+        ) : null}
       </View>
 
       <Text
@@ -164,6 +170,14 @@ const styles = StyleSheet.create({
   // Exactly the badge's own size, so `TierDots` can position against its bottom edge.
   badge: { width: theme.layout.awardBadge, height: theme.layout.awardBadge },
   copy: { flex: 1, gap: 1 },
+  track: {
+    height: 6,
+    marginTop: theme.space[2],
+    borderRadius: 3,
+    overflow: 'hidden',
+    backgroundColor: theme.surface.sunken,
+  },
+  fill: { height: 6, borderRadius: 3, backgroundColor: theme.semantic.emphasis },
   /**
    * Right-aligned with a floor under it, so `7 / 50` and `1,164 / 2,000` end on the
    * same edge and the column does not breathe as the reader scrolls past a wider

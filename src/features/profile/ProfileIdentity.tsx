@@ -207,7 +207,7 @@ export function ProfileIdentity({
         </View>
 
         <View style={styles.copy}>
-          <Text variant="title2" numberOfLines={1}>
+          <Text variant="title1" numberOfLines={2}>
             {name}
           </Text>
           <Text variant="footnote" tone="secondary" numberOfLines={1}>
@@ -225,7 +225,7 @@ export function ProfileIdentity({
           look like a profile with no bio rather than one with a gap. */}
       {bio ? (
         <View style={styles.bio}>
-          <Text variant="callout" tone="secondary" numberOfLines={2}>
+          <Text variant="deck" tone="secondary" numberOfLines={2}>
             {bio}
           </Text>
         </View>

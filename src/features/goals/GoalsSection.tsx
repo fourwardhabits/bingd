@@ -92,6 +92,7 @@ export function GoalsSection({
     <View style={styles.section}>
       <SectionHeader
         title={`Your ${year}`}
+        level="title"
         // No action while the read is in flight or has failed: "Edit" on top of an
         // unknown current value opens a sheet that would happily write an empty draft
         // over a goal the user has actually set.

@@ -39,7 +39,7 @@ beforeEach(() => {
 describe('when the section appears at all', () => {
   it('draws nothing for an account that has never ranked anything', async () => {
     /**
-     * "🔥 0 weeks" on a new account is the app telling somebody they are failing at
+     * "0 weeks" on a new account is the app telling somebody they are failing at
      * something they have not started. A streak is a reward for a habit, and there is
      * no habit to describe yet.
      */
@@ -85,14 +85,14 @@ describe('when the section appears at all', () => {
  * The nudge is the row turning into a task the moment somebody has not done it, and the
  * founder cut it: an open week is not a lost one, and does not need announcing.
  *
- * What survives is `🔥 4 week streak`, with `· This week ✓` after it once the week is
+ * What survives is `4 week streak`, with `· This week ✓` after it once the week is
  * genuinely earned. Nothing here is a countdown, and there is still no loss state.
  */
 describe('what the row says', () => {
   it('names the run as a streak, not as a bare count of weeks', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByText(/🔥 4 week streak/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/4 week streak/)).toBeTruthy());
   });
 
   it('confirms a week that is already earned, in two words', async () => {
@@ -112,7 +112,7 @@ describe('what the row says', () => {
     try {
       const view = await open();
 
-      await waitFor(() => expect(view.getByText(/🔥 4 week streak/)).toBeTruthy());
+      await waitFor(() => expect(view.getByText(/4 week streak/)).toBeTruthy());
       expect(view.queryByText(/keep it going/)).toBeNull();
       expect(view.queryByText(/·/)).toBeNull();
       expect(view.queryByText(/✓/)).toBeNull();
@@ -137,7 +137,7 @@ describe('what the row says', () => {
     mockStreak = settled(streak({ weeks: 0, best: 6 }));
     const view = await open();
 
-    await waitFor(() => expect(view.getByText(/🔥 0 weeks/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/0 weeks/)).toBeTruthy());
     expect(view.getByText(/Rank something this week to start a new one./)).toBeTruthy();
     // The count is said as it is written, not as "A 0 week streak".
     expect(view.getByLabelText(/^0 weeks. Rank something/)).toBeTruthy();
@@ -159,7 +159,7 @@ describe('what the row says', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText(/^A one week streak/)).toBeTruthy());
-    expect(view.getByText(/🔥 1 week streak/)).toBeTruthy();
+    expect(view.getByText(/1 week streak/)).toBeTruthy();
   });
 });
 

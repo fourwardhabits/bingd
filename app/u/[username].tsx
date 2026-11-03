@@ -595,7 +595,7 @@ export default function PublicProfileScreen() {
                   publish — the same rows the title page lists under a tab called
                   Reviews, through the same predicate. Calling them Notes here was the
                   sharpest of the three names one object had. */}
-              <SectionHeader title="Reviews" />
+              <SectionHeader title="Reviews" level="title" />
               {notes.data.map((entry) => (
                 <View key={`${entry.mediaItemId}-${entry.updatedAt}`} style={styles.note}>
                   <TitleRow
@@ -662,7 +662,7 @@ export default function PublicProfileScreen() {
 
           {recent.length ? (
             <View style={styles.section}>
-              <SectionHeader title="Recent activity" />
+              <SectionHeader title="Recent activity" level="title" />
               {recent.map((event) => {
                 return (
                 <ActivityRow
