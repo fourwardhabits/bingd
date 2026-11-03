@@ -49,7 +49,11 @@ export type MediumSelectorProps<T extends string = Medium> = {
    * implementations of it would drift into two dialects at the next tuning pass. What
    * changes is type size, not behaviour.
    */
-  size?: 'title' | 'section';
+  size?: 'title' | 'compact' | 'section';
+  /*
+   * `compact` is the title at 22pt with a small chevron and a short trailing gap, for a
+   * selector that shares its row with another control (For You, Visual 2.1).
+   */
 };
 
 /**
@@ -117,7 +121,13 @@ export function MediumSelector<T extends string = Medium>({
         accessibilityHint="Choose a category"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(true)}
-        style={size === 'section' ? styles.buttonSection : styles.button}
+        style={
+          size === 'section'
+            ? styles.buttonSection
+            : size === 'compact'
+              ? styles.buttonCompact
+              : styles.button
+        }
       >
         <View style={styles.row}>
           {size === 'section' ? (
@@ -131,13 +141,13 @@ export function MediumSelector<T extends string = Medium>({
             // `flexShrink` so a long label (For You's `Recommended Movies`, at a large text
             // size, on a narrow phone) wraps inside the row instead of pushing the chevron
             // off the screen. A label that fits is laid out exactly as before.
-            <Text variant="title1" style={styles.title}>
+            <Text variant={size === 'compact' ? 'title2' : 'title1'} style={styles.title}>
               {labelFor(value, table, labels)}
             </Text>
           )}
           <Ionicons
             name="chevron-down"
-            size={size === 'section' ? theme.layout.icon.sm : theme.layout.icon.md}
+            size={size === 'title' ? theme.layout.icon.md : theme.layout.icon.sm}
             color={size === 'section' ? theme.semantic.action : theme.text.secondary}
           />
         </View>
@@ -200,6 +210,12 @@ const styles = StyleSheet.create({
   // No gutter of its own: a section-sized control sits inside a row the caller has
   // already padded, where the title-sized one is measuring from the screen edge.
   buttonSection: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
+  buttonCompact: {
+    minHeight: theme.layout.minTapTarget,
+    paddingLeft: theme.layout.gutter,
+    paddingRight: theme.space[2],
+    justifyContent: 'center',
+  },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   title: { flexShrink: 1 },
   scrim: {

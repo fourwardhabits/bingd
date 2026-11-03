@@ -67,6 +67,7 @@ import {
   HeaderBoundary,
   PosterGrid,
   Screen,
+  MediumSelector,
   type MediumSelectorOption,
   SkeletonGrid,
   SkeletonRow,
@@ -678,28 +679,8 @@ export default function RecommendationsScreen() {
     // asserted in words, so this panel showed a sentence the wall would not.
     const headline = headlineFor(explanation, taste, (code) => languageName(code) ?? code);
 
-    /**
-     * **Not interested lives here, beside the reason** (proposal, founder revision brief,
-     * 2026-11-03). The X under every poster is gone; this is the one place a reader who
-     * wonders why a title is on the wall can also say they do not want it. It changes the
-     * 2026-08-27 rule that a long press gives the reason and nothing else, so it needs the
-     * founder's agreement before it ships.
-     */
-    const buttons = [
-      {
-        text: 'Not interested',
-        style: 'destructive' as const,
-        onPress: () => {
-          void dismissTitle(item.mediaItemId).then((result) => {
-            if (!result.ok) Alert.alert('Could not hide this', result.message);
-          });
-        },
-      },
-      { text: 'OK', style: 'cancel' as const },
-    ];
-
     if (!__DEV__) {
-      Alert.alert(item.title, headline, buttons);
+      Alert.alert(item.title, headline);
       return;
     }
 
@@ -720,7 +701,7 @@ export default function RecommendationsScreen() {
       `popularity prior: ${explanation.popularity.toFixed(2)}`,
     ].filter(Boolean);
 
-    Alert.alert(item.title, lines.join('\n'), buttons);
+    Alert.alert(item.title, lines.join('\n'));
   };
 
   const unopened = unopenedCount(sentRows);
@@ -782,17 +763,27 @@ export default function RecommendationsScreen() {
        * where a returning reader last found them.
        */}
       {/**
-       * **"For You" as the title, and two compact switches under it** (founder revision
-       * brief, 2026-11-03, preferred over the four-entry dropdown).
+       * **One row: which wall on the left, which medium on the right** (founder, Visual 2.1,
+       * 2026-11-03: "compact, contextual controls; restrained navigation").
        *
-       * The four walls are still the same four `ForYouMode`s: the switches are the two
-       * halves of that one value, so nothing below them changed.
+       * The wall is the existing bottom-sheet selector, now holding two entries rather than
+       * four, and the medium is a compact two-way switch. Together they are still the same
+       * four `ForYouMode`s, so nothing below the row changed. No "For You" heading: the tab
+       * bar already says where the reader is.
        */}
       <View style={styles.header}>
-        <Text variant="title1" accessibilityRole="header">
-          For You
-        </Text>
-        <View style={styles.switches}>
+        <View style={styles.headerWall}>
+          <MediumSelector
+            size="compact"
+            value={onTopRated ? 'top' : 'recommended'}
+            options={FOR_YOU_WALLS}
+            onChange={(next) => {
+              const showing = topMedium ?? medium;
+              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
+            }}
+          />
+        </View>
+        <View style={styles.headerMedium}>
           <CompactSwitch
             accessibilityLabel="Medium"
             options={FOR_YOU_MEDIUMS}
@@ -800,15 +791,6 @@ export default function RecommendationsScreen() {
             onChange={(next) =>
               changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
             }
-          />
-          <CompactSwitch
-            accessibilityLabel="Wall"
-            options={FOR_YOU_WALLS}
-            value={onTopRated ? 'top' : 'recommended'}
-            onChange={(next) => {
-              const showing = topMedium ?? medium;
-              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
-            }}
           />
         </View>
       </View>
@@ -1141,8 +1123,7 @@ export default function RecommendationsScreen() {
               {/* Neither line belongs on Top Rated: both are statements about how well
                   bingd. knows *this reader's* taste, and this wall makes no claim about
                   that at all. */}
-              {/* The "still learning your taste" line under the title is gone (founder revision
-                  brief, 2026-11-03: no descriptive subheading under For You). */}
+              {/* No explanatory line under the header (founder revision brief, 2026-11-03). */}
               <PosterGrid
                 tiles={items.map((item) => ({
                   id: item.mediaItemId,
@@ -1163,6 +1144,27 @@ export default function RecommendationsScreen() {
                   if (item)
                     void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
                 }}
+                /**
+                 * The founder's X (§12): the card goes on the tap — the optimistic
+                 * set feeds `useForYou`'s select, so no refetch and no flash — and
+                 * the write persists it. Only a proven refusal is worth an alert.
+                 *
+                 * **Absent on Top Rated**, and not merely because it would do nothing.
+                 * A dismissal is a durable statement that this reader does not want a
+                 * title *recommended*, and it is read by the slate query alone — so an X
+                 * here would silently edit a different wall while appearing to edit this
+                 * one, and the tile it removed would come back on the next page. The
+                 * community's order is not a list anybody gets to edit.
+                 */
+                onDismissTile={
+                  onTopRated
+                    ? undefined
+                    : (tile) => {
+                        void dismissTitle(tile.id).then((result) => {
+                          if (!result.ok) Alert.alert('Could not hide this', result.message);
+                        });
+                      }
+                }
                 /**
                  * Why a title is on the wall is a question only the slate can answer: it
                  * explains a *score against this reader's taste*, and Top Rated has no
@@ -1302,15 +1304,16 @@ const FOR_YOU_MODES: readonly MediumSelectorOption<ForYouMode>[] = [
   { id: 'topTv', label: 'Top Rated TV Shows' },
 ];
 
-/** Compact labels in Title Case (founder revision brief, 2026-11-03, section 5). */
+/** The wall half of the mode, in the bottom sheet. Title Case (founder, Visual 2.1). */
+const FOR_YOU_WALLS: readonly MediumSelectorOption<'recommended' | 'top'>[] = [
+  { id: 'recommended', label: 'Recommended' },
+  { id: 'top', label: 'Top Rated' },
+];
+
+/** The medium half of the mode, beside it. */
 const FOR_YOU_MEDIUMS: readonly CompactSwitchOption<Medium>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV Shows' },
-];
-
-const FOR_YOU_WALLS: readonly CompactSwitchOption<'recommended' | 'top'>[] = [
-  { id: 'recommended', label: 'Recommended' },
-  { id: 'top', label: 'Top Rated' },
 ];
 
 /**
@@ -1462,13 +1465,20 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[4],
     textAlign: 'center',
   },
+  /**
+   * One row where it fits: on a 360pt phone and wider. Below that the switch wraps to a
+   * second line, right-aligned under the selector, rather than covering its label. Both
+   * keep their natural width, so neither is ever squeezed.
+   */
   header: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[1],
-    paddingBottom: theme.space[3],
-    gap: theme.space[2],
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    paddingRight: theme.layout.gutter,
+    paddingBottom: theme.space[1],
   },
-  switches: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
+  headerWall: { flexShrink: 0 },
+  headerMedium: { flexShrink: 0, marginLeft: 'auto' },
   lowData: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[2],

@@ -321,13 +321,13 @@ function Tile({
   onPress,
   onLongPress,
   onToggleSave,
+  onDismiss,
 }: {
   tile: PosterTile;
   width: number;
   onPress: () => void;
   onLongPress?: () => void;
   onToggleSave?: () => void;
-  /** Accepted and not drawn: see the bookmark below. */
   onDismiss?: () => void;
 }) {
   const { score } = tile;
@@ -378,49 +378,65 @@ function Tile({
         ) : null}
       </Pressable>
       {/**
-       * **The bookmark sits on the poster again; the X row is gone** (founder revision
-       * brief, 2026-11-03: "remove the action row underneath every poster").
+       * **Bookmark and Not interested, stacked on the poster's corner** (founder, Visual 2.1,
+       * 2026-11-03: the older interaction, with no row under the poster).
        *
-       * A sibling of the poster's press, laid over its corner, not a child of it: a native
-       * `hitSlop` cannot reach past a parent, so a 44pt box is the only way to a 44pt
-       * target, and a near miss on it must not open the title (38e07df). The glyph's
-       * square is 26pt inside that box, translucent ink rather than Maroon, so nine of
-       * them on a wall read as part of the artwork rather than nine buttons.
-       *
-       * Dismissal is not drawn on the tile. For You offers it from the long press, beside
-       * the reason (see `recommendations.tsx`), and `onDismiss` is no longer read here.
+       * Siblings of the poster's press laid over its corner, not children of it: a native
+       * `hitSlop` cannot reach past a parent, so each action is its own 44pt box, and a tap
+       * on either never opens the title (38e07df). The two boxes stack edge to edge, so the
+       * visible squares are 26pt and 12pt apart, and translucent ink rather than Maroon, so a
+       * wall of them reads as part of the artwork. A saved title fills its square in Maroon.
        */}
-      {onToggleSave ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: Boolean(tile.saved) }}
-          accessibilityLabel={
-            tile.saved ? `Remove ${tile.title} from watchlist` : `Save ${tile.title} to watchlist`
-          }
-          onPress={() => {
-            hapticSelection();
-            if (!tile.saved) bookmark.pulse();
-            onToggleSave();
-          }}
-          style={styles.save}
-        >
-          {({ pressed }) => (
-            <Animated.View
-              style={[
-                styles.saveGlyph,
-                tile.saved && styles.saveGlyphOn,
-                pressed && styles.pressed,
-                bookmark.pulseStyle,
-              ]}
+      {onToggleSave || onDismiss ? (
+        <View style={styles.corner} pointerEvents="box-none">
+          {onToggleSave ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: Boolean(tile.saved) }}
+              accessibilityLabel={
+                tile.saved ? `Remove ${tile.title} from watchlist` : `Save ${tile.title} to watchlist`
+              }
+              onPress={() => {
+                hapticSelection();
+                if (!tile.saved) bookmark.pulse();
+                onToggleSave();
+              }}
+              style={[styles.cornerAction, styles.cornerActionTop]}
             >
-              <Ionicons
-                name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-                size={14}
-                color={theme.text.inverse}
-              />
-            </Animated.View>
-          )}
-        </Pressable>
+              {({ pressed }) => (
+                <Animated.View
+                  style={[
+                    styles.cornerGlyph,
+                    tile.saved && styles.cornerGlyphOn,
+                    pressed && styles.pressed,
+                    bookmark.pulseStyle,
+                  ]}
+                >
+                  <Ionicons
+                    name={tile.saved ? 'bookmark' : 'bookmark-outline'}
+                    size={14}
+                    color={theme.text.inverse}
+                  />
+                </Animated.View>
+              )}
+            </Pressable>
+          ) : null}
+          {onDismiss ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Not interested in ${tile.title}`}
+              accessibilityHint="Removes it from your recommendations"
+              onPress={onDismiss}
+              style={styles.cornerAction}
+            >
+              {({ pressed }) => (
+                <View style={[styles.cornerGlyph, pressed && styles.pressed]}>
+                  <Ionicons name="close" size={15} color={theme.text.inverse} />
+                </View>
+              )}
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
     </Animated.View>
   );
@@ -456,24 +472,26 @@ const styles = StyleSheet.create({
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },
-  save: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
+  corner: { position: 'absolute', top: 0, right: 0, width: theme.layout.minTapTarget },
+  // Each box is 44pt. The glyphs sit 6pt in from the poster's top and right edges and 12pt
+  // apart: the bookmark at the top of its box, the X at the top of the box below it.
+  cornerAction: {
     width: theme.layout.minTapTarget,
     height: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingRight: 6,
   },
-  saveGlyph: {
+  cornerActionTop: { paddingTop: 6 },
+  cornerGlyph: {
     width: 26,
     height: 26,
     borderRadius: theme.radius.control,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: inkAlpha(0.34),
+    backgroundColor: inkAlpha(0.4),
   },
-  saveGlyphOn: { backgroundColor: theme.semantic.action },
+  cornerGlyphOn: { backgroundColor: theme.semantic.action },
   chip: {
     position: 'absolute',
     right: 6,
