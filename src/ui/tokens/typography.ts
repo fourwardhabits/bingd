@@ -30,10 +30,17 @@ export const typography = {
     fontFamily: fontFamily.serif,
     fontSize: 40,
     lineHeight: 44,
+    letterSpacing: -0.4,
     maxFontSizeMultiplier: 1.3,
   },
-  title1: { fontFamily: fontFamily.serif, fontSize: 28, lineHeight: 34 },
-  title2: { fontFamily: fontFamily.serif, fontSize: 22, lineHeight: 28 },
+  title1: { fontFamily: fontFamily.serif, fontSize: 28, lineHeight: 34, letterSpacing: -0.2 },
+  title2: { fontFamily: fontFamily.serif, fontSize: 22, lineHeight: 28, letterSpacing: -0.1 },
+  /** A film's name inside a row: the serif at the size it stops being a heading. */
+  title3: { fontFamily: fontFamily.serif, fontSize: 18, lineHeight: 23 },
+  /** One editorial line under a heading. The italic has been loaded and unused since launch. */
+  deck: { fontFamily: fontFamily.serifItalic, fontSize: 17, lineHeight: 23 },
+  /** A count that is read rather than compared: profile stats. */
+  stat: { fontFamily: fontFamily.serif, fontSize: 24, lineHeight: 28 },
   headline: { fontFamily: fontFamily.sansSemibold, fontSize: 17, lineHeight: 22 },
   body: { fontFamily: fontFamily.sans, fontSize: 16, lineHeight: 24 },
   /**
