@@ -575,6 +575,7 @@ const styles = `
         --maroon: #773744;
         --ink: #242326;
         --secondary: #5f5a56;
+        --tertiary: #6e6862;
         --hairline: rgba(36, 35, 38, 0.12);
       }
 
