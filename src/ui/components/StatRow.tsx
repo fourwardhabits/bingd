@@ -29,11 +29,11 @@ export type StatRowProps = {
 export function StatRow({ stats }: StatRowProps) {
   return (
     <View style={styles.row}>
-      {stats.map((stat, index) => {
+      {stats.map((stat) => {
         const content = (
           <>
-            <Text variant="headline">{stat.value}</Text>
-            <Text variant="footnote" tone="secondary">
+            <Text variant="stat">{stat.value}</Text>
+            <Text variant="caption" tone="secondary">
               {stat.label}
             </Text>
           </>
@@ -56,7 +56,6 @@ export function StatRow({ stats }: StatRowProps) {
             // whole tile is the target rather than the two lines of text inside it.
             style={({ pressed }) => [
               styles.item,
-              index > 0 && styles.itemDivider,
               pressed && styles.pressed,
             ]}
           >
@@ -67,7 +66,7 @@ export function StatRow({ stats }: StatRowProps) {
             key={stat.label}
             accessible
             accessibilityLabel={label}
-            style={[styles.item, index > 0 && styles.itemDivider]}
+            style={styles.item}
           >
             {content}
           </View>
@@ -81,26 +80,20 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     borderColor: theme.border.hairline,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.surface.raised,
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
     marginHorizontal: theme.layout.gutter,
-    overflow: 'hidden',
   },
   item: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.space[2],
+    paddingVertical: theme.space[3],
     // Two stacked lines of text already clear this, so it changes nothing today. It is
     // stated because half of these tiles are now buttons, and the 44pt floor should be a
     // property of the cell rather than a coincidence of the type scale inside it.
     minHeight: theme.layout.minTapTarget,
-    gap: 2,
+    gap: 1,
   },
   pressed: { opacity: 0.6 },
-  itemDivider: {
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: theme.border.hairline,
-  },
 });

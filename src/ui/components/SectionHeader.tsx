@@ -25,6 +25,8 @@ export type SectionHeaderProps = {
    * spelling, which is why `accessibilityLabel` has never been derived from it.
    */
   exactCase?: boolean;
+  /** `title` names something to browse. The default names a block of data. */
+  level?: 'label' | 'title';
 };
 
 /**
@@ -45,7 +47,9 @@ export function SectionHeader({
   actionAccessibilityLabel,
   onPressAction,
   exactCase = false,
+  level = 'label',
 }: SectionHeaderProps) {
+  const asTitle = level === 'title';
   return (
     <View
       style={styles.row}
@@ -55,13 +59,13 @@ export function SectionHeader({
       accessibilityLabel={title}
     >
       <Text
-        variant="sectionHeader"
-        tone="action"
+        variant={asTitle ? 'title2' : 'sectionHeader'}
+        tone={asTitle ? 'primary' : 'action'}
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.
-        style={exactCase ? styles.exactCase : undefined}
+        style={exactCase || asTitle ? styles.exactCase : undefined}
       >
-        {exactCase ? title : title.toUpperCase()}
+        {exactCase || asTitle ? title : title.toUpperCase()}
       </Text>
       {actionLabel && onPressAction ? (
         // The row is already 44pt tall; the control fills that height rather than

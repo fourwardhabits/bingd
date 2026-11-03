@@ -66,7 +66,7 @@ export default function TabsLayout() {
         tabBarActiveTintColor: theme.semantic.action,
         tabBarInactiveTintColor: theme.text.tertiary,
         tabBarStyle: {
-          backgroundColor: theme.surface.raised,
+          backgroundColor: theme.surface.base,
           borderTopColor: theme.border.hairline,
           ...androidInsets,
         },

@@ -38,9 +38,10 @@ export function Avatar({ uri, name, size = 'md' }: AvatarProps) {
         <Image source={{ uri }} style={styles.fill} contentFit="cover" />
       ) : (
         <Text
-          variant={compact ? 'caption' : 'footnote'}
-          tone="tertiary"
+          variant={compact ? 'caption' : edge >= 56 ? 'title1' : 'footnote'}
+          tone="secondary"
           allowFontScaling={!compact}
+          style={styles.initials}
         >
           {initials}
         </Text>
@@ -61,4 +62,5 @@ const styles = StyleSheet.create({
   fill: {
     ...StyleSheet.absoluteFill,
   },
+  initials: { fontFamily: theme.typography.title2.fontFamily },
 });

@@ -2220,7 +2220,7 @@ const styles = StyleSheet.create({
   revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   // The two ways out, side by side under the one way on. Equal halves, so neither
   // reads as the recommended exit.
-  revealExits: { flexDirection: 'row', gap: theme.space[2] },
+  revealExits: { alignSelf: 'stretch', flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
   centre: { textAlign: 'center' },
   /**

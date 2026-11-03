@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     backgroundColor: inkAlpha(0.4),
   },
   sheet: {
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.base,
     borderTopLeftRadius: theme.radius.sheet,
     borderTopRightRadius: theme.radius.sheet,
     maxHeight: '90%',

@@ -25,16 +25,14 @@ const badgeOf = (view: Awaited<ReturnType<typeof render>>) => {
 };
 
 describe('the notification badge', () => {
-  it('is Parchment behind a Maroon number, ringed in Maroon', async () => {
+  it('is a solid Maroon count with a Parchment number', async () => {
     const view = await render(<AppHeader notifications={{ count: 1, onPress: () => {} }} />);
 
     const badge = badgeOf(view);
-    expect(badge.backgroundColor).toBe(theme.surface.sunken);
-    expect(badge.borderColor).toBe(theme.semantic.action);
-    expect(badge.borderWidth).toBeGreaterThan(0);
+    expect(badge.backgroundColor).toBe(theme.semantic.action);
 
     const number = StyleSheet.flatten(view.getByText('1').props.style);
-    expect(number.color).toBe(theme.semantic.action);
+    expect(number.color).toBe(theme.text.inverse);
   });
 
   it('stays a circle at one digit', async () => {
