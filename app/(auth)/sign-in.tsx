@@ -1,6 +1,7 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -9,7 +10,15 @@ import {
   signInWithApple,
   signInWithGoogle,
 } from '@/features/auth';
-import { BrandLockup, Button, Divider, Field, Screen, Text } from '@/ui/components';
+import {
+  BrandLockup,
+  Button,
+  Divider,
+  Field,
+  KeyboardScreen,
+  Screen,
+  Text,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -46,6 +55,15 @@ export default function SignInScreen() {
   const insets = useSafeAreaInsets();
   // A 568pt phone gets a shorter masthead, so Google stays above the fold.
   const short = useWindowDimensions().height < 640;
+  // Light clock and battery on the Maroon, only while this screen is the one showing. It
+  // stays mounted under whatever is pushed on top, and those screens are Paper.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState<'email' | 'apple' | 'google' | null>(null);
@@ -129,6 +147,8 @@ export default function SignInScreen() {
 
   return (
     <Screen includeBottomInset edges={['left', 'right']}>
+      {focused ? <StatusBar style="light" /> : null}
+      <KeyboardScreen contentContainerStyle={styles.page} bounces={false}>
       {/**
        * **This screen is the product introduction now** (founder, physical iOS 1.0.1
        * build 8).
@@ -163,12 +183,7 @@ export default function SignInScreen() {
         </Text>
       </View>
 
-      <ScrollView
-        style={styles.panel}
-        contentContainerStyle={styles.panelContent}
-        keyboardShouldPersistTaps="handled"
-        bounces={false}
-      >
+      <View style={styles.panel}>
       <View style={styles.form}>
         <Field
           label="Email"
@@ -243,13 +258,19 @@ export default function SignInScreen() {
           disabledReason="One moment."
         />
       </View>
-      </ScrollView>
+      </View>
+      </KeyboardScreen>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  // Takes whatever the form leaves, with the promise sitting on its lower edge, so the
+  // field and the promise are one composition rather than a banner above a form.
   intro: {
+    flexGrow: 1,
+    flexShrink: 0,
+    justifyContent: 'flex-end',
     backgroundColor: theme.semantic.action,
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[7],
@@ -257,14 +278,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   introShort: { paddingBottom: theme.space[4], gap: theme.space[2] },
-  // Scrolls, because the masthead leaves a 320 by 568 phone less room than the form needs.
-  panel: { flex: 1 },
-  panelContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
+  // The masthead and form scroll as one, so a focused field can always clear the keyboard.
+  page: { flexGrow: 1 },
+  panel: {
     gap: theme.space[6],
     paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[5],
+    paddingTop: theme.space[6],
+    paddingBottom: theme.space[4],
   },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },

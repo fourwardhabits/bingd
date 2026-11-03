@@ -22,6 +22,7 @@ import { renderWithProviders } from '@/test-utils/render';
 const mockNav = { pushed: [] as unknown[], replaced: [] as unknown[], back: 0, canGoBack: true };
 
 jest.mock('expo-router', () => ({
+  useFocusEffect: () => {},
   useRouter: () => ({
     push: (href: unknown) => mockNav.pushed.push(href),
     replace: (href: unknown) => mockNav.replaced.push(href),

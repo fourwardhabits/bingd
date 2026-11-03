@@ -1904,24 +1904,38 @@ function Reveal({
       {higher || lower ? (
         <View style={styles.anchors}>
           {higher ? (
-            <View style={styles.anchor} accessibilityElementsHidden>
-              <Text variant="caption" tone="tertiary" style={styles.centre}>
-                Below
-              </Text>
-              <Text variant="title3" tone="secondary" style={styles.centre} numberOfLines={2}>
-                {higher.name}
-              </Text>
+            <View style={[styles.anchor, styles.anchorHigher]} accessibilityElementsHidden>
+              <View style={styles.anchorCopy}>
+                <Text variant="caption" tone="tertiary" style={styles.anchorEnd}>
+                  Below
+                </Text>
+                <Text variant="title3" tone="secondary" style={styles.anchorEnd} numberOfLines={2}>
+                  {higher.name}
+                </Text>
+              </View>
+              <Poster
+                uri={posterUri(higher.posterPath, 'row')}
+                title={higher.name}
+                size="xs"
+              />
             </View>
           ) : null}
           {higher && lower ? <View style={styles.anchorRule} /> : null}
           {lower ? (
             <View style={styles.anchor} accessibilityElementsHidden>
-              <Text variant="caption" tone="tertiary" style={styles.centre}>
-                Above
-              </Text>
-              <Text variant="title3" tone="secondary" style={styles.centre} numberOfLines={2}>
-                {lower.name}
-              </Text>
+              <Poster
+                uri={posterUri(lower.posterPath, 'row')}
+                title={lower.name}
+                size="xs"
+              />
+              <View style={styles.anchorCopy}>
+                <Text variant="caption" tone="tertiary">
+                  Above
+                </Text>
+                <Text variant="title3" tone="secondary" numberOfLines={2}>
+                  {lower.name}
+                </Text>
+              </View>
             </View>
           ) : null}
         </View>
@@ -2229,10 +2243,18 @@ const styles = StyleSheet.create({
    */
   identity: { alignSelf: 'stretch', gap: theme.space[1] },
   // The two names, now a sibling of the block above and separated from it by the
-  // reveal's own space[6]. Two columns with the comparison's own hairline between them,
-  // so where a title landed reads as the same picture as the choice that put it there.
-  anchors: { alignSelf: 'stretch', flexDirection: 'row', gap: theme.space[4] },
-  anchor: { flex: 1, gap: 2 },
+  // reveal's own space[6]. Two films mirrored about the comparison's own hairline, so
+  // where a title landed reads as the same picture as the choice that put it there.
+  anchors: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: theme.space[3],
+  },
+  anchor: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  anchorHigher: { justifyContent: 'flex-end' },
+  anchorCopy: { flexShrink: 1, gap: 2 },
+  anchorEnd: { textAlign: 'right' },
   anchorRule: {
     width: StyleSheet.hairlineWidth * 2,
     alignSelf: 'stretch',
@@ -2253,7 +2275,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.semantic.score,
     borderRadius: theme.radius.card,
     alignSelf: 'stretch',
-    paddingVertical: theme.space[8],
+    paddingVertical: theme.space[6],
     alignItems: 'center',
     gap: theme.space[2],
   },

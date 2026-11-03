@@ -30,6 +30,7 @@ import { renderWithProviders } from '@/test-utils/render';
  */
 
 jest.mock('expo-router', () => ({
+  useFocusEffect: () => {},
   useRouter: () => ({ push: () => {}, replace: () => {}, back: () => {}, canGoBack: () => true }),
   useLocalSearchParams: () => ({}),
   Stack: { Screen: () => null },

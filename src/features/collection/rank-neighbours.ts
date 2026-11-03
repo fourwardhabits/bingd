@@ -23,9 +23,10 @@ import { compactName, type NameableTitle } from '@/lib/titles';
 export type NeighbourRow = NameableTitle & {
   mediaItemId: string;
   position: number;
+  posterPath?: string | null;
 };
 
-export type Neighbour = { mediaItemId: string; name: string };
+export type Neighbour = { mediaItemId: string; name: string; posterPath: string | null };
 
 export type RankNeighbours = {
   /** One place better, nearer #1. Null when the subject *is* #1. */
@@ -41,7 +42,7 @@ const named = (row: NeighbourRow | undefined): Neighbour | null => {
   // A season reads as `The Last of Us, S1` and never as its bare season name, which on
   // its own would be the word "Season 2" sitting under somebody's score.
   const name = compactName(row);
-  return name ? { mediaItemId: row.mediaItemId, name } : null;
+  return name ? { mediaItemId: row.mediaItemId, name, posterPath: row.posterPath ?? null } : null;
 };
 
 /**

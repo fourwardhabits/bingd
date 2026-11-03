@@ -35,21 +35,21 @@ const TEN = Array.from({ length: 10 }, (_, i) => film(`m${i + 1}`, i + 1, `Film 
 describe('neighboursFor', () => {
   it('names both sides of a middle placement', () => {
     expect(neighboursFor('m5', TEN)).toEqual({
-      higher: { mediaItemId: 'm4', name: 'Film 4' },
-      lower: { mediaItemId: 'm6', name: 'Film 6' },
+      higher: { mediaItemId: 'm4', name: 'Film 4', posterPath: null },
+      lower: { mediaItemId: 'm6', name: 'Film 6', posterPath: null },
     });
   });
 
   it('names nothing above a #1, rather than inventing one', () => {
     expect(neighboursFor('m1', TEN)).toEqual({
       higher: null,
-      lower: { mediaItemId: 'm2', name: 'Film 2' },
+      lower: { mediaItemId: 'm2', name: 'Film 2', posterPath: null },
     });
   });
 
   it('names nothing below the last title', () => {
     expect(neighboursFor('m10', TEN)).toEqual({
-      higher: { mediaItemId: 'm9', name: 'Film 9' },
+      higher: { mediaItemId: 'm9', name: 'Film 9', posterPath: null },
       lower: null,
     });
   });
@@ -84,8 +84,8 @@ describe('neighboursFor', () => {
       film('m1', 1, 'Film 1'),
     ];
     expect(neighboursFor('m5', shuffled)).toEqual({
-      higher: { mediaItemId: 'm4', name: 'Film 4' },
-      lower: { mediaItemId: 'm6', name: 'Film 6' },
+      higher: { mediaItemId: 'm4', name: 'Film 4', posterPath: null },
+      lower: { mediaItemId: 'm6', name: 'Film 6', posterPath: null },
     });
   });
 
@@ -107,8 +107,8 @@ describe('neighboursFor', () => {
       season('s3', 3, 'The Bear', 2),
     ];
     expect(neighboursFor('s2', seasons)).toEqual({
-      higher: { mediaItemId: 's1', name: 'The Last of Us, S1' },
-      lower: { mediaItemId: 's3', name: 'The Bear, S2' },
+      higher: { mediaItemId: 's1', name: 'The Last of Us, S1', posterPath: null },
+      lower: { mediaItemId: 's3', name: 'The Bear, S2', posterPath: null },
     });
   });
 
@@ -136,6 +136,6 @@ describe('neighboursFor', () => {
       film('m3', 3, 'Collateral'),
     ];
     expect(neighboursFor('m2', rows).higher).toBeNull();
-    expect(neighboursFor('m2', rows).lower).toEqual({ mediaItemId: 'm3', name: 'Collateral' });
+    expect(neighboursFor('m2', rows).lower).toEqual({ mediaItemId: 'm3', name: 'Collateral', posterPath: null });
   });
 });
