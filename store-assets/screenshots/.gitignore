@@ -1,0 +1,9 @@
+# Everything this pipeline generates. The repo is public and poster licensing is
+# unresolved, so raw captures, composed frames and exports must never be committed.
+out/
+node_modules/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.tar
