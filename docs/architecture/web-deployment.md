@@ -288,9 +288,9 @@ the upload key is still what an EAS-distributed production APK carries.
 
 | key | value | what a visitor gets |
 |---|---|---|
-| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd. on the App Store* — **wins** |
+| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd on the App Store* — **wins** |
 | `ios.betaUrl` | `https://testflight.apple.com/join/kkgaYsqx` | kept as a fallback, never chosen |
-| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd. on Google Play* — **wins** |
+| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd on Google Play* — **wins** |
 | `android.optInUrl` | `https://play.google.com/apps/testing/app.bingd` | kept as a fallback, never chosen |
 | `android.betaUrl` | `null` | — |
 
@@ -688,7 +688,7 @@ arrival and at the result, at every width. The store buttons beside it never mov
   hero's in-flow store row and the result's small call to action are hidden, and the
   sticky bar is the store button.
 - **Sticky bar label:** before and during the demo it reads the platform's own wording
-  ("Get bingd. on Google Play" / "…on the App Store"). Once the third pick is made it reads
+  ("Get bingd on Google Play" / "…on the App Store"). Once the third pick is made it reads
   *Keep ranking in bingd.* and keeps the same destination. *Try again* puts the store's
   name back.
 - **How "phone" is decided:** the hiding rule uses the sticky bar's own condition, so it
