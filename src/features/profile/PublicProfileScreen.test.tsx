@@ -1445,8 +1445,7 @@ describe('the shape of somebody else’s profile', () => {
     const following = view.getByRole('button', { name: 'Following' });
     const style = StyleSheet.flatten(following.props.style);
     expect(style.borderColor).toBe(theme.semantic.action);
-    expect(style.backgroundColor).toBe(theme.surface.raised);
-    expect(style.backgroundColor).not.toBe(theme.semantic.action);
+    expect(style.backgroundColor).toBe('transparent');
   });
 
   it('gives Requested the same treatment without the same word', async () => {

@@ -773,8 +773,8 @@ social surface it belongs to, and from Profile beside the gear.
 
 **Feature, feature, utility.** *Sent to you* and *Group Picks* are two of the things this app
 has that others do not, and they were drawn in exactly the grey of the *Filters* button beside
-them. They now take a Maroon glyph, a Maroon label and a `actionSubtle` hairline; *Filters*
-stays neutral. That is the whole treatment — no filled pill, no card, no badge, no second row,
+them. They now take a Maroon glyph and a Maroon label on the Parchment all three chips share;
+*Filters* stays neutral. That is the whole treatment — no card, no badge, no second row,
 and **no extra height**, which was the founder's explicit constraint. Emphasis composes with
 selection rather than competing with it: an emphasised chip that is also *on* still takes the
 full-strength ring and the Parchment fill, so "this is a feature" and "this is applied" stay

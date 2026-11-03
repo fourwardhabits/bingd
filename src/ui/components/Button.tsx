@@ -18,7 +18,7 @@ import { Text } from './Text';
  * label is Maroon here and inverse there, and a "primary but hollow" prop would make
  * every caller responsible for remembering that.
  */
-type Kind = 'primary' | 'secondary' | 'tertiary' | 'outline';
+type Kind = 'primary' | 'secondary' | 'tertiary' | 'outline' | 'tint';
 
 /**
  * `md` is the screen's own action. `sm` is one that belongs to a row.
@@ -116,7 +116,7 @@ export function Button({
         styles[kind],
         fit && styles.fit,
         pressed && !disabled && styles.pressed,
-        disabled && styles.disabled,
+        disabled && (kind === 'primary' ? styles.disabledPrimary : styles.disabled),
       ]}
       {...rest}
     >
@@ -128,8 +128,10 @@ export function Button({
           variant={size === 'sm' ? 'callout' : 'headline'}
           tone={
             kind === 'primary'
-              ? 'inverse'
-              : kind === 'outline'
+              ? disabled
+                ? 'tertiary'
+                : 'inverse'
+              : kind === 'outline' || kind === 'tint'
                 ? 'action'
                 : tone === 'secondary'
                   ? 'secondary'
@@ -152,17 +154,17 @@ const styles = StyleSheet.create({
   md: { minHeight: theme.layout.buttonMinHeight, paddingHorizontal: theme.space[5] },
   sm: { minHeight: 36, paddingHorizontal: theme.space[4] },
   primary: { backgroundColor: theme.semantic.action },
-  secondary: {
-    backgroundColor: theme.surface.raised,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.strong,
-  },
+  // Parchment, not a white box. Ink on Parchment is 13.3:1 and the label identifies the
+  // control, so it needs no outline (WCAG 1.4.11 asks a boundary of an unlabelled one).
+  secondary: { backgroundColor: theme.surface.sunken },
+  // A compact act repeated down a list, such as Follow. Keeps one Maroon fill per screen.
+  tint: { backgroundColor: theme.surface.sunken },
   tertiary: { backgroundColor: 'transparent', paddingHorizontal: theme.space[2] },
   // Two points of Maroon rather than a hairline: this has to read as the same weight
   // of control as the filled Maroon it replaces, and a hairline outline reads lighter
   // than a fill at any width.
   outline: {
-    backgroundColor: theme.surface.raised,
+    backgroundColor: 'transparent',
     borderWidth: 2,
     borderColor: theme.semantic.action,
   },
@@ -170,4 +172,11 @@ const styles = StyleSheet.create({
   fit: { paddingHorizontal: theme.space[3] },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.4 },
+  // An empty frame, because it is a place something will be. Maroon at 40% was a large
+  // pink block, the loudest thing on sign-in, with a label measuring 1.29:1.
+  disabledPrimary: {
+    backgroundColor: 'transparent',
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.strong,
+  },
 });

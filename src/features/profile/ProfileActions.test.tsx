@@ -89,7 +89,7 @@ describe('the row survives a narrow phone', () => {
 });
 
 describe('one treatment for one object', () => {
-  it('outlines Share and lets the trailing act take the fill', async () => {
+  it('sets Share in Parchment and lets the trailing act take the Maroon fill', async () => {
     const view = await open();
 
     // One filled control per row. The fill is the only thing on a profile competing with
@@ -97,7 +97,7 @@ describe('one treatment for one object', () => {
     // you do with people who are already here, Invite friends is how anybody new
     // arrives.
     expect(StyleSheet.flatten(share(view).props.style).backgroundColor).toBe(
-      theme.surface.raised,
+      theme.surface.sunken,
     );
     expect(StyleSheet.flatten(trailing(view).props.style).backgroundColor).toBe(
       theme.semantic.action,

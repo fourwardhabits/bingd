@@ -25,6 +25,8 @@ export type SectionHeaderProps = {
    * spelling, which is why `accessibilityLabel` has never been derived from it.
    */
   exactCase?: boolean;
+  /** `title` names something to browse. The default names a block of data. */
+  level?: 'label' | 'title';
 };
 
 /**
@@ -45,7 +47,9 @@ export function SectionHeader({
   actionAccessibilityLabel,
   onPressAction,
   exactCase = false,
+  level = 'label',
 }: SectionHeaderProps) {
+  const asTitle = level === 'title';
   return (
     <View
       style={styles.row}
@@ -54,15 +58,19 @@ export function SectionHeader({
       // spells out "T O P  R A N K E D".
       accessibilityLabel={title}
     >
+      {/* Shrinks and wraps beside the action, so at large text a long title takes a second
+          line instead of pushing See all off the screen. */}
+      <View style={styles.heading} testID="section-header-title">
       <Text
-        variant="sectionHeader"
-        tone="action"
+        variant={asTitle ? 'title2' : 'sectionHeader'}
+        tone={asTitle ? 'primary' : 'action'}
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.
-        style={exactCase ? styles.exactCase : undefined}
+        style={exactCase || asTitle ? styles.exactCase : undefined}
       >
-        {exactCase ? title : title.toUpperCase()}
+        {exactCase || asTitle ? title : title.toUpperCase()}
       </Text>
+      </View>
       {actionLabel && onPressAction ? (
         // The row is already 44pt tall; the control fills that height rather than
         // hugging one line of footnote, and the slop covers its narrow width. Nothing
@@ -91,6 +99,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: theme.layout.gutter,
   },
-  action: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
+  heading: { flexShrink: 1, paddingRight: theme.space[3] },
+  action: { flexShrink: 0, minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   exactCase: { textTransform: 'none' },
 });

@@ -87,9 +87,7 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
     paddingHorizontal: theme.space[5],
     borderRadius: theme.radius.control,
-    backgroundColor: theme.surface.raised,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.strong,
+    backgroundColor: theme.surface.sunken,
   },
   pressed: { opacity: 0.6 },
 });

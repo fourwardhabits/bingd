@@ -136,11 +136,11 @@ function FilterChip({
           {glyph}
         </Text>
       ) : (
-        <Text variant="footnote" tone={selected ? 'primary' : 'secondary'}>
+        <Text variant="footnote" tone={selected ? 'inverse' : 'secondary'}>
           {label}
         </Text>
       )}
-      <Text variant="footnote" tone={selected ? 'primary' : 'secondary'}>
+      <Text variant="footnote" tone={selected ? 'inverse' : 'secondary'}>
         {count}
       </Text>
     </Pressable>
@@ -166,12 +166,10 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
     minHeight: theme.layout.control.chipHeight,
     paddingHorizontal: theme.space[3],
-    borderRadius: theme.radius.full,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
+    borderRadius: theme.radius.control,
+    backgroundColor: theme.surface.sunken,
   },
-  chipSelected: { backgroundColor: theme.surface.sunken, borderColor: theme.semantic.action },
+  chipSelected: { backgroundColor: theme.semantic.action },
   list: { maxHeight: 360 },
   listContent: { paddingBottom: theme.space[4] },
   person: {

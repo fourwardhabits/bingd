@@ -9,6 +9,8 @@ The PRD fixes the palette, the typefaces, and the voice. This document turns tho
 
 > **What changed in v2.** Two founder decisions on 2026-08-15, both recorded in [`decision-log.md`](../product/decision-log.md) §12. The ranking output is now a 0–10 score rather than an ordinal, which replaces the rank badge in §8 and the reveal in §9. And the base surface moved from Parchment to a warm near-white, which rewrites §1 and §2 and relaxes two rules v1 stated absolutely. Where v1 was reversed, this document says so rather than quietly reading as though it always said the new thing — the reasoning behind a rule is worth more than the rule.
 
+> **What changed in Visual 2.0 (2026-11-03, proposed).** No colour was added or replaced. Measured across 84 screens, white covered 20.3% of the app, Parchment 3.3% and Amber 0.02%, so the work moved where colour goes. Three rules: the reader stands on Paper, and white is for wells you type into. Controls are filled Parchment shapes, and an outline now means an empty field, a settled state or a disabled action. The serif names things and Inter does the work.
+
 ---
 
 ## 1. Three problems in the palette
@@ -81,9 +83,11 @@ Three surfaces, ordered by how far above the page they sit. Getting the directio
 
 | Token | Value | Use |
 |---|---|---|
-| `surface.base` | `#FBF8F4` Paper | Screen background, the neutral behind everything |
-| `surface.raised` | `#FFFFFF` | Cards, sheets, anything above the page |
-| `surface.sunken` | `#F5EBDD` Parchment | Inputs, wells, chips, selected tabs, skeletons, poster placeholders — and where the brand's warmth now lives |
+| `surface.base` | `#FBF8F4` Paper | Screens, sheets and the tab bar: everywhere the reader stands |
+| `surface.raised` | `#FFFFFF` | Text inputs, Settings groups, the selected cell of a segmented control |
+| `surface.sunken` | `#F5EBDD` Parchment | Secondary buttons, chips, inset panels, avatars, skeletons, poster placeholders — where the brand's warmth lives |
+
+**What Parchment is for, because a warm fill can become a universal beige.** It has three jobs and no others: a quiet control, an inset panel that groups things, and a placeholder for what is not there yet. Parchment never sits on Parchment, so a panel holds tertiary or Maroon actions and never a secondary button. Parchment does not mean selected: selected is Maroon.
 
 Pure white for `raised` is a deliberate choice and the one value here that could reasonably have gone another way. A card only reads as raised if it is lighter than its surroundings, and Paper is already close enough to white that a tinted card would be indistinguishable from the page. White also gives posters their maximum headroom, which is the point of §1.
 
@@ -119,7 +123,6 @@ export const semantic = {
   score:         brand.maroon,      // every stated 0–10 score: badge, community, reveal
   scoreInk:      '#F5EBDD',         // 7.4:1 on score
   scoreEmpty:    '#D9D6D3',         // the score-shaped hole: filled, muted, empty inside
-  actionSubtle:  '#CDB4B6',         // Maroon at border weight, for an emphasised control
   emphasis:      brand.amber,       // milestone fills
   progress:      brand.sage,        // watched, completed, sync success
   danger:        brand.maroon,      // destructive confirmation
@@ -127,7 +130,7 @@ export const semantic = {
 } as const;
 ```
 
-`scoreEmpty` and `actionSubtle` are resolved literals rather than alpha helpers, deliberately: both are drawn on Paper and on Parchment, and an alpha fill takes its colour from whatever happens to be behind it. `scoreEmpty` is Ink at 16% over Paper; `actionSubtle` is Maroon at 35% over Paper. Neither ever carries text, so neither is a certified pair.
+`scoreEmpty` is a resolved literal rather than an alpha helper, deliberately: it is drawn on Paper and on Parchment, and an alpha fill takes its colour from whatever happens to be behind it. `scoreEmpty` is Ink at 16% over Paper.
 
 Destructive actions reuse Maroon rather than introducing red. The palette has no red, a new one would compete with the brand color, and destructive actions in this product are rare and always confirmed with words. The confirm button is labeled with the verb — "Delete list" — never a bare "OK," so color is never the only signal that something is irreversible.
 
@@ -172,7 +175,10 @@ Both are bundled as local assets and never fetched at runtime — the same failu
 | `reveal` | DM Serif Display | 88 / 88 | The score in the ranking reveal. Nowhere else |
 | `display` | DM Serif Display | 40 / 44 | Share cards, milestone moments |
 | `title1` | DM Serif Display | 28 / 34 | Editorial screen titles, the medium dropdown |
-| `title2` | DM Serif Display | 22 / 28 | Title names |
+| `title2` | DM Serif Display | 22 / 28 | Title names, shelf titles, sheet titles |
+| `title3` | DM Serif Display | 18 / 23 | A film's name inside a row, a card or a sheet header |
+| `deck` | DM Serif Display Italic | 17 / 23 | One human line under a heading. Never a paragraph |
+| `stat` | DM Serif Display | 24 / 28 | A count that is read rather than compared |
 | `headline` | Inter 600 | 17 / 22 | Row titles, buttons |
 | `score` | Inter 600 | 17 / 20, tabular | The number inside a score badge (§8) |
 | `body` | Inter 400 | 16 / 24 | Notes, descriptions, prose |
@@ -224,7 +230,7 @@ Applied to the surfaces the 2026-09-08 pass touched and to this document. It is 
 
 `Screen` adds bottom padding only when asked, and every screen inside the tab navigator asks for none. It used to add 16pt unconditionally, which put a strip of Paper between the scroll view and the tab bar — content was clipped at the top of that strip instead of scrolling under the bar, and the strip read as a gap the Android system navigation bar was sitting on.
 
-Android draws edge to edge from SDK 57. The tab bar is sized by the navigator to `49 + insets.bottom` and paints `surface.raised` across the whole of it, so its surface is what appears behind the system navigation buttons — the app has no separate bar to colour, and SDK 57 removed the `androidNavigationBar` config key for exactly that reason. The buttons are dark because `userInterfaceStyle` is `light`, and dark buttons are also what keeps Android from drawing its own contrast scrim behind them, which is the other half of the band.
+Android draws edge to edge from SDK 57. The tab bar is sized by the navigator to `49 + insets.bottom` and paints `surface.base` across the whole of it, so its surface is what appears behind the system navigation buttons — the app has no separate bar to colour, and SDK 57 removed the `androidNavigationBar` config key for exactly that reason. The buttons are dark because `userInterfaceStyle` is `light`, and dark buttons are also what keeps Android from drawing its own contrast scrim behind them, which is the other half of the band.
 
 Screens outside the navigator pass `includeBottomInset` and get `max(insets.bottom, 16)`. Scroll views set their own bottom padding in `contentContainerStyle`, which is the right place for it, because it scrolls.
 
@@ -309,9 +315,11 @@ Specified by anatomy and rules rather than by pixel measurements, which belong i
 
 ### Button
 
-Four kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised` with a `border.strong` outline and Ink label. Tertiary is a bare Ink label with no container. Outline is `surface.raised` with a Maroon border and Maroon label — the filled button's settled state (Following, Requested), not a primary with a modifier.
+Five kinds. Primary is Maroon with `text.inverse`. Secondary is a Parchment shape with an Ink label. Tint is a Parchment shape with a Maroon label, for a compact act repeated down a list, such as Follow, so a list never holds a column of Maroon fills. Tertiary is a bare Ink label with no container. Outline is transparent with a Maroon border and Maroon label — the filled button's settled state (Following, Requested), not a primary with a modifier.
 
-Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. Disabled state reduces opacity to 40% **and** the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
+A secondary has no boundary contrast (Parchment on Paper measures 1.11:1). WCAG 1.4.11 asks for one only where the shape alone identifies a control, and here the label does, at 13.3:1. An outline therefore always means something: an empty field, a settled state or a disabled action.
+
+Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. A disabled primary recedes to an empty frame: transparent, a `border.strong` outline and a `text.tertiary` label, because Maroon at 40% was a pink block louder than anything that could be pressed. Other kinds reduce opacity to 40%. Either way the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
 
 **Which kind an action takes — canonical, 2026-08-27, revised the same day.** The Maroon fill marks **the primary action of the current context** — not "the primary social act everywhere", which is what the first wording of this rule licensed and the founder's title-page pass caught: Recommend carried the only fill in the action row while Rank, the act the whole page exists for, read smaller than it. On a title page the primary context is the Rank/Ranked control in the identity column — content-sized, 44pt tall, with a `headline` label — so **Recommend in the action row is icon-only and quiet** there, and filled Maroon again inside the Recommend sheet, where sending *is* the context's primary act. (The cluster this rule was first written against — a `xl` score circle beside the control in the hero — is gone as of 2026-09-07; the reader's score is the first unit of `SCORES` now, and the judgement about the context is unchanged.) Watchlist is unchanged. **Never two equally dominant Maroon CTAs in one view.** The named examples stand where their context agrees: **Follow**, accept-shaped actions (**Approve**, **Add**), **bingd Awards**; everything that is utility, exit, or settled state stays outlined or quiet — **Share Profile**, **Following** (the `outline` kind), **Share off bingd**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names a judgement about a context, not a licence to repaint every control that feels important.
 
@@ -382,7 +390,7 @@ The comparison target does **not** show its current position or score — founde
 
 ### Sheet
 
-Radius 20 top corners, `surface.raised`, `e2`, drag handle, no dimmed backdrop below 40% — a warm light ground behind a heavy scrim turns muddy rather than dark. Sheets are the primary modal pattern; full-screen modals are reserved for onboarding and the reveal.
+Radius 20 top corners, `surface.base`, `e2`, drag handle, no dimmed backdrop below 40% — a warm light ground behind a heavy scrim turns muddy rather than dark. Sheets are the primary modal pattern; full-screen modals are reserved for onboarding and the reveal.
 
 The panel is edge to edge and its content brings the gutter. See *Layout invariants* in §5 for the container, content, footer and scroll rules.
 
@@ -452,9 +460,9 @@ Three states, and using the wrong one is the common failure:
 
 ### Icon toggle — canonical, 2026-08-28
 
-Two glyphs in one segmented cell: *pick a way of looking at this screen*. Hairline-bordered
+Two glyphs in one segmented cell: *pick a way of looking at this screen*. One Parchment
 group, `control.chipHeight` tall, each cell a `minTapTarget − space[2]` square; the selected
-cell is filled Maroon with `semantic.actionText`, the other is `surface.raised` with
+cell is filled Maroon with `semantic.actionText`, the other is `surface.sunken` with
 `text.secondary`. `radiogroup` on the group and `radio` on each cell — never a switch,
 because neither state is "off": the reader is always looking at one of the two.
 

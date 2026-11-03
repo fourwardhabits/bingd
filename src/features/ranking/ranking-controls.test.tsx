@@ -189,16 +189,14 @@ describe('undo and skip are buttons', () => {
     };
   };
 
-  it('draws both with a container and a border rather than as bare words', async () => {
+  it('draws both with a container rather than as bare words', async () => {
     const { undo, skip } = await controls();
 
     for (const control of [undo, skip]) {
       const style = StyleSheet.flatten(control.props.style);
-      // A fill and a hairline. `tertiary` had `backgroundColor: 'transparent'` and no
+      // A Parchment shape. `tertiary` had `backgroundColor: 'transparent'` and no
       // border at all, which is the whole of what made them read as text.
-      expect(style.backgroundColor).toBe(theme.surface.raised);
-      expect(style.borderWidth).toBeGreaterThan(0);
-      expect(style.borderColor).toBe(theme.border.strong);
+      expect(style.backgroundColor).toBe(theme.surface.sunken);
     }
   });
 
@@ -276,13 +274,12 @@ describe('undo and skip are buttons', () => {
       const a = StyleSheet.flatten(undo.props.style);
       const b = StyleSheet.flatten(escape.props.style);
 
-      // The canonical structure: a raised fill, a hairline, equal halves of the row,
+      // The canonical structure: a Parchment shape, equal halves of the row,
       // and the same compact height as Undo — `theme.surface.raised` is what the
       // founder's "restrained" reference control is drawn with.
-      expect(b.backgroundColor).toBe(theme.surface.raised);
-      expect(b.borderWidth).toBeGreaterThan(0);
+      expect(b.backgroundColor).toBe(theme.surface.sunken);
       expect(b.minHeight).toBe(a.minHeight);
-      expect(b.borderColor).toBe(a.borderColor);
+      expect(b.backgroundColor).toBe(a.backgroundColor);
       expect(escape.props.hitSlop).toBe(undo.props.hitSlop);
     },
   );

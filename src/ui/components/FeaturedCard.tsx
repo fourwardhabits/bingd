@@ -34,9 +34,7 @@ const styles = StyleSheet.create({
   },
   copy: {
     borderRadius: theme.radius.card,
-    borderColor: theme.border.hairline,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.sunken,
     padding: theme.space[3],
     gap: theme.space[1],
   },

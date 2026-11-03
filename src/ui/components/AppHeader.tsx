@@ -70,9 +70,9 @@ export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
             style={({ pressed }) => [styles.bell, pressed && styles.pressed]}
           >
             <Ionicons
-              name={notifications.count > 0 ? 'notifications' : 'notifications-outline'}
+              name="notifications-outline"
               size={theme.layout.icon.md}
-              color={notifications.count > 0 ? theme.semantic.action : theme.text.secondary}
+              color={theme.text.secondary}
             />
             {/* A count rather than a dot, and it is the unread count: the founder's
                 words for this control are "bell with unread badge", and the number a
@@ -84,7 +84,7 @@ export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
                 that is a different statement: news is unread, a request is a task. */}
             {notifications.count > 0 ? (
               <View style={styles.badge}>
-                <Text variant="caption" tone="action" allowFontScaling={false}>
+                <Text variant="caption" tone="inverse" allowFontScaling={false}>
                   {notifications.count > 9 ? '9+' : notifications.count}
                 </Text>
               </View>
@@ -131,15 +131,13 @@ const styles = StyleSheet.create({
    */
   badge: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    minWidth: 18,
-    height: 18,
+    top: -1,
+    right: -2,
+    minWidth: 17,
+    height: 17,
     paddingHorizontal: 4,
     borderRadius: theme.radius.full,
-    backgroundColor: theme.surface.sunken,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.semantic.action,
+    backgroundColor: theme.semantic.action,
     alignItems: 'center',
     justifyContent: 'center',
   },

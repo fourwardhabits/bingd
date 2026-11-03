@@ -23,7 +23,7 @@ export type EmptyStateProps = {
 export function EmptyState({ kind, title, body, action, compact = false }: EmptyStateProps) {
   return (
     <View style={[styles.container, compact && styles.compact]} accessibilityRole="summary">
-      <Text variant={compact ? 'callout' : 'title2'} style={styles.centered}>
+      <Text variant={compact ? 'title3' : 'title2'} style={styles.centered}>
         {title}
       </Text>
       <Text variant={compact ? 'footnote' : 'body'} tone="secondary" style={styles.centered}>

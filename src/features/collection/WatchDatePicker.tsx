@@ -179,7 +179,7 @@ function QuickChip({
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
     >
-      <Text variant="footnote" tone={selected ? 'primary' : 'secondary'}>
+      <Text variant="footnote" tone={selected ? 'inverse' : 'secondary'}>
         {label}
       </Text>
     </Pressable>
@@ -226,13 +226,11 @@ const styles = StyleSheet.create({
   chip: {
     minHeight: theme.layout.control.chipHeight,
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.sunken,
     paddingHorizontal: theme.space[3],
     justifyContent: 'center',
   },
-  chipSelected: { backgroundColor: theme.surface.sunken, borderColor: theme.border.strong },
+  chipSelected: { backgroundColor: theme.semantic.action },
   calendar: { gap: theme.space[2] },
   monthBar: { flexDirection: 'row', alignItems: 'center' },
   monthButton: {

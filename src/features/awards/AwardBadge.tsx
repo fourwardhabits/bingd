@@ -72,13 +72,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  wellEarned: { backgroundColor: theme.surface.sunken },
+  wellEarned: {
+    backgroundColor: theme.surface.base,
+    borderWidth: 2,
+    borderColor: theme.semantic.emphasis,
+  },
   /** Flatter and cooler than the earned well, with a ring rather than a fill. */
   wellLocked: {
     backgroundColor: theme.surface.base,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.border.hairline,
   },
-  locked: { opacity: 0.32 },
+  locked: { opacity: 0.5 },
   emoji: { textAlign: 'center' },
 });

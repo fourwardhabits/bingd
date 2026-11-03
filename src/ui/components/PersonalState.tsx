@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
   },
   unranked: { backgroundColor: theme.semantic.action },
   ranked: {
-    backgroundColor: theme.surface.raised,
+    backgroundColor: 'transparent',
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.semantic.action,
   },

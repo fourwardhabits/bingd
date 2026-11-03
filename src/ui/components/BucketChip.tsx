@@ -45,7 +45,7 @@ export type ChipProps = {
 
 export function Chip({ label, selected = false, onPress }: ChipProps) {
   const content = (
-    <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>
+    <Text variant="callout" tone={selected ? 'inverse' : 'secondary'}>
       {label}
     </Text>
   );
@@ -151,14 +151,12 @@ const styles = StyleSheet.create({
   chip: {
     minHeight: theme.layout.control.chipHeight,
     borderRadius: theme.radius.control,
-    borderColor: theme.border.hairline,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.sunken,
     paddingHorizontal: theme.space[3],
     justifyContent: 'center',
     alignItems: 'center',
   },
-  chipSelected: { backgroundColor: theme.surface.sunken },
+  chipSelected: { backgroundColor: theme.semantic.action },
   container: {
     flex: 1,
     alignItems: 'center',
