@@ -1222,6 +1222,7 @@ export function Comparison({
             accessibilityHint="Puts the previous pair back."
             kind="secondary"
             size="sm"
+            fit
             tone="secondary"
             // 36pt plus 4 either side is the 44 design-system.md §8 requires. `sm` is
             // deliberately shorter than that on its own and says so — slop is the right
@@ -1317,6 +1318,7 @@ export function Comparison({
             testID="ranking-too-tough"
             kind="secondary"
             size="sm"
+            fit
             tone="secondary"
             hitSlop={theme.space[1]}
             onPress={onSkip}

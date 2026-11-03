@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -44,6 +44,8 @@ import { theme } from '@/ui/tokens';
  */
 export default function SignInScreen() {
   const insets = useSafeAreaInsets();
+  // A 568pt phone gets a shorter masthead, so Google stays above the fold.
+  const short = useWindowDimensions().height < 640;
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState<'email' | 'apple' | 'google' | null>(null);
@@ -144,9 +146,17 @@ export default function SignInScreen() {
        * seasons", which names a data model. No comparison, no ranking mechanic, no
        * "matches yours": those are step 4's to explain, to somebody who has said yes.
        */}
-      <View style={[styles.intro, { paddingTop: insets.top + theme.space[7] }]}>
-        <BrandLockup size="lg" reversed />
-        <Text variant="display" tone="inverse">Rank and share what you watch.</Text>
+      <View
+        style={[
+          styles.intro,
+          short && styles.introShort,
+          { paddingTop: insets.top + (short ? theme.space[4] : theme.space[7]) },
+        ]}
+      >
+        <BrandLockup size={short ? 'md' : 'lg'} reversed />
+        <Text variant={short ? 'title1' : 'display'} tone="inverse">
+          Rank and share what you watch.
+        </Text>
         <Text variant="body" tone="inverse">
           Rank movies and TV shows, see what your friends are watching, and find your next
           binge.
@@ -246,6 +256,7 @@ const styles = StyleSheet.create({
     gap: theme.space[3],
     alignItems: 'flex-start',
   },
+  introShort: { paddingBottom: theme.space[4], gap: theme.space[2] },
   // Scrolls, because the masthead leaves a 320 by 568 phone less room than the form needs.
   panel: { flex: 1 },
   panelContent: {
