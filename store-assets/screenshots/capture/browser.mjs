@@ -2,10 +2,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { chromium } from 'playwright-core';
 import sharp from 'sharp';
 
-import { CHROME_ARGS, findChrome, OUT } from '../lib/common.mjs';
+import { launchChrome, OUT } from '../lib/common.mjs';
 import { FIXED_NOW, VIEWER, VIEWER_EMAIL } from './mock/backend.mjs';
 
 /** An iPhone 390x844 at 3x, the size every scene is framed for. */
@@ -281,11 +280,7 @@ async function shootScene(browser, scene, { baseUrl, mock, outDir, fixedSeed }) 
 /** Runs each scene once, with one retry: a busy machine is expected here, not exceptional. */
 export async function shootScenes({ scenes, baseUrl, mock, outDir, retries = 1 }) {
   mkdirSync(outDir, { recursive: true });
-  const browser = await chromium.launch({
-    executablePath: findChrome(),
-    headless: true,
-    args: CHROME_ARGS,
-  });
+  const browser = await launchChrome();
   const results = {};
   const failures = [];
   try {

@@ -2,6 +2,11 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// This package installs on its own, and the repo's CI lints it without installing it. Sharp
+// resolves from the root install; this is the one dependency that does not.
+// eslint-disable-next-line import/no-unresolved
+import { chromium } from 'playwright-core';
+
 /** The pipeline package folder. */
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** The repository this copy of the pipeline lives in. */
@@ -44,7 +49,7 @@ const CHROME_PATHS = [
  * System Chrome, never a downloaded browser: `playwright-core` ships none, and the
  * pipeline must not fetch one. CHROME_PATH overrides the search.
  */
-export function findChrome() {
+function findChrome() {
   const candidates = [process.env.CHROME_PATH, ...CHROME_PATHS].filter(Boolean);
   const found = candidates.find((p) => existsSync(p));
   if (!found) {
@@ -61,4 +66,7 @@ export function findChrome() {
  * up to 45% of a frame. Measured 2026-11-02 with the poster bytes hashed. Chromium's
  * deterministic-mode compositor flags made no difference, so they are not here.
  */
-export const CHROME_ARGS = ['--disable-lcd-text', '--font-render-hinting=none', '--disable-gpu'];
+const CHROME_ARGS = ['--disable-lcd-text', '--font-render-hinting=none', '--disable-gpu'];
+
+export const launchChrome = () =>
+  chromium.launch({ executablePath: findChrome(), headless: true, args: CHROME_ARGS });

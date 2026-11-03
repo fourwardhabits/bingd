@@ -11,10 +11,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { chromium } from 'playwright-core';
 import sharp from 'sharp';
 
-import { CHROME_ARGS, csv, findChrome, OUT, parseArgs } from '../lib/common.mjs';
+import { csv, launchChrome, OUT, parseArgs } from '../lib/common.mjs';
 import { copy as allCopy } from '../manifest/copy.mjs';
 import { frames as allFrames } from '../manifest/frames.mjs';
 import { canvases, targets } from '../manifest/targets.mjs';
@@ -142,11 +141,7 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
   const cropTop = statusBarPixels();
 
-  const browser = await chromium.launch({
-    executablePath: findChrome(),
-    headless: true,
-    args: CHROME_ARGS,
-  });
+  const browser = await launchChrome();
 
   try {
     for (const { frameId, canvasId } of renders) {
