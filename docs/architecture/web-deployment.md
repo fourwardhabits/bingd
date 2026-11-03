@@ -288,9 +288,9 @@ the upload key is still what an EAS-distributed production APK carries.
 
 | key | value | what a visitor gets |
 |---|---|---|
-| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd. on the App Store* — **wins** |
+| `ios.storeUrl` | `https://apps.apple.com/app/id6803954532` | *Get bingd on the App Store* — **wins** |
 | `ios.betaUrl` | `https://testflight.apple.com/join/kkgaYsqx` | kept as a fallback, never chosen |
-| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd. on Google Play* — **wins** |
+| `android.storeUrl` | `https://play.google.com/store/apps/details?id=app.bingd` | *Get bingd on Google Play* — **wins** |
 | `android.optInUrl` | `https://play.google.com/apps/testing/app.bingd` | kept as a fallback, never chosen |
 | `android.betaUrl` | `null` | — |
 
@@ -372,8 +372,9 @@ that would hurt: a plot synopsis on a link preview is a spoiler nobody asked for
 
 **The preview card is generic, and the page is not.** Each page carries `og:site_name`,
 `og:title`, `og:description`, `og:image` and the Twitter equivalents, all static text plus
-one image: `social-card.png`, 1200x630, the wordmark on the brand ground, shipped from
-`web/src/`. It is `summary_large_image`, which the card was built for. It was `summary`
+one image: `social-card.png`, 1200x630, shipped from `web/src/` and rendered by hand with
+`node web/social-card.mjs`. It shows the promise and the reveal (2026-11-02): a stranger who
+is sent a link should learn what the product does, not only what it is called. Text only. It is `summary_large_image`, which the card was built for. It was `summary`
 while the only asset was the square app icon, which every unfurler either letterboxed or
 cropped into a corner of itself.
 
@@ -528,13 +529,13 @@ are committed into `web/src/` beside the existing two, and `sharp` is an authori
 dependency that Cloudflare never installs. The blur regions are stated in source pixels
 and checked by eye, because a region that drifts shows up immediately as a legible name.
 
-On the front page as of 2026-09-14, by section: the hero `shot-movies` + `shot-tv`; the
-ranking section `shot-compare` + `shot-score` (the head-to-head, then the score it lands
-on); the friends section `shot-feed` + `shot-comments`; the last section `shot-recommended`
-+ `shot-grouppicks`. WebP, 640px wide, with only the hero eager. `shot-ranked`,
-`shot-foryou` and `shot-watchlist` are still defined in `shots.mjs` and still in
-`web/src/`, but the page no longer references them. The section labels read How it works,
-A social experience and Find your next binge.
+On the front page as of 2026-11-02, by section: How it works `shot-compare` + `shot-score`
+(the head-to-head, then the score it lands on); Find your next binge `shot-recommended` +
+`shot-grouppicks`; Social watching experience `shot-feed` + `shot-comments`. WebP, 640px
+wide, all lazy: the hero holds the ranking demo rather than a shot. The closing band holds
+the founder's quote beside the install buttons and carries no shot. `shot-movies`,
+`shot-tv`, `shot-ranked`, `shot-foryou` and `shot-watchlist` are still defined in
+`shots.mjs` and still in `web/src/`, but the page no longer references them.
 
 ### Adding or replacing a landing-page screenshot
 
@@ -642,7 +643,8 @@ anything went near `main`.
 ## The ranking demo on the front page — 2026-10-28
 
 The hero's second column is a three-pick ranking demo in place of the two collection
-shots, which moved to the new "Your collection" section. Code locations:
+shots, which moved to the new "Your collection" section. (That section left the page on
+2026-11-02; the front-page section list above is the current one.) Code locations:
 
 - Logic: `web/src/demo.mjs`.
 - Movie list: `web/src/demo-movies.mjs`.
@@ -673,7 +675,7 @@ Revised the same day after three rounds of founder visual QA:
 - **The result:** shown as "Your demo ranking", *A rough order from 3 picks.* It has four
   compact rows (position, small poster, title, year) and no score.
 - **Try again** opens on the next four movies of the list.
-- **"Haven't seen both? Swap pair"** never counts as a pick. It holds back enough movies for
+- **"Haven't seen one? Refresh."** never counts as a pick. It holds back enough movies for
   the remaining picks, so no number of swaps can leave the result short.
 
 **Fixed height:** the two views share one grid cell. The result is built with four empty
@@ -688,7 +690,7 @@ arrival and at the result, at every width. The store buttons beside it never mov
   hero's in-flow store row and the result's small call to action are hidden, and the
   sticky bar is the store button.
 - **Sticky bar label:** before and during the demo it reads the platform's own wording
-  ("Get bingd. on Google Play" / "…on the App Store"). Once the third pick is made it reads
+  ("Get bingd on Google Play" / "…on the App Store"). Once the third pick is made it reads
   *Keep ranking in bingd.* and keeps the same destination. *Try again* puts the store's
   name back.
 - **How "phone" is decided:** the hiding rule uses the sticky bar's own condition, so it
