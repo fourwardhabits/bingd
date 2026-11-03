@@ -25,7 +25,7 @@ which also holds the freeze rule.
 | **Live application source** | `main` `bebfdfb`, the merge of #219 at `eab83c9`. Product development stays frozen at `9d9683a` (#210), and only fixes have shipped since |
 | **DB migrations** | **177 applied**, head `20261024000500`; staging identical, apart from the one difference under [The two lanes](#the-two-lanes) |
 | **Production OTA, 1.1.0** | from `eab83c9`, published 2026-11-03: Android group `04afb993` on runtime `ec79e181`, iOS group `ffbb473c` on runtime `8ea562b7`, EAS run `01a19eda` |
-| **Production OTA, 1.0.1** | update group `01a0db04` from `9d9683a`, on iOS runtime `61efbf17` and Android runtime `da3c7f47` |
+| **Production OTA, 1.0.1** | from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
 | **Preview OTA** | Android group `80fda42e` from `eab83c9`, on runtime `2503ffaa`, staging backend |
 
 ### Store distribution
