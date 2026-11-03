@@ -186,7 +186,7 @@ export function TasteBucketSheet({
         <View style={styles.subject}>
           <Poster uri={subject.posterUri} title={subject.title} size="sm" />
           <View style={styles.subjectText}>
-            <Text variant="headline" numberOfLines={2}>
+            <Text variant="title3" numberOfLines={2}>
               {subject.title}
             </Text>
             {subject.year ? (

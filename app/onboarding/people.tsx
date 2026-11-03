@@ -209,8 +209,16 @@ export default function PeopleStepScreen() {
       <OnboardingFooter>
         {/* Secondary to following, and present on every branch that has a list: inviting
             somebody is the other way this step can succeed. */}
-        {!isError && people.length > 0 ? <InviteFriendsButton /> : null}
-        <Button label="Continue" onPress={leave} />
+        <View style={styles.pair}>
+          {!isError && people.length > 0 ? (
+            <View style={styles.half}>
+              <InviteFriendsButton kind="secondary" />
+            </View>
+          ) : null}
+          <View style={styles.half}>
+            <Button label="Continue" fit onPress={leave} />
+          </View>
+        </View>
       </OnboardingFooter>
     </Screen>
   );
@@ -298,6 +306,8 @@ function PersonRow({
 }
 
 const styles = StyleSheet.create({
+  pair: { flexDirection: 'row', gap: theme.space[2] },
+  half: { flex: 1 },
   body: { paddingBottom: theme.space[6] },
   intro: {
     paddingHorizontal: theme.layout.gutter,

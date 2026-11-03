@@ -987,7 +987,7 @@ describe('the reveal names what it landed between', () => {
     expect(sheet.queryByText('Season 1', { includeHiddenElements: true })).toBeNull();
   });
 
-  it('keeps a long neighbour name on one line', async () => {
+  it('clamps a long neighbour name to two lines in its column', async () => {
     const long = 'The Assassination of Jesse James by the Coward Robert Ford';
     ranked([
       { mediaItemId: 'm2', position: 2, kind: 'movie', title: long, genres: [] },
@@ -997,9 +997,9 @@ describe('the reveal names what it landed between', () => {
     const sheet = await openSheet();
 
     await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
-    // The row wrapping the name, not the name itself, carries the clamp.
-    const row = sheet.getByText(long, { includeHiddenElements: true }).parent;
-    expect(row?.props.numberOfLines).toBe(1);
+    // Half a column is too narrow for one line of a long title to name the film.
+    const name = sheet.getByText(long, { includeHiddenElements: true });
+    expect(name.props.numberOfLines).toBe(2);
   });
 
   it('draws nothing extra before the list it reads has arrived', async () => {

@@ -5,6 +5,7 @@ import { Text } from './Text';
 
 export type WordmarkProps = {
   size?: 'sm' | 'md' | 'lg';
+  reversed?: boolean;
 };
 
 const VARIANT = {
@@ -13,9 +14,9 @@ const VARIANT = {
   lg: 'display',
 } as const;
 
-export function Wordmark({ size = 'md' }: WordmarkProps) {
+export function Wordmark({ size = 'md', reversed = false }: WordmarkProps) {
   return (
-    <Text variant={VARIANT[size]} style={styles.wordmark}>
+    <Text variant={VARIANT[size]} style={reversed ? styles.reversed : styles.wordmark}>
       bingd.
     </Text>
   );
@@ -25,4 +26,5 @@ const styles = StyleSheet.create({
   wordmark: {
     color: theme.semantic.action,
   },
+  reversed: { color: theme.text.inverse },
 });

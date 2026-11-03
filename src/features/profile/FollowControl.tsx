@@ -162,7 +162,7 @@ export function FollowControl({
          * access they have not been granted. What they share is that the act is done
          * and the button is now reporting rather than offering.
          */
-        kind={following || requested ? 'outline' : 'primary'}
+        kind={following || requested ? 'outline' : compact ? 'tint' : 'primary'}
         size={compact ? 'sm' : 'md'}
         /**
          * The half-row rule, which this control is now subject to.

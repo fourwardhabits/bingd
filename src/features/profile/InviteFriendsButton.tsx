@@ -34,7 +34,7 @@ import { Button } from '@/ui/components';
  * the two. `fit`, because half a gutter row at 320pt is 140 and "Invite friends" at
  * `md`'s default padding does not fit it — see `ProfileActions`.
  */
-export function InviteFriendsButton() {
+export function InviteFriendsButton({ kind = 'primary' }: { kind?: 'primary' | 'secondary' }) {
   /**
    * **"Opening…" covers the mint and nothing after it.**
    *
@@ -89,6 +89,6 @@ export function InviteFriendsButton() {
   };
 
   return (
-    <Button label={opening ? 'Opening…' : 'Invite friends'} fit onPress={() => void invite()} />
+    <Button label={opening ? 'Opening…' : 'Invite friends'} kind={kind} fit onPress={() => void invite()} />
   );
 }

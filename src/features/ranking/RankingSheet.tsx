@@ -1222,6 +1222,7 @@ export function Comparison({
             accessibilityHint="Puts the previous pair back."
             kind="secondary"
             size="sm"
+            fit
             tone="secondary"
             // 36pt plus 4 either side is the 44 design-system.md §8 requires. `sm` is
             // deliberately shorter than that on its own and says so — slop is the right
@@ -1317,6 +1318,7 @@ export function Comparison({
             testID="ranking-too-tough"
             kind="secondary"
             size="sm"
+            fit
             tone="secondary"
             hitSlop={theme.space[1]}
             onPress={onSkip}
@@ -1466,7 +1468,7 @@ function Card({
         >
           <Poster uri={posterUri} title={title} width={width} size="md" />
           <View style={styles.cardTitleBox}>
-            <Text variant="callout" numberOfLines={2} style={styles.centre}>
+            <Text variant="title3" numberOfLines={2} style={styles.centre}>
               {title}
             </Text>
           </View>
@@ -1588,6 +1590,13 @@ function Reveal({
   const profile = useCurrentProfile();
   const readableCategory = category === 'tv_seasons' ? 'TV' : 'Movies';
   const shown = useCountUp(score, bucket);
+  /**
+   * A short screen or large text gets the reveal's older, smaller geometry: the title a
+   * step down and the neighbours as names only. The sheet does not scroll, so on a 568pt
+   * phone at 130% text a long title and two posters could push Done off the bottom.
+   */
+  const { height: screenHeight, fontScale } = useWindowDimensions();
+  const roomy = screenHeight >= 700 && fontScale <= 1.15;
 
   // The ranked list for this category, which the collection already caches under the
   // key `apply` invalidated when the title was placed — so this resolves to the list
@@ -1840,7 +1849,7 @@ function Reveal({
        * air, then where it landed.
        */}
       <Animated.View style={[styles.identity, entranceStyle]}>
-        <Text variant="title2" style={styles.centre}>
+        <Text variant={roomy ? 'title1' : 'title2'} style={styles.centre}>
           {displayTitle}
         </Text>
 
@@ -1902,33 +1911,43 @@ function Reveal({
       {higher || lower ? (
         <View style={styles.anchors}>
           {higher ? (
-            <Text
-              variant="footnote"
-              tone="tertiary"
-              style={styles.centre}
-              numberOfLines={1}
-              accessibilityElementsHidden
-            >
-              Below{' '}
-              <Text variant="subhead" tone="secondary">
-                {higher.name}
-              </Text>
-            </Text>
+            <View style={[styles.anchor, styles.anchorHigher]} accessibilityElementsHidden>
+              <View style={styles.anchorCopy}>
+                <Text variant="caption" tone="tertiary" style={styles.anchorEnd}>
+                  Below
+                </Text>
+                <Text variant="title3" tone="secondary" style={styles.anchorEnd} numberOfLines={2}>
+                  {higher.name}
+                </Text>
+              </View>
+              {roomy ? (
+                <Poster
+                  uri={posterUri(higher.posterPath, 'row')}
+                  title={higher.name}
+                  size="xs"
+                />
+              ) : null}
+            </View>
           ) : null}
-
+          {higher && lower ? <View style={styles.anchorRule} /> : null}
           {lower ? (
-            <Text
-              variant="footnote"
-              tone="tertiary"
-              style={styles.centre}
-              numberOfLines={1}
-              accessibilityElementsHidden
-            >
-              Above{' '}
-              <Text variant="subhead" tone="secondary">
-                {lower.name}
-              </Text>
-            </Text>
+            <View style={styles.anchor} accessibilityElementsHidden>
+              {roomy ? (
+                <Poster
+                  uri={posterUri(lower.posterPath, 'row')}
+                  title={lower.name}
+                  size="xs"
+                />
+              ) : null}
+              <View style={styles.anchorCopy}>
+                <Text variant="caption" tone="tertiary">
+                  Above
+                </Text>
+                <Text variant="title3" tone="secondary" numberOfLines={2}>
+                  {lower.name}
+                </Text>
+              </View>
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -2004,7 +2023,7 @@ function Reveal({
        * or stop. Ranking something else starts from Search or the Collection, which is
        * where a reader is already going.
        *
-       * What is left is one row of two: **Add details filled, Done outlined.** The
+       * What is left is one row of two: **Add details filled, Done secondary.** The
        * emphasis is deliberate and it is not "the app wants you to do more work" — the
        * note, the people you watched it with and the watch date are the half of a log
        * that is worth anything later, and this is the one moment somebody has them in
@@ -2015,7 +2034,7 @@ function Reveal({
        * **Done on the left, Add details on the right** (founder, 2026-09-08).
        *
        * The emphasis is unchanged and so is the copy: Add details is still the filled
-       * maroon control and Done is still outlined. What moved is which side each sits on,
+       * maroon control and Done is still secondary. What moved is which side each sits on,
        * and the reason is conventional rather than aesthetic — the forward action belongs
        * in the trailing position, where a thumb reaching past a dismissal expects to find
        * it. Leading it with the filled button asked the reader to step over the thing they
@@ -2192,10 +2211,10 @@ const styles = StyleSheet.create({
     marginVertical: theme.space[4],
     backgroundColor: theme.border.hairline,
   },
-  // Two lines of `callout` before an ellipsis, and the box keeps that height whether the
+  // Two lines of `title3` before an ellipsis, and the box keeps that height whether the
   // name needs one line or two, so the controls under it never move.
   cardTitleBox: {
-    minHeight: theme.typography.callout.lineHeight * 2,
+    minHeight: theme.typography.title3.lineHeight * 2,
     justifyContent: 'flex-start',
   },
   pressed: { opacity: 0.85 },
@@ -2235,9 +2254,23 @@ const styles = StyleSheet.create({
    */
   identity: { alignSelf: 'stretch', gap: theme.space[1] },
   // The two names, now a sibling of the block above and separated from it by the
-  // reveal's own space[6]. Tight inside, so they read as a pair rather than as two
-  // more facts.
-  anchors: { alignSelf: 'stretch', gap: theme.space[1] },
+  // reveal's own space[6]. Two films mirrored about the comparison's own hairline, so
+  // where a title landed reads as the same picture as the choice that put it there.
+  anchors: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: theme.space[3],
+  },
+  anchor: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  anchorHigher: { justifyContent: 'flex-end' },
+  anchorCopy: { flexShrink: 1, gap: 2 },
+  anchorEnd: { textAlign: 'right' },
+  anchorRule: {
+    width: StyleSheet.hairlineWidth * 2,
+    alignSelf: 'stretch',
+    backgroundColor: theme.border.hairline,
+  },
   centredBox: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -2252,8 +2285,8 @@ const styles = StyleSheet.create({
   panel: {
     backgroundColor: theme.semantic.score,
     borderRadius: theme.radius.card,
-    paddingVertical: theme.space[8],
-    paddingHorizontal: theme.space[12],
+    alignSelf: 'stretch',
+    paddingVertical: theme.space[6],
     alignItems: 'center',
     gap: theme.space[2],
   },

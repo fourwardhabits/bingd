@@ -1,6 +1,8 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   isAppleSignInAvailable,
@@ -8,7 +10,15 @@ import {
   signInWithApple,
   signInWithGoogle,
 } from '@/features/auth';
-import { BrandLockup, Button, Divider, Field, Screen, Text } from '@/ui/components';
+import {
+  BrandLockup,
+  Button,
+  Divider,
+  Field,
+  KeyboardScreen,
+  Screen,
+  Text,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -42,6 +52,18 @@ import { theme } from '@/ui/tokens';
  * account.
  */
 export default function SignInScreen() {
+  const insets = useSafeAreaInsets();
+  // A 568pt phone gets a shorter masthead, so Google stays above the fold.
+  const short = useWindowDimensions().height < 640;
+  // Light clock and battery on the Maroon, only while this screen is the one showing. It
+  // stays mounted under whatever is pushed on top, and those screens are Paper.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState<'email' | 'apple' | 'google' | null>(null);
@@ -124,7 +146,9 @@ export default function SignInScreen() {
   };
 
   return (
-    <Screen airy includeBottomInset>
+    <Screen includeBottomInset edges={['left', 'right']}>
+      {focused ? <StatusBar style="light" /> : null}
+      <KeyboardScreen contentContainerStyle={styles.page} bounces={false}>
       {/**
        * **This screen is the product introduction now** (founder, physical iOS 1.0.1
        * build 8).
@@ -142,15 +166,24 @@ export default function SignInScreen() {
        * seasons", which names a data model. No comparison, no ranking mechanic, no
        * "matches yours": those are step 4's to explain, to somebody who has said yes.
        */}
-      <View style={styles.intro}>
-        <BrandLockup size="lg" />
-        <Text variant="display">Rank and share what you watch.</Text>
-        <Text variant="body" tone="secondary">
+      <View
+        style={[
+          styles.intro,
+          short && styles.introShort,
+          { paddingTop: insets.top + (short ? theme.space[4] : theme.space[7]) },
+        ]}
+      >
+        <BrandLockup size={short ? 'md' : 'lg'} reversed />
+        <Text variant={short ? 'title1' : 'display'} tone="inverse">
+          Rank and share what you watch.
+        </Text>
+        <Text variant="body" tone="inverse">
           Rank movies and TV shows, see what your friends are watching, and find your next
           binge.
         </Text>
       </View>
 
+      <View style={styles.panel}>
       <View style={styles.form}>
         <Field
           label="Email"
@@ -225,12 +258,44 @@ export default function SignInScreen() {
           disabledReason="One moment."
         />
       </View>
+      </View>
+      </KeyboardScreen>
+      {/* Maroon stays behind the clock however far the form scrolls, so the light status
+          bar is never left over Paper. */}
+      <View pointerEvents="none" style={[styles.statusBand, { height: insets.top }]} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  intro: { gap: theme.space[3], alignItems: 'flex-start' },
+  // Takes whatever the form leaves, with the promise sitting on its lower edge, so the
+  // field and the promise are one composition rather than a banner above a form.
+  intro: {
+    flexGrow: 1,
+    flexShrink: 0,
+    justifyContent: 'flex-end',
+    backgroundColor: theme.semantic.action,
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[7],
+    gap: theme.space[3],
+    alignItems: 'flex-start',
+  },
+  introShort: { paddingBottom: theme.space[4], gap: theme.space[2] },
+  // The masthead and form scroll as one, so a focused field can always clear the keyboard.
+  page: { flexGrow: 1 },
+  statusBand: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.semantic.action,
+  },
+  panel: {
+    gap: theme.space[6],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[6],
+    paddingBottom: theme.space[4],
+  },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },
   more: { alignItems: 'center', gap: theme.space[1] },

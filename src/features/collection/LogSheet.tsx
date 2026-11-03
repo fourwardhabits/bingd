@@ -1383,7 +1383,7 @@ function Body({
         <View style={styles.header}>
           <Poster uri={title.posterUri} title={title.title} size="xs" />
           <View style={styles.headerText}>
-            <Text variant="headline" numberOfLines={2}>
+            <Text variant="title3" numberOfLines={2}>
               {heading}
             </Text>
             <Text variant="footnote" tone="tertiary">

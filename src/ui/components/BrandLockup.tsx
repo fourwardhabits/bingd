@@ -6,6 +6,7 @@ import { Wordmark } from './Wordmark';
 
 export type BrandLockupProps = {
   size?: 'sm' | 'md' | 'lg';
+  reversed?: boolean;
 };
 
 const GAP = {
@@ -14,11 +15,11 @@ const GAP = {
   lg: 12,
 } as const;
 
-export function BrandLockup({ size = 'md' }: BrandLockupProps) {
+export function BrandLockup({ size = 'md', reversed = false }: BrandLockupProps) {
   return (
     <View style={[styles.row, { gap: GAP[size] }]}>
-      <BrandMark size={size} decorative />
-      <Wordmark size={size} />
+      <BrandMark size={size} decorative reversed={reversed} />
+      <Wordmark size={size} reversed={reversed} />
     </View>
   );
 }
