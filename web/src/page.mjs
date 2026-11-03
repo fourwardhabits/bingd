@@ -128,7 +128,7 @@ const link = (id, href, label) => {
  * showing both options was told "Get bingd for Android" — the same closed test, one
  * description honest about it and one not. Since 2026-09-10 the pair asks `installLabel`
  * first, so both surfaces describe the same destination the same way, and iOS reads "Get
- * bingd. on the App Store" now that the listing is public.
+ * bingd on the App Store" now that the listing is public.
  */
 const PLATFORM_LABEL = { ios: 'Get bingd for iPhone', android: 'Get bingd for Android' };
 
