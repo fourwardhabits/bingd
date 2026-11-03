@@ -822,12 +822,17 @@ export async function signOut() {
   );
 
   const teardown = endRemoteSession();
-  const ended = await bounded('signOut.supabase', teardown, REMOTE_SIGN_OUT_GRACE_MS);
+  const answered = await bounded('signOut.supabase', teardown, REMOTE_SIGN_OUT_GRACE_MS);
 
   // Only when the server did not already do it. A successful `signOut` has removed the
   // stored session itself, so repeating the work would be two more Keychain calls and a
   // second `SIGNED_OUT` for no benefit.
-  if (ended) return;
+  //
+  // `answered` says the step finished, and `teardown` says whether it worked. They differ
+  // for an expired session beside a cached refresh failure: the SDK returns an error
+  // without removing anything, so reading the first as the second left the person signed
+  // in with the screen unchanged (security audit 2026-11-01, m-1).
+  if (answered && (await teardown)) return;
 
   await forgetLocalSession();
 

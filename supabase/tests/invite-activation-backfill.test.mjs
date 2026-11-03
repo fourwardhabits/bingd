@@ -82,7 +82,7 @@ const mintLink = async (owner) => {
 
 const redeem = async (invitee, token) => {
   await t.actAs(invitee);
-  const result = await call(`redeem_invite(gen_random_uuid(), $1)`, [token]);
+  const result = await call(`accept_invite(gen_random_uuid(), $1, auth.uid())`, [token]);
   assert.equal(result.status, 'ok');
 };
 

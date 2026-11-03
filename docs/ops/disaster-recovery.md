@@ -224,12 +224,14 @@ folder from cloud storage before re-shooting. Detail: [web-deployment.md](../arc
 
 These already live on GitHub and need nothing from you. For reference:
 
-| Secret / variable | Used by |
-|---|---|
-| `SUPABASE_URL_NONPROD`, `SUPABASE_SERVICE_ROLE_KEY_NONPROD` | trending refresh (staging) |
-| `SUPABASE_URL_PRODUCTION`, `SUPABASE_SERVICE_ROLE_KEY_PRODUCTION` | trending refresh, welcome email |
-| `RESEND_API_KEY_WELCOME`, `WELCOME_POSTAL_ADDRESS` | welcome email |
-| `BINGD_PRODUCTION_TRENDING` (variable) | enables the production trending run |
+| Secret / variable | Belongs in | Used by |
+|---|---|---|
+| `SUPABASE_URL_NONPROD`, `SUPABASE_SERVICE_ROLE_KEY_NONPROD` | `nonprod` Environment | trending refresh and welcome dry runs (staging) |
+| `SUPABASE_URL_PRODUCTION`, `SUPABASE_SERVICE_ROLE_KEY_PRODUCTION` | `production` Environment | trending refresh, welcome email |
+| `RESEND_API_KEY_WELCOME`, `WELCOME_POSTAL_ADDRESS` | `production` Environment | welcome email |
+| `BINGD_PRODUCTION_TRENDING` (variable) | repository | enables the production trending run |
+
+Both Environments accept `main` only. Until the move in [security-remediation-2026-11-01.md](../release/security-remediation-2026-11-01.md) is finished, the secrets are still at repository level.
 
 GitHub secrets cannot be read back. If one must be re-entered, regenerate it at the vendor.
 
