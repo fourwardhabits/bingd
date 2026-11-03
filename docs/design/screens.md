@@ -1478,3 +1478,15 @@ Nothing here is blocking. The questions that were — the tab structure in §2 a
 | 3 | Deeper search filters: year, decade, genre — §11 | Not built. Needs a server change, and no evidence yet that a catalogue this size needs them |
 | 4 | Sort options on Collection beyond score — §5 | Score descending is the only sort. Recently watched and A–Z are cheap to add once asked for |
 | 5 | User photos on feed items — §7 | Out of scope. Revisit if watch tagging shows people want to post movie-night pictures |
+
+---
+
+## Visual 2.0: first run and the ranking ritual (2026-11-03, proposed)
+
+**Sign-in.** The promise sits on the store frame's Maroon field, in the kit's reversed lockup, and the field takes whatever height the form leaves. The masthead and form scroll as one through `KeyboardScreen`. Status bar content is light while the screen is focused. Below 640pt tall the masthead shortens so Google stays above the fold. This is its own commit, because it is a brand-level decision.
+
+**People.** Invite friends and Continue are the secondary-then-primary pair. A compact Follow is tinted, so the one Maroon fill on the step is the way forward. The step measured 12.1% Maroon before.
+
+**Comparison.** Unchanged in structure. The film's name takes `title3`, as §8 of the design system always specified. Undo and Can't decide hold one line at 320pt.
+
+**The reveal.** The hierarchy is unchanged: score, title, placement, then the names, and no rank below tenth is named. The plaque now shares its edges with the button pair, whose row previously shrank to its content. The two neighbouring titles show as small posters mirrored about the comparison's hairline, so where a title landed reads as the same picture as the choice that put it there.
