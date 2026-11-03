@@ -474,6 +474,12 @@ describe('the board is people only', () => {
 
     expect(view.queryByText('Top Titles')).toBeNull();
     expect(view.queryAllByRole('tab')).toHaveLength(0);
+    // The Feed's own three icons, with Leaderboard the chosen one.
+    expect(
+      within(view.getByLabelText('Feed mode'))
+        .getAllByRole('radio')
+        .map((cell) => cell.props.accessibilityState?.selected),
+    ).toEqual([false, true, false]);
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
     for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {

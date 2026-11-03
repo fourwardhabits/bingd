@@ -21,6 +21,7 @@ import {
   useRecommendationRequests,
   useSweepIntent,
 } from '@/features/recommendations/use-recommendation-requests';
+import { ChipRowScroller } from '@/features/recommendations/ChipRowScroller';
 import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import {
@@ -790,15 +791,9 @@ export default function RecommendationsScreen() {
            * when they do not, the row scrolls rather than reflows, and the wall below it
            * holds still. `alwaysBounceHorizontal={false}` so a row with nowhere to go
            * does not rubber-band. The same arrangement `SegmentedTabs` uses, for the same
-           * reason.
+           * reason. `ChipRowScroller` adds the cue when something lies past the edge.
            */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            alwaysBounceHorizontal={false}
-            style={styles.filterScroller}
-            testID="for-you-controls-scroller"
-          >
+          <ChipRowScroller style={styles.filterScroller} testID="for-you-controls-scroller">
             <View style={styles.filterRow} testID="for-you-controls">
               {/**
                * **Sent to you and Group Picks are absent on Top Rated** (founder,
@@ -896,7 +891,7 @@ export default function RecommendationsScreen() {
                 />
               ) : null}
             </View>
-          </ScrollView>
+          </ChipRowScroller>
 
           {sentOnly ? (
             <SentList

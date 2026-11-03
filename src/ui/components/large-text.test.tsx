@@ -54,9 +54,14 @@ describe('the Movies | TV Shows switch', () => {
     );
 
     for (const half of view.getAllByRole('radio')) {
-      const drawn = StyleSheet.flatten(half.props.style);
-      expect(drawn.height).toBeUndefined();
-      expect(drawn.minHeight).toBe(28);
+      const press = StyleSheet.flatten(half.props.style);
+      const fill = StyleSheet.flatten(
+        (half.children[0] as unknown as { props: { style: never } }).props.style,
+      ) as Record<string, unknown>;
+      // Floors everywhere, so the word can grow and both the fill and the press follow it.
+      expect(press.height).toBeUndefined();
+      expect(fill.height).toBeUndefined();
+      expect(fill.minHeight).toBe(28);
     }
     // And the words themselves scale: no `allowFontScaling={false}` on them.
     expect(view.getByText('TV Shows').props.allowFontScaling).not.toBe(false);

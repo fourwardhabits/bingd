@@ -158,13 +158,14 @@ describe('IconToggle', () => {
 });
 
 /**
- * **For You's Movies | TV Shows switch** (Visual 2.1, 2026-11-03). Each half is drawn 28pt
- * inside a 32pt outline and reaches the target vertically through slop; its width is its
- * word plus `space[2]` either side, past 44 for both words. The halves are 2pt apart, so no
- * sideways slop: a press between them belongs to neither rather than to the wrong one.
+ * **For You's Movies | TV Shows switch** (Visual 2.1, 2026-11-03). Each half is itself a
+ * 44pt press with a 28pt fill inside it, and the 32pt outline is drawn behind the halves.
+ * Not slop: a press never answers outside its parent's bounds, so slop around a half would
+ * have stopped at the outline (independent review). Its width is its word plus `space[2]`
+ * either side, past 44 for both words.
  */
 describe('CompactSwitch', () => {
-  it('answers 44 tall on each half, with no slop into its neighbour', async () => {
+  it('makes each half a 44pt press of its own, with nothing resting on slop', async () => {
     const view = await renderWithProviders(
       <CompactSwitch
         accessibilityLabel="Medium"
@@ -180,14 +181,23 @@ describe('CompactSwitch', () => {
     const halves = view.getAllByRole('radio');
     expect(halves).toHaveLength(2);
     for (const half of halves) {
-      const drawn = StyleSheet.flatten(half.props.style);
+      const press = StyleSheet.flatten(half.props.style);
       // A floor, so the target holds at 100% and only grows with the system text size.
-      expect(tall(drawn.minHeight, half.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
-      expect(drawn.height).toBeUndefined();
-      expect(half.props.hitSlop.left).toBe(0);
-      expect(half.props.hitSlop.right).toBe(0);
-      expect(drawn.paddingHorizontal).toBe(theme.space[2]);
+      expect(press.minHeight).toBeGreaterThanOrEqual(TARGET);
+      expect(press.height).toBeUndefined();
+      expect(half.props.hitSlop).toBeUndefined();
+      // The visible fill inside it: 28pt tall, its word plus `space[2]` either side.
+      const fill = StyleSheet.flatten((half.children[0] as unknown as { props: { style: never } }).props.style) as Record<string, unknown>;
+      expect(fill.minHeight).toBe(28);
+      expect(fill.paddingHorizontal).toBe(theme.space[2]);
+      expect((fill.minHeight as number) + 2 * (press.paddingVertical as number)).toBeGreaterThanOrEqual(TARGET);
     }
+
+    // The outline is drawn, not pressed: it takes no touches of its own.
+    const group = view.getByLabelText('Medium');
+    const outline = (group.children as { props: Record<string, unknown> }[])[0]!;
+    expect(outline.props.pointerEvents).toBe('none');
+    expect(StyleSheet.flatten(outline.props.style as never)).toMatchObject({ position: 'absolute' });
   });
 });
 

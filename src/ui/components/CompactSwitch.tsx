@@ -17,12 +17,16 @@ export type CompactSwitchProps<T extends string> = {
  * Two or three short choices in one quiet outline (founder revision brief, 2026-11-03).
  *
  * For You's `Movies | TV Shows`, beside the Recommended / Top Rated selector (Visual 2.1).
- * Deliberately lighter than `SegmentedTabs` and the filled controls: a hairline box with
- * 8pt corners (no pills), the chosen half on Parchment with Ink text, the other in
- * secondary text, at footnote size so it shares the selector's row on a 360pt phone. The
- * visible box is 32pt; each half's press reaches 44pt tall through `hitSlop`, which works
- * here because the switch is not inside another press. Each half is wider than 44pt by its
- * word alone.
+ * Deliberately lighter than `SegmentedTabs` and the filled controls: a hairline outline
+ * with 8pt corners (no pills), the chosen half on Parchment with Ink text, the other in
+ * secondary text, at footnote size so it shares the selector's row on a 360pt phone.
+ *
+ * **Each half is a 44pt press, and the 32pt outline is drawn behind them.** It used to be
+ * the outline's own box, with `hitSlop` making up the height; but a press never answers
+ * outside its parent's bounds, so the slop stopped at the outline and the real target was
+ * 32pt (independent review, 2026-11-03). Now the halves are the full height and the
+ * outline is a decoration inset inside them, so nothing depends on slop. Each half is
+ * wider than 44pt by its word alone.
  */
 export function CompactSwitch<T extends string>({
   accessibilityLabel,
@@ -31,7 +35,8 @@ export function CompactSwitch<T extends string>({
   onChange,
 }: CompactSwitchProps<T>) {
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={styles.box}>
+    <View accessibilityRole="radiogroup" accessibilityLabel={accessibilityLabel} style={styles.group}>
+      <View pointerEvents="none" style={styles.outline} />
       {options.map((option) => {
         const selected = option.id === value;
         return (
@@ -43,18 +48,15 @@ export function CompactSwitch<T extends string>({
             onPress={() => {
               if (!selected) onChange(option.id);
             }}
-            // 28 + 8 + 8 = 44 tall. None sideways: the halves are 2pt apart, and a side slop
-            // would take the neighbour's own edge (siblings hit-test last-first).
-            hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
-            style={({ pressed }) => [
-              styles.option,
-              selected && styles.selected,
-              pressed && !selected && styles.pressed,
-            ]}
+            style={styles.option}
           >
-            <Text variant="footnote" tone={selected ? 'primary' : 'secondary'} numberOfLines={1}>
-              {option.label}
-            </Text>
+            {({ pressed }) => (
+              <View style={[styles.fill, selected && styles.selected, pressed && !selected && styles.pressed]}>
+                <Text variant="footnote" tone={selected ? 'primary' : 'secondary'} numberOfLines={1}>
+                  {option.label}
+                </Text>
+              </View>
+            )}
           </Pressable>
         );
       })}
@@ -62,22 +64,43 @@ export function CompactSwitch<T extends string>({
   );
 }
 
+/** The outline's stroke, and the 2pt it keeps between itself and each half's fill. */
+const STROKE = StyleSheet.hairlineWidth * 2;
+const INNER = 2;
+/** The fill's floor, and the press around it: 8 + 28 + 8 = 44. */
+const FILL = 28;
+const PAD = (theme.layout.minTapTarget - FILL) / 2;
+
 const styles = StyleSheet.create({
-  box: {
+  group: {
     flexDirection: 'row',
     alignSelf: 'flex-start',
-    padding: 2,
-    gap: 2,
+    paddingHorizontal: STROKE + INNER,
+    gap: INNER,
+  },
+  // Inset so it sits 2pt outside the fills, top and bottom, as the old box did; it
+  // stretches with them at a large text size.
+  outline: {
+    position: 'absolute',
+    top: PAD - INNER - STROKE,
+    bottom: PAD - INNER - STROKE,
+    left: 0,
+    right: 0,
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderWidth: STROKE,
     borderColor: theme.border.hairline,
   },
-  // A floor, not a fixed height: at a large system text size the word grows past 28pt and
-  // the half grows with it rather than clipping the word.
+  // A floor, not a fixed height: at a large system text size the fill grows past 28pt
+  // and the press grows with it rather than clipping the word.
   option: {
-    minHeight: 28,
+    minHeight: theme.layout.minTapTarget,
+    paddingVertical: PAD,
+    justifyContent: 'center',
+  },
+  fill: {
+    minHeight: FILL,
     paddingHorizontal: theme.space[2],
-    borderRadius: theme.radius.control - 2,
+    borderRadius: theme.radius.control - INNER,
     alignItems: 'center',
     justifyContent: 'center',
   },
