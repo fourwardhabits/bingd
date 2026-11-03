@@ -66,8 +66,11 @@ const listView = (who, id) =>
   rpc(who, `select list_view($1) as r`, [id]).then((r) => r[0]?.r ?? null);
 const itemsPage = (who, id) => rpc(who, `select * from list_items_page($1, null, 100)`, [id]);
 const preview = (who, id) => rpc(who, `select * from list_preview($1)`, [id]);
-const byId = (who, id) => rpc(who, `select * from list_by_id($1)`, [id]);
-const itemsByList = (who, id) => rpc(who, `select * from list_items_by_list($1)`, [id]);
+// Signed-in readers since 20261024000400, so anon reads as refused rather than as an error.
+const byId = (who, id) =>
+  who === null ? [] : rpc(who, `select * from list_by_id($1)`, [id]);
+const itemsByList = (who, id) =>
+  who === null ? [] : rpc(who, `select * from list_items_by_list($1)`, [id]);
 const profileLists = (who, owner) =>
   rpc(who, `select * from profile_lists($1, null, 50)`, [owner]);
 
@@ -155,11 +158,11 @@ describe('A. a private list', () => {
     assert.deepEqual(await readers(null, id), ALL_CLOSED);
 
     const direct = await t.asAnon(async () => ({
-      lists: (await t.sql(`select * from lists where id = $1`, [id])).rows,
-      items: (await t.sql(`select * from list_items where list_id = $1`, [id])).rows,
+      lists: await t.errorFrom(`select * from lists where id = $1`, [id]),
+      items: await t.errorFrom(`select * from list_items where list_id = $1`, [id]),
     }));
-    assert.deepEqual(direct.lists, []);
-    assert.deepEqual(direct.items, []);
+    assert.equal(direct.lists?.code, '42501');
+    assert.equal(direct.items?.code, '42501');
   });
 
   it('is closed to a signed-in stranger and to an approved follower alike', async () => {
@@ -212,12 +215,14 @@ describe('B. a link-only list', () => {
     assert.equal((await itemsPage(null, id)).length, 1);
 
     // The enumeration path: a bare select must not surface it, for anybody.
-    for (const who of [null, stranger, follower]) {
+    for (const who of [stranger, follower]) {
       const rows = await as(who, async () =>
         (await t.sql(`select id from lists where visibility = 'link'`)).rows,
       );
-      assert.deepEqual(rows, [], `${who ?? 'anon'} enumerated a link list`);
+      assert.deepEqual(rows, [], `${who} enumerated a link list`);
     }
+    const anon = await t.asAnon(() => t.errorFrom(`select id from lists`));
+    assert.equal(anon?.code, '42501', 'anon has no table of lists to enumerate');
     // Nor through the profile shelf.
     assert.deepEqual(await profileLists(stranger, owner), []);
     assert.deepEqual(await profileLists(owner, owner), [], 'the owner shelf leaked a link list');
@@ -640,7 +645,7 @@ describe('H. the definer surface', () => {
     }
   });
 
-  it('gives anon exactly the six readers and nothing else list-shaped', async () => {
+  it('gives anon exactly the four it needs and nothing else list-shaped', async () => {
     const { rows } = await t.sql(
       `select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -652,8 +657,6 @@ describe('H. the definer surface', () => {
     assert.deepEqual(
       rows.map((r) => r.sig).sort(),
       [
-        'list_by_id(target uuid)',
-        'list_items_by_list(target uuid)',
         'list_items_page(p_list_id uuid, p_after_position integer, p_limit integer)',
         'list_preview(p_list_id uuid)',
         'list_view(p_list_id uuid)',
