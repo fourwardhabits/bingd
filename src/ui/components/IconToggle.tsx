@@ -113,8 +113,6 @@ const styles = StyleSheet.create({
   group: {
     flexDirection: 'row',
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
     overflow: 'hidden',
   },
   cell: {
@@ -122,7 +120,7 @@ const styles = StyleSheet.create({
     height: theme.layout.control.chipHeight,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.sunken,
   },
   cellOn: { backgroundColor: theme.semantic.action },
   pressed: { opacity: 0.7 },

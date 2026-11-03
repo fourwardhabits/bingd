@@ -217,7 +217,7 @@ describe('the press feedback is invisible to everything but a thumb', () => {
     ) as Record<string, unknown>;
 
     expect(style.minHeight).toBeDefined();
-    expect(style.borderColor).toBeDefined();
+    expect(style.backgroundColor).toBeDefined();
   });
 
   it('leaves roles, names and targets exactly as they were', async () => {

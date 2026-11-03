@@ -183,22 +183,22 @@ describe('the control row', () => {
   it('marks the two social features and leaves the utility grey', async () => {
     /**
      * **Feature, feature, utility** — the founder's hierarchy, and the whole of it. Read
-     * off the border and the label colour together, because those are the two things the
-     * treatment actually changes; the glyph follows the same `action` flag in the
+     * off the label colour, the one thing the treatment changes: all three chips share
+     * Parchment since Visual 2.0. The glyph follows the same `action` flag in the
      * component, so a divergence there would be a divergence in one expression.
      */
     const view = await open();
 
     for (const name of ['Sent to you', 'Group Picks']) {
       const chip = view.getByRole('button', { name });
-      expect(flatten(chip.props.style).borderColor).toBe(theme.semantic.actionSubtle);
+      expect(flatten(chip.props.style).backgroundColor).toBe(theme.surface.sunken);
       expect(flatten(within(chip).getByText(name).props.style).color).toBe(
         theme.semantic.action,
       );
     }
 
     const filters = view.getByRole('button', { name: 'Filters' });
-    expect(flatten(filters.props.style).borderColor).toBe(theme.border.hairline);
+    expect(flatten(filters.props.style).backgroundColor).toBe(theme.surface.sunken);
     expect(flatten(within(filters).getByText('Filters').props.style).color).toBe(
       theme.text.secondary,
     );

@@ -9,7 +9,7 @@ import { Text } from './Text';
 export type FilterChipProps = {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
-  /** Draws the on state: Maroon border, sunken fill, Maroon glyph and label. */
+  /** Draws the on state: Maroon fill, Parchment glyph and label. */
   selected?: boolean;
   /**
    * **Marks a chip that opens a bingd. feature rather than narrowing a list** (founder,
@@ -21,13 +21,13 @@ export type FilterChipProps = {
    * about. The founder's instruction is a restrained hierarchy, not a promotion: **social
    * feature, social feature, utility**.
    *
-   * So this is a Maroon glyph, a Maroon label and a Maroon-tinted hairline, and it is
-   * nothing else. No filled pill, no larger target, no badge, and above all no extra
+   * So this is a Maroon glyph and a Maroon label on the same Parchment as every other
+   * chip, and it is nothing else. No larger target, no badge, and above all no extra
    * height — the row's one-line density is a founder lock and this changes only colour.
    *
    * It composes with `selected` rather than competing: an emphasised chip that is also on
-   * still takes the full-strength ring and the Parchment fill, so "this is a feature" and
-   * "this is currently applied" remain two readable states.
+   * takes the Maroon fill, so "this is a feature" and "this is currently applied" remain
+   * two readable states.
    */
   emphasis?: 'social';
   /** Read aloud instead of `label`, where the label alone is ambiguous. */
@@ -54,9 +54,8 @@ export function FilterChip({
   accessibilityLabel,
   onPress,
 }: FilterChipProps) {
-  // Maroon for both, and the two are still told apart by the ring and the fill `on`
-  // adds — see `emphasis`. Computed once so the glyph and the word cannot disagree.
-  const action = selected || emphasis === 'social';
+  // Computed once so the glyph and the word cannot disagree.
+  const action = emphasis === 'social';
   const press = usePressScale();
 
   return (
@@ -88,9 +87,6 @@ export function FilterChip({
         hitSlop={theme.layout.chipHitSlop}
         style={({ pressed }) => [
           styles.chip,
-          // Order matters: emphasis tints the hairline, and `on` overrides it with the
-          // full-strength ring, so a selected feature chip reads as selected.
-          emphasis === 'social' && styles.social,
           selected && styles.on,
           pressed && styles.pressed,
         ]}
@@ -98,9 +94,15 @@ export function FilterChip({
         <Ionicons
           name={icon}
           size={theme.layout.icon.sm}
-          color={action ? theme.semantic.action : theme.text.secondary}
+          color={
+            selected
+              ? theme.semantic.actionText
+              : action
+                ? theme.semantic.action
+                : theme.text.secondary
+          }
         />
-        <Text variant="footnote" tone={action ? 'action' : 'secondary'}>
+        <Text variant="footnote" tone={selected ? 'inverse' : action ? 'action' : 'secondary'}>
           {label}
         </Text>
       </Pressable>
@@ -116,19 +118,8 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.control.chipHeight,
     paddingHorizontal: theme.space[3],
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.sunken,
   },
-  on: { borderColor: theme.semantic.action, backgroundColor: theme.surface.sunken },
-  /**
-   * A feature chip at rest: the same geometry, a Maroon-tinted hairline.
-   *
-   * The border alone, with no fill. A tinted ground here would read as a third selected
-   * state on a row where one chip is genuinely a toggle, and the founder's constraint is
-   * that this row must not get noisier or taller — so the emphasis is carried by the two
-   * things already being drawn, the glyph and the word, plus the line around them.
-   */
-  social: { borderColor: theme.semantic.actionSubtle },
+  on: { backgroundColor: theme.semantic.action },
   pressed: { opacity: 0.7 },
 });

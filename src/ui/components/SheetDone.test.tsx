@@ -34,14 +34,14 @@ it('adds no bottom inset of its own, because the sheet already paid it', async (
   expect(foot.paddingHorizontal).toBe(theme.layout.gutter);
 });
 
-it('is a small button with an edge, not bare words', async () => {
+it('is a small button with a container, not bare words', async () => {
   // The founder's verdict on version 2: maroon text with no container looked detached.
+  // The container is a Parchment shape since Visual 2.0, rather than a white box.
   const view = await renderWithProviders(<SheetDone onPress={() => {}} />);
 
   const press = StyleSheet.flatten(view.getByLabelText('Done').props.style);
-  expect(press.borderWidth).toBeGreaterThan(0);
   expect(press.borderRadius).toBe(theme.radius.control);
-  expect(press.backgroundColor).toBe(theme.surface.raised);
+  expect(press.backgroundColor).toBe(theme.surface.sunken);
 });
 
 it('is not a filled primary action', async () => {

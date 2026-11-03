@@ -199,11 +199,9 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.control.chipHeight,
     paddingHorizontal: theme.space[3],
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
+    backgroundColor: theme.surface.sunken,
   },
-  selected: { backgroundColor: theme.semantic.action, borderColor: theme.semantic.action },
+  selected: { backgroundColor: theme.semantic.action },
   actions: {
     flexDirection: 'row',
     gap: theme.space[3],

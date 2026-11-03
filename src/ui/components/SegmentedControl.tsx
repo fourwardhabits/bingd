@@ -88,11 +88,8 @@ const styles = StyleSheet.create({
   group: {
     flexDirection: 'row',
     borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.strong,
-    backgroundColor: theme.surface.raised,
-    // The container's own border is the outline; the padding is what keeps the
-    // selected fill from sitting on top of it.
+    backgroundColor: theme.surface.sunken,
+    // The well's own ground is the outline; the padding keeps the raised cell inside it.
     padding: 2,
     gap: 2,
   },
@@ -105,11 +102,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  optionSelected: {
-    backgroundColor: theme.surface.sunken,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.semantic.action,
-  },
+  optionSelected: { backgroundColor: theme.surface.raised, ...theme.elevation.e1 },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.4 },
 });
