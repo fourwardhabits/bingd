@@ -203,7 +203,7 @@ export function canSwap(state) {
 }
 
 /**
- * "Haven't seen both? Swap pair." Never counts as a pick.
+ * "Haven't seen one? Refresh." Never counts as a pick.
  *
  * The newcomer is set aside and a fresh one drawn. If the list is still the one movie
  * the demo opened with, that one has never been chosen either, so it is replaced too:
