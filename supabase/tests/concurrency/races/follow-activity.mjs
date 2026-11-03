@@ -17,7 +17,7 @@ import { call, fire, newOp, raceContext } from './_shared.mjs';
  *
  * **F1. One story per actor per window, even when the actor is not the caller.** This is
  * the case the `for update` on the open story exists for, and it is not hypothetical:
- * `redeem_invite` posts the *inviter's* story from the *invitee's* session, so two people
+ * `accept_invite` posts the *inviter's* story from the *invitee's* session, so two people
  * accepting the same personal link at the same moment are two transactions appending to
  * one row. Without the lock they each find nothing open and each insert — and the founder's
  * §A13 frequency cap, which is "one row per actor per hour", becomes a row per invitee.
@@ -109,8 +109,8 @@ export default function suite() {
         await t2.actAs(ravi);
 
         const [r1, r2] = await Promise.all([
-          call(t1, `redeem_invite($1, $2)`, [await newOp(db), token]),
-          call(t2, `redeem_invite($1, $2)`, [await newOp(db), token]),
+          call(t1, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]),
+          call(t2, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]),
         ]);
 
         // Two different people, so both redemptions succeed — unlike R1 in
@@ -161,11 +161,11 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('story');
-        const p1 = fire(t1, `redeem_invite($1, $2)`, [await newOp(db), token]);
+        const p1 = fire(t1, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]);
         await t1.awaitBlocked();
 
         await t2.begin();
-        const p2 = fire(t2, `redeem_invite($1, $2)`, [await newOp(db), token]);
+        const p2 = fire(t2, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]);
         /**
          * Correlated against the actor's own key rather than against "a lock", which is
          * review 25's lesson: a test that accepts any wait will accept the wrong reason.

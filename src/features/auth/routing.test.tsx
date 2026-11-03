@@ -45,6 +45,19 @@ describe('nextRoute', () => {
     });
   });
 
+  describe('an invitation on screen', () => {
+    it('leaves a new account on it, ahead of the first-run stage', () => {
+      // Sending them to `taste` from here would lose the invitation they signed up through,
+      // because the screen is the only thing that can accept it.
+      expect(decide({ group: 'i', screen: '[token]', stage: 'taste' })).toBeNull();
+      expect(decide({ group: 'i', screen: '[token]', stage: null, tasteNeeded: true })).toBeNull();
+    });
+
+    it('still sends a signed-out visitor to sign in, with the token held by the screen', () => {
+      expect(decide({ status: 'signed-out', group: 'i', screen: '[token]' })).toBe('/(auth)/sign-in');
+    });
+  });
+
   describe('signed out and half signed up', () => {
     it('sends a signed-out user to sign in', () => {
       expect(decide({ status: 'signed-out' })).toBe('/(auth)/sign-in');

@@ -20,10 +20,10 @@
  *      inbox row, and an Invite Instigator count that grows with every ranking. This is
  *      the mutant whose damage stays *plausible in the schema*: `activated_at` still
  *      holds a real timestamp, and only the counts are wrong.
- *   4. `redeem_invite` with `on conflict do nothing` weakened to an upsert. Attribution
+ *   4. `accept_invite` with `on conflict do nothing` weakened to an upsert. Attribution
  *      must become movable — a second token takes the credit — which is the defect the
  *      whole redemption design is shaped around.
- *   5. `redeem_invite` with the row lock dropped from its token read — the version
+ *   5. `accept_invite` with the row lock dropped from its token read — the version
  *      independent review 26 rejected. The revocation must stop waiting, so a link its
  *      owner has just withdrawn still pays out to them.
  *   6. `set_bucket` with `_lock_media` deleted — M3, exactly as the register describes
@@ -278,13 +278,13 @@ end; $$;`;
  * link its owner had already withdrawn.
  */
 const UNLOCKED_TOKEN = `
-create or replace function redeem_invite(p_operation_id uuid, p_token text)
+create or replace function accept_invite(p_operation_id uuid, p_token text, p_accepting_user uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_self uuid := auth.uid(); v_token_id uuid; v_inviter uuid; v_env text;
 begin
   perform assert_can_write();
-  if not _claim_operation(p_operation_id,'redeem_invite') then return jsonb_build_object('status','already_applied'); end if;
-  perform _assert_operation_rate('redeem_invite','invite.max_redeem_attempts_per_day',10);
+  if not _claim_operation(p_operation_id,'accept_invite') then return jsonb_build_object('status','already_applied'); end if;
+  perform _assert_operation_rate('accept_invite','invite.max_redeem_attempts_per_day',10);
   select coalesce((select value #>> '{}' from app_config where key = 'env.name'), 'nonprod') into v_env;
   select t.id, t.owner_id into v_token_id, v_inviter from invite_tokens t
    where t.token = p_token and t.revoked_at is null and t.env = v_env;
@@ -300,13 +300,13 @@ end; $$;`;
 
 /** Mutant 4. An upsert instead of a no-op conflict: a second token moves the credit. */
 const MOVABLE_ATTRIBUTION = `
-create or replace function redeem_invite(p_operation_id uuid, p_token text)
+create or replace function accept_invite(p_operation_id uuid, p_token text, p_accepting_user uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_self uuid := auth.uid(); v_token_id uuid; v_inviter uuid; v_env text;
 begin
   perform assert_can_write();
-  if not _claim_operation(p_operation_id,'redeem_invite') then return jsonb_build_object('status','already_applied'); end if;
-  perform _assert_operation_rate('redeem_invite','invite.max_redeem_attempts_per_day',10);
+  if not _claim_operation(p_operation_id,'accept_invite') then return jsonb_build_object('status','already_applied'); end if;
+  perform _assert_operation_rate('accept_invite','invite.max_redeem_attempts_per_day',10);
   select coalesce((select value #>> '{}' from app_config where key = 'env.name'), 'nonprod') into v_env;
   select t.id, t.owner_id into v_token_id, v_inviter from invite_tokens t
    where t.token = p_token and t.revoked_at is null and t.env = v_env;
@@ -520,7 +520,7 @@ const controls = [];
 
   const s = await db.session('invitee');
   await s.actAs(invitee);
-  await s.q(`select redeem_invite($1,$2)`, [crypto.randomUUID(), token]);
+  await s.q(`select accept_invite($1, $2, auth.uid())`, [crypto.randomUUID(), token]);
 
   const rankOne = async (n) => {
     const film = (
@@ -580,8 +580,8 @@ const controls = [];
   await db.sql(MOVABLE_ATTRIBUTION);
   const s = await db.session('invitee');
   await s.actAs(invitee);
-  await s.q(`select redeem_invite($1,$2)`, [crypto.randomUUID(), tokens[0]]);
-  await s.q(`select redeem_invite($1,$2)`, [crypto.randomUUID(), tokens[1]]);
+  await s.q(`select accept_invite($1, $2, auth.uid())`, [crypto.randomUUID(), tokens[0]]);
+  await s.q(`select accept_invite($1, $2, auth.uid())`, [crypto.randomUUID(), tokens[1]]);
 
   const rows = await db.rows(`select inviter_id from invite_attributions where invitee_id=$1`, [
     invitee,
@@ -624,7 +624,7 @@ const controls = [];
 
   await t1.begin();
   await t1.pauseAt('m5');
-  const p = t1.start(`select redeem_invite($1,$2) as r`, [crypto.randomUUID(), token]);
+  const p = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [crypto.randomUUID(), token]);
   await t1.awaitBlocked();
 
   await t2.begin();
@@ -1470,11 +1470,11 @@ end; $$;
 
   await t1.begin();
   await t1.pauseAt('mutant-story');
-  const p1 = t1.start(`select redeem_invite(gen_random_uuid(), $1) as r`, [token]);
+  const p1 = t1.start(`select accept_invite(gen_random_uuid(), $1, auth.uid()) as r`, [token]);
   await t1.awaitBlocked();
 
   await t2.begin();
-  const p2 = t2.start(`select redeem_invite(gen_random_uuid(), $1) as r`, [token]);
+  const p2 = t2.start(`select accept_invite(gen_random_uuid(), $1, auth.uid()) as r`, [token]);
 
   let waitedOnActor = true;
   try {

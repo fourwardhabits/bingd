@@ -415,6 +415,17 @@ export function nextRoute({
   }
 
   /**
+   * **An invitation is answered where it is shown, whatever else this account has left to
+   * do.**
+   *
+   * The screen is where the person decides, and it is the only thing that can accept
+   * (security audit 2026-11-01, B-1), so routing a new account back to its first-run stage
+   * here would lose the invitation it signed up through. The screen leaves by replacing
+   * itself, and every rule below applies again from wherever that lands.
+   */
+  if (group === 'i') return null;
+
+  /**
    * **Routing sends people into the first-run flow; it never takes them out of one that
    * is still running.**
    *

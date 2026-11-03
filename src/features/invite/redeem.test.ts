@@ -11,8 +11,8 @@
  * answer replays a spent redemption at every cold start.
  */
 
-import { MAX_RECOVERABLE_ATTEMPTS } from './pending';
-import { redeemInvite, redeemPendingInvite } from './redeem';
+import { claimForRedemption } from './pending';
+import { acceptInvite, previewInvite, resumePendingInvite } from './redeem';
 
 const mockTrack = jest.fn();
 const mockSetAcquisition = jest.fn();
@@ -48,6 +48,7 @@ let mockIssued = 0;
 jest.mock('expo-crypto', () => ({ randomUUID: () => `operation-${(mockIssued += 1)}` }));
 
 const TOKEN = 'a3f19c2b4d5e6f708192a3b4c5d6e7f8';
+const ME = 'user-me';
 
 const answers = (body: unknown, error: unknown = null) =>
   mockRpc.mockResolvedValue({ data: body, error });
@@ -58,7 +59,20 @@ beforeEach(() => {
   mockIssued = 0;
 });
 
-describe('redeemInvite', () => {
+describe('acceptInvite', () => {
+  it('sends the call that means somebody pressed Accept, and only that one', async () => {
+    answers({ status: 'ok', inviter_username: 'ada' });
+
+    await acceptInvite(TOKEN, 'op-1', ME);
+
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(mockRpc).toHaveBeenCalledWith('accept_invite', {
+      p_operation_id: 'op-1',
+      p_token: TOKEN,
+      p_accepting_user: ME,
+    });
+  });
+
   it('reports the inviter, the follow state, and records the redemption', async () => {
     answers({
       status: 'ok',
@@ -67,10 +81,11 @@ describe('redeemInvite', () => {
       follow_state: 'approved',
     });
 
-    expect(await redeemInvite(TOKEN, 'op-1')).toEqual({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({
       outcome: 'redeemed',
       inviterUsername: 'ada',
       followState: 'approved',
+      connected: false,
     });
     expect(mockTrack).toHaveBeenCalledWith({ name: 'invite_redeemed' });
     // The first honest writer this field has ever had.
@@ -84,16 +99,16 @@ describe('redeemInvite', () => {
      * somebody approved months ago that they have "asked to follow" would be wrong.
      */
     answers({ status: 'ok', inviter_username: 'ada', follow_state: 'pending' });
-    expect(await redeemInvite(TOKEN, 'op-1')).toMatchObject({ followState: 'pending' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ followState: 'pending' });
 
     // A backend that predates the acceptance semantics answers without the key. Null,
     // not a guess: the screen then says the invitation was recorded and nothing about
     // following, which is the only honest thing it can say.
     answers({ status: 'ok', inviter_username: 'ada' });
-    expect(await redeemInvite(TOKEN, 'op-1')).toMatchObject({ followState: null });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ followState: null });
 
     answers({ status: 'ok', inviter_username: 'ada', follow_state: 'something_else' });
-    expect(await redeemInvite(TOKEN, 'op-1')).toMatchObject({ followState: null });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ followState: null });
   });
 
   it('sends the token to nobody', async () => {
@@ -101,7 +116,7 @@ describe('redeemInvite', () => {
     // it, and `FORBIDDEN_PROPERTY_KEYS` names it — this asserts it is not offered.
     answers({ status: 'ok', inviter_username: 'ada' });
 
-    await redeemInvite(TOKEN, 'op-1');
+    await acceptInvite(TOKEN, 'op-1', ME);
 
     for (const call of [...mockTrack.mock.calls, ...mockSetAcquisition.mock.calls]) {
       expect(JSON.stringify(call)).not.toContain(TOKEN);
@@ -114,7 +129,7 @@ describe('redeemInvite', () => {
     // same operation id. Counting it again would report two arrivals from one person.
     answers({ status: 'already_applied', attributed: true });
 
-    expect(await redeemInvite(TOKEN, 'op-1')).toEqual({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({
       outcome: 'already_applied',
       attributed: true,
     });
@@ -127,7 +142,7 @@ describe('redeemInvite', () => {
       mockTrack.mockClear();
       answers({ status: 'refused', reason });
 
-      const result = await redeemInvite(TOKEN, 'op-1');
+      const result = await acceptInvite(TOKEN, 'op-1', ME);
 
       expect(result.outcome).not.toBe('redeemed');
       expect(mockTrack).not.toHaveBeenCalled();
@@ -142,10 +157,10 @@ describe('redeemInvite', () => {
      * redeeming a link they were forwarded.
      */
     answers({ status: 'refused', reason: 'blocked' });
-    expect(await redeemInvite(TOKEN, 'op-1')).toEqual({ outcome: 'unavailable' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({ outcome: 'unavailable' });
 
     answers({ status: 'refused', reason: 'unavailable' });
-    expect(await redeemInvite(TOKEN, 'op-1')).toEqual({ outcome: 'unavailable' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({ outcome: 'unavailable' });
   });
 
   it('treats a refusal it does not recognise as invalid rather than as success', async () => {
@@ -153,14 +168,14 @@ describe('redeemInvite', () => {
     // work", not "assume it did".
     answers({ status: 'refused', reason: 'something_new' });
 
-    expect(await redeemInvite(TOKEN, 'op-1')).toEqual({ outcome: 'invalid' });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({ outcome: 'invalid' });
     expect(mockTrack).not.toHaveBeenCalled();
   });
 
   it('reads an unanswered call as possibly committed', async () => {
     answers(null, { code: '', message: 'Network request failed' });
 
-    expect(await redeemInvite(TOKEN, 'op-1')).toEqual({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toEqual({
       outcome: 'failed',
       message: 'Network request failed',
       changed: true,
@@ -171,7 +186,7 @@ describe('redeemInvite', () => {
   it('reads a raised refusal as a refusal, so the retry may mint a fresh id', async () => {
     answers(null, { code: '53400', message: 'too many' });
 
-    expect(await redeemInvite(TOKEN, 'op-1')).toMatchObject({
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({
       outcome: 'failed',
       changed: false,
     });
@@ -180,11 +195,44 @@ describe('redeemInvite', () => {
   it('treats a 200 with no body as a change, because the request was answered', async () => {
     answers(null);
 
-    expect(await redeemInvite(TOKEN, 'op-1')).toMatchObject({ outcome: 'failed', changed: true });
+    expect(await acceptInvite(TOKEN, 'op-1', ME)).toMatchObject({ outcome: 'failed', changed: true });
   });
 });
 
-describe('redeemPendingInvite', () => {
+describe('previewInvite', () => {
+  it('names the inviter', async () => {
+    answers({ status: 'ok', kind: 'personal', inviter_username: 'ada', inviter_display_name: 'Ada' });
+
+    expect(await previewInvite(TOKEN)).toEqual({
+      outcome: 'ready',
+      kind: 'personal',
+      inviterUsername: 'ada',
+      inviterDisplayName: 'Ada',
+    });
+    expect(mockRpc).toHaveBeenCalledWith('invite_preview', { p_token: TOKEN });
+  });
+
+  it('carries each refusal, and reads an unknown one as invalid', async () => {
+    for (const reason of ['self', 'unavailable', 'already_attributed'] as const) {
+      answers({ status: 'refused', reason });
+      expect(await previewInvite(TOKEN)).toEqual({ outcome: reason });
+    }
+    answers({ status: 'refused', reason: 'something_new' });
+    expect(await previewInvite(TOKEN)).toEqual({ outcome: 'invalid' });
+  });
+
+  it('does not read an answer with no name as ready, because Accept would follow it', async () => {
+    answers({ status: 'ok' });
+    expect(await previewInvite(TOKEN)).toEqual({ outcome: 'invalid' });
+  });
+
+  it('throws when it went unanswered, so the screen cannot offer Accept', async () => {
+    answers(null, { code: '', message: 'Network request failed' });
+    await expect(previewInvite(TOKEN)).rejects.toMatchObject({ message: 'Network request failed' });
+  });
+});
+
+describe('resumePendingInvite', () => {
   /** What the module actually persisted, or undefined if it never wrote. */
   const held = () => JSON.parse(mockStored['invite.pendingToken'] ?? 'null') as string | null;
 
@@ -192,171 +240,129 @@ describe('redeemPendingInvite', () => {
     mockStored['invite.pendingToken'] = JSON.stringify(token);
   };
 
+  /** A press of Accept whose answer never came, as storage records it. */
+  const pressed = (token: string, id = 'operation-from-the-press') => {
+    hold(token);
+    mockStored['invite.acceptedOperation'] = JSON.stringify({ id, userId: ME, token });
+  };
+
   it('does nothing, and calls nothing, when this device holds no invitation', async () => {
     // Which is almost every launch. The cost of finding out has to be one storage read
     // and no request.
-    expect(await redeemPendingInvite()).toBeNull();
+    expect(await resumePendingInvite(ME)).toBeNull();
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
   it('ignores a stored value that is not a token', async () => {
     mockStored['invite.pendingToken'] = JSON.stringify('../../etc/passwd');
 
-    expect(await redeemPendingInvite()).toBeNull();
+    expect(await resumePendingInvite(ME)).toBeNull();
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
-  it('redeems what it holds and then lets it go', async () => {
+  it('hands an unanswered invitation back to be shown, and sends nothing', async () => {
+    // The whole of B-1 on this side. It used to redeem here.
     hold(TOKEN);
-    answers({ status: 'ok', inviter_username: 'ada' });
 
-    expect(await redeemPendingInvite()).toMatchObject({ outcome: 'redeemed' });
-    expect(mockRpc).toHaveBeenCalledWith('redeem_invite', {
-      p_operation_id: 'operation-1',
+    expect(await resumePendingInvite(ME)).toBe(TOKEN);
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(held()).toBe(TOKEN);
+  });
+
+  it('does not send a token an older build left beside its own operation id', async () => {
+    hold(TOKEN);
+    mockStored['invite.pendingOperation'] = JSON.stringify('op-from-the-old-background-path');
+
+    expect(await resumePendingInvite(ME)).toBe(TOKEN);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('replays a press whose answer was lost, with the same id', async () => {
+    // The id belongs to the intent, and here the intent survives the process: an acceptance
+    // that commits and loses its reply has to be recognised, not spent twice.
+    pressed(TOKEN);
+    answers({ status: 'already_applied', attributed: true });
+
+    expect(await resumePendingInvite(ME)).toBeNull();
+
+    expect(mockRpc).toHaveBeenCalledWith('accept_invite', {
+      p_operation_id: 'operation-from-the-press',
       p_token: TOKEN,
+      p_accepting_user: ME,
     });
     expect(held()).toBeNull();
   });
 
-  it('lets a final refusal go rather than replaying it every launch', async () => {
-    // Three of the four. `unavailable` is not final and has its own test below —
-    // independent review 26's second Major.
-    for (const reason of ['invalid', 'self', 'already_attributed']) {
+  it('does not replay another account’s press, which on a shared phone accepts for them', async () => {
+    // Account A pressed Accept and the reply was lost. Account B signs in on the same phone.
+    // B has decided nothing, so B gets the screen.
+    pressed(TOKEN);
+
+    expect(await resumePendingInvite('user-who-only-signed-in')).toBe(TOKEN);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('does not replay a press made on a different invitation', async () => {
+    // What a process killed halfway through swapping the held invitation leaves behind.
+    pressed('b'.repeat(32));
+    hold(TOKEN);
+
+    expect(await resumePendingInvite(ME)).toBe(TOKEN);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('carries the same id into the next launch while the call stays unsettled', async () => {
+    pressed(TOKEN);
+    answers(null, { code: '', message: 'Network request failed' });
+    await resumePendingInvite(ME);
+    expect(held()).toBe(TOKEN);
+
+    answers({ status: 'already_applied', attributed: true });
+    await resumePendingInvite(ME);
+
+    const ids = mockRpc.mock.calls.map(
+      ([, args]) => (args as { p_operation_id: string }).p_operation_id,
+    );
+    expect(ids).toEqual(['operation-from-the-press', 'operation-from-the-press']);
+  });
+
+  it('lets every settled answer go, including one that used to be retried', async () => {
+    // `unavailable` covers a block, and a retry would connect two accounts days after the
+    // screen told the person it could not. They open the link again instead.
+    for (const reason of ['invalid', 'self', 'already_attributed', 'blocked', 'unavailable']) {
       mockStored = {};
-      hold(TOKEN);
+      pressed(TOKEN);
       answers({ status: 'refused', reason });
 
-      await redeemPendingInvite();
+      await resumePendingInvite(ME);
 
       expect(held()).toBeNull();
     }
   });
 
-  it('keeps the invitation through a block or a suspension, which get lifted', async () => {
-    /**
-     * The failure independent review 26 named. `unavailable` covers a block in either
-     * direction and a suspended inviter, and **both of those stop being true**. The
-     * first version of this module treated it as final, so a recipient who completed
-     * signup during a temporary block lost their invitation permanently, with nothing
-     * on any screen to say so.
-     */
-    hold(TOKEN);
-    answers({ status: 'refused', reason: 'blocked' });
-
-    await redeemPendingInvite();
-
-    expect(held()).toBe(TOKEN);
-  });
-
-  it('releases the operation id after a recoverable refusal, or the retry is inert', async () => {
-    /**
-     * Independent review 26b's first Major, and the sharpest test in this file because
-     * the version it catches *looked* correct.
-     *
-     * An `unavailable` refusal is a **settled** answer: `_claim_operation` committed, so
-     * that operation id is spent. A retry carrying it is answered `already_applied` —
-     * the server never reconsiders the token, the block or the suspension — so the five
-     * recoverable attempts were five identical non-answers and the whole mechanism was
-     * inert. The first version of the file below it mocked five independent
-     * `unavailable` answers and therefore could not see it.
-     *
-     * The rule is `lib/operation-intent.ts`'s: the id is dropped the moment the server
-     * answers anything, and held only when the outcome was never established.
-     */
-    hold(TOKEN);
-    answers({ status: 'refused', reason: 'unavailable' });
-    await redeemPendingInvite();
-
-    answers({ status: 'ok', inviter_username: 'ada', follow_state: 'approved' });
-    await redeemPendingInvite();
-
-    const ids = mockRpc.mock.calls.map(
-      ([, args]) => (args as { p_operation_id: string }).p_operation_id,
-    );
-    expect(ids).toHaveLength(2);
-    expect(ids[1]).not.toBe(ids[0]);
-  });
-
-  it('releases the operation id after a refusal that certainly did not commit', async () => {
-    // 53400 from the rate limiter and 42501 from a suspension roll their claim back
-    // with the raise, so the id was never spent. Holding it would be harmless today and
-    // wrong tomorrow; the asymmetry is the rule rather than an optimisation.
-    hold(TOKEN);
+  it('shows the invitation again, rather than sending it, after a refusal that did not commit', async () => {
+    // `53400` and `42501` roll their claim back, so the press is not recorded any more and
+    // nothing here may act on it.
+    pressed(TOKEN);
     answers(null, { code: '53400', message: 'too many' });
-    await redeemPendingInvite();
+    await resumePendingInvite(ME);
 
-    answers({ status: 'ok', inviter_username: 'ada' });
-    await redeemPendingInvite();
-
-    const ids = mockRpc.mock.calls.map(
-      ([, args]) => (args as { p_operation_id: string }).p_operation_id,
-    );
-    expect(ids[1]).not.toBe(ids[0]);
+    mockRpc.mockClear();
+    expect(await resumePendingInvite(ME)).toBe(TOKEN);
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
-  it('gives up on an unavailable inviter after a bounded number of launches', async () => {
-    /**
-     * Bounded rather than retried for ever, because the same answer also covers a
-     * *deleted* inviter, which never recovers — and an unbounded retry would spend a
-     * redeem slot on every cold start until the daily ceiling refused a redemption that
-     * might genuinely have worked.
-     *
-     * The count is in storage rather than in memory precisely because the retries are
-     * on different launches.
-     */
+  it('never mints an id of its own', async () => {
     hold(TOKEN);
-    answers({ status: 'refused', reason: 'unavailable' });
 
-    for (let i = 0; i < MAX_RECOVERABLE_ATTEMPTS - 1; i += 1) {
-      await redeemPendingInvite();
-      expect(held()).toBe(TOKEN);
-    }
+    await resumePendingInvite(ME);
 
-    await redeemPendingInvite();
-    expect(held()).toBeNull();
-  });
-
-  it('keeps the invitation when the call did not settle', async () => {
-    hold(TOKEN);
-    answers(null, { code: '', message: 'Network request failed' });
-
-    await redeemPendingInvite();
-
-    expect(held()).toBe(TOKEN);
-  });
-
-  it('keeps the invitation when the refusal is one that stops being true', async () => {
-    /**
-     * `53400` from the rate limiter and `42501` from a suspension are refusals — the
-     * call certainly did not commit — and they are still kept, because the question
-     * here is "could this succeed later" rather than "may this have committed".
-     * Discarding somebody's invitation because they were briefly over a ceiling is the
-     * failure this beta can least afford.
-     */
-    for (const code of ['53400', '42501']) {
-      mockStored = {};
-      hold(TOKEN);
-      answers(null, { code, message: 'refused' });
-
-      await redeemPendingInvite();
-
-      expect(held()).toBe(TOKEN);
-    }
-  });
-
-  it('carries the same operation id into the retry after an unsettled call', async () => {
-    // The id belongs to the intent, and here the intent survives the process: a
-    // redemption that commits and loses its reply is retried on the next launch, and
-    // only the same id lets `_claim_operation` recognise it rather than spending a
-    // second slot on one decision.
-    hold(TOKEN);
-    answers(null, { code: '', message: 'Network request failed' });
-    await redeemPendingInvite();
-
-    answers({ status: 'already_applied', attributed: true });
-    await redeemPendingInvite();
-
-    const ids = mockRpc.mock.calls.map(([, args]) => (args as { p_operation_id: string }).p_operation_id);
-    expect(ids).toEqual(['operation-1', 'operation-1']);
+    expect(mockIssued).toBe(0);
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+    expect(JSON.parse(mockStored['invite.acceptedOperation'] ?? 'null')).toEqual({
+      id: 'op-1',
+      userId: ME,
+      token: TOKEN,
+    });
   });
 });

@@ -256,18 +256,26 @@ describe('the expiry comes from configuration', () => {
 });
 
 describe('who can reach it', () => {
-  it('is readable signed out, like the rest of the catalogue', async () => {
+  it('is readable signed in, and not signed out', async () => {
     const t = await createTestDb();
     try {
       await putList(t, 'trending.movie.day', ids(2));
 
-      // media_items and media_cache are world-readable on purpose — catalogue
-      // metadata is not user data — and a trending list says nothing about anybody.
-      const rows = await t.asAnon(async () => {
+      // A trending list says nothing about anybody, so this is not a privacy rule: the
+      // shelf is on the Feed, and anon has no reader that needs it (20261024000400).
+      const reader = await t.createUser({ username: 'trend_reader' });
+      const rows = await t.asUser(reader, async () => {
         const { rows } = await t.sql(`select list_key from provider_list_cache`);
         return rows;
       });
       assert.deepEqual(rows, [{ list_key: 'trending.movie.day' }]);
+
+      // The freshness probe in remote-smoke.mjs reads the key and the date, and no more.
+      const anon = await t.asAnon(async () =>
+        (await t.sql(`select list_key from provider_list_cache`)).rows);
+      assert.deepEqual(anon, [{ list_key: 'trending.movie.day' }]);
+      const error = await t.asAnon(() => t.errorFrom(`select payload from provider_list_cache`));
+      assert.equal(error?.code, '42501');
     } finally {
       await t.close();
     }
@@ -370,17 +378,17 @@ describe('tmdb_put_people_index', () => {
     }
   });
 
-  it('is readable signed out and not writable by a client', async () => {
+  it('is readable signed in and not writable by a client', async () => {
     const t = await createTestDb();
     try {
       await putPeople(t, { people: people(1) });
-      const rows = await t.asAnon(async () => {
+      const user = await t.createUser({ username: 'people_writer' });
+      const rows = await t.asUser(user, async () => {
         const { rows } = await t.sql(`select list_key from provider_list_cache`);
         return rows;
       });
       assert.deepEqual(rows, [{ list_key: 'popular.people' }]);
 
-      const user = await t.createUser({ username: 'people_writer' });
       const error = await t.asUser(user, () =>
         t.errorFrom(`select tmdb_put_people_index('{"people":[]}'::jsonb)`),
       );
