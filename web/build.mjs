@@ -2359,10 +2359,9 @@ const LANDING_STYLES = `
 
       /* ------------------------------------------------------------------- demo */
 
-      /* The ranking demo takes the hero's second column, where the two collection shots
-         used to sit; they moved one section down, to the section about the collection.
-         On a phone it follows the install row directly, so the first screen is the
-         headline, the store button and the first pair, in that order. */
+      /* The ranking demo takes the hero's second column. On a phone it follows the install
+         row directly, so the first screen is the headline, the store button and the first
+         pair, in that order. */
       .demo {
         width: 100%;
         max-width: 30rem;
@@ -2577,43 +2576,6 @@ const LANDING_STYLES = `
         border: 0;
       }
 
-      /* ---------------------------------------------------------- founder note */
-
-      /* An editorial pull quote kept to a short read: an oversized opening quotation mark
-         in Maroon as the one accent, the founder's words in the body sans at reading size,
-         tight paragraphs and a quiet attribution. Under half a desktop viewport, so the
-         section after it is already in view. */
-      .founder-section { padding-block: 2.75rem; }
-      .founder-note { position: relative; max-width: 36rem; margin: 0 auto; padding-top: 2.25rem; }
-      .founder-note::before {
-        content: '\\201C';
-        position: absolute;
-        top: -0.75rem;
-        left: -0.125rem;
-        font-family: 'DM Serif Display', Georgia, serif;
-        font-size: 4.5rem;
-        line-height: 1;
-        color: var(--maroon);
-        opacity: 0.35;
-      }
-      .founder-note blockquote { margin: 0; }
-      .founder-note blockquote p {
-        font-size: 1.0625rem;
-        line-height: 1.6;
-        color: var(--ink);
-      }
-      .founder-note blockquote p + p { margin-top: 0.75rem; }
-      .founder-note figcaption {
-        margin-top: 0.25rem;
-        font-size: 0.9375rem;
-        color: var(--tertiary);
-      }
-      @media (max-width: 30rem) {
-        .founder-section { padding-block: 2.25rem; }
-        .founder-note { padding-top: 2rem; }
-        .founder-note blockquote p { font-size: 1rem; }
-      }
-
       /* ---------------------------------------------------------------- buttons */
 
       .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
@@ -2715,27 +2677,84 @@ const LANDING_STYLES = `
         .phone-pair .phone + .phone { display: none; }
         .phone-pair .phone { max-width: 16rem; }
 
-        /* Except where the second picture is the point: the TV collection beside the Movies
-           one in the hero, the score a ranking lands on, the conversation under a friend's
-           ranking, and Group Picks beside the recommendations. Those pairs stack instead
-           of dropping their second half. */
+        /* Except where the second picture is the point: the score a ranking lands on, the
+           conversation under a friend's ranking, and Group Picks beside the
+           recommendations. Those pairs stack instead of dropping their second half. */
         .phone-pair.stack-narrow { flex-direction: column; }
         .phone-pair.stack-narrow .phone + .phone { display: block; }
       }
 
       /* -------------------------------------------------------------- final CTA */
 
-      .closer { background: var(--maroon); color: var(--inverse); text-align: center; }
+      /* The founder's quote and the install ask, side by side in one band, which is what
+         keeps the end of the page short (founder QA, 2026-11-02). One Maroon band rather
+         than a Parchment half and a Maroon half: the section above is a Parchment band, and
+         the quote would have run straight into it. Left-aligned like every other section,
+         because a centred column beside a left-aligned quote reads as two different pages.
+         The two store buttons do not fit a half-width column side by side, so here they
+         stack at one width rather than wrapping at two. */
+      .closer { background: var(--maroon); color: var(--inverse); }
       .closer h2 { color: var(--inverse); }
-      .closer .section-lede { color: rgba(245, 235, 221, 0.82); margin-inline: auto; }
-      .closer .actions { justify-content: center; }
+      .closer .section-lede { color: rgba(245, 235, 221, 0.82); }
+      .closer .actions { flex-direction: column; max-width: 22rem; }
       .closer a.button { background: var(--inverse); color: var(--maroon); border-color: var(--inverse); }
       .closer a.button.secondary {
         background: transparent;
         color: var(--inverse);
         border-color: rgba(245, 235, 221, 0.5);
       }
-      .closer .fineprint { color: rgba(245, 235, 221, 0.74); margin-inline: auto; }
+      .closer .fineprint { color: rgba(245, 235, 221, 0.74); }
+
+      /* One rule, which lies across the gap when the two stack and stands in it when they
+         sit side by side, so it is always halfway between them. The column stretches at
+         desktop so the rule is as tall as the band's content, whichever side is taller. */
+      .closer-cta { position: relative; }
+      .closer-cta::before {
+        content: '';
+        position: absolute;
+        top: -1.25rem;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: rgba(245, 235, 221, 0.28);
+      }
+      @media (min-width: 56rem) {
+        .closer-cta { align-self: stretch; display: flex; flex-direction: column; justify-content: center; }
+        .closer-cta::before { top: 0; bottom: 0; left: -2rem; right: auto; width: 1px; height: auto; }
+      }
+
+      /* It has to read as a quotation before a word of it is read. In the body sans it was
+         one more paragraph of the page (founder QA, 2026-11-02), so the words and the mark
+         are both in the serif's italic. 1.375rem is the app's title2, the size this serif
+         already carries running text at, which keeps it a quote rather than a headline:
+         the display size this note had on 2026-10-28 took more than a desktop screen. */
+      .founder-note { position: relative; max-width: 36rem; margin: 0; padding-top: 2.75rem; }
+      .founder-note::before {
+        content: '\\201C';
+        position: absolute;
+        top: -0.5rem;
+        left: -0.625rem;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-style: italic;
+        font-size: 5rem;
+        line-height: 1;
+        color: var(--inverse);
+        opacity: 0.55;
+      }
+      .founder-note blockquote { margin: 0; }
+      .founder-note blockquote p {
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-style: italic;
+        font-size: clamp(1.1875rem, 2.6vw, 1.375rem);
+        line-height: 1.4;
+      }
+      .founder-note blockquote p + p { margin-top: 0.75rem; }
+      .founder-note figcaption {
+        margin-top: 1rem;
+        font-size: 0.9375rem;
+        font-weight: 500;
+        color: rgba(245, 235, 221, 0.82);
+      }
 
       /* The focus ring inverts with everything else. It was var(--maroon) on a maroon
          ground, which is a 1.00:1 outline: a keyboard user got no visible focus at all
@@ -2829,18 +2848,6 @@ const SHOT = {
     w: 640,
     h: 1285,
     alt: 'A bingd. comment thread under a ranking of The Witcher, season one, with names and faces blurred',
-  },
-  movies: {
-    src: '/shot-movies.webp',
-    w: 640,
-    h: 1286,
-    alt: 'A ranked bingd. movie collection as a grid of posters, each one carrying its own score out of ten',
-  },
-  tv: {
-    src: '/shot-tv.webp',
-    w: 640,
-    h: 1285,
-    alt: 'A ranked bingd. TV collection as a grid of posters, each season carrying its own score out of ten',
   },
   feed: {
     src: '/shot-feed.webp',
@@ -3147,7 +3154,7 @@ await writeFile(
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
 
@@ -3203,24 +3210,6 @@ ${DEMO}
       <section>
         <div class="wrap split">
           <div class="split-copy">
-            <p class="kicker">Your collection</p>
-            <h2>A collection that actually reflects your taste.</h2>
-            <p class="section-lede">
-              Every movie and TV season you rank takes its place in your collection, so
-              your list reads in the order you really feel about them
-            </p>
-          </div>
-
-          <div class="phone-pair stack-narrow">
-            ${shot('movies')}
-            ${shot('tv')}
-          </div>
-        </div>
-      </section>
-
-      <section class="band">
-        <div class="wrap split flip">
-          <div class="split-copy">
             <p class="kicker">Find your next binge</p>
             <h2>Spend less time deciding.</h2>
             <p class="section-lede">
@@ -3240,10 +3229,10 @@ ${DEMO}
         </div>
       </section>
 
-      <section>
-        <div class="wrap split">
+      <section class="band">
+        <div class="wrap split flip">
           <div class="split-copy">
-            <p class="kicker">A social experience</p>
+            <p class="kicker">Social watching experience</p>
             <h2>See what your friends are watching.</h2>
             <p class="section-lede">
               Follow friends to comment on and save their latest watches, compare taste,
@@ -3258,37 +3247,31 @@ ${DEMO}
         </div>
       </section>
 
-      <section class="band founder-section">
-        <div class="wrap">
+      <section class="closer">
+        <div class="wrap split">
           <figure class="founder-note">
             <blockquote>
               <p>
-                Beli changed the way I experienced restaurants. I went from eating out
-                occasionally to ranking every place, comparing lists with friends, and hunting
-                for the next spot.
+                The Beli app completely changed my experience of restaurants. I went from
+                occasionally eating out to ranking every place, comparing lists with friends,
+                and even making reservations. I built &ldquo;bingd&rdquo; because I wanted that
+                same post-watch ritual and excitement for movies and TV.
               </p>
-              <p>
-                I built bingd because I wanted that same post-watch ritual for movies and TV:
-                rank what you watch, compare taste with friends, and keep the fun going after
-                the credits roll.
-              </p>
-              <p>Hope you enjoy it as much as I do. Happy binging,</p>
+              <p>Keep the fun going even after the credits roll. Happy binging,</p>
             </blockquote>
-            <figcaption>Suraj, founder</figcaption>
+            <figcaption>Suraj Kandukuri</figcaption>
           </figure>
-        </div>
-      </section>
 
-      <section class="closer">
-        <div class="wrap">
-          <h2>Start with five movies or TV you love.</h2>
-          <p class="section-lede">
-            That is enough for bingd. to have an opinion about everything else
-          </p>
+          <div class="closer-cta">
+            <h2>Start with five movies or TV&nbsp;shows you love.</h2>
+            <p class="section-lede">
+              That is enough for bingd. to have an opinion about everything else
+            </p>
 
 ${installRow({})}
 
-          <p class="fineprint">${AVAILABILITY}</p>
+            <p class="fineprint">${AVAILABILITY}</p>
+          </div>
         </div>
       </section>
     </main>

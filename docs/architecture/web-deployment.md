@@ -529,13 +529,13 @@ are committed into `web/src/` beside the existing two, and `sharp` is an authori
 dependency that Cloudflare never installs. The blur regions are stated in source pixels
 and checked by eye, because a region that drifts shows up immediately as a legible name.
 
-On the front page as of 2026-09-14, by section: the hero `shot-movies` + `shot-tv`; the
-ranking section `shot-compare` + `shot-score` (the head-to-head, then the score it lands
-on); the friends section `shot-feed` + `shot-comments`; the last section `shot-recommended`
-+ `shot-grouppicks`. WebP, 640px wide, with only the hero eager. `shot-ranked`,
-`shot-foryou` and `shot-watchlist` are still defined in `shots.mjs` and still in
-`web/src/`, but the page no longer references them. The section labels read How it works,
-A social experience and Find your next binge.
+On the front page as of 2026-11-02, by section: How it works `shot-compare` + `shot-score`
+(the head-to-head, then the score it lands on); Find your next binge `shot-recommended` +
+`shot-grouppicks`; Social watching experience `shot-feed` + `shot-comments`. WebP, 640px
+wide, all lazy: the hero holds the ranking demo rather than a shot. The closing band holds
+the founder's quote beside the install buttons and carries no shot. `shot-movies`,
+`shot-tv`, `shot-ranked`, `shot-foryou` and `shot-watchlist` are still defined in
+`shots.mjs` and still in `web/src/`, but the page no longer references them.
 
 ### Adding or replacing a landing-page screenshot
 
