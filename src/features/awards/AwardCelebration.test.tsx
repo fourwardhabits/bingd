@@ -23,6 +23,7 @@ let mockParams: { awards?: string } = {};
 let mockAwards: { data?: unknown; isPending: boolean; isError: boolean };
 
 jest.mock('expo-router', () => ({
+  useFocusEffect: () => {},
   useRouter: () => ({ back: mockBack, push: jest.fn() }),
   useLocalSearchParams: () => mockParams,
 }));
