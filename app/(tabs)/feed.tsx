@@ -77,11 +77,11 @@ import {
   MediumSelector,
   Screen,
   SectionHeader,
-  SegmentedTabs,
+  IconToggle,
   SkeletonRow,
   Text,
   usePullRefresh,
-  type SegmentOption,
+  type IconToggleOption,
 } from '@/ui/components';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
@@ -135,10 +135,10 @@ const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
  * Feed tab that word would name nothing.
  */
 const FEED_MODES = [
-  { id: 'feed', label: 'Activity' },
-  { id: 'leaderboard', label: 'Leaderboard' },
-  { id: 'people', label: 'People' },
-] as const satisfies readonly SegmentOption<FeedMode>[];
+  { value: 'feed', icon: 'newspaper-outline', label: 'Activity' },
+  { value: 'leaderboard', icon: 'trophy-outline', label: 'Leaderboard' },
+  { value: 'people', icon: 'people-outline', label: 'People' },
+] as const satisfies readonly IconToggleOption<FeedMode>[];
 
 /** PRD §14. Fan-out on read: followed users' activity is queried at read time
  *  rather than written into per-user inboxes (docs/architecture/README.md AD-5). */
@@ -712,15 +712,10 @@ export default function FeedScreen() {
          * exactly the feed that was there. That is founder acceptance D.
          */}
         {/**
-         * **The modes, then the heading of whatever is showing.**
+         * **The heading of whatever is showing, opposite the three mode icons.**
          *
-         *     Activity   Leaderboard   People
-         *     TRENDING NOW  ·  THIS MONTH ▼  ·  PEOPLE YOU MAY KNOW
+         *     Trending now  ·  THIS MONTH ▼  ·  People you may know        [▤] [🏆] [👥]
          *
-         * `SegmentedTabs` because this is navigation: it changes which content is shown,
-         * which is what that component is for and the same row Collection draws under its
-         * title. Three words need the row's whole width, so they cannot share it with the
-         * heading any more, and that is why the heading now sits on a row of its own.
          * It stays in the scrolling content, at the head of the list it switches.
          *
          * The heading is whatever is immediately below — the shelf's
@@ -735,31 +730,35 @@ export default function FeedScreen() {
          * **People's heading is a `SectionHeader` and not a `MediumSelector`**, which is
          * the founder's "do not add a fake chevron": there is no header-level choice on
          * People yet, and a chevron that opens nothing is a control that lies. The two
-         * components draw the same words the same way — `sectionHeader`, uppercase, Maroon
-         * — so the row does not move if a second list ever makes it a selector.
+         * components draw the words in Maroon, so the row does not move if a second list
+         * ever makes it a selector.
+         *
+         * **One row, not two** (founder revision brief, 2026-11-03). A labelled tab row cost
+         * a second row at the top of the busiest screen and printed "Activity" twice. The
+         * icons are main's, with their 44pt cells.
          */}
-        <SegmentedTabs
-          accessibilityLabel="Feed mode"
-          options={FEED_MODES}
-          value={mode}
-          onChange={changeMode}
-        />
-        {showingBoard ? (
-          // The gutter is the board's alone: `SectionHeader` pads itself and a section-sized
-          // `MediumSelector` deliberately does not.
-          <View style={styles.contentHeaderInset}>
-            <MediumSelector
-              size="section"
-              value={timeframe}
-              onChange={changeTimeframe}
-              options={LEADERBOARD_TIMEFRAMES}
-            />
+        <View style={styles.contentHeader}>
+          <View style={[styles.contentHeaderLeft, showingBoard && styles.contentHeaderInset]}>
+            {showingBoard ? (
+              <MediumSelector
+                size="section"
+                value={timeframe}
+                onChange={changeTimeframe}
+                options={LEADERBOARD_TIMEFRAMES}
+              />
+            ) : showingPeople ? (
+              <SectionHeader title="People you may know" level="editorial" />
+            ) : trendingHasItems ? (
+              <SectionHeader title="Trending now" level="editorial" />
+            ) : null}
           </View>
-        ) : showingPeople ? (
-          <SectionHeader title="People you may know" level="title" />
-        ) : trendingHasItems ? (
-          <SectionHeader title="Trending now" level="title" />
-        ) : null}
+          <IconToggle
+            label="Feed mode"
+            value={mode}
+            onChange={changeMode}
+            options={FEED_MODES}
+          />
+        </View>
 
         {showingBoard ? (
           <LeaderboardView
@@ -817,7 +816,7 @@ export default function FeedScreen() {
              * legible where the same empty state floating below a shelf is not.
              */}
             <View style={styles.boundary}>
-              <SectionHeader title="Activity" level="title" />
+              <SectionHeader title="Activity" />
             </View>
 
             {/* The confirmation, on the screen the reader is still looking at rather than in
@@ -1203,11 +1202,18 @@ const styles = StyleSheet.create({
   trending: { gap: theme.space[2] },
   // The selector's row, the same height as the `SectionHeader` it stands in for, so
   // switching mode does not move the list. Only the timeframe needs the gutter.
-  contentHeaderInset: {
+  contentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: theme.layout.gutter,
+    paddingTop: theme.space[3],
     minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-    paddingHorizontal: theme.layout.gutter,
   },
+  // Takes the space the toggle leaves, so a long heading truncates rather than pushing
+  // the icons off the row.
+  contentHeaderLeft: { flex: 1, justifyContent: 'center' },
+  contentHeaderInset: { paddingLeft: theme.layout.gutter },
   /**
    * The rule between discovery and activity.
    *

@@ -19,7 +19,7 @@ import { supabase } from '@/lib/supabase';
 export const LEADERBOARD_METRICS = [
   { value: 'titles', label: 'Titles' },
   { value: 'movies', label: 'Movies' },
-  { value: 'tv', label: 'TV' },
+  { value: 'tv', label: 'TV Shows' },
   { value: 'reviews', label: 'Reviews' },
 ] as const;
 

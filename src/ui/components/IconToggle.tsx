@@ -11,11 +11,17 @@ export type IconToggleOption<T extends string> = {
 };
 
 export type IconToggleProps<T extends string> = {
-  /** Two cells. See "WHY TWO, EXACTLY" below: a closed tuple, not a bare array. */
-  options: readonly [IconToggleOption<T>, IconToggleOption<T>];
+  /**
+   * Two cells, or three. See "WHY TWO, EXACTLY — AND WHY THREE" below: the tuple is
+   * still closed rather than a bare array, so a caller cannot quietly grow this into a
+   * strip of five unlabelled glyphs.
+   */
+  options:
+    | readonly [IconToggleOption<T>, IconToggleOption<T>]
+    | readonly [IconToggleOption<T>, IconToggleOption<T>, IconToggleOption<T>];
   value: T;
   onChange: (next: T) => void;
-  /** Announced for the group. "View" on Collection. */
+  /** Announced for the group. "View" on Collection, "Feed mode" on the Feed. */
   label: string;
   style?: StyleProp<ViewStyle>;
 };
@@ -40,12 +46,38 @@ export type IconToggleProps<T extends string> = {
  * left with two dialects of the same idea.
  *
  * ---------------------------------------------------------------------------
- * WHY TWO, EXACTLY
+ * WHY TWO, EXACTLY — AND WHY THREE
  *
- * At three this stops being a toggle and becomes something with room for words. A
- * glyph-only cell is legible because there are two of them and the pair is a question with
- * two answers. The Feed held a third cell from 2026-09-08 until the founder moved its modes
- * to labelled `SegmentedTabs` on 2026-11-02, so the tuple is closed at two again.
+ * The tuple type used to take precisely two options, with this reasoning: at three this
+ * stops being a toggle and becomes a segmented control, which the app already has as
+ * `SegmentedControl` with room for labels; a glyph-only cell is legible because there are
+ * two of them and the pair is a question with two answers, and a third unlabelled icon is
+ * a guess.
+ *
+ * **The founder has taken the other side of that, for the Feed** (tranche 2026-09-08 §A2).
+ * The Feed's control gains People beside Feed and Leaderboard, and the instruction is
+ * explicit that it uses "the same component family, dimensions, border radius, selected
+ * Maroon treatment and visual weight" — no responsive font shrinking, no wrapping, no
+ * sixth tab. `SegmentedControl` cannot be that: it is a labelled radio group with `flex: 1`
+ * halves that spans its container, so putting it opposite `TRENDING NOW` in a content
+ * header row would take the row's whole width for three words.
+ *
+ * So the tuple widens to two *or* three, and the original objection is answered rather
+ * than dropped: a glyph is a guess when nothing else on the screen names it, and each of
+ * these three cells has a name where the reader is already looking — the left half of the
+ * same row is the heading of whatever the selected cell shows (`TRENDING NOW`,
+ * `THIS MONTH`, `PEOPLE YOU MAY KNOW`). The `label` on every option is still what a screen
+ * reader is given, and it is still required.
+ *
+ * It stays a closed tuple. Three is a decision, not the start of a series: a fourth cell
+ * would put the control past the width the founder's §A2 fixes it at, and at that point
+ * the answer is a different control rather than one more glyph.
+ *
+ * The arithmetic holds at three on the narrowest phone this app supports. Each cell is
+ * `minTapTarget - space[2]` = 36pt wide, so the group is 108pt plus two hairlines; on a
+ * 320pt screen the row's other side has 108pt of the 288pt between the gutters left over
+ * for a heading, and `SectionHeader`'s `sectionHeader` variant truncates rather than
+ * wrapping. `touch-targets.test.tsx` is where the 44pt claim is asserted.
  *
  * `radiogroup` rather than a switch, because a switch implies on/off and neither of
  * these has an off state — the reader is always looking at one of the two.
@@ -113,6 +145,8 @@ const styles = StyleSheet.create({
   group: {
     flexDirection: 'row',
     borderRadius: theme.radius.control,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
     overflow: 'hidden',
   },
   cell: {
@@ -120,7 +154,7 @@ const styles = StyleSheet.create({
     height: theme.layout.control.chipHeight,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.surface.sunken,
+    backgroundColor: theme.surface.raised,
   },
   cellOn: { backgroundColor: theme.semantic.action },
   pressed: { opacity: 0.7 },

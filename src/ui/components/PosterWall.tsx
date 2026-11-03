@@ -13,7 +13,7 @@ import { formatScore, type Bucket } from '@/features/collection/score';
 
 import { hapticSelection } from '../haptics';
 import { usePressScale, usePulse } from '../press';
-import { theme } from '../tokens';
+import { inkAlpha, theme } from '../tokens';
 import { Poster } from './Poster';
 import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
@@ -321,13 +321,13 @@ function Tile({
   onPress,
   onLongPress,
   onToggleSave,
-  onDismiss,
 }: {
   tile: PosterTile;
   width: number;
   onPress: () => void;
   onLongPress?: () => void;
   onToggleSave?: () => void;
+  /** Accepted and not drawn: see the bookmark below. */
   onDismiss?: () => void;
 }) {
   const { score } = tile;
@@ -377,64 +377,51 @@ function Tile({
           </View>
         ) : null}
       </Pressable>
-      {/* Below the poster and outside its press, because a native `hitSlop` cannot reach past
-          a parent: a 44pt box is the only way to a 44pt target, and a near miss here must
-          not open the title. */}
-        {onToggleSave || onDismiss ? (
-        <View style={[styles.tileActions, { width }]}>
-        {onToggleSave ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: Boolean(tile.saved) }}
-            accessibilityLabel={
-              tile.saved
-                ? `Remove ${tile.title} from watchlist`
-                : `Save ${tile.title} to watchlist`
-            }
-            /**
-             * **Saving is a state change, so it pulses and it buzzes** (2026-09-08).
-             *
-             * The glyph swap happens between two frames: `bookmark-outline` becomes
-             * `bookmark` with no moment at which anything moved, so on a device the change
-             * is something a reader notices a beat later rather than something they see
-             * happen. One small pulse plus the lightest haptic is what turns it into an
-             * acknowledgement.
-             *
-             * **On the way on only.** `usePulse` gets the *new* state, and celebrating the
-             * removal of a bookmark would be the app disagreeing with the reader. The
-             * haptic fires either way, because both directions are the reader having done
-             * something.
-             */
-            onPress={() => {
-              hapticSelection();
-              if (!tile.saved) bookmark.pulse();
-              onToggleSave();
-            }}
-            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
-          >
-            <Animated.View style={bookmark.pulseStyle}>
+      {/**
+       * **The bookmark sits on the poster again; the X row is gone** (founder revision
+       * brief, 2026-11-03: "remove the action row underneath every poster").
+       *
+       * A sibling of the poster's press, laid over its corner, not a child of it: a native
+       * `hitSlop` cannot reach past a parent, so a 44pt box is the only way to a 44pt
+       * target, and a near miss on it must not open the title (38e07df). The glyph's
+       * square is 26pt inside that box, translucent ink rather than Maroon, so nine of
+       * them on a wall read as part of the artwork rather than nine buttons.
+       *
+       * Dismissal is not drawn on the tile. For You offers it from the long press, beside
+       * the reason (see `recommendations.tsx`), and `onDismiss` is no longer read here.
+       */}
+      {onToggleSave ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: Boolean(tile.saved) }}
+          accessibilityLabel={
+            tile.saved ? `Remove ${tile.title} from watchlist` : `Save ${tile.title} to watchlist`
+          }
+          onPress={() => {
+            hapticSelection();
+            if (!tile.saved) bookmark.pulse();
+            onToggleSave();
+          }}
+          style={styles.save}
+        >
+          {({ pressed }) => (
+            <Animated.View
+              style={[
+                styles.saveGlyph,
+                tile.saved && styles.saveGlyphOn,
+                pressed && styles.pressed,
+                bookmark.pulseStyle,
+              ]}
+            >
               <Ionicons
                 name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-                size={20}
-                color={tile.saved ? theme.semantic.action : theme.text.secondary}
+                size={14}
+                color={theme.text.inverse}
               />
             </Animated.View>
-          </Pressable>
-        ) : null}
-        {onDismiss ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Not interested in ${tile.title}`}
-            accessibilityHint="Removes it from your recommendations"
-            onPress={onDismiss}
-            // Quiet rather than Maroon: dismissal is an exit, not the act of the wall.
-            style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
-          >
-            <Ionicons name="close" size={18} color={theme.text.tertiary} />
-          </Pressable>
-        ) : null}
-        </View>
-        ) : null}
+          )}
+        </Pressable>
+      ) : null}
     </Animated.View>
   );
 }
@@ -469,31 +456,37 @@ const styles = StyleSheet.create({
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },
-  tileActions: { flexDirection: 'row', justifyContent: 'space-between' },
   save: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
     width: theme.layout.minTapTarget,
     height: theme.layout.minTapTarget,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dismiss: {
-    width: theme.layout.minTapTarget,
-    height: theme.layout.minTapTarget,
+  saveGlyph: {
+    width: 26,
+    height: 26,
+    borderRadius: theme.radius.control,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: inkAlpha(0.34),
   },
+  saveGlyphOn: { backgroundColor: theme.semantic.action },
   chip: {
     position: 'absolute',
     right: 6,
     bottom: 6,
-    width: 34,
-    height: 34,
+    // 30pt and no Paper ring (founder revision brief, 2026-11-03): the ring made the
+    // disc the brightest edge on a dark poster. A soft shadow keeps it off the artwork.
+    width: 30,
+    height: 30,
     borderRadius: theme.radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.semantic.score,
-    borderWidth: 1.5,
-    borderColor: theme.surface.base,
+    ...theme.elevation.e1,
   },
   pressed: { opacity: 0.7 },
 });

@@ -473,7 +473,7 @@ describe('the board is people only', () => {
     ]);
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
   });
@@ -721,7 +721,7 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
     expect(view.queryByText('Watched')).toBeNull();

@@ -59,7 +59,7 @@ export type MediumSelectorProps<T extends string = Medium> = {
  */
 export const MEDIUM_OPTIONS: readonly MediumSelectorOption[] = [
   { id: 'movies', label: 'Movies' },
-  { id: 'tv_seasons', label: 'TV' },
+  { id: 'tv_seasons', label: 'TV Shows' },
 ];
 
 const labelFor = <T extends string>(

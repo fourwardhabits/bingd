@@ -394,7 +394,7 @@ describe('what this person likes', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Top ranked')).toBeTruthy());
-    expect(view.queryByRole('tab', { name: 'TV' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'TV Shows' })).toBeNull();
   });
 
   it('names a ranked season with its show, where a name is rendered at all', async () => {

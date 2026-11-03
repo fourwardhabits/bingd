@@ -72,11 +72,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  wellEarned: {
-    backgroundColor: theme.surface.base,
-    borderWidth: 2,
-    borderColor: theme.semantic.emphasis,
-  },
+  // A warm fill, not an amber ring (founder revision brief, 2026-11-03).
+  wellEarned: { backgroundColor: theme.surface.sunken },
   /** Flatter and cooler than the earned well, with a ring rather than a fill. */
   wellLocked: {
     backgroundColor: theme.surface.base,

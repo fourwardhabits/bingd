@@ -12,6 +12,11 @@ export {
   type ChipProps,
 } from './BucketChip';
 export { Button } from './Button';
+export {
+  CompactSwitch,
+  type CompactSwitchOption,
+  type CompactSwitchProps,
+} from './CompactSwitch';
 export { CastRow, type CastRowProps } from './CastRow';
 export { CastStrip, type CastMember } from './CastStrip';
 export { ClampedText, collapse, MARKER, type ClampedTextProps } from './ClampedText';
