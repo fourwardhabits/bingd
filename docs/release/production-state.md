@@ -1,7 +1,8 @@
 # Production state
 
 **What is live right now.** One page, updated at every production release. Last updated
-**2026-11-01**, when the store table below was checked against both public listings.
+**2026-11-03**, at the security remediation release, when the store table below was also
+checked against both public listings.
 
 This exists because the release documentation was all *runbooks* — how a cutover was done
 on a particular day — and none of it answered "what is production, today". The 2026-09-25
@@ -21,10 +22,11 @@ which also holds the freeze rule.
 
 | | |
 |---|---|
-| **Frozen application source** | `main` `9d9683a` (#210). Application development is frozen here |
-| **DB migrations** | **172 applied**, head `20261023000100`; staging identical |
-| **Production OTA** | update group `01a0db04` from `9d9683a`, on iOS runtime `61efbf17` and Android runtime `da3c7f47` |
-| **Preview OTA** | update group `01a0db08` from the same `9d9683a`, staging backend |
+| **Live application source** | `main` `bebfdfb`, the merge of #219 at `eab83c9`. Product development stays frozen at `9d9683a` (#210), and only fixes have shipped since |
+| **DB migrations** | **177 applied**, head `20261024000500`; staging identical, apart from the one difference under [The two lanes](#the-two-lanes) |
+| **Production OTA, 1.1.0** | from `eab83c9`, published 2026-11-03: Android group `04afb993` on runtime `ec79e181`, iOS group `ffbb473c` on runtime `8ea562b7`, EAS run `01a19eda` |
+| **Production OTA, 1.0.1** | update group `01a0db04` from `9d9683a`, on iOS runtime `61efbf17` and Android runtime `da3c7f47` |
+| **Preview OTA** | Android group `80fda42e` from `eab83c9`, on runtime `2503ffaa`, staging backend |
 
 ### Store distribution
 
@@ -38,7 +40,7 @@ Both 1.1.0 binaries are built from release commit `63694c3` = `9d9683a` + the ma
 They **embed** the frozen app, including the fresh-install reload guard (#198), which no OTA can
 deliver to a first launch.
 
-Read from the public App Store lookup and Play listing on 2026-11-01. The Play listing shows the
+Read from the public App Store lookup and Play listing on 2026-11-03. The Play listing shows the
 current version, not rollout percentage. `config/live-runtimes.json` holds the same two runtimes
 for the OTA gate, and changes with this table.
 
@@ -48,8 +50,9 @@ for the OTA gate, and changes with this table.
   `01a0db04`. A fresh install of one launches its old embedded bundle, downloads `01a0db04` in
   the background, and runs it after the next reload. That older embedded bundle predates #198,
   so its first foreground return can reload mid-sign-in.
-- **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) *embed* `9d9683a`. No OTA has been
-  published for those runtimes, and none is needed: first launch is already the frozen app.
+- **1.1.0 binaries** (runtimes `8ea562b7` / `ec79e181`) *embed* `9d9683a` and take the 1.1.0 OTA
+  above on a later launch. It replaced the Trending OTA from `5043a9e` (groups `7fb9487d` and
+  `8820ef6f`), which was live from 2026-11-02.
 - **Launch behaviour, both platforms:** `fallbackToCacheTimeout: 0` and the default
   `checkAutomatically` (on load). The embedded or cached bundle shows immediately, any newer
   update downloads in the background, and it applies at the next safe foreground return
@@ -57,7 +60,8 @@ for the OTA gate, and changes with this table.
   launch. iOS and Android behave the same.
 - **A future OTA from `main` targets the 1.1.0 runtimes only.** Reaching 1.0.1 installs as well
   means publishing a second time from a 1.0.1 tree (`release/2026-09-25-prod` is `9d9683a` at
-  1.0.1). While the freeze holds, no OTA is planned.
+  1.0.1). Neither Trending nor the security OTA did this, so 1.0.1 installs run the older
+  client against the newer database. See [Invitations](#invitations-20261024000100).
 
 ---
 
@@ -104,6 +108,17 @@ episode-level tracking, whole-series ranking, and proactive release pushes (shad
 ---
 
 ## The semantics the current release fixes in place
+
+### Invitations (`20261024000100`)
+
+**Two accounts connect only when somebody presses Accept.** Opening a link grants nothing, and
+`invite_preview` names the inviter before anything is asked of the person. `accept_invite` is the
+only client call that connects two accounts. `redeem_invite`, which installed builds send, writes
+nothing and raises `Update bingd to accept this invitation.`, so those builds keep the link and
+show that message.
+
+1.0.1 installs are protected, and they keep showing that message until they take the 1.1.0 store
+update, because no OTA reaches them.
 
 ### Grouped Unranked ranking (`20261020000100`, `20261023000100`)
 
@@ -186,8 +201,15 @@ preview lane. **Preview never points at production data.**
 4. only the explicitly unreleased fix being tested.
 
 Preview never accumulates its own history that later has to be reconciled. Today it carries
-nothing unreleased: `01a0db08` is `9d9683a`. Staging QA accounts and the states they cover are
+nothing unreleased: `80fda42e` is `eab83c9`. Staging QA accounts and the states they cover are
 in [`staging-qa-inventory.md`](./staging-qa-inventory.md).
+
+**The two databases have one known difference.** Production has `rls_auto_enable()` and its event
+trigger `ensure_rls`, a Supabase project setting that turns RLS on for new tables in `public`.
+Staging has neither, and no migration created them. So a migration that deliberately creates a
+table without RLS would behave differently on the two. Compared on 2026-11-03, every other
+function, table, grant and policy matched, once line endings are ignored: the function text holds
+CRs on either side, depending on which machine applied the migration.
 
 ---
 
