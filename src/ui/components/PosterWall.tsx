@@ -13,7 +13,7 @@ import { formatScore, type Bucket } from '@/features/collection/score';
 
 import { hapticSelection } from '../haptics';
 import { usePressScale, usePulse } from '../press';
-import { inkAlpha, theme } from '../tokens';
+import { theme } from '../tokens';
 import { Poster } from './Poster';
 import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
@@ -320,6 +320,8 @@ function Tile({
           blurhash={tile.blurhash}
           width={width}
         />
+        {onToggleSave || onDismiss ? (
+        <View style={styles.tileActions}>
         {onToggleSave ? (
           <Pressable
             accessibilityRole="button"
@@ -359,8 +361,8 @@ function Tile({
             <Animated.View style={bookmark.pulseStyle}>
               <Ionicons
                 name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-                size={16}
-                color={theme.text.inverse}
+                size={20}
+                color={tile.saved ? theme.semantic.action : theme.text.secondary}
               />
             </Animated.View>
           </Pressable>
@@ -377,8 +379,10 @@ function Tile({
             hitSlop={8}
             style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
           >
-            <Ionicons name="close" size={16} color={theme.text.inverse} />
+            <Ionicons name="close" size={18} color={theme.text.tertiary} />
           </Pressable>
+        ) : null}
+        </View>
         ) : null}
         {score != null ? (
           <View
@@ -427,31 +431,18 @@ const styles = StyleSheet.create({
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },
-  save: {
-    position: 'absolute',
-    top: theme.space[1],
-    right: theme.space[1],
-    width: 28,
-    height: 28,
-    borderRadius: theme.radius.control,
+  tileActions: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.semantic.action,
+    justifyContent: 'space-between',
+    paddingTop: 2,
+    paddingBottom: theme.space[1],
   },
+  save: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   // Beneath the bookmark, same size, same corner column. Ink at 60% rather than
   // Maroon: the bookmark is the wall's invitation and this is its way out, and two
   // Maroon squares stacked would read as one two-part control.
-  dismiss: {
-    position: 'absolute',
-    top: theme.space[1] + 28 + theme.space[1],
-    right: theme.space[1],
-    width: 28,
-    height: 28,
-    borderRadius: theme.radius.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: inkAlpha(0.6),
-  },
+  dismiss: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   chip: {
     position: 'absolute',
     right: 6,

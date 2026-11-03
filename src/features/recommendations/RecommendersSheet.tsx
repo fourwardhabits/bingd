@@ -35,7 +35,7 @@ export function RecommendersSheet({
   return (
     <Sheet visible={visible} onClose={onClose} onDismissed={onDismissed} label="Recommended by">
       <View style={styles.head}>
-        <Text variant="headline">Recommended by</Text>
+        <Text variant="title2">Recommended by</Text>
       </View>
       <ScrollView contentContainerStyle={styles.list}>
         {rows.map((row) => {

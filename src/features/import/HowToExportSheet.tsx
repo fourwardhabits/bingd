@@ -98,7 +98,7 @@ export function HowToExportSheet({
        */}
       <View style={styles.sheet}>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
-          <Text variant="headline">Getting your Letterboxd file</Text>
+          <Text variant="title2">Getting your Letterboxd file</Text>
 
           <View style={styles.steps}>
             {HOW_TO_STEPS.map((step, index) => (

@@ -356,7 +356,7 @@ export function ActivityRow({
                 dates, which is the founder's rule and was the defect independent
                 review found here. U+00A0 removes that break opportunity, so the
                 wrap moves back into the title's own words where it belongs. */}
-            <Text variant="subhead" style={styles.entity} onPress={onPressTitle}>
+            <Text variant="subhead" style={styles.film} onPress={onPressTitle}>
               {filmName}
               {year ? (
                 <Text variant="subhead" tone="secondary" style={styles.year}>
@@ -657,6 +657,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.base,
   },
   entity: { fontFamily: fontFamily.sansSemibold, color: theme.text.primary },
+  /**
+   * The film inside the sentence, set in the serif a step larger: the way a magazine sets
+   * a title in running text. Still one text node, so the line wraps as a sentence
+   * (founder, 2026-08-20). The nested year goes back to Inter through `styles.year`.
+   */
+  film: { fontFamily: fontFamily.serif, fontSize: 16, color: theme.text.primary },
   /**
    * The year sits inside the title's run, but it is not part of the entity: `(2008)`
    * is when the film is from, not what it is called. What stops a wrap orphaning it is

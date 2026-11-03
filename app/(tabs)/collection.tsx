@@ -520,23 +520,20 @@ export default function CollectionScreen() {
             </View>
           </View>
         ) : (
-          <View style={styles.nudge}>
-            <Text variant="callout">You have unranked titles</Text>
-            <Text variant="footnote" tone="secondary">
-              Rank what you have watched to complete your Collection and improve your
-              recommendations.
+          <View style={styles.strip}>
+            <Text variant="callout" style={styles.stripCopy} numberOfLines={1}>
+              You have unranked titles
             </Text>
-            <View style={styles.nudgeActions}>
-              <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
-              <Button
-                label="Dismiss"
-                kind="secondary"
-                size="sm"
-                onPress={() => {
-                  void dismissNudge().catch(() => {});
-                }}
-              />
-            </View>
+            <Button
+              label="Dismiss"
+              kind="tertiary"
+              tone="secondary"
+              size="sm"
+              onPress={() => {
+                void dismissNudge().catch(() => {});
+              }}
+            />
+            <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
           </View>
         )
       ) : null}
@@ -834,14 +831,24 @@ const styles = StyleSheet.create({
     marginHorizontal: theme.layout.gutter,
     marginTop: theme.space[3],
     marginBottom: theme.space[2],
-    paddingHorizontal: theme.space[3],
-    paddingVertical: theme.space[3],
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.surface.raised,
-    borderColor: theme.border.hairline,
-    borderWidth: StyleSheet.hairlineWidth * 2,
+    padding: theme.space[4],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.sunken,
     gap: theme.space[2],
   },
+  strip: {
+    marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[3],
+    paddingLeft: theme.space[4],
+    paddingRight: theme.space[2],
+    paddingVertical: theme.space[2],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.sunken,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+  },
+  stripCopy: { flex: 1 },
   nudgeActions: { flexDirection: 'row', gap: theme.space[2], paddingTop: theme.space[1] },
 
   body: { flex: 1 },

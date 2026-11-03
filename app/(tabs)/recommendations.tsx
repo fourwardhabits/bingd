@@ -1091,11 +1091,11 @@ export default function RecommendationsScreen() {
                   bingd. knows *this reader's* taste, and this wall makes no claim about
                   that at all. */}
               {onTopRated ? null : slate.data?.popularityOnly ? (
-                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
+                <Text variant="deck" tone="secondary" style={styles.lowData}>
                   Popular right now while bingd learns your taste.
                 </Text>
               ) : slate.data?.lowData ? (
-                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
+                <Text variant="deck" tone="secondary" style={styles.lowData}>
                   bingd is still learning your taste.
                 </Text>
               ) : null}
@@ -1430,7 +1430,7 @@ const styles = StyleSheet.create({
   },
   lowData: {
     paddingHorizontal: theme.layout.gutter,
-    textAlign: 'center',
+    paddingBottom: theme.space[2],
   },
   // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
   // into whatever the page offers it — the note `SegmentedTabs` carries.

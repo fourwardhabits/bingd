@@ -1490,3 +1490,15 @@ Nothing here is blocking. The questions that were — the tab structure in §2 a
 **Comparison.** Unchanged in structure. The film's name takes `title3`, as §8 of the design system always specified. Undo and Can't decide hold one line at 320pt.
 
 **The reveal.** The hierarchy is unchanged: score, title, placement, then the names, and no rank below tenth is named. The plaque now shares its edges with the button pair, whose row previously shrank to its content. The two neighbouring titles show as small posters mirrored about the comparison's hairline, so where a title landed reads as the same picture as the choice that put it there.
+
+## Visual 2.0: library and discovery (2026-11-03, proposed)
+
+**Feed.** Trending now and Activity take the serif title level. The row is unchanged in structure: one sentence, one text node, 60pt. The film's name inside that sentence takes the serif a step larger, the way a magazine sets a title in running text.
+
+**Collection.** The unranked card becomes a one-line strip with its two answers, Dismiss and Rank, so the wall starts about 90pt higher. The sentence asking the reader to "complete your Collection" is gone.
+
+**For You.** A tile's artwork carries nothing. Bookmark and dismiss hang beneath the poster, so the two 28pt squares no longer sit on top of titles. The two low-data lines take the `deck` italic.
+
+**Group Picks.** The first pick leads on a Parchment panel marked START HERE, because the sheet answers "what should we watch" and a list alone does not answer it. Its number is labelled `bingd` once. Every row still gives its one reason. An empty score is the grey disc, as on the title page.
+
+**Leaderboard.** Ranks take the serif, matching First Five.

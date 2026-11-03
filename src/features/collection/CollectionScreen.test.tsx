@@ -639,11 +639,9 @@ describe('the unranked card', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
-    expect(
-      view.getByText(
-        'Rank what you have watched to complete your Collection and improve your recommendations.',
-      ),
-    ).toBeTruthy();
+    // One line, so the wall starts higher. "Complete your Collection" was a task the
+    // reader never set.
+    expect(view.queryByText(/complete your Collection/)).toBeNull();
   });
 
   /**

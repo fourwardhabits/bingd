@@ -194,7 +194,7 @@ function LeaderboardRow({
       ]}
     >
       <Text
-        variant="callout"
+        variant="title3"
         tone={top ? 'action' : 'tertiary'}
         style={styles.rank}
         allowFontScaling={false}
@@ -326,7 +326,7 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
         standing.count,
       )}`}
     >
-      <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
+      <Text variant="title3" tone="tertiary" style={styles.rank} allowFontScaling={false}>
         {standing.rank}
       </Text>
       <View style={styles.copy}>

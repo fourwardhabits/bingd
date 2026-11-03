@@ -23,6 +23,7 @@ import {
   EmptyScoreBadge,
   EmptyState,
   FilterChip,
+  Poster,
   ScoreBadge,
   Sheet,
   SkeletonRow,
@@ -143,7 +144,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
     return (
       <Sheet visible onClose={onClose} label="Group Picks">
         <View style={styles.header}>
-          <Text variant="headline">Group Picks</Text>
+          <Text variant="title2">Group Picks</Text>
           {/**
            * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
            *
@@ -267,7 +268,7 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   return (
     <Sheet visible onClose={onClose} label="Group Picks">
       <View style={styles.header}>
-        <Text variant="headline">Group Picks</Text>
+        <Text variant="title2">Group Picks</Text>
         {/* The group, restated as names, so the list underneath has a visible subject.
             Labels rather than controls: the group is spent when the sheet closes. */}
         <View style={styles.members} accessibilityRole="text">
@@ -341,44 +342,87 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
               ) : null}
               {picks.map((pick, index) => {
                 const isSaved = savedIds.has(pick.item.mediaItemId);
+                const reason = reasonFor(pick);
+                const score =
+                  pick.communityScore == null ? (
+                    <EmptyScoreBadge size="sm" muted />
+                  ) : (
+                    <ScoreBadge score={pick.communityScore} size="sm" />
+                  );
+                const save = (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      isSaved
+                        ? `Remove ${pick.item.title} from your watchlist`
+                        : `Add ${pick.item.title} to your watchlist`
+                    }
+                    accessibilityState={{
+                      selected: isSaved,
+                      disabled: busy === pick.item.mediaItemId,
+                    }}
+                    disabled={busy === pick.item.mediaItemId}
+                    hitSlop={theme.space[2]}
+                    onPress={() => void toggleSave(pick)}
+                  >
+                    <Ionicons
+                      name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                      size={theme.layout.icon.md}
+                      color={isSaved ? theme.semantic.action : theme.text.tertiary}
+                    />
+                  </Pressable>
+                );
+                if (index === 0) {
+                  return (
+                    <Pressable
+                      key={pick.item.mediaItemId}
+                      accessibilityRole="button"
+                      accessibilityLabel={[pick.item.title, pick.item.year, reason]
+                        .filter(Boolean)
+                        .join(', ')}
+                      onPress={() => openPick(pick, 1)}
+                      style={styles.lead}
+                    >
+                      <Poster
+                        uri={posterUri(pick.item.posterPath, 'card')}
+                        title={pick.item.title}
+                        size="md"
+                      />
+                      <View style={styles.leadCopy}>
+                        <Text variant="sectionHeader" tone="action">
+                          START HERE
+                        </Text>
+                        <Text variant="title2" numberOfLines={3}>
+                          {pick.item.year
+                            ? `${pick.item.title} (${pick.item.year})`
+                            : pick.item.title}
+                        </Text>
+                        <Text variant="footnote" tone="secondary">
+                          {reason}
+                        </Text>
+                        <View style={styles.leadActions}>
+                          {score}
+                          {/* The number's name, once: it is bingd's, not the group's. */}
+                          <Text variant="footnote" tone="secondary" style={styles.leadUnit}>
+                            bingd
+                          </Text>
+                          {save}
+                        </View>
+                      </View>
+                    </Pressable>
+                  );
+                }
                 return (
                   <TitleRow
                     key={pick.item.mediaItemId}
                     title={pick.item.title}
                     year={pick.item.year}
                     posterUri={posterUri(pick.item.posterPath, 'row')}
-                    secondary={reasonFor(pick)}
+                    secondary={reason}
                     trailing={
                       <View style={styles.trailing}>
-                        {/* The bingd. community score, or the same empty circle the
-                            title page shows below its sample floor. Never the group's
-                            internal ranking. */}
-                        {pick.communityScore == null ? (
-                          <EmptyScoreBadge size="sm" />
-                        ) : (
-                          <ScoreBadge score={pick.communityScore} size="sm" />
-                        )}
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={
-                            isSaved
-                              ? `Remove ${pick.item.title} from your watchlist`
-                              : `Add ${pick.item.title} to your watchlist`
-                          }
-                          accessibilityState={{
-                            selected: isSaved,
-                            disabled: busy === pick.item.mediaItemId,
-                          }}
-                          disabled={busy === pick.item.mediaItemId}
-                          hitSlop={theme.space[2]}
-                          onPress={() => void toggleSave(pick)}
-                        >
-                          <Ionicons
-                            name={isSaved ? 'bookmark' : 'bookmark-outline'}
-                            size={theme.layout.icon.md}
-                            color={isSaved ? theme.semantic.action : theme.text.tertiary}
-                          />
-                        </Pressable>
+                        {score}
+                        {save}
                       </View>
                     }
                     divided
@@ -436,6 +480,23 @@ const styles = StyleSheet.create({
   },
   countChips: { flexDirection: 'row', gap: theme.space[2] },
   list: { maxHeight: 520 },
+  lead: {
+    flexDirection: 'row',
+    gap: theme.space[4],
+    marginHorizontal: theme.layout.gutter,
+    marginBottom: theme.space[2],
+    padding: theme.space[3],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.sunken,
+  },
+  leadCopy: { flex: 1, gap: theme.space[1], justifyContent: 'center' },
+  leadActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[2],
+    marginTop: theme.space[2],
+  },
+  leadUnit: { flex: 1 },
   quiet: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
   trailing: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
