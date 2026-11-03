@@ -6,15 +6,24 @@
 //
 // The catalogue is short on purpose. App Review Guideline 2.3.8 asks that screenshots suit a
 // 4+ rating whatever the app's own rating, so titles with violent or adult key art are left
-// out altogether rather than sorted out of view. Every title here has a poster.
+// out altogether rather than sorted out of view. Every title here has a poster. Stranger Things
+// (monster key art) and Parasite (a body on a lawn) came out on 2026-11-02 for that reason.
 //
 // Control: setScenario('established' | 'newuser'), or POST /__scenario {"name":"..."}.
 // GET /__log returns calls this mock did not recognise, which is how a new backend call on
 // a redesigned branch shows up in capture.json instead of as a quietly empty screen.
 import http from 'node:http';
 
-/** The clock every scene runs on, in the mock and in the browser. See capture/browser.mjs. */
+/**
+ * The clock every scene runs on, shared with the browser: virtual time is FIXED_NOW plus the
+ * real time since the scene's origin, in both. A timestamp the mock sends ("12 minutes ago") is
+ * therefore relative to the moment it was requested, and the label the app draws depends only on
+ * how long rendering took, not on how long the page took to load. The Feed rounds to the nearest
+ * minute, so with a clock anchored at page load, a slow scene drew "13m ago".
+ */
 export const FIXED_NOW = Date.parse('2026-10-15T18:00:00Z');
+let clockOrigin = Date.now();
+const virtualNow = () => FIXED_NOW + (Date.now() - clockOrigin);
 
 export const VIEWER = '00000000-0000-4000-8000-000000000001';
 export const VIEWER_EMAIL = 'alex@example.com';
@@ -49,7 +58,6 @@ const movies = [
   M('Knives Out', '2019-11-27', ['Comedy', 'Crime', 'Mystery'], 131, 'PG-13', '/pThyQovXQrw2m0s9x82twj48Jq4.jpg', null, 'A detective investigates the death of the patriarch of an eccentric, combative family.'),
   M('The Dark Knight', '2008-07-18', ['Action', 'Crime', 'Drama'], 152, 'PG-13', '/qJ2tW6WMUDux911r6m7haRef0WH.jpg', '/nMKdUUepR0i5zn0y1T4CsSB5chy.jpg', 'Batman raises the stakes in his war on crime, and meets a criminal mastermind who wants to watch the city burn.'),
   M('Oppenheimer', '2023-07-21', ['Drama', 'History'], 181, 'R', '/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg', '/rLb2cwF3Pazuxaj0sRXQ037tGI1.jpg', 'The story of the physicist at the centre of the development of the atomic bomb.'),
-  M('Parasite', '2019-05-30', ['Comedy', 'Thriller', 'Drama'], 133, 'R', '/7IiTTgloJzvGI1TAYymCfbfl3vT.jpg', '/TU9NIjwzjoKPwQHoHshkFcQUCG.jpg', 'A jobless family schemes its way into the household of the wealthy Parks, one hire at a time.', 'ko'),
   M('Everything Everywhere All at Once', '2022-03-25', ['Action', 'Adventure', 'Science Fiction'], 140, 'R', '/w3LxiVYdWWRvEVdn5RYq6jIqkb1.jpg', null, 'A laundromat owner discovers she must connect with parallel universe versions of herself.'),
   // Not ranked by the viewer from here on: see RANKED_MOVIE_COUNT.
   M('Barbie', '2023-07-21', ['Comedy', 'Adventure'], 114, 'PG-13', '/iuFNMS8U5cb6xfzi51Dbkovj7vM.jpg', '/ctMserH8g2SeOAnCw5gFjdQF8mo.jpg', 'Barbie and Ken leave the perfect world of Barbie Land for the real one.'),
@@ -66,11 +74,10 @@ const movies = [
 ];
 
 /** The first N of `movies` are the viewer's ranked list; the rest feed the watchlist and For You. */
-const RANKED_MOVIE_COUNT = 12;
+const RANKED_MOVIE_COUNT = 11;
 
 const S = (title, date, genres, cert, poster, backdrop, seasons, overview) => ({ title, release_date: date, genres, certification: cert, poster_path: poster, backdrop_path: backdrop, kind: 'series', overview, original_language: 'en', seasons });
 const series = [
-  S('Stranger Things', '2016-07-15', ['Drama', 'Mystery', 'Sci-Fi & Fantasy'], 'TV-14', '/49WJfeN0moxb9IPfGn8AIqMGskD.jpg', '/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', [8, 9, 8, 9], 'A boy vanishes and a small town uncovers a mystery of secret experiments.'),
   S('Severance', '2022-02-18', ['Drama', 'Mystery', 'Sci-Fi & Fantasy'], 'TV-MA', '/lFf6LLrQjYldcZItzOkGmMMigP7.jpg', null, [9, 10], 'Office workers undergo a procedure that surgically divides their memories between work and life.'),
   S('The Bear', '2022-06-23', ['Drama', 'Comedy'], 'TV-MA', '/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg', null, [8, 10, 10], 'A young chef returns to Chicago to run his family’s sandwich shop.'),
   S('Arcane', '2021-11-06', ['Animation', 'Sci-Fi & Fantasy'], 'TV-14', '/fqldf2t8ztc9aiwn3k6mlX3tvRT.jpg', null, [9, 9], 'Sisters fight on rival sides of a war between two cities.'),
@@ -80,7 +87,7 @@ const series = [
   S('Fleabag', '2016-07-21', ['Comedy', 'Drama'], 'TV-MA', '/27vEYsRKa3eAniwmoccOoluEXQ1.jpg', null, [6, 6], 'A dry-witted woman navigates life and love in London.'),
 ];
 
-const ago = (mins) => new Date(FIXED_NOW - mins * 60000).toISOString();
+const ago = (mins) => new Date(virtualNow() - mins * 60000).toISOString();
 
 const media = [];
 const add = (o) => { const row = { id: mid(media.length + 1), season_number: null, parent_id: null, parent: null, episode_count: null, provenance: 'tmdb', tmdb_id: 1000 + media.length, fetched_at: ago(0), popularity: 100 - media.length, ...o }; media.push(row); return row; };
@@ -107,8 +114,8 @@ export const titleId = (title, season = null) => byTitle(title, season).id;
 const embedMedia = (m) => ({ title: m.title, season_number: m.season_number, release_date: m.release_date, poster_path: m.poster_path, genres: m.genres, runtime_minutes: m.runtime_minutes, kind: m.kind, original_language: m.original_language, parent_id: m.parent_id, parent: m.parent, certification: m.certification, episode_count: m.episode_count });
 
 const moviesRanked = movies.slice(0, RANKED_MOVIE_COUNT).map((m) => byTitle(m.title));
-const bucketOfMovie = (i) => (i < 9 ? 'loved' : i < 11 ? 'fine' : 'not_for_me');
-const tvRanked = [['Stranger Things', 1], ['Severance', 1], ['The Bear', 2], ['Arcane', 1], ['The Office', 2], ['Friends', 1], ['Succession', 4], ['Fleabag', 2], ['Severance', 2], ['The Bear', 1], ['Stranger Things', 3], ['The Office', 3], ['Stranger Things', 2], ['The Office', 1], ['Friends', 2], ['Fleabag', 1]].map(([t, s]) => byTitle(t, s));
+const bucketOfMovie = (i) => (i < 9 ? 'loved' : i < 10 ? 'fine' : 'not_for_me');
+const tvRanked = [['Severance', 1], ['The Bear', 2], ['Arcane', 1], ['The Office', 2], ['Friends', 1], ['Succession', 4], ['Fleabag', 2], ['Severance', 2], ['The Bear', 1], ['Succession', 2], ['The Office', 3], ['Succession', 3], ['The Office', 1], ['Friends', 2], ['Fleabag', 1]].map(([t, s]) => byTitle(t, s));
 const myRankings = [
   ...moviesRanked.map((m, i) => ({ user_id: VIEWER, media_item_id: m.id, bucket: bucketOfMovie(i), position: i + 1, category: 'movies', created_at: ago(1000 + i * 700) })),
   ...tvRanked.map((m, i) => ({ user_id: VIEWER, media_item_id: m.id, bucket: i < 9 ? 'loved' : 'fine', position: i + 1, category: 'tv_seasons', created_at: ago(1500 + i * 900) })),
@@ -133,7 +140,7 @@ const feedEvents = () => [
 ];
 
 const trendingMovieIds = () => ['Spirited Away', 'Zootopia', 'Knives Out', 'Barbie', 'Avatar', 'Titanic', 'Shrek', 'Coco'].map((t) => byTitle(t).id);
-const trendingTvIds = () => ['Stranger Things', 'Severance', 'The Bear', 'Arcane', 'The Office', 'Friends'].map((t) => byTitle(t).id);
+const trendingTvIds = () => ['Severance', 'The Bear', 'Arcane', 'The Office', 'Friends', 'Fleabag'].map((t) => byTitle(t).id);
 const forYouIds = (kind) => media.filter((m) => m.kind === kind && !moviesRanked.includes(m)).map((m) => m.id);
 
 const notes = () => [
@@ -259,7 +266,7 @@ const rpc = {
   title_reviews_v2: () => [],
   title_review_count: () => 0,
   // Unranked titles only: the app drops a recommendation once the viewer has ranked it.
-  recommendations_to_me: () => (newUser() ? [] : [sent('r1', priya, byTitle('Arcane', 2), 1600, 'You will lose your mind.'), sent('r2', maya, byTitle('Shrek'), 4300, null), sent('r3', theo, byTitle('The Matrix'), 9000, 'Still holds up.'), sent('r4', sofia, byTitle('Whiplash'), 12000, null), sent('r5', jonah, byTitle('Stranger Things', 4), 15000, 'Finish it this weekend.'), sent('r6', maya, byTitle('Avatar'), 21000, null)]),
+  recommendations_to_me: () => (newUser() ? [] : [sent('r1', priya, byTitle('Arcane', 2), 1600, 'You will lose your mind.'), sent('r2', maya, byTitle('Shrek'), 4300, null), sent('r3', theo, byTitle('The Matrix'), 9000, 'Still holds up.'), sent('r4', sofia, byTitle('Whiplash'), 12000, null), sent('r5', jonah, byTitle('The Bear', 3), 15000, 'Finish it this weekend.'), sent('r6', maya, byTitle('Avatar'), 21000, null)]),
   recommendation_requests: () => [],
   recommendation_exposure_within: () => [],
   recommendation_exposure: () => [],
@@ -378,7 +385,7 @@ export function startMock(port) {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => resolve({
-      setScenario: (name) => { scenario = name; rankState.answers = 0; rankState.count = 0; rankState.placed = []; },
+      setScenario: (name, origin = Date.now()) => { scenario = name; clockOrigin = origin; rankState.answers = 0; rankState.count = 0; rankState.placed = []; },
       unhandled: () => Object.fromEntries(unhandled),
       stop: () => new Promise((done) => { server.close(done); server.closeAllConnections(); }),
     }));

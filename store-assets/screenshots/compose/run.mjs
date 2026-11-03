@@ -37,12 +37,23 @@ const onlyCanvases = csv(args.canvases);
 /** How far into the safe area a frame keeps, so the app's header clears the rounded corner. */
 const STATUS_BAR_KEEP = 10;
 
+const recordFile = join(rawDir, 'capture.json');
+const record = existsSync(recordFile) ? JSON.parse(readFileSync(recordFile, 'utf8')) : null;
+
 function statusBarPixels() {
   if (args['status-bar']) return Number(args['status-bar']);
-  const record = join(rawDir, 'capture.json');
-  if (!existsSync(record)) return 0;
-  const { device } = JSON.parse(readFileSync(record, 'utf8'));
-  return (device.safeArea.top - STATUS_BAR_KEEP) * device.deviceScaleFactor;
+  if (!record) return 0;
+  return (record.device.safeArea.top - STATUS_BAR_KEEP) * record.device.deviceScaleFactor;
+}
+
+/** Where a framed screen starts, in raw pixels: see `focus` in manifest/frames.mjs. */
+function focusPixels(frame, rawHeight) {
+  if (!frame.focus) return 0;
+  const measured = record?.scenes?.[frame.scene]?.focusTop;
+  if (measured !== undefined) {
+    return Math.round((measured - frame.focus.margin) * record.device.deviceScaleFactor);
+  }
+  return Math.round(rawHeight * frame.focus.fallback);
 }
 
 /**
@@ -53,13 +64,14 @@ async function screenImage(
   scene,
   screenWidth,
   cropTop,
-  { focus = 0, visibleHeight = 0, radius, roundBottom = false },
+  { frame = null, visibleHeight = 0, radius, roundBottom = false },
 ) {
   const file = join(rawDir, `${scene}.png`);
   if (!existsSync(file)) throw new Error(`No raw capture for scene "${scene}" in ${rawDir}`);
   const { width, height } = await sharp(file).metadata();
   const needed = Math.ceil((visibleHeight * width) / screenWidth);
-  const top = Math.max(cropTop, Math.min(Math.round(height * focus), height - needed));
+  const wanted = frame ? focusPixels(frame, height) : 0;
+  const top = Math.max(cropTop, Math.min(wanted, height - needed));
   if (height - top < needed) {
     throw new Error(`${scene} is too short to fill the device: ${height - top} < ${needed}`);
   }
@@ -151,7 +163,7 @@ async function main() {
       if (frame.scene) {
         const { bezel, screenRadius, screenWidth } = deviceMetrics(canvas.device.width);
         images.main = await screenImage(frame.scene, screenWidth, cropTop, {
-          focus: frame.focus,
+          frame,
           visibleHeight: canvas.height - canvas.device.top - bezel,
           radius: screenRadius,
         });
@@ -175,6 +187,9 @@ async function main() {
         viewport: { width: canvas.width, height: canvas.height },
         deviceScaleFactor: 1,
       });
+      // Generous, like capture: a frame carries megabytes of inline image, and with GPU raster
+      // off a 1320x2868 screenshot on a shared machine can take longer than the 30s default.
+      page.setDefaultTimeout(180000);
       await page.setContent(html, { waitUntil: 'load' });
 
       // A failed face would be swapped silently by the browser. This is the stop for that.

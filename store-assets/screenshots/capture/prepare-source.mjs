@@ -196,5 +196,16 @@ export function prepareSource({ source, workdir, nodeModules, mockPort }) {
 
   warnOnLockfileDrift(nodeModules, source);
   symlinkSync(nodeModules, join(workdir, 'node_modules'), 'junction');
+  // What --attach records as the source: what was built, not what the ref points at later.
+  writeFileSync(join(workdir, 'source.json'), `${JSON.stringify(source, null, 2)}\n`);
   return { patches };
+}
+
+/** The source a prepared workdir was built from. */
+export function servedSource(workdir) {
+  const file = join(workdir, 'source.json');
+  if (!existsSync(file)) {
+    throw new Error(`${workdir} has no source.json. Start it with --serve before using --attach.`);
+  }
+  return JSON.parse(readFileSync(file, 'utf8'));
 }

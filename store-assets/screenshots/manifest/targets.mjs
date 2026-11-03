@@ -47,7 +47,8 @@ export const canvases = {
     viewedAt: 390,
     type: { eyebrow: 54, headline: 76, sub: 38 },
     text: { top: 56, gap: 14 },
-    device: { width: 620, top: 440 },
+    // 580, not 620: at 620 the Visual 2.0 score sheet's buttons fell off the foot of the canvas.
+    device: { width: 580, top: 440 },
   },
   'social-link': {
     width: 1200,

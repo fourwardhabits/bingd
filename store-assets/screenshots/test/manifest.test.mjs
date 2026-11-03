@@ -99,6 +99,16 @@ test('every target resolves to a canvas or raw scenes it can actually build', ()
   }
 });
 
+test('a frame with focus can be framed from a capture record and without one', () => {
+  for (const [id, frame] of Object.entries(frames)) {
+    if (!frame.focus) continue;
+    assert.ok(Number.isFinite(frame.focus.margin), `${id} focus.margin`);
+    assert.ok(frame.focus.fallback > 0 && frame.focus.fallback < 1, `${id} focus.fallback`);
+    const scene = scenes.find((s) => s.id === frame.scene);
+    assert.ok(scene.focusOn, `${id} focuses on ${frame.scene}, which records no focusOn edge`);
+  }
+});
+
 test('the store sizes Apple and Google document are all present', () => {
   const sizes = new Set(targets.map((t) => `${t.surface} ${t.width}x${t.height}`));
   for (const size of [

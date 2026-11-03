@@ -26,6 +26,7 @@ const args = parseArgs(process.argv.slice(2), {
   targets: 'value',
   frames: 'value',
   partial: 'flag',
+  'status-bar': 'value',
 });
 
 const composedDir = resolve(args.composed ?? join(OUT, 'composed'));
@@ -47,11 +48,14 @@ function encode(image, target) {
 /**
  * The site shows the bare screen with no status bar, like the shots web/shots.mjs writes.
  * The blank safe area goes from the top, and the rest of the height from below the tab bar.
+ * A native capture has no capture.json and a real status bar, so `--status-bar` says how many
+ * pixels to take off, the same flag compose takes.
  */
 function websiteCrop(metadata, target, record) {
   const scale = metadata.width / target.width;
   const height = Math.round(target.height * scale);
-  const top = record ? record.device.safeArea.top * record.device.deviceScaleFactor : 0;
+  const fromRecord = record ? record.device.safeArea.top * record.device.deviceScaleFactor : 0;
+  const top = args['status-bar'] ? Number(args['status-bar']) : fromRecord;
   if (top + height > metadata.height) {
     throw new Error(`Raw image too short for ${target.id}: ${metadata.height} < ${top + height}`);
   }

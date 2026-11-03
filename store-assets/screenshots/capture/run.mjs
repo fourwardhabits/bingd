@@ -16,7 +16,7 @@ import { scenes as allScenes } from '../manifest/scenes.mjs';
 import { DEVICE, shootScenes } from './browser.mjs';
 import { startExpo, stopExpo, waitForBundle } from './expo-server.mjs';
 import { FIXED_NOW, startMock } from './mock/backend.mjs';
-import { prepareSource, resolveSource } from './prepare-source.mjs';
+import { prepareSource, resolveSource, servedSource } from './prepare-source.mjs';
 
 const args = parseArgs(process.argv.slice(2), {
   source: 'value',
@@ -64,7 +64,18 @@ async function main() {
   }
 
   if (!args.source) throw new Error('--source <git ref or folder> is required');
-  const source = resolveSource(args.source);
+  let source = resolveSource(args.source);
+  if (args.attach) {
+    // A branch can move while a server runs. Record what is being served, and say so.
+    const served = servedSource(workdir);
+    if (served.sha !== source.sha) {
+      console.warn(
+        `warning: ${args.source} is now ${source.sha?.slice(0, 7)}, but this server was built from ` +
+          `${served.sha?.slice(0, 7)}. Capturing what is served; --serve again to rebuild.`,
+      );
+    }
+    source = served;
+  }
 
   const selected = csv(args.scenes);
   const scenes = selected

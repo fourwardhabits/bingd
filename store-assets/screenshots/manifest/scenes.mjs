@@ -8,7 +8,13 @@ import { titleId } from '../capture/mock/backend.mjs';
  * shoot. Each scene waits for text that only that screen shows, so when a redesign moves
  * or renames something the scene fails by name instead of capturing the wrong screen.
  * Keep the strings in step with the app: they are its visible copy, not test ids.
+ *
+ * `focusOn` is a selector whose top edge capture records in capture.json, so compose can
+ * frame a scene around it. The shared Sheet renders `sheet-body`, which is a component hook
+ * rather than copy, and it held through the Visual 2.0 redesign where a fixed fraction of
+ * the screen did not: the score sheet grew taller and the old crop cut through its handle.
  */
+const SHEET = '[data-testid="sheet-body"]';
 
 const FIRST_FIVE = ['The Dark Knight', 'Spirited Away', 'Barbie', 'Inception', 'Interstellar'];
 
@@ -45,6 +51,7 @@ export const scenes = [
   {
     id: 'compare',
     url: `/title/${titleId(RANK_SUBJECT)}`,
+    focusOn: SHEET,
     run: async (s) => {
       await openComparison(s);
     },
@@ -52,6 +59,7 @@ export const scenes = [
   {
     id: 'reveal',
     url: `/title/${titleId(RANK_SUBJECT)}`,
+    focusOn: SHEET,
     run: async (s) => {
       await openComparison(s);
       for (let i = 0; i < 3; i += 1) {

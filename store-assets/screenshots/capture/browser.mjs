@@ -73,10 +73,11 @@ const session = {
  * still advances, because its timing reads Date.now() and a frozen clock would hang every
  * animation. `Math.random` is seeded so anything shuffled comes out the same each run.
  */
-function seedBrowser({ fixedNow, seed, auth, stage, phase, viewer, prefs }) {
+function seedBrowser({ fixedNow, origin, seed, auth, stage, phase, viewer, prefs }) {
   const RealDate = Date;
   const realNow = RealDate.now.bind(RealDate);
-  const offset = fixedNow - realNow();
+  // The same mapping the mock uses: see FIXED_NOW in capture/mock/backend.mjs.
+  const offset = fixedNow - origin;
   class FixedDate extends RealDate {
     constructor(...args) {
       if (args.length === 0) super(realNow() + offset);
@@ -128,10 +129,11 @@ function artworkOnScreen() {
 
 /**
  * Waits until no poster is in flight and everything in view has painted. A tile captured
- * earlier shows a placeholder, and a placeholder in a store frame is a defect.
+ * earlier shows a placeholder, and a placeholder in a store frame is a defect. Ninety seconds,
+ * because a poster served from the local cache once took longer than 45 on a loaded machine.
  */
 async function waitForArtwork(page, tracker) {
-  const deadline = Date.now() + 45000;
+  const deadline = Date.now() + 90000;
   let waiting = [];
   while (Date.now() < deadline) {
     waiting = await page.evaluate(artworkOnScreen);
@@ -141,16 +143,17 @@ async function waitForArtwork(page, tracker) {
     await page.waitForTimeout(250);
   }
   const stuck = [...tracker.inflight, ...waiting].slice(0, 3).join(', ');
-  throw new Error(`Artwork still not on screen after 45s: ${stuck}`);
+  throw new Error(`Artwork still not on screen after 90s: ${stuck}`);
 }
 
 /**
  * Takes the shot only once two frames in a row are identical. "Loaded" is not "painted":
  * expo-image fades each poster in, and under load a shot taken on any fixed delay catches
- * them half transparent. A screen that never holds still is an error, not a shot.
+ * them half transparent. A screen that never holds still is an error, not a shot. The window
+ * is a minute because on a loaded machine one CPU-rastered screenshot can take several seconds.
  */
 async function stillShot(page) {
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + 60000;
   let last = await page.screenshot({ timeout: 120000 });
   while (Date.now() < deadline) {
     await page.waitForTimeout(350);
@@ -158,7 +161,7 @@ async function stillShot(page) {
     if (next.equals(last)) return next;
     last = next;
   }
-  throw new Error('The screen was still changing after 30s');
+  throw new Error('The screen was still changing after 60s');
 }
 
 /** The small vocabulary scenes are written in. */
@@ -187,7 +190,8 @@ function sceneTools(page) {
 }
 
 async function shootScene(browser, scene, { baseUrl, mock, outDir, fixedSeed }) {
-  mock.setScenario(scene.scenario ?? 'established');
+  const origin = Date.now();
+  mock.setScenario(scene.scenario ?? 'established', origin);
   const context = await browser.newContext({
     viewport: DEVICE.viewport,
     deviceScaleFactor: DEVICE.deviceScaleFactor,
@@ -236,6 +240,7 @@ async function shootScene(browser, scene, { baseUrl, mock, outDir, fixedSeed }) 
   const signedIn = scene.signedIn !== false;
   await page.addInitScript(seedBrowser, {
     fixedNow: FIXED_NOW,
+    origin,
     seed: fixedSeed,
     auth: signedIn ? session : null,
     stage: scene.stage === undefined ? 'done' : scene.stage,
@@ -253,6 +258,12 @@ async function shootScene(browser, scene, { baseUrl, mock, outDir, fixedSeed }) 
       throw new Error(`Artwork failed to load: ${[...tracker.failedArt].slice(0, 3).join('; ')}`);
     }
     const buffer = await stillShot(page);
+    let focusTop;
+    if (scene.focusOn) {
+      const box = await page.locator(scene.focusOn).filter({ visible: true }).last().boundingBox();
+      if (!box) throw new Error(`focusOn ${scene.focusOn} is not on screen`);
+      focusTop = Math.round(box.y);
+    }
     const file = `${scene.id}.png`;
     writeFileSync(join(outDir, file), buffer);
     const { width, height } = await sharp(buffer).metadata();
@@ -261,6 +272,7 @@ async function shootScene(browser, scene, { baseUrl, mock, outDir, fixedSeed }) 
       width,
       height,
       sha256: createHash('sha256').update(buffer).digest('hex'),
+      ...(focusTop === undefined ? {} : { focusTop }),
       // Sorted: posters finish in network order, and the record should not change with it.
       artwork: Object.fromEntries(Object.entries(tracker.art).sort()),
       blocked: [...tracker.blocked],
