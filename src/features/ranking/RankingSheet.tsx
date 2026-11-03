@@ -1590,6 +1590,13 @@ function Reveal({
   const profile = useCurrentProfile();
   const readableCategory = category === 'tv_seasons' ? 'TV' : 'Movies';
   const shown = useCountUp(score, bucket);
+  /**
+   * A short screen or large text gets the reveal's older, smaller geometry: the title a
+   * step down and the neighbours as names only. The sheet does not scroll, so on a 568pt
+   * phone at 130% text a long title and two posters could push Done off the bottom.
+   */
+  const { height: screenHeight, fontScale } = useWindowDimensions();
+  const roomy = screenHeight >= 700 && fontScale <= 1.15;
 
   // The ranked list for this category, which the collection already caches under the
   // key `apply` invalidated when the title was placed — so this resolves to the list
@@ -1842,7 +1849,7 @@ function Reveal({
        * air, then where it landed.
        */}
       <Animated.View style={[styles.identity, entranceStyle]}>
-        <Text variant="title1" style={styles.centre}>
+        <Text variant={roomy ? 'title1' : 'title2'} style={styles.centre}>
           {displayTitle}
         </Text>
 
@@ -1913,21 +1920,25 @@ function Reveal({
                   {higher.name}
                 </Text>
               </View>
-              <Poster
-                uri={posterUri(higher.posterPath, 'row')}
-                title={higher.name}
-                size="xs"
-              />
+              {roomy ? (
+                <Poster
+                  uri={posterUri(higher.posterPath, 'row')}
+                  title={higher.name}
+                  size="xs"
+                />
+              ) : null}
             </View>
           ) : null}
           {higher && lower ? <View style={styles.anchorRule} /> : null}
           {lower ? (
             <View style={styles.anchor} accessibilityElementsHidden>
-              <Poster
-                uri={posterUri(lower.posterPath, 'row')}
-                title={lower.name}
-                size="xs"
-              />
+              {roomy ? (
+                <Poster
+                  uri={posterUri(lower.posterPath, 'row')}
+                  title={lower.name}
+                  size="xs"
+                />
+              ) : null}
               <View style={styles.anchorCopy}>
                 <Text variant="caption" tone="tertiary">
                   Above

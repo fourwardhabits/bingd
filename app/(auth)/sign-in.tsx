@@ -260,6 +260,9 @@ export default function SignInScreen() {
       </View>
       </View>
       </KeyboardScreen>
+      {/* Maroon stays behind the clock however far the form scrolls, so the light status
+          bar is never left over Paper. */}
+      <View pointerEvents="none" style={[styles.statusBand, { height: insets.top }]} />
     </Screen>
   );
 }
@@ -280,6 +283,13 @@ const styles = StyleSheet.create({
   introShort: { paddingBottom: theme.space[4], gap: theme.space[2] },
   // The masthead and form scroll as one, so a focused field can always clear the keyboard.
   page: { flexGrow: 1 },
+  statusBand: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.semantic.action,
+  },
   panel: {
     gap: theme.space[6],
     paddingHorizontal: theme.layout.gutter,
