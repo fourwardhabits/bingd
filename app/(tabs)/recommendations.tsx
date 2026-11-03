@@ -266,12 +266,6 @@ export default function RecommendationsScreen() {
     }, [sentOnly, topMedium, groupPicking, reviewingRequests]),
   );
 
-  /** What the selector shows. See `topMedium`. */
-  const mode: ForYouMode = topMedium
-    ? topMedium === 'movies'
-      ? 'topMovies'
-      : 'topTv'
-    : medium;
   /** Whether the wall is the community's order rather than this reader's slate. */
   const onTopRated = topMedium !== null;
 
@@ -732,37 +726,6 @@ export default function RecommendationsScreen() {
       <AppHeader />
 
       {/**
-       * **Movies and TV shows** — one selector, in the place Collection leads with the
-       * same one.
-       *
-       * "TV shows" rather than "TV seasons" because this wall holds series: TMDB answers
-       * "similar" about a show and never about one of its seasons. Collection keeps its
-       * own two options and its own label — see `MediumSelector`.
-       *
-       * **People was a third option here and has left** (founder §A16, 2026-09-08). It is
-       * a mode of the Feed tab now, for the reason this file's header gives: a
-       * recommendations screen is not where a new account builds a social graph. What that
-       * leaves behind is a two-option dropdown, which is what this control was before
-       * 2026-08-26 and is again.
-       *
-       * A dropdown and not a tab row, which is the 2026-09-07 decision and is unaffected:
-       * on a device the tab row drew differently here than on Collection, and the two
-       * screens are meant to lead with the same control. It is also the only one of the two
-       * that scales — a fourth tab is a wrapped row where a fourth sheet row is a fourth
-       * sheet row, which is exactly the bet the two Top Rated entries below just called in.
-       *
-       * **Top Rated Movies and Top Rated TV are entries here rather than a chip** (founder,
-       * 2026-09-09). This control answers "what am I looking at", and the community's order
-       * is a different answer to that question, not a narrowing of the reader's own — every
-       * chip in the row below narrows a wall that is already showing, and this replaces it.
-       *
-       * `Top Rated TV` says seasons even though the personalised entry above it says shows,
-       * and the two are right for their own walls: a season is the only television unit
-       * anybody can rate, so it is the only one that can be rated highest. `MediumSelector`
-       * draws the four in one sheet, in this order, so the two personalised walls stay
-       * where a returning reader last found them.
-       */}
-      {/**
        * **One row: which wall on the left, which medium on the right** (founder, Visual 2.1,
        * 2026-11-03: "compact, contextual controls; restrained navigation").
        *
@@ -861,13 +824,13 @@ export default function RecommendationsScreen() {
                 icon={sentOnly ? 'mail-open' : 'mail-outline'}
                 label={
                   unopened > 0
-                    ? `Sent to you · ${unopened}${atLeast ? '+' : ''}`
-                    : 'Sent to you'
+                    ? `Sent to You · ${unopened}${atLeast ? '+' : ''}`
+                    : 'Sent to You'
                 }
                 accessibilityLabel={
                   unopened > 0
-                    ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-                    : 'Sent to you'
+                    ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                    : 'Sent to You'
                 }
                 selected={sentOnly}
                 // A social feature, not a filter — see the note above `emphasis` on
@@ -1099,31 +1062,11 @@ export default function RecommendationsScreen() {
                 />
               }
             >
-              {/**
-               * **What this wall is, when it is not yet the reader's** (pre-GTM audit,
-               * 2026-09-07).
-               *
-               * `lowData` is the hook's own word for a slate scored with no resolved
-               * anchors — a taste too thin to quote a title from. A stranger who has
-               * ranked two films sees exactly this wall, and without a word for it the
-               * screen called For You is presenting last week's trending page as
-               * personalisation. One quiet line in the footnote register the exhausted
-               * notice already uses, above the artwork, and gone the moment an anchor
-               * resolves. Not a header, not a card, and nothing about the slate moved.
-               *
-               * **Two sentences, because "popular" is a claim** (Codex review of #122).
-               * The pool takes `socialCandidates` as well as the trending fallback, so a
-               * reader with no anchor can be looking at titles the people they follow
-               * loved. `popularityOnly` is derived from the wall actually drawn: only
-               * when no anchor resolved *and* nothing social is on it does the line say
-               * the wall is popular; a thin taste with social titles on the wall gets
-               * the narrower truth, that bingd. is still learning, and no claim about
-               * where the titles came from.
-               */}
-              {/* Neither line belongs on Top Rated: both are statements about how well
-                  bingd. knows *this reader's* taste, and this wall makes no claim about
-                  that at all. */}
-              {/* No explanatory line under the header (founder revision brief, 2026-11-03). */}
+              {/* No line above the wall about how well bingd. knows the reader's taste
+                  (founder revision brief, 2026-11-03: nothing descriptive under the
+                  header). Until 2026-11-03 a thin taste printed "Popular right now while
+                  bingd learns your taste" or "bingd is still learning your taste" here; each
+                  tile's long press still says why that title is on the wall. */}
               <PosterGrid
                 tiles={items.map((item) => ({
                   id: item.mediaItemId,
@@ -1267,13 +1210,14 @@ export default function RecommendationsScreen() {
  * Collection's is `'movies' | 'tv_seasons'`, because the units genuinely differ: TMDB
  * answers "similar" about a *show* and never about one of its seasons, so the
  * personalised wall holds series. (Its label read "TV shows" for that reason until 2026-09-14,
- * when all four entries were renamed to say which list they are; see `FOR_YOU_MODES`.)
+ * when all four entries were renamed to say which list they are, and since Visual 2.1
+ * the four are a wall selector and a medium switch side by side.)
  *
  * **The two television entries hold different units, and only one of them says so.**
  * Nothing in this product has ever rated a whole series — `rankable_category` maps
  * `season -> tv_seasons` and refuses a series outright (PRD §10) — so the highest-rated
  * television is a *season*, while the personalised wall beside it is *shows*. The labels
- * are the founder's, given as a list of exactly four, and `Top Rated TV` is one of them:
+ * are the founder's, and `Top Rated` with `TV Shows` is one of the four combinations:
  * a reader meets the distinction in the rows themselves, which read `The Last of Us, S1`,
  * rather than in a label long enough to wrap. Recorded here because the two words are one
  * apart and mean different things.
@@ -1283,26 +1227,6 @@ export default function RecommendationsScreen() {
  * lineage — it is titles, which is what this screen exclusively is.
  */
 export type ForYouMode = Medium | 'topMovies' | 'topTv';
-
-/**
- * **Recommended Movies · Recommended TV · Top Rated Movies · Top Rated TV** (founder
- * physical QA, 2026-09-14).
- *
- * The personalised pair read `Movies` and `TV shows`, which stopped being unambiguous once
- * `Top Rated Movies` sat beneath `Movies`: both are movies, and only one label said what kind
- * of list it was. Every entry now names its list, and the words that differ — Recommended,
- * Top Rated — are the ones a reader is choosing between. The tab and screen are still For
- * You. The ids, and everything keyed on them, are unchanged: this is words, not logic.
- *
- * A dropdown rather than a horizontal row, so nothing needs to scroll; `MediumSelector` lets
- * the trigger's label wrap rather than push its chevron off a narrow screen.
- */
-const FOR_YOU_MODES: readonly MediumSelectorOption<ForYouMode>[] = [
-  { id: 'movies', label: 'Recommended Movies' },
-  { id: 'tv', label: 'Recommended TV Shows' },
-  { id: 'topMovies', label: 'Top Rated Movies' },
-  { id: 'topTv', label: 'Top Rated TV Shows' },
-];
 
 /** The wall half of the mode, in the bottom sheet. Title Case (founder, Visual 2.1). */
 const FOR_YOU_WALLS: readonly MediumSelectorOption<'recommended' | 'top'>[] = [
@@ -1479,10 +1403,6 @@ const styles = StyleSheet.create({
   },
   headerWall: { flexShrink: 0 },
   headerMedium: { flexShrink: 0, marginLeft: 'auto' },
-  lowData: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[2],
-  },
   // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
   // into whatever the page offers it — the note `SegmentedTabs` carries.
   filterScroller: { flexGrow: 0 },

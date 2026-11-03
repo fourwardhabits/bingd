@@ -318,7 +318,7 @@ describe('what this person likes', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Movies: 25')).toBeTruthy());
-    expect(view.getByLabelText('TV: 3')).toBeTruthy();
+    expect(view.getByLabelText('TV Shows: 3')).toBeTruthy();
   });
 
   it('falls back to the ranked count rather than failing the profile', async () => {

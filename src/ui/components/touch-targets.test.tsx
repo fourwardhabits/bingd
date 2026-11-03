@@ -4,6 +4,7 @@ import { StyleSheet } from 'react-native';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
+import { CompactSwitch } from './CompactSwitch';
 import { FilterChip } from './FilterChip';
 import { IconToggle } from './IconToggle';
 import { MediumSelector } from './MediumSelector';
@@ -153,6 +154,38 @@ describe('IconToggle', () => {
     expect(wide(cell.width, last!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
     // The middle one does not, and takes nothing from either neighbour to try.
     expect(wide(cell.width, middle!.props.hitSlop)).toBe(cell.width);
+  });
+});
+
+/**
+ * **For You's Movies | TV Shows switch** (Visual 2.1, 2026-11-03). Each half is drawn 28pt
+ * inside a 32pt outline and reaches the target vertically through slop; its width is its
+ * word plus `space[2]` either side, past 44 for both words. The halves are 2pt apart, so no
+ * sideways slop: a press between them belongs to neither rather than to the wrong one.
+ */
+describe('CompactSwitch', () => {
+  it('answers 44 tall on each half, with no slop into its neighbour', async () => {
+    const view = await renderWithProviders(
+      <CompactSwitch
+        accessibilityLabel="Medium"
+        options={[
+          { id: 'movies', label: 'Movies' },
+          { id: 'tv', label: 'TV Shows' },
+        ]}
+        value="movies"
+        onChange={() => {}}
+      />,
+    );
+
+    const halves = view.getAllByRole('radio');
+    expect(halves).toHaveLength(2);
+    for (const half of halves) {
+      const drawn = StyleSheet.flatten(half.props.style);
+      expect(tall(drawn.height, half.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+      expect(half.props.hitSlop.left).toBe(0);
+      expect(half.props.hitSlop.right).toBe(0);
+      expect(drawn.paddingHorizontal).toBe(theme.space[2]);
+    }
   });
 });
 

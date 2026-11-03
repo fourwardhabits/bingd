@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -133,13 +133,29 @@ const open = async () => {
   return view;
 };
 
-const choose = async (view: Awaited<ReturnType<typeof open>>, option: string) => {
-  await fireEvent.press(view.getByLabelText(/^Showing /));
-  await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${option}`) }));
+/**
+ * The wall and the medium are two controls since Visual 2.1 (founder, 2026-11-03): the
+ * bottom-sheet selector on the left (Recommended / Top Rated) and the Movies | TV Shows
+ * switch on the right. `choose` takes the four walls by their full names and works both.
+ */
+const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
+  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV Shows)$/.exec(category) ?? [];
+  if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
+  if (!showing(view).startsWith(`Showing ${wall} `)) {
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${wall}`) }));
+  }
+  await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: medium }));
 };
 
-const showing = (view: Awaited<ReturnType<typeof open>>) =>
-  view.getByLabelText(/^Showing /).props.accessibilityLabel;
+/** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
+const showing = (view: Awaited<ReturnType<typeof open>>) => {
+  const wall = view.getByLabelText(/^Showing /).props.accessibilityLabel;
+  const medium = within(view.getByLabelText('Medium'))
+    .getAllByRole('radio')
+    .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
+  return `${wall} ${medium}`;
+};
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -170,7 +186,7 @@ describe('choosing Top Rated', () => {
     expect(tiles).toEqual(['The Highest, 2014', 'The Second, 2014', 'The Third, 2014']);
   });
 
-  it('asks for movies on Top Rated Movies and for seasons on Top Rated TV', async () => {
+  it('asks for movies on Top Rated Movies and for seasons on Top Rated TV Shows', async () => {
     const view = await open();
 
     await choose(view, 'Top Rated Movies');
@@ -181,7 +197,7 @@ describe('choosing Top Rated', () => {
     );
 
     mockRpc.mockClear();
-    await choose(view, 'Top Rated TV');
+    await choose(view, 'Top Rated TV Shows');
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
         'top_rated_titles',
@@ -190,12 +206,12 @@ describe('choosing Top Rated', () => {
     );
     // Two walls, two queries, and the movies one is not re-asked: they are separate
     // cache entries, which is what makes moving between them free.
-    expect(showing(view)).toBe('Showing Top Rated TV');
+    expect(showing(view)).toBe('Showing Top Rated TV Shows');
   });
 
   it('takes Sent to you and Group Picks away, and keeps Filters', async () => {
     const view = await open();
-    expect(view.getByLabelText(/^Sent to you/)).toBeTruthy();
+    expect(view.getByLabelText(/^Sent to You/)).toBeTruthy();
     expect(view.getByText('Group Picks')).toBeTruthy();
 
     await choose(view, 'Top Rated Movies');
@@ -203,7 +219,7 @@ describe('choosing Top Rated', () => {
 
     // Both are statements about particular people, and this wall's whole claim is that
     // the order belongs to everybody.
-    expect(view.queryByLabelText(/^Sent to you/)).toBeNull();
+    expect(view.queryByLabelText(/^Sent to You/)).toBeNull();
     expect(view.queryByText('Group Picks')).toBeNull();
     // Filters narrow *which titles*, which is a question this wall can answer.
     expect(view.getByText('Filters')).toBeTruthy();
@@ -211,7 +227,7 @@ describe('choosing Top Rated', () => {
 
   it('leaves Sent to you off when it comes back, rather than under the wrong wall', async () => {
     const view = await open();
-    await fireEvent.press(view.getByLabelText(/^Sent to you/));
+    await fireEvent.press(view.getByLabelText(/^Sent to You/));
 
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('The Highest, 2014')).toBeTruthy());
@@ -219,8 +235,8 @@ describe('choosing Top Rated', () => {
 
     // It was on when Top Rated was chosen. Restoring it would draw a list of things
     // people sent this reader under a control they last pressed to leave that list.
-    await waitFor(() => expect(view.getByLabelText(/^Sent to you/)).toBeTruthy());
-    expect(view.getByLabelText(/^Sent to you/).props.accessibilityState?.selected).toBeFalsy();
+    await waitFor(() => expect(view.getByLabelText(/^Sent to You/)).toBeTruthy());
+    expect(view.getByLabelText(/^Sent to You/).props.accessibilityState?.selected).toBeFalsy();
   });
 
   it('says nobody has rated enough yet when the wall is simply empty', async () => {

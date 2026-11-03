@@ -127,12 +127,10 @@ const NEXT_PAGE_THRESHOLD = 800;
 const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
 
 /**
- * Three places, named in words (founder, Growth UX sprint, 2026-11-02).
- *
- * These were three unlabelled glyphs in the heading row, and People and Leaderboard are
- * where somebody finds the friends who make the rest of the app worth opening. The left
- * tab is still what a launch opens on. `Activity` rather than `Feed`, because inside the
- * Feed tab that word would name nothing.
+ * Three places, drawn as main's icons opposite the heading (founder revision brief,
+ * 2026-11-03), after a labelled tab row cost the screen a second row. The words are each
+ * cell's accessible name. The left cell is still what a launch opens on, and it is
+ * `Activity` rather than `Feed`, because inside the Feed tab that word would name nothing.
  */
 const FEED_MODES = [
   { value: 'feed', icon: 'newspaper-outline', label: 'Activity' },

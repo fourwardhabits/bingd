@@ -16,12 +16,13 @@ export type CompactSwitchProps<T extends string> = {
 /**
  * Two or three short choices in one quiet outline (founder revision brief, 2026-11-03).
  *
- * For You's `Movies | TV Shows` and `Recommended | Top Rated`. Deliberately lighter than
- * `SegmentedTabs` and the filled controls: a hairline box with 8pt corners (no pills), the
- * chosen half on Parchment with Ink text, the other in secondary text, all at footnote
- * size so both switches share one row on a 390pt phone. The visible box is 32pt; each
- * half's press reaches 44pt through `hitSlop`, which works here because the switch is not
- * inside another press.
+ * For You's `Movies | TV Shows`, beside the Recommended / Top Rated selector (Visual 2.1).
+ * Deliberately lighter than `SegmentedTabs` and the filled controls: a hairline box with
+ * 8pt corners (no pills), the chosen half on Parchment with Ink text, the other in
+ * secondary text, at footnote size so it shares the selector's row on a 360pt phone. The
+ * visible box is 32pt; each half's press reaches 44pt tall through `hitSlop`, which works
+ * here because the switch is not inside another press. Each half is wider than 44pt by its
+ * word alone.
  */
 export function CompactSwitch<T extends string>({
   accessibilityLabel,
@@ -42,7 +43,9 @@ export function CompactSwitch<T extends string>({
             onPress={() => {
               if (!selected) onChange(option.id);
             }}
-            hitSlop={{ top: 6, bottom: 6 }}
+            // 28 + 8 + 8 = 44 tall. None sideways: the halves are 2pt apart, and a side slop
+            // would take the neighbour's own edge (siblings hit-test last-first).
+            hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
             style={({ pressed }) => [
               styles.option,
               selected && styles.selected,
