@@ -61,8 +61,13 @@ const progress = (who, id) =>
 const readers = async (who, id) => ({
   view: (await listView(who, id)) !== null,
   items: (await itemsPage(who, id)).length > 0,
-  byId: (await byId(who, id)).length > 0,
-  itemsByList: (await itemsByList(who, id)).length > 0,
+  // Signed-in readers since 20261024000400. The public list page uses the two above.
+  ...(who === null
+    ? {}
+    : {
+        byId: (await byId(who, id)).length > 0,
+        itemsByList: (await itemsByList(who, id)).length > 0,
+      }),
 });
 
 const create = (who, { title = 'A list', visibility = 'private', order_style = 'unranked', description = null, first = null } = {}) =>
@@ -198,6 +203,16 @@ beforeEach(async () => {
 // §F — the matrix
 // ---------------------------------------------------------------------------
 
+describe('the daily ceiling', () => {
+  it('cannot be stepped around with a null operation id', async () => {
+    // The ceiling counts the ledger, and a null id writes nothing to it (audit m-12).
+    const error = await t.asUser(stranger, () =>
+      t.errorFrom(`select create_list(null, 'No ledger row', null, 'private', 'unranked', null)`),
+    );
+    assert.equal(error?.code, '22023');
+  });
+});
+
 describe('the readability matrix', () => {
   it('private is owner only, through every reader', async () => {
     const id = await createOk(owner, { visibility: 'private' });
@@ -210,13 +225,14 @@ describe('the readability matrix', () => {
       itemsByList: true,
     });
 
-    for (const who of [follower, stranger, null]) {
+    for (const who of [follower, stranger]) {
       assert.deepEqual(
         await readers(who, id),
         { view: false, items: false, byId: false, itemsByList: false },
-        `a private list answered ${who ?? 'anon'}`,
+        `a private list answered ${who}`,
       );
     }
+    assert.deepEqual(await readers(null, id), { view: false, items: false });
   });
 
   it('link-only is readable by anyone holding the id, public profile or not', async () => {
@@ -225,13 +241,14 @@ describe('the readability matrix', () => {
 
     for (const profile of ['public', 'private']) {
       await setVisibility(owner, profile);
-      for (const who of [owner, follower, stranger, null]) {
+      for (const who of [owner, follower, stranger]) {
         assert.deepEqual(
           await readers(who, id),
           { view: true, items: true, byId: true, itemsByList: true },
-          `a link list (${profile} profile) refused ${who ?? 'anon'}`,
+          `a link list (${profile} profile) refused ${who}`,
         );
       }
+      assert.deepEqual(await readers(null, id), { view: true, items: true });
     }
   });
 
@@ -379,16 +396,9 @@ describe('the link exception is bounded', () => {
       'a stranger could see something other than the public list',
     );
 
-    // Anon sees the public list and only the public list. That is the policy working,
-    // not a hole: a public list on a public profile is exactly what the web renders.
-    const asAnon = await t.asAnon(async () =>
-      (await t.sql(`select visibility from lists`)).rows,
-    );
-    assert.deepEqual(
-      asAnon.map((r) => r.visibility),
-      ['public'],
-      'anon could enumerate something other than the public list',
-    );
+    // Anon holds no table at all. A public list is reached by its id, through list_view.
+    const asAnon = await t.asAnon(() => t.errorFrom(`select visibility from lists`));
+    assert.equal(asAnon?.code, '42501', 'anon could enumerate lists');
   });
 
   it('my_lists answers only for the caller, and cannot be pointed anywhere else', async () => {

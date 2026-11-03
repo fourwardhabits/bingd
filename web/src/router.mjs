@@ -439,25 +439,24 @@ export function listDisplay(row) {
 // Why this is allowed to read the database at all
 // ---------------------------------------------------------------------------
 //
-// Because it is not a new read path. Two policies that already exist decide
-// everything here, and both were written for the app rather than for this page:
+// Because the anon key can read exactly two things here, and neither is a list of
+// people (20261024000400):
 //
-//   - `media_items_read` is `using (true)`. The film catalogue is TMDB data with no
-//     person attached to it, and it has been world readable since 20260813000400.
-//   - `profiles_read` is `using (can_i_view(id))`, and `can_view_profile` answers a
+//   - the columns of `media_items` this page asks for. The film catalogue is TMDB data
+//     with no person attached to it.
+//   - `public_profile_card`, one account by exact handle. `can_view_profile` answers a
 //     *null viewer* with `visibility = 'public' and status = 'active'` and nothing
-//     else. A private account, a suspended account and a handle that does not exist
+//     else, so a private account, a suspended account and a handle that does not exist
 //     are one case from out here: zero rows.
 //
-// So the privacy rule is enforced by Postgres, on the same policy the app obeys, and
-// this page cannot widen it. It holds the anon key, which is the key the mobile
-// bundle already ships and which RLS bounds. **If a private profile ever appeared on
-// this page it would mean `can_view_profile` had changed**, and it would be visible
-// in the app long before it was visible here.
+// Every other table is refused to this key outright, so this page cannot widen the
+// privacy rule. **If a private profile ever appeared on this page it would mean
+// `can_view_profile` had changed**, and it would be visible in the app long before it
+// was visible here.
 //
-// What is deliberately not read: `profiles.bio` (readable, and still nobody's
-// business on a link preview), anything under `user_media`, `rankings`, `follows` or
-// `feed_events`. The page shows what was shared, never what anyone did with it.
+// What is deliberately not read: `profiles.bio` (nobody's business on a link preview),
+// anything under `user_media`, `rankings`, `follows` or `feed_events`. The page shows
+// what was shared, never what anyone did with it.
 
 /** TMDB's image CDN, the same host `src/lib/images.ts` builds app poster URLs from. */
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -515,14 +514,14 @@ export function avatarUrl(supabaseUrl, avatarPath) {
  *
  * `select` names its columns, and that is a privacy rule rather than a bandwidth one. A
  * `select=*` would quietly start shipping any column added later, and the table this
- * reads is the one table in the schema whose read policy is `using (true)`.
+ * reads is the one table in the schema whose read policy is `using (true)`. The anon
+ * grant on it is a column list for the same reason, so a column not named here is refused.
  *
  * **The columns grew with the public title preview and every one of them is TMDB's.**
  * `overview`, `runtime_minutes`, `genres` and `episode_count` describe the film or the
  * season and describe nobody. Nothing from `user_media`, `rankings`, `follows`,
  * `title_recommendations` or `feed_events` is reachable from this request: they are
- * different tables, behind policies that answer a null viewer with zero rows, and no
- * embed here names one. A personal score, a Following score, a recommendation note, a
+ * different tables, which this key cannot read at all, and no embed here names one. A personal score, a Following score, a recommendation note, a
  * watch date and a predicted score are all on that side of the line.
  */
 export function titleContextRequest(supabaseUrl, id) {
@@ -537,15 +536,16 @@ export function titleContextRequest(supabaseUrl, id) {
 }
 
 /**
- * The PostgREST request that resolves a public profile, or null.
+ * The request that resolves a public profile, or null.
  *
- * Three columns. The handle is already `handleFromPath`-validated, so it is
- * `[a-z0-9_]{3,24}` and safe in a query string.
+ * `public_profile_card`, by GET, so the answer is the same array of rows the title read
+ * gives. Three columns. The handle is already `handleFromPath`-validated, so it is
+ * `[a-z0-9_]{3,24}` and safe in a query string, and the function refuses anything else.
  */
 export function profileContextRequest(supabaseUrl, handle) {
   if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
   if (typeof handle !== 'string' || !/^[a-z0-9_]{3,24}$/.test(handle)) return null;
-  return `${supabaseUrl}/rest/v1/profiles?username=eq.${handle}&select=display_name,username,avatar_path&limit=1`;
+  return `${supabaseUrl}/rest/v1/rpc/public_profile_card?p_handle=${handle}`;
 }
 
 /** `2023` from `2023-01-15`, and nothing from a null or a malformed date. */

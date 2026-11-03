@@ -61,7 +61,10 @@ copy of the social graph by another route.
 **Sentry is scrubbed on the same reasoning** (`src/lib/monitoring.ts`): `sendDefaultPii`
 off, the user object reduced to an id, request bodies and cookies deleted, `extra`
 filtered to scalars, console breadcrumbs dropped, **query strings stripped from every URL**
-— including on performance transactions, which do not pass through `beforeSend`.
+— including on performance transactions, which do not pass through `beforeSend`, and on
+their HTTP spans, which is where the SDK puts them. The span half arrived on 2026-11-01
+(audit M-5): a build older than that sends them unless the server-side rule in
+`security-remediation-2026-11-01.md` is in place.
 
 **The one honest residual:** exception messages and stack frames are not redacted, because
 a crash reporter that strips the error reports nothing. PostgreSQL echoes rejected input in

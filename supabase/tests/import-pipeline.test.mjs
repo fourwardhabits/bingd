@@ -528,9 +528,9 @@ describe('the shared match cache', () => {
     }
   });
 
-  it('resolves the next importer for free once a second account has agreed', async () => {
-    // Hugo's import is the corroboration; Grace is then the beneficiary, and her title is
-    // one the local tier could not reach — so only the promoted URI can place it.
+  it('does not let a promoted URI place a title the row does not name', async () => {
+    // Hugo's import is the corroboration. Grace's title is one the local tier cannot reach,
+    // and a mapping confirms a row rather than speaking for it, so hers goes to the provider.
     const hugo = await t.createUser({ username: 'pipe_hugo' });
     await importArchive(hugo, [
       staged('Cached Film', { correlation: 'cached film|2001', filmUri: 'https://boxd.it/FILMURI' }),
@@ -546,7 +546,7 @@ describe('the shared match cache', () => {
         filmUri: 'https://boxd.it/FILMURI',
       }),
     ]);
-    assert.equal(await sourceOf(grace, film), 'imported');
+    assert.equal(await sourceOf(grace, film), null);
   });
 });
 

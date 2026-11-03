@@ -9,14 +9,15 @@
  */
 
 import {
+  acceptedOperationId,
   claimForRedemption,
   clearPendingInvite,
   holdInvite,
   isInviteToken,
-  MAX_RECOVERABLE_ATTEMPTS,
   pendingInvite,
-  recordRecoverableRefusal,
   redemptionOperationId,
+  releaseRedemptionOperationId,
+  releaseShownInvite,
   replacePendingInvite,
 } from './pending';
 
@@ -35,6 +36,8 @@ jest.mock('@/lib/prefs', () => ({
 
 const TOKEN = 'a3f19c2b4d5e6f708192a3b4c5d6e7f8';
 const OTHER = 'ffffffffffffffffffffffffffffffff';
+const ME = 'user-me';
+const SOMEBODY_ELSE = 'user-somebody-else';
 
 beforeEach(() => {
   mockStored = {};
@@ -111,8 +114,8 @@ describe('redemptionOperationId', () => {
     let issued = 0;
     const mint = () => `op-${(issued += 1)}`;
 
-    expect(await redemptionOperationId(mint)).toBe('op-1');
-    expect(await redemptionOperationId(mint)).toBe('op-1');
+    expect(await redemptionOperationId(TOKEN, ME, mint)).toBe('op-1');
+    expect(await redemptionOperationId(TOKEN, ME, mint)).toBe('op-1');
     expect(issued).toBe(1);
   });
 
@@ -123,11 +126,11 @@ describe('redemptionOperationId', () => {
     const mint = () => `op-${(issued += 1)}`;
 
     await holdInvite(TOKEN);
-    await redemptionOperationId(mint);
+    await redemptionOperationId(TOKEN, ME, mint);
     await clearPendingInvite();
 
     await holdInvite(OTHER);
-    expect(await redemptionOperationId(mint)).toBe('op-2');
+    expect(await redemptionOperationId(OTHER, ME, mint)).toBe('op-2');
   });
 });
 
@@ -156,10 +159,10 @@ describe('replacePendingInvite', () => {
     const mint = () => `op-${(issued += 1)}`;
 
     await holdInvite(TOKEN);
-    expect(await redemptionOperationId(mint)).toBe('op-1');
+    expect(await redemptionOperationId(TOKEN, ME, mint)).toBe('op-1');
 
     await replacePendingInvite(OTHER);
-    expect(await redemptionOperationId(mint)).toBe('op-2');
+    expect(await redemptionOperationId(OTHER, ME, mint)).toBe('op-2');
   });
 
   it('refuses anything that is not a token, leaving what was held', async () => {
@@ -183,7 +186,7 @@ describe('claimForRedemption', () => {
   it('makes the acted-on token pending, replacing a different one that was held', async () => {
     await holdInvite(TOKEN);
 
-    await claimForRedemption(OTHER, () => 'op-1');
+    await claimForRedemption(OTHER, ME, () => 'op-1');
 
     expect(await pendingInvite()).toBe(OTHER);
   });
@@ -192,72 +195,132 @@ describe('claimForRedemption', () => {
     // The ordinary case, and every retry. Dropping the id here would make a lost reply
     // a second call rather than a replay, which is the whole point of holding it.
     await holdInvite(TOKEN);
-    expect(await claimForRedemption(TOKEN, () => 'op-1')).toBe('op-1');
-    expect(await claimForRedemption(TOKEN, () => 'op-2')).toBe('op-1');
+    expect(await claimForRedemption(TOKEN, ME, () => 'op-1')).toBe('op-1');
+    expect(await claimForRedemption(TOKEN, ME, () => 'op-2')).toBe('op-1');
   });
 
   it('mints a fresh id when the token changed, because it is a different decision', async () => {
     await holdInvite(TOKEN);
-    expect(await claimForRedemption(TOKEN, () => 'op-1')).toBe('op-1');
-    expect(await claimForRedemption(OTHER, () => 'op-2')).toBe('op-2');
-  });
-
-  it('resets the recoverable-refusal count with the token', async () => {
-    await holdInvite(TOKEN);
-    for (let i = 1; i < MAX_RECOVERABLE_ATTEMPTS; i += 1) await recordRecoverableRefusal();
-    expect(await recordRecoverableRefusal()).toBe(false);
-
-    await claimForRedemption(OTHER, () => 'op-1');
-
-    // A different invitation starts with its own budget: the previous token's refusals
-    // said nothing about this inviter.
-    expect(await recordRecoverableRefusal()).toBe(true);
+    expect(await claimForRedemption(TOKEN, ME, () => 'op-1')).toBe('op-1');
+    expect(await claimForRedemption(OTHER, ME, () => 'op-2')).toBe('op-2');
   });
 
   it('claims nothing for a value that is not a token', async () => {
     await holdInvite(TOKEN);
-    expect(await claimForRedemption('../../etc/passwd', () => 'op-1')).toBeNull();
+    expect(await claimForRedemption('../../etc/passwd', ME, () => 'op-1')).toBeNull();
     expect(await pendingInvite()).toBe(TOKEN);
   });
 
   it('claims an invitation on a device that held none', async () => {
     // The signed-in case: the link opened the app directly and nothing was ever stashed.
-    expect(await claimForRedemption(TOKEN, () => 'op-1')).toBe('op-1');
+    expect(await claimForRedemption(TOKEN, ME, () => 'op-1')).toBe('op-1');
     expect(await pendingInvite()).toBe(TOKEN);
   });
 });
 
-describe('recordRecoverableRefusal', () => {
-  it('drops the spent operation id so the next launch is a real attempt', async () => {
-    // Independent review 26b. Without this the retry carries an id the ledger has
-    // already seen, is answered already_applied, and nothing is reconsidered.
+describe('what counts as a press of Accept', () => {
+  /**
+   * Security audit 2026-11-01, B-1. An operation id is the only thing that lets a token be
+   * sent with nobody looking at it, so only a press may mint one.
+   */
+  it('is nothing at all for a token that was merely held', async () => {
     await holdInvite(TOKEN);
-    expect(await redemptionOperationId(() => 'op-1')).toBe('op-1');
 
-    expect(await recordRecoverableRefusal()).toBe(true);
+    expect(await acceptedOperationId(TOKEN, ME)).toBeNull();
+  });
 
-    expect(await redemptionOperationId(() => 'op-2')).toBe('op-2');
+  it('is an id, once claimForRedemption has run', async () => {
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+
+    expect(await acceptedOperationId(TOKEN, ME)).toBe('op-1');
+  });
+
+  it('ignores an id an older build stored, which its background path minted too', async () => {
+    // Reading this key would turn that build's silent attempt into a consent.
+    mockStored['invite.pendingOperation'] = JSON.stringify('op-from-the-old-background-path');
+    await holdInvite(TOKEN);
+
+    expect(await acceptedOperationId(TOKEN, ME)).toBeNull();
+  });
+
+  it('belongs to the account that pressed, so a phone that changes hands cannot replay it', async () => {
+    // The ledger is per account, so this id under another account would be a fresh call,
+    // and it would accept the invitation for somebody who only signed in.
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+
+    expect(await acceptedOperationId(TOKEN, SOMEBODY_ELSE)).toBeNull();
+    expect(await acceptedOperationId(TOKEN, ME)).toBe('op-1');
+  });
+
+  it('belongs to the invitation it was made on, so an interrupted swap cannot move it', async () => {
+    // The token and the press are separate keys. A process killed between `replacePendingInvite`'s
+    // two writes leaves the new token beside the old press, and that press was not for it.
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+    mockStored['invite.pendingToken'] = JSON.stringify(OTHER);
+
+    expect(await acceptedOperationId(OTHER, ME)).toBeNull();
+  });
+
+  it('mints that account its own id when it presses Accept itself', async () => {
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+
+    expect(await claimForRedemption(TOKEN, SOMEBODY_ELSE, () => 'op-2')).toBe('op-2');
+  });
+
+  it('stops being one when the refusal certainly did not commit', async () => {
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+
+    await releaseRedemptionOperationId();
+
+    expect(await acceptedOperationId(TOKEN, ME)).toBeNull();
+    expect(await pendingInvite()).toBe(TOKEN);
+  });
+});
+
+describe('releaseShownInvite', () => {
+  it('lets go of the token the screen now has, so walking away leaves nothing', async () => {
+    await holdInvite(TOKEN);
+
+    await releaseShownInvite(TOKEN, ME);
+
+    expect(await pendingInvite()).toBeNull();
+  });
+
+  it('leaves a different held invitation alone', async () => {
+    await holdInvite(TOKEN);
+
+    await releaseShownInvite(OTHER, ME);
+
     expect(await pendingInvite()).toBe(TOKEN);
   });
 
-  it('counts refusals across launches and gives up at the bound', async () => {
-    await holdInvite(TOKEN);
-    for (let i = 1; i < MAX_RECOVERABLE_ATTEMPTS; i += 1) {
-      expect(await recordRecoverableRefusal()).toBe(true);
-    }
-    expect(await recordRecoverableRefusal()).toBe(false);
+  it('lets go of a press another account made, once this account has the screen', async () => {
+    await claimForRedemption(TOKEN, SOMEBODY_ELSE, () => 'op-1');
+
+    await releaseShownInvite(TOKEN, ME);
+
+    expect(await pendingInvite()).toBeNull();
+  });
+
+  it('keeps a press whose answer never arrived, because that needs replaying', async () => {
+    await claimForRedemption(TOKEN, ME, () => 'op-1');
+
+    await releaseShownInvite(TOKEN, ME);
+
+    expect(await pendingInvite()).toBe(TOKEN);
+    expect(await acceptedOperationId(TOKEN, ME)).toBe('op-1');
   });
 });
 
 describe('clearPendingInvite', () => {
   it('clears the token and its operation id together', async () => {
     await holdInvite(TOKEN);
-    await redemptionOperationId(() => 'op-1');
+    await redemptionOperationId(TOKEN, ME, () => 'op-1');
 
     await clearPendingInvite();
 
     expect(await pendingInvite()).toBeNull();
     // Asserted through the public path: a fresh mint is offered rather than the old id.
-    expect(await redemptionOperationId(() => 'op-2')).toBe('op-2');
+    expect(await redemptionOperationId(TOKEN, ME, () => 'op-2')).toBe('op-2');
   });
 });
