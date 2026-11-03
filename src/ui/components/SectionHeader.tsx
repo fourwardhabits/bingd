@@ -44,6 +44,9 @@ export function SectionHeader({
       // spells out "T O P  R A N K E D".
       accessibilityLabel={title}
     >
+      {/* Shrinks and wraps beside the action, so at large text a long title takes a second
+          line instead of pushing See all off the screen. */}
+      <View style={styles.heading} testID="section-header-title">
       <Text
         variant={asTitle ? 'title2' : 'sectionHeader'}
         tone={asTitle ? 'primary' : 'action'}
@@ -53,6 +56,7 @@ export function SectionHeader({
       >
         {asTitle ? title : title.toUpperCase()}
       </Text>
+      </View>
       {actionLabel && onPressAction ? (
         // The row is already 44pt tall; the control fills that height rather than
         // hugging one line of footnote, and the slop covers its narrow width. Nothing
@@ -81,6 +85,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: theme.layout.gutter,
   },
-  action: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
+  heading: { flexShrink: 1, paddingRight: theme.space[3] },
+  action: { flexShrink: 0, minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   exactCase: { textTransform: 'none' },
 });

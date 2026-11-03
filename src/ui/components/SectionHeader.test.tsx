@@ -32,3 +32,18 @@ describe('SectionHeader casing', () => {
     expect(view.getByLabelText('Top ranked')).toBeTruthy();
   });
 });
+
+describe('SectionHeader at large text', () => {
+  it('lets a long title wrap beside its action, which keeps its whole width', async () => {
+    // At 200% text on a 320pt phone, "bingd Awards" in title2 plus See all is wider than
+    // the screen. The heading must be the thing that gives, never the control.
+    const view = await render(
+      <SectionHeader title="bingd Awards" level="title" actionLabel="See all" onPressAction={() => {}} />,
+    );
+
+    const heading = view.getByTestId('section-header-title');
+    expect(StyleSheet.flatten(heading.props.style)).toMatchObject({ flexShrink: 1 });
+    const action = view.getByRole('button');
+    expect(StyleSheet.flatten(action.props.style)).toMatchObject({ flexShrink: 0 });
+  });
+});
