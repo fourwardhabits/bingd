@@ -202,6 +202,18 @@ describe('signing out', () => {
    * removed the stored session, so repeating it is two Keychain calls and a second
    * `SIGNED_OUT` for nothing.
    */
+  it('ends the local session when the SDK answers with an error and removes nothing', async () => {
+    // What `@supabase/auth-js` does for an expired session beside a cached refresh failure.
+    // The step finished, so a check that only asked whether it had finished read this as
+    // signed out, and the session stayed on the device.
+    mockSupabaseSignOut.mockResolvedValue({ error: new Error('refresh failed') });
+
+    await signOut();
+
+    expect(mockRemoveItem).toHaveBeenCalledWith(STORAGE_KEY);
+    expect(mockAnnounce).toHaveBeenCalled();
+  });
+
   it('does not repeat the local exit when the server already did it', async () => {
     await signOut();
     expect(mockRemoveItem).not.toHaveBeenCalled();

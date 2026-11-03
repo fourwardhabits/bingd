@@ -21,7 +21,7 @@ import { call, fire, inbox, newOp, raceContext } from './_shared.mjs';
  * move it. This is the defect the whole design is shaped around: a redemption that
  * could move credit is a growth number that can be stolen.
  *
- * **R2. A block is a barrier here too.** `redeem_invite` takes `_lock_pair` before it
+ * **R2. A block is a barrier here too.** `accept_invite` takes `_lock_pair` before it
  * reads `blocks`, like every other writer of that shape (`20260819000400`). A block
  * committing between the read and the insert must not leave an attribution behind.
  *
@@ -196,22 +196,22 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('redeem');
-        const p1 = t1.start(`select redeem_invite($1, $2) as r`, [await newOp(db), tokenA]);
+        const p1 = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), tokenA]);
         await t1.awaitBlocked();
 
         await t2.begin();
-        const p2 = t2.start(`select redeem_invite($1, $2) as r`, [await newOp(db), tokenB]);
+        const p2 = t2.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), tokenB]);
         /**
          * Correlated against the account key, not left as "something blocked".
          *
          * Both calls are by the same account, so the *first* lock either reaches is
-         * `_assert_operation_rate`'s, keyed on the account and `redeem_invite`. Naming
+         * `_assert_operation_rate`'s, keyed on the account and `accept_invite`. Naming
          * it is what stops this test passing for a reason that has nothing to do with
          * the redemption — review 25's lesson, applied here from the start.
          */
         await t2.awaitBlocked({
           on: 'advisory',
-          advisoryKey: await db.accountKey(invitee, 'redeem_invite'),
+          advisoryKey: await db.accountKey(invitee, 'accept_invite'),
         });
 
         await ctl.release('redeem');
@@ -267,8 +267,8 @@ export default function suite() {
         await t2.actAs(invitee);
 
         const [r1, r2] = await Promise.all([
-          call(t1, `redeem_invite($1, $2)`, [await newOp(db), token]),
-          call(t2, `redeem_invite($1, $2)`, [await newOp(db), token]),
+          call(t1, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]),
+          call(t2, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]),
         ]);
 
         const statuses = [r1.status, r2.status].sort();
@@ -328,11 +328,11 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('replay');
-        const p1 = t1.start(`select redeem_invite($1, $2) as r`, [op, token]);
+        const p1 = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [op, token]);
         await t1.awaitBlocked();
 
         await t2.begin();
-        const p2 = t2.start(`select redeem_invite($1, $2) as r`, [op, token]);
+        const p2 = t2.start(`select accept_invite($1, $2, auth.uid()) as r`, [op, token]);
         await t2.awaitBlocked();
 
         await ctl.release('replay');
@@ -359,7 +359,7 @@ export default function suite() {
 
     it('R2: redemption waits on the pair lock a concurrent block holds', async () => {
       /**
-       * The lock, isolated and named — the only way to show `redeem_invite` takes it at
+       * The lock, isolated and named — the only way to show `accept_invite` takes it at
        * all. The controller holds the exact key `_lock_pair` computes for the pair; the
        * redemption must be found waiting on *that* key, not merely on something.
        *
@@ -381,7 +381,7 @@ export default function suite() {
 
         await t1.actAs(invitee);
         await t1.begin();
-        const pending = t1.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const pending = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         await t1.awaitBlocked({ on: 'advisory', advisoryKey: pairKey });
 
         await ctl.releasePair(invitee, inviter);
@@ -425,7 +425,7 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('block-race');
-        const p1 = t1.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const p1 = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         await t1.awaitBlocked();
 
         await t2.begin();
@@ -471,7 +471,7 @@ export default function suite() {
       const s = await db.session('redeemer');
       try {
         await s.actAs(invitee);
-        assert.deepEqual(await call(s, `redeem_invite($1, $2)`, [await newOp(db), token]), {
+        assert.deepEqual(await call(s, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]), {
           status: 'refused',
           reason: 'blocked',
         });
@@ -499,7 +499,7 @@ export default function suite() {
       const s = await db.session('redeemer');
       try {
         await s.actAs(invitee);
-        assert.equal((await call(s, `redeem_invite($1, $2)`, [await newOp(db), token])).status, 'ok');
+        assert.equal((await call(s, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token])).status, 'ok');
 
         await db.sql(`delete from profiles where id = $1`, [inviter]);
 
@@ -554,7 +554,7 @@ export default function suite() {
       const redeemer = await db.session('redeemer');
       await redeemer.actAs(invitee);
       assert.equal(
-        (await call(redeemer, `redeem_invite($1, $2)`, [await newOp(db), token])).status,
+        (await call(redeemer, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token])).status,
         'ok',
       );
       await redeemer.end();
@@ -638,7 +638,7 @@ export default function suite() {
 
       const redeemer = await db.session('redeemer');
       await redeemer.actAs(invitee);
-      await call(redeemer, `redeem_invite($1, $2)`, [await newOp(db), token]);
+      await call(redeemer, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]);
       await redeemer.end();
 
       await rankTitles(invitee, 4, 300000);
@@ -692,7 +692,7 @@ export default function suite() {
 
       const redeemer = await db.session('redeemer');
       await redeemer.actAs(invitee);
-      await call(redeemer, `redeem_invite($1, $2)`, [await newOp(db), token]);
+      await call(redeemer, `accept_invite($1, $2, auth.uid())`, [await newOp(db), token]);
       await redeemer.end();
 
       const blocker = await db.session('blocker');
@@ -746,7 +746,7 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('revoke-race');
-        const p1 = t1.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const p1 = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         await t1.awaitBlocked();
 
         await t2.begin();
@@ -798,7 +798,7 @@ export default function suite() {
         await t1.q(`select revoke_invite_link($1)`, [await newOp(db)]);
 
         // Fired while the revocation is still open, so the SELECT genuinely waits.
-        const pending = t2.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const pending = t2.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         await t2.awaitBlocked({ on: 'transactionid' });
 
         await t1.commit();
@@ -873,11 +873,11 @@ export default function suite() {
 
         await t1.begin();
         await t1.pauseAt('independent');
-        const p1 = t1.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const p1 = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         await t1.awaitBlocked();
 
         await t2.begin();
-        const p2 = t2.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const p2 = t2.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         // Runs straight through: different account, different pair, different keys.
         assert.equal((await p2).rows[0].r.status, 'ok');
         await t2.commit();
@@ -918,7 +918,7 @@ export default function suite() {
         await t1.actAs(invitee);
         await t1.begin();
         await t1.pauseAt('crosstalk');
-        const p1 = t1.start(`select redeem_invite($1, $2) as r`, [await newOp(db), token]);
+        const p1 = t1.start(`select accept_invite($1, $2, auth.uid()) as r`, [await newOp(db), token]);
         await t1.awaitBlocked();
 
         await t2.actAs(stranger);
