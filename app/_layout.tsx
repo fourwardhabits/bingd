@@ -20,7 +20,7 @@ import {
   useAuth,
   useAuthRouting,
 } from '@/features/auth';
-import { useRedeemPendingInvite } from '@/features/invite';
+import { useResumePendingInvite } from '@/features/invite';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
 import { useReportDeviceContext } from '@/features/notifications/use-report-device-context';
@@ -212,14 +212,15 @@ function Navigation() {
   const resolved = auth.status !== 'loading' && auth.status !== 'error';
   const signedIn = auth.status === 'ready';
   /**
-   * An invitation opened before there was an account to attribute it to.
+   * An invitation opened before there was an account to show it to.
    *
    * Here rather than in the signup screen because there are three ways to reach a ready
    * session and only one of them passes through that screen — see the hook. It reads
    * device storage on each transition into `ready` and does nothing on the launches,
-   * which are almost all of them, where there is nothing held.
+   * which are almost all of them, where there is nothing held. It brings the person back
+   * to the invitation and never accepts one for them.
    */
-  useRedeemPendingInvite();
+  useResumePendingInvite();
   /**
    * The push lifecycle: register a device that already has permission, follow a token
    * that rolls, refresh the inbox on arrival, route a tap, and nudge the sender when the

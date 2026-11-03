@@ -547,15 +547,12 @@ describe('the context requests', () => {
     }
   });
 
-  it('asks for one profile by handle, and for three columns only', () => {
+  it('asks for one profile by exact handle, through the one thing anon may call', () => {
+    // The table is closed to this key (20261024000400): an export of every public account
+    // was one paged request away while this page read `profiles` directly.
     const url = profileContextRequest(SUPA, 'fourward');
-    assert.ok(url.startsWith(`${SUPA}/rest/v1/profiles?username=eq.fourward`));
-    assert.ok(url.includes('display_name'));
-    assert.ok(url.includes('avatar_path'));
-    // `bio` is readable for a public profile and is still nobody's business on a link
-    // preview, and nothing under it is a visibility question this page should reopen.
-    assert.ok(!url.includes('bio'));
-    assert.ok(!url.includes('email'));
+    assert.equal(url, `${SUPA}/rest/v1/rpc/public_profile_card?p_handle=fourward`);
+    assert.ok(!url.includes('/rest/v1/profiles'));
   });
 
   it('refuses an identifier that did not come from the path validators', () => {
