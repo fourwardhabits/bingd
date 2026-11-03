@@ -643,7 +643,8 @@ anything went near `main`.
 ## The ranking demo on the front page — 2026-10-28
 
 The hero's second column is a three-pick ranking demo in place of the two collection
-shots, which moved to the new "Your collection" section. Code locations:
+shots, which moved to the new "Your collection" section. (That section left the page on
+2026-11-02; the front-page section list above is the current one.) Code locations:
 
 - Logic: `web/src/demo.mjs`.
 - Movie list: `web/src/demo-movies.mjs`.
