@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { diagnosticsAvailable } from '@/features/diagnostics/availability';
@@ -150,9 +150,14 @@ const open = async () => {
   return view;
 };
 
-/** What the category control says it is showing, which is the only place that is stated. */
-const showing = (view: Awaited<ReturnType<typeof open>>) =>
-  view.getByLabelText(/^Showing /).props.accessibilityLabel;
+/** What the wall selector and the medium switch say together: "Showing Recommended Movies". */
+const showing = (view: Awaited<ReturnType<typeof open>>) => {
+  const wall = view.getByLabelText(/^Showing /).props.accessibilityLabel;
+  const medium = within(view.getByLabelText('Medium'))
+    .getAllByRole('radio')
+    .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
+  return `${wall} ${medium}`;
+};
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -240,42 +245,33 @@ describe('why this tile is here, on a long press', () => {
   });
 });
 
+/**
+ * **No line about the reader's taste above the wall** (founder revision brief, 2026-11-03:
+ * nothing descriptive under the For You header).
+ *
+ * Until then a thin taste printed one of two sentences above the artwork, "Popular right now
+ * while bingd learns your taste" when the wall came only from the popularity fallback, and
+ * "bingd is still learning your taste" otherwise (Codex review of #122). Both are gone, in
+ * every state of the slate, and the wall underneath is drawn exactly as before. Why a title
+ * is on the wall is still a long press away; that is the describe block above.
+ */
 describe('a wall that is not yet the reader’s', () => {
   const POPULAR = 'Popular right now while bingd learns your taste.';
   const LEARNING = 'bingd is still learning your taste.';
 
-  it('calls the wall popular only when it genuinely came from the popularity fallback', async () => {
-    // No anchor, and nothing social on the wall: the hook's `popularityOnly`.
-    mockSlate.lowData = true;
-    mockSlate.popularityOnly = true;
-    mockSlate.anchorsUsed = 0;
+  it.each([
+    ['from the popularity fallback alone', { lowData: true, popularityOnly: true, anchorsUsed: 0 }],
+    ['with a followed reader’s title on it', { lowData: true, popularityOnly: false, anchorsUsed: 0 }],
+    ['once an anchor has resolved', { lowData: false, popularityOnly: false, anchorsUsed: 1 }],
+  ])('says nothing above the wall when it came %s', async (_, slate) => {
+    Object.assign(mockSlate, slate);
     const view = await open();
 
-    expect(view.getByText(POPULAR)).toBeTruthy();
+    expect(view.queryByText(POPULAR)).toBeNull();
     expect(view.queryByText(LEARNING)).toBeNull();
+    expect(view.queryByText(/learn(s|ing) your taste/)).toBeNull();
     // The wall itself is untouched: the same tile, drawn the same way.
     expect(view.getByLabelText(/^Inception/)).toBeTruthy();
-  });
-
-  it('does not call a wall popular when a followed reader’s title is on it', async () => {
-    // Codex review of #122: no anchor resolved, but `social_candidates` contributed a
-    // title that is on screen. Still a thin taste, so still worth a word — but not
-    // "popular", which would name a source the wall does not have.
-    mockSlate.lowData = true;
-    mockSlate.popularityOnly = false;
-    mockSlate.anchorsUsed = 0;
-    const view = await open();
-
-    expect(view.getByText(LEARNING)).toBeTruthy();
-    expect(view.queryByText(POPULAR)).toBeNull();
-    expect(view.getByLabelText(/^Inception/)).toBeTruthy();
-  });
-
-  it('says nothing once an anchor has resolved', async () => {
-    const view = await open();
-
-    expect(view.queryByText(POPULAR)).toBeNull();
-    expect(view.queryByText(LEARNING)).toBeNull();
   });
 });
 

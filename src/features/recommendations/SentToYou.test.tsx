@@ -190,7 +190,7 @@ const recommendation = (over: Record<string, unknown> = {}) => ({
  * to watch" down to "things people sent me".
  */
 const openSent = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
-  await fireEvent.press(view.getByText(/^Sent to you/));
+  await fireEvent.press(view.getByText(/^Sent to You/));
 };
 
 beforeEach(() => {
@@ -216,7 +216,8 @@ describe('the wall and the list', () => {
     // Asserted on the category control rather than on a heading, because the headings
     // are gone: a screen reached from a tab called For you does not need a band of
     // prose saying For you.
-    await waitFor(() => expect(view.getByText('Recommended Movies')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Showing Recommended')).toBeTruthy());
+    expect(view.getByRole('radio', { name: 'Movies' }).props.accessibilityState?.selected).toBe(true);
     expect(view.queryByText('Inception')).toBeNull();
     expect(view.queryByText('For you')).toBeNull();
     expect(view.queryByText('Based on your taste')).toBeNull();
@@ -230,7 +231,7 @@ describe('the wall and the list', () => {
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Sent to you · 1')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Sent to You · 1')).toBeTruthy());
   });
 
   it('names the sender and how long ago, which is what the row is for', async () => {
@@ -604,7 +605,7 @@ describe('re-tapping the For You tab', () => {
     // The list is gone and the chip is off, which together are "back on the wall". The
     // wall itself is stood in for in this file — see the note on `mockSlate`.
     await waitFor(() => expect(view.queryByText('Inception (2010)')).toBeNull());
-    expect(view.getByText(/^Sent to you/).props.accessibilityState?.selected).not.toBe(true);
+    expect(view.getByText(/^Sent to You/).props.accessibilityState?.selected).not.toBe(true);
   });
 
   it('keeps the filters, which are answers the reader gave on purpose', async () => {

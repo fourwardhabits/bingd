@@ -56,8 +56,13 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.control.chipHeight,
     paddingHorizontal: theme.space[3],
     borderRadius: theme.radius.control,
-    backgroundColor: theme.surface.sunken,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.raised,
   },
-  on: { backgroundColor: theme.semantic.action },
+  on: {
+    backgroundColor: theme.semantic.action,
+    borderColor: theme.semantic.action,
+  },
   pressed: { opacity: 0.7 },
 });

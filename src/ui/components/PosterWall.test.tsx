@@ -1,5 +1,7 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { StyleSheet, type ViewStyle } from 'react-native';
 
+import { theme } from '../tokens';
 import { PosterGrid, PosterShelf, type PosterTile } from './PosterWall';
 
 const tiles: PosterTile[] = [
@@ -174,6 +176,91 @@ describe('the dismiss control on a tile (founder, 2026-08-27 §12)', () => {
 
     expect(onDismissTile).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
     expect(onPressTile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * **Bookmark and Not interested together, stacked on the corner** (founder, Visual 2.1,
+ * 2026-11-03). Each is its own 44pt press, and neither sits inside the poster's press: a
+ * native `hitSlop` cannot reach past a parent, so a smaller box nested in the poster would
+ * leave the rest of its target opening the title.
+ */
+describe('the two corner actions together', () => {
+  const tile: PosterTile = { id: 'a', title: 'Inception', year: 2010 };
+  const renderBoth = (handlers: Partial<Record<'onPressTile' | 'onToggleSave' | 'onDismissTile' | 'onLongPressTile', jest.Mock>> = {}) =>
+    render(
+      <PosterGrid
+        tiles={[tile]}
+        onPressTile={handlers.onPressTile ?? jest.fn()}
+        onToggleSave={handlers.onToggleSave ?? jest.fn()}
+        onDismissTile={handlers.onDismissTile ?? jest.fn()}
+        onLongPressTile={handlers.onLongPressTile ?? jest.fn()}
+      />,
+    );
+  type Node = { parent: Node | null; props: Record<string, unknown> };
+  const ancestors = (node: Node) => {
+    const out: Node[] = [];
+    for (let at = node.parent; at; at = at.parent) out.push(at);
+    return out;
+  };
+
+  it('gives each a 44pt box of its own, one above the other, neither inside the poster', async () => {
+    const view = await renderBoth();
+    const poster = view.getByLabelText('Inception, 2010');
+    const save = view.getByLabelText('Save Inception to watchlist');
+    const dismiss = view.getByLabelText('Not interested in Inception');
+
+    for (const action of [save, dismiss]) {
+      const box = StyleSheet.flatten(action.props.style) as ViewStyle;
+      expect(box.width).toBe(theme.layout.minTapTarget);
+      expect(box.height).toBe(theme.layout.minTapTarget);
+      expect(ancestors(action as unknown as Node)).not.toContain(poster);
+    }
+
+    // Siblings in one column pinned to the corner, bookmark first: two whole boxes that
+    // stack edge to edge, so no point on the poster belongs to both.
+    const column = (save as unknown as Node).parent!;
+    expect(ancestors(dismiss as unknown as Node)).toContain(column);
+    const corner = StyleSheet.flatten(column.props.style as ViewStyle);
+    expect(corner).toMatchObject({ position: 'absolute', top: 0, right: 0 });
+    expect(corner.flexDirection ?? 'column').toBe('column');
+    expect(view.getAllByRole('button').indexOf(save)).toBeLessThan(
+      view.getAllByRole('button').indexOf(dismiss),
+    );
+  });
+
+  it('fires only the action that was pressed', async () => {
+    const handlers = {
+      onPressTile: jest.fn(),
+      onToggleSave: jest.fn(),
+      onDismissTile: jest.fn(),
+      onLongPressTile: jest.fn(),
+    };
+    const view = await renderBoth(handlers);
+
+    await fireEvent.press(view.getByLabelText('Save Inception to watchlist'));
+    expect(handlers.onToggleSave).toHaveBeenCalledTimes(1);
+    expect(handlers.onDismissTile).not.toHaveBeenCalled();
+
+    await fireEvent.press(view.getByLabelText('Not interested in Inception'));
+    expect(handlers.onDismissTile).toHaveBeenCalledTimes(1);
+    expect(handlers.onToggleSave).toHaveBeenCalledTimes(1);
+
+    expect(handlers.onPressTile).not.toHaveBeenCalled();
+    expect(handlers.onLongPressTile).not.toHaveBeenCalled();
+  });
+
+  it('keeps the long press on the poster for the reason, and never for dismissing', async () => {
+    const handlers = { onDismissTile: jest.fn(), onLongPressTile: jest.fn() };
+    const view = await renderBoth(handlers);
+
+    await fireEvent(view.getByLabelText('Inception, 2010'), 'longPress');
+
+    expect(handlers.onLongPressTile).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+    expect(handlers.onDismissTile).not.toHaveBeenCalled();
+    // Holding the X is not asserted here: RNTL's `fireEvent` walks up to the `Tile`
+    // component's own `onLongPress` prop, which a native touch on the X's sibling press
+    // never reaches. That the X is outside the poster's press is the first test above.
   });
 });
 

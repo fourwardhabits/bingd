@@ -12,8 +12,13 @@ export type SectionHeaderProps = {
    */
   actionAccessibilityLabel?: string;
   onPressAction?: () => void;
-  /** `title` names something to browse. The default names a block of data. */
-  level?: 'label' | 'title';
+  /**
+   * `title` names something to browse. The default names a block of data. `editorial`
+   * is the medium step between them: the serif at 18pt in Maroon, for a shelf that should
+   * read as curated without weighing as much as a screen title (founder revision brief,
+   * 2026-11-03: Trending now).
+   */
+  level?: 'label' | 'editorial' | 'title';
 };
 
 /**
@@ -36,6 +41,8 @@ export function SectionHeader({
   level = 'label',
 }: SectionHeaderProps) {
   const asTitle = level === 'title';
+  const editorial = level === 'editorial';
+  const exact = asTitle || editorial;
   return (
     <View
       style={styles.row}
@@ -48,13 +55,13 @@ export function SectionHeader({
           line instead of pushing See all off the screen. */}
       <View style={styles.heading} testID="section-header-title">
       <Text
-        variant={asTitle ? 'title2' : 'sectionHeader'}
+        variant={asTitle ? 'title2' : editorial ? 'title3' : 'sectionHeader'}
         tone={asTitle ? 'primary' : 'action'}
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.
-        style={asTitle ? styles.exactCase : undefined}
+        style={exact ? styles.exactCase : undefined}
       >
-        {asTitle ? title : title.toUpperCase()}
+        {exact ? title : title.toUpperCase()}
       </Text>
       </View>
       {actionLabel && onPressAction ? (

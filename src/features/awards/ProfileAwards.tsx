@@ -74,7 +74,7 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
   const badgeSize = Math.min(
     theme.layout.awardBadge,
     Math.floor(
-      (width - theme.layout.gutter * 2 - theme.space[3] * 2 - theme.space[2] * (PROFILE_AWARD_SLOTS - 1)) /
+      (width - theme.layout.gutter * 2 - theme.space[2] * (PROFILE_AWARD_SLOTS - 1)) /
         PROFILE_AWARD_SLOTS,
     ),
   );
@@ -191,12 +191,10 @@ const styles = StyleSheet.create({
    */
   row: {
     flexDirection: 'row',
-    marginHorizontal: theme.layout.gutter,
-    paddingHorizontal: theme.space[3],
-    paddingVertical: theme.space[4],
+    // No case behind the row (founder revision brief, 2026-11-03): the five slots read as
+    // a set on the page without a panel of their own.
+    paddingHorizontal: theme.layout.gutter,
     gap: theme.space[2],
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.surface.sunken,
   },
   slot: { flex: 1, alignItems: 'center', gap: theme.space[1] },
   // Sized by the caller, so `TierDots` positions against the badge's own bottom edge

@@ -159,8 +159,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: theme.space[3],
     borderRadius: theme.radius.control,
-    backgroundColor: theme.surface.sunken,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.raised,
   },
-  selected: { backgroundColor: theme.semantic.action },
+  selected: { backgroundColor: theme.semantic.action, borderColor: theme.semantic.action },
   pressed: { opacity: 0.7 },
 });

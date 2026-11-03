@@ -174,7 +174,7 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
             options={[
               { id: 'all' as const, label: 'All' },
               { id: 'movies' as const, label: 'Movies' },
-              { id: 'tv_seasons' as const, label: 'TV' },
+              { id: 'tv_seasons' as const, label: 'TV Shows' },
             ]}
             value={filter}
             onChange={setFilter}
@@ -214,8 +214,9 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
           }
         />
       ) : (
+        // Three across, every tile equal (founder revision brief, 2026-11-03). The lead
+        // layout stays available in PosterGrid and is switched off here.
         <PosterGrid
-          lead
           tiles={tiles}
           onPressTile={(tile) => onPressTitle(tile.id)}
         />

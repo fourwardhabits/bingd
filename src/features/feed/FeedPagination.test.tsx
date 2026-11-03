@@ -165,7 +165,7 @@ type View = Awaited<ReturnType<typeof renderWithProviders>>;
 
 const open = async () => {
   const view = await renderWithProviders(<FeedScreen />);
-  await waitFor(() => expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy());
+  await waitFor(() => expect(view.getByRole('radio', { name: 'Activity' })).toBeTruthy());
   return view;
 };
 

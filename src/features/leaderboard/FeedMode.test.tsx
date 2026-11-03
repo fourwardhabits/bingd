@@ -217,14 +217,22 @@ beforeEach(() => {
 
 type View = Awaited<ReturnType<typeof renderWithProviders>>;
 
+/**
+ * The ACTIVITY heading, or null. The mode icons' left cell is also called Activity, so the
+ * heading is the one whose role is header.
+ */
+const activityHeading = (view: View) =>
+  view.queryAllByLabelText('Activity').find((node) => node.props.accessibilityRole === 'header') ??
+  null;
+
 const open = async () => {
   const view = await renderWithProviders(<FeedScreen />);
-  await waitFor(() => expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy());
+  await waitFor(() => expect(view.getByRole('radio', { name: 'Activity' })).toBeTruthy());
   return view;
 };
 
 const toBoard = async (view: View, expecting = 'This month') => {
-  await fireEvent.press(view.getByRole('tab', { name: 'Leaderboard' }));
+  await fireEvent.press(view.getByRole('radio', { name: 'Leaderboard' }));
   await waitFor(() => expect(view.getByLabelText(`Showing ${expecting}`)).toBeTruthy());
 };
 
@@ -270,7 +278,7 @@ describe('where the toggle lives', () => {
   it('is in the content, under the app bar, instead', async () => {
     const view = await open();
     expect(view.getByLabelText('Feed mode')).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'Leaderboard' })).toBeTruthy();
+    expect(view.getByRole('radio', { name: 'Leaderboard' })).toBeTruthy();
   });
 
   it('leaves the bell reachable in both modes', async () => {
@@ -288,7 +296,7 @@ describe('the toggle', () => {
   it('opens on Feed, with the Activity heading and no board', async () => {
     const view = await open();
 
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(activityHeading(view)).toBeTruthy();
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -296,7 +304,7 @@ describe('the toggle', () => {
     const view = await open();
     await toBoard(view);
 
-    expect(view.queryByLabelText('Activity')).toBeNull();
+    expect(activityHeading(view)).toBeNull();
   });
 
   it('goes back to the Feed, with the feed untouched', async () => {
@@ -305,9 +313,9 @@ describe('the toggle', () => {
     const view = await open();
     await toBoard(view);
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByRole('radio', { name: 'Activity' }));
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -381,8 +389,8 @@ describe('the timeframe, remembered — and the mode, not', () => {
     await toBoard(view);
     await chooseTimeframe(view, 'This month', 'All time');
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await fireEvent.press(view.getByRole('radio', { name: 'Activity' }));
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
     await toBoard(view, 'All time');
   });
 
@@ -404,7 +412,7 @@ describe('the timeframe, remembered — and the mode, not', () => {
 
     const second = await open();
 
-    expect(second.getByLabelText('Activity')).toBeTruthy();
+    expect(activityHeading(second)).toBeTruthy();
     expect(second.queryByLabelText(/^Showing /)).toBeNull();
 
     await toBoard(second, 'All time');
@@ -465,15 +473,16 @@ describe('the board is people only', () => {
     await toBoard(view);
 
     expect(view.queryByText('Top Titles')).toBeNull();
-    // The Feed's own three modes, and no row of the board's own beneath them.
-    expect(view.queryAllByRole('tab').map((tab) => tab.props.accessibilityState?.selected)).toEqual([
-      false,
-      true,
-      false,
-    ]);
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
+    // The Feed's own three icons, with Leaderboard the chosen one.
+    expect(
+      within(view.getByLabelText('Feed mode'))
+        .getAllByRole('radio')
+        .map((cell) => cell.props.accessibilityState?.selected),
+    ).toEqual([false, true, false]);
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
   });
@@ -721,7 +730,7 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
     expect(view.queryByText('Watched')).toBeNull();
@@ -1082,7 +1091,7 @@ describe('the two analytics events', () => {
     });
 
     mockTrack.mockClear();
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByRole('radio', { name: 'Activity' }));
     expect(mockTrack).not.toHaveBeenCalled();
   });
 
@@ -1120,7 +1129,7 @@ describe('the hardware back button', () => {
 
     expect(pressBack()).toBe(true);
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -1137,7 +1146,7 @@ describe('the hardware back button', () => {
     await chooseTimeframe(view, 'This month', 'All time');
 
     expect(pressBack()).toBe(true);
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
 
     await toBoard(view, 'All time');
     expect(view.getByLabelText('Showing All time')).toBeTruthy();
@@ -1165,18 +1174,18 @@ describe('re-tapping the Feed tab', () => {
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
   it('changes nothing when the reader is already on the Feed root', async () => {
     const view = await open();
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(activityHeading(view)).toBeTruthy();
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
-    expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy();
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
+    expect(view.getByRole('radio', { name: 'Activity' })).toBeTruthy();
   });
 
   it('does not leave the board when the press arrives from another tab', async () => {
@@ -1197,7 +1206,7 @@ describe('re-tapping the Feed tab', () => {
     await chooseTimeframe(view, 'This month', 'All time');
 
     pressFeedTab();
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
 
     await toBoard(view, 'All time');
     expect(view.getByLabelText('Showing All time')).toBeTruthy();
@@ -1215,7 +1224,7 @@ describe('re-tapping the Feed tab', () => {
     expect(views()).toBe(1);
 
     pressFeedTab();
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
 
     expect(views()).toBe(1);
   });
@@ -1255,6 +1264,14 @@ describe('the content header gutter', () => {
    * The obvious fix, a gutter around every heading, would double a `SectionHeader` to 32
    * because it already carries its own. The inset belongs to the board's selector alone.
    */
+  it('leaves the row itself unpadded, so the heading opposite is not doubled', async () => {
+    const view = await open();
+    expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
+
+    await toBoard(view);
+    expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
+  });
+
   it('does not add a second gutter around a heading that pads itself', async () => {
     const view = await open();
     await toPeople(view);
@@ -1277,24 +1294,31 @@ describe('the content header gutter', () => {
  * them are in `supabase/tests/`. Nothing here reaches for either.
  */
 const toPeople = async (view: View) => {
-  await fireEvent.press(view.getByRole('tab', { name: 'People' }));
+  await fireEvent.press(view.getByRole('radio', { name: 'People' }));
   await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
 };
 
 describe('the People mode', () => {
-  /** Founder, 2026-11-02: these were three unlabelled glyphs. A word is the whole point. */
-  it('is one of three named tabs, not a sixth destination', async () => {
+  /**
+   * Founder revision brief, 2026-11-03: main's three icons, opposite the heading, rather
+   * than a labelled tab row. The words are still there for a screen reader, and the left
+   * one is Activity, because inside the Feed tab "Feed" would name nothing.
+   */
+  it('is a third cell in the same control, not a fourth tab', async () => {
     const view = await open();
 
-    // One control, three words, and the group keeps the name it had.
+    // One control, three cells, and the group keeps the name it had.
     const group = view.getByLabelText('Feed mode');
-    expect(group.props.accessibilityRole).toBe('tablist');
-    expect(within(group).getByText('Activity')).toBeTruthy();
-    expect(within(group).getByText('Leaderboard')).toBeTruthy();
-    expect(within(group).getByText('People')).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'Leaderboard' })).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'People' })).toBeTruthy();
+    expect(group.props.accessibilityRole).toBe('radiogroup');
+    expect(within(group).getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
+      'Activity',
+      'Leaderboard',
+      'People',
+    ]);
+    // Icons only: no word printed beside them to repeat the ACTIVITY heading below.
+    expect(within(group).queryByText('Activity')).toBeNull();
+    expect(within(group).queryByText('Leaderboard')).toBeNull();
+    expect(within(group).queryByText('People')).toBeNull();
   });
 
   /**
@@ -1316,7 +1340,7 @@ describe('the People mode', () => {
     const view = await open();
     await toPeople(view);
 
-    expect(view.queryByLabelText('Activity')).toBeNull();
+    expect(activityHeading(view)).toBeNull();
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
@@ -1324,9 +1348,9 @@ describe('the People mode', () => {
     const view = await open();
     await toPeople(view);
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByRole('radio', { name: 'Activity' }));
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
     expect(view.queryByLabelText('People you may know')).toBeNull();
   });
 
@@ -1352,7 +1376,7 @@ describe('leaving People the two ways a mode can be left', () => {
 
     expect(pressBack()).toBe(true);
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
   });
 
   it('returns to the Feed root on a re-tap of the tab', async () => {
@@ -1361,7 +1385,7 @@ describe('leaving People the two ways a mode can be left', () => {
 
     pressFeedTab();
 
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
   });
 });
 
@@ -1388,7 +1412,7 @@ describe('arriving to find people', () => {
 
   it('opens People on an already-mounted tab, and lets go afterwards', async () => {
     const view = await open();
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(activityHeading(view)).toBeTruthy();
 
     mockParams = { show: 'people', from: 'sparse_feed' };
     await view.rerender(<FeedScreen />);
@@ -1401,16 +1425,16 @@ describe('arriving to find people', () => {
 
     // Not stuck: the consumed parameter does not put People back on the next render.
     mockParams = {};
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
-    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await fireEvent.press(view.getByRole('radio', { name: 'Activity' }));
+    await waitFor(() => expect(activityHeading(view)).toBeTruthy());
     await view.rerender(<FeedScreen />);
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(activityHeading(view)).toBeTruthy();
   });
 
   it('opens on Feed when nobody asked for People', async () => {
     const view = await open();
 
-    expect(view.getByLabelText('Activity')).toBeTruthy();
+    expect(activityHeading(view)).toBeTruthy();
     expect(mockSetParams).not.toHaveBeenCalled();
   });
 
@@ -1443,7 +1467,7 @@ describe('arriving to find people', () => {
 
     // And not again on the way back, which is the rule `leaderboard_viewed` follows.
     mockTrack.mockClear();
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByRole('radio', { name: 'Activity' }));
     expect(mockTrack).not.toHaveBeenCalled();
   });
 });

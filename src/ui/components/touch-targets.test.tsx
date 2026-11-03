@@ -4,6 +4,7 @@ import { StyleSheet } from 'react-native';
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
 
+import { CompactSwitch } from './CompactSwitch';
 import { FilterChip } from './FilterChip';
 import { IconToggle } from './IconToggle';
 import { MediumSelector } from './MediumSelector';
@@ -107,6 +108,96 @@ describe('IconToggle', () => {
     expect(tall(cell.height, first!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
     expect(wide(cell.width, first!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
     expect(wide(cell.width, last!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+  });
+  /**
+   * **Three cells, and the one dimension the arrangement gives up** (§A2, 2026-09-08).
+   *
+   * The Feed's control gained People. The slop rule is unchanged and that is the point:
+   * horizontal slop goes on the group's outer edges only, because the cells are flush and
+   * React Native hit-tests siblings last-first, so a left slop on any cell but the first
+   * takes its neighbour's own drawn right edge.
+   *
+   * The consequence is that the **middle cell is 36 × 44 rather than 44 × 44**, and there is
+   * no distribution that fixes it: the only eight points a middle cell could gain are ones
+   * it takes from a neighbour, and a cell that looks pressable and is not is a worse defect
+   * than one that is eight points narrow. Pinned here so it stays a decision — and so that
+   * anyone who does find a better arrangement has a failing test telling them the outer
+   * cells and the vertical target must not regress with it.
+   */
+  it('keeps the outer-edge slop rule at three, and says what that costs the middle', async () => {
+    const view = await renderWithProviders(
+      <IconToggle
+        options={[
+          { value: 'feed', icon: 'newspaper-outline', label: 'Feed' },
+          { value: 'leaderboard', icon: 'trophy-outline', label: 'Leaderboard' },
+          { value: 'people', icon: 'people-outline', label: 'People' },
+        ]}
+        value="feed"
+        onChange={() => {}}
+        label="Feed mode"
+      />,
+    );
+
+    const [first, middle, last] = view.getAllByRole('radio');
+    const cell = StyleSheet.flatten(first!.props.style);
+
+    expect(first!.props.hitSlop).toEqual({ ...SLOP, left: theme.space[2], right: 0 });
+    expect(middle!.props.hitSlop).toEqual({ ...SLOP, left: 0, right: 0 });
+    expect(last!.props.hitSlop).toEqual({ ...SLOP, left: 0, right: theme.space[2] });
+
+    // Every cell reaches the target vertically, which is the axis a thumb misses on.
+    for (const option of [first, middle, last]) {
+      expect(tall(cell.height, option!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    }
+    // The two outer cells reach it horizontally as well.
+    expect(wide(cell.width, first!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    expect(wide(cell.width, last!.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+    // The middle one does not, and takes nothing from either neighbour to try.
+    expect(wide(cell.width, middle!.props.hitSlop)).toBe(cell.width);
+  });
+});
+
+/**
+ * **For You's Movies | TV Shows switch** (Visual 2.1, 2026-11-03). Each half is itself a
+ * 44pt press with a 28pt fill inside it, and the 32pt outline is drawn behind the halves.
+ * Not slop: a press never answers outside its parent's bounds, so slop around a half would
+ * have stopped at the outline (independent review). Its width is its word plus `space[2]`
+ * either side, past 44 for both words.
+ */
+describe('CompactSwitch', () => {
+  it('makes each half a 44pt press of its own, with nothing resting on slop', async () => {
+    const view = await renderWithProviders(
+      <CompactSwitch
+        accessibilityLabel="Medium"
+        options={[
+          { id: 'movies', label: 'Movies' },
+          { id: 'tv', label: 'TV Shows' },
+        ]}
+        value="movies"
+        onChange={() => {}}
+      />,
+    );
+
+    const halves = view.getAllByRole('radio');
+    expect(halves).toHaveLength(2);
+    for (const half of halves) {
+      const press = StyleSheet.flatten(half.props.style);
+      // A floor, so the target holds at 100% and only grows with the system text size.
+      expect(press.minHeight).toBeGreaterThanOrEqual(TARGET);
+      expect(press.height).toBeUndefined();
+      expect(half.props.hitSlop).toBeUndefined();
+      // The visible fill inside it: 28pt tall, its word plus `space[2]` either side.
+      const fill = StyleSheet.flatten((half.children[0] as unknown as { props: { style: never } }).props.style) as Record<string, unknown>;
+      expect(fill.minHeight).toBe(28);
+      expect(fill.paddingHorizontal).toBe(theme.space[2]);
+      expect((fill.minHeight as number) + 2 * (press.paddingVertical as number)).toBeGreaterThanOrEqual(TARGET);
+    }
+
+    // The outline is drawn, not pressed: it takes no touches of its own.
+    const group = view.getByLabelText('Medium');
+    const outline = (group.children as { props: Record<string, unknown> }[])[0]!;
+    expect(outline.props.pointerEvents).toBe('none');
+    expect(StyleSheet.flatten(outline.props.style as never)).toMatchObject({ position: 'absolute' });
   });
 });
 

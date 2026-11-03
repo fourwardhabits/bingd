@@ -165,7 +165,11 @@ describe('the control row', () => {
     expect(row.flexDirection).toBe('row');
     expect(row.flexWrap).toBe('nowrap');
     // And the thing that makes one row possible at every width.
-    expect(view.getByTestId('for-you-controls-scroller').props.horizontal).toBe(true);
+    const scroller = view.getByTestId('for-you-controls-scroller');
+    expect(scroller.props.horizontal).toBe(true);
+    // Full height at every height too: a ScrollView shrinks by default, and on a 568pt
+    // screen the row gave its height to the wall and clipped the chips' tops.
+    expect(flatten(scroller.props.style)).toMatchObject({ flexGrow: 0, flexShrink: 0 });
   });
 
   it('puts a deliberate seam between the controls and the first posters', async () => {
@@ -183,22 +187,22 @@ describe('the control row', () => {
   it('marks the two social features and leaves the utility grey', async () => {
     /**
      * **Feature, feature, utility** — the founder's hierarchy, and the whole of it. Read
-     * off the label colour, the one thing the treatment changes: all three chips share
-     * Parchment since Visual 2.0. The glyph follows the same `action` flag in the
+     * off the border and the label colour together, because those are the two things the
+     * treatment actually changes; the glyph follows the same `action` flag in the
      * component, so a divergence there would be a divergence in one expression.
      */
     const view = await open();
 
-    for (const name of ['Sent to you', 'Group Picks']) {
+    for (const name of ['Sent to You', 'Group Picks']) {
       const chip = view.getByRole('button', { name });
-      expect(flatten(chip.props.style).backgroundColor).toBe(theme.surface.sunken);
+      expect(flatten(chip.props.style).borderColor).toBe(theme.semantic.actionSubtle);
       expect(flatten(within(chip).getByText(name).props.style).color).toBe(
         theme.semantic.action,
       );
     }
 
     const filters = view.getByRole('button', { name: 'Filters' });
-    expect(flatten(filters.props.style).backgroundColor).toBe(theme.surface.sunken);
+    expect(flatten(filters.props.style).borderColor).toBe(theme.border.hairline);
     expect(flatten(within(filters).getByText('Filters').props.style).color).toBe(
       theme.text.secondary,
     );
