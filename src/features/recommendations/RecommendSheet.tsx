@@ -320,7 +320,7 @@ export function RecommendSheet({
   return (
     <Sheet visible onClose={onClose} label={`Recommend ${name}`}>
       <View style={styles.header}>
-        <Text variant="headline" numberOfLines={2}>
+        <Text variant="title2" numberOfLines={2}>
           Recommend {name}
         </Text>
       </View>

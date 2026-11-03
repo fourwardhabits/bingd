@@ -1005,7 +1005,7 @@ function FirstFive({ onContinue }: { onContinue: () => void }) {
               <Poster uri={posterUri(row.posterPath, 'card')} title={row.title} size="xs" />
             </View>
             <View style={styles.rankTitle}>
-              <Text variant="body" numberOfLines={2}>
+              <Text variant="title3" numberOfLines={2}>
                 {row.title}
               </Text>
               {row.year ? (
