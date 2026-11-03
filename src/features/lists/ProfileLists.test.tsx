@@ -94,7 +94,7 @@ describe("somebody else's profile", () => {
     // Not "no section with an empty state" — no section. The heading itself would be a
     // disclosure.
     await waitFor(() => expect(mockCalls.length).toBeGreaterThan(0));
-    expect(view.queryByText('LISTS')).toBeNull();
+    expect(view.queryByText('Lists')).toBeNull();
     expect(view.queryByText(/Nothing public yet/)).toBeNull();
     // The provider wrapper is still the root; what matters is that the component put
     // nothing inside it, including hidden nodes.
