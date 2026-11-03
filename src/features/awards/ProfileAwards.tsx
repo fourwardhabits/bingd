@@ -206,7 +206,11 @@ const styles = StyleSheet.create({
    * A ring, not a pale disc. At this size a low-opacity fill reads as artwork that
    * failed to load; an outline reads as a place something goes.
    */
-  empty: { backgroundColor: theme.surface.base },
+  empty: {
+    backgroundColor: theme.surface.base,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+  },
   // Somebody else's unfilled slot. Present, so the row keeps its five-slot shape, and
   // quiet, so their profile does not read as a list of things they have not done.
   emptyDim: { opacity: 0.7 },

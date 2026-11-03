@@ -141,6 +141,7 @@ export function StreakLine({ userId }: StreakLineProps) {
       <Ionicons name="flame" size={theme.layout.icon.sm} color={theme.semantic.emphasis} />
       <Text
         variant="callout"
+        style={styles.copy}
         // The flame is decoration beside a number that already says it. Read out, it
         // would be "fire, four week streak".
         accessibilityLabel={state ? `${run}. ${state}` : run}
@@ -166,4 +167,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.space[1],
   },
+  // Wraps beside the flame: the lapsed sentence is longer than a 320pt row.
+  copy: { flex: 1 },
 });

@@ -171,13 +171,13 @@ const styles = StyleSheet.create({
   badge: { width: theme.layout.awardBadge, height: theme.layout.awardBadge },
   copy: { flex: 1, gap: 1 },
   track: {
-    height: 4,
+    height: 6,
     marginTop: theme.space[2],
-    borderRadius: 2,
+    borderRadius: 3,
     overflow: 'hidden',
     backgroundColor: theme.surface.sunken,
   },
-  fill: { height: 4, borderRadius: 2, backgroundColor: theme.semantic.emphasis },
+  fill: { height: 6, borderRadius: 3, backgroundColor: theme.semantic.emphasis },
   /**
    * Right-aligned with a floor under it, so `7 / 50` and `1,164 / 2,000` end on the
    * same edge and the column does not breathe as the reader scrolls past a wider
