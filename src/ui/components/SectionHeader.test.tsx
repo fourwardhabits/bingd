@@ -14,10 +14,10 @@ const printed = (text: ReturnType<typeof render> extends Promise<infer V> ? V : 
  * was `BINGD AWARDS`, on every platform, with every test passing. These read the style.
  */
 describe('SectionHeader casing', () => {
-  it('prints an exact-case title as given, with the token’s uppercasing undone', async () => {
-    const view = await render(<SectionHeader title="bingd AWARDS" exactCase />);
+  it('prints a title level heading as given, with the token’s uppercasing undone', async () => {
+    const view = await render(<SectionHeader title="bingd Awards" level="title" />);
 
-    expect(printed(view, 'bingd AWARDS').textTransform).toBe('none');
+    expect(printed(view, 'bingd Awards').textTransform).toBe('none');
   });
 
   it('leaves every other heading uppercase', async () => {

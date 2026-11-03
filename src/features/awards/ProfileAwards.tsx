@@ -74,7 +74,7 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
   const badgeSize = Math.min(
     theme.layout.awardBadge,
     Math.floor(
-      (width - theme.layout.gutter * 2 - theme.space[2] * (PROFILE_AWARD_SLOTS - 1)) /
+      (width - theme.layout.gutter * 2 - theme.space[3] * 2 - theme.space[2] * (PROFILE_AWARD_SLOTS - 1)) /
         PROFILE_AWARD_SLOTS,
     ),
   );
@@ -100,8 +100,8 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
   return (
     <View style={styles.section}>
       <SectionHeader
-        title="bingd AWARDS"
-        exactCase
+        title="bingd Awards"
+        level="title"
         // Offered even with an empty shelf: the sheet is where the twenty are, and
         // "what could I earn" is the question a new account has.
         actionLabel="See all"
@@ -191,8 +191,12 @@ const styles = StyleSheet.create({
    */
   row: {
     flexDirection: 'row',
-    paddingHorizontal: theme.layout.gutter,
+    marginHorizontal: theme.layout.gutter,
+    paddingHorizontal: theme.space[3],
+    paddingVertical: theme.space[4],
     gap: theme.space[2],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.sunken,
   },
   slot: { flex: 1, alignItems: 'center', gap: theme.space[1] },
   // Sized by the caller, so `TierDots` positions against the badge's own bottom edge
@@ -202,13 +206,9 @@ const styles = StyleSheet.create({
    * A ring, not a pale disc. At this size a low-opacity fill reads as artwork that
    * failed to load; an outline reads as a place something goes.
    */
-  empty: {
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.sunken,
-  },
+  empty: { backgroundColor: theme.surface.base },
   // Somebody else's unfilled slot. Present, so the row keeps its five-slot shape, and
   // quiet, so their profile does not read as a list of things they have not done.
-  emptyDim: { opacity: 0.4 },
+  emptyDim: { opacity: 0.7 },
   name: { textAlign: 'center' },
 });

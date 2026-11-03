@@ -658,9 +658,9 @@ bingd. Any follow between you is removed"* and *"Join me on bingd. <link>"*. A l
 heading that does not end in a full stop anywhere else in the app does not gain one here:
 *"You have been invited to bingd"*.
 
-**Uppercase keeps the name lowercase.** A section header is upper-cased by
-`SectionHeader`; the awards shelf passes `exactCase` so it reads `bingd AWARDS` rather
-than `BINGD AWARDS`.
+**A shelf title keeps its case.** `SectionHeader` upper-cases a label, and its `title` level prints as
+given, so the awards shelf reads `bingd Awards`. Where the name does sit in an upper-cased
+run, it stays lowercase: `bingd AWARDS`, never `BINGD AWARDS`.
 
 ### Where it is not written this way
 

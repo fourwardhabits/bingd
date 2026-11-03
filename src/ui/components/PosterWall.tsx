@@ -92,6 +92,7 @@ export function PosterShelf({
       {showTitle ? (
         <SectionHeader
           title={title}
+          level="title"
           actionLabel={onPressAll ? 'All' : undefined}
           onPressAction={onPressAll}
         />
@@ -136,6 +137,11 @@ export type PosterGridProps = {
    * reader.
    */
   onDismissTile?: (tile: PosterTile) => void;
+  /**
+   * Sets the first tile at twice the width beside the next two. For a wall in rank order
+   * only, where the composition then states the ranking: Top ranked on a profile.
+   */
+  lead?: boolean;
   /** Long-press, for anything a wall of unlabelled artwork cannot say. */
   onLongPressTile?: (tile: PosterTile) => void;
 };
@@ -155,6 +161,7 @@ export function PosterGrid({
   onToggleSave,
   onDismissTile,
   onLongPressTile,
+  lead = false,
 }: PosterGridProps) {
   const { width } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
@@ -165,17 +172,43 @@ export function PosterGrid({
 
   if (tiles.length === 0) return null;
 
+  const [first, second, third] = tiles;
+  const mosaic = lead && first && second && third ? { first, second, third } : null;
+
   return (
     <View style={styles.grid}>
       {title ? (
         <SectionHeader
           title={title}
+          level="title"
           actionLabel={onPressAll ? 'All' : undefined}
           onPressAction={onPressAll}
         />
       ) : null}
+      {mosaic ? (
+        <View style={[styles.leadRow, { gap }]}>
+          <Tile
+            tile={mosaic.first}
+            width={cardWidth * 2 + gap}
+            onPress={() => onPressTile(mosaic.first)}
+          />
+          {/* One and a half gaps: two posters and a gap must equal the lead's height. */}
+          <View style={{ gap: gap * 1.5 }}>
+            <Tile
+              tile={mosaic.second}
+              width={cardWidth}
+              onPress={() => onPressTile(mosaic.second)}
+            />
+            <Tile
+              tile={mosaic.third}
+              width={cardWidth}
+              onPress={() => onPressTile(mosaic.third)}
+            />
+          </View>
+        </View>
+      ) : null}
       <View style={[styles.gridRows, { gap }]}>
-        {tiles.map((tile) => (
+        {(mosaic ? tiles.slice(3) : tiles).map((tile) => (
           <Tile
             key={tile.id}
             tile={tile}
@@ -418,6 +451,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: theme.layout.gutter,
+  },
+  leadRow: {
+    flexDirection: 'row',
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.layout.posterGrid.gap,
   },
   // The width of the cell FlashList sized, never a flex share of it: a cell's height is
   // measured, and a flexing child would measure against the row instead of its tile.

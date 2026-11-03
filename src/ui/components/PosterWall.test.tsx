@@ -138,7 +138,7 @@ describe('PosterShelf', () => {
       <PosterShelf title="Because you loved Inception" tiles={tiles} onPressTile={() => {}} />,
     );
 
-    expect(view.getByText('BECAUSE YOU LOVED INCEPTION')).toBeTruthy();
+    expect(view.getByText('Because you loved Inception')).toBeTruthy();
   });
 
   it('offers the full list only when there is somewhere to go', async () => {

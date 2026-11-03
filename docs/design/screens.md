@@ -1502,3 +1502,17 @@ Nothing here is blocking. The questions that were — the tab structure in §2 a
 **Group Picks.** The first pick leads on a Parchment panel marked START HERE, because the sheet answers "what should we watch" and a list alone does not answer it. Its number is labelled `bingd` once. Every row still gives its one reason. An empty score is the grey disc, as on the title page.
 
 **Leaderboard.** Ranks take the serif, matching First Five.
+
+---
+
+## Visual 2.0: profile, Awards and celebration (2026-11-03, proposed)
+
+**Profile.** The name takes `title1` and the bio the `deck` italic, so the top of the page reads as a masthead. Stats are a printed strip. Every shelf takes the title level. The streak's flame is an Amber glyph rather than an OS emoji, which rendered differently on each platform.
+
+**Top ranked leads with the first film.** The wall is in rank order, so the composition states the ranking: first at twice the width, second and third beside it, the rest three across.
+
+**Awards shelf.** Still five slots, always five. The row sits in a Parchment display case with Paper wells, so an empty slot reads as a niche rather than a hole. An earned Award wears an Amber ring. No poster sits inside the case, so the rule that Amber stays away from artwork holds.
+
+**Awards sheet.** Names take the serif, and each track shows an Amber line to its next tier.
+
+**Celebration.** The poster wall runs full height with no navigation bar across it. The eyebrow is the system's Maroon label.

@@ -160,6 +160,7 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
     <View style={styles.section}>
       <SectionHeader
         title="Top ranked"
+        level="title"
         actionLabel={seeAll ? 'See all' : undefined}
         onPressAction={seeAll ? () => onSeeAll?.(seeAll) : undefined}
       />
@@ -214,6 +215,7 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
         />
       ) : (
         <PosterGrid
+          lead
           tiles={tiles}
           onPressTile={(tile) => onPressTitle(tile.id)}
         />

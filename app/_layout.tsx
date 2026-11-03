@@ -369,7 +369,7 @@ function Navigation() {
                 name="awards/celebrate"
                 options={{
                   presentation: 'modal',
-                  headerShown: true,
+                  headerShown: false,
                   title: ROOT_SCREEN_TITLES['awards/celebrate'],
                 }}
               />
