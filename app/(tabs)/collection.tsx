@@ -521,7 +521,7 @@ export default function CollectionScreen() {
           </View>
         ) : (
           <View style={styles.strip}>
-            <Text variant="callout" style={styles.stripCopy} numberOfLines={1}>
+            <Text variant="callout" style={styles.stripCopy}>
               You have unranked titles
             </Text>
             <Button
