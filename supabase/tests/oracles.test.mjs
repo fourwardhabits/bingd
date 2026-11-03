@@ -158,17 +158,18 @@ test('policies still filter correctly once the helper takes no viewer argument',
     const alice = await t.createUser({ username: 'alice' });
     const bob = await t.createUser({ username: 'bob', visibility: 'private' });
 
-    const anonSees = await t.asAnon(async () => {
+    const carol = await t.createUser({ username: 'carol' });
+    const carolSees = await t.asUser(carol, async () => {
       const { rows } = await t.sql(`select username from profiles order by username`);
       return rows.map((r) => r.username);
     });
-    assert.deepEqual(anonSees, ['alice'], 'a signed-out reader sees only public profiles');
+    assert.deepEqual(carolSees, ['alice', 'carol'], 'a stranger sees only public profiles');
 
     const bobSees = await t.asUser(bob, async () => {
       const { rows } = await t.sql(`select username from profiles order by username`);
       return rows.map((r) => r.username);
     });
-    assert.deepEqual(bobSees, ['alice', 'bob'], 'bob sees the public profile and his own');
+    assert.deepEqual(bobSees, ['alice', 'bob', 'carol'], 'bob sees the public profiles and his own');
 
     void alice;
   } finally {

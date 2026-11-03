@@ -360,8 +360,10 @@ describe('suspension hides the account everywhere at once', () => {
   });
 
   it('hides it from anonymous readers too', async () => {
+    const { rows: [{ username }] } = await t.sql(
+      `select username::text from profiles where id = $1`, [suspended]);
     const { rows } = await t.asAnon(() =>
-      t.sql(`select id from profiles where id = $1`, [suspended]),
+      t.sql(`select * from public_profile_card($1)`, [username]),
     );
     assert.equal(rows.length, 0, 'the public web pages must not serve a suspended account');
   });
@@ -767,6 +769,14 @@ describe('the guard is wired in, not merely present', () => {
     // applies — and every act a name leads to (open the profile, follow, request) calls
     // the guard itself.
     'follow_activity_people',
+
+    // 20261024000100. Whose invitation this is, before anything is granted. A pure read,
+    // and accepting it calls the guard.
+    'invite_preview',
+
+    // 20261024000400. One public account's name and picture, for the website. A pure read
+    // gated on can_view_profile, which already refuses a suspended account.
+    'public_profile_card',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

@@ -81,16 +81,35 @@ describe('avatars', () => {
   });
 
   describe('reading', () => {
-    it('is open, including to a signed-out client', async () => {
-      // Profile pages are served signed-out. This is also the trade the bucket
-      // makes: anyone holding the URL keeps it.
+    /**
+     * Pictures are served by public URL, which never consults this policy, so a profile
+     * page needs nothing from it. What it controlled was **listing**, and the bucket's
+     * top-level folders are account ids, private accounts included (20261024000400).
+     */
+    it('lists nothing to a signed-out client, or to another account', async () => {
       await upload(alice, `${alice}/face.jpg`);
 
-      const rows = await t.asAnon(async () => {
+      const asAnon = await t.asAnon(async () => {
         const { rows } = await t.sql(`select name from storage.objects where bucket_id = 'avatars'`);
         return rows;
       });
-      assert.equal(rows.length, 1);
+      assert.deepEqual(asAnon, []);
+
+      const asOther = await t.asUser(bob, async () => {
+        const { rows } = await t.sql(`select name from storage.objects where bucket_id = 'avatars'`);
+        return rows;
+      });
+      assert.deepEqual(asOther, []);
+    });
+
+    it('lists an account its own folder, which clearing it on deletion needs', async () => {
+      await upload(alice, `${alice}/face.jpg`);
+
+      const rows = await t.asUser(alice, async () => {
+        const { rows } = await t.sql(`select name from storage.objects where bucket_id = 'avatars'`);
+        return rows;
+      });
+      assert.deepEqual(rows, [{ name: `${alice}/face.jpg` }]);
     });
   });
 

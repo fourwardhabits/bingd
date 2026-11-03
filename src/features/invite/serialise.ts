@@ -10,7 +10,7 @@
  * the token and reading the id are two `await`s over device storage, and two redemptions
  * can be in flight in one process:
  *
- *   1. off the invitation screen, `useRedeemPendingInvite` starts and reads pending token
+ *   1. off the invitation screen, `useResumePendingInvite` starts and reads pending token
  *      **A**. The route then changes, which stands the hook down for *future* effects and
  *      does not cancel the promise already running;
  *   2. the person opens invitation **B** and taps Accept. `claimForRedemption(B)` replaces

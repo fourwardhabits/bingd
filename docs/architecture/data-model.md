@@ -721,7 +721,7 @@ be paged by a keyset over its members.
 **The membership itself is bounded at `feed.follow_story_max_people` (50 by default) as it is
 written**, and that number is what keeps this read small — an independent review of the
 migration found the need for it. `follow.max_per_hour` bounds one account's own follows at sixty, but
-`redeem_invite` posts the *inviter's* story from the invitee's session, so a link shared into
+`accept_invite` posts the *inviter's* story from the invitee's session, so a link shared into
 a large group chat appends one member per redemption with no per-actor ceiling anywhere. A
 story naming five thousand people is not a story anybody reads; it is a sort on every feed
 page that happens to include it. So a follow past the ceiling inside the same window is
@@ -769,7 +769,7 @@ takes the ordered pair key and then `follow_story:<actor>` before it reads anyth
 first version used `select ... limit 1 for update` alone and the real-PostgreSQL race suite
 rejected it immediately: **`for update` locks the rows a query returned, and cannot lock a
 row that is not there yet.** Two transactions that both find no open story both find nothing
-to lock. That is reachable in production rather than in theory — `redeem_invite` posts the
+to lock. That is reachable in production rather than in theory — `accept_invite` posts the
 *inviter's* story from the *invitee's* session, so two people accepting one personal link at
 the same moment hold two different pair keys and nothing else. Pair then actor, one of each,
 which is what makes the pair deadlock-free.
@@ -784,7 +784,7 @@ rather than one that has not.
 
 `invite_tokens.kind` (`personal` | `referral`, defaulted, `referral` declared with no
 writer) is the gate on the mutual auto-follow a redeemed invitation now creates. It is a
-property of the token rather than a branch inside `redeem_invite`, so a future public
+property of the token rather than a branch inside `accept_invite`, so a future public
 campaign link is a writer plus a product decision rather than an `if` somebody has to notice.
 
 Since `20260912000200` a valid **personal** token ends with **both** edges `approved`, in all

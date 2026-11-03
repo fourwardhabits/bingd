@@ -215,9 +215,9 @@ export async function run({
     log(`  window            ${preview.delay_hours}h to ${preview.max_age_hours}h after signup, at most ${preview.max_per_run} per run`);
     log(`  would claim       ${preview.candidates.length}`);
     log(`  links to create   ${preview.invite_links_to_create}   (have no personal invite link; a real claim mints exactly one each)`);
-    for (const c of preview.candidates) {
-      log(`    ${c.suppressed ? 'suppressed ' : '           '}@${c.username}  signed up ${c.signed_up_at}`);
-    }
+    // Counts only. This repository is public, so its Actions logs are too: who is being
+    // written to, and when they signed up, belongs in welcome_emails and not here.
+    log(`  suppressed        ${preview.candidates.filter((c) => c.suppressed).length}`);
     log('\n  DRY RUN. Nothing was claimed and nothing was sent.\n');
     return { ...summary, wouldClaim: preview.candidates.length, preview };
   }
@@ -355,7 +355,7 @@ export async function run({
             },
       );
     } catch (error) {
-      log(`  ! could not record @${person.username}: ${error.message}`);
+      log(`  ! could not record one outcome: ${error.code ?? 'unknown'}`);
     }
 
     if (outcome.ok) summary.sent += 1;
@@ -368,9 +368,10 @@ export async function run({
      */
     if (recorded !== true) summary.unrecorded += 1;
 
+    // No handle and no provider id: welcome_emails holds both, behind the service role.
     log(
-      `  ${outcome.ok ? 'sent  ' : 'FAILED'} @${person.username} attempt ${person.attempt}` +
-        (outcome.ok ? ` resend ${outcome.id}` : ` status ${outcome.status}`) +
+      `  ${outcome.ok ? 'sent  ' : 'FAILED'} attempt ${person.attempt}` +
+        (outcome.ok ? '' : ` status ${outcome.status}`) +
         (recorded === true ? '' : '  NOT RECORDED: stays claimed, never retried'),
     );
   }

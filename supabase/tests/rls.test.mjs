@@ -53,11 +53,13 @@ describe('the harness enforces policies at all', () => {
     assert.equal(asStranger.rows.length, 0, 'a private profile leaked to a stranger');
   });
 
-  it('gives an anonymous reader public profiles only', async () => {
-    const { rows } = await t.asAnon(() => t.sql(`select username from profiles order by username`));
-    const names = rows.map((r) => r.username);
-    assert.ok(names.includes('alice'), 'public profiles are readable on the web pages');
-    assert.ok(!names.includes('priya'), 'a private profile was exposed to an anonymous reader');
+  it('gives an anonymous reader one public profile by exact handle, and no list', async () => {
+    const card = (handle) => t.asAnon(() => t.sql(`select * from public_profile_card($1)`, [handle]));
+    assert.equal((await card('alice')).rows.length, 1, 'public profiles open on the web pages');
+    assert.equal((await card('priya')).rows.length, 0, 'a private profile reached an anonymous reader');
+
+    const error = await t.asAnon(() => t.errorFrom(`select username from profiles`));
+    assert.equal(error?.code, '42501', 'the anon key could list accounts');
   });
 });
 

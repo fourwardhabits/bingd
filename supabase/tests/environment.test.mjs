@@ -70,10 +70,16 @@ describe('environment_name', () => {
    * whose neighbours would then also have to be audited.
    */
   it('does not open app_config to a client', async () => {
-    await t.asAnon(async () => {
+    const user = await t.createUser({ username: 'env_reader' });
+    await t.asUser(user, async () => {
       const { rows } = await t.sql(`select count(*)::int as n from app_config where key = 'env.name'`);
       assert.equal(rows[0].n, 0, 'env.name is readable as a config row');
     });
+    assert.equal(
+      (await t.asAnon(() => t.errorFrom(`select key from app_config`)))?.code,
+      '42501',
+      'anon reads no table of settings at all',
+    );
   });
 });
 
