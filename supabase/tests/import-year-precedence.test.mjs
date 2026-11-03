@@ -498,16 +498,20 @@ describe('several cached films in exactly the export’s year', () => {
     assert.equal(row.status, 'ambiguous');
   });
 
-  it('still lets a trusted mapping speak first', async () => {
-    await film('Past Lives', '2023-06-02');
+  it('does not let a trusted mapping choose between namesakes', async () => {
+    // Two accounts can claim a URI for any film they can name, and here the wrong one
+    // shares the row's title and year, so the row cannot contradict it. Rule 1b decides on
+    // evidence the row and the catalogue hold, and the mapping does not get a vote
+    // (security audit 2026-11-01, M-1).
+    const native = await film('Past Lives', '2023-06-02');
     await film('Past Lives', '2023-03-02', 'Nagligad nga Kinabuhi');
-    const trusted = await film('Past Lives', '2023-11-11', 'Something Corroborated');
+    const claimed = await film('Past Lives', '2023-11-11', 'Something Corroborated');
     await t.sql(
       `insert into letterboxd_matches (letterboxd_uri, media_item_id, tier, claim_count)
-       values ($1, $2, 'local', 2)`, [PAST_URI, trusted]);
+       values ($1, $2, 'local', 2)`, [PAST_URI, claimed]);
 
     const row = await matchOnly(lia, [pastRow(2023)]);
-    assert.equal(row.media_item_id, trusted);
+    assert.equal(row.media_item_id, native);
   });
 
   it('is unchanged for a row with no year', async () => {

@@ -1,54 +1,51 @@
-import { useSegments } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { useAuth } from '@/features/auth';
 
-import { redeemPendingInvite } from './redeem';
+import { resumePendingInvite } from './redeem';
 
 /**
- * Redeems the invitation this device is holding, once there is an account to attribute.
+ * Brings somebody back to the invitation this device is holding, once there is an account
+ * to show it to.
+ *
+ * ---------------------------------------------------------------------------
+ * It shows the invitation. It does not accept it
+ * ---------------------------------------------------------------------------
+ *
+ * Security audit 2026-11-01, B-1. This hook used to redeem whatever was held, with no tap
+ * and nothing on screen, so opening an attacker's link and leaving gave them access to a
+ * private account. Now it routes to `app/i/[token].tsx`, which names the inviter and says
+ * what accepting grants, and only the button there accepts. A new account sees that screen
+ * straight after the profile form, before the first-run flow continues.
+ *
+ * The one thing that still reaches the server from here is a replay of a press of Accept
+ * whose answer was lost. `resumePendingInvite` states the rule.
  *
  * ---------------------------------------------------------------------------
  * Why this is a hook in the layout and not a call in the signup screen
  * ---------------------------------------------------------------------------
  *
  * There are three ways to arrive at a ready session and only one of them goes through
- * the profile form. A person invited on a phone that already had Bingd installed and
- * signed in never sees it; a person who abandoned signup and came back a day later
- * completes it from a cold start; a person who signed in with Apple returns through an
- * OAuth round trip that remounts the tree. A call placed in `create-profile.tsx` would
- * cover exactly one of the three, and the two it missed are the ones this whole
- * mechanism exists for.
+ * the profile form. A person who abandoned signup and came back a day later completes it
+ * from a cold start; a person who signed in with Apple returns through an OAuth round trip
+ * that remounts the tree; an existing account signs back in with a token held. A call
+ * placed in `create-profile.tsx` would cover exactly one of the three.
  *
  * So it hangs off the same place `useAuthRouting` does — the one component that sees
  * every transition into `ready` — and asks device storage whether there is anything to
  * do. There almost never is, and the cost of finding out is one read.
  *
  * ---------------------------------------------------------------------------
- * Why it stands down on the invitation screen
- * ---------------------------------------------------------------------------
- *
- * `app/i/[token].tsx` redeems on an explicit tap, and PRD §17 requires that tap. If
- * this hook redeemed underneath it, the person would press Accept on an invitation that
- * had already been accepted a moment earlier and be told "already accepted" — correct,
- * idempotent, and a confusing thing to say to somebody who has just done the thing
- * once. The screen owns the token while it is on screen.
- *
- * Nothing is lost by waiting: leaving the screen without accepting keeps the token, and
- * the next launch redeems it here.
- *
- * ---------------------------------------------------------------------------
  * Once per session, and the ref rather than a query
  * ---------------------------------------------------------------------------
  *
- * A ref keyed on the user id, because this is not a read to be cached — it is a write,
- * and React Query's retry and refetch behaviour is exactly wrong for one. The outcome
- * is not rendered anywhere: a redemption that succeeds is visible as the app working,
- * and one that fails keeps its token for the next launch rather than interrupting
- * somebody's first minute with a message about a mechanism they never saw.
+ * A ref keyed on the user id, because this can write, and React Query's retry and refetch
+ * behaviour is exactly wrong for that.
  */
-export function useRedeemPendingInvite() {
+export function useResumePendingInvite() {
   const auth = useAuth();
+  const router = useRouter();
   const segments = useSegments();
   const attempted = useRef<string | null>(null);
 
@@ -60,6 +57,8 @@ export function useRedeemPendingInvite() {
     if (attempted.current === auth.userId) return;
 
     attempted.current = auth.userId;
-    void redeemPendingInvite();
-  }, [auth, onInvitationScreen]);
+    void resumePendingInvite(auth.userId).then((token) => {
+      if (token) router.push({ pathname: '/i/[token]', params: { token } });
+    });
+  }, [auth, onInvitationScreen, router]);
 }

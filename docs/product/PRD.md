@@ -3797,6 +3797,8 @@ v0.5 said "accepts or follows" in three places without ever defining the result.
 6. An active **block** in either direction voids the invitation entirely.
 7. Acceptance also records referral attribution, independent of the follow.
 
+**Amended 2026-11-01 (security audit, B-1, `20261024000100`).** Clause 1 was stated and not enforced: the app stored every token it opened and redeemed it in the background, so opening a link and leaving connected two accounts. Now only `accept_invite`, sent by the Accept button, connects anybody. The screen names the inviter first, through `invite_preview`, and says what accepting grants. A token is held only while there is no account to show it to, a new account sees the invitation straight after the profile form, and *Not now* leaves nothing behind. `redeem_invite` remains for installed builds and does nothing, attribution included: it cannot tell a tap from a background call, and an attribution is permanent.
+
 ### Recipient paths
 
 | Situation | Behavior |
