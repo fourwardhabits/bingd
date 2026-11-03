@@ -6,6 +6,9 @@ changing one argument.
 
 **Nothing here publishes.** See [Publishing](#stage-4-publishing-deliberately-absent).
 
+**Everything it produces is a layout proof, not a final store screenshot.** Store images need
+captures from a real phone build; [NATIVE-CAPTURE.md](./NATIVE-CAPTURE.md) has the plan.
+
 | Stage | Command | Reads | Writes |
 |---|---|---|---|
 | 1. Capture | `npm run capture -- ...` | The app at a git ref or folder | `out/raw/` |
@@ -105,6 +108,19 @@ Expect to touch `manifest/scenes.mjs`, because scenes wait on visible copy, and
 `capture/mock/backend.mjs` if backend calls changed. If the tab bar file moved, the patch warns
 and the run continues. If the web output line moved, the run stops.
 
+On Visual 2.0 (`visual2/4-profile-awards` at `87ea14c`), every patch and all 13 scenes held
+unchanged, and the mock saw no unknown call. What broke was framing: the score sheet grew
+taller, and a crop set as a fraction of the screen cut through its handle. So a scene can name a
+`focusOn` selector, capture records where that element starts, and compose frames from it. The
+sheet scenes use the shared `Sheet`'s `sheet-body` test id, which is a component hook rather than
+copy. To keep the outputs of two builds apart, pass each its own folders:
+
+```
+node capture/run.mjs --source visual2/4-profile-awards --node-modules <path> --out out/visual2/raw
+node compose/run.mjs --raw out/visual2/raw --out out/visual2/composed
+node export/run.mjs --raw out/visual2/raw --composed out/visual2/composed --out out/visual2/export
+```
+
 ## Stage 2: compose
 
 ```
@@ -144,7 +160,7 @@ Add a frame in `manifest/frames.mjs`, then list it on a target in `manifest/targ
 ## Stage 3: export
 
 ```
-node export/run.mjs [--targets a,b] [--frames c,d] [--partial]
+node export/run.mjs [--targets a,b] [--frames c,d] [--partial] [--status-bar <px>]
 ```
 
 `manifest/targets.mjs` is the one list of outputs. Each file is read back and refused if its
