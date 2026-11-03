@@ -524,16 +524,18 @@ export default function CollectionScreen() {
             <Text variant="callout" style={styles.stripCopy}>
               You have unranked titles
             </Text>
-            <Button
-              label="Dismiss"
-              kind="tertiary"
-              tone="secondary"
-              size="sm"
-              onPress={() => {
-                void dismissNudge().catch(() => {});
-              }}
-            />
-            <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
+            <View style={styles.stripActions}>
+              <Button
+                label="Dismiss"
+                kind="tertiary"
+                tone="secondary"
+                size="sm"
+                onPress={() => {
+                  void dismissNudge().catch(() => {});
+                }}
+              />
+              <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
+            </View>
           </View>
         )
       ) : null}
@@ -845,10 +847,23 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
     backgroundColor: theme.surface.sunken,
     flexDirection: 'row',
+    // At a large system text size the copy and both buttons no longer fit one line, and
+    // Rank (the strip's whole point) went off the screen. So the pair wraps to a second
+    // line, right-aligned, once the copy would drop below ~6 words' room. At 100% it
+    // stays one line on every supported width (Visual 2.1 check, 2026-11-03).
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[1],
+  },
+  stripCopy: { flexGrow: 1, flexShrink: 1, flexBasis: 100 },
+  stripActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     gap: theme.space[1],
+    marginLeft: 'auto',
   },
-  stripCopy: { flex: 1 },
   nudgeActions: { flexDirection: 'row', gap: theme.space[2], paddingTop: theme.space[1] },
 
   body: { flex: 1 },

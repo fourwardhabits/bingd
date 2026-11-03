@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState, type ReactNode } from 'react';
-import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useRef, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { paperAlpha, theme } from '@/ui/tokens';
 
@@ -20,12 +20,17 @@ export type ChipRowScrollerProps = {
  * off-screen with nothing to say it was there. So while anything lies past the right edge,
  * the edge fades into Paper under a small chevron; scrolled to the end, both go.
  *
+ * **The cue is a press, not a picture** (independent review, 2026-11-03). It sits over the
+ * edge of whichever chip is there, and a chevron that let the tap fall through to that chip
+ * would say "more this way" and then do something else. So a tap on it scrolls the row to
+ * its end, and it is 44pt wide, the target floor. Screen readers skip it: they reach every
+ * chip by swiping, on screen or not, and a second way to scroll would be noise.
+ *
  * The fade is bands of Paper, the technique `HeaderBoundary` and `TitleHero` use, because
  * a real gradient would be `expo-linear-gradient`: a native module and a new fingerprint.
- * It is decoration, so it takes no touches and is hidden from screen readers, which reach
- * every chip by swiping whether it is on screen or not.
  */
 export function ChipRowScroller({ children, style, testID }: ChipRowScrollerProps) {
+  const scroller = useRef<ScrollView>(null);
   const [viewport, setViewport] = useState(0);
   const [content, setContent] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -34,6 +39,7 @@ export function ChipRowScroller({ children, style, testID }: ChipRowScrollerProp
   return (
     <View>
       <ScrollView
+        ref={scroller}
         horizontal
         showsHorizontalScrollIndicator={false}
         alwaysBounceHorizontal={false}
@@ -47,8 +53,8 @@ export function ChipRowScroller({ children, style, testID }: ChipRowScrollerProp
         {children}
       </ScrollView>
       {more ? (
-        <View
-          pointerEvents="none"
+        <Pressable
+          onPress={() => scroller.current?.scrollToEnd({ animated: true })}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           style={styles.hint}
@@ -64,13 +70,13 @@ export function ChipRowScroller({ children, style, testID }: ChipRowScrollerProp
               color={theme.text.secondary}
             />
           </View>
-        </View>
+        </Pressable>
       ) : null}
     </View>
   );
 }
 
-/** Four 8pt bands, Paper going opaque towards the edge. */
+/** Four 11pt bands, Paper going opaque towards the edge: 44pt in all, the target floor. */
 const FADE = [0.3, 0.6, 0.85, 0.97];
 
 const styles = StyleSheet.create({
@@ -81,7 +87,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     flexDirection: 'row',
   },
-  band: { width: 8 },
+  band: { width: theme.layout.minTapTarget / FADE.length },
   // Centred on the chips rather than on the row, which carries 12pt above them and 16pt
   // below (`filterRow`).
   glyph: {

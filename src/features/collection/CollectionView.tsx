@@ -184,6 +184,7 @@ export function CollectionView({
           value={state.mode}
           onChange={(mode) => onChange({ ...state, mode })}
           options={VIEW_MODES}
+          style={styles.toggle}
         />
       </View>
 
@@ -326,14 +327,20 @@ const nameOf = (item: CollectionItem) =>
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
+  // Wraps, so at a large system text size the view toggle drops to its own line,
+  // right-aligned, instead of running off the screen (Visual 2.1 check, 2026-11-03).
+  // The row gap clears the chips' 6pt slop on both lines. At 100% nothing wraps.
   controls: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: theme.space[2],
+    columnGap: theme.space[2],
+    rowGap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
   },
   spacer: { flex: 1 },
+  toggle: { marginLeft: 'auto' },
 
   // The sort menu's own styles moved to `ui/components/SortControl` with the menu.
   count: {

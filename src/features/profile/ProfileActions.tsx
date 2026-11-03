@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { PixelRatio, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { Button } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -82,13 +82,36 @@ export type ProfileActionsProps = {
  * wrapped and its button grew to two lines beside a one-line neighbour. `Button`'s own
  * note has the arithmetic.
  */
+/**
+ * **One above the other at a large system text size** (Visual 2.1 check, 2026-11-03).
+ *
+ * `fit` lets a label shrink to 85% to stay on one line in its half, and below that it
+ * truncates. At 130% on a 320pt phone, and at 200% everywhere, "Invite friends" does not
+ * fit its half even at 85%, so the pair stacks: each button full width, its label whole.
+ * Nothing can measure text before it is drawn, so this estimates the longest label this
+ * row carries ("Invite friends", 14 characters) at about 0.48em of the 17pt headline,
+ * which errs towards stacking. At 100% the row is unchanged on every supported width.
+ */
+const LONGEST_LABEL = 14;
+const HEADLINE_CHAR = 17 * 0.48;
+const FIT_FLOOR = 0.85;
+const FIT_PADDING = theme.space[3] * 2;
+
+export const stackProfileActions = (width: number, fontScale: number) => {
+  const half = (width - theme.layout.gutter * 2 - theme.space[2]) / 2;
+  return LONGEST_LABEL * HEADLINE_CHAR * fontScale * FIT_FLOOR + FIT_PADDING > half;
+};
+
 export function ProfileActions({ onShare, trailing }: ProfileActionsProps) {
+  // `useWindowDimensions` re-renders this when the width or the text size changes.
+  const { width } = useWindowDimensions();
+  const stacked = Boolean(trailing) && stackProfileActions(width, PixelRatio.getFontScale());
   return (
-    <View style={styles.row}>
-      <View style={styles.half}>
+    <View style={stacked ? styles.column : styles.row} testID="profile-actions">
+      <View style={stacked ? null : styles.half}>
         <Button label="Share Profile" kind="secondary" fit onPress={onShare} />
       </View>
-      {trailing ? <View style={styles.half}>{trailing}</View> : null}
+      {trailing ? <View style={stacked ? null : styles.half}>{trailing}</View> : null}
     </View>
   );
 }
@@ -97,5 +120,7 @@ const styles = StyleSheet.create({
   // Two equal halves rather than one button and a chip: they are different kinds of
   // thing, and equal weight is what stops the fill reading as the only real control.
   row: { flexDirection: 'row', gap: theme.space[2] },
+  // Stacked, the two keep equal weight by being equally wide.
+  column: { gap: theme.space[2] },
   half: { flex: 1 },
 });

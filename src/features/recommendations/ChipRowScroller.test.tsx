@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@testing-library/react-native';
-import { Text } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 
 import { ChipRowScroller } from './ChipRowScroller';
 
@@ -31,15 +31,35 @@ const scrollTo = async (view: Awaited<ReturnType<typeof renderRow>>, x: number) 
 };
 
 describe('the more-to-the-right cue', () => {
-  it('is drawn while anything lies past the edge', async () => {
+  it('is drawn while anything lies past the edge, as a 44pt press of its own', async () => {
     const view = await renderRow();
     await measure(view, 320, 420);
 
     const cue = view.getByTestId('row-more', HIDDEN);
-    // Decoration only: it takes no touches and is not read out.
-    expect(cue.props.pointerEvents).toBe('none');
+    // A press, so a tap on the chevron scrolls rather than falling through to whichever
+    // chip lies under the fade.
+    expect(cue.props.onClick ?? cue.props.onResponderRelease).toBeDefined();
+    expect(cue.props.pointerEvents).not.toBe('none');
+    const bands = (cue.children as unknown as { props: { style: never } }[]).slice(0, -1);
+    const width = bands.reduce((sum, band) => sum + (StyleSheet.flatten(band.props.style) as { width: number }).width, 0);
+    expect(width).toBeGreaterThanOrEqual(44);
+    // Not read out: a screen reader reaches every chip by swiping.
     expect(cue.props.importantForAccessibility).toBe('no-hide-descendants');
     expect(cue.props.accessibilityElementsHidden).toBe(true);
+  });
+
+  it('scrolls the row to its end when pressed', async () => {
+    const scrollToEnd = jest.spyOn(ScrollView.prototype, 'scrollToEnd').mockImplementation(() => {});
+    try {
+      const view = await renderRow();
+      await measure(view, 320, 420);
+
+      await fireEvent.press(view.getByTestId('row-more', HIDDEN));
+
+      expect(scrollToEnd).toHaveBeenCalledWith({ animated: true });
+    } finally {
+      scrollToEnd.mockRestore();
+    }
   });
 
   it('goes once the row is scrolled to its end, and comes back on the way back', async () => {

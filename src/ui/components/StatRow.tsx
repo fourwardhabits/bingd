@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { PixelRatio, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { theme } from '../tokens';
 import { Text } from './Text';
@@ -26,9 +26,42 @@ export type StatRowProps = {
   stats: StatItem[];
 };
 
+/**
+ * How wide one caption character is at 100%, near enough, for the column decision below.
+ * Measured off the 130% render, "Followers" averages about 0.51em in the 12pt caption;
+ * rounded up to 0.53em so the estimate errs towards two columns rather than a collision.
+ * Four across still holds at 100% on a 320pt phone.
+ */
+const CAPTION_CHAR = 6.4;
+/** What a cell keeps clear either side of its label, so two labels never touch. */
+const CELL_INSET = theme.space[1];
+
+/**
+ * Four across, or two by two when four labels would collide (Visual 2.1 check,
+ * 2026-11-03: at 130% on a 320pt phone "Followers" and "Following" ran into each other,
+ * and at 200% every label did). Jest and the layout engine cannot measure text before it
+ * is drawn, so this estimates the widest label from its length and the system text size,
+ * which is the one input that changes it. At 100% it is four across on every supported
+ * width.
+ */
+export const statColumns = (labels: string[], width: number, fontScale: number) => {
+  const widest = Math.max(...labels.map((label) => label.length)) * CAPTION_CHAR * fontScale;
+  const cell = (width - theme.layout.gutter * 2) / labels.length;
+  return widest + CELL_INSET * 2 > cell ? 2 : labels.length;
+};
+
 export function StatRow({ stats }: StatRowProps) {
+  // `useWindowDimensions` re-renders this when the width or the system text size changes;
+  // `PixelRatio` is where React Native reports the text size itself.
+  const { width } = useWindowDimensions();
+  const columns = statColumns(
+    stats.map((stat) => stat.label),
+    width,
+    PixelRatio.getFontScale(),
+  );
+  const cell = columns < stats.length ? styles.half : null;
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, columns < stats.length && styles.grid]} testID="stat-row">
       {stats.map((stat) => {
         const content = (
           <>
@@ -56,6 +89,7 @@ export function StatRow({ stats }: StatRowProps) {
             // whole tile is the target rather than the two lines of text inside it.
             style={({ pressed }) => [
               styles.item,
+              cell,
               pressed && styles.pressed,
             ]}
           >
@@ -66,7 +100,7 @@ export function StatRow({ stats }: StatRowProps) {
             key={stat.label}
             accessible
             accessibilityLabel={label}
-            style={styles.item}
+            style={[styles.item, cell]}
           >
             {content}
           </View>
@@ -99,5 +133,8 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   label: { textAlign: 'center' },
+  // Two by two: each cell half the row, so the four sit in a square under one another.
+  grid: { flexWrap: 'wrap' },
+  half: { flexBasis: '50%', flexGrow: 0, flexShrink: 0 },
   pressed: { opacity: 0.6 },
 });
