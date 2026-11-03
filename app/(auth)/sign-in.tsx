@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   isAppleSignInAvailable,
@@ -42,6 +43,7 @@ import { theme } from '@/ui/tokens';
  * account.
  */
 export default function SignInScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState<'email' | 'apple' | 'google' | null>(null);
@@ -124,7 +126,7 @@ export default function SignInScreen() {
   };
 
   return (
-    <Screen airy includeBottomInset>
+    <Screen includeBottomInset edges={['left', 'right']}>
       {/**
        * **This screen is the product introduction now** (founder, physical iOS 1.0.1
        * build 8).
@@ -142,15 +144,21 @@ export default function SignInScreen() {
        * seasons", which names a data model. No comparison, no ranking mechanic, no
        * "matches yours": those are step 4's to explain, to somebody who has said yes.
        */}
-      <View style={styles.intro}>
-        <BrandLockup size="lg" />
-        <Text variant="display">Rank and share what you watch.</Text>
-        <Text variant="body" tone="secondary">
+      <View style={[styles.intro, { paddingTop: insets.top + theme.space[7] }]}>
+        <BrandLockup size="lg" reversed />
+        <Text variant="display" tone="inverse">Rank and share what you watch.</Text>
+        <Text variant="body" tone="inverse">
           Rank movies and TV shows, see what your friends are watching, and find your next
           binge.
         </Text>
       </View>
 
+      <ScrollView
+        style={styles.panel}
+        contentContainerStyle={styles.panelContent}
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
       <View style={styles.form}>
         <Field
           label="Email"
@@ -225,12 +233,28 @@ export default function SignInScreen() {
           disabledReason="One moment."
         />
       </View>
+      </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  intro: { gap: theme.space[3], alignItems: 'flex-start' },
+  intro: {
+    backgroundColor: theme.semantic.action,
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[7],
+    gap: theme.space[3],
+    alignItems: 'flex-start',
+  },
+  // Scrolls, because the masthead leaves a 320 by 568 phone less room than the form needs.
+  panel: { flex: 1 },
+  panelContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    gap: theme.space[6],
+    paddingHorizontal: theme.layout.gutter,
+    paddingVertical: theme.space[5],
+  },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },
   more: { alignItems: 'center', gap: theme.space[1] },

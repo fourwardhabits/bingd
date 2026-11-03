@@ -2,10 +2,12 @@ import { Image } from 'expo-image';
 
 const ICON = require('../../../assets/brand/bingd-icon.svg');
 const ICON_SMALL = require('../../../assets/brand/bingd-icon-small.svg');
+const ICON_REVERSED = require('../../../assets/brand/bingd-icon-reversed.svg');
 
 export type BrandMarkProps = {
   size?: 'sm' | 'md' | 'lg';
   decorative?: boolean;
+  reversed?: boolean;
 };
 
 const SIZES = {
@@ -14,10 +16,10 @@ const SIZES = {
   lg: { width: 64, height: 38 },
 } as const;
 
-export function BrandMark({ size = 'md', decorative = false }: BrandMarkProps) {
+export function BrandMark({ size = 'md', decorative = false, reversed = false }: BrandMarkProps) {
   return (
     <Image
-      source={size === 'sm' ? ICON_SMALL : ICON}
+      source={reversed ? ICON_REVERSED : size === 'sm' ? ICON_SMALL : ICON}
       style={SIZES[size]}
       contentFit="contain"
       accessibilityLabel={decorative ? undefined : 'bingd mark'}
