@@ -26,7 +26,7 @@ which also holds the freeze rule.
 | **DB migrations** | **177 applied**, head `20261024000500`; staging identical, apart from the one difference under [The two lanes](#the-two-lanes) |
 | **Production OTA, 1.1.0** | from `eab83c9`, published 2026-11-03: Android group `04afb993` on runtime `ec79e181`, iOS group `ffbb473c` on runtime `8ea562b7`, EAS run `01a19eda` |
 | **Production OTA, 1.0.1** | from `9d9683a`, published 2026-09-26: Android group `ef499cac` on runtime `da3c7f47`, iOS group `b79070c2` on runtime `61efbf17`. Both updates' ids start `01a0db04`, the name used below |
-| **Preview OTA** | Android group `80fda42e` from `eab83c9`, on runtime `2503ffaa`, staging backend |
+| **Preview OTA** | Android group `09510b25` from `3f9295a`, published 2026-11-03, on runtime `2503ffaa`, staging backend. It is `main` plus the unmerged Visual 2.0 candidate (#221, #226 to #229) on test. No iOS binary is on the current runtime |
 
 ### Store distribution
 
@@ -201,7 +201,8 @@ preview lane. **Preview never points at production data.**
 4. only the explicitly unreleased fix being tested.
 
 Preview never accumulates its own history that later has to be reconciled. Today it carries
-nothing unreleased: `80fda42e` is `eab83c9`. Staging QA accounts and the states they cover are
+one unreleased candidate: `09510b25` is `3f9295a`, which is `main` (`bebfdfb`) with #221 and
+Visual 2.0's #226 to #229 merged in, none of them merged to `main` yet. Staging QA accounts and the states they cover are
 in [`staging-qa-inventory.md`](./staging-qa-inventory.md).
 
 **The two databases have one known difference.** Production has `rls_auto_enable()` and its event
