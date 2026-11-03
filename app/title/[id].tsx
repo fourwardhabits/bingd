@@ -725,6 +725,8 @@ export default function TitleScreen() {
   if (isPending) {
     return (
       <Screen includeBottomInset>
+        {/* The bar keeps its back arrow and says nothing: "Title" names the route. */}
+        <Stack.Screen options={{ title: '' }} />
         <LoadingScreen />
       </Screen>
     );
@@ -733,6 +735,7 @@ export default function TitleScreen() {
   if (isError || !data?.title) {
     return (
       <Screen includeBottomInset>
+        <Stack.Screen options={{ title: '' }} />
         <EmptyState
           kind="couldNotLoad"
           title="Could not load this title"

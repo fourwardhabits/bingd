@@ -113,7 +113,7 @@ export function FollowListSheet({
   return (
     <Sheet visible onClose={close} label={TITLE[kind]}>
       <View style={styles.head}>
-        <Text variant="headline">{TITLE[kind]}</Text>
+        <Text variant="title2">{TITLE[kind]}</Text>
         {/* Full size rather than `sm`, which is 36pt — under the 44pt floor `layout.ts`
             sets. Every other sheet in the app closes with a default-sized button, and a
             close control is the one thing on a sheet somebody presses without looking. */}

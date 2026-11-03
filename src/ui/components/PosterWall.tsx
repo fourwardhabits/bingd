@@ -13,7 +13,7 @@ import { formatScore, type Bucket } from '@/features/collection/score';
 
 import { hapticSelection } from '../haptics';
 import { usePressScale, usePulse } from '../press';
-import { inkAlpha, theme } from '../tokens';
+import { theme } from '../tokens';
 import { Poster } from './Poster';
 import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
@@ -320,6 +320,29 @@ function Tile({
           blurhash={tile.blurhash}
           width={width}
         />
+        {score != null ? (
+          <View
+            // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
+            // wall the old bucket tint was at its worst: nine tiles, three colours,
+            // none of them the poster's, all of them restating a number already
+            // printed on top of them.
+            style={styles.chip}
+            // Already in the label above, and a chip that announces itself
+            // separately makes every tile two stops instead of one.
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text variant="caption" tone="inverse" allowFontScaling={false}>
+              {formatScore(score)}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+      {/* Below the poster and outside its press, because a native `hitSlop` cannot reach past
+          a parent: a 44pt box is the only way to a 44pt target, and a near miss here must
+          not open the title. */}
+        {onToggleSave || onDismiss ? (
+        <View style={[styles.tileActions, { width }]}>
         {onToggleSave ? (
           <Pressable
             accessibilityRole="button"
@@ -348,19 +371,13 @@ function Tile({
               if (!tile.saved) bookmark.pulse();
               onToggleSave();
             }}
-            // A tile in a three-column grid is about 115pt wide, and a 44pt visual
-            // control on it would cover most of the artwork. The glyph is 28pt and the
-            // *touch target* is grown to the minimum with hitSlop, which is the only
-            // way to keep both design-system.md §8's tap-target rule and a wall that
-            // still reads as artwork.
-            hitSlop={8}
             style={({ pressed }) => [styles.save, pressed && styles.pressed]}
           >
             <Animated.View style={bookmark.pulseStyle}>
               <Ionicons
                 name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-                size={16}
-                color={theme.text.inverse}
+                size={20}
+                color={tile.saved ? theme.semantic.action : theme.text.secondary}
               />
             </Animated.View>
           </Pressable>
@@ -371,33 +388,14 @@ function Tile({
             accessibilityLabel={`Not interested in ${tile.title}`}
             accessibilityHint="Removes it from your recommendations"
             onPress={onDismiss}
-            // Same 28pt-glyph-with-grown-target treatment as the bookmark above; a
-            // second 44pt control would cover half the artwork. Quiet rather than
-            // Maroon: dismissal is an exit, not the primary act of the wall.
-            hitSlop={8}
+            // Quiet rather than Maroon: dismissal is an exit, not the act of the wall.
             style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
           >
-            <Ionicons name="close" size={16} color={theme.text.inverse} />
+            <Ionicons name="close" size={18} color={theme.text.tertiary} />
           </Pressable>
         ) : null}
-        {score != null ? (
-          <View
-            // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
-            // wall the old bucket tint was at its worst: nine tiles, three colours,
-            // none of them the poster's, all of them restating a number already
-            // printed on top of them.
-            style={styles.chip}
-            // Already in the label above, and a chip that announces itself
-            // separately makes every tile two stops instead of one.
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <Text variant="caption" tone="inverse" allowFontScaling={false}>
-              {formatScore(score)}
-            </Text>
-          </View>
+        </View>
         ) : null}
-      </Pressable>
     </Animated.View>
   );
 }
@@ -427,30 +425,18 @@ const styles = StyleSheet.create({
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },
+  tileActions: { flexDirection: 'row', justifyContent: 'space-between' },
   save: {
-    position: 'absolute',
-    top: theme.space[1],
-    right: theme.space[1],
-    width: 28,
-    height: 28,
-    borderRadius: theme.radius.control,
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.semantic.action,
   },
-  // Beneath the bookmark, same size, same corner column. Ink at 60% rather than
-  // Maroon: the bookmark is the wall's invitation and this is its way out, and two
-  // Maroon squares stacked would read as one two-part control.
   dismiss: {
-    position: 'absolute',
-    top: theme.space[1] + 28 + theme.space[1],
-    right: theme.space[1],
-    width: 28,
-    height: 28,
-    borderRadius: theme.radius.control,
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: inkAlpha(0.6),
   },
   chip: {
     position: 'absolute',

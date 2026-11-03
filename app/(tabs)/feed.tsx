@@ -756,9 +756,9 @@ export default function FeedScreen() {
             />
           </View>
         ) : showingPeople ? (
-          <SectionHeader title="People you may know" />
+          <SectionHeader title="People you may know" level="title" />
         ) : trendingHasItems ? (
-          <SectionHeader title="Trending now" />
+          <SectionHeader title="Trending now" level="title" />
         ) : null}
 
         {showingBoard ? (
@@ -817,7 +817,7 @@ export default function FeedScreen() {
              * legible where the same empty state floating below a shelf is not.
              */}
             <View style={styles.boundary}>
-              <SectionHeader title="Activity" />
+              <SectionHeader title="Activity" level="title" />
             </View>
 
             {/* The confirmation, on the screen the reader is still looking at rather than in
