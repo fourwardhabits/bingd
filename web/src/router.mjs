@@ -136,11 +136,11 @@ export function installLabel(destination) {
     case 'play-opt-in':
       return 'Join the bingd. Android beta';
     case 'play':
-      return 'Get bingd. on Google Play';
+      return 'Get bingd on Google Play';
     case 'store':
       return destination.platform === 'android'
-        ? 'Get bingd. on Google Play'
-        : 'Get bingd. on the App Store';
+        ? 'Get bingd on Google Play'
+        : 'Get bingd on the App Store';
     default:
       return null;
   }
