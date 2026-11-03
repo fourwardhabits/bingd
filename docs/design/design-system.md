@@ -87,6 +87,8 @@ Three surfaces, ordered by how far above the page they sit. Getting the directio
 | `surface.raised` | `#FFFFFF` | Text inputs, Settings groups, the selected cell of a segmented control |
 | `surface.sunken` | `#F5EBDD` Parchment | Secondary buttons, chips, inset panels, avatars, skeletons, poster placeholders — where the brand's warmth lives |
 
+**What Parchment is for, because a warm fill can become a universal beige.** It has three jobs and no others: a quiet control, an inset panel that groups things, and a placeholder for what is not there yet. Parchment never sits on Parchment, so a panel holds tertiary or Maroon actions and never a secondary button. Parchment does not mean selected: selected is Maroon.
+
 Pure white for `raised` is a deliberate choice and the one value here that could reasonably have gone another way. A card only reads as raised if it is lighter than its surroundings, and Paper is already close enough to white that a tinted card would be indistinguishable from the page. White also gives posters their maximum headroom, which is the point of §1.
 
 ### Text
@@ -128,7 +130,7 @@ export const semantic = {
 } as const;
 ```
 
-`scoreEmpty` is a resolved literal rather than an alpha helper, deliberately: it is drawn on Paper and on Parchment, and an alpha fill takes its colour from whatever happens to be behind it. `scoreEmpty` is Ink at 16% over Paper; `actionSubtle` is Maroon at 35% over Paper. Neither ever carries text, so neither is a certified pair.
+`scoreEmpty` is a resolved literal rather than an alpha helper, deliberately: it is drawn on Paper and on Parchment, and an alpha fill takes its colour from whatever happens to be behind it. `scoreEmpty` is Ink at 16% over Paper.
 
 Destructive actions reuse Maroon rather than introducing red. The palette has no red, a new one would compete with the brand color, and destructive actions in this product are rare and always confirmed with words. The confirm button is labeled with the verb — "Delete list" — never a bare "OK," so color is never the only signal that something is irreversible.
 
