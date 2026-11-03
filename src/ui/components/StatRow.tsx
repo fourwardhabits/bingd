@@ -33,7 +33,7 @@ export function StatRow({ stats }: StatRowProps) {
         const content = (
           <>
             <Text variant="stat">{stat.value}</Text>
-            <Text variant="caption" tone="secondary">
+            <Text variant="caption" tone="secondary" style={styles.label}>
               {stat.label}
             </Text>
           </>
@@ -84,10 +84,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth * 2,
     marginHorizontal: theme.layout.gutter,
   },
+  // Numbers on one line from the top, so a label that wraps at a large text size (TV
+  // Shows, on a 320pt phone) grows its own cell downwards instead of lifting its number
+  // above the other three.
   item: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingVertical: theme.space[3],
     // Two stacked lines of text already clear this, so it changes nothing today. It is
     // stated because half of these tiles are now buttons, and the 44pt floor should be a
@@ -95,5 +98,6 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
     gap: 1,
   },
+  label: { textAlign: 'center' },
   pressed: { opacity: 0.6 },
 });

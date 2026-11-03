@@ -1404,8 +1404,11 @@ const styles = StyleSheet.create({
   headerWall: { flexShrink: 0 },
   headerMedium: { flexShrink: 0, marginLeft: 'auto' },
   // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
-  // into whatever the page offers it — the note `SegmentedTabs` carries.
-  filterScroller: { flexGrow: 0 },
+  // into whatever the page offers it — the note `SegmentedTabs` carries. `flexShrink: 0`
+  // because a ScrollView shrinks by default: on a short phone the row gave up height to
+  // the wall and cut the tops off the chips (Visual 2.1 check, 320 x 568). The wall
+  // scrolls, so it is the one that gives way.
+  filterScroller: { flexGrow: 0, flexShrink: 0 },
   /**
    * `nowrap` is the contract. A wrapped chip row is the founder's rejected state, and
    * the scroller around this is what makes one row possible at every width instead of a

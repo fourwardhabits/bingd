@@ -72,8 +72,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.border.hairline,
   },
+  // A floor, not a fixed height: at a large system text size the word grows past 28pt and
+  // the half grows with it rather than clipping the word.
   option: {
-    height: 28,
+    minHeight: 28,
     paddingHorizontal: theme.space[2],
     borderRadius: theme.radius.control - 2,
     alignItems: 'center',

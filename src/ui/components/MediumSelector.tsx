@@ -66,6 +66,16 @@ export const MEDIUM_OPTIONS: readonly MediumSelectorOption[] = [
   { id: 'tv_seasons', label: 'TV Shows' },
 ];
 
+/**
+ * The compact selector's one ceiling on system text size (Visual 2.1 check, 2026-11-03).
+ *
+ * For You's labels are single words, so `flexShrink` cannot wrap them: at 200% on a 320pt
+ * phone "Recommended" is wider than the screen and pushes its chevron off the edge. At
+ * 175% the word, the chevron and the padding still fit 320pt. Everything else on the row,
+ * the Movies | TV Shows switch included, scales without a ceiling and wraps instead.
+ */
+export const COMPACT_MAX_SCALE = 1.75;
+
 const labelFor = <T extends string>(
   value: T,
   options: readonly MediumSelectorOption<T>[],
@@ -141,7 +151,11 @@ export function MediumSelector<T extends string = Medium>({
             // `flexShrink` so a long label (For You's `Recommended Movies`, at a large text
             // size, on a narrow phone) wraps inside the row instead of pushing the chevron
             // off the screen. A label that fits is laid out exactly as before.
-            <Text variant={size === 'compact' ? 'title2' : 'title1'} style={styles.title}>
+            <Text
+              variant={size === 'compact' ? 'title2' : 'title1'}
+              style={styles.title}
+              maxFontSizeMultiplier={size === 'compact' ? COMPACT_MAX_SCALE : undefined}
+            >
               {labelFor(value, table, labels)}
             </Text>
           )}

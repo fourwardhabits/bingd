@@ -181,7 +181,9 @@ describe('CompactSwitch', () => {
     expect(halves).toHaveLength(2);
     for (const half of halves) {
       const drawn = StyleSheet.flatten(half.props.style);
-      expect(tall(drawn.height, half.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+      // A floor, so the target holds at 100% and only grows with the system text size.
+      expect(tall(drawn.minHeight, half.props.hitSlop)).toBeGreaterThanOrEqual(TARGET);
+      expect(drawn.height).toBeUndefined();
       expect(half.props.hitSlop.left).toBe(0);
       expect(half.props.hitSlop.right).toBe(0);
       expect(drawn.paddingHorizontal).toBe(theme.space[2]);

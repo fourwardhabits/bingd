@@ -165,7 +165,11 @@ describe('the control row', () => {
     expect(row.flexDirection).toBe('row');
     expect(row.flexWrap).toBe('nowrap');
     // And the thing that makes one row possible at every width.
-    expect(view.getByTestId('for-you-controls-scroller').props.horizontal).toBe(true);
+    const scroller = view.getByTestId('for-you-controls-scroller');
+    expect(scroller.props.horizontal).toBe(true);
+    // Full height at every height too: a ScrollView shrinks by default, and on a 568pt
+    // screen the row gave its height to the wall and clipped the chips' tops.
+    expect(flatten(scroller.props.style)).toMatchObject({ flexGrow: 0, flexShrink: 0 });
   });
 
   it('puts a deliberate seam between the controls and the first posters', async () => {
