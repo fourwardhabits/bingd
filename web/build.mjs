@@ -964,7 +964,7 @@ const social = ({ share, path }) => `
     <meta property="og:image" content="${ORIGIN}/social-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="The bingd. wordmark" />
+    <meta property="og:image:alt" content="bingd. Rank what you watch. See where it really lands." />
     <meta property="og:url" content="${ORIGIN}${path}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${share}" />
@@ -3134,7 +3134,7 @@ await writeFile(
     <meta property="og:image" content="${ORIGIN}/social-card.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="The bingd. wordmark" />
+    <meta property="og:image:alt" content="bingd. Rank what you watch. See where it really lands." />
     <meta property="og:url" content="${ORIGIN}/" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="bingd. Rank the movies and TV you watch" />
@@ -3169,8 +3169,8 @@ await writeFile(
           <div class="split-copy">
             <h1><span class="line">Rank what you watch.</span> <span class="line">See where it really lands.</span></h1>
             <p class="lede">
-              bingd is your new post-watch ritual. A movie and TV logging app to surface
-              your favorite titles and make watching a shared experience
+              Pick which movie or TV season you liked more. bingd turns those choices into
+              your personal ranking
             </p>
 
 ${installRow({ primary: true })}
