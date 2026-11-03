@@ -35,7 +35,52 @@ describe('PosterGrid', () => {
       <PosterGrid title="Top ranked" tiles={[]} onPressTile={() => {}} />,
     );
 
-    expect(view.queryByText('TOP RANKED')).toBeNull();
+    // Shelf titles print as given since Visual 2.0, so this looks for the real words.
+    expect(view.queryByText('Top ranked')).toBeNull();
+  });
+});
+
+describe('PosterGrid with a lead', () => {
+  const ranked: PosterTile[] = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, i) => ({
+    id,
+    title: `Film ${id.toUpperCase()}`,
+    year: 2000 + i,
+  }));
+
+  it('keeps rank order, the first film leading', async () => {
+    const view = await render(<PosterGrid lead tiles={ranked} onPressTile={() => {}} />);
+    const order = view
+      .getAllByRole('button')
+      .map((node) => node.props.accessibilityLabel as string)
+      .filter((label) => label?.startsWith('Film'));
+
+    expect(order).toEqual(['Film A, 2000', 'Film B, 2001', 'Film C, 2002', 'Film D, 2003', 'Film E, 2004', 'Film F, 2005']);
+  });
+
+  it('gives the three lead tiles every handler the grid gives the rest', async () => {
+    // The mosaic draws its first three tiles itself, and a tile drawn there once lost
+    // its long press, save and dismiss. A caller's handlers must reach all six.
+    const onLongPressTile = jest.fn();
+    const onToggleSave = jest.fn();
+    const onDismissTile = jest.fn();
+    const view = await render(
+      <PosterGrid
+        lead
+        tiles={ranked}
+        onPressTile={() => {}}
+        onLongPressTile={onLongPressTile}
+        onToggleSave={onToggleSave}
+        onDismissTile={onDismissTile}
+      />,
+    );
+
+    await fireEvent(view.getByLabelText('Film A, 2000'), 'longPress');
+    await fireEvent.press(view.getByLabelText('Save Film B to watchlist'));
+    await fireEvent.press(view.getByLabelText('Not interested in Film C'));
+
+    expect(onLongPressTile).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+    expect(onToggleSave).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
+    expect(onDismissTile).toHaveBeenCalledWith(expect.objectContaining({ id: 'c' }));
   });
 });
 

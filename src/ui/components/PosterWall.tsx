@@ -187,23 +187,29 @@ export function PosterGrid({
       ) : null}
       {mosaic ? (
         <View style={[styles.leadRow, { gap }]}>
+          {/* The same handlers as every other tile, so a caller's long press, save and
+              dismiss reach the first three as well. */}
           <Tile
             tile={mosaic.first}
             width={cardWidth * 2 + gap}
             onPress={() => onPressTile(mosaic.first)}
+            onLongPress={onLongPressTile ? () => onLongPressTile(mosaic.first) : undefined}
+            onToggleSave={onToggleSave ? () => onToggleSave(mosaic.first) : undefined}
+            onDismiss={onDismissTile ? () => onDismissTile(mosaic.first) : undefined}
           />
           {/* One and a half gaps: two posters and a gap must equal the lead's height. */}
           <View style={{ gap: gap * 1.5 }}>
-            <Tile
-              tile={mosaic.second}
-              width={cardWidth}
-              onPress={() => onPressTile(mosaic.second)}
-            />
-            <Tile
-              tile={mosaic.third}
-              width={cardWidth}
-              onPress={() => onPressTile(mosaic.third)}
-            />
+            {[mosaic.second, mosaic.third].map((tile) => (
+              <Tile
+                key={tile.id}
+                tile={tile}
+                width={cardWidth}
+                onPress={() => onPressTile(tile)}
+                onLongPress={onLongPressTile ? () => onLongPressTile(tile) : undefined}
+                onToggleSave={onToggleSave ? () => onToggleSave(tile) : undefined}
+                onDismiss={onDismissTile ? () => onDismissTile(tile) : undefined}
+              />
+            ))}
           </View>
         </View>
       ) : null}
