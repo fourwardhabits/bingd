@@ -36,7 +36,12 @@ export type MediumSelectorProps<T extends string = Medium> = {
   /**
    * How large the closed control reads. The open sheet is identical either way.
    *
-   * `title` — DM Serif at `title1`, the screen's actual title. Collection and For You.
+   * `title` — DM Serif at `title1`, the screen's actual title.
+   *
+   * `nav` — DM Serif at `title2` (22pt), the left half of the navigation row on For You
+   *   and Collection, with the Movies | TV `CompactSwitch` on its right (founder final
+   *   polish, 2026-11-04). One step down from `title` so the pair shares a 360pt row; no
+   *   right padding, because the row's own gap is the space before the switch.
    *
    * `section` — the app's section-header treatment: uppercase, Maroon, `sectionHeader`.
    *   Added 2026-08-29 for the Leaderboard's timeframe, which sits in a *content* header
@@ -49,7 +54,7 @@ export type MediumSelectorProps<T extends string = Medium> = {
    * implementations of it would drift into two dialects at the next tuning pass. What
    * changes is type size, not behaviour.
    */
-  size?: 'title' | 'section';
+  size?: 'title' | 'nav' | 'section';
 };
 
 /**
@@ -117,7 +122,9 @@ export function MediumSelector<T extends string = Medium>({
         accessibilityHint="Choose a category"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(true)}
-        style={size === 'section' ? styles.buttonSection : styles.button}
+        style={
+          size === 'section' ? styles.buttonSection : size === 'nav' ? styles.buttonNav : styles.button
+        }
       >
         <View style={styles.row}>
           {size === 'section' ? (
@@ -131,13 +138,13 @@ export function MediumSelector<T extends string = Medium>({
             // `flexShrink` so a long label (For You's `Recommended Movies`, at a large text
             // size, on a narrow phone) wraps inside the row instead of pushing the chevron
             // off the screen. A label that fits is laid out exactly as before.
-            <Text variant="title1" style={styles.title}>
+            <Text variant={size === 'nav' ? 'title2' : 'title1'} style={styles.title}>
               {labelFor(value, table, labels)}
             </Text>
           )}
           <Ionicons
             name="chevron-down"
-            size={size === 'section' ? theme.layout.icon.sm : theme.layout.icon.md}
+            size={size === 'title' ? theme.layout.icon.md : theme.layout.icon.sm}
             color={size === 'section' ? theme.semantic.action : theme.text.secondary}
           />
         </View>
@@ -199,6 +206,11 @@ const styles = StyleSheet.create({
   },
   // No gutter of its own: a section-sized control sits inside a row the caller has
   // already padded, where the title-sized one is measuring from the screen edge.
+  buttonNav: {
+    minHeight: theme.layout.minTapTarget,
+    paddingLeft: theme.layout.gutter,
+    justifyContent: 'center',
+  },
   buttonSection: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   title: { flexShrink: 1 },

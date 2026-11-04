@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { theme } from '../tokens';
 import { AppHeader } from './AppHeader';
@@ -63,5 +63,47 @@ describe('the notification badge', () => {
     const view = await render(<AppHeader notifications={{ count: 3, onPress: () => {} }} />);
 
     expect(view.getByLabelText('Notifications, 3 waiting')).toBeTruthy();
+  });
+});
+
+/**
+ * **One header on every main tab** (founder final polish, 2026-11-04): 4pt more below the
+ * logo than above it, and the logo at the same height whether or not the tab has a bell.
+ *
+ * The lockup is centred in the bar, so the bar's height decides where it sits. The right
+ * side reserves the bell's box on every tab; without that, Feed and Profile (which have a
+ * bell) drew a taller bar than For You, Collection and Search, and their logo sat lower.
+ */
+describe('the header bar', () => {
+  type Node = { props: { style?: StyleProp<ViewStyle> }; children?: Node[] };
+  // The bar's two children are the lockup and the right side.
+  const barOf = (view: Awaited<ReturnType<typeof render>>) => {
+    const root = view.toJSON() as unknown as Node;
+    return {
+      bar: StyleSheet.flatten(root.props.style) ?? {},
+      right: StyleSheet.flatten(root.children?.[1]?.props.style) ?? {},
+    };
+  };
+
+  it('breathes below the logo and keeps the inset above it', async () => {
+    const { bar } = barOf(await render(<AppHeader />));
+
+    expect(bar.paddingTop).toBe(theme.space[2]);
+    expect(bar.paddingBottom).toBe(theme.space[2] + 4);
+  });
+
+  it('reserves the same height on the right with a bell, a gear and bell, or nothing', async () => {
+    const heights = [
+      barOf(await render(<AppHeader />)).right.height,
+      barOf(await render(<AppHeader notifications={{ count: 0, onPress: () => {} }} />)).right.height,
+      barOf(
+        await render(
+          <AppHeader settings={{ onPress: () => {} }} notifications={{ count: 2, onPress: () => {} }} />,
+        ),
+      ).right.height,
+    ];
+
+    expect(typeof heights[0]).toBe('number');
+    expect(new Set(heights).size).toBe(1);
   });
 });

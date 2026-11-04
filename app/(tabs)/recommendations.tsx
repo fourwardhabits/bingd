@@ -678,43 +678,43 @@ export default function RecommendationsScreen() {
        * header losing a control, not a navigation redesign.
        */}
       <AppHeader />
+      <HeaderBoundary />
 
       {/**
-       * **Movies / TV Shows on the left, Recommended | Top Rated on the right** (founder,
-       * final direction, 2026-11-03: Direction A).
+       * **Recommended / Top Rated on the left, Movies | TV on the right** (founder final
+       * polish, 2026-11-04), under the header's divider rather than above it.
        *
-       * The medium is the same dropdown Collection leads with, so the two screens share
-       * one convention for which kind of title is showing. Which wall is a compact switch
-       * beside it. Together they are still the four `ForYouMode`s, so nothing below the
-       * row changed. Below the logo bar rather than in it; no For You heading, because
-       * the tab bar already says where the reader is. Where both do not fit one line the
-       * switch wraps under the dropdown, right-aligned, rather than either shrinking.
+       * Which wall is the page's dropdown, and the medium is the compact switch: the same
+       * two components, sizes and spacing as Collection's row, so the two screens share
+       * one navigation pattern. Together they are still the four `ForYouMode`s, so nothing
+       * below the row changed, and each control keeps the other's value. No For You
+       * heading, because the tab bar already says where the reader is. Where both do not
+       * fit one line (about 330pt, so a 320pt phone) the switch wraps under the dropdown,
+       * right-aligned, rather than either shrinking.
        */}
       <View style={styles.header}>
-        <View style={styles.headerMedium}>
-          <MediumSelector
-            value={topMedium ?? medium}
-            options={FOR_YOU_MEDIUMS}
-            onChange={(next) =>
-              changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
-            }
-          />
-        </View>
         <View style={styles.headerWall}>
-          <CompactSwitch
-            accessibilityLabel="Wall"
-            options={FOR_YOU_WALLS}
+          <MediumSelector
+            size="nav"
             value={onTopRated ? 'top' : 'recommended'}
+            options={FOR_YOU_WALLS}
             onChange={(next) => {
               const showing = topMedium ?? medium;
               changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
             }}
           />
         </View>
+        <View style={styles.headerMedium}>
+          <CompactSwitch
+            accessibilityLabel="Medium"
+            options={FOR_YOU_MEDIA}
+            value={topMedium ?? medium}
+            onChange={(next) =>
+              changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
+            }
+          />
+        </View>
       </View>
-      {/* The selector above it is the screen's entire header, and this is the seam that
-      marks where the header ends and the wall begins. */}
-      <HeaderBoundary />
 
           {/* Above the filters, and only when something is waiting.
 
@@ -1164,14 +1164,14 @@ export default function RecommendationsScreen() {
  */
 export type ForYouMode = Medium | 'topMovies' | 'topTv';
 
-/** The medium, in Collection's dropdown. Title Case (founder, 2026-11-03). */
-const FOR_YOU_MEDIUMS: readonly MediumSelectorOption<Medium>[] = [
+/** The medium, in the compact switch. "TV", not "TV Shows", at this size (2026-11-04). */
+const FOR_YOU_MEDIA: readonly CompactSwitchOption<Medium>[] = [
   { id: 'movies', label: 'Movies' },
-  { id: 'tv', label: 'TV Shows' },
+  { id: 'tv', label: 'TV' },
 ];
 
-/** Which wall, in the compact switch beside it. */
-const FOR_YOU_WALLS: readonly CompactSwitchOption<'recommended' | 'top'>[] = [
+/** Which wall, in the page's dropdown. */
+const FOR_YOU_WALLS: readonly MediumSelectorOption<'recommended' | 'top'>[] = [
   { id: 'recommended', label: 'Recommended' },
   { id: 'top', label: 'Top Rated' },
 ];
@@ -1321,16 +1321,19 @@ function Nothing({
 const styles = StyleSheet.create({
   /**
    * One row where it fits, which is 360pt and wider. Below that the switch wraps to a
-   * second line, right-aligned, rather than covering the dropdown or shrinking.
+   * second line, right-aligned, rather than covering the dropdown or shrinking. The 12pt
+   * column gap is the least space between the dropdown's chevron and the switch.
+   * Collection's `titleRow` is the same row.
    */
   header: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
+    columnGap: theme.space[3],
     paddingRight: theme.layout.gutter,
   },
-  headerMedium: { flexShrink: 0 },
-  headerWall: { flexShrink: 0, marginLeft: 'auto' },
+  headerWall: { flexShrink: 0 },
+  headerMedium: { flexShrink: 0, marginLeft: 'auto' },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
   exhausted: {
     paddingHorizontal: theme.layout.gutter,

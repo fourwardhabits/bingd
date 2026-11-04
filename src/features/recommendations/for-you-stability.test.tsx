@@ -1,4 +1,4 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -426,11 +426,9 @@ describe('refreshing the wall', () => {
     // hit. The arrangement still has to come back identical, because the seed lives in
     // a module rather than in the screen's state. That is what stops For You reshuffling
     // every time somebody visits another tab and returns.
-    const selector = () => view.getAllByLabelText(/^Showing /)[0]!;
-    await fireEvent.press(selector());
-    await fireEvent.press(view.getByRole('button', { name: /^TV Shows/ }));
-    await fireEvent.press(selector());
-    await fireEvent.press(view.getByRole('button', { name: /^Movies/ }));
+    const medium = within(view.getByLabelText('Medium'));
+    await fireEvent.press(medium.getByRole('radio', { name: 'TV' }));
+    await fireEvent.press(medium.getByRole('radio', { name: 'Movies' }));
 
     await waitFor(() => expect(wall(view)).toEqual(before));
   });

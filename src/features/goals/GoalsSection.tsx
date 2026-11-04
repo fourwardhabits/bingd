@@ -3,7 +3,14 @@ import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
-import { Button, EmptyState, SectionHeader, SkeletonRow, Text } from '@/ui/components';
+import {
+  Button,
+  EmptyState,
+  SectionHeader,
+  type SectionHeaderSize,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { StreakLine } from '@/features/streaks/StreakLine';
@@ -34,6 +41,12 @@ export type GoalsSectionProps = {
    * about taste, and this section is drawn on somebody else's profile too.
    */
   streakUserId?: string;
+  /**
+   * The heading's size: `large` on the reader's own Profile tab only (founder final
+   * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
+   * standard 12pt heading.
+   */
+  headingSize?: SectionHeaderSize;
 };
 
 /**
@@ -50,6 +63,7 @@ export function GoalsSection({
   year = currentYear(),
   onPressTitle,
   streakUserId,
+  headingSize,
 }: GoalsSectionProps) {
   const queryClient = useQueryClient();
   const goals = useWatchGoals(userId, year);
@@ -92,6 +106,7 @@ export function GoalsSection({
     <View style={styles.section}>
       <SectionHeader
         title={`Your ${year}`}
+        size={headingSize}
         // No action while the read is in flight or has failed: "Edit" on top of an
         // unknown current value opens a sheet that would happily write an empty draft
         // over a goal the user has actually set.

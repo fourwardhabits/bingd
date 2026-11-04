@@ -5,7 +5,14 @@ import { bandSizes, projectedScore, scoreFor } from '@/features/collection/score
 import { useRankedCollection } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
-import { EmptyState, PosterGrid, SectionHeader, SegmentedTabs, SkeletonRow } from '@/ui/components';
+import {
+  EmptyState,
+  PosterGrid,
+  SectionHeader,
+  type SectionHeaderSize,
+  SegmentedTabs,
+  SkeletonRow,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 type Filter = 'all' | 'movies' | 'tv_seasons';
@@ -23,6 +30,12 @@ export type TopRankedProps = {
    * only when there is genuinely more to see — see `seeAll`.
    */
   onSeeAll?: (category: 'movies' | 'tv_seasons') => void;
+  /**
+   * The heading's size: `large` on the reader's own Profile tab only (founder final
+   * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
+   * standard 12pt heading.
+   */
+  headingSize?: SectionHeaderSize;
 };
 
 /**
@@ -56,7 +69,13 @@ export type TopRankedProps = {
  * Scores are computed per category against that category's whole band, never against
  * the slice on screen. Scoring six titles against themselves would give all six a 10.
  */
-export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRankedProps) {
+export function TopRanked({
+  userId,
+  otherName,
+  onPressTitle,
+  onSeeAll,
+  headingSize,
+}: TopRankedProps) {
   const [filter, setFilter] = useState<Filter>('all');
 
   const movies = useRankedCollection(userId, 'movies');
@@ -160,6 +179,7 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
     <View style={styles.section}>
       <SectionHeader
         title="Top ranked"
+        size={headingSize}
         actionLabel={seeAll ? 'See all' : undefined}
         onPressAction={seeAll ? () => onSeeAll?.(seeAll) : undefined}
       />

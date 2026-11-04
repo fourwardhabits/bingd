@@ -1217,6 +1217,50 @@ founder's final direction: the three glyphs in the heading row stay, as drawn ab
 the row cost the busiest screen a second line and printed "Activity" twice. The Feed is
 production's, plus Try again when the first page fails to load.
 
+### One navigation row, one header — 2026-11-04
+
+Founder's final polish, from GPT's specification.
+
+**For You and Collection share one navigation row**, directly under the header's divider:
+the page's dropdown on the left, in DM Serif at `title2` (22pt, `MediumSelector size="nav"`),
+and a `Movies | TV` `CompactSwitch` on the right, in Inter Medium 14 with its 44pt halves.
+The two are at least 12pt apart. Where they do not fit one line (about 330pt on For You, so
+a 320pt phone, or any phone at large text), the switch wraps under the dropdown,
+right-aligned, and neither shrinks.
+
+| Screen | Dropdown | Switch |
+|---|---|---|
+| For You | Recommended / Top Rated | Movies | TV. The pair is still the four walls, and each control keeps the other's value |
+| Collection | Watched / Watchlist / Unranked / Lists. Unranked only while this side has an unranked title, as the tab was | Movies | TV, not drawn on Lists, which mixes media. Leaving Lists returns to the side the reader was on |
+
+The dropdown replaces Collection's Watched / Watchlist tab row and its old Movies / TV Shows /
+Lists dropdown; every state either reached is still one entry away. Filters, Rating, the
+Poster / List control, the poster grid and its scores are unchanged.
+
+**One header on every main tab.** `AppHeader` keeps its 8pt inset above the logo and has 12pt
+below it (4pt more). Its right side reserves the bell's height on every tab, so the logo sits
+at the same height on Feed, For You, Collection, Search and Profile; before, the bell made
+Feed's and Profile's bar 2pt taller. Every tab draws `HeaderBoundary` directly under the
+header, Profile included, and its own navigation beneath that: For You's and Collection's row,
+Search's field, Feed's heading row.
+
+**Eight headings at 15pt, by name.** `SectionHeader size="large"` (`sectionHeaderLarge`: Inter
+Semibold 15/20, 0.7 tracking, uppercase, Maroon) on Feed's TRENDING NOW and ACTIVITY and on
+the Profile tab's YOUR 2026, bingd AWARDS (still lower-case bingd), TOP RANKED, WATCHLIST,
+LISTS and RECENT ACTIVITY. Everything else keeps the 12pt `sectionHeader`, including the
+same sections on somebody else's profile, PEOPLE YOU MAY KNOW and the Leaderboard's
+timeframe beside TRENDING NOW, Settings, Where to Watch and the filter sheets. No icons beside
+headings.
+
+**Leaderboard.** The metrics read All Titles, Movies, TV Shows, Reviews, in one chip row that
+scrolls sideways and never wraps: All Titles is whole on arrival and Reviews is reached by
+scrolling. First place carries a 16pt Amber (`semantic.emphasis`) trophy, drawn out of the
+row's flow in the spare left of the rank column so the row does not grow or shift, on every
+row ranked 1, and silent to a screen reader.
+
+**Deferred, not to be built for this release:** the empty-state poster frames, decorative
+waves, icons beside headings, new Awards artwork and other ornament.
+
 ### Follow activity in the Feed — 2026-09-08
 
 Founder §§A9–A14. Following somebody is now Feed content, and it is **social discovery

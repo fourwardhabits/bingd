@@ -758,7 +758,9 @@ export default function FeedScreen() {
               // `contentHeaderInset` above — the same reason Trending does not.
               <SectionHeader title="People you may know" />
             ) : trendingHasItems ? (
-              <SectionHeader title="Trending now" />
+              // 15pt, like ACTIVITY below (founder final polish, 2026-11-04). People's
+              // heading and the board's timeframe keep the standard 12pt.
+              <SectionHeader title="Trending now" size="large" />
             ) : null}
           </View>
 
@@ -833,7 +835,7 @@ export default function FeedScreen() {
              * legible where the same empty state floating below a shelf is not.
              */}
             <View style={styles.boundary}>
-              <SectionHeader title="Activity" />
+              <SectionHeader title="Activity" size="large" />
             </View>
 
             {/* The confirmation, on the screen the reader is still looking at rather than in

@@ -63,12 +63,20 @@ const settled = (awards: AwardProgress[]) => ({
   isError: false,
 });
 
-const open = (over: { viewerId?: string; userId?: string; onSeeAll?: () => void } = {}) =>
+const open = (
+  over: {
+    viewerId?: string;
+    userId?: string;
+    onSeeAll?: () => void;
+    headingSize?: 'standard' | 'large';
+  } = {},
+) =>
   renderWithProviders(
     <ProfileAwards
       viewerId={over.viewerId ?? 'me'}
       userId={over.userId ?? 'me'}
       onSeeAll={over.onSeeAll ?? (() => {})}
+      headingSize={over.headingSize}
     />,
   );
 
@@ -278,5 +286,26 @@ describe('when the read does not land', () => {
 
     expect(view.queryByText('bingd AWARDS')).toBeNull();
     expect(view.queryByText(/Could not load/i)).toBeNull();
+  });
+});
+
+/**
+ * **15pt on the reader's own Profile tab, 12pt everywhere else** (founder final polish,
+ * 2026-11-04). The Profile tab asks for the large heading; somebody else's profile draws
+ * this same section and does not.
+ */
+describe('the heading size', () => {
+  const sizeOf = (view: Awaited<ReturnType<typeof open>>) =>
+    StyleSheet.flatten(view.getByText('bingd AWARDS').props.style).fontSize;
+
+  it('is 15pt when the Profile tab asks for it, with bingd still lower-case', async () => {
+    const view = await open({ headingSize: 'large' });
+    expect(sizeOf(view)).toBe(15);
+    expect(StyleSheet.flatten(view.getByText('bingd AWARDS').props.style).textTransform).toBe('none');
+  });
+
+  it('is the standard 12pt otherwise', async () => {
+    const view = await open({ viewerId: 'me', userId: 'them' });
+    expect(sizeOf(view)).toBe(12);
   });
 });

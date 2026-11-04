@@ -108,6 +108,15 @@ jest.mock('expo-router', () => ({
   useNavigation: () => mockNavigation,
 }));
 
+/**
+ * The trending shelf's titles. Empty unless a test stocks it, which is also what the real
+ * hook returns against the empty tables mocked above, so the rest of this file is unmoved.
+ */
+let mockTrendingItems: unknown[] = [];
+jest.mock('@/features/trending/use-trending', () => ({
+  useTrending: () => ({ data: { items: mockTrendingItems, stale: false } }),
+}));
+
 /** Mutable so a test can sign one reader out and another in. */
 const mockProfile = { id: 'user-1' };
 
@@ -200,6 +209,7 @@ beforeEach(() => {
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
 
+  mockTrendingItems = [];
   mockRpc.mockReset();
   mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
     if (name === 'leaderboard') {
@@ -474,7 +484,7 @@ describe('the board is people only', () => {
     ).toEqual([false, true, false]);
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
+    for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
   });
@@ -722,7 +732,7 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
+    for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
     expect(view.queryByText('Watched')).toBeNull();
@@ -1092,7 +1102,7 @@ describe('the two analytics events', () => {
     await toBoard(view);
     mockTrack.mockClear();
 
-    await fireEvent.press(view.getByText('Titles'));
+    await fireEvent.press(view.getByText('All Titles'));
     expect(mockTrack).not.toHaveBeenCalled();
 
     await fireEvent.press(view.getByText('Movies'));
@@ -1446,5 +1456,45 @@ describe('arriving to find people', () => {
     mockTrack.mockClear();
     await fireEvent.press(view.getByLabelText('Feed'));
     expect(mockTrack).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The Feed's two headings are 15pt, and only those two** (founder final polish,
+ * 2026-11-04). The board's timeframe and People's heading sit in the same slot as
+ * TRENDING NOW and keep the standard 12pt, as the founder specified by name.
+ */
+describe('the Feed headings', () => {
+  const sizeOf = (node: { props: { style?: unknown } }) =>
+    (StyleSheet.flatten(node.props.style as TextStyle) as TextStyle).fontSize;
+
+  it('draws TRENDING NOW and ACTIVITY at 15pt', async () => {
+    mockTrendingItems = [
+      {
+        mediaItemId: 'film-1',
+        kind: 'movie',
+        rank: 0,
+        popularity: 90,
+        title: 'A Film',
+        year: 2026,
+        posterPath: '/a.jpg',
+      },
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getAllByText('TRENDING NOW').length).toBeGreaterThan(0));
+    expect(sizeOf(view.getAllByText('TRENDING NOW')[0]!)).toBe(15);
+    expect(sizeOf(view.getByText('ACTIVITY'))).toBe(15);
+  });
+
+  it('keeps the timeframe and PEOPLE YOU MAY KNOW at 12pt', async () => {
+    const view = await open();
+    await toBoard(view);
+    expect(sizeOf(within(view.getByLabelText('Showing This month')).getByText(/this month/i))).toBe(12);
+
+    await toPeople(view);
+    expect(sizeOf(view.getByText('PEOPLE YOU MAY KNOW'))).toBe(12);
   });
 });

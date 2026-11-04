@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 import { Text } from './Text';
 
 export type CompactSwitchOption<T extends string> = { id: T; label: string };
@@ -16,10 +16,10 @@ export type CompactSwitchProps<T extends string> = {
 /**
  * Two or three short choices in one quiet outline (founder revision brief, 2026-11-03).
  *
- * For You's `Movies | TV Shows`, beside the Recommended / Top Rated selector (Visual 2.1).
- * Deliberately lighter than `SegmentedTabs` and the filled controls: a hairline outline
- * with 8pt corners (no pills), the chosen half on Parchment with Ink text, the other in
- * secondary text, at footnote size so it shares the selector's row on a 360pt phone.
+ * `Movies | TV` on For You and Collection, right of the page's dropdown (founder final
+ * polish, 2026-11-04). Deliberately lighter than `SegmentedTabs` and the filled controls:
+ * a hairline outline with 8pt corners (no pills), the chosen half on Parchment with Ink
+ * text, the other in secondary text, in Inter Medium at 14pt.
  *
  * **Each half is a 44pt press, and the 32pt outline is drawn behind them.** It used to be
  * the outline's own box, with `hitSlop` making up the height; but a press never answers
@@ -52,7 +52,12 @@ export function CompactSwitch<T extends string>({
           >
             {({ pressed }) => (
               <View style={[styles.fill, selected && styles.selected, pressed && !selected && styles.pressed]}>
-                <Text variant="footnote" tone={selected ? 'primary' : 'secondary'} numberOfLines={1}>
+                <Text
+                  variant="footnote"
+                  tone={selected ? 'primary' : 'secondary'}
+                  numberOfLines={1}
+                  style={styles.label}
+                >
                   {option.label}
                 </Text>
               </View>
@@ -92,8 +97,11 @@ const styles = StyleSheet.create({
   },
   // A floor, not a fixed height: at a large system text size the fill grows past 28pt
   // and the press grows with it rather than clipping the word.
+  // 44pt wide as well as tall: "TV" alone measures about 19pt, and its half was a 35pt
+  // target until the floor applied both ways (final polish review, 2026-11-04).
   option: {
     minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
     paddingVertical: PAD,
     justifyContent: 'center',
   },
@@ -104,6 +112,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  label: { fontFamily: fontFamily.sansMedium, fontSize: 14, lineHeight: 18 },
   selected: { backgroundColor: theme.surface.sunken },
   pressed: { opacity: 0.6 },
 });

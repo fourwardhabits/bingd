@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Share } from 'react-native';
+import { Share, StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -165,8 +165,9 @@ jest.mock('@/lib/supabase', () => ({
 jest.mock('@/features/awards/ProfileAwards', () => {
   const { Pressable, Text, View } = jest.requireActual('react-native');
   return {
-    ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
-      <View>
+    ProfileAwards: ({ onSeeAll, headingSize }: { onSeeAll: () => void; headingSize?: string }) => (
+      // Carries the heading size the Profile tab asked for, so the 15pt test can read it.
+      <View testID={`awards-heading-${headingSize ?? 'standard'}`}>
         <Text>bingd AWARDS</Text>
         <Pressable accessibilityRole="button" onPress={onSeeAll}>
           <Text>See all</Text>
@@ -1076,5 +1077,37 @@ describe('social links', () => {
       'Open Instagram profile',
       'Open website',
     ]);
+  });
+});
+
+/**
+ * **The Profile tab's six headings are 15pt** (founder final polish, 2026-11-04): YOUR
+ * 2026, bingd AWARDS (bingd still lower-case), TOP RANKED, WATCHLIST, LISTS and RECENT
+ * ACTIVITY. Somebody else's profile draws the same sections at 12pt — see
+ * `PublicProfileScreen.test.tsx`.
+ */
+describe('the Profile headings', () => {
+  it('draws all six at 15pt', async () => {
+    mockTables.watchlist = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'w1',
+        created_at: '2026-08-19T10:00:00Z',
+        media_items: { ...movie('w1', 'Sicario'), season_number: null, parent: null },
+      },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('WATCHLIST')).toBeTruthy());
+
+    // bingd AWARDS is stubbed in this file (see the mock above), so here it is the size
+    // the tab asks for; `ProfileAwards.test.tsx` asserts the section draws it at 15pt.
+    expect(view.getByTestId('awards-heading-large')).toBeTruthy();
+
+    const headings = [/^YOUR \d{4}$/, 'TOP RANKED', 'WATCHLIST', 'LISTS', 'RECENT ACTIVITY'];
+    const sizes = headings.map((heading) => {
+      const style = StyleSheet.flatten(view.getByText(heading).props.style) as TextStyle | undefined;
+      return [String(heading), style?.fontSize];
+    });
+    expect(sizes).toEqual(headings.map((heading) => [String(heading), 15]));
   });
 });

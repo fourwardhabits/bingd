@@ -15,7 +15,7 @@ import { hapticSelection } from '../haptics';
 import { usePressScale, usePulse } from '../press';
 import { inkAlpha, theme } from '../tokens';
 import { Poster } from './Poster';
-import { SectionHeader } from './SectionHeader';
+import { SectionHeader, type SectionHeaderSize } from './SectionHeader';
 import { Text } from './Text';
 
 export type PosterTile = {
@@ -56,6 +56,8 @@ export type PosterShelfProps = {
    * accessible name whether or not it is painted.
    */
   showTitle?: boolean;
+  /** The heading's size. See `SectionHeader`'s `size`. */
+  headingSize?: SectionHeaderSize;
 };
 
 /**
@@ -72,6 +74,7 @@ export function PosterShelf({
   onPressTile,
   onPressAll,
   showTitle = true,
+  headingSize,
 }: PosterShelfProps) {
   const { width } = useWindowDimensions();
   const { gap, peek } = theme.layout.posterShelf;
@@ -92,6 +95,7 @@ export function PosterShelf({
       {showTitle ? (
         <SectionHeader
           title={title}
+          size={headingSize}
           actionLabel={onPressAll ? 'All' : undefined}
           onPressAction={onPressAll}
         />

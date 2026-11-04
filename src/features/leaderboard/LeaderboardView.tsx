@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar, Chip, Divider, EmptyState, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -55,6 +55,10 @@ export type LeaderboardViewProps = {
  * It keys on `rank`, not on position in the array — so a three-way tie for first shows
  * three accented rows and the fourth person is fourth, which is what the board says.
  *
+ * **First place alone adds one mark**: a 16pt Amber trophy beside the rank (founder final
+ * polish, 2026-11-04). One icon in the palette's existing celebration colour, not a podium
+ * or a medal set — see `TROPHY`.
+ *
  * ---------------------------------------------------------------------------
  * THE "YOU" ROW
  *
@@ -85,11 +89,19 @@ export function LeaderboardView({
           the board beneath it, so there is exactly one place the timeframe is named
           (founder §3). */}
 
-      {/* The same chip row Search and Collection filters use, so a reader who has met
-          one has met all three. Horizontal and wrapping rather than scrolling: four
-          short words fit on one line at every text size this app supports, and a
-          scrolling row of four hides the fourth on the narrowest phone. */}
-      <View style={styles.chips}>
+      {/* The same chips Search and Collection filters use, so a reader who has met one
+          has met all three. **One row that scrolls sideways, never wrapping** (founder
+          final polish, 2026-11-04): with All Titles the four no longer fit at 360pt, and a
+          second line of chips would be a second navigation row. All Titles leads and is
+          always whole on arrival; Reviews is reached by scrolling. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        alwaysBounceHorizontal={false}
+        style={styles.chipScroller}
+        contentContainerStyle={styles.chips}
+        accessibilityLabel="Leaderboard metric"
+      >
         {LEADERBOARD_METRICS.map((option) => (
           <Chip
             key={option.value}
@@ -98,7 +110,7 @@ export function LeaderboardView({
             onPress={() => onChangeMetric(option.value)}
           />
         ))}
-      </View>
+      </ScrollView>
 
       {/**
         * **One content container for every state and every metric** (founder physical QA,
@@ -151,6 +163,20 @@ export function LeaderboardView({
   );
 }
 
+/**
+ * **The trophy beside first place** (founder final polish, 2026-11-04): Amber, the
+ * palette's celebration colour, at 16pt.
+ *
+ * Out of the row's flow, in the spare left of the rank column — the column is 24pt wide
+ * and right-aligned, so a one-digit rank leaves room beside it. In flow it would push the
+ * avatar, name and count of the first-place row out of line with every row below.
+ *
+ * On every row ranked 1, so a tie for first shows a trophy on each — the same rule as the
+ * top-three accent, which keys on `rank` rather than on position. Hidden from a screen
+ * reader: the row already says "Number 1".
+ */
+const TROPHY = 16;
+
 function LeaderboardRow({
   entry,
   metric,
@@ -201,6 +227,17 @@ function LeaderboardRow({
       >
         {entry.rank}
       </Text>
+      {entry.rank === 1 ? (
+        <Ionicons
+          name="trophy"
+          size={TROPHY}
+          color={theme.semantic.emphasis}
+          style={styles.trophy}
+          testID="leaderboard-trophy"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+      ) : null}
 
       <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
 
@@ -345,9 +382,10 @@ function YouRow({ standing, metric }: { standing: MyStanding; metric: Leaderboar
 const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
   heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  // Its own height and no more: a horizontal ScrollView otherwise grows in a column.
+  chipScroller: { flexGrow: 0, flexShrink: 0 },
   chips: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
@@ -364,6 +402,14 @@ const styles = StyleSheet.create({
   // Fixed width so the avatars line up whether the rank is 1 or 48. Right-aligned so
   // the digits themselves line up, which is what makes a column of numbers scannable.
   rank: { minWidth: 24, textAlign: 'right' },
+  // Centred on the row and drawn from the gutter, where the rank column starts. A "1"
+  // right-aligned in 24pt leaves about 16pt to its left; see `TROPHY`.
+  trophy: {
+    position: 'absolute',
+    left: theme.layout.gutter - 4,
+    top: '50%',
+    marginTop: -TROPHY / 2,
+  },
   copy: { flex: 1, gap: 1 },
   // Name and handle on one baseline. The name keeps its intrinsic width and the handle
   // shrinks first, so a long display name costs the handle rather than the count.

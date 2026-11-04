@@ -6,8 +6,8 @@ import { supabase } from '@/lib/supabase';
 /**
  * The four metrics, in the order the chips draw them.
  *
- * **Titles | Movies | TV | Reviews**, which is the founder's correction of 2026-08-28.
- * Titles is the union of the two beside it, so the row reads as a total followed by its
+ * **All Titles | Movies | TV | Reviews**, which is the founder's correction of 2026-08-28,
+ * named All Titles in the final polish (2026-11-04). It is the union of the two beside it, so the row reads as a total followed by its
  * two halves and then a different question — rather than the total, a different question,
  * and then the halves, which is what the first pass had.
  *
@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabase';
  * here is a visible failure rather than a board about the wrong question.
  */
 export const LEADERBOARD_METRICS = [
-  { value: 'titles', label: 'Titles' },
+  { value: 'titles', label: 'All Titles' },
   { value: 'movies', label: 'Movies' },
   { value: 'tv', label: 'TV Shows' },
   { value: 'reviews', label: 'Reviews' },

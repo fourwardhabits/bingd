@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { SectionHeader, Text } from '@/ui/components';
+import { SectionHeader, type SectionHeaderSize, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { ListCover } from './ListCover';
@@ -16,6 +16,12 @@ export type ProfileListsProps = {
   onManage?: () => void;
   /** `See all`. Another profile, and only when there is more than the shelf shows. */
   onSeeAll?: () => void;
+  /**
+   * The heading's size: `large` on the reader's own Profile tab only (founder final
+   * polish, 2026-11-04). Somebody else's profile draws this section too, and keeps the
+   * standard 12pt heading.
+   */
+  headingSize?: SectionHeaderSize;
 };
 
 /**
@@ -55,6 +61,7 @@ export function ProfileLists({
   onOpenList,
   onManage,
   onSeeAll,
+  headingSize,
 }: ProfileListsProps) {
   const lists = useProfileLists(ownerId);
   const rows = lists.data ?? [];
@@ -69,6 +76,7 @@ export function ProfileLists({
     <View style={styles.section}>
       <SectionHeader
         title="Lists"
+        size={headingSize}
         actionLabel={isOwner ? 'Manage' : showSeeAll ? 'See all' : undefined}
         actionAccessibilityLabel={isOwner ? 'Manage your lists' : 'See all lists'}
         onPressAction={isOwner ? onManage : showSeeAll ? onSeeAll : undefined}

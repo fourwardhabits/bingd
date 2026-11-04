@@ -25,7 +25,15 @@ export type SectionHeaderProps = {
    * spelling, which is why `accessibilityLabel` has never been derived from it.
    */
   exactCase?: boolean;
+  /**
+   * `large` — 15pt rather than 12 (`sectionHeaderLarge`), for the Feed and Profile tabs'
+   * own headings only (founder final polish, 2026-11-04). Every other heading, including
+   * the same components drawn on somebody else's profile, keeps the standard size.
+   */
+  size?: SectionHeaderSize;
 };
+
+export type SectionHeaderSize = 'standard' | 'large';
 
 /**
  * The one way a screen names a section (design-system.md §8).
@@ -45,6 +53,7 @@ export function SectionHeader({
   actionAccessibilityLabel,
   onPressAction,
   exactCase = false,
+  size = 'standard',
 }: SectionHeaderProps) {
   return (
     <View
@@ -55,7 +64,7 @@ export function SectionHeader({
       accessibilityLabel={title}
     >
       <Text
-        variant="sectionHeader"
+        variant={size === 'large' ? 'sectionHeaderLarge' : 'sectionHeader'}
         tone="action"
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.

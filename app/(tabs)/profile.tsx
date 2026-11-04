@@ -49,6 +49,7 @@ import { theme } from '@/ui/tokens';
 import {
   ActivityRow,
   AppHeader,
+  HeaderBoundary,
   EmptyState,
   Screen,
   SectionHeader,
@@ -260,6 +261,9 @@ export default function ProfileScreen() {
           onPress: () => router.push('/settings/notifications'),
         }}
       />
+      {/* The divider every main tab draws under its header (founder final polish,
+          2026-11-04). Profile was the one without it. */}
+      <HeaderBoundary />
       <ScrollView
         ref={scroller}
         contentContainerStyle={styles.content}
@@ -408,6 +412,9 @@ export default function ProfileScreen() {
           onPressTitle={(id) => router.push(`/title/${id}`)}
           /* Own profile only. See GoalsSectionProps.streakUserId. */
           streakUserId={profile.id}
+          // The Profile tab's six headings are 15pt (founder final polish, 2026-11-04);
+          // somebody else's profile draws the same sections at the standard size.
+          headingSize="large"
         />
 
         {/* After Your 2026: the settled half of the page, below the half that is still
@@ -416,6 +423,7 @@ export default function ProfileScreen() {
           viewerId={profile.id}
           userId={profile.id}
           onSeeAll={() => setAwardsOpen(true)}
+          headingSize="large"
         />
 
         {/**
@@ -431,6 +439,7 @@ export default function ProfileScreen() {
          */}
         <TopRanked
           userId={profile.id}
+          headingSize="large"
           onPressTitle={(id) => router.push(`/title/${id}`)}
           onSeeAll={(category) =>
             // **Carrying the side they chose.** The Collection tab remembers a medium per
@@ -447,6 +456,7 @@ export default function ProfileScreen() {
         <ProfileWatchlist
           userId={profile.id}
           onPressTitle={(id) => router.push(`/title/${id}`)}
+          headingSize="large"
         />
 
         {/* **Lists, after Watchlist and before Recent activity** (founder, 2026-09-19).
@@ -464,10 +474,11 @@ export default function ProfileScreen() {
           isOwner
           onOpenList={(listId) => router.push(`/lists/${listId}?surface=profile_shelf`)}
           onManage={() => router.push('/lists?entry=profile_manage')}
+          headingSize="large"
         />
 
         <View style={styles.section}>
-          <SectionHeader title="Recent activity" />
+          <SectionHeader title="Recent activity" size="large" />
           {feed.isPending ? (
             <SkeletonRow count={2} />
           ) : feed.isError && recent.length === 0 ? (

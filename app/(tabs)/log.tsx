@@ -491,6 +491,7 @@ export default function LogScreen() {
           brand row; the founder's correction is the cross-tab header rhythm:
           row one is who you are looking at, row two is what you do here. */}
       <AppHeader />
+      <HeaderBoundary />
       <View style={styles.searchRow}>
         <SearchField
           ref={field}
@@ -509,7 +510,6 @@ export default function LogScreen() {
           accessibilityHint="Results appear as you type"
         />
       </View>
-      <HeaderBoundary />
 
       {/* Hidden while idle. A filter over nothing is five buttons that do
           nothing, and the recent searches below are not filterable by kind.

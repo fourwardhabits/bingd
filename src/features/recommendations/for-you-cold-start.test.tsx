@@ -151,8 +151,8 @@ const open = async () => {
 
 /** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
 const showing = (view: Awaited<ReturnType<typeof open>>) => {
-  const medium = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
-  const wall = within(view.getByLabelText('Wall'))
+  const wall = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
+  const medium = within(view.getByLabelText('Medium'))
     .getAllByRole('radio')
     .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
   return `Showing ${wall} ${medium}`;

@@ -134,24 +134,24 @@ const open = async () => {
 };
 
 /**
- * The medium and the wall are two controls since the final direction (founder,
- * 2026-11-03): Collection's dropdown on the left (Movies / TV Shows) and the Recommended |
- * Top Rated switch on the right. `choose` takes the four walls by their full names.
+ * The wall and the medium are two controls (founder final polish, 2026-11-04): the page's
+ * dropdown on the left (Recommended / Top Rated) and the Movies | TV switch on the right,
+ * the same pair Collection uses. `choose` takes the four walls by their full names.
  */
 const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
-  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV Shows)$/.exec(category) ?? [];
+  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV)$/.exec(category) ?? [];
   if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
-  await fireEvent.press(within(view.getByLabelText('Wall')).getByRole('radio', { name: wall }));
-  if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${medium}`) {
+  if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${wall}`) {
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${medium}`) }));
+    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${wall}`) }));
   }
+  await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: medium }));
 };
 
 /** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
 const showing = (view: Awaited<ReturnType<typeof open>>) => {
-  const medium = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
-  const wall = within(view.getByLabelText('Wall'))
+  const wall = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
+  const medium = within(view.getByLabelText('Medium'))
     .getAllByRole('radio')
     .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
   return `Showing ${wall} ${medium}`;
@@ -197,7 +197,7 @@ describe('choosing Top Rated', () => {
     );
 
     mockRpc.mockClear();
-    await choose(view, 'Top Rated TV Shows');
+    await choose(view, 'Top Rated TV');
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
         'top_rated_titles',
@@ -206,7 +206,7 @@ describe('choosing Top Rated', () => {
     );
     // Two walls, two queries, and the movies one is not re-asked: they are separate
     // cache entries, which is what makes moving between them free.
-    expect(showing(view)).toBe('Showing Top Rated TV Shows');
+    expect(showing(view)).toBe('Showing Top Rated TV');
   });
 
   it('takes Sent to you and Group Picks away, and keeps Filters', async () => {
@@ -521,5 +521,30 @@ describe('keep looking on a deeply scrolled wall', () => {
     await fireEvent.press(view.getByText('Keep looking'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalled());
     expect(mockRpc).toHaveBeenCalledWith('top_rated_titles', expect.objectContaining({}));
+  });
+});
+
+/**
+ * **Each control keeps the other's value** (founder final polish, 2026-11-04). The dropdown
+ * chooses the wall and the switch the medium; together they are the four walls, so changing
+ * one must never reset the other.
+ */
+describe('the dropdown and the switch together', () => {
+  it('keeps the medium across a change of wall, and the wall across a change of medium', async () => {
+    const view = await open();
+
+    await choose(view, 'Recommended TV');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
+
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: /^Top Rated/ }));
+    await waitFor(() => expect(showing(view)).toBe('Showing Top Rated TV'));
+
+    await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: 'Movies' }));
+    await waitFor(() => expect(showing(view)).toBe('Showing Top Rated Movies'));
+
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: /^Recommended/ }));
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended Movies'));
   });
 });

@@ -149,24 +149,24 @@ const open = async () => {
 };
 
 /**
- * The medium and the wall are two controls since the final direction (founder,
- * 2026-11-03): Collection's dropdown on the left (Movies / TV Shows) and the Recommended |
- * Top Rated switch on the right. `choose` takes the four walls by their full names.
+ * The wall and the medium are two controls (founder final polish, 2026-11-04): the page's
+ * dropdown on the left (Recommended / Top Rated) and the Movies | TV switch on the right,
+ * the same pair Collection uses. `choose` takes the four walls by their full names.
  */
 const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
-  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV Shows)$/.exec(category) ?? [];
+  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV)$/.exec(category) ?? [];
   if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
-  await fireEvent.press(within(view.getByLabelText('Wall')).getByRole('radio', { name: wall }));
-  if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${medium}`) {
+  if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${wall}`) {
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${medium}`) }));
+    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${wall}`) }));
   }
+  await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: medium }));
 };
 
 /** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
 const showing = (view: Awaited<ReturnType<typeof open>>) => {
-  const medium = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
-  const wall = within(view.getByLabelText('Wall'))
+  const wall = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
+  const medium = within(view.getByLabelText('Medium'))
     .getAllByRole('radio')
     .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
   return `Showing ${wall} ${medium}`;
@@ -195,34 +195,34 @@ describe('the one selector', () => {
 
     expect(view.queryByText('Titles')).toBeNull();
     expect(view.queryByLabelText('What to look at')).toBeNull();
-    // The only radios on the screen are the Recommended | Top Rated switch's two.
+    // The only radios on the screen are the Movies | TV switch's two.
     expect(view.getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
-      'Recommended',
-      'Top Rated',
+      'Movies',
+      'TV',
     ]);
   });
 
   it('offers the two personalised walls and the two community ones, and nothing else', async () => {
     const view = await open();
 
-    // Which wall: a compact switch, Recommended then Top Rated (founder, 2026-11-03).
-    const wall = view.getByLabelText('Wall');
-    expect(wall.props.accessibilityRole).toBe('radiogroup');
-    expect(within(wall).getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
-      'Recommended',
-      'Top Rated',
+    // Which medium: the compact switch, Movies then TV (founder final polish, 2026-11-04).
+    const medium = view.getByLabelText('Medium');
+    expect(medium.props.accessibilityRole).toBe('radiogroup');
+    expect(within(medium).getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
+      'Movies',
+      'TV',
     ]);
 
-    // Which medium: Collection's dropdown, in Title Case. Exactly two, in this order —
-    // presence alone would pass a third entry, or a swap. Scoped to the sheet by its
-    // scrim, because RNTL renders a modal's siblings; the rows carry their label as text.
+    // Which wall: the page's dropdown. Exactly two, in this order — presence alone would
+    // pass a third entry, or a swap. Scoped to the sheet by its scrim, because RNTL
+    // renders a modal's siblings; the rows carry their label as text.
     await fireEvent.press(view.getByLabelText(/^Showing /));
     const sheet = within(view.getByLabelText('Close'));
     const options = sheet
       .getAllByRole('button')
       .map((node) => within(node).getAllByText(/\S/)[0]?.props.children)
       .map((label) => String(label ?? ''));
-    expect(options).toEqual(['Movies', 'TV Shows']);
+    expect(options).toEqual(['Recommended', 'Top Rated']);
     // §A16. People is a mode of the Feed tab now, gone rather than hidden.
     expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
     // The For You override: this wall holds series, so it does not say seasons.
@@ -296,9 +296,9 @@ describe('the title categories', () => {
 
   it('still draws them on TV shows', async () => {
     const view = await open();
-    await choose(view, 'Recommended TV Shows');
+    await choose(view, 'Recommended TV');
 
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV Shows'));
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
     expect(view.getByText(/^Sent to You/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
@@ -326,8 +326,8 @@ describe('crossing between the two categories', () => {
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
 
-    await choose(view, 'Recommended TV Shows');
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV Shows'));
+    await choose(view, 'Recommended TV');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
     expect(view.getByText('Filters · 1')).toBeTruthy();
   });
@@ -339,8 +339,8 @@ describe('crossing between the two categories', () => {
     await fireEvent.press(view.getByText(/^Sent to You/));
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
 
-    await choose(view, 'Recommended TV Shows');
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV Shows'));
+    await choose(view, 'Recommended TV');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
     // Still the list rather than the wall, which is what the chip being on means.
     expect(view.getByText('Heat (1995)')).toBeTruthy();

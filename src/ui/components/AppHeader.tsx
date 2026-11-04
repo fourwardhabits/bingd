@@ -97,11 +97,32 @@ export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
   );
 }
 
+/**
+ * **The bell's box, which every tab's right side now reserves** (founder final polish,
+ * 2026-11-04: "the logo appears at the same vertical position on every tab").
+ *
+ * The lockup is centred in this row, so the row's height decides where the logo sits.
+ * The bell's pressable (a 24pt glyph inside 4pt of padding) came out about 2pt taller than
+ * the lockup, which made Feed and Profile 2pt taller than For You, Collection and Search,
+ * and put their logo 1pt lower. Reserving the bell's height on every tab, with or without
+ * a bell, gives all five the same row. It is a fixed height rather than a minimum so that
+ * a platform drawing the glyph a little taller cannot reopen the difference: the bell is
+ * centred in it and its hit area (`hitSlop`) is unchanged.
+ */
+const ACTIONS_HEIGHT = 34;
+
 const styles = StyleSheet.create({
+  /**
+   * **4pt more below the logo, and the same above it** (founder final polish, 2026-11-04).
+   *
+   * Only the bottom grew: the top inset is what keeps the logo clear of the Android
+   * status bar, so the bar breathes below its content rather than moving it up.
+   */
   wrap: {
     minHeight: theme.layout.control.headerHeight,
     paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[2],
+    paddingTop: theme.space[2],
+    paddingBottom: theme.space[2] + theme.space[1],
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -111,6 +132,7 @@ const styles = StyleSheet.create({
   // `space-between` used to leave them.
   right: {
     flex: 1,
+    height: ACTIONS_HEIGHT,
     justifyContent: 'flex-end',
     marginLeft: theme.space[4],
     flexDirection: 'row',

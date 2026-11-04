@@ -73,7 +73,7 @@ export {
 export { ScorePanel, type ScorePanelProps } from './ScorePanel';
 export { ScoresSection, type ScoresSectionProps } from './ScoresSection';
 export { SearchField, type SearchFieldProps } from './SearchField';
-export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
+export { SectionHeader, type SectionHeaderProps, type SectionHeaderSize } from './SectionHeader';
 export {
   SegmentedControl,
   type SegmentedControlOption,

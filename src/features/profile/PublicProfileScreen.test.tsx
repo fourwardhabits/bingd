@@ -1,5 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert, Share, StyleSheet, type ViewStyle } from 'react-native';
+import { Alert, Share, StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { theme } from '@/ui/tokens';
 
@@ -1580,5 +1580,20 @@ describe('social links', () => {
 
     await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
     expect(view.queryAllByRole('link')).toHaveLength(0);
+  });
+});
+
+/**
+ * **Somebody else's profile keeps the standard 12pt headings.** The 15pt headings were
+ * scoped to the reader's own Profile tab (founder final polish, 2026-11-04), and the
+ * sections here are the same components, so the size is asserted rather than assumed.
+ */
+describe('the headings on somebody else\'s profile', () => {
+  it('stay at 12pt', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('TOP RANKED')).toBeTruthy());
+
+    const style = StyleSheet.flatten(view.getByText('TOP RANKED').props.style) as TextStyle;
+    expect(style.fontSize).toBe(12);
   });
 });

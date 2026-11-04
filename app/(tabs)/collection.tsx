@@ -31,15 +31,13 @@ import {
   Button,
   HeaderBoundary,
   EmptyState,
-  MEDIUM_OPTIONS,
   MediumSelector,
   Screen,
-  SegmentedTabs,
   SkeletonRow,
   Text,
-  type MediumSelectorOption,
 } from '@/ui/components';
 import { MyLists } from '@/features/lists/MyLists';
+import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 
 type Segment = 'watched' | 'watchlist' | 'unranked';
 type Medium = RankingCategory;
@@ -71,22 +69,26 @@ const isMedium = (value: unknown): value is Medium =>
   value === 'movies' || value === 'tv_seasons';
 
 /**
- * **Movies / TV / Lists** — one selector, three modes (founder QA, 2026-09-21).
+ * **Movies, TV or Lists** — the mode this tab remembers (founder QA, 2026-09-21).
  *
- * Lists was a `My lists ›` link on this row, reached by a push. It is now a first-class
- * mode of the same control, remembered like the other two under the same key: a reader
- * who left Collection on Lists comes back to Lists. It is not a segment and not a bottom
- * tab — Watched, Watchlist and Unranked are slices of a medium, and a list mixes media,
- * so in Lists mode those tabs are simply not drawn.
+ * Lists was a `My lists ›` link, reached by a push. It is a first-class mode, remembered
+ * like the two media under the same key: a reader who left Collection on Lists comes back
+ * to Lists. Since the final polish (2026-11-04) it is the last entry of the page's
+ * dropdown, after Watched, Watchlist and Unranked, and the Movies | TV switch is not drawn
+ * while it is showing, because a list mixes media.
  */
 type CollectionMode = Medium | 'lists';
 
 const isMode = (value: unknown): value is CollectionMode => isMedium(value) || value === 'lists';
 
-const COLLECTION_MODES: readonly MediumSelectorOption<CollectionMode>[] = [
-  ...MEDIUM_OPTIONS,
-  { id: 'lists', label: 'Lists' },
+/** The medium, in the compact switch For You uses too. */
+const COLLECTION_MEDIA: readonly CompactSwitchOption<Medium>[] = [
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv_seasons', label: 'TV' },
 ];
+
+/** What the page's dropdown chooses: a segment of the medium, or Lists. */
+type CollectionChoice = Segment | 'lists';
 
 /**
  * Poster or List, per account, across launches (founder §11).
@@ -164,6 +166,10 @@ export default function CollectionScreen() {
   // The medium the three sections read. In Lists mode none of them is drawn, so the
   // value only has to be a valid one for the hooks above them.
   const medium: Medium = mode === 'lists' ? 'movies' : mode;
+  // The side to come back to from Lists; see `changeMedium`. State rather than a ref,
+  // because the dropdown reads it while drawn on Lists: whether it offers Unranked is a
+  // question about the side that leaving Lists will open.
+  const [mediumBeforeLists, setMediumBeforeLists] = useState<Medium>('movies');
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
   /**
    * Filters, sort, view mode and shuffle seed, owned here rather than by either
@@ -341,7 +347,9 @@ export default function CollectionScreen() {
    */
   const unrankedFor = (which: Medium) =>
     filterByMedium(loggedSummary?.unranked ?? [], which).length;
-  const unrankedCount = unrankedFor(medium);
+  // On Lists, the side the reader will return to: the dropdown offers Unranked there, and
+  // choosing it must open Unranked rather than fall back to Watched.
+  const unrankedCount = unrankedFor(inLists ? mediumBeforeLists : medium);
   const rankedCount = loggedSummary?.rankedCount ?? 0;
 
   const segments: { id: Segment; label: string }[] = useMemo(
@@ -353,6 +361,10 @@ export default function CollectionScreen() {
       ...(unrankedCount > 0 ? [{ id: 'unranked' as const, label: 'Unranked' }] : []),
     ],
     [unrankedCount],
+  );
+  const views: { id: CollectionChoice; label: string }[] = useMemo(
+    () => [...segments, { id: 'lists', label: 'Lists' }],
+    [segments],
   );
 
   // Ranking the last unranked title — or switching to a category with none — removes
@@ -376,6 +388,7 @@ export default function CollectionScreen() {
    * opening on Movies next time.
    */
   const changeMedium = (next: CollectionMode) => {
+    if (next === 'lists' && !inLists) setMediumBeforeLists(medium);
     chosenMedium.current = true;
     setMediumPref({ profileId: profile.id, medium: next });
     if (next !== 'lists' && segment === 'unranked' && unrankedFor(next) === 0) {
@@ -440,43 +453,49 @@ export default function CollectionScreen() {
   return (
     <Screen>
       <AppHeader />
+      <HeaderBoundary />
       {/**
-       * **The medium is a dropdown again, and one visible tab row beneath it**
-       * (founder, physical Android, 2026-09-07).
+       * **Watched ▾ on the left, Movies | TV on the right** (founder final polish,
+       * 2026-11-04), under the header's divider.
        *
-       * It was two stacked tab rows for a day — Movies/TV over Watched/Watchlist — on
-       * the argument that a constant choice should not hide behind a sheet. On a device
-       * that argument lost to what it produced: two navigation bars in a column, which
-       * read as one four-item control that had been split rather than as a hierarchy,
-       * and which drew differently here than on For You. The dropdown is the screen's
-       * *title* — one line, `title1`, the category it is showing — so the only visible
-       * tabs are the ones that switch state within it. That is the rhythm the app had.
+       * The same dropdown and switch, at the same sizes and spacing, as For You's row, so
+       * the two screens share one navigation pattern. The dropdown replaces the Watched /
+       * Watchlist tab row and holds every state that row and the old Movies / TV Shows /
+       * Lists dropdown reached between them: Watched, Watchlist, Unranked (only while
+       * this side has an unranked title, as the tab was) and Lists. The switch is not
+       * drawn on Lists, which mixes media. Where both do not fit one line the switch
+       * wraps under the dropdown, right-aligned.
        *
-       * Search's All / Movies / TV / People is deliberately still chips: those filter a
-       * result set rather than naming which collection you are in.
+       * Picking a segment from Lists returns to the medium the reader was on before.
        */}
       <View style={styles.titleRow}>
         <View style={styles.titleRowSelector}>
-          <MediumSelector<CollectionMode>
-            value={mode}
-            onChange={changeMedium}
-            options={COLLECTION_MODES}
+          <MediumSelector<CollectionChoice>
+            size="nav"
+            value={inLists ? 'lists' : active}
+            options={views}
+            onChange={(next) => {
+              if (next === 'lists') {
+                changeMedium('lists');
+                return;
+              }
+              if (inLists) changeMedium(mediumBeforeLists);
+              setSegment(next);
+            }}
           />
         </View>
+        {inLists ? null : (
+          <View style={styles.titleRowSwitch}>
+            <CompactSwitch
+              accessibilityLabel="Medium"
+              options={COLLECTION_MEDIA}
+              value={medium}
+              onChange={changeMedium}
+            />
+          </View>
+        )}
       </View>
       {inLists ? <MyLists entry="collection" /> : null}
-      {inLists ? null : (
-        <SegmentedTabs
-          options={segments}
-          value={active}
-          onChange={setSegment}
-          accessibilityLabel="Collection section"
-        />
-      )}
-      {/* Beneath the Movies/TV and Watched/Watchlist controls, which are both
-          navigation: the same seam Feed and Log use, in the analogous place. The
-          information architecture is untouched. */}
-      {inLists ? null : <HeaderBoundary />}
 
       {/* **Two answers to one question, side by side.**
 
@@ -817,16 +836,22 @@ function Loading() {
 
 const styles = StyleSheet.create({
   /**
-   * The Movies / TV / Lists dropdown, on its own line.
+   * The dropdown and the switch: For You's `header` row, to the point.
    *
    * `MediumSelector` renders a fragment — a `Pressable` and its `Modal` — so it is
-   * wrapped rather than dropped straight into the row: with three children,
-   * `space-between` would distribute around the zero-sized modal and put the title
-   * somewhere nobody asked for. The wrapper also carries `flexShrink`, so a long
-   * category label wraps inside itself instead of pushing the action off the screen.
+   * wrapped rather than dropped straight into the row, which keeps the zero-sized modal
+   * out of the layout. The switch wraps to a second line, right-aligned, where the two
+   * do not fit; the 12pt column gap is the least space between them.
    */
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  titleRowSelector: { flexShrink: 1 },
+  titleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[3],
+    paddingRight: theme.layout.gutter,
+  },
+  titleRowSelector: { flexShrink: 0 },
+  titleRowSwitch: { flexShrink: 0, marginLeft: 'auto' },
 
   // A column now. As a row it put the copy and the dismissal at opposite edges,
   // which is what made them read as unrelated to each other.
