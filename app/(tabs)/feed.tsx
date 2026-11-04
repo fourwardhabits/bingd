@@ -74,14 +74,14 @@ import {
   Button,
   EmptyState,
   HeaderBoundary,
+  IconToggle,
   MediumSelector,
   Screen,
   SectionHeader,
-  SegmentedTabs,
   SkeletonRow,
   Text,
   usePullRefresh,
-  type SegmentOption,
+  type IconToggleOption,
 } from '@/ui/components';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
@@ -126,19 +126,20 @@ const NEXT_PAGE_THRESHOLD = 800;
 
 const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
 
-/**
- * Three places, named in words (founder, Growth UX sprint, 2026-11-02).
- *
- * These were three unlabelled glyphs in the heading row, and People and Leaderboard are
- * where somebody finds the friends who make the rest of the app worth opening. The left
- * tab is still what a launch opens on. `Activity` rather than `Feed`, because inside the
- * Feed tab that word would name nothing.
- */
 const FEED_MODES = [
-  { id: 'feed', label: 'Activity' },
-  { id: 'leaderboard', label: 'Leaderboard' },
-  { id: 'people', label: 'People' },
-] as const satisfies readonly SegmentOption<FeedMode>[];
+  // `newspaper` rather than `list`: Collection's list glyph means "the other way of
+  // drawing this same thing", and this control's left cell means "the ordinary
+  // homepage". Reusing the glyph would say the two toggles answer the same question.
+  { value: 'feed', icon: 'newspaper-outline', label: 'Feed' },
+  { value: 'leaderboard', icon: 'trophy-outline', label: 'Leaderboard' },
+  /**
+   * `people-outline`, which is the glyph this app already spends on a set of people —
+   * Group Picks' chip and the old For You mutuals chip both use it. `person-add-outline`
+   * was the other candidate and is wrong: it names the *act* of following, and this cell
+   * names a place, in a control whose other two cells are also places.
+   */
+  { value: 'people', icon: 'people-outline', label: 'People' },
+] as const satisfies readonly IconToggleOption<FeedMode>[];
 
 /** PRD §14. Fan-out on read: followed users' activity is queried at read time
  *  rather than written into per-user inboxes (docs/architecture/README.md AD-5). */
@@ -712,18 +713,17 @@ export default function FeedScreen() {
          * exactly the feed that was there. That is founder acceptance D.
          */}
         {/**
-         * **The modes, then the heading of whatever is showing.**
+         * **The content header row** (founder follow-up §1).
          *
-         *     Activity   Leaderboard   People
-         *     TRENDING NOW  ·  THIS MONTH ▼  ·  PEOPLE YOU MAY KNOW
+         *     TRENDING NOW                    [Feed] [Trophy] [People]
+         *     THIS MONTH ▼                    [Feed] [Trophy] [People]
+         *     PEOPLE YOU MAY KNOW             [Feed] [Trophy] [People]
          *
-         * `SegmentedTabs` because this is navigation: it changes which content is shown,
-         * which is what that component is for and the same row Collection draws under its
-         * title. Three words need the row's whole width, so they cannot share it with the
-         * heading any more, and that is why the heading now sits on a row of its own.
-         * It stays in the scrolling content, at the head of the list it switches.
+         * One row, drawn in every mode, so the toggle keeps its position while the thing
+         * across from it changes. That is what makes it read as a control over *this
+         * content* rather than as chrome: it sits at the head of the list it switches.
          *
-         * The heading is whatever is immediately below — the shelf's
+         * The left side is the heading of whatever is immediately below — the shelf's
          * name in Feed mode, the timeframe selector in Leaderboard mode, and since
          * 2026-09-08 (§A3) `PEOPLE YOU MAY KNOW` in People mode, in the same slot with the
          * same treatment. In Feed mode it is drawn only when the shelf will actually
@@ -738,28 +738,44 @@ export default function FeedScreen() {
          * components draw the same words the same way — `sectionHeader`, uppercase, Maroon
          * — so the row does not move if a second list ever makes it a selector.
          */}
-        <SegmentedTabs
-          accessibilityLabel="Feed mode"
-          options={FEED_MODES}
-          value={mode}
-          onChange={changeMode}
-        />
-        {showingBoard ? (
-          // The gutter is the board's alone: `SectionHeader` pads itself and a section-sized
-          // `MediumSelector` deliberately does not.
-          <View style={styles.contentHeaderInset}>
-            <MediumSelector
-              size="section"
-              value={timeframe}
-              onChange={changeTimeframe}
-              options={LEADERBOARD_TIMEFRAMES}
-            />
+        <View style={styles.contentHeader}>
+          {/* The gutter is applied here, on the board's side only. `SectionHeader` pads
+              itself and a section-sized `MediumSelector` deliberately does not, so a
+              single inset on the row would double-pad TRENDING NOW while an inset on
+              neither leaves the timeframe flush against the screen edge — which is what
+              the founder photographed. Padding on the existing flex child, so the row's
+              height and the toggle's position are untouched. */}
+          <View style={[styles.contentHeaderLeft, showingBoard && styles.contentHeaderInset]}>
+            {showingBoard ? (
+              <MediumSelector
+                size="section"
+                value={timeframe}
+                onChange={changeTimeframe}
+                options={LEADERBOARD_TIMEFRAMES}
+              />
+            ) : showingPeople ? (
+              // `SectionHeader` pads itself, which is why People does not take
+              // `contentHeaderInset` above — the same reason Trending does not.
+              <SectionHeader title="People you may know" />
+            ) : trendingHasItems ? (
+              <SectionHeader title="Trending now" />
+            ) : null}
           </View>
-        ) : showingPeople ? (
-          <SectionHeader title="People you may know" />
-        ) : trendingHasItems ? (
-          <SectionHeader title="Trending now" />
-        ) : null}
+
+          {/**
+           * The same `IconToggle` Collection's Poster/List control uses — one component,
+           * so the two cannot drift into two dialects of the same idea. They behave
+           * differently on purpose: Collection persists its choice across launches and
+           * this one deliberately does not (§6), which is exactly why they must look the
+           * same by construction rather than by agreement.
+           */}
+          <IconToggle
+            label="Feed mode"
+            value={mode}
+            onChange={changeMode}
+            options={FEED_MODES}
+          />
+        </View>
 
         {showingBoard ? (
           <LeaderboardView
@@ -1201,13 +1217,27 @@ const styles = StyleSheet.create({
   // Collapses to nothing when the shelf renders null, so an absent shelf costs no
   // space rather than an empty band above the first activity row.
   trending: { gap: theme.space[2] },
-  // The selector's row, the same height as the `SectionHeader` it stands in for, so
-  // switching mode does not move the list. Only the timeframe needs the gutter.
-  contentHeaderInset: {
+  /**
+   * The content header row: a heading on the left, the mode toggle on the right.
+   *
+   * The gutter lives here rather than on the children, because the two left-hand
+   * occupants are different components — a `SectionHeader`, which pads itself, and a
+   * section-sized `MediumSelector`, which deliberately does not. Padding the row is what
+   * makes them line up with each other and with the list below.
+   */
+  contentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: theme.layout.gutter,
+    paddingTop: theme.space[3],
     minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-    paddingHorizontal: theme.layout.gutter,
   },
+  // Takes the space the toggle leaves, so a long heading truncates rather than pushing
+  // the control off the row.
+  contentHeaderLeft: { flex: 1, justifyContent: 'center' },
+  // Only the timeframe selector carries it — see the call site.
+  contentHeaderInset: { paddingLeft: theme.layout.gutter },
   /**
    * The rule between discovery and activity.
    *

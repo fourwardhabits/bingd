@@ -273,7 +273,7 @@ export function ProfileIdentity({
               hint: 'Opens the list',
             },
             {
-              label: 'TV',
+              label: 'TV Shows',
               value: stats.seasons,
               onPress: onPressSeasons,
               hint: 'Opens the list',

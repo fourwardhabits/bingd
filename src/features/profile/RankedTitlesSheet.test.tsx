@@ -150,7 +150,7 @@ it('switches list without closing, through the sheet’s own control', async () 
   const view = await open({ onChangeCategory });
   await waitFor(() => expect(view.getByText(/A Film/)).toBeTruthy());
 
-  fireEvent.press(view.getByText('TV'));
+  fireEvent.press(view.getByText('TV Shows'));
 
   expect(onChangeCategory).toHaveBeenCalledWith('tv_seasons');
 });
@@ -487,7 +487,7 @@ describe('the sort control', () => {
 
     // Sorting is not switching lists, and it must not behave as though it were.
     expect(onChangeCategory).not.toHaveBeenCalled();
-    await fireEvent.press(view.getByText('TV'));
+    await fireEvent.press(view.getByText('TV Shows'));
     expect(onChangeCategory).toHaveBeenCalledWith('tv_seasons');
   });
 

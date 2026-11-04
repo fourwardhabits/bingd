@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, waitFor } from '@testing-library/react-native';
 import { BackHandler, StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -10,7 +10,7 @@ import { theme } from '@/ui/tokens';
 import FeedScreen from '../../../app/(tabs)/feed';
 
 /**
- * The Feed's three modes, the timeframe selector, and the board's rows.
+ * The Feed ↔ Leaderboard toggle, the timeframe selector, and the board's rows.
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS FILE GUARDS
@@ -219,12 +219,12 @@ type View = Awaited<ReturnType<typeof renderWithProviders>>;
 
 const open = async () => {
   const view = await renderWithProviders(<FeedScreen />);
-  await waitFor(() => expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy());
+  await waitFor(() => expect(view.getByLabelText('Feed')).toBeTruthy());
   return view;
 };
 
 const toBoard = async (view: View, expecting = 'This month') => {
-  await fireEvent.press(view.getByRole('tab', { name: 'Leaderboard' }));
+  await fireEvent.press(view.getByLabelText('Leaderboard'));
   await waitFor(() => expect(view.getByLabelText(`Showing ${expecting}`)).toBeTruthy());
 };
 
@@ -267,10 +267,10 @@ describe('where the toggle lives', () => {
     ).not.toHaveLength(0);
   });
 
-  it('is in the content, under the app bar, instead', async () => {
+  it('is in the content header row instead', async () => {
     const view = await open();
     expect(view.getByLabelText('Feed mode')).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'Leaderboard' })).toBeTruthy();
+    expect(view.getByLabelText('Leaderboard')).toBeTruthy();
   });
 
   it('leaves the bell reachable in both modes', async () => {
@@ -292,7 +292,7 @@ describe('the toggle', () => {
     expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
-  it('switches to the Leaderboard from its tab', async () => {
+  it('switches to the Leaderboard on the trophy', async () => {
     const view = await open();
     await toBoard(view);
 
@@ -305,7 +305,7 @@ describe('the toggle', () => {
     const view = await open();
     await toBoard(view);
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByLabelText('Feed'));
 
     await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
     expect(view.queryByLabelText('Showing This month')).toBeNull();
@@ -381,7 +381,7 @@ describe('the timeframe, remembered — and the mode, not', () => {
     await toBoard(view);
     await chooseTimeframe(view, 'This month', 'All time');
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByLabelText('Feed'));
     await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
     await toBoard(view, 'All time');
   });
@@ -465,15 +465,10 @@ describe('the board is people only', () => {
     await toBoard(view);
 
     expect(view.queryByText('Top Titles')).toBeNull();
-    // The Feed's own three modes, and no row of the board's own beneath them.
-    expect(view.queryAllByRole('tab').map((tab) => tab.props.accessibilityState?.selected)).toEqual([
-      false,
-      true,
-      false,
-    ]);
+    expect(view.queryAllByRole('tab')).toHaveLength(0);
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
   });
@@ -721,7 +716,7 @@ describe('the metrics', () => {
     const view = await open();
     await toBoard(view);
 
-    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+    for (const label of ['Titles', 'Movies', 'TV Shows', 'Reviews']) {
       expect(view.getByText(label)).toBeTruthy();
     }
     expect(view.queryByText('Watched')).toBeNull();
@@ -1082,7 +1077,7 @@ describe('the two analytics events', () => {
     });
 
     mockTrack.mockClear();
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByLabelText('Feed'));
     expect(mockTrack).not.toHaveBeenCalled();
   });
 
@@ -1176,7 +1171,7 @@ describe('re-tapping the Feed tab', () => {
     pressFeedTab();
 
     await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
-    expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy();
+    expect(view.getByLabelText('Feed')).toBeTruthy();
   });
 
   it('does not leave the board when the press arrives from another tab', async () => {
@@ -1252,14 +1247,18 @@ describe('the content header gutter', () => {
   });
 
   /**
-   * The obvious fix, a gutter around every heading, would double a `SectionHeader` to 32
-   * because it already carries its own. The inset belongs to the board's selector alone.
+   * The obvious fix — a gutter on the row itself — would have doubled TRENDING NOW to
+   * 32, because `SectionHeader` already carries one. So the row stays unpadded on the
+   * left and the inset belongs to the board's occupant alone. Read off the toggle,
+   * which is in that row in both modes and is the one thing on it that pads itself
+   * nowhere.
    */
-  it('does not add a second gutter around a heading that pads itself', async () => {
+  it('leaves the row itself unpadded, so the heading opposite is not doubled', async () => {
     const view = await open();
-    await toPeople(view);
+    expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
 
-    expect(leftInsetOf(view.getByLabelText('People you may know'))).toBe(theme.layout.gutter);
+    await toBoard(view);
+    expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
   });
 });
 
@@ -1277,24 +1276,20 @@ describe('the content header gutter', () => {
  * them are in `supabase/tests/`. Nothing here reaches for either.
  */
 const toPeople = async (view: View) => {
-  await fireEvent.press(view.getByRole('tab', { name: 'People' }));
+  await fireEvent.press(view.getByLabelText('People'));
   await waitFor(() => expect(view.getByLabelText('People you may know')).toBeTruthy());
 };
 
 describe('the People mode', () => {
-  /** Founder, 2026-11-02: these were three unlabelled glyphs. A word is the whole point. */
-  it('is one of three named tabs, not a sixth destination', async () => {
+  it('is a third cell in the same control, not a fourth tab', async () => {
     const view = await open();
 
-    // One control, three words, and the group keeps the name it had.
+    // One control, three cells, and the group keeps the name it had.
     const group = view.getByLabelText('Feed mode');
-    expect(group.props.accessibilityRole).toBe('tablist');
-    expect(within(group).getByText('Activity')).toBeTruthy();
-    expect(within(group).getByText('Leaderboard')).toBeTruthy();
-    expect(within(group).getByText('People')).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'Activity' })).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'Leaderboard' })).toBeTruthy();
-    expect(view.getByRole('tab', { name: 'People' })).toBeTruthy();
+    expect(group.props.accessibilityRole).toBe('radiogroup');
+    expect(view.getByLabelText('Feed')).toBeTruthy();
+    expect(view.getByLabelText('Leaderboard')).toBeTruthy();
+    expect(view.getByLabelText('People')).toBeTruthy();
   });
 
   /**
@@ -1324,7 +1319,7 @@ describe('the People mode', () => {
     const view = await open();
     await toPeople(view);
 
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByLabelText('Feed'));
 
     await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
     expect(view.queryByLabelText('People you may know')).toBeNull();
@@ -1401,7 +1396,7 @@ describe('arriving to find people', () => {
 
     // Not stuck: the consumed parameter does not put People back on the next render.
     mockParams = {};
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByLabelText('Feed'));
     await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
     await view.rerender(<FeedScreen />);
     expect(view.getByLabelText('Activity')).toBeTruthy();
@@ -1443,7 +1438,7 @@ describe('arriving to find people', () => {
 
     // And not again on the way back, which is the rule `leaderboard_viewed` follows.
     mockTrack.mockClear();
-    await fireEvent.press(view.getByRole('tab', { name: 'Activity' }));
+    await fireEvent.press(view.getByLabelText('Feed'));
     expect(mockTrack).not.toHaveBeenCalled();
   });
 });

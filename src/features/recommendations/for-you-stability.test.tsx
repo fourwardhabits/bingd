@@ -428,9 +428,9 @@ describe('refreshing the wall', () => {
     // every time somebody visits another tab and returns.
     const selector = () => view.getAllByLabelText(/^Showing /)[0]!;
     await fireEvent.press(selector());
-    await fireEvent.press(view.getByText('Recommended TV'));
+    await fireEvent.press(view.getByRole('button', { name: /^TV Shows/ }));
     await fireEvent.press(selector());
-    await fireEvent.press(view.getByText('Recommended Movies'));
+    await fireEvent.press(view.getByRole('button', { name: /^Movies/ }));
 
     await waitFor(() => expect(wall(view)).toEqual(before));
   });

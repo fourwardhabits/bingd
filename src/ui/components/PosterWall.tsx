@@ -320,66 +320,6 @@ function Tile({
           blurhash={tile.blurhash}
           width={width}
         />
-        {onToggleSave ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: Boolean(tile.saved) }}
-            accessibilityLabel={
-              tile.saved
-                ? `Remove ${tile.title} from watchlist`
-                : `Save ${tile.title} to watchlist`
-            }
-            /**
-             * **Saving is a state change, so it pulses and it buzzes** (2026-09-08).
-             *
-             * The glyph swap happens between two frames: `bookmark-outline` becomes
-             * `bookmark` with no moment at which anything moved, so on a device the change
-             * is something a reader notices a beat later rather than something they see
-             * happen. One small pulse plus the lightest haptic is what turns it into an
-             * acknowledgement.
-             *
-             * **On the way on only.** `usePulse` gets the *new* state, and celebrating the
-             * removal of a bookmark would be the app disagreeing with the reader. The
-             * haptic fires either way, because both directions are the reader having done
-             * something.
-             */
-            onPress={() => {
-              hapticSelection();
-              if (!tile.saved) bookmark.pulse();
-              onToggleSave();
-            }}
-            // A tile in a three-column grid is about 115pt wide, and a 44pt visual
-            // control on it would cover most of the artwork. The glyph is 28pt and the
-            // *touch target* is grown to the minimum with hitSlop, which is the only
-            // way to keep both design-system.md §8's tap-target rule and a wall that
-            // still reads as artwork.
-            hitSlop={8}
-            style={({ pressed }) => [styles.save, pressed && styles.pressed]}
-          >
-            <Animated.View style={bookmark.pulseStyle}>
-              <Ionicons
-                name={tile.saved ? 'bookmark' : 'bookmark-outline'}
-                size={16}
-                color={theme.text.inverse}
-              />
-            </Animated.View>
-          </Pressable>
-        ) : null}
-        {onDismiss ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Not interested in ${tile.title}`}
-            accessibilityHint="Removes it from your recommendations"
-            onPress={onDismiss}
-            // Same 28pt-glyph-with-grown-target treatment as the bookmark above; a
-            // second 44pt control would cover half the artwork. Quiet rather than
-            // Maroon: dismissal is an exit, not the primary act of the wall.
-            hitSlop={8}
-            style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
-          >
-            <Ionicons name="close" size={16} color={theme.text.inverse} />
-          </Pressable>
-        ) : null}
         {score != null ? (
           <View
             // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
@@ -398,6 +338,79 @@ function Tile({
           </View>
         ) : null}
       </Pressable>
+      {/**
+       * **The bookmark and the X sit beside the poster's press, not inside it**
+       * (founder, final direction, 2026-11-03: correct 44pt targets).
+       *
+       * They used to be children of the poster's press with an 8pt slop each, so their
+       * two 44pt targets overlapped by 12pt between the glyphs, and both were nested in
+       * the press that opens the title. Now each is its own 44pt box in a column pinned to
+       * the poster's corner: the boxes meet edge to edge and neither can open the title.
+       * The glyphs are production's, 28pt and in the same corner; the X sits 12pt below
+       * the bookmark rather than 4pt, which is what two whole 44pt boxes cost.
+       */}
+      {onToggleSave || onDismiss ? (
+        <View style={styles.corner} pointerEvents="box-none">
+          {onToggleSave ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: Boolean(tile.saved) }}
+              accessibilityLabel={
+                tile.saved
+                  ? `Remove ${tile.title} from watchlist`
+                  : `Save ${tile.title} to watchlist`
+              }
+              /**
+               * **Saving is a state change, so it pulses and it buzzes** (2026-09-08).
+               *
+               * The glyph swap happens between two frames: `bookmark-outline` becomes
+               * `bookmark` with no moment at which anything moved, so on a device the change
+               * is something a reader notices a beat later rather than something they see
+               * happen. One small pulse plus the lightest haptic is what turns it into an
+               * acknowledgement.
+               *
+               * **On the way on only.** `usePulse` gets the *new* state, and celebrating the
+               * removal of a bookmark would be the app disagreeing with the reader. The
+               * haptic fires either way, because both directions are the reader having done
+               * something.
+               */
+              onPress={() => {
+                hapticSelection();
+                if (!tile.saved) bookmark.pulse();
+                onToggleSave();
+              }}
+              style={styles.cornerAction}
+            >
+              {({ pressed }) => (
+                <Animated.View style={[styles.save, pressed && styles.pressed, bookmark.pulseStyle]}>
+                  <Ionicons
+                    name={tile.saved ? 'bookmark' : 'bookmark-outline'}
+                    size={16}
+                    color={theme.text.inverse}
+                  />
+                </Animated.View>
+              )}
+            </Pressable>
+          ) : null}
+          {onDismiss ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Not interested in ${tile.title}`}
+              accessibilityHint="Removes it from your recommendations"
+              onPress={onDismiss}
+              // Quiet rather than Maroon: dismissal is an exit, not the primary act of the
+              // wall.
+              style={styles.cornerAction}
+            >
+              {({ pressed }) => (
+                <View style={[styles.dismiss, pressed && styles.pressed]}>
+                  <Ionicons name="close" size={16} color={theme.text.inverse} />
+                </View>
+              )}
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </Animated.View>
   );
 }
@@ -427,10 +440,19 @@ const styles = StyleSheet.create({
   cellStart: { alignItems: 'flex-start' },
   cellCentre: { alignItems: 'center' },
   cellEnd: { alignItems: 'flex-end' },
+  // A 44pt-wide column on the poster's corner, holding one 44pt box per action.
+  corner: { position: 'absolute', top: 0, right: 0, width: theme.layout.minTapTarget },
+  // Each box is the whole target. The glyph sits in its top-right corner, 4pt in from the
+  // poster's edge, as it always has.
+  cornerAction: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: theme.space[1],
+    paddingRight: theme.space[1],
+  },
   save: {
-    position: 'absolute',
-    top: theme.space[1],
-    right: theme.space[1],
     width: 28,
     height: 28,
     borderRadius: theme.radius.control,
@@ -442,9 +464,6 @@ const styles = StyleSheet.create({
   // Maroon: the bookmark is the wall's invitation and this is its way out, and two
   // Maroon squares stacked would read as one two-part control.
   dismiss: {
-    position: 'absolute',
-    top: theme.space[1] + 28 + theme.space[1],
-    right: theme.space[1],
     width: 28,
     height: 28,
     borderRadius: theme.radius.control,

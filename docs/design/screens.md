@@ -1210,13 +1210,12 @@ rather than by a placeholder.
 address-book permission, which is a decision about what bingd uploads about people who never
 signed up.
 
-### The modes get words — 2026-11-02
+### The modes stay three icons — 2026-11-03
 
-The control is `SegmentedTabs` now, reading `Activity · Leaderboard · People`, under the app
-bar and above the heading of whatever is showing. It was three glyphs in the heading row, and
-nothing on screen said where the other two led. Same modes, same order, same behaviour: a
-launch still opens on the left one and nothing about mode is persisted. The sketch above
-shows the old row and is kept for the page shape it describes.
+A labelled `Activity · Leaderboard · People` row was tried on 2026-11-02 and set aside by the
+founder's final direction: the three glyphs in the heading row stay, as drawn above, because
+the row cost the busiest screen a second line and printed "Activity" twice. The Feed is
+production's, plus Try again when the first page fails to load.
 
 ### Follow activity in the Feed — 2026-09-08
 

@@ -148,15 +148,29 @@ const open = async () => {
   return view;
 };
 
-/** The category control is a dropdown: open it, then choose — as Collection's is. */
+/**
+ * The medium and the wall are two controls since the final direction (founder,
+ * 2026-11-03): Collection's dropdown on the left (Movies / TV Shows) and the Recommended |
+ * Top Rated switch on the right. `choose` takes the four walls by their full names.
+ */
 const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) => {
-  await fireEvent.press(view.getByLabelText(/^Showing /));
-  await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${category}`) }));
+  const [, wall, medium] = /^(Recommended|Top Rated) (Movies|TV Shows)$/.exec(category) ?? [];
+  if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
+  await fireEvent.press(within(view.getByLabelText('Wall')).getByRole('radio', { name: wall }));
+  if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${medium}`) {
+    await fireEvent.press(view.getByLabelText(/^Showing /));
+    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${medium}`) }));
+  }
 };
 
-/** What the trigger says it is showing, which is the only place the choice is stated. */
-const showing = (view: Awaited<ReturnType<typeof open>>) =>
-  view.getByLabelText(/^Showing /).props.accessibilityLabel;
+/** What the two controls say together, as one phrase: "Showing Top Rated Movies". */
+const showing = (view: Awaited<ReturnType<typeof open>>) => {
+  const medium = String(view.getByLabelText(/^Showing /).props.accessibilityLabel).replace(/^Showing /, '');
+  const wall = within(view.getByLabelText('Wall'))
+    .getAllByRole('radio')
+    .find((cell) => cell.props.accessibilityState?.selected)?.props.accessibilityLabel;
+  return `Showing ${wall} ${medium}`;
+};
 
 beforeEach(() => {
   mockPush.mockReset();
@@ -181,55 +195,37 @@ describe('the one selector', () => {
 
     expect(view.queryByText('Titles')).toBeNull();
     expect(view.queryByLabelText('What to look at')).toBeNull();
-    expect(view.queryAllByRole('radio')).toHaveLength(0);
+    // The only radios on the screen are the Recommended | Top Rated switch's two.
+    expect(view.getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
+      'Recommended',
+      'Top Rated',
+    ]);
   });
 
   it('offers the two personalised walls and the two community ones, and nothing else', async () => {
     const view = await open();
+
+    // Which wall: a compact switch, Recommended then Top Rated (founder, 2026-11-03).
+    const wall = view.getByLabelText('Wall');
+    expect(wall.props.accessibilityRole).toBe('radiogroup');
+    expect(within(wall).getAllByRole('radio').map((cell) => cell.props.accessibilityLabel)).toEqual([
+      'Recommended',
+      'Top Rated',
+    ]);
+
+    // Which medium: Collection's dropdown, in Title Case. Exactly two, in this order —
+    // presence alone would pass a third entry, or a swap. Scoped to the sheet by its
+    // scrim, because RNTL renders a modal's siblings; the rows carry their label as text.
     await fireEvent.press(view.getByLabelText(/^Showing /));
-
-    // Matched at the start rather than exactly: the chosen option carries a checkmark,
-    // and the glyph is a `Text` node that lands in the accessible name behind the label.
-    // Founder physical QA, 2026-09-14: every entry names its list. The bare `Movies` and
-    // `TV shows` are gone, because beside `Top Rated Movies` they did not say which list.
-    expect(view.getByRole('button', { name: /^Recommended Movies/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^Recommended TV/ })).toBeTruthy();
-    expect(view.queryByRole('button', { name: /^Movies/ })).toBeNull();
-    expect(view.queryByRole('button', { name: /^TV shows/ })).toBeNull();
-    // Added 2026-09-09. The community's order is a different answer to "what am I
-    // looking at", which is the question this control asks, so it lives here rather
-    // than as a chip in the row below — see the screen's own note.
-    expect(view.getByRole('button', { name: /^Top Rated Movies/ })).toBeTruthy();
-    expect(view.getByRole('button', { name: /^Top Rated TV/ })).toBeTruthy();
-    // §A16. People is a mode of the Feed tab now, and the option that used to open it here
-    // is gone rather than hidden — a dropdown row nobody can reach is a dropdown row.
-    expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
-
-    /**
-     * Exactly four, in exactly this order.
-     *
-     * The four `getByRole`s above assert presence, which a fifth option — a Lowest Rated
-     * the founder ruled out, say — passes just as happily, and which a swap of the two
-     * Top Rated entries passes too. The founder gave this control as an ordered list of
-     * four, so the list is what gets asserted. Independent review, 2026-09-09.
-     *
-     * Scoped to the sheet by its scrim rather than queried off the whole screen: the
-     * selector is a `Modal`, and RNTL renders a modal's siblings rather than hiding them
-     * the way a real screen reader would, so an unscoped `getAllByRole('button')` picks
-     * up the chip row and the tiles underneath as well.
-     *
-     * The option rows carry their label as a `Text` child rather than an
-     * `accessibilityLabel`, which is why this reads the rendered text.
-     */
     const sheet = within(view.getByLabelText('Close'));
     const options = sheet
       .getAllByRole('button')
       .map((node) => within(node).getAllByText(/\S/)[0]?.props.children)
       .map((label) => String(label ?? ''));
-    expect(options).toEqual(['Recommended Movies', 'Recommended TV', 'Top Rated Movies', 'Top Rated TV']);
-    // The For You override. Collection lists the rankable unit, which is the season;
-    // the *personalised* wall holds series, and calling them seasons here would name
-    // something that is not on screen.
+    expect(options).toEqual(['Movies', 'TV Shows']);
+    // §A16. People is a mode of the Feed tab now, gone rather than hidden.
+    expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
+    // The For You override: this wall holds series, so it does not say seasons.
     expect(view.queryByRole('button', { name: /^TV seasons/ })).toBeNull();
   });
 
@@ -294,17 +290,17 @@ describe('the title categories', () => {
     await waitFor(() =>
       expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy(),
     );
-    expect(view.getByText(/^Sent to you/)).toBeTruthy();
+    expect(view.getByText(/^Sent to You/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
   });
 
   it('still draws them on TV shows', async () => {
     const view = await open();
-    await choose(view, 'Recommended TV');
+    await choose(view, 'Recommended TV Shows');
 
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV Shows'));
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
-    expect(view.getByText(/^Sent to you/)).toBeTruthy();
+    expect(view.getByText(/^Sent to You/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
   });
 });
@@ -330,8 +326,8 @@ describe('crossing between the two categories', () => {
     await fireEvent.press(view.getByText('Apply'));
     await waitFor(() => expect(view.getByText('Filters · 1')).toBeTruthy());
 
-    await choose(view, 'Recommended TV');
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
+    await choose(view, 'Recommended TV Shows');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV Shows'));
 
     expect(view.getByText('Filters · 1')).toBeTruthy();
   });
@@ -340,11 +336,11 @@ describe('crossing between the two categories', () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await open();
 
-    await fireEvent.press(view.getByText(/^Sent to you/));
+    await fireEvent.press(view.getByText(/^Sent to You/));
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
 
-    await choose(view, 'Recommended TV');
-    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
+    await choose(view, 'Recommended TV Shows');
+    await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV Shows'));
 
     // Still the list rather than the wall, which is what the chip being on means.
     expect(view.getByText('Heat (1995)')).toBeTruthy();
@@ -394,7 +390,7 @@ describe('the top controls', () => {
     const scroller = view.getByTestId('for-you-controls-scroller');
     expect(scroller.props.horizontal).toBe(true);
     // All three, in the row, in the founder's order.
-    expect(within(row).getByText(/^Sent to you/)).toBeTruthy();
+    expect(within(row).getByText(/^Sent to You/)).toBeTruthy();
     expect(within(row).getByText('Group Picks')).toBeTruthy();
     expect(within(row).getByText(/^Filters/)).toBeTruthy();
   });

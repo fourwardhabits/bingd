@@ -173,7 +173,7 @@ export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRank
             options={[
               { id: 'all' as const, label: 'All' },
               { id: 'movies' as const, label: 'Movies' },
-              { id: 'tv_seasons' as const, label: 'TV' },
+              { id: 'tv_seasons' as const, label: 'TV Shows' },
             ]}
             value={filter}
             onChange={setFilter}

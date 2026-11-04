@@ -276,7 +276,7 @@ describe('the category tabs still rank inside their own category', () => {
     mockRows = orderingFixture('anna-id');
 
     const view = await settled(await open());
-    fireEvent.press(view.getByRole('tab', { name: 'TV' }));
+    fireEvent.press(view.getByRole('tab', { name: 'TV Shows' }));
 
     await waitFor(() =>
       expect(wall(view)).toEqual(['10.0 TV A', '7.0 TV B', '3.4 TV C']),
@@ -291,7 +291,7 @@ describe('the walls with nothing to interleave', () => {
     const view = await settled(await open());
 
     expect(wall(view)).toEqual(['10.0 Movie A', '7.0 Movie B']);
-    expect(view.queryByRole('tab', { name: 'TV' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'TV Shows' })).toBeNull();
   });
 
   it('has no tabs, and one ranking’s order, when only seasons are ranked', async () => {

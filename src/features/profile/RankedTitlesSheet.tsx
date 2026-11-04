@@ -287,7 +287,7 @@ export function RankedTitlesSheet({
         <SegmentedTabs
           options={[
             { id: 'movies' as const, label: 'Movies' },
-            { id: 'tv_seasons' as const, label: 'TV' },
+            { id: 'tv_seasons' as const, label: 'TV Shows' },
           ]}
           value={category}
           onChange={onChangeCategory}

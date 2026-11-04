@@ -14,7 +14,7 @@ import {
 } from '@/features/collection/filters';
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
-import { headlineFor, SLATE_SIZE } from '@/features/recommendations/rank';
+import { SLATE_SIZE } from '@/features/recommendations/rank';
 import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
 import { RequestAlertRow } from '@/features/recommendations/RequestAlertRow';
 import {
@@ -31,7 +31,6 @@ import { useDismissTitle } from '@/features/recommendations/use-dismissed';
 import {
   MAX_PAGES,
   useForYou,
-  type ForYouItem,
   type Medium,
 } from '@/features/recommendations/use-for-you';
 import {
@@ -54,7 +53,6 @@ import {
 } from '@/features/recommendations/use-title-recommendations';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
-import { languageName } from '@/lib/language';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
@@ -71,6 +69,7 @@ import {
   SkeletonRow,
   Text,
 } from '@/ui/components';
+import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 
 /**
  * For You, rebuilt to the shape of Collection (founder pass, 2026-08-17).
@@ -264,12 +263,6 @@ export default function RecommendationsScreen() {
     }, [sentOnly, topMedium, groupPicking, reviewingRequests]),
   );
 
-  /** What the selector shows. See `topMedium`. */
-  const mode: ForYouMode = topMedium
-    ? topMedium === 'movies'
-      ? 'topMovies'
-      : 'topTv'
-    : medium;
   /** Whether the wall is the community's order rather than this reader's slate. */
   const onTopRated = topMedium !== null;
 
@@ -650,57 +643,14 @@ export default function RecommendationsScreen() {
   };
 
   /**
-   * Why this tile is here, on a long press.
-   *
-   * **Production gets the sentence and nothing else** (pre-GTM audit, 2026-09-07). This
-   * used to put `score 0.412`, the anchor contributions and the popularity prior in
-   * front of anybody who held a poster — the working the engine shows a developer, in
-   * the vocabulary of `rank.ts`, on a store build. The sentence `headlineFor` derives is
-   * the explanation PRD §13 requires and the only one a reader is owed: "Because you
-   * loved Heat", "More drama, which you rank highly", "Popular right now".
-   *
-   * The raw diagnostics survive in local development only — `__DEV__`, a dev client
-   * attached to Metro — and nowhere else (founder decision, 2026-09-07). The first cut of
-   * this gated them on `diagnosticsAvailable`, which is beta and below, on the reasoning
-   * that a beta tester holding a poster is who the working is for. The founder's ruling
-   * is that a community beta build is a stranger's build for this purpose: the same
-   * sentence a store user gets, and nothing in `rank.ts` vocabulary. The Diagnostics
-   * sheet keeps its own wider gate; this one is narrower on purpose.
+   * **No long press on the wall** (founder, final direction, 2026-11-03). It answered with a
+   * native alert holding the `headlineFor` sentence ("Because you loved Heat"), and in
+   * local development the engine's working under it. The founder ruled the alert out of
+   * the design. PRD §13 constrains what a reason may say, not that one is shown, so
+   * nothing else depends on it; `headlineFor` and its tests stay in `rank.ts` for the day
+   * a reason is drawn on the page. Developers lose the working on long press; the
+   * Diagnostics sheet is unchanged.
    */
-  const explain = (item: ForYouItem) => {
-    const { explanation } = item;
-    const taste = slate.data?.taste;
-    if (!taste) return;
-
-    // The real taste, not a stand-in. A stand-in with a large `sampleSize` was
-    // defeating the suppression that stops a taste built from one ranking being
-    // asserted in words, so this panel showed a sentence the wall would not.
-    const headline = headlineFor(explanation, taste, (code) => languageName(code) ?? code);
-
-    if (!__DEV__) {
-      Alert.alert(item.title, headline);
-      return;
-    }
-
-    const lines = [
-      headline,
-      `score ${explanation.total.toFixed(3)}`,
-      explanation.anchors.length
-        ? `anchors: ${explanation.anchors
-            .map((hit) => `${hit.title} (#${hit.position}, +${hit.contribution.toFixed(2)})`)
-            .join(', ')}`
-        : 'anchors: none',
-      explanation.genre
-        ? `genre: ${explanation.genre.genre} ${explanation.genre.affinity.toFixed(2)}`
-        : 'genre: none',
-      explanation.language
-        ? `language: ${explanation.language.code} ${explanation.language.affinity.toFixed(2)}`
-        : 'language: none',
-      `popularity prior: ${explanation.popularity.toFixed(2)}`,
-    ].filter(Boolean);
-
-    Alert.alert(item.title, lines.join('\n'));
-  };
 
   const unopened = unopenedCount(sentRows);
   // The server caps this list at 200 and orders unopened first, so a full page of
@@ -730,37 +680,38 @@ export default function RecommendationsScreen() {
       <AppHeader />
 
       {/**
-       * **Movies and TV shows** — one selector, in the place Collection leads with the
-       * same one.
+       * **Movies / TV Shows on the left, Recommended | Top Rated on the right** (founder,
+       * final direction, 2026-11-03: Direction A).
        *
-       * "TV shows" rather than "TV seasons" because this wall holds series: TMDB answers
-       * "similar" about a show and never about one of its seasons. Collection keeps its
-       * own two options and its own label — see `MediumSelector`.
-       *
-       * **People was a third option here and has left** (founder §A16, 2026-09-08). It is
-       * a mode of the Feed tab now, for the reason this file's header gives: a
-       * recommendations screen is not where a new account builds a social graph. What that
-       * leaves behind is a two-option dropdown, which is what this control was before
-       * 2026-08-26 and is again.
-       *
-       * A dropdown and not a tab row, which is the 2026-09-07 decision and is unaffected:
-       * on a device the tab row drew differently here than on Collection, and the two
-       * screens are meant to lead with the same control. It is also the only one of the two
-       * that scales — a fourth tab is a wrapped row where a fourth sheet row is a fourth
-       * sheet row, which is exactly the bet the two Top Rated entries below just called in.
-       *
-       * **Top Rated Movies and Top Rated TV are entries here rather than a chip** (founder,
-       * 2026-09-09). This control answers "what am I looking at", and the community's order
-       * is a different answer to that question, not a narrowing of the reader's own — every
-       * chip in the row below narrows a wall that is already showing, and this replaces it.
-       *
-       * `Top Rated TV` says seasons even though the personalised entry above it says shows,
-       * and the two are right for their own walls: a season is the only television unit
-       * anybody can rate, so it is the only one that can be rated highest. `MediumSelector`
-       * draws the four in one sheet, in this order, so the two personalised walls stay
-       * where a returning reader last found them.
+       * The medium is the same dropdown Collection leads with, so the two screens share
+       * one convention for which kind of title is showing. Which wall is a compact switch
+       * beside it. Together they are still the four `ForYouMode`s, so nothing below the
+       * row changed. Below the logo bar rather than in it; no For You heading, because
+       * the tab bar already says where the reader is. Where both do not fit one line the
+       * switch wraps under the dropdown, right-aligned, rather than either shrinking.
        */}
-      <MediumSelector value={mode} onChange={changeMode} options={FOR_YOU_MODES} />
+      <View style={styles.header}>
+        <View style={styles.headerMedium}>
+          <MediumSelector
+            value={topMedium ?? medium}
+            options={FOR_YOU_MEDIUMS}
+            onChange={(next) =>
+              changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
+            }
+          />
+        </View>
+        <View style={styles.headerWall}>
+          <CompactSwitch
+            accessibilityLabel="Wall"
+            options={FOR_YOU_WALLS}
+            value={onTopRated ? 'top' : 'recommended'}
+            onChange={(next) => {
+              const showing = topMedium ?? medium;
+              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
+            }}
+          />
+        </View>
+      </View>
       {/* The selector above it is the screen's entire header, and this is the seam that
       marks where the header ends and the wall begins. */}
       <HeaderBoundary />
@@ -828,13 +779,13 @@ export default function RecommendationsScreen() {
                 icon={sentOnly ? 'mail-open' : 'mail-outline'}
                 label={
                   unopened > 0
-                    ? `Sent to you · ${unopened}${atLeast ? '+' : ''}`
-                    : 'Sent to you'
+                    ? `Sent to You · ${unopened}${atLeast ? '+' : ''}`
+                    : 'Sent to You'
                 }
                 accessibilityLabel={
                   unopened > 0
-                    ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-                    : 'Sent to you'
+                    ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                    : 'Sent to You'
                 }
                 selected={sentOnly}
                 // A social feature, not a filter — see the note above `emphasis` on
@@ -1066,39 +1017,9 @@ export default function RecommendationsScreen() {
                 />
               }
             >
-              {/**
-               * **What this wall is, when it is not yet the reader's** (pre-GTM audit,
-               * 2026-09-07).
-               *
-               * `lowData` is the hook's own word for a slate scored with no resolved
-               * anchors — a taste too thin to quote a title from. A stranger who has
-               * ranked two films sees exactly this wall, and without a word for it the
-               * screen called For You is presenting last week's trending page as
-               * personalisation. One quiet line in the footnote register the exhausted
-               * notice already uses, above the artwork, and gone the moment an anchor
-               * resolves. Not a header, not a card, and nothing about the slate moved.
-               *
-               * **Two sentences, because "popular" is a claim** (Codex review of #122).
-               * The pool takes `socialCandidates` as well as the trending fallback, so a
-               * reader with no anchor can be looking at titles the people they follow
-               * loved. `popularityOnly` is derived from the wall actually drawn: only
-               * when no anchor resolved *and* nothing social is on it does the line say
-               * the wall is popular; a thin taste with social titles on the wall gets
-               * the narrower truth, that bingd. is still learning, and no claim about
-               * where the titles came from.
-               */}
-              {/* Neither line belongs on Top Rated: both are statements about how well
-                  bingd. knows *this reader's* taste, and this wall makes no claim about
-                  that at all. */}
-              {onTopRated ? null : slate.data?.popularityOnly ? (
-                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
-                  Popular right now while bingd learns your taste.
-                </Text>
-              ) : slate.data?.lowData ? (
-                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
-                  bingd is still learning your taste.
-                </Text>
-              ) : null}
+              {/* No line above the wall about how well bingd. knows the reader's taste
+                  (founder, 2026-11-03). Until then a thin taste printed "Popular right now
+                  while bingd learns your taste" or "bingd is still learning your taste". */}
               <PosterGrid
                 tiles={items.map((item) => ({
                   id: item.mediaItemId,
@@ -1138,22 +1059,6 @@ export default function RecommendationsScreen() {
                         void dismissTitle(tile.id).then((result) => {
                           if (!result.ok) Alert.alert('Could not hide this', result.message);
                         });
-                      }
-                }
-                /**
-                 * Why a title is on the wall is a question only the slate can answer: it
-                 * explains a *score against this reader's taste*, and Top Rated has no
-                 * such score. The gesture is absent there rather than answering with
-                 * something else.
-                 */
-                onLongPressTile={
-                  onTopRated
-                    ? undefined
-                    : (tile) => {
-                        const item = slateItems.find(
-                          (candidate) => candidate.mediaItemId === tile.id,
-                        );
-                        if (item) explain(item);
                       }
                 }
               />
@@ -1259,24 +1164,16 @@ export default function RecommendationsScreen() {
  */
 export type ForYouMode = Medium | 'topMovies' | 'topTv';
 
-/**
- * **Recommended Movies · Recommended TV · Top Rated Movies · Top Rated TV** (founder
- * physical QA, 2026-09-14).
- *
- * The personalised pair read `Movies` and `TV shows`, which stopped being unambiguous once
- * `Top Rated Movies` sat beneath `Movies`: both are movies, and only one label said what kind
- * of list it was. Every entry now names its list, and the words that differ — Recommended,
- * Top Rated — are the ones a reader is choosing between. The tab and screen are still For
- * You. The ids, and everything keyed on them, are unchanged: this is words, not logic.
- *
- * A dropdown rather than a horizontal row, so nothing needs to scroll; `MediumSelector` lets
- * the trigger's label wrap rather than push its chevron off a narrow screen.
- */
-const FOR_YOU_MODES: readonly MediumSelectorOption<ForYouMode>[] = [
-  { id: 'movies', label: 'Recommended Movies' },
-  { id: 'tv', label: 'Recommended TV' },
-  { id: 'topMovies', label: 'Top Rated Movies' },
-  { id: 'topTv', label: 'Top Rated TV' },
+/** The medium, in Collection's dropdown. Title Case (founder, 2026-11-03). */
+const FOR_YOU_MEDIUMS: readonly MediumSelectorOption<Medium>[] = [
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv', label: 'TV Shows' },
+];
+
+/** Which wall, in the compact switch beside it. */
+const FOR_YOU_WALLS: readonly CompactSwitchOption<'recommended' | 'top'>[] = [
+  { id: 'recommended', label: 'Recommended' },
+  { id: 'top', label: 'Top Rated' },
 ];
 
 /**
@@ -1422,19 +1319,29 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
+  /**
+   * One row where it fits, which is 360pt and wider. Below that the switch wraps to a
+   * second line, right-aligned, rather than covering the dropdown or shrinking.
+   */
+  header: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    paddingRight: theme.layout.gutter,
+  },
+  headerMedium: { flexShrink: 0 },
+  headerWall: { flexShrink: 0, marginLeft: 'auto' },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
   exhausted: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
     textAlign: 'center',
   },
-  lowData: {
-    paddingHorizontal: theme.layout.gutter,
-    textAlign: 'center',
-  },
   // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
   // into whatever the page offers it — the note `SegmentedTabs` carries.
-  filterScroller: { flexGrow: 0 },
+  // `flexShrink: 0` because a ScrollView shrinks by default: on a short phone the row gave
+  // up height to the wall and cut the tops off the chips (Visual 2.1 check, 320 x 568).
+  filterScroller: { flexGrow: 0, flexShrink: 0 },
   /**
    * `nowrap` is the contract. A wrapped chip row is the founder's rejected state, and
    * the scroller around this is what makes one row possible at every width instead of a
