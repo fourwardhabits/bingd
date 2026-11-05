@@ -443,7 +443,8 @@ export default function TitleScreen() {
           // `note_visibility` since the Ranked menu had to say Edit *review* or Edit
           // *private note*: one column stores both, and the menu cannot name the right
           // one without it. `useLogState` has selected it since notes became social.
-          .select('bucket, watched_on, note, note_has_spoilers, note_visibility')
+          // `note_updated_at` for the immersive Reviews tab's "Your review" date.
+          .select('bucket, watched_on, note, note_has_spoilers, note_visibility, note_updated_at')
           .eq('user_id', profile.id)
           .eq('media_item_id', id ?? '')
           .maybeSingle(),
@@ -1672,6 +1673,25 @@ export default function TitleScreen() {
             // the server would refuse anyway.
             viewerId={profile.id}
             limit={reviewLimit}
+            // The immersive page's Reviews tab (founder phone QA, 2026-11-04): your
+            // published review first, from your own row — a public note and nothing else.
+            variant={immersive ? 'editorial' : undefined}
+            ownReview={
+              immersive && hasReview
+                ? {
+                    text: noteText,
+                    hasSpoilers: Boolean(data.logged?.note_has_spoilers),
+                    updatedAt:
+                      (reviews.data ?? []).find((review) => review.userId === profile.id)
+                        ?.updatedAt ??
+                      data.logged?.note_updated_at ??
+                      null,
+                    helpfulCount:
+                      (reviews.data ?? []).find((review) => review.userId === profile.id)
+                        ?.helpfulCount ?? 0,
+                  }
+                : null
+            }
           />
         ) : null}
 

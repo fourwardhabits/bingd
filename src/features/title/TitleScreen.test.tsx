@@ -3778,6 +3778,83 @@ describe('the immersive title page (experiment)', () => {
       expect(view.getAllByText('Review number 1.')).toHaveLength(1);
     });
 
+    /**
+     * **The Reviews tab, refined** (founder phone QA, 2026-11-04): your published review
+     * first as a light "Your review" section with a small Edit review; no full-width
+     * compose button; no second score circle; a compact Write a review otherwise.
+     */
+    describe('your review', () => {
+      const withNote = (visibility: 'public' | 'private', note = 'My own words on it.') => {
+        ranked();
+        tableRows.user_media = [
+          {
+            user_id: 'user-1',
+            media_item_id: 'film-1',
+            bucket: 'loved',
+            watched_on: '2026-08-12',
+            note,
+            note_visibility: visibility,
+            note_has_spoilers: false,
+            note_updated_at: '2026-10-02T10:00:00.000Z',
+          },
+        ];
+      };
+      const openReviews = async () => {
+        const view = await open();
+        const tab = await waitFor(() => view.getByRole('tab', { name: /^Reviews/ }));
+        await fireEvent.press(tab);
+        return view;
+      };
+
+      it('leads with your published review, once, with a small Edit review', async () => {
+        withNote('public');
+        // The list also carries your review (with a score); it must not be drawn twice.
+        mockRpcResults.title_reviews_v2 = [
+          reviewBy(1),
+          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+          reviewBy(2),
+        ];
+        const view = await openReviews();
+        const mine = await waitFor(() => view.getByTestId('your-review'));
+
+        expect(within(mine).getByText(/Your review/)).toBeTruthy();
+        expect(within(mine).getByText('My own words on it.')).toBeTruthy();
+        expect(view.getAllByText('My own words on it.')).toHaveLength(1);
+        // Before everyone else's.
+        const order = readingOrder(view.toJSON());
+        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+        // No score circle on your own review — it is the emphasis in the module above.
+        expect(within(mine).queryAllByLabelText(/out of 10/)).toHaveLength(0);
+        // A small Edit review, and no full-width compose button.
+        expect(within(mine).getByTestId('edit-review')).toBeTruthy();
+        expect(view.queryByRole('button', { name: 'Write a review' })).toBeNull();
+
+        // Into the one composer: the log sheet, as every other route to a note.
+        await fireEvent.press(within(mine).getByTestId('edit-review'));
+        await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      });
+
+      it('never shows a private note as your review, and offers Write a review', async () => {
+        withNote('private', 'Only for me.');
+        mockRpcResults.title_reviews_v2 = [reviewBy(1)];
+        const view = await openReviews();
+        await waitFor(() => expect(view.getByTestId('write-review')).toBeTruthy());
+
+        expect(view.queryByTestId('your-review')).toBeNull();
+        expect(view.queryByText('Only for me.')).toBeNull();
+        expect(view.getByRole('button', { name: 'Write a review' })).toBeTruthy();
+      });
+
+      it('asks an unranked reader to rank first, compactly', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1)];
+        const view = await openReviews();
+        await waitFor(() =>
+          expect(view.getByRole('button', { name: 'Rank to leave a review' })).toBeTruthy(),
+        );
+        expect(view.queryByTestId('your-review')).toBeNull();
+      });
+    });
+
     describe('from your circle', () => {
       it('previews a followed reader’s published review and opens Reviews filtered to them', async () => {
         mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>

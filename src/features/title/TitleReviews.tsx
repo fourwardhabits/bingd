@@ -46,6 +46,26 @@ export type TitleReviewsProps = {
    * shows, as on the original page.
    */
   limit?: number;
+  /**
+   * The immersive page's Reviews tab (Cinematic Editorial, founder phone QA 2026-11-04).
+   *
+   * Your published review leads, in a light "Your review" section with a small
+   * *Edit review* beneath it, and the full-width compose button goes. No score circle on
+   * it — yours is already the emphasis in the title module. Everyone else's follow,
+   * unchanged, with yours left out of the list so it is never shown twice. Without a
+   * published review, a compact *Write a review*. Absent, the tab is the original page's.
+   */
+  variant?: 'editorial';
+  /**
+   * The viewer's own **published** review — their note with public visibility, from their
+   * own row, never a private note. Read by the editorial variant only.
+   */
+  ownReview?: {
+    text: string;
+    hasSpoilers: boolean;
+    updatedAt: string | null;
+    helpfulCount: number;
+  } | null;
 };
 
 /**
@@ -82,16 +102,78 @@ export function TitleReviews({
   noun,
   viewerId,
   limit,
+  variant,
+  ownReview = null,
 }: TitleReviewsProps) {
   // Which review's reason sheet is open, by `user_media.id`.
   const [reporting, setReporting] = useState<string | null>(null);
+  const editorial = variant === 'editorial';
+  // In the editorial tab your own review is drawn above, so it is not listed again.
+  const listed = editorial ? reviews.filter((review) => review.userId !== viewerId) : reviews;
 
   return (
     <View style={styles.tab}>
+      {editorial ? (
+        <View style={styles.compose}>
+          {ownReview && viewerRanked ? (
+            <View style={styles.own} testID="your-review">
+              <Text variant="caption" tone="tertiary">
+                {['Your review', formatDate(ownReview.updatedAt)].filter(Boolean).join(' \u00b7 ')}
+              </Text>
+              {/* Never masked: it is the reader's own writing. Its spoiler claim still
+                  shows, as the marker every review carries. */}
+              <SpoilerNote
+                text={ownReview.text}
+                hasSpoilers={ownReview.hasSpoilers}
+                masked={false}
+                numberOfLines={6}
+                titleForLabel={noun}
+              />
+              <View style={styles.ownFoot}>
+                {ownReview.helpfulCount > 0 ? (
+                  <Text variant="caption" tone="tertiary" style={styles.ownHelpful}>
+                    {helpfulWords(ownReview.helpfulCount)}
+                  </Text>
+                ) : (
+                  <View style={styles.ownHelpful} />
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit your review"
+                  onPress={onWrite}
+                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                  style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+                  testID="edit-review"
+                >
+                  <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+                  <Text variant="callout" tone="action">
+                    Edit review
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={viewerRanked ? 'Write a review' : 'Rank to leave a review'}
+              onPress={onWrite}
+              hitSlop={{ top: 12, bottom: 12 }}
+              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+              testID="write-review"
+            >
+              <Ionicons name="create-outline" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Text variant="callout" tone="action">
+                {viewerRanked ? 'Write a review' : 'Rank to leave a review'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      ) : null}
       {/* The control first, because somebody who has just ranked something is more
           likely to be here to write than to read. Absent when they have not ranked
           it — a review of something you have not placed in your list is a review with
           no score, and the founder's route in is to rank first. */}
+      {editorial ? null : (
       <View style={styles.compose}>
         {viewerRanked ? (
           <Button
@@ -107,11 +189,12 @@ export function TitleReviews({
           />
         )}
       </View>
+      )}
 
       {/* Offered once there is an order to choose. Kept while Following is active even
           when it returns nothing, so the reader can see which filter emptied the list
           rather than meeting a bare empty state with no way back. */}
-      {limit === undefined && (reviews.length > 1 || sort === 'following') ? (
+      {limit === undefined && (listed.length > 1 || sort === 'following') ? (
         <View style={styles.sort}>
           <SegmentedTabs
             options={SORT_OPTIONS.map((option) => ({
@@ -128,7 +211,7 @@ export function TitleReviews({
 
       {loading ? (
         <SkeletonRow count={2} />
-      ) : reviews.length === 0 ? (
+      ) : listed.length === 0 ? (
         sort === 'following' ? (
           <EmptyState
             kind="nothingYet"
@@ -140,12 +223,16 @@ export function TitleReviews({
           <EmptyState
             kind="nothingYet"
             compact
-            title="No reviews yet"
-            body={`Be the first to leave a review of this ${noun}.`}
+            title={editorial && ownReview ? 'No other reviews yet' : 'No reviews yet'}
+            body={
+              editorial && ownReview
+                ? `Yours is the only review of this ${noun} so far.`
+                : `Be the first to leave a review of this ${noun}.`
+            }
           />
         )
       ) : (
-        (limit === undefined ? reviews : reviews.slice(0, limit)).map((review) => (
+        (limit === undefined ? listed : listed.slice(0, limit)).map((review) => (
           <View key={`${review.userId}-${review.updatedAt}`} style={styles.review}>
             <View style={styles.head}>
               <Pressable
@@ -372,5 +459,26 @@ const styles = StyleSheet.create({
   foot: { flexDirection: 'row', alignItems: 'center', gap: theme.space[4] },
   helpful: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   reactions: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
+  /**
+   * Your review in the editorial tab: a light Parchment surface and no border — set apart
+   * from everybody else's by tone, not by a frame.
+   */
+  own: {
+    backgroundColor: theme.surface.sunken,
+    borderRadius: theme.radius.control,
+    paddingHorizontal: theme.space[3],
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[1],
+    gap: theme.space[2],
+  },
+  ownFoot: { flexDirection: 'row', alignItems: 'center' },
+  ownHelpful: { flex: 1 },
+  inlineAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget - 12,
+  },
   pressed: { opacity: 0.7 },
 });

@@ -194,3 +194,13 @@ gitignored): Original page and production lock confirmed unchanged; three findin
 the follow-up commit with tests: the genre and cast sheets gained the labelled *Done* every sheet
 carries; the cast sheet's list scrolls inside a bounded height; and a title without artwork asks
 for dark status-bar glyphs from the first frame, because its band is Parchment.
+
+### Reviews tab follow-up (founder phone QA, 2026-11-04)
+
+Immersive layout only (`TitleReviews variant="editorial"`); the Original page's Reviews tab is
+unchanged. Your **published** review (your own note with public visibility, never a private
+note) leads, in a light Parchment "Your review" section with its date, spoiler marker and a small
+*Edit review* that opens the log sheet. The full-width *Edit your review* button is gone, there
+is no score circle on it, and it is left out of the list below so it is never shown twice. With
+no published review: a compact *Write a review* (or *Rank to leave a review*). Other reviews,
+sorting, spoiler masking, Helpful and Report are unchanged. Tabs change by tapping only.
