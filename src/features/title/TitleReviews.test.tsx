@@ -341,7 +341,9 @@ describe('the reviews preview', () => {
     expect(REVIEWS_PREVIEW_COUNT).toBe(2);
     expect(view.getAllByTestId('review-preview')).toHaveLength(2);
     expect(view.queryByText('Third.')).toBeNull();
-    await fireEvent.press(view.getAllByTestId('review-preview')[0]);
+    const [first] = view.getAllByTestId('review-preview');
+    if (!first) throw new Error('no preview row');
+    await fireEvent.press(first);
     expect(onSeeAll).toHaveBeenCalled();
   });
 

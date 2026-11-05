@@ -129,7 +129,7 @@ import {
   TitleHero,
   TitleRow,
 } from '@/ui/components';
-import { fontFamily, theme } from '@/ui/tokens';
+import { theme } from '@/ui/tokens';
 
 /**
  * What this route shows when its own render throws.
