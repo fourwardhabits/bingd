@@ -108,6 +108,11 @@ read per page. Not built: it is a new database function.
   4. "and N more" on a long grouped-ranking sentence could be truncated away at 320pt (the
      sentence is no longer clamped when it ends in that control).
 
+- Codex re-check of the fixes (`feed-cinematic-recheck.md`): the four fixes hold; one gap —
+  an already-visible preview kept its text while the post-block refetch ran (up to ~33s with
+  retries). Fixed in the next commit: social writes now **reset** the preview entries, so no
+  preview is drawn until a read made after the change succeeds. Test fails without the fix.
+
 ### Residuals (unchanged from `505ae33`, not introduced here)
 
 - Reaction summaries are not invalidated by block/unfollow either; a blocked person's reaction

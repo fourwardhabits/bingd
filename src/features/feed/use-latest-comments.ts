@@ -1,4 +1,4 @@
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, type QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { avatarUri } from '@/lib/images';
@@ -100,6 +100,24 @@ export function latestReadable(rows: readonly Row[]): LatestComment | null {
 
 export const latestCommentKey = (viewerId: string, eventId: string) =>
   ['comments', viewerId, eventId, 'latest'] as const;
+
+/**
+ * **Forget every preview at once, after anything that changes whom this reader may see**
+ * (independent re-check, 2026-11-04).
+ *
+ * Invalidating is not enough: a refetching query keeps its last success on screen, and with
+ * the request deadline and two retries a blocked person's words stayed under the card for
+ * up to half a minute after the block committed. Resetting drops the data synchronously, so
+ * the card draws no preview until a read made *after* the change has answered.
+ */
+export function resetCommentPreviews(queryClient: QueryClient, viewerId: string) {
+  return queryClient.resetQueries({
+    predicate: (query) =>
+      query.queryKey[0] === 'comments' &&
+      query.queryKey[1] === viewerId &&
+      query.queryKey[3] === 'latest',
+  });
+}
 
 /**
  * `eventIds`: the cards with at least one comment this reader may see. Returns a map that
