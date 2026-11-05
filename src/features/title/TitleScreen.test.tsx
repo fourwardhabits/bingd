@@ -4034,6 +4034,34 @@ describe('the immersive title page (experiment)', () => {
         );
       });
 
+      it('falls back to Most Helpful, label and rows alike, when Rating stops being honest', async () => {
+        // Independent review, post-QA sprint 2: Rating chosen over 99 reviews, then a
+        // refetch (after a vote) returns the 100-row ceiling. The sheet must not keep a
+        // Rating label over a Helpful list.
+        let full = false;
+        const ninetyNine = Array.from({ length: 99 }, (_, n) => ({
+          ...reviewBy(n + 1),
+          score: String((n % 9) + 1),
+        }));
+        mockRpcResults.title_reviews_v2 = () =>
+          full ? [...ninetyNine, { ...reviewBy(100), score: '9.9' }] : ninetyNine;
+        mockRpcResults.title_review_count = 99;
+        mockRpcResults.set_review_helpful = { helpful_count: 1, viewer_helpful: true };
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sortTab(sheet, 'Rating'));
+        await waitFor(() => expect(sortTab(sheet, 'Highest rated first')).toBeSelected());
+
+        full = true;
+        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 1's review helpful/));
+        await waitFor(() => expect(sheet.queryByRole('tab', { name: /Rating|rated/ })).toBeNull(), {
+          timeout: 4000,
+        });
+        expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
+        expect(sheet.getByTestId('reviews-truncated')).toBeTruthy();
+      });
+
       it('keeps Following as a filter inside the sheet', async () => {
         mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
           args.p_sort === 'following' ? [reviewBy(7)] : [reviewBy(1), reviewBy(2)];

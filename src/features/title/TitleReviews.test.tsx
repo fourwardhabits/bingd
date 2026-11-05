@@ -373,6 +373,18 @@ describe('the reviews preview', () => {
     expect(view.queryByTestId('reviews-preview-empty')).toBeNull();
   });
 
+  it('says the reviews could not load, with Try again, rather than "No reviews yet"', async () => {
+    const onRetry = jest.fn();
+    const view = await renderWithProviders(
+      <ReviewsPreview {...base} reviews={[]} failed onRetry={onRetry} />,
+    );
+    expect(view.getByText('Reviews couldn’t load.')).toBeTruthy();
+    expect(view.queryByTestId('reviews-preview-empty')).toBeNull();
+    expect(view.queryByText('No reviews yet')).toBeNull();
+    await fireEvent.press(view.getByRole('button', { name: 'Try loading reviews again' }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
   it('masks a spoiler, and says so to a screen reader without the words', async () => {
     const view = await renderWithProviders(
       <ReviewsPreview

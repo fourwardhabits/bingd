@@ -5,6 +5,7 @@ import {
   Animated,
   Easing,
   Pressable,
+  ScrollView,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -1728,6 +1729,20 @@ function Reveal({
    * read. The haptic is in its own mount-only effect for the same reason, and because it
    * is governed by a different switch entirely.
    */
+  /**
+   * **The exits are always on screen** (independent review, post-QA sprint 2). The reveal
+   * grew an award block, and two awards at a large text size on a small phone made the
+   * column taller than the sheet's 90% cap, with Done and Add details below the edge and
+   * nothing to scroll. So everything above the exits scrolls inside a bounded body, the
+   * same explicit-height pattern the title page's cast sheet uses, and the exits sit under
+   * it. On an ordinary phone the body is shorter than its bound and nothing scrolls.
+   */
+  const { height: windowHeight, fontScale } = useWindowDimensions();
+  const revealBodyMax = Math.max(
+    REVEAL_BODY_MIN,
+    Math.round(windowHeight * 0.9) - REVEAL_CHROME - Math.round(REVEAL_EXIT_ROW * fontScale),
+  );
+
   const { reduced: reducedMotion, known: motionKnown } = useReducedMotionState();
   const [entrance] = useState(() => new Animated.Value(0));
   const started = useRef(false);
@@ -1840,6 +1855,13 @@ function Reveal({
 
   return (
     <View style={styles.reveal}>
+      <ScrollView
+        style={[styles.revealScroll, { maxHeight: revealBodyMax }]}
+        contentContainerStyle={styles.revealBody}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+        testID="reveal-body"
+      >
       {/* The entrance is on the panel and the identity block together rather than on the
           whole reveal, so the buttons at the bottom of the sheet do not move — a control
           that slides while a thumb is travelling toward it is the one kind of motion that
@@ -2069,6 +2091,8 @@ function Reveal({
        * and the title stays as movable from Rankings as every other one.
        */}
 
+      </ScrollView>
+
       {/**
        * **Where the reveal stopped being the end.**
        *
@@ -2219,6 +2243,14 @@ export function SkipTitleLink({
 
 /** The reveal names at most two new awards; the celebration after it plays every one. */
 const REVEAL_AWARDS_SHOWN = 2;
+/**
+ * What the sheet spends outside the reveal's scrolling body: the handle, the reveal's
+ * own padding and gap, and a bottom inset — and the exit row, which grows with text.
+ */
+const REVEAL_CHROME = 120;
+const REVEAL_EXIT_ROW = 60;
+/** However small the phone, the body keeps room for the score and the title. */
+const REVEAL_BODY_MIN = 220;
 const REVEAL_AWARD_BADGE = 40;
 
 const styles = StyleSheet.create({
@@ -2364,6 +2396,8 @@ const styles = StyleSheet.create({
     gap: theme.space[6],
     padding: theme.layout.gutter,
   },
+  revealScroll: { alignSelf: 'stretch', flexGrow: 0 },
+  revealBody: { alignItems: 'center', gap: theme.space[6] },
   panel: {
     backgroundColor: theme.semantic.score,
     borderRadius: theme.radius.card,

@@ -1528,17 +1528,26 @@ export default function TitleScreen() {
    * only while that list is provably complete — and any other order is the server's.
    */
   const reviewList = ({ inSheet = false }: { inSheet?: boolean } = {}) => {
-    const rating = inSheet && isRatingOrder(reviewSort) && ratingAvailable;
+    /**
+     * The order the sheet is actually in, used for the rows and the control alike
+     * (independent review, post-QA sprint 2). Rating chosen over a list that has since
+     * reached the ceiling — a refetch after a vote, say — is no longer an order this
+     * sheet can honestly show, so it reads as Most Helpful, which is what it draws, rather
+     * than a Rating label over a Helpful list.
+     */
+    const order: ReviewOrder =
+      isRatingOrder(reviewSort) && !(inSheet && ratingAvailable) ? 'top_desc' : reviewSort;
+    const rating = isRatingOrder(order);
     const serverRows = rating ? helpfulReviews.data : reviews.data;
     const rows = rating
-      ? orderByRating(helpfulReviews.data ?? [], reviewSort === 'rating_asc' ? 'asc' : 'desc')
+      ? orderByRating(helpfulReviews.data ?? [], order === 'rating_asc' ? 'asc' : 'desc')
       : (reviews.data ?? []);
     const loading = rating ? helpfulReviews.isPending : reviews.isPending;
     return (
       <TitleReviews
           reviews={rows}
           loading={loading}
-          sort={reviewSort}
+          sort={order}
           onChangeSort={(next) => {
             setReviewSort(next);
             track({ name: 'reviews_sort_changed', props: { sort: next } });
@@ -2093,6 +2102,8 @@ export default function TitleScreen() {
           <ReviewsPreview
             reviews={helpfulReviews.data ?? []}
             loading={helpfulReviews.isPending}
+            failed={helpfulReviews.isError && !helpfulReviews.data}
+            onRetry={() => void helpfulReviews.refetch()}
             maskedFor={reviewMasked}
             viewerId={profile.id}
             viewerRanked={Boolean(data.ranked)}

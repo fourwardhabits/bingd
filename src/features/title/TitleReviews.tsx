@@ -217,8 +217,14 @@ export function TitleReviews({
 
       {/* Offered once there is an order to choose. Kept while Following is active even
           when it returns nothing, so the reader can see which filter emptied the list
-          rather than meeting a bare empty state with no way back. */}
-      {limit === undefined && (listed.length > 1 || sort === 'following') ? (
+          rather than meeting a bare empty state with no way back. In the editorial
+          sheet it also stays while a new order loads, and while any order but the
+          default is chosen: a control that vanishes mid-switch is a control the reader
+          cannot take back (post-QA sprint 2). */}
+      {limit === undefined &&
+      (listed.length > 1 ||
+        sort === 'following' ||
+        (editorial && (loading || sort !== 'top_desc'))) ? (
         <View style={styles.sort}>
           <SegmentedTabs
             options={options.map((option) => ({
@@ -405,6 +411,9 @@ export type ReviewsPreviewProps = {
   /** The Most Helpful list, as the server ordered it. */
   reviews: TitleReview[];
   loading: boolean;
+  /** The read failed and nothing is cached: say so, rather than "No reviews yet". */
+  failed?: boolean;
+  onRetry?: () => void;
   maskedFor: (review: TitleReview) => boolean;
   viewerId: string;
   viewerRanked: boolean;
@@ -432,6 +441,8 @@ export const REVIEWS_PREVIEW_COUNT = 2;
 export function ReviewsPreview({
   reviews,
   loading,
+  failed = false,
+  onRetry,
   maskedFor,
   viewerId,
   viewerRanked,
@@ -527,7 +538,29 @@ export function ReviewsPreview({
         </Pressable>
       ))}
 
-      {!showOwn && others.length === 0 ? (
+      {failed && others.length === 0 ? (
+        <View style={styles.previewEmpty} testID="reviews-preview-failed">
+          <Text variant="footnote" tone="secondary">
+            Reviews couldn’t load.
+          </Text>
+          {onRetry ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Try loading reviews again"
+              onPress={onRetry}
+              hitSlop={{ top: 12, bottom: 12 }}
+              style={({ pressed }) => [styles.inlineAction, pressed && styles.pressed]}
+            >
+              <Ionicons name="refresh" size={theme.layout.icon.sm} color={theme.semantic.action} />
+              <Text variant="callout" tone="action">
+                Try again
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {!failed && !showOwn && others.length === 0 ? (
         <View style={styles.previewEmpty} testID="reviews-preview-empty">
           <Text variant="footnote" tone="secondary">
             No reviews yet
@@ -548,7 +581,7 @@ export function ReviewsPreview({
         </View>
       ) : null}
 
-      {showOwn && others.length === 0 ? (
+      {!failed && showOwn && others.length === 0 ? (
         <Text variant="footnote" tone="tertiary" testID="reviews-preview-only-yours">
           {`No other reviews of this ${noun} yet.`}
         </Text>

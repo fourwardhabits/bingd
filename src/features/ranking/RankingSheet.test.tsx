@@ -2032,6 +2032,34 @@ describe('the reveal reads title, then placement, then where it landed', () => {
     expect(at('Sicario')).toBeLessThan(at('Collateral'));
   });
 
+  it('keeps Done and Add details on screen: only the body above them scrolls', async () => {
+    // Independent review, post-QA sprint 2: two awards at a large text size on a small
+    // phone made the reveal taller than the sheet. The body is bounded and scrolls; the
+    // exits are outside it.
+    const rn = jest.requireActual('react-native') as typeof import('react-native');
+    const dims = jest.spyOn(rn, 'useWindowDimensions');
+    dims.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 1.5 });
+    try {
+      mockRanked.mockReturnValue({ data: movies });
+      answering(placement);
+      const sheet = await openSheet({ onFinishLog: jest.fn() });
+      await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+
+      const body = sheet.getByTestId('reveal-body');
+      const maxHeight = StyleSheet.flatten(body.props.style).maxHeight as number;
+      // Inside 90% of the screen, with room left for the exit row at this text size.
+      expect(maxHeight).toBeGreaterThan(0);
+      expect(maxHeight).toBeLessThanOrEqual(640 * 0.9 - 60 * 1.5);
+      // The title scrolls with the body; the exits do not.
+      expect(within(body).getByText('Film A')).toBeTruthy();
+      expect(within(body).queryByRole('button', { name: 'Done' })).toBeNull();
+      expect(within(body).queryByRole('button', { name: 'Add details' })).toBeNull();
+      expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy();
+    } finally {
+      dims.mockRestore();
+    }
+  });
+
   it('ends in exactly two controls, Done then Add details', async () => {
     /**
      * `onFinishLog` is what puts Add details on screen — every screen that mounts the
