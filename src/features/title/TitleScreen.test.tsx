@@ -3587,6 +3587,32 @@ describe('the immersive title page (experiment)', () => {
       expect(mockStatusBars.at(-1)).toBe('light');
     });
 
+    it('asks for dark status glyphs from the first frame when there is no artwork', async () => {
+      // The band is Parchment then, and white glyphs on it would be unreadable.
+      tableRows.media_items = [{ ...film, backdrop_path: null, poster_path: null }];
+      mockStatusBars.length = 0;
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+      expect(mockStatusBars.at(-1)).toBe('dark');
+    });
+
+    it('gives the full cast sheet a labelled way out', async () => {
+      const six = Array.from({ length: 6 }, (_, n) => ({
+        id: 9100 + n,
+        name: `Player ${n + 1}`,
+        character: null,
+        profile_path: null,
+      }));
+      tableRows.media_cache = [{ ...credits, payload: { ...credits.payload, cast: six } }];
+      const view = await open();
+      await fireEvent.press(
+        await waitFor(() => view.getByRole('button', { name: 'See all 6 cast members' })),
+      );
+      await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
+      await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(view.queryByTestId('cast-sheet')).toBeNull());
+    });
+
     it('asks for nothing once another screen covers it, so the next screen keeps its own', async () => {
       mockFocused = false;
       mockStatusBars.length = 0;
@@ -3803,7 +3829,7 @@ describe('the immersive title page (experiment)', () => {
 
       await fireEvent.press(view.getByRole('button', { name: 'See all 6 cast members' }));
       await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
-      expect(within(view.getByTestId('cast-sheet')).getByText('Actor 6')).toBeTruthy();
+      expect(within(view.getByTestId('cast-sheet-list')).getByText('Actor 6')).toBeTruthy();
     });
   });
 });

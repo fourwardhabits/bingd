@@ -75,6 +75,10 @@ describe('GenreLine', () => {
     await fireEvent.press(screen.getByLabelText('Show all 4 genres'));
     await waitFor(() => expect(screen.getByTestId('genre-sheet')).toBeTruthy());
     expect(screen.getByText('Science Fiction · Action & Adventure · Mystery · Thriller')).toBeTruthy();
+
+    // A labelled way out, for a screen reader that cannot reach the scrim.
+    await fireEvent.press(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByTestId('genre-sheet')).toBeNull());
   });
 
   it('shows no plus when everything fits', async () => {

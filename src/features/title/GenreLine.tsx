@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 
-import { Sheet, Text } from '@/ui/components';
+import { Sheet, SheetDone, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 const SEP = ' · ';
@@ -143,6 +143,9 @@ export function GenreLine({ genres, titleName }: { genres: readonly string[]; ti
               {genres.join(SEP)}
             </Text>
           </View>
+          {/* The labelled way out every sheet carries: `Sheet` hides its scrim from
+              assistive technology on the understanding that this exists. */}
+          <SheetDone onPress={() => setOpen(false)} />
         </Sheet>
       ) : null}
     </View>

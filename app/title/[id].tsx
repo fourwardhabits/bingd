@@ -11,10 +11,12 @@ import { cloneElement, type ReactNode, useCallback, useEffect, useMemo, useRef, 
 import {
   Alert,
   Animated,
+  Dimensions,
   Linking,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -115,6 +117,7 @@ import {
   SegmentedTabs,
   type SegmentOption,
   Sheet,
+  SheetDone,
   SheetRow,
   SkeletonRow,
   usePullRefresh,
@@ -2066,6 +2069,14 @@ export default function TitleScreen() {
         <Sheet visible onClose={() => setCastOpen(false)} label={`Cast of ${title.title}`}>
           <View style={styles.castSheet} testID="cast-sheet">
             <Text variant="title2">Cast</Text>
+          </View>
+          {/* Bounded and scrolling: twelve rows at a large text size are taller than the
+              sheet, and the last members must still be reachable. */}
+          <ScrollView
+            testID="cast-sheet-list"
+            style={styles.castScroll}
+            contentContainerStyle={styles.castList}
+          >
             {cast.map((member) => (
               <Pressable
                 key={member.id}
@@ -2092,7 +2103,8 @@ export default function TitleScreen() {
                 </View>
               </Pressable>
             ))}
-          </View>
+          </ScrollView>
+          <SheetDone onPress={() => setCastOpen(false)} />
         </Sheet>
       ) : null}
     </>
@@ -2116,7 +2128,11 @@ export default function TitleScreen() {
        * cast strip says `‹ Title` and not `‹ title/[id]`.
        */}
       <Stack.Screen options={{ title: title.title, headerShown: false }} />
-      {immersive && focused ? <StatusBar style={barRevealed ? 'dark' : 'light'} /> : null}
+      {/* Dark glyphs over the Parchment band a title without artwork gets, from the first
+          frame; light over artwork until the bar has revealed. */}
+      {immersive && focused ? (
+        <StatusBar style={barRevealed || !hero.uri ? 'dark' : 'light'} />
+      ) : null}
 
       <TitleTopBar
         progress={scrollY.interpolate({
@@ -3263,7 +3279,9 @@ const styles = StyleSheet.create({
   },
   immersiveCircleCopy: { flex: 1, gap: 2 },
   immersiveCircleName: { fontFamily: fontFamily.sansSemibold },
-  castSheet: { gap: theme.space[2], paddingBottom: theme.space[4] },
+  castSheet: { paddingBottom: theme.space[2] },
+  castScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.6) },
+  castList: { gap: theme.space[2] },
   castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },
   /**
    * **The row starts where the hero ends** (founder, final direction, 2026-09-07).

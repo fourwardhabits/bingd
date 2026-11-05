@@ -177,3 +177,11 @@ Shared components touched, all additively: `CastStrip` (`compact` prop), `TitleA
 - **Keep the experiment, drop the refinement:** use `experiment/immersive-title` at `02f713d`
   instead of this branch in the combined candidate, or revert this branch's commit.
 - **Original page:** unchanged by this refinement; every restore option above still applies.
+
+### Review of the refinement
+
+Independent Codex review of `5699db7` (`.agent-workflow/codex-reviews/cinematic-editorial.md`,
+gitignored): Original page and production lock confirmed unchanged; three findings, all fixed in
+the follow-up commit with tests: the genre and cast sheets gained the labelled *Done* every sheet
+carries; the cast sheet's list scrolls inside a bounded height; and a title without artwork asks
+for dark status-bar glyphs from the first frame, because its band is Parchment.
