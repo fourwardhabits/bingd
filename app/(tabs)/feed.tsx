@@ -27,9 +27,12 @@ import {
   watchLabel,
 } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
+import { FeedCard } from '@/features/feed/FeedCard';
+import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { useCommentCounts } from '@/features/feed/use-comments';
+import { useLatestComments } from '@/features/feed/use-latest-comments';
 import {
   feedItems,
   trimFeedToFirstPage,
@@ -43,6 +46,7 @@ import { FollowStorySheet } from '@/features/feed/FollowStorySheet';
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
+  REACTION_LABEL,
   useReactions,
   useSetReaction,
   type ReactionKind,
@@ -464,6 +468,21 @@ export default function FeedScreen() {
   const eventIds = useMemo(() => events.map((event) => event.id), [events]);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
+  /**
+   * The newest comment under each card that has any (cinematic Feed, 2026-11-04).
+   *
+   * Only the cards whose count is above zero, so a quiet page reads nothing more than it
+   * did. The count is this reader's own (`activity_comment_counts`), so a thread whose
+   * only remarks are by people they may not see is never asked for.
+   */
+  const threadedIds = useMemo(
+    () =>
+      events
+        .filter((event) => takesFeedCard(event) && (commentCounts.data?.get(event.id) ?? 0) > 0)
+        .map((event) => event.id),
+    [events, commentCounts.data],
+  );
+  const latestComments = useLatestComments(threadedIds, profile.id);
   const { setReaction } = useSetReaction(profile.id);
 
   const choose = async (eventId: string, kind: ReactionKind | null) => {
@@ -682,6 +701,9 @@ export default function FeedScreen() {
               void feed.refetch();
               void reactions.refetch();
               void commentCounts.refetch();
+              // The latest-comment previews, by the prefix every comment write already
+              // invalidates — a remark retracted elsewhere leaves the card on this pull.
+              void queryClient.invalidateQueries({ queryKey: ['comments', profile.id] });
               // The bell is on this screen, so a reader pulling to see what is new is
               // asking about it too. Leaving it out meant the one deliberate "refresh
               // this page" gesture in the app refreshed everything on it except the
@@ -938,6 +960,75 @@ export default function FeedScreen() {
                       setFollowStoryFor(event.id);
                     }}
                   />
+                ) : takesFeedCard(event) ? (
+                  /**
+                   * **A title activity is a cinematic card** (founder-approved direction,
+                   * 2026-11-04). The same values and callbacks the row below is handed —
+                   * the sentence, the live score, the spoiler decision, the watchlist write,
+                   * the Recommend sheet, the reaction gestures — laid out around the title's
+                   * artwork instead of beside a 40pt poster. Awards and goals keep the row.
+                   */
+                  <FeedCard
+                    key={event.id}
+                    actorName={event.actorName}
+                    actorAvatarUri={event.actorAvatarUri}
+                    onPressActor={
+                      event.actorId === profile.id || !event.actorUsername
+                        ? undefined
+                        : () => router.push(`/u/${event.actorUsername}`)
+                    }
+                    verb={verbFor(event.type)}
+                    tail={tailFor(event.type, event.title)}
+                    tailAction={
+                      event.type === 'ranking_batch' && (event.rankedCount ?? 1) > 1
+                        ? {
+                            connector: 'and',
+                            label: `${(event.rankedCount ?? 1) - 1} more`,
+                            onPress: () =>
+                              setRankingBatchFor({
+                                id: event.id,
+                                medium: event.kind === 'season' ? 'tv_seasons' : 'movies',
+                              }),
+                          }
+                        : null
+                    }
+                    companions={event.companions}
+                    title={event.title}
+                    year={event.year}
+                    metadata={metadataFor(event)}
+                    watchLabel={watchLabel(event.watchNumber)}
+                    timeLabel={relativeTime(event.createdAt)}
+                    artwork={feedArtwork(event)}
+                    score={event.score}
+                    bucket={event.bucket}
+                    review={
+                      event.note
+                        ? {
+                            text: event.note.text,
+                            hasSpoilers: event.note.hasSpoilers,
+                            masked: shouldMask({
+                              hasSpoilers: event.note.hasSpoilers,
+                              mediaItemId: event.mediaItemId,
+                              viewerId: profile.id,
+                              authorId: event.actorId,
+                              watched: watched.data,
+                            }),
+                          }
+                        : null
+                    }
+                    onPressTitle={() => router.push(`/title/${event.mediaItemId}`)}
+                    reaction={reactionFor(event.id)}
+                    onPressComments={() => setCommentsFor(event.id)}
+                    commentCount={commentCounts.data?.get(event.id) ?? 0}
+                    onPressSave={
+                      event.actorId !== profile.id
+                        ? () => toggleWatchlist(event.mediaItemId!)
+                        : undefined
+                    }
+                    saved={saved.has(event.mediaItemId!)}
+                    onPressShare={event.kind !== 'series' ? () => openRecommend(event) : undefined}
+                    latestComment={latestCommentFor(event)}
+                  />
                 ) : (
                 <ActivityRow
                   key={event.id}
@@ -1179,11 +1270,35 @@ export default function FeedScreen() {
     </Screen>
   );
 
+  /**
+   * The newest comment under a card, with the spoiler decided here — by `shouldMask`, the
+   * function the sheet uses, against the exact title the activity is about and the
+   * comment's own author. A masked preview carries no body to the card at all.
+   */
+  function latestCommentFor(event: FeedItem) {
+    const comment = latestComments.get(event.id);
+    if (!comment) return null;
+    return {
+      authorName: comment.authorName,
+      authorAvatarUri: comment.authorAvatarUri,
+      body: comment.body,
+      masked: shouldMask({
+        hasSpoilers: comment.hasSpoilers,
+        mediaItemId: event.mediaItemId,
+        viewerId: profile.id,
+        authorId: comment.authorId,
+        watched: watched.data,
+      }),
+      timeLabel: relativeTime(comment.createdAt),
+    };
+  }
+
   function reactionFor(eventId: string) {
     const summary = reactions.data?.get(eventId);
     return {
       count: summary?.total ?? 0,
       mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+      mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
       glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
       onPress: () => void toggleDefault(eventId),
       onLongPress: () => setPickerFor(eventId),
