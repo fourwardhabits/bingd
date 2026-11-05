@@ -1,7 +1,7 @@
 # Post-QA Refinement Sprint 2 — record and rollback
 
-**Status:** Verified on 2026-11-05 and prepared for **Android Preview only**. Nothing is pushed,
-merged or in production, and there is no iOS update. The previous Preview group `8272a1af`
+**Status:** Verified and **published to Android Preview only** on 2026-11-05: group `1f99a23b`, from
+`0681248`. Nothing is pushed, merged or in production, and there is no iOS update. The previous Preview group `8272a1af`
 (`85a8a03`) is the rollback.
 
 This page is the durable record. Rollback needs nothing beyond this repository and the EAS
@@ -197,8 +197,22 @@ Reports are in the worktree's gitignored `.agent-workflow/codex-reviews/`.
 
 ## Android Preview
 
-Not yet published at this commit. The update group and id are recorded in the docs-only
-commit after it.
+Published on 2026-11-05 to **Android Preview only**, from the clean checkout
+`../worktrees/visual2-preview-publish` (real `npm ci`), with
+`npm run update:preview -- --platform android --non-interactive`, run from Git Bash.
+
+| | |
+|---|---|
+| Update group | `1f99a23b-01d4-497e-b89b-15470b53f393` |
+| Android update id | `01a1ac31-f3b8-70c5-a7d9-093506ec9909` |
+| Branch | `preview` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (the EAS fingerprint at publish matched the local one) |
+| Commit | `06812489f45ae86ea0817e09d10b919b0f0e08ce` (code `0f82e93` plus this record) |
+| Replaces | `8272a1af-902c-42ce-8e52-a5f737808236` (`85a8a03`), the rollback target |
+
+Confirmed with `eas update:view 1f99a23b-01d4-497e-b89b-15470b53f393 --json`: a single
+Android entry, with the commit and runtime as above. `eas update:list --branch preview`
+still lists `8272a1af` and `4212ffa9` beneath it. There is no iOS group.
 
 ## Rollback
 
