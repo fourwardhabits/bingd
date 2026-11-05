@@ -4,7 +4,11 @@ import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { nudgePushDelivery } from '@/features/notifications/push';
 import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
-import { latestCommentKey, latestReadable } from '@/features/feed/use-latest-comments';
+import {
+  beginThreadRead,
+  latestReadable,
+  reconcilePreviewFromThread,
+} from '@/features/feed/use-latest-comments';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { useChunkedById } from '@/lib/chunked-query';
@@ -207,6 +211,8 @@ export function useComments(eventId: string | null, viewerId: string) {
     staleTime: 0,
     gcTime: 0,
     queryFn: async (): Promise<Comment[]> => {
+      // Taken before the request: what this answer can claim to be current as of.
+      const read = beginThreadRead(viewerId);
       const { data, error } = await supabase.rpc('activity_comments', {
         p_feed_event_id: eventId as string,
       });
@@ -217,12 +223,16 @@ export function useComments(eventId: string | null, viewerId: string) {
        * Preview review, 2026-11-04). The preview is its own cached read, and a mounted
        * query with `staleTime: 0` is not refetched just because time has passed — so a
        * comment withdrawn, or an author who went private, stayed under the card even after
-       * opening the conversation had shown it gone. This read is the newer answer: the
-       * preview is set from it, including to nothing.
+       * opening the conversation had shown it gone. This read replaces the preview —
+       * unless the reader blocked or unfollowed somebody while it was in flight, or the
+       * preview has a newer answer than this one (`reconcilePreviewFromThread`).
        */
-      queryClient.setQueryData(
-        latestCommentKey(viewerId, eventId as string),
-        latestReadable((data ?? []) as Parameters<typeof latestReadable>[0]),
+      reconcilePreviewFromThread(
+        queryClient,
+        viewerId,
+        eventId as string,
+        (data ?? []) as Parameters<typeof latestReadable>[0],
+        read,
       );
 
       return ((data ?? []) as CommentRow[]).map((row) => ({
