@@ -205,3 +205,13 @@ following commit: every privacy reset bumps a per-reader visibility generation, 
 read may only update the preview if no reset happened while it was in flight and no newer
 preview answer has landed since it began. Regression test (`preview-race.test.tsx`) releases a
 pre-block response after the reset; it fails on the previous code.
+
+A second re-check found two more orderings [high] and a test that passed for the wrong reason.
+All comment reads now share one per-reader **read revision**, taken when a read starts: a
+card applies an answer only if it is newer than the last one applied to it, in either completion
+order, and a visibility reset raises a floor so everything in flight is too old to apply. A
+conversation read that straddles a reset reads again before returning rows, so a conversation
+reopened around a block cannot show its pre-block answer. That last race already existed at
+`505ae33`, where nothing reset comment queries on a block. `preview-race.test.tsx` drives the
+real card and conversation queries with responses released in each order and a hand-stepped
+clock; all four cases fail on the previous fix and pass on this one.

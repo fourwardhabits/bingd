@@ -1,4 +1,4 @@
-import { useQueries, type QueryClient } from '@tanstack/react-query';
+import { useQueries, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { avatarUri } from '@/lib/images';
@@ -102,18 +102,74 @@ export const latestCommentKey = (viewerId: string, eventId: string) =>
   ['comments', viewerId, eventId, 'latest'] as const;
 
 /**
+ * ---------------------------------------------------------------------------
+ * ONE ORDER FOR EVERY COMMENT READ (combined Preview re-checks, 2026-11-04)
+ *
+ * A card's preview is written by two reads of the same thread — the card's own and the
+ * conversation's — and responses arrive in any order. Three races were found in turn: an
+ * old thread answer restoring words after a block; an old *preview* answer restoring words
+ * the conversation had just shown gone (or a newer, clean thread answer being refused
+ * because an older preview had finished later); and a thread request pending across a block
+ * being reused when the conversation reopened.
+ *
+ * They are one problem — "is this answer older than one already applied?" — and are
+ * answered by one number instead of by timing:
+ *
+ *   · every comment read, preview or thread, takes a **revision** from a per-reader counter
+ *     when it *starts*;
+ *   · a card applies an answer only if its revision is newer than the last one applied to
+ *     that card, whichever order the responses arrive in;
+ *   · a **visibility reset** (follow, unfollow, block, unblock) raises a per-reader floor to
+ *     the counter, so every request already in flight is too old to apply anywhere — the
+ *     privacy case is decided by order alone, with no clock;
+ *   · a thread read whose revision falls under the floor by the time it answers **reads
+ *     again** before returning rows, so a reopened conversation cannot show a pre-block
+ *     answer either.
+ *
+ * Session memory only: revisions say nothing across launches, and need not — every cache
+ * they guard is in memory too.
+ * ---------------------------------------------------------------------------
+ */
+const lastRevision = new Map<string, number>();
+const visibilityFloor = new Map<string, number>();
+const appliedRevision = new Map<string, number>();
+
+/** Called when a comment read starts. Returns its place in this reader's order. */
+export function beginCommentRead(viewerId: string): number {
+  const next = (lastRevision.get(viewerId) ?? 0) + 1;
+  lastRevision.set(viewerId, next);
+  return next;
+}
+
+/** Whether a read that started at `revision` began after the reader's last visibility change. */
+export const afterVisibilityChange = (viewerId: string, revision: number) =>
+  revision > (visibilityFloor.get(viewerId) ?? 0);
+
+/**
+ * Whether the answer to a read that started at `revision` may be applied to this card —
+ * and, if so, records it as the newest applied. Refused when the reader's visibility has
+ * changed since it started, or when a newer read's answer is already on the card.
+ */
+export function acceptCommentRead(viewerId: string, eventId: string, revision: number): boolean {
+  if (!afterVisibilityChange(viewerId, revision)) return false;
+  const key = `${viewerId}\u0000${eventId}`;
+  if (revision < (appliedRevision.get(key) ?? 0)) return false;
+  appliedRevision.set(key, revision);
+  return true;
+}
+
+/**
  * **Forget every preview at once, after anything that changes whom this reader may see**
  * (independent re-check, 2026-11-04).
  *
- * Invalidating is not enough: a refetching query keeps its last success on screen, and with
- * the request deadline and two retries a blocked person's words stayed under the card for
- * up to half a minute after the block committed. Resetting drops the data synchronously, so
- * the card draws no preview until a read made *after* the change has answered.
+ * The floor first, so every read already in flight is too old to apply. Then the previews
+ * are reset rather than invalidated: a refetching query keeps its last success on screen,
+ * and a blocked person's words would stay under the card while the refetch ran. The reset
+ * drops them synchronously, and the card draws nothing until a read made after the change
+ * has answered.
  */
 export function resetCommentPreviews(queryClient: QueryClient, viewerId: string) {
-  // First, so any thread read already in flight is from an older generation by the time it
-  // lands — see `reconcilePreviewFromThread`.
-  visibilityGeneration.set(viewerId, previewGeneration(viewerId) + 1);
+  visibilityFloor.set(viewerId, lastRevision.get(viewerId) ?? 0);
   return queryClient.resetQueries({
     predicate: (query) =>
       query.queryKey[0] === 'comments' &&
@@ -123,48 +179,18 @@ export function resetCommentPreviews(queryClient: QueryClient, viewerId: string)
 }
 
 /**
- * How many times this reader's visibility has changed in this session: bumped by every
- * `resetCommentPreviews`, which every follow, unfollow, block and unblock calls.
- */
-const visibilityGeneration = new Map<string, number>();
-export const previewGeneration = (viewerId: string) => visibilityGeneration.get(viewerId) ?? 0;
-
-/** When a thread read began, and under which visibility. Captured before the request. */
-export type ThreadRead = { generation: number; startedAt: number };
-
-export const beginThreadRead = (viewerId: string): ThreadRead => ({
-  generation: previewGeneration(viewerId),
-  startedAt: Date.now(),
-});
-
-/**
- * **Set a card's preview from a fresh thread read — unless the answer is already stale**
- * (combined Preview re-check, 2026-11-04).
- *
- * The thread's answer replaces the preview so a withdrawn comment leaves the card once the
- * conversation has shown it gone. But a read is only as current as the moment it began:
- * open a thread, close it before it answers, block the newest commenter, and the block's
- * reset refetches the preview *without* that person — then the thread's pre-block answer
- * lands and would put their words back. So the write is refused when either:
- *
- *   · the reader's visibility changed while the read was in flight (a newer generation),
- *     which is the privacy case and is decided without any timing; or
- *   · the preview itself was answered after this read began — a newer answer than ours.
- *
- * Returns whether it wrote, for the tests.
+ * Set a card's preview from a fresh thread read, if no newer answer is already on the card
+ * and the reader's visibility has not changed since the read began. Returns whether it wrote.
  */
 export function reconcilePreviewFromThread(
   queryClient: QueryClient,
   viewerId: string,
   eventId: string,
   rows: readonly Row[],
-  read: ThreadRead,
+  revision: number,
 ): boolean {
-  if (previewGeneration(viewerId) !== read.generation) return false;
-  const key = latestCommentKey(viewerId, eventId);
-  const state = queryClient.getQueryState(key);
-  if (state && state.dataUpdatedAt > read.startedAt) return false;
-  queryClient.setQueryData(key, latestReadable(rows));
+  if (!acceptCommentRead(viewerId, eventId, revision)) return false;
+  queryClient.setQueryData(latestCommentKey(viewerId, eventId), latestReadable(rows));
   return true;
 }
 
@@ -174,6 +200,7 @@ export function reconcilePreviewFromThread(
  * a failed or pending read is simply absent, and the card then draws no preview.
  */
 export function useLatestComments(eventIds: readonly string[], viewerId: string) {
+  const queryClient = useQueryClient();
   const results = useQueries({
     queries: eventIds.map((eventId) => ({
       queryKey: latestCommentKey(viewerId, eventId),
@@ -183,10 +210,17 @@ export function useLatestComments(eventIds: readonly string[], viewerId: string)
       staleTime: 0,
       gcTime: 0,
       queryFn: async (): Promise<LatestComment | null> => {
+        const revision = beginCommentRead(viewerId);
         const { data, error } = await supabase.rpc('activity_comments', {
           p_feed_event_id: eventId,
         });
         if (error) throw error;
+        // An answer older than one already applied to this card, or from before a
+        // visibility change, is discarded: the card keeps what it has.
+        if (!acceptCommentRead(viewerId, eventId, revision)) {
+          const current = queryClient.getQueryData(latestCommentKey(viewerId, eventId));
+          return (current as LatestComment | null | undefined) ?? null;
+        }
         return latestReadable((data ?? []) as Row[]);
       },
     })),
