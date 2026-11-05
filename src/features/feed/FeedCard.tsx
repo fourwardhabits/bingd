@@ -9,21 +9,6 @@ import { fontFamily, paperAlpha, theme } from '@/ui/tokens';
 
 import { artworkHeight, type FeedArtwork } from './feed-artwork';
 
-/**
- * The newest comment under a card, already decided for this reader.
- *
- * `masked` comes from `shouldMask`, at the call site, exactly as a note's does — this
- * component never works out whether a spoiler applies. A masked preview carries no body
- * on screen at all: the reveal lives in the conversation, one tap away.
- */
-export type FeedCardComment = {
-  authorName: string;
-  authorAvatarUri: string | null;
-  body: string;
-  masked: boolean;
-  timeLabel: string;
-};
-
 export type FeedCardProps = {
   actorName: string;
   actorAvatarUri?: string | null;
@@ -46,8 +31,7 @@ export type FeedCardProps = {
   bucket?: Bucket | null;
   /**
    * The review the actor chose to publish with this activity — `public_notes`, which only
-   * ever returns a note its author shared. Never a comment: a remark by somebody else is
-   * `latestComment`, drawn under the actions with that person's own name and face.
+   * ever returns a note its author shared. Never a comment, which is somebody else's remark.
    */
   review?: { text: string; hasSpoilers: boolean; masked: boolean } | null;
   onPressTitle: () => void;
@@ -59,7 +43,6 @@ export type FeedCardProps = {
   saved?: boolean;
   /** The Recommend sheet, which ends in "Share off bingd". Absent for a whole series. */
   onPressShare?: () => void;
-  latestComment?: FeedCardComment | null;
 };
 
 /**
@@ -73,8 +56,6 @@ export type FeedCardProps = {
  *     "The review, if one was published…"            ← absent, not empty, without one
  *     ❤️😂 4                                          ← absent with no reactions
  *     ♡ Like    💬 Comment    🔖 Save    ➤ Share
- *     ┌ (face) Theo  Top 3?? We need to talk.  9m ┐   ← absent with no comments
- *     └ View all 3 comments                        ┘
  *
  * Feed only. The profile's Recent activity and the conversation page keep `ActivityRow`,
  * which is the compact form those surfaces were designed around.
@@ -108,7 +89,6 @@ export function FeedCard({
   onPressSave,
   saved = false,
   onPressShare,
-  latestComment,
 }: FeedCardProps) {
   const filmName = title ?? 'a title';
   const { width } = useWindowDimensions();
@@ -360,41 +340,6 @@ export function FeedCard({
         ) : null}
       </View>
 
-      {/* 6. The newest comment, under the actions, in the commenter's own name. */}
-      {latestComment && onPressComments ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            latestComment.masked
-              ? `Latest comment from ${latestComment.authorName} contains spoilers. Open the conversation.`
-              : `Latest comment from ${latestComment.authorName}: ${latestComment.body}. Open the conversation.`
-          }
-          onPress={onPressComments}
-          style={({ pressed }) => [styles.comment, pressed && styles.pressed]}
-          testID="feed-card-latest-comment"
-        >
-          <Avatar size="xs" uri={latestComment.authorAvatarUri} name={latestComment.authorName} />
-          <View style={styles.commentCopy}>
-            <Text variant="footnote" numberOfLines={2}>
-              <Text variant="footnote" style={styles.entity}>
-                {latestComment.authorName}
-              </Text>
-              {latestComment.masked ? (
-                <Text variant="footnote" tone="tertiary">
-                  {'  Contains spoilers · tap to view'}
-                </Text>
-              ) : (
-                <Text variant="footnote">{`  ${latestComment.body}`}</Text>
-              )}
-            </Text>
-            <Text variant="caption" tone="tertiary" numberOfLines={1}>
-              {commentCount > 1
-                ? `${latestComment.timeLabel} · View all ${commentCount} comments`
-                : latestComment.timeLabel}
-            </Text>
-          </View>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -527,18 +472,5 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
   },
   mineGlyph: { fontSize: 17, lineHeight: undefined, includeFontPadding: false },
-  comment: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: theme.space[2],
-    marginHorizontal: theme.layout.gutter,
-    marginBottom: theme.space[2],
-    paddingVertical: theme.space[2],
-    paddingHorizontal: theme.space[3],
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.surface.sunken,
-    minHeight: theme.layout.minTapTarget,
-  },
-  commentCopy: { flex: 1, gap: 2 },
   pressed: { opacity: 0.7 },
 });

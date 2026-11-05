@@ -226,3 +226,21 @@ conversation draws only an answer read since it was opened (object identity, str
 off for threads), so it never opens onto words the card read earlier. `preview-race.test.tsx`
 replays every ordering the reviews found — including two answers in one turn — on the real
 hooks; giving the card its own cache again fails five of six cases.
+
+## Decision: no latest-comment preview in this Preview (founder, 2026-11-04)
+
+After the fifth independent review still found orderings in which a card preview could show a
+withdrawn or blocked comment, the founder chose to ship this Preview **without** the
+latest-comment line on Feed cards. Everything else on the card stays: artwork, score, review,
+reaction summary, Like / Comment (with its count) / Save / Share.
+
+- `use-comments.ts`, `CommentThread.tsx` and `CommentSheet.tsx` are byte-identical to `505ae33`,
+  so comments behave exactly as on today's Preview.
+- `use-latest-comments.ts` and its race tests are removed. The one remaining comment-related
+  change versus `505ae33` is in `use-social.ts`: follow, unfollow, block and unblock also
+  invalidate `['comments', viewer]` and `['comment-counts', viewer]`, which only makes counts and
+  an open conversation refresh sooner.
+- Known baseline (unchanged from `505ae33`, not introduced here): a conversation request still in
+  flight when the reader blocks someone can answer with pre-block rows until the next read.
+- The QA checklist's preview items no longer apply; see the combined record.
+- The preview returns later on a design reviewed on its own (research note to follow).

@@ -1,6 +1,4 @@
 import { artworkHeight, feedArtwork, takesFeedCard } from './feed-artwork';
-import type { Comment } from './use-comments';
-import { latestOf } from './use-latest-comments';
 
 describe('feedArtwork', () => {
   it('prefers the title’s own backdrop, at the card bucket', () => {
@@ -46,68 +44,5 @@ describe('takesFeedCard', () => {
     }
     // A title activity whose title did not resolve has nothing to frame.
     expect(takesFeedCard({ type: 'title_ranked', mediaItemId: null })).toBe(false);
-  });
-});
-
-describe('latestOf', () => {
-  const comment = (
-    id: string,
-    at: string,
-    body: string | null,
-    { deleted = false, parentId = null }: { deleted?: boolean; parentId?: string | null } = {},
-  ): Comment => ({
-    id,
-    eventId: 'e1',
-    parentId,
-    authorId: `a-${id}`,
-    authorUsername: `u${id}`,
-    authorName: `u${id}`,
-    authorAvatarUri: null,
-    body,
-    hasSpoilers: false,
-    createdAt: at,
-    editedAt: null,
-    deleted,
-    reactionCount: 0,
-    reactedByMe: false,
-    reactionKinds: [],
-    myReaction: null,
-    mentions: [],
-  });
-
-  it('is the newest comment by time, replies included', () => {
-    const latest = latestOf([
-      comment('root', '2026-11-04T10:00:00Z', 'first'),
-      comment('reply', '2026-11-04T10:05:00Z', 'answer', { parentId: 'root' }),
-      comment('root2', '2026-11-04T10:02:00Z', 'second'),
-    ]);
-    expect(latest?.id).toBe('reply');
-    expect(latest?.authorName).toBe('ureply');
-  });
-
-  it('never previews a retracted comment', () => {
-    const latest = latestOf([
-      comment('kept', '2026-11-04T10:00:00Z', 'kept'),
-      comment('gone', '2026-11-04T10:09:00Z', null, { deleted: true }),
-    ]);
-    expect(latest?.id).toBe('kept');
-    expect(latestOf([comment('gone', '2026-11-04T10:09:00Z', null, { deleted: true })])).toBeNull();
-    expect(latestOf(undefined)).toBeNull();
-  });
-
-  it('skips a reply whose root the server withheld, as the sheet does', () => {
-    const latest = latestOf([
-      comment('visible', '2026-11-04T10:00:00Z', 'visible root'),
-      comment('orphan', '2026-11-04T10:09:00Z', 'reply to a hidden root', { parentId: 'hidden-root' }),
-    ]);
-    expect(latest?.id).toBe('visible');
-  });
-
-  it('keeps a reply under a retracted root, as the sheet does', () => {
-    const latest = latestOf([
-      comment('tomb', '2026-11-04T10:00:00Z', null, { deleted: true }),
-      comment('reply', '2026-11-04T10:09:00Z', 'still here', { parentId: 'tomb' }),
-    ]);
-    expect(latest?.id).toBe('reply');
   });
 });
