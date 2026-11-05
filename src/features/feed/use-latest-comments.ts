@@ -111,12 +111,61 @@ export const latestCommentKey = (viewerId: string, eventId: string) =>
  * the card draws no preview until a read made *after* the change has answered.
  */
 export function resetCommentPreviews(queryClient: QueryClient, viewerId: string) {
+  // First, so any thread read already in flight is from an older generation by the time it
+  // lands — see `reconcilePreviewFromThread`.
+  visibilityGeneration.set(viewerId, previewGeneration(viewerId) + 1);
   return queryClient.resetQueries({
     predicate: (query) =>
       query.queryKey[0] === 'comments' &&
       query.queryKey[1] === viewerId &&
       query.queryKey[3] === 'latest',
   });
+}
+
+/**
+ * How many times this reader's visibility has changed in this session: bumped by every
+ * `resetCommentPreviews`, which every follow, unfollow, block and unblock calls.
+ */
+const visibilityGeneration = new Map<string, number>();
+export const previewGeneration = (viewerId: string) => visibilityGeneration.get(viewerId) ?? 0;
+
+/** When a thread read began, and under which visibility. Captured before the request. */
+export type ThreadRead = { generation: number; startedAt: number };
+
+export const beginThreadRead = (viewerId: string): ThreadRead => ({
+  generation: previewGeneration(viewerId),
+  startedAt: Date.now(),
+});
+
+/**
+ * **Set a card's preview from a fresh thread read — unless the answer is already stale**
+ * (combined Preview re-check, 2026-11-04).
+ *
+ * The thread's answer replaces the preview so a withdrawn comment leaves the card once the
+ * conversation has shown it gone. But a read is only as current as the moment it began:
+ * open a thread, close it before it answers, block the newest commenter, and the block's
+ * reset refetches the preview *without* that person — then the thread's pre-block answer
+ * lands and would put their words back. So the write is refused when either:
+ *
+ *   · the reader's visibility changed while the read was in flight (a newer generation),
+ *     which is the privacy case and is decided without any timing; or
+ *   · the preview itself was answered after this read began — a newer answer than ours.
+ *
+ * Returns whether it wrote, for the tests.
+ */
+export function reconcilePreviewFromThread(
+  queryClient: QueryClient,
+  viewerId: string,
+  eventId: string,
+  rows: readonly Row[],
+  read: ThreadRead,
+): boolean {
+  if (previewGeneration(viewerId) !== read.generation) return false;
+  const key = latestCommentKey(viewerId, eventId);
+  const state = queryClient.getQueryState(key);
+  if (state && state.dataUpdatedAt > read.startedAt) return false;
+  queryClient.setQueryData(key, latestReadable(rows));
+  return true;
 }
 
 /**

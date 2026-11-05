@@ -198,3 +198,10 @@ its comment was withdrawn (or its author went private) stayed under the card eve
 the conversation showed it gone. Fixed in the next commit: every fresh read of a thread now sets
 that card's preview from the same answer, including to nothing. Regression test fails without
 the fix.
+
+Codex re-check of that fix found a race [high]: a thread request made before a block could
+answer after the block's preview reset and restore the blocked author's words. Fixed in the
+following commit: every privacy reset bumps a per-reader visibility generation, and a thread
+read may only update the preview if no reset happened while it was in flight and no newer
+preview answer has landed since it began. Regression test (`preview-race.test.tsx`) releases a
+pre-block response after the reset; it fails on the previous code.
