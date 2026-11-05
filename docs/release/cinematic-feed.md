@@ -215,3 +215,14 @@ reopened around a block cannot show its pre-block answer. That last race already
 `505ae33`, where nothing reset comment queries on a block. `preview-race.test.tsx` drives the
 real card and conversation queries with responses released in each order and a hand-stepped
 clock; all four cases fail on the previous fix and pass on this one.
+
+**Final design (after the combined review's third round).** Each round of reconciling two
+caches found another ordering, so the card's preview stopped being a read of its own. The
+card now observes **the conversation's own query** (one entry per thread, `readThread` its only
+writer) and derives its line with `select`. Ordering, cancellation and sign-out are the query
+library's own guarantees: a refetch cancels the read it supersedes, a cancelled or reset read is
+never committed, and sign-out clears the client. A visibility change resets every thread. The
+conversation draws only an answer read since it was opened (object identity, structural sharing
+off for threads), so it never opens onto words the card read earlier. `preview-race.test.tsx`
+replays every ordering the reviews found — including two answers in one turn — on the real
+hooks; giving the card its own cache again fails five of six cases.

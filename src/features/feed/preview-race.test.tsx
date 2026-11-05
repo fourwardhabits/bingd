@@ -2,30 +2,32 @@ import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { useComments } from './use-comments';
+import { commentsKey, useComments } from './use-comments';
 import { resetCommentPreviews, useLatestComments } from './use-latest-comments';
 
 /**
  * ---------------------------------------------------------------------------
- * COMMENT READS THAT ANSWER OUT OF ORDER (combined Preview re-checks, 2026-11-04)
+ * ONE CACHE, ONE WRITER — EVERY ORDERING THE REVIEWS FOUND (combined Preview, 2026-11-04)
  *
- * The card's preview and the conversation read the same thread, and their responses can
- * arrive in any order, around a block. Every case here uses the real `useLatestComments`
- * (the card) and the real `useComments` (the conversation) on a real TanStack client;
- * only the network is held, and each response is released explicitly, in the order under
- * test. The rule all of them check: **an answer from a read that began earlier, or before
- * the reader's visibility changed, never replaces a newer one.**
+ * The Feed card's preview and the conversation are one query per thread. Each case below is
+ * an ordering an independent review found in an earlier, two-cache design, replayed against
+ * the real `useLatestComments` (the card) and `useComments` (the conversation) on a real
+ * TanStack client. Only the network is held, and responses are released explicitly —
+ * including two in the same turn with no flush between them.
+ *
+ * The rule every case checks: **the card and the conversation always show the answer to
+ * the newest read, and never an answer from before a visibility change.**
  * ---------------------------------------------------------------------------
  */
 
-type Pending = { resolve: (rows: unknown[]) => void };
-const mockPending: Pending[] = [];
+type Held = { resolve: (rows: unknown[]) => void };
+const mockHeld: Held[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () =>
       new Promise((resolve) => {
-        mockPending.push({ resolve: (rows) => resolve({ data: rows, error: null }) });
+        mockHeld.push({ resolve: (rows) => resolve({ data: rows, error: null }) });
       }),
   },
   startSessionRefresh: () => () => {},
@@ -52,183 +54,193 @@ const row = (id: string, author: string, body: string, at: string) => ({
 
 const FRIEND = row('c-friend', 'friend', 'A comment the reader may still see.', '2026-11-04T09:00:00Z');
 const GONE = row('c-gone', 'other', 'Words that are no longer available.', '2026-11-04T10:00:00Z');
+const STILL = 'A comment the reader may still see.';
 
-/** The card, and the conversation when `open` — what a Feed screen mounts. */
 const useCardAndThread = ({ viewer, open }: { viewer: string; open: boolean }) => ({
   card: useLatestComments(['e1'], viewer),
   thread: useComments(open ? 'e1' : null, viewer),
 });
 
-/** Waits until no read of this card is in flight, so an assertion sees what was written. */
-const cardSettled = async (hook: { client: import('@tanstack/react-query').QueryClient }, viewer: string) =>
-  waitFor(() =>
-    expect(hook.client.getQueryState(['comments', viewer, 'e1', 'latest'])?.fetchStatus).toBe('idle'),
-  );
-
-/** Releases the next held request with these rows. */
-const release = async (rows: unknown[]) => {
-  await waitFor(() => expect(mockPending.length).toBeGreaterThan(0));
-  const next = mockPending.shift()!;
-  await act(async () => {
-    next.resolve(rows);
-  });
-};
-
-const preview = (current: ReturnType<typeof useCardAndThread>) => current.card.get('e1')?.body ?? null;
-
-/**
- * A clock the tests step by hand (`tick`), so "started before" and "answered after" are
- * never the same instant by accident — a guard that leaned on timing could otherwise pass
- * these tests for the wrong reason, which the previous version of this file did.
- */
-let mockNow = 1_700_000_000_000;
-const tick = () => {
-  mockNow += 1_000;
-};
-beforeEach(() => {
-  mockPending.length = 0;
-  jest.spyOn(Date, 'now').mockImplementation(() => mockNow);
-});
-afterEach(() => {
-  jest.restoreAllMocks();
-});
-
-// Each test its own reader, so the per-reader order of one cannot touch another's.
 let reader = 0;
-const nextReader = () => `viewer-${(reader += 1)}`;
-
-it('an old card read that lands after a newer conversation read cannot restore its words', async () => {
-  const viewer = nextReader();
+const mount = async () => {
+  const viewer = `viewer-${(reader += 1)}`;
   let props = { viewer, open: false };
   const hook = await renderHookWithProviders(() => useCardAndThread(props));
+  const set = async (open: boolean) => {
+    props = { viewer, open };
+    await hook.rerender(undefined as never);
+  };
+  /** What the card would draw next: the cache, which a render can lag by a notification. */
+  const cached = () =>
+    (
+      (hook.client.getQueryData(commentsKey(viewer, 'e1')) as { body: string | null }[] | undefined) ??
+      []
+    ).map((comment) => comment.body);
+  const settled = () =>
+    waitFor(() =>
+      expect(hook.client.getQueryState(commentsKey(viewer, 'e1'))?.fetchStatus).toBe('idle'),
+    );
+  return { viewer, hook, set, cached, settled };
+};
 
-  // The card's read starts first and is held. Then the comment is withdrawn and the
-  // conversation opens: its later read answers first, without the comment.
-  await waitFor(() => expect(mockPending).toHaveLength(1));
-  const cardRead = mockPending.shift()!;
-  props = { viewer, open: true };
-  await hook.rerender(undefined as never);
-  await release([FRIEND]);
-  await waitFor(() => expect(hook.result.current.thread.isSuccess).toBe(true));
-  await waitFor(() =>
-    expect(preview(hook.result.current)).toBe('A comment the reader may still see.'),
-  );
+const take = async () => {
+  await waitFor(() => expect(mockHeld.length).toBeGreaterThan(0));
+  return mockHeld.shift()!;
+};
 
-  // The card's older read finally answers with the withdrawn comment. It must not apply.
-  tick();
-  await act(async () => {
-    cardRead.resolve([FRIEND, GONE]);
-  });
-  await cardSettled(hook, viewer);
-  // The cache is what the card draws next; the render can lag it by a notification.
-  const cached = hook.client.getQueryData(['comments', viewer, 'e1', 'latest']) as { body?: string } | null;
-  expect(cached?.body).toBe('A comment the reader may still see.');
-  await waitFor(() =>
-    expect(preview(hook.result.current)).toBe('A comment the reader may still see.'),
-  );
+const card = (hook: Awaited<ReturnType<typeof mount>>['hook']) =>
+  hook.result.current.card.get('e1')?.body ?? null;
+
+beforeEach(() => {
+  mockHeld.length = 0;
 });
 
-it('a newer conversation read still applies after an older card read has landed', async () => {
-  const viewer = nextReader();
-  let props = { viewer, open: false };
-  const hook = await renderHookWithProviders(() => useCardAndThread(props));
+it('the card and the conversation share one read, so they cannot disagree', async () => {
+  const { hook, set, settled } = await mount();
+  const first = await take();
 
-  await waitFor(() => expect(mockPending).toHaveLength(1));
-  const cardRead = mockPending.shift()!;
-  tick();
-  props = { viewer, open: true };
-  await hook.rerender(undefined as never);
-  await waitFor(() => expect(mockPending).toHaveLength(1));
-  const threadRead = mockPending.shift()!;
+  // Opening the conversation while the card's read is in flight joins it: no second read.
+  await set(true);
+  expect(mockHeld).toHaveLength(0);
 
-  // The older card read lands first — after the conversation's read began — still
-  // carrying the comment …
-  tick();
   await act(async () => {
-    cardRead.resolve([FRIEND, GONE]);
+    first.resolve([FRIEND]);
   });
-  await waitFor(() => expect(preview(hook.result.current)).toBe('Words that are no longer available.'));
+  await settled();
+  await waitFor(() => expect(card(hook)).toBe(STILL));
+  expect(hook.result.current.thread.data?.map((comment) => comment.body)).toEqual([STILL]);
+});
 
-  // … then the newer conversation read, which no longer has it, replaces it.
+it('an older read answering last — even in the same turn — never replaces a newer one', async () => {
+  const { viewer, hook, cached, settled } = await mount();
+  const first = await take();
   await act(async () => {
-    threadRead.resolve([FRIEND]);
+    first.resolve([FRIEND, GONE]);
   });
-  await waitFor(() =>
-    expect(preview(hook.result.current)).toBe('A comment the reader may still see.'),
-  );
+  await settled();
+
+  // A refresh starts a read, and before it answers a comment write elsewhere (or a pull)
+  // asks again. The second read supersedes the first.
+  await act(async () => {
+    void hook.client.invalidateQueries({ queryKey: ['comments', viewer] });
+  });
+  const older = await take();
+  await act(async () => {
+    void hook.client.invalidateQueries({ queryKey: ['comments', viewer] });
+  });
+  const newer = await take();
+
+  // Both answer in one turn, the older one last, with no flush between them.
+  await act(async () => {
+    newer.resolve([FRIEND]);
+    older.resolve([FRIEND, GONE]);
+  });
+  await settled();
+
+  expect(cached()).toEqual([STILL]);
+  await waitFor(() => expect(card(hook)).toBe(STILL));
+});
+
+it('a block drops the card at once and a pre-block answer is never committed', async () => {
+  const { viewer, hook, set, cached, settled } = await mount();
+  const first = await take();
+  await act(async () => {
+    first.resolve([FRIEND, GONE]);
+  });
+  await waitFor(() => expect(card(hook)).toBe('Words that are no longer available.'));
+
+  // The conversation opens and refetches; that read is held.
+  await set(true);
+  const preBlock = await take();
+
+  // The block. Not awaited: its promise settles when the refetch it starts answers.
+  await act(async () => {
+    void resetCommentPreviews(hook.client, viewer);
+  });
+  // The card has nothing to show until a post-block read answers.
+  await waitFor(() => expect(card(hook)).toBeNull());
+  const postBlock = await take();
+
+  // The pre-block answer and the post-block one arrive in the same turn, pre-block last.
+  await act(async () => {
+    postBlock.resolve([FRIEND]);
+    preBlock.resolve([FRIEND, GONE]);
+  });
+  await settled();
+
+  expect(cached()).toEqual([STILL]);
+  await waitFor(() => expect(card(hook)).toBe(STILL));
+  expect(hook.result.current.thread.data?.map((comment) => comment.body)).toEqual([STILL]);
 });
 
 it('a conversation reopened around a block never shows its pre-block answer', async () => {
-  const viewer = nextReader();
-  let props = { viewer, open: false };
-  const hook = await renderHookWithProviders(() => useCardAndThread(props));
-  await release([FRIEND]); // the card's own read
+  const { viewer, hook, set, cached, settled } = await mount();
+  const first = await take();
+  await act(async () => {
+    first.resolve([FRIEND]);
+  });
+  await settled();
 
-  // Open the conversation; its request is held. Close it, block, reopen.
-  props = { viewer, open: true };
-  await hook.rerender(undefined as never);
-  await waitFor(() => expect(mockPending).toHaveLength(1));
-  const preBlock = mockPending.shift()!;
-  props = { viewer, open: false };
-  await hook.rerender(undefined as never);
-  // Not awaited: its promise settles only when the refetch answers, which this test holds.
+  await set(true);
+  const preBlock = await take();
+  await set(false);
   await act(async () => {
     void resetCommentPreviews(hook.client, viewer);
   });
-  await waitFor(() => expect(preview(hook.result.current)).toBeNull(), { timeout: 1000 });
-  props = { viewer, open: true };
-  await hook.rerender(undefined as never);
+  await set(true);
 
-  // The pre-block answer arrives, still carrying the blocked author.
   await act(async () => {
     preBlock.resolve([FRIEND, GONE]);
   });
-  // It is not shown: the conversation reads again, and the post-block answer is what it
-  // returns. (The card's post-block refetch is answered along the way.)
-  // Answer whatever is asked next — the card's post-block refetch and the re-read —
-  // until the conversation settles.
+  // Answer whatever is asked after the block until it settles.
   await waitFor(async () => {
-    if (mockPending.length) await release([FRIEND]);
+    if (mockHeld.length) {
+      const next = mockHeld.shift()!;
+      await act(async () => {
+        next.resolve([FRIEND]);
+      });
+    }
     expect(hook.result.current.thread.isSuccess).toBe(true);
   });
-  const bodies = (hook.result.current.thread.data ?? []).map((comment) => comment.body);
-  expect(bodies).toEqual(['A comment the reader may still see.']);
-  expect(preview(hook.result.current)).toBe('A comment the reader may still see.');
+
+  expect(cached()).toEqual([STILL]);
+  expect(hook.result.current.thread.data?.map((comment) => comment.body)).toEqual([STILL]);
 });
 
-it('a conversation read from before a block cannot restore the blocked author on the card', async () => {
-  const viewer = nextReader();
-  let props = { viewer, open: false };
-  const hook = await renderHookWithProviders(() => useCardAndThread(props));
-  await release([FRIEND, GONE]); // the card shows the soon-to-be-blocked comment
-  await waitFor(() => expect(preview(hook.result.current)).toBe('Words that are no longer available.'));
+it('signing out drops every thread, and an answer that lands afterwards is not committed', async () => {
+  const { viewer, hook, cached } = await mount();
+  const pending = await take();
 
-  props = { viewer, open: true };
-  await hook.rerender(undefined as never);
-  await waitFor(() => expect(mockPending).toHaveLength(1));
-  const preBlock = mockPending.shift()!;
-
-  // The block: the card is reset and refetched without that person.
-  // Not awaited: its promise settles only when the refetch answers, which this test holds.
+  // Sign-out clears the whole client (`session.tsx`).
   await act(async () => {
-    void resetCommentPreviews(hook.client, viewer);
+    hook.client.clear();
   });
-  await waitFor(() => expect(preview(hook.result.current)).toBeNull(), { timeout: 1000 });
-  await release([FRIEND]);
+  await act(async () => {
+    pending.resolve([FRIEND, GONE]);
+  });
+
+  expect(cached()).toEqual([]);
+  expect(hook.client.getQueryData(commentsKey(viewer, 'e1'))).toBeUndefined();
+});
+
+it('the conversation never opens onto words the card read before it opened', async () => {
+  const { hook, set, settled } = await mount();
+  const first = await take();
+  await act(async () => {
+    first.resolve([FRIEND, GONE]);
+  });
+  await settled();
+
+  // Opening the conversation: the card's earlier answer is in the cache, but the sheet
+  // draws nothing until its own read — made now — has answered (review 43).
+  await set(true);
+  expect(hook.result.current.thread.data).toBeUndefined();
+  expect(hook.result.current.thread.isPending).toBe(true);
+  const own = await take();
+  await act(async () => {
+    own.resolve([FRIEND]);
+  });
   await waitFor(() =>
-    expect(preview(hook.result.current)).toBe('A comment the reader may still see.'),
+    expect(hook.result.current.thread.data?.map((comment) => comment.body)).toEqual([STILL]),
   );
-
-  // The conversation's pre-block answer lands; it is read again rather than applied.
-  await act(async () => {
-    preBlock.resolve([FRIEND, GONE]);
-  });
-  await waitFor(async () => {
-    if (mockPending.length) await release([FRIEND]);
-    expect(hook.result.current.thread.isSuccess).toBe(true);
-  });
-  expect(preview(hook.result.current)).toBe('A comment the reader may still see.');
-  expect((hook.result.current.thread.data ?? []).map((comment) => comment.body)).toEqual([
-    'A comment the reader may still see.',
-  ]);
 });
