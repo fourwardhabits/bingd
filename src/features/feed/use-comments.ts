@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
@@ -199,100 +198,51 @@ export function useCommentCounts(eventIds: string[], viewerId: string) {
  * stale text is exactly what was reported. A skeleton for one round trip — 2.2ms of
  * server time — is the right price.
  */
-/** The one cache entry for a thread, which the conversation and the Feed card both read. */
-export const commentsKey = (viewerId: string, eventId: string) =>
-  ['comments', viewerId, eventId] as const;
-
-/**
- * A thread, as this reader may see it: `activity_comments`, mapped. The conversation and the
- * Feed card's preview both read it through this function under `commentsKey`, so there is
- * one cache entry per thread and the query is its only writer.
- */
-export async function readThread(eventId: string): Promise<Comment[]> {
-  const { data, error } = await supabase.rpc('activity_comments', {
-    p_feed_event_id: eventId,
-  });
-  if (error) throw error;
-
-  return ((data ?? []) as CommentRow[]).map((row) => ({
-    id: row.id,
-    eventId,
-    parentId: row.parent_id,
-    authorId: row.author_id,
-    authorUsername: row.username,
-    authorName: row.display_name || row.username,
-    authorAvatarUri: avatarUri(row.avatar_path),
-    body: row.body,
-    hasSpoilers: row.has_spoilers,
-    createdAt: row.created_at,
-    editedAt: row.edited_at,
-    deleted: row.deleted_at !== null,
-    reactionCount: row.reaction_count,
-    reactedByMe: row.reacted_by_me,
-    // Narrowed against the shared list rather than cast: the column is `text`, and a
-    // value this client does not know is a glyph it cannot draw — so an unrecognised
-    // one is dropped here rather than rendering as `undefined` three layers down.
-    reactionKinds: (row.reaction_kinds ?? []).filter(isReactionKind),
-    myReaction: isReactionKind(row.my_reaction) ? row.my_reaction : null,
-    // Defensive against a server that predates 20260830000100 — a bundle can be
-    // newer than the database it is pointed at during a rollout, and an edit that
-    // read `undefined.map` would be a crash rather than a comment with no mentions.
-    mentions: (row.mentions ?? []).map((mention) => ({
-      id: mention.id,
-      username: mention.username,
-      // Absent from a server that predates the column, and from any row written
-      // before it existed. Null reads as "no second spelling", which is right.
-      handle: mention.handle ?? null,
-    })),
-  }));
-}
-
-/**
- * The conversation: one query per thread, **shared with the Feed card's preview**
- * (`useLatestComments` observes the same key). One cache and one writer, so the card and
- * the conversation can never disagree, and ordering, cancellation and sign-out are the
- * query library's own guarantees rather than anything this file arranges — the design the
- * combined Preview reviews arrived at after three rounds of reconciling two caches
- * (2026-11-04).
- *
- * **Only an answer read since the conversation opened is drawn.** A Feed card keeps the
- * entry alive while it is on screen, so the sheet could otherwise open onto words read
- * before it was opened — the "stale words while refetching" defect `gcTime: 0` was added
- * to stop (review 43). The query refetches on mount (`staleTime: 0`), and until an answer
- * has arrived since then the conversation reports itself loading and draws nothing.
- */
 export function useComments(eventId: string | null, viewerId: string) {
-  const queryClient = useQueryClient();
-  const key = commentsKey(viewerId, eventId ?? '');
-  /**
-   * What the cache held for this thread at the moment it was opened here, per event — the
-   * sheet stays mounted and is pointed at one thread after another. An answer is fresh only
-   * if it is a *different* answer: every read commits a new array (structural sharing is
-   * off for threads), so identity says "read since this opened" with no clock to tie and no
-   * counter for a visibility reset to restart — the library's `isFetchedAfterMount` left an
-   * open conversation "loading" after a block.
-   */
-  const [opened, setOpened] = useState(() => ({
-    eventId,
-    data: queryClient.getQueryData(key) as Comment[] | undefined,
-  }));
-  const openedData =
-    opened.eventId === eventId ? opened.data : (queryClient.getQueryData(key) as Comment[] | undefined);
-  if (opened.eventId !== eventId) setOpened({ eventId, data: openedData });
-  const query = useQuery({
-    queryKey: key,
+  return useQuery({
+    queryKey: ['comments', viewerId, eventId],
     enabled: Boolean(eventId),
     staleTime: 0,
     gcTime: 0,
-    queryFn: () => readThread(eventId as string),
-    structuralSharing: false,
+    queryFn: async (): Promise<Comment[]> => {
+      const { data, error } = await supabase.rpc('activity_comments', {
+        p_feed_event_id: eventId as string,
+      });
+      if (error) throw error;
+
+      return ((data ?? []) as CommentRow[]).map((row) => ({
+        id: row.id,
+        eventId: eventId as string,
+        parentId: row.parent_id,
+        authorId: row.author_id,
+        authorUsername: row.username,
+        authorName: row.display_name || row.username,
+        authorAvatarUri: avatarUri(row.avatar_path),
+        body: row.body,
+        hasSpoilers: row.has_spoilers,
+        createdAt: row.created_at,
+        editedAt: row.edited_at,
+        deleted: row.deleted_at !== null,
+        reactionCount: row.reaction_count,
+        reactedByMe: row.reacted_by_me,
+        // Narrowed against the shared list rather than cast: the column is `text`, and a
+        // value this client does not know is a glyph it cannot draw — so an unrecognised
+        // one is dropped here rather than rendering as `undefined` three layers down.
+        reactionKinds: (row.reaction_kinds ?? []).filter(isReactionKind),
+        myReaction: isReactionKind(row.my_reaction) ? row.my_reaction : null,
+        // Defensive against a server that predates 20260830000100 — a bundle can be
+        // newer than the database it is pointed at during a rollout, and an edit that
+        // read `undefined.map` would be a crash rather than a comment with no mentions.
+        mentions: (row.mentions ?? []).map((mention) => ({
+          id: mention.id,
+          username: mention.username,
+          // Absent from a server that predates the column, and from any row written
+          // before it existed. Null reads as "no second spelling", which is right.
+          handle: mention.handle ?? null,
+        })),
+      }));
+    },
   });
-  const fresh = !query.isError && query.data !== undefined && query.data !== openedData;
-  return {
-    ...query,
-    data: fresh ? query.data : undefined,
-    isPending: query.isPending || (!fresh && !query.isError),
-  };
 }
 
 /**

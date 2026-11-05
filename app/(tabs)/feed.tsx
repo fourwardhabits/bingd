@@ -32,7 +32,6 @@ import { feedArtwork, takesFeedCard } from '@/features/feed/feed-artwork';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { useLatestComments } from '@/features/feed/use-latest-comments';
 import {
   feedItems,
   trimFeedToFirstPage,
@@ -468,21 +467,6 @@ export default function FeedScreen() {
   const eventIds = useMemo(() => events.map((event) => event.id), [events]);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
-  /**
-   * The newest comment under each card that has any (cinematic Feed, 2026-11-04).
-   *
-   * Only the cards whose count is above zero, so a quiet page reads nothing more than it
-   * did. The count is this reader's own (`activity_comment_counts`), so a thread whose
-   * only remarks are by people they may not see is never asked for.
-   */
-  const threadedIds = useMemo(
-    () =>
-      events
-        .filter((event) => takesFeedCard(event) && (commentCounts.data?.get(event.id) ?? 0) > 0)
-        .map((event) => event.id),
-    [events, commentCounts.data],
-  );
-  const latestComments = useLatestComments(threadedIds, profile.id);
   const { setReaction } = useSetReaction(profile.id);
 
   const choose = async (eventId: string, kind: ReactionKind | null) => {
@@ -701,9 +685,6 @@ export default function FeedScreen() {
               void feed.refetch();
               void reactions.refetch();
               void commentCounts.refetch();
-              // The latest-comment previews, by the prefix every comment write already
-              // invalidates — a remark retracted elsewhere leaves the card on this pull.
-              void queryClient.invalidateQueries({ queryKey: ['comments', profile.id] });
               // The bell is on this screen, so a reader pulling to see what is new is
               // asking about it too. Leaving it out meant the one deliberate "refresh
               // this page" gesture in the app refreshed everything on it except the
@@ -1027,7 +1008,6 @@ export default function FeedScreen() {
                     }
                     saved={saved.has(event.mediaItemId!)}
                     onPressShare={event.kind !== 'series' ? () => openRecommend(event) : undefined}
-                    latestComment={latestCommentFor(event)}
                   />
                 ) : (
                 <ActivityRow
@@ -1269,29 +1249,6 @@ export default function FeedScreen() {
       />
     </Screen>
   );
-
-  /**
-   * The newest comment under a card, with the spoiler decided here — by `shouldMask`, the
-   * function the sheet uses, against the exact title the activity is about and the
-   * comment's own author. A masked preview carries no body to the card at all.
-   */
-  function latestCommentFor(event: FeedItem) {
-    const comment = latestComments.get(event.id);
-    if (!comment) return null;
-    return {
-      authorName: comment.authorName,
-      authorAvatarUri: comment.authorAvatarUri,
-      body: comment.body,
-      masked: shouldMask({
-        hasSpoilers: comment.hasSpoilers,
-        mediaItemId: event.mediaItemId,
-        viewerId: profile.id,
-        authorId: comment.authorId,
-        watched: watched.data,
-      }),
-      timeLabel: relativeTime(comment.createdAt),
-    };
-  }
 
   function reactionFor(eventId: string) {
     const summary = reactions.data?.get(eventId);

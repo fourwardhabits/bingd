@@ -327,137 +327,36 @@ describe('reviews', () => {
   });
 });
 
-describe('the latest-comment preview', () => {
-  const withComments = (rows: unknown[], count = rows.length) => {
-    mockRpc.activity_comment_counts = [{ feed_event_id: 'e1', comment_count: count }];
-    mockRpc.activity_comments = rows;
-  };
-
-  it('previews the newest comment in the commenter’s name, with “View all”', async () => {
+/**
+ * **No latest-comment line on the card in this Preview** (founder, 2026-11-04). Five rounds
+ * of independent review each found another ordering in which a preview could show a
+ * withdrawn or blocked comment, so the line was taken out for this candidate. The card
+ * keeps its comment count and Comment control; the conversation is the only place a
+ * comment's words appear, read exactly as on 505ae33.
+ */
+describe('comments on the card', () => {
+  it('draws no comment text and reads no thread from the Feed', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    withComments([
-      comment('c1', 'First!', '2026-11-04T10:05:00Z'),
-      comment('c2', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z', {
-        parent_id: 'c1',
-        author_id: 'priya',
-        username: 'priyan',
-        display_name: 'Priya',
-      }),
-    ]);
+    mockRpc.activity_comment_counts = [{ feed_event_id: 'e1', comment_count: 2 }];
+    mockRpc.activity_comments = [comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z')];
     const view = await renderWithProviders(<FeedScreen />);
-    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
-
-    const said = textOf(preview);
-    // The reply is the newest thing said, and it is Priya's — not Ada's.
-    expect(said).toContain('Priya');
-    expect(said).toContain('Top 3?? We need to talk.');
-    expect(said).not.toContain('Ada');
-    expect(said).toContain('View all 2 comments');
-  });
-
-  it('opens the existing conversation when tapped', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    withComments([comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z')]);
-    const view = await renderWithProviders(<FeedScreen />);
-    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
-
-    expect(view.queryByPlaceholderText('Add a comment')).toBeNull();
-    fireEvent.press(preview);
-    await waitFor(() => expect(view.getByPlaceholderText('Add a comment')).toBeTruthy());
-  });
-
-  it('drops a preview the conversation no longer contains once the thread is read', async () => {
-    // Loaded, then withdrawn (or its author went private to this reader) before the
-    // conversation is opened. The thread's fresh read is the newer answer.
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    withComments([comment('c1', 'Soon to be withdrawn.', '2026-11-04T10:09:00Z')]);
-    const view = await renderWithProviders(<FeedScreen />);
-    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
-    expect(textOf(preview)).toContain('Soon to be withdrawn.');
-    // Sanity: the hidden-element query does find a preview while one exists.
-    expect(view.queryByTestId('feed-card-latest-comment', { includeHiddenElements: true })).toBeTruthy();
-
-    mockRpc.activity_comments = [];
-    fireEvent.press(view.getByTestId('feed-card-comment'));
-    await waitFor(() => expect(view.getByPlaceholderText('Add a comment')).toBeTruthy());
-
-    // Behind the open sheet, which hides the Feed from default queries — so look there too.
-    const hidden = { includeHiddenElements: true };
     await waitFor(() =>
-      expect(view.queryByTestId('feed-card-latest-comment', hidden)).toBeNull(),
+      expect(view.getByLabelText(/^2 comments on Ada's activity/)).toBeTruthy(),
     );
-    expect(view.queryByText(/Soon to be withdrawn/, hidden)).toBeNull();
+
+    expect(view.queryByText(/We need to talk/)).toBeNull();
+    expect(mockRpcCalls.some((call) => call.name === 'activity_comments')).toBe(false);
   });
 
-  it('skips a retracted comment and previews the one before it', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    withComments(
-      [comment('c1', 'Still here.', '2026-11-04T10:05:00Z'), comment('c2', null, '2026-11-04T10:09:00Z')],
-      1,
-    );
-    const view = await renderWithProviders(<FeedScreen />);
-    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
-    expect(textOf(preview)).toContain('Still here.');
-  });
-
-  it('masks a spoiler comment for a reader who has not seen the title', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    withComments([
-      comment('c1', 'He builds the bomb.', '2026-11-04T10:09:00Z', { has_spoilers: true }),
-    ]);
-    const view = await renderWithProviders(<FeedScreen />);
-    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
-    expect(textOf(preview)).toContain('Contains spoilers');
-    expect(textOf(preview)).not.toContain('He builds the bomb.');
-  });
-
-  it('shows a spoiler comment to a reader who has seen the title', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    mockWatched = [{ media_item_id: 'film-e1' }];
-    withComments([
-      comment('c1', 'He builds the bomb.', '2026-11-04T10:09:00Z', { has_spoilers: true }),
-    ]);
-    const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(textOf(view.getByTestId('feed-card-latest-comment'))).toContain('He builds the bomb.'));
-  });
-
-  it('draws no preview when the comment read fails, rather than anything cached', async () => {
+  it('opens the conversation from Comment, where the words are read', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockRpc.activity_comment_counts = [{ feed_event_id: 'e1', comment_count: 1 }];
-    mockRpc.activity_comments = new Error('offline');
+    mockRpc.activity_comments = [comment('c1', 'Top 3?? We need to talk.', '2026-11-04T10:09:00Z')];
     const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() =>
-      expect(mockRpcCalls.some((call) => call.name === 'activity_comments')).toBe(true),
-    );
-    expect(view.queryByTestId('feed-card-latest-comment')).toBeNull();
-    // The count still says there is a conversation to open.
-    expect(view.getByTestId('feed-card-comment')).toBeTruthy();
-  });
+    fireEvent.press(await waitFor(() => view.getByTestId('feed-card-comment')));
 
-  it('never previews a reply whose root the server withheld', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    withComments([
-      comment('c1', 'An earlier remark.', '2026-11-04T10:01:00Z'),
-      comment('c2', 'Replying to someone you cannot see.', '2026-11-04T10:09:00Z', {
-        parent_id: 'hidden-root',
-      }),
-    ]);
-    const view = await renderWithProviders(<FeedScreen />);
-    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
-    expect(textOf(preview)).toContain('An earlier remark.');
-    expect(textOf(preview)).not.toContain('Replying to someone you cannot see.');
-  });
-
-  it('makes no comment read for a card with no comments, and draws no preview', async () => {
-    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
-    const view = await renderWithProviders(<FeedScreen />);
-    await waitFor(() => expect(view.getByTestId('feed-card-artwork')).toBeTruthy());
-    await waitFor(() =>
-      expect(mockRpcCalls.some((call) => call.name === 'activity_comment_counts')).toBe(true),
-    );
-
-    expect(mockRpcCalls.some((call) => call.name === 'activity_comments')).toBe(false);
-    expect(view.queryByTestId('feed-card-latest-comment')).toBeNull();
+    await waitFor(() => expect(view.getByPlaceholderText('Add a comment')).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/We need to talk/)).toBeTruthy());
   });
 });
 
