@@ -152,7 +152,15 @@ inert.
 ## Cinematic Editorial refinement (2026-11-04)
 
 Branch `experiment/cinematic-editorial-title`, on `02f713d` (this experiment). Local only,
-not pushed, not published. The commit SHA is recorded in the commit log and the handoff.
+not pushed, not published. Code commits, in order:
+
+| Commit | What |
+|---|---|
+| `5699db7` | The refinement |
+| `568afd8` | Review fixes: sheet dismissal, cast scrolling, status bar without artwork |
+| `f1d17c0` | Sheet gutters |
+
+This record is the commit after `f1d17c0`; the branch head is the candidate.
 **Same switch, same default, same production lock:** `title-layout.ts` is unchanged, so the
 Original page is still the default everywhere and the Labs row is still hidden in production.
 Ranking, scoring and every sheet still run through the page's shared handlers.
@@ -175,7 +183,8 @@ Shared components touched, all additively: `CastStrip` (`compact` prop), `TitleA
 ### Restoring the previous Immersive layout
 
 - **Keep the experiment, drop the refinement:** use `experiment/immersive-title` at `02f713d`
-  instead of this branch in the combined candidate, or revert this branch's commit.
+  instead of this branch in the combined candidate, or revert `f1d17c0`, `568afd8` and
+  `5699db7` (newest first) with `git revert`.
 - **Original page:** unchanged by this refinement; every restore option above still applies.
 
 ### Review of the refinement
