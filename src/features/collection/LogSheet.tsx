@@ -9,7 +9,7 @@ import { queryKeys } from '@/lib/query';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
-import { readNoteVisibilityDefault, rememberNoteVisibility } from './note-visibility-pref';
+import { NEW_NOTE_VISIBILITY } from './note-visibility-pref';
 import { theme } from '@/ui/tokens';
 import {
   BucketChoices,
@@ -284,23 +284,6 @@ function Body({
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const logState = useLogState(profile.id, title.id);
-  /**
-   * What a new note opens on for this reader, once the local store answers.
-   *
-   * Null until it lands, and the fallback while it is null is the product default —
-   * on. A composer that opened private and then flipped to public a beat later would
-   * be worse than either, and the read is local so the gap is a frame.
-   */
-  const [rememberedVisibility, setRememberedVisibility] = useState<NoteVisibility | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void readNoteVisibilityDefault(profile.id).then((stored) => {
-      if (!cancelled) setRememberedVisibility(stored);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile.id]);
   const { data: existing } = logState;
   const state = existing ?? emptyLogState;
   /**
@@ -541,22 +524,20 @@ function Body({
    * value to contradict.
    */
   /**
-   * **The remembered default, and it is the last term rather than the first.**
+   * **A new note opens private** (founder, 2026-11-04; `note-visibility-pref.ts`).
    *
-   * The founder's rule (2026-09-06): a first-ever note opens with *Share as a review*
-   * on, and after that a new note opens on whatever they chose last time. What the rule
-   * must never do is republish existing writing — so it sits behind `state.note`, which
-   * is the promise that a saved note opens on its stored value and nothing else.
-   *
-   * `noteIntent === 'review'` still wins over it: arriving through "Write a review" is
-   * an explicit request to publish this one, whatever the habit is.
+   * It becomes a public review only when the reader turns *Share as a review* on for it.
+   * There is no remembered habit any more: a past "shared" would publish the next note
+   * without that note's own act. `noteIntent === 'review'` — the title's "Write a review"
+   * — is that act made before writing, so it still opens shared. Writing that already
+   * exists opens on its stored value whatever happens here.
    */
   const visibility =
     visibilityEdit ??
     (state.note
       ? state.noteVisibility
       : (openWriting ??
-        (noteIntent === 'review' ? 'public' : (rememberedVisibility ?? 'public'))));
+        (noteIntent === 'review' ? 'public' : NEW_NOTE_VISIBILITY)));
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
   /**
@@ -1104,19 +1085,6 @@ function Body({
           if (writesNoteHere) {
             knownNote.current = trimmed;
             knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
-            /**
-             * **The habit, remembered — and only here.**
-             *
-             * This branch is a note being written on a row that did not exist, which is
-             * the definition of a new composition. The `save_note` branch below is an
-             * edit to writing that already exists, and a decision about *that note* is
-             * not a change of habit — remembering it there is how a reader who unshared
-             * one old private note would find every future note opening private.
-             *
-             * Only on an acknowledged success, for the same reason `createdRow` is:
-             * a save that failed says nothing about what anybody intended.
-             */
-            void rememberNoteVisibility(profile.id, nextVisibility);
           }
         }
         ok = report(result);

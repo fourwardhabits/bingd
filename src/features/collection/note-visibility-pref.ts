@@ -1,68 +1,31 @@
-import { readPref, writePref } from '@/lib/prefs';
-
 import type { NoteVisibility } from './writes';
 
 /**
- * Which visibility a **new** note opens on, remembered per account.
+ * Which visibility a **new** note opens on: private, every time (founder, 2026-11-04).
  *
  * ---------------------------------------------------------------------------
- * THE RULE, AND THE ONE THING IT MUST NEVER DO
+ * WHY PRIVATE, AND WHY THERE IS NO LONGER A REMEMBERED HABIT
  *
- * The founder's decision: the first note anybody ever writes opens with *Share as a
- * review* **on**, because a review nobody can read is not what most people mean when
- * they write about a film. After that the app follows them — turn it off and save, and
- * the next new note opens off; turn it back on, and the next opens on.
+ * From 2026-09-06 a reader's first-ever note opened with *Share as a review* on, and every
+ * later new note opened on whatever they chose last time. With the log sheet's details
+ * above its buckets (ranking-start Option A), that meant a first note typed before a
+ * bucket was autosaved as a public review a second after typing paused — in the title's
+ * Reviews, counted on the profile and the Leaderboard, able to unlock an award post —
+ * before the reader had ranked anything, and still public if they closed the sheet.
  *
- * **It never touches writing that already exists.** A note that has been saved opens on
- * the visibility it was saved with, full stop. This preference is consulted only for a
- * note with no stored value to contradict, which is what makes it impossible for a
- * general habit to retroactively publish something somebody kept private. `LogSheet`
- * enforces that ordering; this module holds no opinion about it and could not, because
- * it is never told whether a note exists.
- * ---------------------------------------------------------------------------
+ * The founder's rule now: **a note becomes a public review only when the reader turns on
+ * "Share as a review" for it.** So a new note opens private, and a past choice no longer
+ * carries to the next note — a remembered "shared" would publish the next note without
+ * that note's own explicit act. Completing a ranking publishes nothing either.
  *
- * Local and per account, through the same `readPref`/`writePref` pair the Collection's
- * remembered medium uses: it is a device habit rather than a fact about the account, so
- * it needs no column, no migration and no sync. A device that has never been used to
- * write anything gets the default, which is the right answer for a new device too.
+ * Two things are unchanged and must stay so:
+ * - **Writing that already exists opens on the visibility it was saved with.** Published
+ *   reviews stay published; private notes stay private.
+ * - **"Write a review"** on a title's Reviews is an explicit request to publish that note,
+ *   so the log sheet still opens it shared (`noteIntent: 'review'`). It is the one entry
+ *   point that names a review before anything is written.
+ *
+ * The `notes.share-default` value earlier builds stored on a device is no longer read. It
+ * is inert, so nothing needs cleaning up.
  */
-const KEY = 'notes.share-default';
-
-/** ON, and deliberately. See the header. */
-export const DEFAULT_NOTE_VISIBILITY: NoteVisibility = 'public';
-
-const isVisibility = (value: unknown): value is NoteVisibility =>
-  value === 'public' || value === 'private';
-
-/**
- * What a new note should open on for this reader.
- *
- * A stored value that will not parse — a key left by an older build — is ignored rather
- * than trusted, the same way the remembered medium validates its own.
- */
-export async function readNoteVisibilityDefault(userId: string): Promise<NoteVisibility> {
-  try {
-    const stored = await readPref<unknown>(`${userId}.${KEY}`);
-    return isVisibility(stored) ? stored : DEFAULT_NOTE_VISIBILITY;
-  } catch {
-    // A store that cannot be read is not a reader who chose privately. The product
-    // default stands, which is the same answer a fresh install gets.
-    return DEFAULT_NOTE_VISIBILITY;
-  }
-}
-
-/**
- * Remember what they chose, on a successful save of a **new** note.
- *
- * Only on success, and only for a new one: a save that failed says nothing about intent,
- * and an edit to existing writing is a decision about *that note* rather than a change
- * of habit. Both conditions are the caller's to establish — see `LogSheet`.
- */
-export async function rememberNoteVisibility(userId: string, visibility: NoteVisibility) {
-  try {
-    await writePref(`${userId}.${KEY}`, visibility);
-  } catch {
-    // A preference that could not be stored costs the next note its memory and nothing
-    // else. Never worth failing a save that already landed.
-  }
-}
+export const NEW_NOTE_VISIBILITY: NoteVisibility = 'private';
