@@ -4,7 +4,7 @@ import { AppState } from 'react-native';
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
 
-import { addMonths, formatWatchDate, today } from './dates';
+import { addDays, addMonths, formatWatchDate, today } from './dates';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
 import { emptyLogState } from './use-log-state';
 import {
@@ -2873,6 +2873,30 @@ describe('the remembered share choice', () => {
     });
     await sheet.openNotes();
     await waitFor(() => expect(shareOn(sheet)).toBe(true));
+  });
+
+  it('saves a date picked while the preference is still being read', async () => {
+    // Only the note waits for the Share choice; a date carries no visibility. Holding it
+    // too dropped a pick made in that instant without a word (Codex, combined candidate).
+    let release = () => {};
+    mockPrefGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sheet = await open(filmA);
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Yesterday' }));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_watched_on: addDays(today(), -1),
+      p_note: null,
+    });
+    // And the note itself is still shut until the choice lands.
+    expect(sheet.notesRow().props.accessibilityState.disabled).toBe(true);
+    await act(async () => {
+      release();
+      await mockPrefGate;
+    });
   });
 
   it('is not changed by opening a note, saving one, or finishing a ranking', async () => {
