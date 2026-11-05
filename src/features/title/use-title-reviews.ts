@@ -17,6 +17,58 @@ export type ReviewSort = 'top_desc' | 'top_asc' | 'following' | 'recent_desc' | 
 
 export const DEFAULT_REVIEW_SORT: ReviewSort = 'top_desc';
 
+/**
+ * What the Cinematic Editorial Reviews sheet can be ordered by (post-QA sprint 2,
+ * 2026-11-05): the five server orders, plus Rating.
+ *
+ * **Rating is not a server order**, and is never faked as one. `title_reviews_v2` has no
+ * score sort and no paging. So Rating is the *complete* Most Helpful list re-ordered by
+ * the authors' own scores, and is offered only when that list is provably complete —
+ * when the server returned fewer rows than it was asked for (`reviewsComplete`). A
+ * truncated list is never re-sorted and passed off as a global order. Server-side Rating
+ * and paging are a `title_reviews_v3` follow-up, which needs a migration.
+ */
+export type ReviewOrder = ReviewSort | 'rating_desc' | 'rating_asc';
+
+export const isRatingOrder = (order: ReviewOrder): order is 'rating_desc' | 'rating_asc' =>
+  order === 'rating_desc' || order === 'rating_asc';
+
+/** The server order a view reads: Rating reads Most Helpful and re-orders it. */
+export const serverSortOf = (order: ReviewOrder): ReviewSort =>
+  isRatingOrder(order) ? 'top_desc' : order;
+
+/**
+ * Rows asked for per read: the server's own ceiling (`least(..., 100)` in
+ * 20260911000200). Asking for exactly the ceiling is what makes a shorter answer a proof
+ * that nothing was left behind.
+ */
+export const REVIEW_LIMIT = 100;
+
+/** True only when the server returned everything there is for this order. */
+export const reviewsComplete = (rows: readonly unknown[] | undefined): boolean =>
+  Array.isArray(rows) && rows.length < REVIEW_LIMIT;
+
+/**
+ * A complete list, ordered by the author's score. A review written without a ranking has
+ * no score and goes last in either direction — it is not a zero. Ties keep the Most
+ * Helpful list's own order (a stable sort over it), so a Helpful tap never moves a row.
+ */
+export function orderByRating(rows: readonly TitleReview[], direction: 'desc' | 'asc') {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const x = a.row.score;
+      const y = b.row.score;
+      if (x === null || y === null) {
+        if (x === y) return a.index - b.index;
+        return x === null ? 1 : -1;
+      }
+      if (x !== y) return direction === 'desc' ? y - x : x - y;
+      return a.index - b.index;
+    })
+    .map(({ row }) => row);
+}
+
 export type TitleReview = {
   /**
    * The `user_media` row this review is written on, which is also its report subject and
@@ -75,7 +127,7 @@ export function useTitleReviews(mediaItemId: string | null, sort: ReviewSort) {
       const { data, error } = await supabase.rpc('title_reviews_v2', {
         p_media_item_id: mediaItemId,
         p_sort: sort,
-        p_limit: 50,
+        p_limit: REVIEW_LIMIT,
       });
       if (error) throw error;
 

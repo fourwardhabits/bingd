@@ -734,7 +734,17 @@ export type AnalyticsEvent =
    */
   | {
       name: 'reviews_sort_changed';
-      props: { sort: 'top_desc' | 'top_asc' | 'following' | 'recent_desc' | 'recent_asc' };
+      // Rating (post-QA sprint 2) is the Cinematic Editorial sheet's client-side order.
+      props: {
+        sort:
+          | 'top_desc'
+          | 'top_asc'
+          | 'following'
+          | 'recent_desc'
+          | 'recent_asc'
+          | 'rating_desc'
+          | 'rating_asc';
+      };
     }
 
   // --- Recommendations ------------------------------------------------------

@@ -2,8 +2,8 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import { TitleReviews } from './TitleReviews';
-import type { ReviewSort, TitleReview } from './use-title-reviews';
+import { REVIEWS_PREVIEW_COUNT, ReviewsPreview, TitleReviews } from './TitleReviews';
+import type { ReviewOrder, TitleReview } from './use-title-reviews';
 
 /**
  * The Reviews tab's controls — 20260911000100.
@@ -39,8 +39,8 @@ const review = (over: Partial<TitleReview> & { id: string }): TitleReview => ({
 const open = (
   over: {
     reviews?: TitleReview[];
-    sort?: ReviewSort;
-    onChangeSort?: (sort: ReviewSort) => void;
+    sort?: ReviewOrder;
+    onChangeSort?: (sort: ReviewOrder) => void;
     onToggleHelpful?: (review: TitleReview) => void;
   } = {},
 ) =>
@@ -216,5 +216,174 @@ describe('the empty states', () => {
     // Not the generic one: a reader who filtered to Following and met "Be the first"
     // would think nobody had written anything at all.
     expect(view.queryByText('No reviews yet')).toBeNull();
+  });
+});
+
+/**
+ * The Cinematic Editorial sheet's controls (post-QA sprint 2, 2026-11-05): Most Helpful,
+ * Newest, Rating and the Following filter, each reversing on a second tap where that
+ * means something — and the original page's three, untouched.
+ */
+describe('the editorial sheet', () => {
+  const sheet = (sort: ReviewOrder, onChangeSort = jest.fn(), ratingAvailable = true) =>
+    renderWithProviders(
+      <TitleReviews
+        reviews={[review({ id: 'a' }), review({ id: 'b', userId: 'other-2' })]}
+        loading={false}
+        sort={sort}
+        onChangeSort={onChangeSort}
+        onToggleHelpful={() => {}}
+        maskedFor={() => false}
+        onPressAuthor={() => {}}
+        viewerRanked
+        viewerHasReview={false}
+        onWrite={() => {}}
+        noun="movie"
+        viewerId={VIEWER}
+        variant="editorial"
+        ratingAvailable={ratingAvailable}
+      />,
+    );
+
+  it('offers Helpful, Newest, Rating and Following, Most Helpful selected by default', async () => {
+    const view = await sheet('top_desc');
+    expect(view.getByRole('tab', { name: 'Most helpful first' })).toBeSelected();
+    expect(view.getByRole('tab', { name: 'Newest' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Rating' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Only people you follow' })).toBeTruthy();
+  });
+
+  it('reverses the active order on a second tap, and enters another at its default', async () => {
+    const onChangeSort = jest.fn();
+    const helpful = await sheet('top_desc', onChangeSort);
+    await fireEvent.press(helpful.getByRole('tab', { name: 'Most helpful first' }));
+    await fireEvent.press(helpful.getByRole('tab', { name: 'Newest' }));
+    await fireEvent.press(helpful.getByRole('tab', { name: 'Rating' }));
+    expect(onChangeSort.mock.calls.map(([next]) => next)).toEqual([
+      'top_asc',
+      'recent_desc',
+      'rating_desc',
+    ]);
+
+    const newest = jest.fn();
+    const recent = await sheet('recent_desc', newest);
+    await fireEvent.press(recent.getByRole('tab', { name: 'Newest first' }));
+    expect(newest).toHaveBeenCalledWith('recent_asc');
+
+    const oldest = await sheet('recent_asc');
+    expect(oldest.getByRole('tab', { name: 'Oldest first' })).toBeSelected();
+    expect(oldest.getByText('Oldest')).toBeTruthy();
+
+    const rating = jest.fn();
+    const rated = await sheet('rating_desc', rating);
+    await fireEvent.press(rated.getByRole('tab', { name: 'Highest rated first' }));
+    expect(rating).toHaveBeenCalledWith('rating_asc');
+  });
+
+  it('leaves Rating out when the list it would re-order is not complete', async () => {
+    const view = await sheet('top_desc', jest.fn(), false);
+    expect(view.queryByRole('tab', { name: 'Rating' })).toBeNull();
+  });
+
+  it('shows the thumbs-up Helpful as the one reaction, no heart beside it', async () => {
+    const view = await renderWithProviders(
+      <TitleReviews
+        reviews={[review({ id: 'a', userId: 'other-1', reactionCount: 4 })]}
+        loading={false}
+        sort="top_desc"
+        onChangeSort={() => {}}
+        onToggleHelpful={() => {}}
+        maskedFor={() => false}
+        onPressAuthor={() => {}}
+        viewerRanked
+        viewerHasReview={false}
+        onWrite={() => {}}
+        noun="movie"
+        viewerId={VIEWER}
+        variant="editorial"
+      />,
+    );
+    expect(view.getByLabelText(/review helpful/)).toBeTruthy();
+    expect(view.queryByText('4')).toBeNull();
+  });
+
+  it('keeps the original page on Top, Following and Recent', async () => {
+    const view = await open();
+    expect(view.getByRole('tab', { name: 'Top, most helpful first' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Following' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Recent' })).toBeTruthy();
+    expect(view.queryByRole('tab', { name: 'Rating' })).toBeNull();
+  });
+});
+
+describe('the reviews preview', () => {
+  const base = {
+    loading: false,
+    maskedFor: () => false,
+    viewerId: VIEWER,
+    viewerRanked: true,
+    ownReview: null,
+    onWrite: () => {},
+    onSeeAll: () => {},
+    noun: 'movie',
+  };
+  const others = [
+    review({ id: 'a', userId: 'other-1', text: 'First.' }),
+    review({ id: 'b', userId: 'other-2', text: 'Second.' }),
+    review({ id: 'c', userId: 'other-3', text: 'Third.' }),
+  ];
+
+  it('shows at most two, three lines each, and opens the sheet from a review', async () => {
+    const onSeeAll = jest.fn();
+    const view = await renderWithProviders(
+      <ReviewsPreview {...base} reviews={others} onSeeAll={onSeeAll} />,
+    );
+    expect(REVIEWS_PREVIEW_COUNT).toBe(2);
+    expect(view.getAllByTestId('review-preview')).toHaveLength(2);
+    expect(view.queryByText('Third.')).toBeNull();
+    await fireEvent.press(view.getAllByTestId('review-preview')[0]);
+    expect(onSeeAll).toHaveBeenCalled();
+  });
+
+  it('puts your review first and leaves yours out of the others', async () => {
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[review({ id: 'mine', userId: VIEWER, text: 'Mine, from the list.' }), ...others]}
+        ownReview={{ text: 'Mine.', hasSpoilers: false, updatedAt: null, helpfulCount: 2 }}
+      />,
+    );
+    expect(view.getByTestId('your-review')).toBeTruthy();
+    expect(view.getByText('2 people found this helpful')).toBeTruthy();
+    expect(view.queryByText('Mine, from the list.')).toBeNull();
+    expect(view.getAllByTestId('review-preview')).toHaveLength(1);
+  });
+
+  it('says only yours exists when nobody else has written one', async () => {
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[]}
+        ownReview={{ text: 'Mine.', hasSpoilers: false, updatedAt: null, helpfulCount: 0 }}
+      />,
+    );
+    expect(view.getByTestId('reviews-preview-only-yours')).toBeTruthy();
+    expect(view.queryByTestId('reviews-preview-empty')).toBeNull();
+  });
+
+  it('masks a spoiler, and says so to a screen reader without the words', async () => {
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[
+          review({ id: 'a', userId: 'other-1', text: 'He was dead all along.', hasSpoilers: true }),
+        ]}
+        maskedFor={() => true}
+      />,
+    );
+    expect(view.queryByText(/dead all along/)).toBeNull();
+    expect(view.getByTestId('review-preview').props.accessibilityLabel).toMatch(
+      /Contains spoilers$/,
+    );
   });
 });

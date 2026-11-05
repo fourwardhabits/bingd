@@ -2,7 +2,15 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { useSetReviewHelpful, useTitleReviews } from './use-title-reviews';
+import {
+  REVIEW_LIMIT,
+  isRatingOrder,
+  orderByRating,
+  reviewsComplete,
+  serverSortOf,
+  useSetReviewHelpful,
+  useTitleReviews,
+} from './use-title-reviews';
 
 /**
  * The Helpful write, and what the cache does while it is in flight — 20260911000100.
@@ -61,7 +69,7 @@ describe('reading the list', () => {
     expect(mockRpc).toHaveBeenCalledWith('title_reviews_v2', {
       p_media_item_id: MEDIA,
       p_sort: 'top_desc',
-      p_limit: 50,
+      p_limit: 100,
     });
     expect(result.current.data?.[0]?.helpfulCount).toBe(5);
     expect(result.current.data?.[0]?.viewerHelpful).toBe(true);
@@ -198,5 +206,51 @@ describe('marking a review helpful', () => {
 
     await waitFor(() => expect(result.current.set.isSuccess).toBe(true));
     expect(result.current.list.data?.[0]?.helpfulCount).toBeGreaterThanOrEqual(0);
+  });
+});
+
+/**
+ * Rating, which the server cannot sort by (post-QA sprint 2, 2026-11-05): a complete
+ * list re-ordered on the device, and only ever a complete one.
+ */
+describe('ordering by rating', () => {
+  const row = (id: string, score: number | null) => ({
+    id,
+    userId: `u-${id}`,
+    username: id,
+    name: id,
+    avatarUri: null,
+    score,
+    text: id,
+    hasSpoilers: false,
+    updatedAt: null,
+    reactionCount: 0,
+    helpfulCount: 0,
+    viewerHelpful: false,
+  });
+
+  it('orders by score either way, unscored last both times, ties in Helpful order', () => {
+    const rows = [row('a', 7), row('b', null), row('c', 9), row('d', 7), row('e', 2)];
+    expect(orderByRating(rows, 'desc').map((r) => r.id)).toEqual(['c', 'a', 'd', 'e', 'b']);
+    expect(orderByRating(rows, 'asc').map((r) => r.id)).toEqual(['e', 'a', 'd', 'c', 'b']);
+    // Never mutates the cached list it was given.
+    expect(rows.map((r) => r.id)).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('calls a list complete only when the server returned less than it was asked for', () => {
+    expect(REVIEW_LIMIT).toBe(100);
+    expect(reviewsComplete([])).toBe(true);
+    expect(reviewsComplete(new Array(99).fill(0))).toBe(true);
+    expect(reviewsComplete(new Array(100).fill(0))).toBe(false);
+    expect(reviewsComplete(undefined)).toBe(false);
+  });
+
+  it('reads Rating from the Most Helpful order, and every other order as itself', () => {
+    expect(serverSortOf('rating_desc')).toBe('top_desc');
+    expect(serverSortOf('rating_asc')).toBe('top_desc');
+    for (const sort of ['top_desc', 'top_asc', 'following', 'recent_desc', 'recent_asc'] as const) {
+      expect(serverSortOf(sort)).toBe(sort);
+      expect(isRatingOrder(sort)).toBe(false);
+    }
   });
 });

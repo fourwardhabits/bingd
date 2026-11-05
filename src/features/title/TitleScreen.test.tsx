@@ -3694,16 +3694,17 @@ describe('the immersive title page (experiment)', () => {
       const view = await open();
       await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
 
-      for (const key of ['about', 'cast']) {
+      for (const key of ['about', 'cast', 'reviews']) {
         expect(view.getAllByTestId(`immersive-section-${key}`)).toHaveLength(1);
       }
-      // Reviews, Similar and Details are tabs now, not stacked sections as well.
-      for (const key of ['reviews', 'similar', 'details']) {
+      // Similar and Details are tabs, not stacked sections as well.
+      for (const key of ['similar', 'details']) {
         expect(view.queryByTestId(`immersive-section-${key}`)).toBeNull();
       }
+      // Post-QA sprint 2: Reviews left the tabs — Similar | Trailers | Details.
       const tabs = within(view.getByTestId('immersive-tabs'));
       expect(tabs.getByRole('tab', { name: 'Similar' })).toBeTruthy();
-      expect(tabs.getByRole('tab', { name: 'Reviews' })).toBeTruthy();
+      expect(tabs.queryByRole('tab', { name: /^Reviews/ })).toBeNull();
       expect(tabs.getByRole('tab', { name: 'Details' })).toBeTruthy();
       // Similar leads and is selected.
       expect(tabs.getByRole('tab', { name: 'Similar' })).toBeSelected();
@@ -3713,7 +3714,8 @@ describe('the immersive title page (experiment)', () => {
       // Section headings print in capitals; the spoken name keeps the title's case.
       expect(at('ABOUT')).toBeGreaterThan(-1);
       expect(at('ABOUT')).toBeLessThan(at('CAST'));
-      expect(at('CAST')).toBeLessThan(at('Similar'));
+      expect(at('CAST')).toBeLessThan(at('REVIEWS'));
+      expect(at('REVIEWS')).toBeLessThan(at('Similar'));
       // The cast is on the page, not behind a tab.
       expect(view.getByText('Leonardo DiCaprio')).toBeTruthy();
     });
@@ -3778,25 +3780,14 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
     });
 
-    it('lists every review under the Reviews tab, once', async () => {
-      mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
-      mockRpcResults.title_review_count = 3;
-      const view = await open();
-      await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews (3)' })).toBeTruthy());
-      // Similar is the default, so no review is drawn yet.
-      expect(view.queryByText('Review number 1.')).toBeNull();
-
-      await fireEvent.press(view.getByRole('tab', { name: 'Reviews (3)' }));
-      await waitFor(() => expect(view.getByText('Review number 3.')).toBeTruthy());
-      expect(view.getAllByText('Review number 1.')).toHaveLength(1);
-    });
-
     /**
-     * **The Reviews tab, refined** (founder phone QA, 2026-11-04): your published review
-     * first as a light "Your review" section with a small Edit review; no full-width
-     * compose button; no second score circle; a compact Write a review otherwise.
+     * **Reviews after Cast, every review in a sheet** (post-QA sprint 2, 2026-11-05).
+     *
+     * The page shows one or two — yours first — and See all opens the full list in a
+     * sheet, where the order, Helpful, spoilers and reporting live. The Reviews tab and
+     * the "From your circle" line are gone; Following is a filter inside the sheet.
      */
-    describe('your review', () => {
+    describe('reviews after Cast', () => {
       const withNote = (visibility: 'public' | 'private', note = 'My own words on it.') => {
         ranked();
         tableRows.user_media = [
@@ -3812,97 +3803,266 @@ describe('the immersive title page (experiment)', () => {
           },
         ];
       };
-      const openReviews = async () => {
-        const view = await open();
-        const tab = await waitFor(() => view.getByRole('tab', { name: /^Reviews/ }));
-        await fireEvent.press(tab);
-        return view;
+      const sheetOf = async (view: Awaited<ReturnType<typeof open>>) => {
+        await fireEvent.press(
+          await waitFor(() => view.getByRole('button', { name: /^See all \d+ reviews$|^See the review$/ })),
+        );
+        return within(await waitFor(() => view.getByTestId('reviews-sheet-list')));
       };
+      const sortTab = (sheet: ReturnType<typeof within>, name: string | RegExp) =>
+        sheet.getByRole('tab', { name });
+      const reviewsCalledWith = (sort: string) =>
+        mockRpc.mock.calls.some(
+          ([name, args]) =>
+            name === 'title_reviews_v2' && (args as { p_sort?: string }).p_sort === sort,
+        );
 
-      it('leads with your published review, once, with a small Edit review', async () => {
+      it('previews the two most helpful under the Cast, three lines each', async () => {
+        tableRows.media_cache = [credits];
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
+        mockRpcResults.title_review_count = 3;
+        const view = await open();
+        const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
+        await waitFor(() => expect(preview.getByText('Review number 1.')).toBeTruthy());
+
+        expect(preview.getByText('Review number 2.')).toBeTruthy();
+        expect(preview.queryByText('Review number 3.')).toBeNull();
+        expect(preview.getAllByTestId('review-preview')).toHaveLength(2);
+        // Read as the Most Helpful list, at the server's ceiling.
+        expect(mockRpc).toHaveBeenCalledWith(
+          'title_reviews_v2',
+          expect.objectContaining({ p_sort: 'top_desc', p_limit: 100 }),
+        );
+        // Reviews sits after the Cast and before the lower tabs.
+        const order = readingOrder(view.toJSON());
+        expect(order.indexOf('CAST')).toBeLessThan(order.indexOf('REVIEWS'));
+        expect(order.indexOf('REVIEWS')).toBeLessThan(order.indexOf('Similar'));
+        expect(view.getByRole('button', { name: 'See all 3 reviews' })).toBeTruthy();
+      });
+
+      it('leads with your published review and its Edit, then one other', async () => {
         withNote('public');
-        // The list also carries your review (with a score); it must not be drawn twice.
         mockRpcResults.title_reviews_v2 = [
           reviewBy(1),
           { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
           reviewBy(2),
         ];
-        const view = await openReviews();
-        const mine = await waitFor(() => view.getByTestId('your-review'));
+        mockRpcResults.title_review_count = 3;
+        const view = await open();
+        const preview = within(await waitFor(() => view.getByTestId('reviews-preview')));
+        const mine = await waitFor(() => preview.getByTestId('your-review'));
 
         expect(within(mine).getByText(/Your review/)).toBeTruthy();
-        expect(within(mine).getByText('My own words on it.')).toBeTruthy();
-        expect(view.getAllByText('My own words on it.')).toHaveLength(1);
-        // Before everyone else's.
+        expect(preview.getAllByText('My own words on it.')).toHaveLength(1);
+        expect(preview.getAllByTestId('review-preview')).toHaveLength(1);
+        expect(preview.getByText('Review number 1.')).toBeTruthy();
+        expect(preview.queryByText('Review number 2.')).toBeNull();
         const order = readingOrder(view.toJSON());
         expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
-        // No score circle on your own review — it is the emphasis in the module above.
+        // No score circle on your own review.
         expect(within(mine).queryAllByLabelText(/out of 10/)).toHaveLength(0);
-        // A small Edit review, and no full-width compose button.
-        expect(within(mine).getByTestId('edit-review')).toBeTruthy();
-        expect(view.queryByRole('button', { name: 'Write a review' })).toBeNull();
 
-        // Into the one composer: the log sheet, as every other route to a note.
         await fireEvent.press(within(mine).getByTestId('edit-review'));
         await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
       });
 
-      it('never shows a private note as your review, and offers Write a review', async () => {
+      it('never shows a private note as a review, anywhere', async () => {
         withNote('private', 'Only for me.');
         mockRpcResults.title_reviews_v2 = [reviewBy(1)];
-        const view = await openReviews();
-        await waitFor(() => expect(view.getByTestId('write-review')).toBeTruthy());
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        await waitFor(() => expect(view.getByText('Review number 1.')).toBeTruthy());
 
         expect(view.queryByTestId('your-review')).toBeNull();
         expect(view.queryByText('Only for me.')).toBeNull();
-        expect(view.getByRole('button', { name: 'Write a review' })).toBeTruthy();
+        const sheet = await sheetOf(view);
+        expect(sheet.queryByText('Only for me.')).toBeNull();
+        expect(sheet.queryByTestId('your-review')).toBeNull();
       });
 
-      it('asks an unranked reader to rank first, compactly', async () => {
-        mockRpcResults.title_reviews_v2 = [reviewBy(1)];
-        const view = await openReviews();
+      it('masks a spoiler review in the preview for a reader who has not seen it', async () => {
+        mockRpcResults.title_reviews_v2 = [
+          { ...reviewBy(7), note: 'The top keeps spinning.', has_spoilers: true },
+        ];
+        mockRpcResults.title_review_count = 1;
+        const view = await open();
+        const row = await waitFor(() => view.getByTestId('review-preview'));
+        expect(within(row).queryByText(/The top keeps spinning/)).toBeNull();
+        expect(row.props.accessibilityLabel).toMatch(/Contains spoilers$/);
+        expect(row.props.accessibilityLabel).not.toMatch(/spinning/);
+      });
+
+      it('says No reviews yet, with a compact Write a review for a ranked reader', async () => {
+        ranked();
+        mockRpcResults.title_reviews_v2 = [];
+        mockRpcResults.title_review_count = 0;
+        const view = await open();
+        const empty = await waitFor(() => view.getByTestId('reviews-preview-empty'));
+        expect(within(empty).getByText('No reviews yet')).toBeTruthy();
+        expect(within(empty).getByRole('button', { name: 'Write a review' })).toBeTruthy();
+        // Nothing to see all of.
+        expect(view.queryByRole('button', { name: /^See all/ })).toBeNull();
+
+        await fireEvent.press(within(empty).getByRole('button', { name: 'Write a review' }));
+        await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
+      });
+
+      it('asks an unranked reader to rank first', async () => {
+        mockRpcResults.title_reviews_v2 = [];
+        mockRpcResults.title_review_count = 0;
+        const view = await open();
         await waitFor(() =>
           expect(view.getByRole('button', { name: 'Rank to leave a review' })).toBeTruthy(),
         );
         expect(view.queryByTestId('your-review')).toBeNull();
       });
-    });
 
-    describe('from your circle', () => {
-      it('previews a followed reader’s published review and opens Reviews filtered to them', async () => {
-        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
-          args.p_sort === 'following' ? [reviewBy(7)] : [reviewBy(1)];
+      it('draws no "From your circle" line any more', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(7)];
+        mockRpcResults.title_review_count = 1;
         const view = await open();
-        const circle = await waitFor(() => view.getByTestId('immersive-circle'));
-        expect(within(circle).getByText(/Review number 7\./)).toBeTruthy();
+        await waitFor(() => expect(view.getByTestId('reviews-preview')).toBeTruthy());
+        expect(view.queryByTestId('immersive-circle')).toBeNull();
+        expect(reviewsCalledWith('following')).toBe(false);
+      });
 
-        await fireEvent.press(circle);
-        await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews' })).toBeSelected());
-        expect(mockRpc).toHaveBeenCalledWith(
-          'title_reviews_v2',
-          expect.objectContaining({ p_sort: 'following' }),
+      it('lists every review in the sheet, once, Most Helpful first, and closes on Done', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
+        mockRpcResults.title_review_count = 3;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        for (const n of [1, 2, 3]) {
+          expect(sheet.getAllByText(`Review number ${n}.`)).toHaveLength(1);
+        }
+        expect(sortTab(sheet, 'Most helpful first')).toBeSelected();
+        // Helpful is the review's one reaction: a thumbs-up, and no heart beside it.
+        expect(sheet.getByLabelText(/^Mark Reader 1's review helpful/)).toBeTruthy();
+        expect(sheet.getByLabelText("Report Reader 1's review")).toBeTruthy();
+
+        await fireEvent.press(view.getByRole('button', { name: 'Done' }));
+        await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
+      });
+
+      it('marks a review helpful from the sheet, on the real vote', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2)];
+        mockRpcResults.title_review_count = 2;
+        mockRpcResults.set_review_helpful = { helpful_count: 1, viewer_helpful: true };
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sheet.getByLabelText(/^Mark Reader 2's review helpful/));
+        await waitFor(() =>
+          expect(mockRpc).toHaveBeenCalledWith(
+            'set_review_helpful',
+            expect.objectContaining({ p_review_id: 'um-2', p_helpful: true }),
+          ),
         );
-        // While Reviews is open the line steps aside, so the review is not shown twice.
-        expect(view.queryByTestId('immersive-circle')).toBeNull();
       });
 
-      it('draws nothing when nobody the reader follows has reviewed it', async () => {
-        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
-          args.p_sort === 'following' ? [] : [reviewBy(1)];
+      it('orders by Newest on the server, and Oldest on a second tap', async () => {
+        mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2)];
+        mockRpcResults.title_review_count = 2;
         const view = await open();
-        await waitFor(() => expect(view.getByTestId('immersive-tabs')).toBeTruthy());
-        expect(view.queryByTestId('immersive-circle')).toBeNull();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sortTab(sheet, 'Newest'));
+        await waitFor(() => expect(reviewsCalledWith('recent_desc')).toBe(true), { timeout: 4000 });
+        await fireEvent.press(sortTab(sheet, 'Newest first'));
+        await waitFor(() => expect(reviewsCalledWith('recent_asc')).toBe(true), { timeout: 4000 });
+        expect(sortTab(sheet, 'Oldest first')).toBeSelected();
       });
 
-      it('masks a spoiler review for a reader who has not seen the title', async () => {
-        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
-          args.p_sort === 'following'
-            ? [{ ...reviewBy(7), note: 'The top keeps spinning.', has_spoilers: true }]
-            : [];
+      it('orders by Rating over the complete list, highest first, then lowest', async () => {
+        mockRpcResults.title_reviews_v2 = [
+          { ...reviewBy(1), score: '6.1' },
+          { ...reviewBy(2), score: '9.4' },
+          { ...reviewBy(3), score: null },
+          { ...reviewBy(4), score: '7.7' },
+        ];
+        mockRpcResults.title_review_count = 4;
         const view = await open();
-        const circle = await waitFor(() => view.getByTestId('immersive-circle'));
-        expect(within(circle).getByText(/Contains spoilers/)).toBeTruthy();
-        expect(within(circle).queryByText(/The top keeps spinning/)).toBeNull();
+        const sheet = await sheetOf(view);
+        const calls = mockRpc.mock.calls.length;
+
+        await fireEvent.press(sortTab(sheet, 'Rating'));
+        // An instance tree names each string at its composite and its host; once each.
+        const shown = () => [
+          ...new Set(
+            readingOrder(view.getByTestId('reviews-sheet-list')).filter((t) =>
+              /^Review number \d\.$/.test(t),
+            ),
+          ),
+        ];
+        await waitFor(() =>
+          expect(shown()).toEqual([
+            'Review number 2.',
+            'Review number 4.',
+            'Review number 1.',
+            'Review number 3.',
+          ]),
+        );
+        // Re-ordered from the list already read: no new order was asked of the server.
+        expect(
+          mockRpc.mock.calls
+            .slice(calls)
+            .filter(([name]) => name === 'title_reviews_v2')
+            .every(([, args]) => (args as { p_sort: string }).p_sort === 'top_desc'),
+        ).toBe(true);
+
+        await fireEvent.press(sortTab(sheet, 'Highest rated first'));
+        // Lowest first; a review with no score stays last either way.
+        await waitFor(() =>
+          expect(shown()).toEqual([
+            'Review number 1.',
+            'Review number 4.',
+            'Review number 2.',
+            'Review number 3.',
+          ]),
+        );
+      });
+
+      it('never offers Rating over a list the server may have cut short', async () => {
+        mockRpcResults.title_reviews_v2 = Array.from({ length: 100 }, (_, n) => reviewBy(n + 1));
+        mockRpcResults.title_review_count = 140;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        expect(sheet.queryByRole('tab', { name: 'Rating' })).toBeNull();
+        expect(sheet.getByTestId('reviews-truncated')).toHaveTextContent(
+          'Showing the first 100 reviews in this order.',
+        );
+      });
+
+      it('keeps Following as a filter inside the sheet', async () => {
+        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
+          args.p_sort === 'following' ? [reviewBy(7)] : [reviewBy(1), reviewBy(2)];
+        mockRpcResults.title_review_count = 2;
+        const view = await open();
+        const sheet = await sheetOf(view);
+
+        await fireEvent.press(sortTab(sheet, 'Only people you follow'));
+        await waitFor(() => expect(sheet.getByText('Review number 7.')).toBeTruthy());
+        expect(sheet.queryByText('Review number 1.')).toBeNull();
+      });
+
+      it('pins your own review at the top of the sheet, with Edit', async () => {
+        withNote('public');
+        mockRpcResults.title_reviews_v2 = [
+          reviewBy(1),
+          { ...reviewBy(9), user_id: 'user-1', note: 'My own words on it.', display_name: 'Sai' },
+        ];
+        mockRpcResults.title_review_count = 2;
+        const view = await open();
+        const sheet = await sheetOf(view);
+        const mine = sheet.getByTestId('your-review');
+        expect(sheet.getAllByText('My own words on it.')).toHaveLength(1);
+        const order = readingOrder(view.getByTestId('reviews-sheet-list'));
+        expect(order.indexOf('My own words on it.')).toBeLessThan(order.indexOf('Review number 1.'));
+
+        // Edit from inside the sheet: the sheet goes, then the one composer opens.
+        await fireEvent.press(within(mine).getByTestId('edit-review'));
+        await waitFor(() => expect(view.queryByTestId('reviews-sheet')).toBeNull());
       });
     });
 

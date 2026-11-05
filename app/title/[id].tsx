@@ -71,14 +71,18 @@ import { GenreLine } from '@/features/title/GenreLine';
 import { TrailerRail } from '@/features/title/TrailerRail';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
-import { TitleReviews } from '@/features/title/TitleReviews';
+import { ReviewsPreview, TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
 import {
   DEFAULT_REVIEW_SORT,
+  isRatingOrder,
+  orderByRating,
+  reviewsComplete,
+  serverSortOf,
   useSetReviewHelpful,
   useTitleReviewCount,
   useTitleReviews,
-  type ReviewSort,
+  type ReviewOrder,
   type TitleReview,
 } from '@/features/title/use-title-reviews';
 import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
@@ -333,7 +337,15 @@ export default function TitleScreen() {
   const pendingRecheck = useRef<{ watchEventId: string; bucket: RankingSubject['bucket'] } | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
-  const [reviewSort, setReviewSort] = useState<ReviewSort>(DEFAULT_REVIEW_SORT);
+  // The Cinematic Editorial sheet may also choose Rating, which reads Top and re-orders it.
+  const [reviewSort, setReviewSort] = useState<ReviewOrder>(DEFAULT_REVIEW_SORT);
+  /**
+   * The Cinematic Editorial Reviews sheet (post-QA sprint 2, 2026-11-05), and a write
+   * asked for from inside it: the sheet closes first and the log sheet opens after it has
+   * gone, so two modals are never presented at once — the rewatch hand-off's rule.
+   */
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  const pendingReviewWrite = useRef(false);
   const [recommending, setRecommending] = useState(false);
   /**
    * The ⋯ menu: add to a list, change the rating, drop it, or remove the title.
@@ -503,15 +515,23 @@ export default function TitleScreen() {
    *
    * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
    */
-  const reviews = useTitleReviews(data?.title?.kind === 'series' ? null : titleId, reviewSort);
+  const reviews = useTitleReviews(
+    data?.title?.kind === 'series' ? null : titleId,
+    serverSortOf(reviewSort),
+  );
   /**
-   * Published reviews by people this reader follows, for the immersive page's one-line
-   * "From your circle". The Reviews tab's own `following` filter, read only when the
-   * immersive layout is on; nothing new on the server.
+   * The Most Helpful list, for the Cinematic Editorial page's Reviews preview and for the
+   * sheet's Rating order, which re-orders it (post-QA sprint 2, 2026-11-05).
+   *
+   * The same query key the sheet's default order reads — `['title-reviews', id,
+   * 'top_desc']` — so it is one cache entry, one request, and the one every Helpful
+   * vote and every collection change already updates and invalidates. It replaces the
+   * "From your circle" read: the preview supersedes that line, and Following stays a
+   * filter inside the sheet.
    */
-  const circleReviews = useTitleReviews(
+  const helpfulReviews = useTitleReviews(
     immersive && data?.title?.kind !== 'series' ? titleId : null,
-    'following',
+    'top_desc',
   );
   /**
    * The number on the tab, read separately from the list.
@@ -1500,6 +1520,94 @@ export default function TitleScreen() {
   );
 
   /**
+   * The full list of reviews: the original page's Reviews tab, and the Cinematic
+   * Editorial page's Reviews sheet (post-QA sprint 2, 2026-11-05). One element, so the
+   * two cannot disagree about spoilers, Helpful, reporting or who sees what.
+   *
+   * In the sheet, Rating is the complete Most Helpful list re-ordered by score — offered
+   * only while that list is provably complete — and any other order is the server's.
+   */
+  const reviewList = ({ inSheet = false }: { inSheet?: boolean } = {}) => {
+    const rating = inSheet && isRatingOrder(reviewSort) && ratingAvailable;
+    const serverRows = rating ? helpfulReviews.data : reviews.data;
+    const rows = rating
+      ? orderByRating(helpfulReviews.data ?? [], reviewSort === 'rating_asc' ? 'asc' : 'desc')
+      : (reviews.data ?? []);
+    const loading = rating ? helpfulReviews.isPending : reviews.isPending;
+    return (
+      <TitleReviews
+          reviews={rows}
+          loading={loading}
+          sort={reviewSort}
+          onChangeSort={(next) => {
+            setReviewSort(next);
+            track({ name: 'reviews_sort_changed', props: { sort: next } });
+          }}
+          onToggleHelpful={(review: TitleReview) => {
+            /**
+             * One write at a time, and a second tap while it is in flight does nothing.
+             *
+             * Not throttling for its own sake: a queued mutation runs its `onMutate`
+             * immediately, so a second tap would take a snapshot of the first tap's
+             * optimistic state and a double failure would roll back to a mark the
+             * server never accepted. Refusing to start the second write keeps exactly
+             * one optimistic change alive, which is the condition the rollback in
+             * `useSetReviewHelpful` is correct under.
+             */
+            if (setHelpful.isPending) return;
+            // The premium interaction vocabulary, at its quietest weight: this is a
+            // selection, not an achievement.
+            hapticSelection();
+            setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
+          }}
+          // Against this viewer's watched set and this exact media item: having seen
+          // Season 1 does not unmask Season 2.
+          maskedFor={(review) =>
+            shouldMask({
+              hasSpoilers: review.hasSpoilers,
+              mediaItemId: title.id,
+              viewerId: profile.id,
+              authorId: review.userId,
+              watched: watched.data,
+            })
+          }
+          onPressAuthor={(handle) => {
+            if (inSheet) setReviewsOpen(false);
+            router.push(`/u/${handle}`);
+          }}
+          viewerRanked={Boolean(data.ranked)}
+          viewerHasReview={(reviews.data ?? []).some(
+            (review) => review.userId === profile.id,
+          )}
+          // One composer. A note has always been written in the log sheet, where the
+          // spoiler flag and the visibility are chosen beside it; a second one here
+          // would be a second content model wearing a different button.
+          onWrite={inSheet ? writeFromSheet : () => openLog('review')}
+          noun={title.kind === 'season' ? 'season' : 'movie'}
+          // So the reporting control is absent from the viewer's own review, which
+          // the server would refuse anyway.
+          viewerId={profile.id}
+          ratingAvailable={inSheet && ratingAvailable}
+          truncated={inSheet && !reviewsComplete(serverRows)}
+          // The immersive page's Reviews tab (founder phone QA, 2026-11-04): your
+          // published review first, from your own row — a public note and nothing else.
+          variant={immersive ? 'editorial' : undefined}
+          ownReview={immersive ? ownPublishedReview : null}
+        />
+    );
+  };
+
+  /** Rating needs every review in hand; a list at the server's ceiling may not be all. */
+  const ratingAvailable = immersive && reviewsComplete(helpfulReviews.data);
+
+  /** Edit or Write from inside the sheet: close it, then open the one composer. */
+  const writeFromSheet = () => {
+    setReviewsOpen(false);
+    if (Platform.OS === 'ios') pendingReviewWrite.current = true;
+    else openLog('review');
+  };
+
+  /**
    * **The tab bodies, as one function both layouts call** (Immersive Scroll experiment).
    *
    * The blocks inside are the ones the tab bar always rendered, moved here unchanged:
@@ -1509,7 +1617,7 @@ export default function TitleScreen() {
    */
   const tabContent = (
     which: Tab | null | undefined,
-    { reviewLimit, similarLimit }: { reviewLimit?: number; similarLimit?: number } = {},
+    { similarLimit }: { similarLimit?: number } = {},
   ) => {
     const activeTab = which;
     return (
@@ -1622,78 +1730,7 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
-        {activeTab === 'reviews' ? (
-          <TitleReviews
-            reviews={reviews.data ?? []}
-            loading={reviews.isPending}
-            sort={reviewSort}
-            onChangeSort={(next) => {
-              setReviewSort(next);
-              track({ name: 'reviews_sort_changed', props: { sort: next } });
-            }}
-            onToggleHelpful={(review: TitleReview) => {
-              /**
-               * One write at a time, and a second tap while it is in flight does nothing.
-               *
-               * Not throttling for its own sake: a queued mutation runs its `onMutate`
-               * immediately, so a second tap would take a snapshot of the first tap's
-               * optimistic state and a double failure would roll back to a mark the
-               * server never accepted. Refusing to start the second write keeps exactly
-               * one optimistic change alive, which is the condition the rollback in
-               * `useSetReviewHelpful` is correct under.
-               */
-              if (setHelpful.isPending) return;
-              // The premium interaction vocabulary, at its quietest weight: this is a
-              // selection, not an achievement.
-              hapticSelection();
-              setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
-            }}
-            // Against this viewer's watched set and this exact media item: having seen
-            // Season 1 does not unmask Season 2.
-            maskedFor={(review) =>
-              shouldMask({
-                hasSpoilers: review.hasSpoilers,
-                mediaItemId: title.id,
-                viewerId: profile.id,
-                authorId: review.userId,
-                watched: watched.data,
-              })
-            }
-            onPressAuthor={(handle) => router.push(`/u/${handle}`)}
-            viewerRanked={Boolean(data.ranked)}
-            viewerHasReview={(reviews.data ?? []).some(
-              (review) => review.userId === profile.id,
-            )}
-            // One composer. A note has always been written in the log sheet, where the
-            // spoiler flag and the visibility are chosen beside it; a second one here
-            // would be a second content model wearing a different button.
-            onWrite={() => openLog('review')}
-            noun={title.kind === 'season' ? 'season' : 'movie'}
-            // So the reporting control is absent from the viewer's own review, which
-            // the server would refuse anyway.
-            viewerId={profile.id}
-            limit={reviewLimit}
-            // The immersive page's Reviews tab (founder phone QA, 2026-11-04): your
-            // published review first, from your own row — a public note and nothing else.
-            variant={immersive ? 'editorial' : undefined}
-            ownReview={
-              immersive && hasReview
-                ? {
-                    text: noteText,
-                    hasSpoilers: Boolean(data.logged?.note_has_spoilers),
-                    updatedAt:
-                      (reviews.data ?? []).find((review) => review.userId === profile.id)
-                        ?.updatedAt ??
-                      data.logged?.note_updated_at ??
-                      null,
-                    helpfulCount:
-                      (reviews.data ?? []).find((review) => review.userId === profile.id)
-                        ?.helpfulCount ?? 0,
-                  }
-                : null
-            }
-          />
-        ) : null}
+        {activeTab === 'reviews' ? reviewList() : null}
 
         {activeTab === 'details' ? (
           <View style={styles.details}>
@@ -1882,17 +1919,12 @@ export default function TitleScreen() {
     </View>
   );
 
-  /** The lower tabs. Similar leads; Reviews is absent on a whole series, as before. */
+  /**
+   * The lower tabs: Similar | Trailers | Details (post-QA sprint 2, 2026-11-05). Reviews
+   * left them for its own section after Cast and the sheet behind its See all.
+   */
   const lowerTabs: SegmentOption<LowerTab>[] = [
     { id: 'similar', label: 'Similar' },
-    ...(isSeries
-      ? []
-      : [
-          {
-            id: 'reviews' as const,
-            label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
-          },
-        ]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Trailers' }] : []),
     { id: 'details', label: 'Details' },
   ];
@@ -1900,24 +1932,43 @@ export default function TitleScreen() {
     ? lowerTab
     : 'similar';
 
+  /** Spoiler masking for one review, against this viewer and this exact media item. */
+  const reviewMasked = (review: TitleReview) =>
+    shouldMask({
+      hasSpoilers: review.hasSpoilers,
+      mediaItemId: title.id,
+      viewerId: profile.id,
+      authorId: review.userId,
+      watched: watched.data,
+    });
+
+  /** The reader's own published review, from their own row — a public note, never a private one. */
+  const ownPublishedReview = hasReview
+    ? {
+        text: noteText,
+        hasSpoilers: Boolean(data.logged?.note_has_spoilers),
+        updatedAt:
+          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
+            ?.updatedAt ??
+          data.logged?.note_updated_at ??
+          null,
+        helpfulCount:
+          (helpfulReviews.data ?? reviews.data ?? []).find((review) => review.userId === profile.id)
+            ?.helpfulCount ?? 0,
+      }
+    : null;
+
   /**
-   * **From your circle** (brief §6): the newest published review by somebody the reader
-   * follows, as one quiet line above the tabs — only when one exists, and never while the
-   * Reviews tab is open, where the same review is already listed. It is the server's own
-   * `following` filter over published reviews, so a comment can never appear here and an
-   * account the reader may not see never does either. A spoiler is masked by the rule the
-   * Reviews tab applies.
+   * How many reviews See all leads to. The count and the list are two reads and either
+   * can be the fresher one for a moment, so the larger is used: See all is never hidden
+   * while a review is on screen.
    */
-  const circleReview = !isSeries ? (circleReviews.data?.[0] ?? null) : null;
-  const circleMasked = circleReview
-    ? shouldMask({
-        hasSpoilers: circleReview.hasSpoilers,
-        mediaItemId: title.id,
-        viewerId: profile.id,
-        authorId: circleReview.userId,
-        watched: watched.data,
-      })
-    : false;
+  const reviewTotal = Math.max(reviewCount.data ?? 0, helpfulReviews.data?.length ?? 0);
+
+  const openReviews = () => {
+    setReviewSort(DEFAULT_REVIEW_SORT);
+    setReviewsOpen(true);
+  };
 
   const immersiveContent = (
     <>
@@ -2024,41 +2075,33 @@ export default function TitleScreen() {
         </View>
       ) : null}
 
-      {circleReview && lowerActive !== 'reviews' ? (
-        <Pressable
-          testID="immersive-circle"
-          accessibilityRole="button"
-          accessibilityLabel={
-            circleMasked
-              ? `From your circle: ${circleReview.name}'s review contains spoilers. Open reviews from people you follow.`
-              : `From your circle: ${circleReview.name}: ${circleReview.text}. Open reviews from people you follow.`
-          }
-          onPress={() => {
-            setReviewSort('following');
-            setLowerTab('reviews');
-          }}
-          style={({ pressed }) => [styles.immersiveCircle, pressed && styles.pressed]}
-        >
-          <Avatar size="xs" uri={circleReview.avatarUri} name={circleReview.name} />
-          <View style={styles.immersiveCircleCopy}>
-            <Text variant="caption" tone="tertiary">
-              From your circle
-            </Text>
-            <Text variant="footnote" numberOfLines={2}>
-              <Text variant="footnote" style={styles.immersiveCircleName}>
-                {circleReview.name}
-              </Text>
-              {circleMasked ? (
-                <Text variant="footnote" tone="tertiary">
-                  {'  Contains spoilers'}
-                </Text>
-              ) : (
-                `  ${circleReview.text}`
-              )}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={theme.layout.icon.sm} color={theme.text.tertiary} />
-        </Pressable>
+      {/**
+       * **Reviews, after Cast** (post-QA sprint 2, 2026-11-05): one or two on the page,
+       * yours first, and every review behind See all. Not for a series, which nobody can
+       * rank and so nobody can review.
+       */}
+      {!isSeries ? (
+        <View style={styles.immersiveSection} testID="immersive-section-reviews">
+          <SectionHeader
+            title="Reviews"
+            actionLabel={reviewTotal > 0 ? 'See all' : undefined}
+            actionAccessibilityLabel={
+              reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`
+            }
+            onPressAction={reviewTotal > 0 ? openReviews : undefined}
+          />
+          <ReviewsPreview
+            reviews={helpfulReviews.data ?? []}
+            loading={helpfulReviews.isPending}
+            maskedFor={reviewMasked}
+            viewerId={profile.id}
+            viewerRanked={Boolean(data.ranked)}
+            ownReview={ownPublishedReview}
+            onWrite={() => openLog('review')}
+            onSeeAll={openReviews}
+            noun={title.kind === 'season' ? 'season' : 'movie'}
+          />
+        </View>
       ) : null}
 
       <View style={styles.tabs} testID="immersive-tabs">
@@ -2130,6 +2173,31 @@ export default function TitleScreen() {
           <SheetDone onPress={() => setCastOpen(false)} />
         </Sheet>
       ) : null}
+
+      <Sheet
+        visible={reviewsOpen}
+        onClose={() => setReviewsOpen(false)}
+        label={`Reviews of ${displayTitle ?? title.title}`}
+        onDismissed={() => {
+          if (!pendingReviewWrite.current) return;
+          pendingReviewWrite.current = false;
+          openLog('review');
+        }}
+      >
+        <View style={styles.castSheet} testID="reviews-sheet">
+          <Text variant="title2">
+            {reviewTotal ? `Reviews (${reviewTotal})` : 'Reviews'}
+          </Text>
+        </View>
+        <ScrollView
+          testID="reviews-sheet-list"
+          style={styles.castScroll}
+          contentContainerStyle={styles.reviewsSheetList}
+        >
+          {reviewList({ inSheet: true })}
+        </ScrollView>
+        <SheetDone onPress={() => setReviewsOpen(false)} />
+      </Sheet>
     </>
   );
 
@@ -3292,17 +3360,10 @@ const styles = StyleSheet.create({
   immersiveNotices: { paddingTop: theme.space[2] },
   immersiveSection: { paddingTop: theme.space[5], gap: theme.space[1] },
   // One quiet line above the tabs, on Paper: no card of its own.
-  immersiveCircle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[3],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[5],
-    minHeight: theme.layout.minTapTarget,
-  },
+
   immersiveCircleCopy: { flex: 1, gap: 2 },
-  immersiveCircleName: { fontFamily: fontFamily.sansSemibold },
   castSheet: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  reviewsSheetList: { paddingBottom: theme.space[2] },
   castScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.6) },
   castList: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
   castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },
