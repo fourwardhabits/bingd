@@ -2609,10 +2609,11 @@ describe('the state after a ranking', () => {
   it('keeps the ordinary sheet exactly as it was', async () => {
     const sheet = await open(filmA);
 
-    // No `postRank`, so the bucket question is the top of the sheet and there is no
-    // Done — this sheet has a Close in its header and a backdrop, and a title that has
-    // not been ranked has no moment a Done would be the end of.
-    await waitFor(() => expect(sheet.getByText('How was it?')).toBeTruthy());
+    // No `postRank`, so the three buckets end the sheet and there is no Done — this
+    // sheet has a Close in its header and a backdrop, and a title that has not been
+    // ranked has no moment a Done would be the end of. Since Option A the buckets are
+    // at the foot rather than the top, and their question is spoken, not drawn.
+    await waitFor(() => expect(sheet.getByTestId('bucket-choices')).toBeTruthy());
     expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull();
     expect(sheet.queryByText('Ranked')).toBeNull();
   });
@@ -2841,5 +2842,324 @@ describe('the remembered share default', () => {
     await sheet.openNotes();
 
     await waitFor(() => expect(shareOn(sheet)).toBe(true));
+  });
+});
+
+/**
+ * **Ranking-start, Option A** (founder, 2026-11-04).
+ *
+ * The details come first and the three buckets last, so the sheet reads top to bottom
+ * and the tap that starts the comparisons is the last thing on it. Nothing new sits
+ * between that tap and the comparisons, and nothing above it is required.
+ *
+ * What the order changed underneath is the point of most of these: a note, a date or a
+ * companion is now often the *first* write, and so the one that creates the row. The
+ * bucket used to be refused while such a write was running, and a note that created
+ * the row did so without the date the row was showing.
+ */
+describe('the ranking-start order', () => {
+  /** Where each landmark sits in the rendered tree, by its first appearance. */
+  const order = (sheet: Awaited<ReturnType<typeof open>>, marks: string[]) => {
+    const tree = JSON.stringify(sheet.toJSON());
+    return marks.map((mark) => {
+      const at = tree.indexOf(mark);
+      if (at < 0) throw new Error(`not rendered: ${mark}`);
+      return at;
+    });
+  };
+  const ascending = (xs: number[]) => xs.every((x, i) => i === 0 || (xs[i - 1] ?? Infinity) < x);
+
+  it('puts the note, the date and the companions first, and the buckets last', async () => {
+    const sheet = await open(filmA);
+    await waitFor(() => expect(sheet.getByTestId('bucket-choices')).toBeTruthy());
+
+    expect(
+      ascending(
+        order(sheet, [
+          '"accessibilityLabel":"Note"',
+          '"accessibilityLabel":"Watch date"',
+          '"accessibilityLabel":"Who I watched with"',
+          '"testID":"bucket-choices"',
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it('draws no question above the buckets, and still names the group with it', async () => {
+    const sheet = await open(filmA);
+    const group = await waitFor(() => sheet.getByTestId('bucket-choices'));
+
+    expect(sheet.queryByText('How was it?')).toBeNull();
+    expect(group.props.accessibilityRole).toBe('radiogroup');
+    expect(group.props.accessibilityLabel).toBe('How was it?');
+    expect(sheet.getAllByRole('radio').map((radio) => radio.props.accessibilityLabel)).toEqual([
+      'I liked it',
+      'It was fine',
+      'I didn’t like it',
+    ]);
+  });
+
+  it('keeps the same row order after a ranking, with Done last and no buckets', async () => {
+    const sheet = await open(filmA, { postRank: { score: 8.7, position: 3, category: 'movies' } });
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+
+    expect(sheet.queryByTestId('bucket-choices')).toBeNull();
+    expect(
+      ascending(
+        order(sheet, [
+          '"accessibilityLabel":"Note"',
+          '"accessibilityLabel":"Watch date"',
+          '"accessibilityLabel":"Who I watched with"',
+          '"children":["Done"]',
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it('saves a note typed first before the bucket, then ranks, then dates it as the row showed', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openNotes();
+    // Typed and not blurred: the tap on the bucket is what hands the text over.
+    await fireEvent.changeText(sheet.note(), 'the ending landed');
+    await fireEvent.press(sheet.bucket('I liked it'));
+
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await waitFor(() => expect(callsTo('set_watch_date')).toHaveLength(1));
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual([
+      'log_watched',
+      'log_title',
+      'set_watch_date',
+    ]);
+    // The note's own write sends no date: it upserts, and a date sent there could
+    // overwrite one recorded on another device a moment earlier.
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_note: 'the ending landed',
+      p_watched_on: null,
+    });
+    // The bucket then dates the undated row the way `log_title` would have, with the
+    // basis the reader's untouched Today earned.
+    expect(callsTo('set_watch_date')[0][1]).toMatchObject({
+      p_media_item_id: 'film-a',
+      p_watched_on: today(),
+      p_basis: 'today_default',
+    });
+  });
+
+  it('keeps showing Today once a note written first has created the row', async () => {
+    const sheet = await open(filmA);
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue?.text).toBe('Today'));
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'first thoughts');
+    // What the server holds now: a row this sheet just made, with no date yet.
+    stubReads({ bucket: null, watched_on: null, note: 'first thoughts', note_updated_at: 'v1' }, null);
+    const reads = readsOf('user_media');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(reads));
+    await settle();
+
+    // Not "Earlier": a dateless row this sheet created is a first log in progress, not
+    // a title somebody logged without a date.
+    expect(sheet.dateRow().props.accessibilityValue?.text).toBe('Today');
+  });
+
+  it('does not stamp a date that is already there by the time the bucket lands', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'first thoughts');
+    // Another device dated this title while the note was being written.
+    stubReads(
+      { bucket: null, watched_on: '2026-10-01', note: 'first thoughts', note_updated_at: 'v1' },
+      null,
+    );
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await settle();
+
+    expect(callsTo('set_watch_date')).toHaveLength(0);
+  });
+
+  it('does not stamp a date when the fresh read fails and only the old cache is left', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'first thoughts');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await settle();
+    // From here the read fails. The cache still holds an undated row, which is exactly
+    // what must not be taken as "still undated" — another device may have dated it.
+    stubFailedLogState();
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    await settle();
+
+    expect(callsTo('set_watch_date')).toHaveLength(0);
+  });
+
+  it('holds the comparisons once when a detail fails while the tap waits, then goes on', async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'log_watched') {
+        await held;
+        return { data: null, error: { code: '22023', message: 'That note could not be saved.' } };
+      }
+      return { data: { status: 'ok' }, error: null };
+    });
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'a thought');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await act(async () => {
+      release();
+      await held;
+    });
+    await settle();
+
+    // The refusal is on screen, and nothing has moved on past it.
+    expect(sheet.getByText('That note could not be saved.')).toBeTruthy();
+    expect(callsTo('log_title')).toHaveLength(0);
+    expect(onRank).not.toHaveBeenCalled();
+
+    // The reader has seen it. Nothing above the buckets is required, so the next tap
+    // ranks even though the note is refused again.
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    expect(callsTo('log_title')).toHaveLength(1);
+  });
+
+  it('writes no date with a first note when the reader has said Earlier', async () => {
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Earlier' }));
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'saw it years ago');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toBeNull();
+  });
+
+  it('waits for a note still being saved, then starts the comparisons', async () => {
+    // The tap used to be dropped here: `choose` refused while any write was in flight,
+    // and with the note above the buckets that is the ordinary sequence — type, pause
+    // long enough for the autosave, tap a bucket.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'log_watched') await held;
+      return { data: { status: 'ok' }, error: null };
+    });
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'a thought');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await settle();
+    // Not before the note has landed: `log_title` must find the row the note created.
+    expect(callsTo('log_title')).toHaveLength(0);
+    expect(onRank).not.toHaveBeenCalled();
+
+    await act(async () => {
+      release();
+      await held;
+    });
+
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+    expect(callsTo('log_title')).toHaveLength(1);
+  });
+
+  it('starts one ranking for two quick taps on a bucket', async () => {
+    // The bucket's own write is held, so the second tap lands while the first is still
+    // in flight — the only window in which a double tap can mean two rankings.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'log_title') await held;
+      return { data: { status: 'ok' }, error: null };
+    });
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
+    await fireEvent.press(sheet.bucket('I liked it'));
+    await act(async () => {
+      release();
+      await held;
+    });
+
+    await waitFor(() => expect(onRank).toHaveBeenCalled());
+    await settle();
+    expect(callsTo('log_title')).toHaveLength(1);
+    expect(onRank).toHaveBeenCalledTimes(1);
+  });
+
+  describe('counting the first watch', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const analytics = require('@/lib/analytics') as typeof import('@/lib/analytics');
+    const watches = (spy: jest.SpyInstance) =>
+      spy.mock.calls.filter(([event]) => event.name === 'watch_logged').map(([event]) => event);
+
+    it('counts it once when a note written first is what created the row', async () => {
+      const spy = jest.spyOn(analytics, 'track');
+      try {
+        const sheet = await open(filmA);
+        await sheet.openNotes();
+        await fireEvent.changeText(sheet.note(), 'worth it');
+        await fireEvent.press(sheet.bucket('I liked it'));
+        await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
+        await settle();
+
+        // `log_title` found the row the note had created, so it answered created: false
+        // (the stub sends no `created`). The title is still this reader's first log.
+        expect(watches(spy)).toEqual([
+          { name: 'watch_logged', props: { kind: 'first', basis: 'today_default', surface: 'search' } },
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('counts nothing for a title that was already seen before the sheet opened', async () => {
+      stubReads({ bucket: null, watched_on: '2026-08-01', note: null }, null);
+      const spy = jest.spyOn(analytics, 'track');
+      try {
+        const sheet = await open(filmA);
+        await waitFor(() =>
+          expect(sheet.getByLabelText('Watch date').props.accessibilityState.disabled).toBe(false),
+        );
+        await fireEvent.press(sheet.bucket('I liked it'));
+        await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
+        await settle();
+
+        expect(watches(spy)).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });

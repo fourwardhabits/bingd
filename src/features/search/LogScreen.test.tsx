@@ -256,7 +256,7 @@ describe('a series in the results', () => {
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText(SERIES_ROW));
     expect(mockPush).toHaveBeenCalledWith('/title/series-1');
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('starts season logging from the + action', async () => {
@@ -287,7 +287,7 @@ describe('a film in the results', () => {
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
 
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
     await waitFor(() => expect(callsTo('log_title')).toHaveLength(1));
@@ -310,7 +310,7 @@ describe('a film in the results', () => {
 
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
@@ -1857,7 +1857,7 @@ describe('saving from a search result', () => {
     expect(callsTo('recommend')).toHaveLength(0);
     // No navigation, and no log sheet: the reader saves and carries on searching.
     expect(mockPush).not.toHaveBeenCalled();
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('does not open the title underneath it', async () => {
@@ -1877,7 +1877,7 @@ describe('saving from a search result', () => {
     await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
 
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     expect(callsTo('set_watchlist')).toHaveLength(0);
   });
 
@@ -1963,7 +1963,7 @@ describe('the leading action is the reader’s own ranking state', () => {
     await fireEvent.press(view.getByLabelText(/^10\.0 out of 10/));
 
     // The same sheet `+` opens, which is the sheet that knows about rebucket and rerank.
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
   });
 
   /**
@@ -1982,7 +1982,7 @@ describe('the leading action is the reader’s own ranking state', () => {
     expect(view.queryByLabelText(/Finish ranking/)).toBeNull();
 
     await fireEvent.press(view.getByLabelText('Log Inception'));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     expect(mockRpc.mock.calls.filter(([fn]) => fn === 'rank_start')).toHaveLength(0);
   });
 
@@ -2005,7 +2005,7 @@ describe('the leading action is the reader’s own ranking state', () => {
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('leads an unlogged title with the ordinary log action', async () => {

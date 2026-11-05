@@ -3489,7 +3489,7 @@ describe('the ranking state on the title page', () => {
     await fireEvent.press(view.getByTestId('title-action-rank'));
     await waitFor(() => expect(rankStarts()).toHaveLength(1));
     expect(rankStarts()[0][1]).toMatchObject({ p_media_item_id: 'film-1', p_bucket: 'fine' });
-    expect(view.queryByText('How was it?')).toBeNull();
+    expect(view.queryByLabelText('How was it?')).toBeNull();
   });
 
   it('reads Rank for a seen title with no bucket, such as an untouched import, and logs it', async () => {
@@ -3501,7 +3501,7 @@ describe('the ranking state on the title page', () => {
     expect(view.queryByText('Finish ranking')).toBeNull();
 
     await fireEvent.press(view.getByTestId('title-action-rank'));
-    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     expect(rankStarts()).toHaveLength(0);
   });
 });

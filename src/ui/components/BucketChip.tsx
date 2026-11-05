@@ -31,6 +31,11 @@ export type BucketChoicesProps = {
   /** The chosen bucket, or `null` for a question not yet answered. */
   selected: BucketId | null;
   onSelect: (bucket: BucketId) => void;
+  /**
+   * The question the three choices answer, for a screen reader. A surface that no
+   * longer draws it (the log sheet, since Option A) still names the group with it.
+   */
+  accessibilityLabel?: string;
   testID?: string;
 };
 
@@ -130,9 +135,19 @@ function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
  * own content block, and padding it twice is what makes a three-column row too
  * narrow to hold the longest label on a small phone.
  */
-export function BucketChoices({ selected, onSelect, testID }: BucketChoicesProps) {
+export function BucketChoices({
+  selected,
+  onSelect,
+  accessibilityLabel,
+  testID,
+}: BucketChoicesProps) {
   return (
-    <View style={styles.choices} accessibilityRole="radiogroup" testID={testID}>
+    <View
+      style={styles.choices}
+      accessibilityRole="radiogroup"
+      accessibilityLabel={accessibilityLabel}
+      testID={testID}
+    >
       {BUCKETS.map((bucket) => (
         <BucketChip
           key={bucket.id}
