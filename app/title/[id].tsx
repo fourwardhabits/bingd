@@ -65,6 +65,8 @@ import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
 import { HERO_COLLAPSED_BAND, REVEAL_WINDOW } from '@/features/title/use-hero-reveal';
 import { StatusBar } from 'expo-status-bar';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
+import { GenreLine } from '@/features/title/GenreLine';
+import { TrailerRail } from '@/features/title/TrailerRail';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
 import { TitleReviews } from '@/features/title/TitleReviews';
@@ -99,6 +101,7 @@ import {
 } from '@/features/recommendations/use-title-recommendations';
 import { compactName } from '@/lib/titles';
 import {
+  Avatar,
   CastStrip,
   EmptyState,
   EpisodeRow,
@@ -110,6 +113,7 @@ import {
   ScoresSection,
   SectionHeader,
   SegmentedTabs,
+  type SegmentOption,
   Sheet,
   SheetRow,
   SkeletonRow,
@@ -118,7 +122,7 @@ import {
   TitleHero,
   TitleRow,
 } from '@/ui/components';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme } from '@/ui/tokens';
 
 /**
  * What this route shows when its own render throws.
@@ -138,6 +142,12 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons' | 'similar';
+/** The immersive page's lower tabs. `videos` is labelled Trailers there. */
+type LowerTab = 'similar' | 'reviews' | 'videos' | 'details';
+/** Cast portraits the immersive preview fits across a 360pt screen; See all past it. */
+const CAST_VISIBLE = 4;
+/** How many the preview strip holds before the sheet takes over. */
+const CAST_PREVIEW = 10;
 
 /**
  * How many episodes a season page draws before it offers to show the rest.
@@ -263,8 +273,12 @@ export default function TitleScreen() {
   /** The first screen's measured height, which decides when the bar turns solid. */
   const [immersiveHeight, setImmersiveHeight] = useState(0);
   /** The two previews that expand in place rather than opening anything. */
-  const [allReviews, setAllReviews] = useState(false);
-  const [allSimilar, setAllSimilar] = useState(false);
+  /** The immersive page's lower tabs. Similar leads (Cinematic Editorial brief, §5). */
+  const [lowerTab, setLowerTab] = useState<LowerTab>('similar');
+  /** The full cast, in a sheet, from the immersive Cast preview's See all. */
+  const [castOpen, setCastOpen] = useState(false);
+  /** Where the immersive module's top edge sits; the top bar's reveal ends there. */
+  const [immersiveModuleTop, setImmersiveModuleTop] = useState(0);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   /**
    * The title the open ranking is about, and what it scored — the two halves of
@@ -486,6 +500,15 @@ export default function TitleScreen() {
    * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
    */
   const reviews = useTitleReviews(data?.title?.kind === 'series' ? null : titleId, reviewSort);
+  /**
+   * Published reviews by people this reader follows, for the immersive page's one-line
+   * "From your circle". The Reviews tab's own `following` filter, read only when the
+   * immersive layout is on; nothing new on the server.
+   */
+  const circleReviews = useTitleReviews(
+    immersive && data?.title?.kind !== 'series' ? titleId : null,
+    'following',
+  );
   /**
    * The number on the tab, read separately from the list.
    *
@@ -837,7 +860,7 @@ export default function TitleScreen() {
   const collapsedHero = barHeight + HERO_COLLAPSED_BAND;
   const revealEnd = Math.max(
     (immersive
-      ? immersiveHeight || Math.round(screenHeight * 0.86)
+      ? immersiveModuleTop || immersiveHeight || Math.round(screenHeight * 0.3)
       : hero.uri
         ? screenWidth / theme.layout.aspect.backdrop
         : collapsedHero) - barHeight,
@@ -1775,36 +1798,38 @@ export default function TitleScreen() {
     );
   };
   /**
-   * ---------------------------------------------------------------------------
-   * **THE IMMERSIVE LAYOUT** (Immersive Scroll experiment, 2026-11-04)
+   * **The Cinematic Editorial layout** (founder-approved direction, 2026-11-04), rendered
+   * instead of the original scroll content when this device opted in.
    *
-   * Rendered instead of the original scroll content when this device opted in. It reads
-   * the values the original page computes above and calls the same handlers, so ranking,
-   * scoring and every sheet behave identically; only the arrangement differs.
+   * It reads the values the original page computes above and calls the same handlers, so
+   * ranking, scoring and every sheet behave identically; only the arrangement differs:
    *
-   * The first screen (`ImmersiveHero`) carries the title, its metadata, the three scores
-   * and the actions. Below it, each piece of the page appears once: About, Where to Watch,
-   * Episodes or Seasons where they apply, Cast, Reviews, Similar titles, Details. No tab
-   * bar, no second title, no second poster, no second Rank, no second score block.
+   *   1. `ImmersiveHero` — a sharp backdrop, and over its foot one Paper module holding
+   *      the title, the genre line, the metadata, the actions and the three scores;
+   *   2. About, Where to Watch, Episodes or Seasons where they apply, and Cast — each once,
+   *      on Paper, never inside the module;
+   *   3. the tab row the original page uses, now Similar | Reviews | Trailers | Details,
+   *      with one optional line above it from people the reader follows.
+   *
+   * No second title, poster, Rank or score block anywhere below the module.
    */
   const immersiveName = (
-    <Text testID="title-name" variant="title1" tone="inverse" numberOfLines={3}>
+    <Text testID="title-name" variant="title1" numberOfLines={3}>
       {primaryName}
     </Text>
   );
   /**
-   * The same cluster as the original page, on the artwork. A ranked title keeps a smaller
-   * *Edit ranking*, which opens the rating sheet (*Update your rating*); the ranking menu
-   * stays one tap away on the bar's ⋯ and on Your score. An unranked or unfinished title
-   * keeps Rank exactly as it was.
+   * The same cluster as the original page, on Paper. An unranked or unfinished title keeps
+   * Rank exactly as it was; a ranked one shows the smaller *Edit ranking*, which opens the
+   * rating sheet (*Update your rating*) — its score is the emphasis, in the score row.
    */
   const immersiveActions = cloneElement(actions, {
-    tone: 'artwork',
     rank: rankable
       ? {
           ranked: Boolean(data.ranked),
           label: data.ranked ? 'Edit ranking' : undefined,
           icon: data.ranked ? 'create-outline' : undefined,
+          compact: Boolean(data.ranked),
           accessibilityLabel: data.ranked
             ? `Edit your ranking of ${displayTitle ?? title.title}`
             : `Rank ${displayTitle ?? title.title}`,
@@ -1815,28 +1840,61 @@ export default function TitleScreen() {
         }
       : null,
   });
+  /**
+   * The module's metadata line: `2023 · R · 125m`, or `Season 1 · 2023 · TV-MA · 9
+   * episodes`. The year leads, as the brief asks; the director moves to Details, so the
+   * line stays one statement about the title rather than a credit roll.
+   */
+  const moduleMeta = [
+    isSeason ? identitySubtitle : year ? String(year) : null,
+    descriptive.certification,
+    lengthLabel,
+  ]
+    .filter(Boolean)
+    .join(SEP);
   const immersiveSection = (key: string, heading: string, body: ReactNode) => (
     <View key={key} style={styles.immersiveSection} testID={`immersive-section-${key}`}>
       <SectionHeader title={heading} />
       {body}
     </View>
   );
-  const showAll = (label: string, onPress: () => void) => (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.immersiveShowAll, pressed && styles.pressed]}
-    >
-      <Text variant="callout" tone="action">
-        {label}
-      </Text>
-    </Pressable>
-  );
-  const REVIEW_PREVIEW = 2;
-  const SIMILAR_PREVIEW = 6;
-  const reviewTotal = reviewCount.data ?? reviews.data?.length ?? 0;
-  const loadedReviews = reviews.data?.length ?? 0;
+
+  /** The lower tabs. Similar leads; Reviews is absent on a whole series, as before. */
+  const lowerTabs: SegmentOption<LowerTab>[] = [
+    { id: 'similar', label: 'Similar' },
+    ...(isSeries
+      ? []
+      : [
+          {
+            id: 'reviews' as const,
+            label: reviewCount.data ? `Reviews (${reviewCount.data})` : 'Reviews',
+          },
+        ]),
+    ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Trailers' }] : []),
+    { id: 'details', label: 'Details' },
+  ];
+  const lowerActive: LowerTab = lowerTabs.some((option) => option.id === lowerTab)
+    ? lowerTab
+    : 'similar';
+
+  /**
+   * **From your circle** (brief §6): the newest published review by somebody the reader
+   * follows, as one quiet line above the tabs — only when one exists, and never while the
+   * Reviews tab is open, where the same review is already listed. It is the server's own
+   * `following` filter over published reviews, so a comment can never appear here and an
+   * account the reader may not see never does either. A spoiler is masked by the rule the
+   * Reviews tab applies.
+   */
+  const circleReview = !isSeries ? (circleReviews.data?.[0] ?? null) : null;
+  const circleMasked = circleReview
+    ? shouldMask({
+        hasSpoilers: circleReview.hasSpoilers,
+        mediaItemId: title.id,
+        viewerId: profile.id,
+        authorId: circleReview.userId,
+        watched: watched.data,
+      })
+    : false;
 
   const immersiveContent = (
     <>
@@ -1848,6 +1906,7 @@ export default function TitleScreen() {
         title={displayTitle ?? title.title}
         topInset={insets.top}
         onHeight={setImmersiveHeight}
+        onModuleTop={setImmersiveModuleTop}
       >
         <View style={styles.immersiveIdentity} testID="title-identity">
           {isSeason && parent?.id ? (
@@ -1862,26 +1921,10 @@ export default function TitleScreen() {
           ) : (
             immersiveName
           )}
-          {identitySubtitle ? (
-            <Text
-              testID="title-subtitle"
-              variant="callout"
-              tone="inverse"
-              style={styles.immersiveSecondary}
-              numberOfLines={1}
-            >
-              {identitySubtitle}
-            </Text>
-          ) : null}
-          {metaLine ? (
-            <Text
-              testID="title-meta"
-              variant="footnote"
-              tone="inverse"
-              style={styles.immersiveSecondary}
-              numberOfLines={1}
-            >
-              {metaLine}
+          <GenreLine genres={descriptive.genres} titleName={displayTitle ?? title.title} />
+          {moduleMeta ? (
+            <Text testID="title-meta" variant="footnote" tone="secondary" numberOfLines={2}>
+              {moduleMeta}
             </Text>
           ) : null}
           {contextLine ? (
@@ -1894,19 +1937,15 @@ export default function TitleScreen() {
                 historyOpen ? () => router.push(`/title/${id}/history` as never) : undefined
               }
             >
-              <Text
-                testID="title-context"
-                variant="caption"
-                tone="inverse"
-                numberOfLines={1}
-                style={styles.immersiveTertiary}
-              >
+              <Text testID="title-context" variant="caption" tone="tertiary" numberOfLines={1}>
                 {contextLine}
                 {historyOpen ? ' ›' : ''}
               </Text>
             </Pressable>
           ) : null}
         </View>
+
+        {immersiveActions}
 
         {!isSeries ? (
           <ImmersiveScores
@@ -1930,63 +1969,132 @@ export default function TitleScreen() {
             onPressFollowing={() => setFollowingRatingsOpen(true)}
           />
         ) : null}
-
-        {immersiveActions}
       </ImmersiveHero>
 
       <View style={styles.immersiveNotices}>{notices}</View>
 
-      {title.overview || descriptive.genres.length
-        ? immersiveSection(
-            'about',
-            'About',
-            <>
-              {title.overview ? <Synopsis text={title.overview} /> : null}
-              <GenreRow genres={descriptive.genres} />
-            </>,
-          )
+      {title.overview
+        ? immersiveSection('about', 'About', <Synopsis text={title.overview} />)
         : null}
 
       <WhereToWatch mediaItemId={title.id} titleName={title.title} />
 
       {isSeason ? immersiveSection('episodes', 'Episodes', tabContent('episodes')) : null}
       {isSeries ? immersiveSection('seasons', 'Seasons', tabContent('seasons')) : null}
-      {cast.length ? immersiveSection('cast', 'Cast', tabContent('cast')) : null}
 
-      {!isSeries
-        ? immersiveSection(
-            'reviews',
-            reviewTotal ? `Reviews (${reviewTotal})` : 'Reviews',
-            <>
-              {tabContent('reviews', { reviewLimit: allReviews ? undefined : REVIEW_PREVIEW })}
-              {!allReviews && loadedReviews > REVIEW_PREVIEW
-                ? showAll(`Show all ${reviewTotal || loadedReviews} reviews`, () =>
-                    setAllReviews(true),
-                  )
-                : null}
-            </>,
-          )
-        : null}
+      {cast.length ? (
+        <View style={styles.immersiveSection} testID="immersive-section-cast">
+          <SectionHeader
+            title="Cast"
+            actionLabel={cast.length > CAST_VISIBLE ? 'See all' : undefined}
+            actionAccessibilityLabel={`See all ${cast.length} cast members`}
+            onPressAction={cast.length > CAST_VISIBLE ? () => setCastOpen(true) : undefined}
+          />
+          <CastStrip
+            compact
+            cast={cast.slice(0, CAST_PREVIEW)}
+            onPressMember={(member) => router.push(`/person/${member.id}`)}
+          />
+        </View>
+      ) : null}
 
-      {immersiveSection(
-        'similar',
-        'Similar titles',
-        <>
-          {tabContent('similar', { similarLimit: allSimilar ? undefined : SIMILAR_PREVIEW })}
-          {!allSimilar && similar.tiles.length > SIMILAR_PREVIEW
-            ? showAll(`Show all ${similar.tiles.length} titles`, () => setAllSimilar(true))
-            : null}
-        </>,
+      {circleReview && lowerActive !== 'reviews' ? (
+        <Pressable
+          testID="immersive-circle"
+          accessibilityRole="button"
+          accessibilityLabel={
+            circleMasked
+              ? `From your circle: ${circleReview.name}'s review contains spoilers. Open reviews from people you follow.`
+              : `From your circle: ${circleReview.name}: ${circleReview.text}. Open reviews from people you follow.`
+          }
+          onPress={() => {
+            setReviewSort('following');
+            setLowerTab('reviews');
+          }}
+          style={({ pressed }) => [styles.immersiveCircle, pressed && styles.pressed]}
+        >
+          <Avatar size="xs" uri={circleReview.avatarUri} name={circleReview.name} />
+          <View style={styles.immersiveCircleCopy}>
+            <Text variant="caption" tone="tertiary">
+              From your circle
+            </Text>
+            <Text variant="footnote" numberOfLines={2}>
+              <Text variant="footnote" style={styles.immersiveCircleName}>
+                {circleReview.name}
+              </Text>
+              {circleMasked ? (
+                <Text variant="footnote" tone="tertiary">
+                  {'  Contains spoilers'}
+                </Text>
+              ) : (
+                `  ${circleReview.text}`
+              )}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={theme.layout.icon.sm} color={theme.text.tertiary} />
+        </Pressable>
+      ) : null}
+
+      <View style={styles.tabs} testID="immersive-tabs">
+        <SegmentedTabs
+          options={lowerTabs}
+          value={lowerActive}
+          onChange={(next) => {
+            // The same event the original page sends, for the same deliberate move.
+            if (next === 'similar' && lowerActive !== 'similar') {
+              track({
+                name: 'similar_tab_opened',
+                props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
+              });
+            }
+            setLowerTab(next);
+          }}
+        />
+      </View>
+
+      {lowerActive === 'videos' ? (
+        <TrailerRail
+          videos={videos.data ?? []}
+          label={videoTitle}
+          sub={(video) => [SITE_LABEL[video.site] ?? video.site, video.type].filter(Boolean).join(' · ')}
+        />
+      ) : (
+        tabContent(lowerActive)
       )}
 
-      {immersiveSection(
-        'details',
-        'Details',
-        <>
-          {tabContent('details')}
-          {tabContent('videos')}
-        </>,
-      )}
+      {castOpen ? (
+        <Sheet visible onClose={() => setCastOpen(false)} label={`Cast of ${title.title}`}>
+          <View style={styles.castSheet} testID="cast-sheet">
+            <Text variant="title2">Cast</Text>
+            {cast.map((member) => (
+              <Pressable
+                key={member.id}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  member.character ? `${member.name}, who plays ${member.character}` : member.name
+                }
+                onPress={() => {
+                  setCastOpen(false);
+                  router.push(`/person/${member.id}`);
+                }}
+                style={({ pressed }) => [styles.castRow, pressed && styles.pressed]}
+              >
+                <Avatar size="sm" uri={member.avatarUri} name={member.name} />
+                <View style={styles.immersiveCircleCopy}>
+                  <Text variant="callout" numberOfLines={1}>
+                    {member.name}
+                  </Text>
+                  {member.character ? (
+                    <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                      {member.character}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </Sheet>
+      ) : null}
     </>
   );
 
@@ -3141,12 +3249,22 @@ const TITLE_CAP_OFFSET = theme.space[1];
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   // ---- Immersive Scroll experiment (2026-11-04)
-  immersiveIdentity: { gap: 2 },
-  immersiveSecondary: { opacity: 0.84 },
-  immersiveTertiary: { opacity: 0.74 },
+  immersiveIdentity: { gap: theme.space[1] },
   immersiveNotices: { paddingTop: theme.space[2] },
-  immersiveSection: { paddingTop: theme.space[6], gap: theme.space[1] },
-  immersiveShowAll: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  immersiveSection: { paddingTop: theme.space[5], gap: theme.space[1] },
+  // One quiet line above the tabs, on Paper: no card of its own.
+  immersiveCircle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[5],
+    minHeight: theme.layout.minTapTarget,
+  },
+  immersiveCircleCopy: { flex: 1, gap: 2 },
+  immersiveCircleName: { fontFamily: fontFamily.sansSemibold },
+  castSheet: { gap: theme.space[2], paddingBottom: theme.space[4] },
+  castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },
   /**
    * **The row starts where the hero ends** (founder, final direction, 2026-09-07).
    *

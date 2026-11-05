@@ -146,3 +146,34 @@ inert.
    check, and the release record in `docs/release/production-state.md`.
 5. iOS: a production OTA reaches iOS too. Look at the layout on an iOS device or simulator
    before any production exposure. These checks were Android and web renders only.
+
+---
+
+## Cinematic Editorial refinement (2026-11-04)
+
+Branch `experiment/cinematic-editorial-title`, on `02f713d` (this experiment). Local only,
+not pushed, not published. The commit SHA is recorded in the commit log and the handoff.
+**Same switch, same default, same production lock:** `title-layout.ts` is unchanged, so the
+Original page is still the default everywhere and the Labs row is still hidden in production.
+Ranking, scoring and every sheet still run through the page's shared handlers.
+
+### What changed in the Immersive layout only
+
+| | |
+|---|---|
+| **First screen** | `ImmersiveHero.tsx` rewritten. A sharp backdrop band (16:9 of the width, made a quarter taller), and over its foot one Paper module, inset 12pt from each edge. A blurred, darkened copy of the same image sits only behind the module and ends at its foot, then Paper. The full-screen blurred field and the Parchment-on-artwork text are gone. Poster-only: the sharp poster centred on its own soft field. No artwork: Parchment and the initials frame. |
+| **Module** | Title, then `GenreLine` (new: one line, whole genres, `+N` opens a sheet with all of them), then `year · rating · length` (season: `Season 1 · year · rating · episodes`; the director moved to Details), then the watch-history line, the actions and the three scores. |
+| **Actions** | `TitleActions` gains an optional `compact` rank (36pt visual, 44pt target), used for *Edit ranking* on a ranked title. Default unchanged. |
+| **Scores** | `ImmersiveScores` restyled for Paper: Ink text, hairline dividers, no tinted panel; labels may take two lines instead of truncating. Same values, states and taps. |
+| **Below the module** | About (synopsis only) → Where to Watch (the existing row, unchanged) → Episodes (season) or Seasons (series) → Cast (`CastStrip compact`, four across at 360pt, *See all* opens the whole cast in a sheet) → "From your circle" (one line, only when someone the reader follows has published a review; the server's existing `following` review filter; hidden while Reviews is open; spoiler-masked) → tabs **Similar \| Reviews \| Trailers \| Details**, reusing `tabContent`. |
+| **Trailers** | `TrailerRail.tsx`: YouTube thumbnails in a horizontal rail; a tap opens YouTube exactly as the Original row does. No inline player, no autoplay, no new dependency. Thumbnails load from `i.ytimg.com` only when the tab is opened. |
+| **Top bar** | The reveal now ends where the module's top meets the bar, so the bar is opaque before *Edit ranking* passes under it (the ghosting app-09 reported at ~600pt on 360×780). |
+
+Shared components touched, all additively: `CastStrip` (`compact` prop), `TitleActions`
+(`compact` rank). With neither passed, both render exactly as before.
+
+### Restoring the previous Immersive layout
+
+- **Keep the experiment, drop the refinement:** use `experiment/immersive-title` at `02f713d`
+  instead of this branch in the combined candidate, or revert this branch's commit.
+- **Original page:** unchanged by this refinement; every restore option above still applies.

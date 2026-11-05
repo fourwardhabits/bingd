@@ -63,6 +63,13 @@ export type RankAction = {
    */
   label?: string;
   icon?: React.ComponentProps<typeof Ionicons>['name'];
+  /**
+   * The smaller, secondary form — the immersive page's *Edit ranking*, where the reader's
+   * score is the emphasis and this is only the way back into the sheet (Cinematic
+   * Editorial brief, §2). Visually 36pt with a quieter label; the touch target stays 44pt
+   * through its slop. Absent everywhere else, so every other Rank is unchanged.
+   */
+  compact?: boolean;
 };
 
 export type IconAction = {
@@ -172,11 +179,13 @@ export function TitleActions({
             onPress={rank.onPress}
             onPressIn={rankPress.onPressIn}
             onPressOut={rankPress.onPressOut}
+            hitSlop={rank.compact ? { top: 4, bottom: 4 } : undefined}
             style={({ pressed }) => [
               styles.rank,
               rank.ranked ? (onArtwork ? styles.rankedOnArtwork : styles.ranked) : styles.unranked,
               // On the artwork the label is never truncated: the icons wrap instead.
               onArtwork && styles.rankOnArtwork,
+              rank.compact && styles.rankCompact,
               pressed && styles.pressed,
             ]}
           >
@@ -196,7 +205,7 @@ export function TitleActions({
               and a two-line `Ranked` is a control that has changed shape rather than a
               label that has grown. */}
             <Text
-              variant="headline"
+              variant={rank.compact ? 'subhead' : 'headline'}
               numberOfLines={1}
               tone={rank.ranked && !onArtwork ? 'action' : 'inverse'}
             >
@@ -391,6 +400,11 @@ const styles = StyleSheet.create({
   },
   badgeOnArtwork: { backgroundColor: brand.ink },
   rankOnArtwork: { flexShrink: 0, maxWidth: '100%' },
+  rankCompact: {
+    minHeight: theme.layout.minTapTarget - 8,
+    paddingHorizontal: theme.space[2] + 2,
+    gap: theme.space[1] + 2,
+  },
   // 32pt boxes with a 6pt hitSlop each side, so every glyph still clears the 44pt target.
   icon: {
     width: ICON_BOX,

@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { formatScore } from '@/features/collection/score';
 import { ScoreBadge, Text } from '@/ui/components';
-import { paperAlpha, theme } from '@/ui/tokens';
+import { theme } from '@/ui/tokens';
 
 /**
  * **The three scores as one compact strip, on the artwork** (Immersive Scroll experiment).
@@ -116,7 +116,7 @@ function Cell({
       ) : (
         <Text
           variant="headline"
-          tone="inverse"
+          tone={value ? 'primary' : 'tertiary'}
           style={value ? styles.value : styles.missing}
           numberOfLines={1}
           // The dash is a picture of "nothing here"; the reason beside it is what is read.
@@ -127,11 +127,13 @@ function Cell({
         </Text>
       )}
       <View style={styles.copy}>
-        <Text variant="footnote" tone="inverse" style={styles.label} numberOfLines={stacked ? 2 : 1}>
+        {/* Two lines in either layout: a label is never cut ("Your sc…"), and at a large
+            text size on a narrow phone the cell grows rather than truncating. */}
+        <Text variant="footnote" tone="secondary" numberOfLines={2}>
           {label}
         </Text>
         {support ? (
-          <Text variant="caption" tone="inverse" style={styles.support} numberOfLines={2}>
+          <Text variant="caption" tone="tertiary" numberOfLines={2}>
             {support}
           </Text>
         ) : null}
@@ -165,13 +167,17 @@ function Cell({
 }
 
 const styles = StyleSheet.create({
+  /**
+   * One row on the module's Paper (Cinematic Editorial, 2026-11-04): no panel of its own,
+   * only a hairline above it separating the scores from the actions, and hairlines between
+   * the cells. It was a tinted box on the artwork when the words sat on the picture.
+   */
   strip: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: paperAlpha(0.2),
-    backgroundColor: paperAlpha(0.06),
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+    marginHorizontal: -theme.space[3],
   },
   cell: {
     flex: 1,
@@ -189,12 +195,10 @@ const styles = StyleSheet.create({
   cellProminent: { flex: 1.2 },
   stripStacked: { flexDirection: 'column' },
   cellStacked: { flex: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
-  dividedStacked: { borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: paperAlpha(0.2) },
-  divided: { borderLeftWidth: StyleSheet.hairlineWidth * 2, borderLeftColor: paperAlpha(0.2) },
+  dividedStacked: { borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: theme.border.hairline },
+  divided: { borderLeftWidth: StyleSheet.hairlineWidth * 2, borderLeftColor: theme.border.hairline },
   value: { fontVariant: ['tabular-nums'], minHeight: theme.layout.scoreBadge.md, textAlignVertical: 'center', lineHeight: theme.layout.scoreBadge.md },
-  missing: { opacity: 0.6, minHeight: theme.layout.scoreBadge.md, lineHeight: theme.layout.scoreBadge.md },
+  missing: { minHeight: theme.layout.scoreBadge.md, lineHeight: theme.layout.scoreBadge.md },
   copy: { alignSelf: 'stretch', gap: 1 },
-  label: { opacity: 0.92 },
-  support: { opacity: 0.78 },
   pressed: { opacity: 0.7 },
 });

@@ -59,7 +59,11 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
-      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
+      // A result may be a function of the call's arguments — the circle's `following` read
+      // and the Reviews tab's read are one RPC told apart by `p_sort`.
+      const result = mockRpcResults[name];
+      const data = typeof result === 'function' ? (result as typeof mockRpc)(args) : result;
+      return Promise.resolve({ data: error ? null : (data ?? null), error });
     },
     from: (table: string) => {
       mockReads[table] = (mockReads[table] ?? 0) + 1;
@@ -3597,8 +3601,25 @@ describe('the immersive title page (experiment)', () => {
 
       expect(view.queryByTestId('title-identity-copy')).toBeNull();
       expect(view.queryByTestId('title-poster-column')).toBeNull();
-      // No tab bar: the scrolled sections replace it.
-      expect(view.queryByRole('tab', { name: 'Details' })).toBeNull();
+      // Everything that names or acts on the title sits in the one floating module.
+      const module = within(view.getByTestId('immersive-module'));
+      expect(module.getByTestId('title-name')).toBeTruthy();
+      expect(module.getByTestId('genre-line')).toBeTruthy();
+      expect(module.getByTestId('title-meta')).toBeTruthy();
+      expect(module.getByTestId('title-actions')).toBeTruthy();
+      expect(module.getByTestId('immersive-scores')).toBeTruthy();
+    });
+
+    it('reads the genres under the title and the year first in the metadata', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('genre-line')).toBeTruthy());
+
+      expect(view.getByTestId('genre-line-text')).toHaveTextContent('Science Fiction · Action');
+      expect(view.getByTestId('title-meta')).toHaveTextContent(/^2010 · /);
+      // Not repeated in About: the module is where the genres live now.
+      expect(view.queryByTestId('genre-row')).toBeNull();
+      const order = readingOrder(view.toJSON());
+      expect(order.indexOf('Inception')).toBeLessThan(order.findIndex((t) => t.includes('Science Fiction')));
     });
 
     it('states the title, the scores, Rank and the synopsis once each', async () => {
@@ -3629,24 +3650,43 @@ describe('the immersive title page (experiment)', () => {
       expect(scores.queryAllByLabelText(/out of 10/)).toHaveLength(0);
     });
 
-    it('lays the page out in the brief’s order, each section once', async () => {
+    it('lays the page out in the brief’s order: About, Cast, then the lower tabs', async () => {
       tableRows.media_cache = [credits];
       const view = await open();
       await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
 
-      for (const key of ['about', 'cast', 'reviews', 'similar', 'details']) {
+      for (const key of ['about', 'cast']) {
         expect(view.getAllByTestId(`immersive-section-${key}`)).toHaveLength(1);
       }
+      // Reviews, Similar and Details are tabs now, not stacked sections as well.
+      for (const key of ['reviews', 'similar', 'details']) {
+        expect(view.queryByTestId(`immersive-section-${key}`)).toBeNull();
+      }
+      const tabs = within(view.getByTestId('immersive-tabs'));
+      expect(tabs.getByRole('tab', { name: 'Similar' })).toBeTruthy();
+      expect(tabs.getByRole('tab', { name: 'Reviews' })).toBeTruthy();
+      expect(tabs.getByRole('tab', { name: 'Details' })).toBeTruthy();
+      // Similar leads and is selected.
+      expect(tabs.getByRole('tab', { name: 'Similar' })).toBeSelected();
+
       const order = readingOrder(view.toJSON());
       const at = (word: string) => order.indexOf(word);
       // Section headings print in capitals; the spoken name keeps the title's case.
       expect(at('ABOUT')).toBeGreaterThan(-1);
       expect(at('ABOUT')).toBeLessThan(at('CAST'));
-      expect(at('CAST')).toBeLessThan(at('REVIEWS'));
-      expect(at('REVIEWS')).toBeLessThan(at('SIMILAR TITLES'));
-      expect(at('SIMILAR TITLES')).toBeLessThan(at('DETAILS'));
+      expect(at('CAST')).toBeLessThan(at('Similar'));
       // The cast is on the page, not behind a tab.
       expect(view.getByText('Leonardo DiCaprio')).toBeTruthy();
+    });
+
+    it('opens each lower tab in place, Details among them', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-tabs')).toBeTruthy());
+
+      await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
+      await waitFor(() => expect(view.getByRole('tab', { name: 'Details' })).toBeSelected());
+      expect(view.getByText('Christopher Nolan')).toBeTruthy();
     });
 
     it('ranks an unranked title from Rank, through the log sheet', async () => {
@@ -3699,18 +3739,71 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
     });
 
-    it('previews two reviews and shows the rest in place', async () => {
+    it('lists every review under the Reviews tab, once', async () => {
       mockRpcResults.title_reviews_v2 = [reviewBy(1), reviewBy(2), reviewBy(3)];
       mockRpcResults.title_review_count = 3;
       const view = await open();
-      await waitFor(() => expect(view.getByText('Review number 1.')).toBeTruthy());
+      await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews (3)' })).toBeTruthy());
+      // Similar is the default, so no review is drawn yet.
+      expect(view.queryByText('Review number 1.')).toBeNull();
 
-      expect(view.getByText('Review number 2.')).toBeTruthy();
-      expect(view.queryByText('Review number 3.')).toBeNull();
-
-      await fireEvent.press(view.getByRole('button', { name: 'Show all 3 reviews' }));
+      await fireEvent.press(view.getByRole('tab', { name: 'Reviews (3)' }));
       await waitFor(() => expect(view.getByText('Review number 3.')).toBeTruthy());
       expect(view.getAllByText('Review number 1.')).toHaveLength(1);
+    });
+
+    describe('from your circle', () => {
+      it('previews a followed reader’s published review and opens Reviews filtered to them', async () => {
+        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
+          args.p_sort === 'following' ? [reviewBy(7)] : [reviewBy(1)];
+        const view = await open();
+        const circle = await waitFor(() => view.getByTestId('immersive-circle'));
+        expect(within(circle).getByText(/Review number 7\./)).toBeTruthy();
+
+        await fireEvent.press(circle);
+        await waitFor(() => expect(view.getByRole('tab', { name: 'Reviews' })).toBeSelected());
+        expect(mockRpc).toHaveBeenCalledWith(
+          'title_reviews_v2',
+          expect.objectContaining({ p_sort: 'following' }),
+        );
+        // While Reviews is open the line steps aside, so the review is not shown twice.
+        expect(view.queryByTestId('immersive-circle')).toBeNull();
+      });
+
+      it('draws nothing when nobody the reader follows has reviewed it', async () => {
+        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
+          args.p_sort === 'following' ? [] : [reviewBy(1)];
+        const view = await open();
+        await waitFor(() => expect(view.getByTestId('immersive-tabs')).toBeTruthy());
+        expect(view.queryByTestId('immersive-circle')).toBeNull();
+      });
+
+      it('masks a spoiler review for a reader who has not seen the title', async () => {
+        mockRpcResults.title_reviews_v2 = (args: { p_sort: string }) =>
+          args.p_sort === 'following'
+            ? [{ ...reviewBy(7), note: 'The top keeps spinning.', has_spoilers: true }]
+            : [];
+        const view = await open();
+        const circle = await waitFor(() => view.getByTestId('immersive-circle'));
+        expect(within(circle).getByText(/Contains spoilers/)).toBeTruthy();
+        expect(within(circle).queryByText(/The top keeps spinning/)).toBeNull();
+      });
+    });
+
+    it('shows a compact cast preview and the whole cast from See all', async () => {
+      const six = Array.from({ length: 6 }, (_, n) => ({
+        id: 9000 + n,
+        name: `Actor ${n + 1}`,
+        character: `Role ${n + 1}`,
+        profile_path: null,
+      }));
+      tableRows.media_cache = [{ ...credits, payload: { ...credits.payload, cast: six } }];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
+
+      await fireEvent.press(view.getByRole('button', { name: 'See all 6 cast members' }));
+      await waitFor(() => expect(view.getByTestId('cast-sheet')).toBeTruthy());
+      expect(within(view.getByTestId('cast-sheet')).getByText('Actor 6')).toBeTruthy();
     });
   });
 });

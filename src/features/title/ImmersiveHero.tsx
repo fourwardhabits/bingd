@@ -1,200 +1,186 @@
 import { Image } from 'expo-image';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import type { HeroArtwork } from '@/lib/hero';
 import { Poster } from '@/ui/components';
-import { brand, inkAlpha, theme } from '@/ui/tokens';
+import { inkAlpha, theme } from '@/ui/tokens';
 
-/**
- * **The immersive title page's first screen** (Immersive Scroll experiment, 2026-11-04).
- *
- * Near full screen, and built so that no artwork has to be cropped to a phone's shape:
- *
- * ---------------------------------------------------------------------------
- * THE ARTWORK
- *
- * The backdrop is drawn sharp across the top at its own 16:9. When the screen has room
- * left over, the band grows to use it, but never past 4:3 — at most an eighth of the
- * width is lost from each side, so an off-centre subject survives. A single full-screen
- * cover crop, which suits one key art and cuts the face out of the next, is what this
- * avoids (founder brief §4).
- *
- * Behind everything is the same artwork blurred heavily under Ink at 0.45: the ambient
- * field that fills the rest of the screen, so the picture visibly continues below the
- * sharp band rather than stopping at a dark slab. The sharp band fades into that tint
- * over its lower part.
- *
- * The words are anchored at the foot of the screen and get their own scrim, a 72pt fade
- * into Ink at 0.7 on top of the ambient tint — about 0.83 Ink in total behind every word.
- * So no text is ever set on sharp artwork, and a white sky arrives under the title as a
- * dark grey: Parchment on that holds about 6.5:1, against 13:1 on plain Ink.
- *
- * With no backdrop, the band is the poster card on the blurred poster — the poster is the
- * art, and the only time it appears on this page. With no artwork at all, the designed
- * missing-poster state on plain Ink.
- *
- * ---------------------------------------------------------------------------
- * THE WORDS
- *
- * `children` is the identity, the scores and the actions, laid out by the title page
- * from the values the original page already computes. They stack below the band; with
- * larger text they push the screen taller rather than clipping, because the screen is a
- * minimum height, never a fixed one.
- */
 export type ImmersiveHeroProps = {
   artwork: HeroArtwork;
-  /** The poster card for the poster and no-artwork treatments. */
+  /** The sharp poster for a poster-only title, and the initials frame for none. */
   posterUri: string | null;
-  /** What the poster placeholder names when there is no artwork. */
   title: string;
-  /** The status bar, which the navigation overlays along with the artwork. */
+  /** The status bar's height, which the top band has to clear. */
   topInset: number;
-  /** Reports the screen's height, which decides when the bar above it turns solid. */
+  /** The whole hero's height, artwork and module together. */
   onHeight?: (height: number) => void;
+  /**
+   * Where the floating module's top edge sits, from the top of the page. The top bar's
+   * reveal ends here, so the bar is opaque before the module's controls pass under it.
+   */
+  onModuleTop?: (y: number) => void;
+  /** The module's contents: title, genres, metadata, actions and scores. */
   children: ReactNode;
 };
 
-const NAV_BAR_HEIGHT = Platform.select({ android: 56, default: 44 }) as number;
-/** How much of the window the first screen takes, so the next section visibly waits below. */
-const SCREEN_SHARE = 0.86;
-const BACKDROP_RATIO = 16 / 9;
-const TALLEST_RATIO = 4 / 3;
-/** The ambient tint over the blurred artwork. */
-const AMBIENT_SCRIM = 0.45;
-/** The extra Ink behind the words, on top of the ambient tint (about 0.83 in total). */
-const BODY_SCRIM = 0.7;
-const BODY_FADE = 72;
 /**
- * Ink at the join between the sharp band and the blurred field, which then eases back to
- * the ambient tint. The two layers are the same picture at different scales, so their
- * colours cannot meet exactly; a darker waist is what keeps the join from reading as an edge.
+ * The Cinematic Editorial first screen (founder-approved direction, 2026-11-04).
+ *
+ *     ┌──────────────────────────────┐
+ *     │   sharp backdrop             │  ← the band: the title's own image, unblurred
+ *     │                              │
+ *     │ ┌──────────────────────────┐ │  ← the module overlaps the band's lower edge,
+ *     │░│ Title                    │░│    inset from both sides so the artwork shows
+ *     │░│ Genre · Genre · +2       │░│    around it
+ *     │░│ 2023 · R · 125m          │░│  ░ the same image, softened and darkened —
+ *     │░│ [Rank] ▢ ▢ ▢             │░│    only behind the module
+ *     │░│ Your score | bingd | Fol │░│
+ *     └─┴──────────────────────────┴─┘  ← the artwork ends at the module's foot
+ *       Paper, and the page continues
+ *
+ * What it replaces: the first version extended a blurred, darkened copy of the artwork
+ * behind the whole first screen and set the words in Parchment on it. The founder's
+ * refinement keeps the image sharp where it is seen, confines the softened extension to
+ * the strip behind the module, and puts everything that can be read or pressed on one
+ * Paper surface in Ink — so the module is one object rather than words on a picture.
+ *
+ * **Natural height.** Nothing here is a fixed height that could clip: the band's height is
+ * derived from the screen width, and the module is as tall as its contents — a long
+ * title, large text, a stacked score row and a two-row action cluster all simply make it
+ * taller, and the softened strip behind it grows with it.
  */
-const SEAM = 0.7;
-const SEAM_EASE = 96;
-
-/** Below the band: from the seam's Ink back down to the ambient tint. */
-const SEAM_GRADIENT = [
-  'linear-gradient(to bottom,',
-  `${inkAlpha(0.45)} 0%,`,
-  `${inkAlpha(0)} 100%)`,
-].join(' ');
-
 export function ImmersiveHero({
   artwork,
   posterUri,
   title,
   topInset,
   onHeight,
+  onModuleTop,
   children,
 }: ImmersiveHeroProps) {
-  const { width, height: windowHeight } = useWindowDimensions();
-  const [bodyHeight, setBodyHeight] = useState(0);
-  const minHeight = Math.round(windowHeight * SCREEN_SHARE);
+  const { width } = useWindowDimensions();
+  const barBand = topInset + NAV_BAR_HEIGHT;
 
-  const backdrop = artwork.treatment === 'backdrop';
-  const natural = width / BACKDROP_RATIO;
-  const tallest = width / TALLEST_RATIO;
-  const posterBand = topInset + NAV_BAR_HEIGHT + theme.poster.detail.height + theme.space[6];
-  const band = backdrop
-    ? Math.round(Math.min(Math.max(natural, minHeight - bodyHeight), tallest))
-    : Math.round(Math.max(natural, posterBand));
+  /**
+   * The band: 16:9 of the width, made a quarter taller.
+   *
+   * Exactly 16:9 would show the whole frame, but the top bar sits over its first hundred
+   * points and the module over its last few dozen, which leaves a letterbox of picture. A
+   * quarter taller crops about a tenth from each side — enough to keep an off-centre
+   * subject in frame on nearly every backdrop TMDB publishes — and gives the image the
+   * room the brief asks for above the module.
+   */
+  const backdropBand = Math.round((width / BACKDROP_RATIO) * BAND_STRETCH);
+  // A poster stands upright under the bar, with room for the module to overlap its foot.
+  const posterBand = barBand + POSTER_HEIGHT + MODULE_OVERLAP;
+  const band =
+    artwork.treatment === 'backdrop' ? Math.max(backdropBand, barBand + MIN_VISIBLE) : posterBand;
+  const moduleTop = band - MODULE_OVERLAP;
 
   return (
     <View
       testID="immersive-hero"
-      style={[styles.frame, { minHeight }]}
-      onLayout={(event) => onHeight?.(event.nativeEvent.layout.height)}
+      onLayout={(event) => {
+        onHeight?.(event.nativeEvent.layout.height);
+        onModuleTop?.(moduleTop);
+      }}
     >
-      {artwork.uri ? (
-        <Image
-          source={{ uri: artwork.uri }}
-          contentFit="cover"
-          blurRadius={40}
-          style={StyleSheet.absoluteFill}
-          accessibilityIgnoresInvertColors
-        />
-      ) : null}
-      <View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: inkAlpha(artwork.uri ? AMBIENT_SCRIM : 1) }]}
-      />
-
-      <View testID="immersive-art" style={{ height: band }}>
-        {backdrop ? (
-          <>
-            <Image
-              source={{ uri: artwork.uri }}
-              contentFit="cover"
-              contentPosition="center"
-              transition={theme.duration.navigation}
-              style={StyleSheet.absoluteFill}
-              accessibilityIgnoresInvertColors
-            />
-            <View
-              pointerEvents="none"
-              style={[StyleSheet.absoluteFill, { experimental_backgroundImage: ART_FADE }]}
-            />
-          </>
+      <View testID="immersive-art" style={[styles.band, { height: band }]}>
+        {artwork.treatment === 'backdrop' ? (
+          <Image
+            source={{ uri: artwork.uri }}
+            contentFit="cover"
+            contentPosition="center"
+            transition={theme.duration.navigation}
+            style={StyleSheet.absoluteFill}
+            accessibilityIgnoresInvertColors
+          />
         ) : (
-          <View style={[styles.posterBand, { paddingTop: topInset + NAV_BAR_HEIGHT }]}>
-            <View style={styles.posterFrame}>
-              <Poster uri={posterUri} title={title} size="detail" />
+          <>
+            {/* A poster-only title: the poster's own colours as a soft field, and the
+                poster itself sharp and centred on it. No artwork at all: Parchment, and
+                the designed initials frame — the brand's own fallback. */}
+            {artwork.uri ? (
+              <>
+                <Image
+                  source={{ uri: artwork.uri }}
+                  contentFit="cover"
+                  blurRadius={30}
+                  style={StyleSheet.absoluteFill}
+                  accessibilityIgnoresInvertColors
+                />
+                <View style={[StyleSheet.absoluteFill, styles.posterDim]} pointerEvents="none" />
+              </>
+            ) : null}
+            <View style={[styles.posterSlot, { top: barBand }]} testID="immersive-poster">
+              <Poster uri={posterUri} title={title} width={POSTER_WIDTH} />
             </View>
-          </View>
+          </>
         )}
-        <View
-          pointerEvents="none"
-          style={[
-            styles.topScrim,
-            { height: topInset + NAV_BAR_HEIGHT, experimental_backgroundImage: TOP_SCRIM },
-          ]}
-        />
-      </View>
-
-      {backdrop ? (
-        <View
-          pointerEvents="none"
-          style={[styles.seam, { top: band, experimental_backgroundImage: SEAM_GRADIENT }]}
-        />
-      ) : null}
-
-      {/* The space between the band and the words is the ambient artwork, and it is what
-          puts the words at the foot of the screen. */}
-      <View style={styles.spacer} />
-
-      <View
-        testID="immersive-body"
-        style={[styles.body, artwork.uri ? styles.bodyOnArtwork : null]}
-        onLayout={(event) => setBodyHeight(Math.round(event.nativeEvent.layout.height))}
-      >
+        {/* The scrim the top controls need on any artwork — the one `TitleHero` draws. */}
         {artwork.uri ? (
           <View
             pointerEvents="none"
-            style={[styles.bodyFade, { experimental_backgroundImage: BODY_FADE_GRADIENT }]}
+            style={[styles.topScrim, { height: barBand, experimental_backgroundImage: TOP_SCRIM }]}
           />
         ) : null}
-        {children}
+      </View>
+
+      <View style={[styles.moduleRow, { marginTop: -MODULE_OVERLAP }]}>
+        {/**
+         * The softened extension, behind the module only.
+         *
+         * It starts where the sharp band ends and stops at the module's foot, so the
+         * artwork finishes with the module and Paper continues below. Full width, so the
+         * strip beside each edge of the module is still picture. The same image, enlarged
+         * to cover the strip from its bottom edge — the part of the frame the band was
+         * just showing — then softened and darkened so it reads as the picture continuing
+         * rather than a second picture.
+         */}
+        {artwork.uri ? (
+          <View
+            pointerEvents="none"
+            testID="immersive-extension"
+            style={[styles.extension, { top: MODULE_OVERLAP }]}
+          >
+            <Image
+              source={{ uri: artwork.uri }}
+              contentFit="cover"
+              contentPosition="bottom"
+              blurRadius={24}
+              style={StyleSheet.absoluteFill}
+              accessibilityIgnoresInvertColors
+            />
+            <View style={[StyleSheet.absoluteFill, styles.extensionDim]} />
+          </View>
+        ) : (
+          <View
+            pointerEvents="none"
+            style={[styles.extension, styles.extensionPlain, { top: MODULE_OVERLAP }]}
+          />
+        )}
+
+        <View testID="immersive-module" style={styles.module}>
+          {children}
+        </View>
       </View>
     </View>
   );
 }
 
-/** The band's lower part, darkening into the ambient tint below it. */
-const ART_FADE = [
-  'linear-gradient(to bottom,',
-  `${inkAlpha(0)} 0%,`,
-  `${inkAlpha(0)} 55%,`,
-  `${inkAlpha(0.35)} 80%,`,
-  `${inkAlpha(SEAM)} 100%)`,
-].join(' ');
-
-/** The fade above the words, into the Ink they sit on. */
-const BODY_FADE_GRADIENT = [
-  'linear-gradient(to bottom,',
-  `${inkAlpha(0)} 0%,`,
-  `${inkAlpha(BODY_SCRIM)} 100%)`,
-].join(' ');
+const NAV_BAR_HEIGHT = Platform.select({ android: 56, default: 44 }) as number;
+const BACKDROP_RATIO = 16 / 9;
+/** A quarter taller than 16:9 — see the band's note. */
+const BAND_STRETCH = 1.25;
+/** However wide the screen, at least this much picture shows between the bar and module. */
+const MIN_VISIBLE = 120;
+/** How far the module rises over the artwork. */
+const MODULE_OVERLAP = 56;
+const POSTER_HEIGHT = theme.poster.detail.height;
+const POSTER_WIDTH = theme.poster.detail.width;
+/** The module's inset from each screen edge: the width of artwork left showing. */
+const MODULE_INSET = theme.space[3];
 
 /** The same top scrim `TitleHero` draws, so the back and menu controls read on any art. */
 const TOP_SCRIM = [
@@ -206,18 +192,28 @@ const TOP_SCRIM = [
 ].join(' ');
 
 const styles = StyleSheet.create({
-  frame: { backgroundColor: brand.ink, overflow: 'hidden' },
+  band: { overflow: 'hidden', backgroundColor: theme.surface.sunken },
   topScrim: { position: 'absolute', top: 0, left: 0, right: 0 },
-  posterBand: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  posterFrame: { ...theme.elevation.e2, borderRadius: theme.radius.card },
-  spacer: { flex: 1 },
-  seam: { position: 'absolute', left: 0, right: 0, height: SEAM_EASE },
-  bodyOnArtwork: { backgroundColor: inkAlpha(BODY_SCRIM) },
-  bodyFade: { position: 'absolute', left: 0, right: 0, top: -BODY_FADE, height: BODY_FADE },
-  body: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-    paddingBottom: theme.space[6],
-    gap: theme.space[4],
+  posterDim: { backgroundColor: inkAlpha(0.25) },
+  posterSlot: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  moduleRow: { paddingHorizontal: MODULE_INSET },
+  extension: { position: 'absolute', left: 0, right: 0, bottom: 0, overflow: 'hidden' },
+  extensionDim: { backgroundColor: inkAlpha(0.35) },
+  extensionPlain: { backgroundColor: theme.surface.sunken },
+  /**
+   * One Paper surface for everything that can be read or pressed. A hairline keeps its
+   * edge where it meets Paper below; the lighter of the two elevations lifts it off the
+   * picture without a heavy shadow.
+   */
+  module: {
+    backgroundColor: theme.surface.base,
+    borderRadius: theme.radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border.hairline,
+    paddingHorizontal: theme.space[4],
+    paddingTop: theme.space[4],
+    paddingBottom: theme.space[3],
+    gap: theme.space[3],
+    ...theme.elevation.e1,
   },
 });
