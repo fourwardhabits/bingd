@@ -1,8 +1,8 @@
 # Combined Android Preview candidate — record and rollback
 
-**Status:** assembled and verified on 2026-11-04 (local only). Nothing is pushed or merged,
-and nothing is in production. Android Preview publication is recorded below once it happens,
-by the session that runs it.
+**Status:** assembled and verified on 2026-11-04, then published to **Android Preview only**
+on 2026-11-05 (group `8272a1af`, from `85a8a03`). Nothing is pushed or merged, and nothing
+is in production. There is no iOS update.
 
 This page is the durable record. Rollback needs nothing beyond this repository.
 
@@ -112,16 +112,21 @@ watchlist activity is **not** in this candidate; it waits on a separate backend 
 
 ## Android Preview
 
-Not yet published. Record here the update group, the Android update id, the runtime, the
-commit and the date. Publication is Android only.
+Published on 2026-11-05 at 13:01 UTC by the app-ab session, from the clean publish checkout
+(`../worktrees/visual2-preview-publish`, detached at `85a8a03`). The publish was Android only,
+and there is no iOS group.
 
 | | |
 |---|---|
-| Update group | — |
-| Android update id | — |
-| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (expected; JS only) |
-| Commit | — |
-| Replaces | `4212ffa9-2668-4613-bb65-f6f78ad6a047` (`505ae33`, final polish) |
+| Update group | `8272a1af-902c-42ce-8e52-a5f737808236` |
+| Android update id | `01a1abcd-2599-7289-a18e-d4297f2811d5` |
+| Branch | `preview` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (EAS's fingerprint at publish matched the local one) |
+| Commit | `85a8a031d93a488b2802ea325f508898b475717e` (code `88113f2` plus this record) |
+| Replaces | `4212ffa9-2668-4613-bb65-f6f78ad6a047` (`505ae33`, final polish) — the rollback target |
+
+Confirmed with `eas update:view 8272a1af-902c-42ce-8e52-a5f737808236 --json`: a single
+Android entry, with the commit and runtime as above.
 
 ## Rollback
 
