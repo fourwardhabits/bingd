@@ -5,7 +5,8 @@ import { newOperationId } from '@/features/collection/writes';
 import { nudgePushDelivery } from '@/features/notifications/push';
 import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
 import {
-  beginThreadRead,
+  afterVisibilityChange,
+  beginCommentRead,
   latestReadable,
   reconcilePreviewFromThread,
 } from '@/features/feed/use-latest-comments';
@@ -211,31 +212,46 @@ export function useComments(eventId: string | null, viewerId: string) {
     staleTime: 0,
     gcTime: 0,
     queryFn: async (): Promise<Comment[]> => {
-      // Taken before the request: what this answer can claim to be current as of.
-      const read = beginThreadRead(viewerId);
-      const { data, error } = await supabase.rpc('activity_comments', {
-        p_feed_event_id: eventId as string,
-      });
-      if (error) throw error;
+      /**
+       * **Never return rows from before a visibility change** (combined Preview re-check,
+       * 2026-11-04). A request still pending when the reader blocks somebody is reused if
+       * the conversation reopens before it answers; its rows predate the block. So a read
+       * whose revision fell under the reader's visibility floor while in flight is made
+       * again. Bounded: three changes inside one round trip is not a real sequence, and the
+       * error is the honest outcome if it ever were.
+       */
+      let data: unknown[] | null = null;
+      let revision = 0;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        revision = beginCommentRead(viewerId);
+        const response = await supabase.rpc('activity_comments', {
+          p_feed_event_id: eventId as string,
+        });
+        if (response.error) throw response.error;
+        if (afterVisibilityChange(viewerId, revision)) {
+          data = (response.data ?? []) as unknown[];
+          break;
+        }
+      }
+      if (data === null) throw new Error('Who you can see changed while this loaded. Try again.');
 
       /**
        * **The Feed card's preview follows every fresh read of its thread** (combined
        * Preview review, 2026-11-04). The preview is its own cached read, and a mounted
        * query with `staleTime: 0` is not refetched just because time has passed — so a
        * comment withdrawn, or an author who went private, stayed under the card even after
-       * opening the conversation had shown it gone. This read replaces the preview —
-       * unless the reader blocked or unfollowed somebody while it was in flight, or the
-       * preview has a newer answer than this one (`reconcilePreviewFromThread`).
+       * opening the conversation had shown it gone. This read replaces the preview unless a
+       * newer read's answer is already on the card (`reconcilePreviewFromThread`).
        */
       reconcilePreviewFromThread(
         queryClient,
         viewerId,
         eventId as string,
-        (data ?? []) as Parameters<typeof latestReadable>[0],
-        read,
+        data as Parameters<typeof latestReadable>[0],
+        revision,
       );
 
-      return ((data ?? []) as CommentRow[]).map((row) => ({
+      return (data as CommentRow[]).map((row) => ({
         id: row.id,
         eventId: eventId as string,
         parentId: row.parent_id,
