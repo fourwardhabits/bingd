@@ -54,6 +54,7 @@ export type LatestComment = {
 
 type Row = {
   id: string;
+  parent_id: string | null;
   author_id: string;
   username: string;
   display_name: string | null;
@@ -69,12 +70,19 @@ type Row = {
  *
  * Replies count: "the most recent comment" is the last thing anybody said, and a reply is
  * where most of a conversation's latest words are. A tombstone does not — it has no words.
- * Exported for the test that pins both rules.
+ *
+ * **Only a reply the sheet would draw** (independent review, 2026-11-04). `activity_comments`
+ * can return a visible person's reply while omitting its root, when the root's author is one
+ * this reader may not see. The sheet's `threadsOf` drops such a reply; the preview must too,
+ * or it would show words that opening the conversation never does. A reply under a returned
+ * tombstone is kept, as the sheet keeps it. Exported for the tests that pin these rules.
  */
 export function latestReadable(rows: readonly Row[]): LatestComment | null {
+  const present = new Set(rows.map((row) => row.id));
   let latest: Row | null = null;
   for (const row of rows) {
     if (row.deleted_at !== null || !row.body) continue;
+    if (row.parent_id !== null && !present.has(row.parent_id)) continue;
     if (!latest || row.created_at > latest.created_at) latest = row;
   }
   if (!latest || !latest.body) return null;
@@ -102,7 +110,11 @@ export function useLatestComments(eventIds: readonly string[], viewerId: string)
   const results = useQueries({
     queries: eventIds.map((eventId) => ({
       queryKey: latestCommentKey(viewerId, eventId),
+      // Both of the sheet's safeguards: refetch on every mount, and discard the entry the
+      // moment no card observes it, so a card scrolled back into a page never starts from
+      // words that may since have been withdrawn.
       staleTime: 0,
+      gcTime: 0,
       queryFn: async (): Promise<LatestComment | null> => {
         const { data, error } = await supabase.rpc('activity_comments', {
           p_feed_event_id: eventId,
@@ -115,16 +127,22 @@ export function useLatestComments(eventIds: readonly string[], viewerId: string)
 
   // `useQueries` returns a new array every render, so the map is keyed on what it holds —
   // the body and the flag included, so an edit to the same comment redraws the preview.
+  //
+  // **Only an answer this mount has read and that has not since failed** (independent
+  // review, 2026-11-04). A result carried over from an earlier mount, or one whose refetch
+  // errored, is not evidence the comment still stands, so the card draws no preview rather
+  // than words the author may have withdrawn.
+  const verified = results.map((result) =>
+    result.isSuccess && result.isFetchedAfterMount && !result.isError ? result.data : null,
+  );
   const signature = JSON.stringify(
-    results.map((result) =>
-      result.data ? [result.data.id, result.data.body, result.data.hasSpoilers] : null,
-    ),
+    verified.map((data) => (data ? [data.id, data.body, data.hasSpoilers] : null)),
   );
   return useMemo(() => {
     const map = new Map<string, LatestComment>();
-    results.forEach((result, index) => {
+    verified.forEach((data, index) => {
       const eventId = eventIds[index];
-      if (eventId && result.data) map.set(eventId, result.data);
+      if (eventId && data) map.set(eventId, data);
     });
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps

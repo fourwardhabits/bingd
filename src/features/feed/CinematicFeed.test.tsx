@@ -38,6 +38,7 @@ jest.mock('@/lib/supabase', () => ({
     rpc: (name: string, args: Record<string, unknown>) => {
       mockRpcCalls.push({ name, args });
       const value = mockRpc[name];
+      if (value instanceof Error) return Promise.resolve({ data: null, error: value });
       const data =
         typeof value === 'function' ? (value as MockFn)(args) : (value ?? []);
       return Promise.resolve({ data, error: null });
@@ -397,6 +398,33 @@ describe('the latest-comment preview', () => {
     await waitFor(() => expect(textOf(view.getByTestId('feed-card-latest-comment'))).toContain('He builds the bomb.'));
   });
 
+  it('draws no preview when the comment read fails, rather than anything cached', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockRpc.activity_comment_counts = [{ feed_event_id: 'e1', comment_count: 1 }];
+    mockRpc.activity_comments = new Error('offline');
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() =>
+      expect(mockRpcCalls.some((call) => call.name === 'activity_comments')).toBe(true),
+    );
+    expect(view.queryByTestId('feed-card-latest-comment')).toBeNull();
+    // The count still says there is a conversation to open.
+    expect(view.getByTestId('feed-card-comment')).toBeTruthy();
+  });
+
+  it('never previews a reply whose root the server withheld', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    withComments([
+      comment('c1', 'An earlier remark.', '2026-11-04T10:01:00Z'),
+      comment('c2', 'Replying to someone you cannot see.', '2026-11-04T10:09:00Z', {
+        parent_id: 'hidden-root',
+      }),
+    ]);
+    const view = await renderWithProviders(<FeedScreen />);
+    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
+    expect(textOf(preview)).toContain('An earlier remark.');
+    expect(textOf(preview)).not.toContain('Replying to someone you cannot see.');
+  });
+
   it('makes no comment read for a card with no comments, and draws no preview', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     const view = await renderWithProviders(<FeedScreen />);
@@ -471,6 +499,24 @@ describe('the actions', () => {
     fireEvent.press(await waitFor(() => view.getByTestId('feed-card-artwork')));
     expect(mockPush).toHaveBeenCalledWith('/title/film-e1');
   });
+});
+
+it('never truncates the sentence that holds a sitting’s “and N more”', async () => {
+  mockRows = [
+    event('e1', 'ranking_batch', { kind: 'movie', title: 'Keep Your Hands Off Eizouken! The Extended Edition', poster_path: '/k.jpg' }, {
+      name: 'Suraj Kandukuri',
+      payload: { count: 3, sitting: 's-1' },
+    }),
+  ];
+  const view = await renderWithProviders(<FeedScreen />);
+  const more = await waitFor(() => view.getByText('2 more'));
+  // Every Text between the control and the card: none may clamp lines.
+  type Node = { props?: Record<string, unknown>; parent?: Node | null };
+  let node: Node | null = more as unknown as Node;
+  while (node && node.props?.testID !== 'feed-scroll') {
+    expect(node.props?.numberOfLines).toBeUndefined();
+    node = node.parent ?? null;
+  }
 });
 
 it('keeps the feed’s order, and awards keep their compact row', async () => {

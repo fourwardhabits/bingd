@@ -145,7 +145,10 @@ export function FeedCard({
         <View style={styles.headerCopy}>
           {/* One sentence, wrapped by the layout — `ActivityRow`'s grammar unchanged,
               including the non-breaking join that stops `(2023)` orphaning. */}
-          <Text variant="subhead" tone="secondary" numberOfLines={2}>
+          {/* Three lines, like the row — and no clamp at all when the sentence ends in a
+              control: "and 2 more" is the only way into a sitting, and truncation would
+              cut exactly that (independent review, 2026-11-04). */}
+          <Text variant="subhead" tone="secondary" numberOfLines={tailAction ? undefined : 3}>
             <Text variant="subhead" style={styles.entity} onPress={onPressActor}>
               {actorName}
             </Text>

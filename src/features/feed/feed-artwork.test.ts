@@ -49,8 +49,15 @@ describe('takesFeedCard', () => {
 });
 
 describe('latestReadable', () => {
-  const row = (id: string, at: string, body: string | null, deleted = false) => ({
+  const row = (
+    id: string,
+    at: string,
+    body: string | null,
+    deleted = false,
+    parent_id: string | null = null,
+  ) => ({
     id,
+    parent_id,
     author_id: `a-${id}`,
     username: `u${id}`,
     display_name: null,
@@ -64,7 +71,7 @@ describe('latestReadable', () => {
   it('is the newest comment by time, replies included', () => {
     const latest = latestReadable([
       row('root', '2026-11-04T10:00:00Z', 'first'),
-      row('reply', '2026-11-04T10:05:00Z', 'answer'),
+      row('reply', '2026-11-04T10:05:00Z', 'answer', false, 'root'),
       row('root2', '2026-11-04T10:02:00Z', 'second'),
     ]);
     expect(latest?.id).toBe('reply');
@@ -78,5 +85,23 @@ describe('latestReadable', () => {
     ]);
     expect(latest?.id).toBe('kept');
     expect(latestReadable([row('gone', '2026-11-04T10:09:00Z', null, true)])).toBeNull();
+  });
+
+  it('skips a reply whose root the server withheld, as the sheet does', () => {
+    // The root's author is hidden from this reader, so `activity_comments` returned the
+    // reply alone. `threadsOf` drops it; the preview must not show it either.
+    const latest = latestReadable([
+      row('visible', '2026-11-04T10:00:00Z', 'visible root'),
+      row('orphan', '2026-11-04T10:09:00Z', 'reply to a hidden root', false, 'hidden-root'),
+    ]);
+    expect(latest?.id).toBe('visible');
+  });
+
+  it('keeps a reply under a retracted root, as the sheet does', () => {
+    const latest = latestReadable([
+      row('tomb', '2026-11-04T10:00:00Z', null, true),
+      row('reply', '2026-11-04T10:09:00Z', 'still here', false, 'tomb'),
+    ]);
+    expect(latest?.id).toBe('reply');
   });
 });

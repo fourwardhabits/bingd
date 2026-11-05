@@ -18,6 +18,7 @@ and the title page are untouched and keep `ActivityRow`.
 | `src/features/feed/use-latest-comments.ts` | New. Newest readable comment per card, from the existing `activity_comments` RPC. |
 | `src/features/feed/use-feed.ts` | Selects `backdrop_path` (title and parent) and the parent `poster_path`. Read-only columns on `media_items`, whose policy is `using (true)`. |
 | `app/(tabs)/feed.tsx` | Title activity renders `FeedCard`; awards, goals and follow stories keep their rows. Pull-to-refresh also refreshes comment previews. |
+| `src/features/profile/use-social.ts` | Follow, unfollow, block and unblock now also invalidate `['comments', viewer]` and `['comment-counts', viewer]`, so a blocked commenter's preview and count disappear at once. |
 | `src/features/feed/CinematicFeed.test.tsx`, `feed-artwork.test.ts` | New tests (27). |
 
 No migration, no new RPC, no schema, policy, notification or reaction-backend change.
@@ -95,7 +96,22 @@ read per page. Not built: it is a new database function.
   ranking with review and comments, ranking without either, single watchlist add, poster
   fallback, no artwork, TV season, a 12-add burst as it renders today, long-press picker, preview
   opening the thread, and the grouped-watchlist concept.
-- Independent Codex regression review: `.agent-workflow/codex-reviews/` in this worktree.
+- Independent Codex regression review of `68b1b6b` (`.agent-workflow/codex-reviews/feed-cinematic.md`,
+  gitignored): **needs-attention**, four findings, all fixed in the follow-up commit with
+  regression tests that fail without the fixes:
+  1. a blocked commenter's preview stayed until the next pull (social writes now invalidate
+     comments and counts);
+  2. a preview could start from a cached body that had since been withdrawn (now `gcTime: 0`
+     and only results read during this mount and not since failed are shown);
+  3. a reply whose root author is hidden could be previewed although the sheet drops it (the
+     preview now applies the sheet's thread rule);
+  4. "and N more" on a long grouped-ranking sentence could be truncated away at 320pt (the
+     sentence is no longer clamped when it ends in that control).
+
+### Residuals (unchanged from `505ae33`, not introduced here)
+
+- Reaction summaries are not invalidated by block/unfollow either; a blocked person's reaction
+  can stay in a card's count until the next pull, as it already could on `ActivityRow`.
 
 ## Rollback
 
