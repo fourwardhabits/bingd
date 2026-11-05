@@ -190,3 +190,11 @@ Navigation and polish (505ae33)
 
 - [ ] For You and Collection share one row; Movies | TV toggle works; Lists hides the toggle.
 - [ ] Header spacing identical on all five tabs; Leaderboard chips scroll; rank-1 trophy shows.
+
+### Combined-candidate review (2026-11-04)
+
+Codex on the combined head `9942738` found one more Feed issue [high]: a preview loaded before
+its comment was withdrawn (or its author went private) stayed under the card even after opening
+the conversation showed it gone. Fixed in the next commit: every fresh read of a thread now sets
+that card's preview from the same answer, including to nothing. Regression test fails without
+the fix.

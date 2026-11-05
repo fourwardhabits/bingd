@@ -4,6 +4,7 @@ import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { nudgePushDelivery } from '@/features/notifications/push';
 import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
+import { latestCommentKey, latestReadable } from '@/features/feed/use-latest-comments';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { useChunkedById } from '@/lib/chunked-query';
@@ -199,6 +200,7 @@ export function useCommentCounts(eventIds: string[], viewerId: string) {
  * server time — is the right price.
  */
 export function useComments(eventId: string | null, viewerId: string) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ['comments', viewerId, eventId],
     enabled: Boolean(eventId),
@@ -209,6 +211,19 @@ export function useComments(eventId: string | null, viewerId: string) {
         p_feed_event_id: eventId as string,
       });
       if (error) throw error;
+
+      /**
+       * **The Feed card's preview follows every fresh read of its thread** (combined
+       * Preview review, 2026-11-04). The preview is its own cached read, and a mounted
+       * query with `staleTime: 0` is not refetched just because time has passed — so a
+       * comment withdrawn, or an author who went private, stayed under the card even after
+       * opening the conversation had shown it gone. This read is the newer answer: the
+       * preview is set from it, including to nothing.
+       */
+      queryClient.setQueryData(
+        latestCommentKey(viewerId, eventId as string),
+        latestReadable((data ?? []) as Parameters<typeof latestReadable>[0]),
+      );
 
       return ((data ?? []) as CommentRow[]).map((row) => ({
         id: row.id,

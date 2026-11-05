@@ -366,6 +366,29 @@ describe('the latest-comment preview', () => {
     await waitFor(() => expect(view.getByPlaceholderText('Add a comment')).toBeTruthy());
   });
 
+  it('drops a preview the conversation no longer contains once the thread is read', async () => {
+    // Loaded, then withdrawn (or its author went private to this reader) before the
+    // conversation is opened. The thread's fresh read is the newer answer.
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    withComments([comment('c1', 'Soon to be withdrawn.', '2026-11-04T10:09:00Z')]);
+    const view = await renderWithProviders(<FeedScreen />);
+    const preview = await waitFor(() => view.getByTestId('feed-card-latest-comment'));
+    expect(textOf(preview)).toContain('Soon to be withdrawn.');
+    // Sanity: the hidden-element query does find a preview while one exists.
+    expect(view.queryByTestId('feed-card-latest-comment', { includeHiddenElements: true })).toBeTruthy();
+
+    mockRpc.activity_comments = [];
+    fireEvent.press(view.getByTestId('feed-card-comment'));
+    await waitFor(() => expect(view.getByPlaceholderText('Add a comment')).toBeTruthy());
+
+    // Behind the open sheet, which hides the Feed from default queries — so look there too.
+    const hidden = { includeHiddenElements: true };
+    await waitFor(() =>
+      expect(view.queryByTestId('feed-card-latest-comment', hidden)).toBeNull(),
+    );
+    expect(view.queryByText(/Soon to be withdrawn/, hidden)).toBeNull();
+  });
+
   it('skips a retracted comment and previews the one before it', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     withComments(
