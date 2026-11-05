@@ -1857,7 +1857,17 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[2],
   },
   headerText: { flex: 1, gap: 2 },
-  buckets: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  /**
+   * The buckets as the sheet's foot (post-QA sprint 2, 2026-11-05): a hairline on the
+   * gutters closes the optional details above, and the three answers sit 12pt under it,
+   * so the decision reads as its own group rather than a fourth row of the form.
+   */
+  buckets: {
+    marginHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+  },
   /**
    * The post-rank receipt: badge left, two lines beside it.
    *

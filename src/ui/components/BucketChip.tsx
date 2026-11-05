@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { BUCKET_LABEL } from '@/features/collection/score';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 import { Text } from './Text';
 
 /**
@@ -92,9 +92,13 @@ function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
       <View
         style={[
           styles.circle,
-          { borderColor: bucket.color },
+          // Unchosen, the circle holds a faint wash of its own colour (post-QA sprint 2,
+          // 2026-11-05), so the three read as three meanings before one is picked
+          // rather than as three empty rings. Chosen, it fills, as it always did.
+          { borderColor: bucket.color, backgroundColor: tintOf(bucket.color) },
           selected && { backgroundColor: bucket.color },
         ]}
+        testID={`bucket-circle-${bucket.id}`}
       >
         {selected ? (
           <Text
@@ -106,7 +110,7 @@ function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
           </Text>
         ) : null}
       </View>
-      <Text variant="callout" style={styles.label}>
+      <Text variant="callout" style={styles.label} testID={`bucket-label-${bucket.id}`}>
         {bucket.label}
       </Text>
     </Pressable>
@@ -162,6 +166,11 @@ export function BucketChoices({
 
 const CIRCLE = 44;
 
+/** A bucket colour at about a tenth of its strength — the unchosen circle's wash. */
+export function tintOf(hex: string): string | undefined {
+  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}1F` : undefined;
+}
+
 const styles = StyleSheet.create({
   chip: {
     minHeight: theme.layout.control.chipHeight,
@@ -188,7 +197,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { textAlign: 'center' },
+  // Semibold: the three answers are the sheet's one decision and should read as such.
+  label: { textAlign: 'center', fontFamily: fontFamily.sansSemibold },
   /**
    * Three equal columns, always. The gap is the sheet's own rhythm rather than a
    * number chosen here, and at a 320pt width it still leaves each column 88pt —

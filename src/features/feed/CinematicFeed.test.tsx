@@ -1,7 +1,8 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { BackHandler } from 'react-native';
+import { BackHandler, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context. See app-directory.test.ts.
@@ -386,6 +387,105 @@ describe('the actions', () => {
     ];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => expect(view.getByLabelText('2 reactions. See who reacted.')).toBeTruthy());
+  });
+
+  /**
+   * **One social area** (post-QA sprint 2, 2026-11-05): the summary, a hairline, then the
+   * actions — on the card's gutters, with nothing drawn for a post nobody reacted to.
+   */
+  const reactor = (user: string, kind: string) => ({
+    feed_event_id: 'e1',
+    user_id: user,
+    kind,
+    profiles: { id: user, username: user, display_name: user.toUpperCase(), avatar_path: null },
+  });
+
+  it('draws no summary and no hairline with no reactions, just the actions', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    const view = await renderWithProviders(<FeedScreen />);
+    await waitFor(() => expect(view.getByTestId('feed-card-like')).toBeTruthy());
+    expect(view.queryByTestId('feed-card-reactions')).toBeNull();
+    expect(view.queryByTestId('feed-card-social-divider')).toBeNull();
+    expect(view.queryByText(/reactions?$/)).toBeNull();
+    expect(view.getByText('Like')).toBeTruthy();
+  });
+
+  it('says 1 reaction, in the singular, with its glyph and a hairline', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'wow')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
+    expect(within(summary).getByText('1 reaction')).toBeTruthy();
+    expect(within(summary).getByText('😮', { includeHiddenElements: true })).toBeTruthy();
+    expect(summary.props.accessibilityLabel).toBe('1 reaction. See who reacted.');
+    expect(view.getByTestId('feed-card-social-divider')).toBeTruthy();
+  });
+
+  it('clusters up to three kinds and counts every reaction', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [
+      reactor('theo', 'love'),
+      reactor('priya', 'love'),
+      reactor('ana', 'funny'),
+      reactor('raj', 'wow'),
+      reactor('kim', 'moved'),
+    ];
+    const view = await renderWithProviders(<FeedScreen />);
+    const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
+    expect(within(summary).getByText('5 reactions')).toBeTruthy();
+    const glyphs = within(summary)
+      .getAllByText(/^(❤️|👍|👎|😂|😮|😢)$/, { includeHiddenElements: true })
+      .map((node) => node.props.children);
+    expect(glyphs).toHaveLength(3);
+    // Most common first.
+    expect(glyphs[0]).toBe('❤️');
+  });
+
+  it('leads with the reader’s own reaction and names it on the control', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love'), reactor('priya', 'love'), reactor('user-1', 'wow')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
+    const glyphs = within(summary)
+      .getAllByText(/^(❤️|👍|👎|😂|😮|😢)$/, { includeHiddenElements: true })
+      .map((node) => node.props.children);
+    expect(glyphs[0]).toBe('😮');
+    expect(within(summary).getByText('3 reactions')).toBeTruthy();
+
+    const like = view.getByTestId('feed-card-like');
+    expect(like.props.accessibilityState).toMatchObject({ selected: true });
+    expect(within(like).getByText('Wow')).toBeTruthy();
+    // Long press still opens the six to change it.
+    fireEvent(like, 'longPress');
+    await waitFor(() => expect(view.getByLabelText('Funny')).toBeTruthy());
+  });
+
+  it('opens the list of who reacted from anywhere on the summary', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love'), reactor('priya', 'funny')];
+    const view = await renderWithProviders(<FeedScreen />);
+    fireEvent.press(await waitFor(() => view.getByTestId('feed-card-reactions')));
+    await waitFor(() =>
+      expect(view.getByLabelText('THEO, reacted Love. Open their profile.')).toBeTruthy(),
+    );
+  });
+
+  it('puts the summary, hairline and actions on the card’s gutters, 44pt targets each', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
+    const gutter = theme.layout.gutter;
+    expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(gutter);
+    expect(StyleSheet.flatten(view.getByTestId('feed-card-social-divider').props.style).marginHorizontal).toBe(gutter);
+    for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-save', 'feed-card-share']) {
+      const style = StyleSheet.flatten(view.getByTestId(id).props.style);
+      expect(style.minHeight).toBeGreaterThanOrEqual(44);
+      expect(style.minWidth).toBeGreaterThanOrEqual(44);
+      // The target's own padding plus the row's inset lands its icon on the gutter.
+      const row = StyleSheet.flatten(view.getByTestId(id).parent?.props.style);
+      expect((row?.paddingHorizontal ?? 0) + style.paddingHorizontal).toBe(gutter);
+    }
   });
 
   it('saves to the watchlist and shares into Recommend', async () => {

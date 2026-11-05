@@ -36,8 +36,9 @@ export type ImmersiveHeroProps = {
  *     │░│ 2023 · R · 125m          │░│  ░ the same image, softened and darkened —
  *     │░│ [Rank] ▢ ▢ ▢             │░│    only behind the module
  *     │░│ Your score | bingd | Fol │░│
- *     └─┴──────────────────────────┴─┘  ← the artwork ends at the module's foot
- *       Paper, and the page continues
+ *     │░└──────────────────────────┘░│
+ *     └──────────────────────────────┘  ← a 12pt frame of artwork under the module,
+ *       Paper, and the page continues      the same width as the margins beside it
  *
  * What it replaces: the first version extended a blurred, darkened copy of the artwork
  * behind the whole first screen and set the words in Parchment on it. The founder's
@@ -131,8 +132,10 @@ export function ImmersiveHero({
         {/**
          * The softened extension, behind the module only.
          *
-         * It starts where the sharp band ends and stops at the module's foot, so the
-         * artwork finishes with the module and Paper continues below. Full width, so the
+         * It starts where the sharp band ends and stops one inset below the module's
+         * foot, so the module is framed by picture on three sides at one width, and
+         * Paper continues below with a clean edge (post-QA sprint 2, 2026-11-05: the
+         * picture used to end flush with the module, which read as unfinished). Full width, so the
          * strip beside each edge of the module is still picture. The same image, enlarged
          * to cover the strip from its bottom edge — the part of the frame the band was
          * just showing — then softened and darkened so it reads as the picture continuing
@@ -179,7 +182,7 @@ const MIN_VISIBLE = 120;
 const MODULE_OVERLAP = 56;
 const POSTER_HEIGHT = theme.poster.detail.height;
 const POSTER_WIDTH = theme.poster.detail.width;
-/** The module's inset from each screen edge: the width of artwork left showing. */
+/** The module's inset from each screen edge and below it: the width of artwork showing. */
 const MODULE_INSET = theme.space[3];
 
 /** The same top scrim `TitleHero` draws, so the back and menu controls read on any art. */
@@ -196,7 +199,7 @@ const styles = StyleSheet.create({
   topScrim: { position: 'absolute', top: 0, left: 0, right: 0 },
   posterDim: { backgroundColor: inkAlpha(0.25) },
   posterSlot: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  moduleRow: { paddingHorizontal: MODULE_INSET },
+  moduleRow: { paddingHorizontal: MODULE_INSET, paddingBottom: MODULE_INSET },
   extension: { position: 'absolute', left: 0, right: 0, bottom: 0, overflow: 'hidden' },
   extensionDim: { backgroundColor: inkAlpha(0.35) },
   extensionPlain: { backgroundColor: theme.surface.sunken },

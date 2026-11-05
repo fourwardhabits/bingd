@@ -13,27 +13,43 @@ import { TitleReviews } from './TitleReviews';
  * compact score strip, the action cluster on artwork, and the reviews preview.
  */
 describe('the immersive score strip', () => {
-  it('draws the three labels in one strip, with real values', async () => {
+  /** Every string under a node, in tree order — nested Text included. */
+  const textOf = (node: unknown): string => {
+    if (node == null) return '';
+    if (typeof node === 'string') return node;
+    if (typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    const element = node as { children?: unknown; props?: { children?: unknown } };
+    return textOf(element.props?.children ?? element.children ?? []);
+  };
+
+  it('draws compact labels with the real rating counts, and real values', async () => {
     const view = await render(
       <ImmersiveScores
         you={{ score: 9.2 }}
-        bingd={{ score: 8.4, ratingCount: 128 }}
+        bingd={{ score: 8.7, ratingCount: 4 }}
         following={{ score: 7.9, ratingCount: 3 }}
       />,
     );
 
     const strip = within(view.getByTestId('immersive-scores'));
-    expect(strip.getByText('Your score')).toBeTruthy();
-    expect(strip.getByText('bingd')).toBeTruthy();
-    expect(strip.getByText('Following')).toBeTruthy();
-    expect(strip.getByText('8.4')).toBeTruthy();
-    expect(strip.getByText('128 ratings')).toBeTruthy();
-    expect(strip.getByText('3 ratings')).toBeTruthy();
+    expect(textOf(view.getByTestId('immersive-score-you-label').props.children)).toBe('Your score');
+    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd. (4)');
+    expect(textOf(view.getByTestId('immersive-score-following-label').props.children)).toBe(
+      'Following (3)',
+    );
+    expect(strip.getByText('8.7')).toBeTruthy();
+    expect(strip.getByText('7.9')).toBeTruthy();
     // The reader's own score is the one filled badge.
     expect(strip.getByLabelText('9.2 out of 10')).toBeTruthy();
+    // No second line of explanation in the row any more.
+    expect(strip.queryByText(/ratings$/)).toBeNull();
+    // The count is a rating count, and is said as one.
+    expect(view.getByLabelText('bingd score. 8.7 out of 10. 4 ratings')).toBeTruthy();
+    expect(view.getByLabelText('People you follow. 7.9 out of 10. 3 ratings')).toBeTruthy();
   });
 
-  it('says why a score is missing, with a dash and never an empty circle', async () => {
+  it('shows a dash for a missing score and keeps the reason for screen readers', async () => {
     const view = await render(
       <ImmersiveScores
         you={{ score: null }}
@@ -43,18 +59,67 @@ describe('the immersive score strip', () => {
     );
 
     const strip = within(view.getByTestId('immersive-scores'));
-    expect(strip.getByText('Not ranked yet')).toBeTruthy();
-    expect(strip.getByText('Not enough ratings')).toBeTruthy();
-    expect(strip.getByText('No ratings yet')).toBeTruthy();
-    expect(strip.getAllByText('–', { includeHiddenElements: true })).toHaveLength(3);
+    expect(strip.getAllByText('—')).toHaveLength(3);
     expect(strip.queryAllByLabelText(/out of 10/)).toHaveLength(0);
+    // The reasons are not printed…
+    expect(strip.queryByText('Not ranked yet')).toBeNull();
+    expect(strip.queryByText(/Not enough ratings/)).toBeNull();
+    expect(strip.queryByText(/No ratings yet/)).toBeNull();
+    // …they are what each column says.
+    expect(view.getByLabelText('Your score. Not ranked yet')).toBeTruthy();
+    expect(view.getByLabelText('bingd score. Not enough ratings yet. 0 ratings')).toBeTruthy();
+    expect(
+      view.getByLabelText('People you follow. No ratings yet from people you follow. 0 ratings'),
+    ).toBeTruthy();
+    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd. (0)');
+    expect(textOf(view.getByTestId('immersive-score-following-label').props.children)).toBe(
+      'Following (0)',
+    );
+  });
+
+  it('never draws a count the server has not reported yet', async () => {
+    const view = await render(
+      <ImmersiveScores
+        you={null}
+        bingd={{ score: null, ratingCount: null, loading: true }}
+        following={{ score: null, ratingCount: null, loading: true }}
+      />,
+    );
+    expect(textOf(view.getByTestId('immersive-score-bingd-label').props.children)).toBe('bingd.');
+    expect(textOf(view.getByTestId('immersive-score-following-label').props.children)).toBe(
+      'Following',
+    );
+    expect(view.queryByText(/\(0\)/)).toBeNull();
+    expect(view.getByLabelText('bingd score. Loading')).toBeTruthy();
   });
 
   it('says Score loading for a ranked title whose number has not landed', async () => {
     const view = await render(
       <ImmersiveScores you={{ score: null, pending: true }} bingd={null} following={null} />,
     );
-    expect(view.getByText('Score loading')).toBeTruthy();
+    expect(view.getByLabelText('Your score. Score loading')).toBeTruthy();
+  });
+
+  it('gives the three columns equal widths, each value and label centred', async () => {
+    const view = await render(
+      <ImmersiveScores
+        you={{ score: 9.2, onPress: () => {} }}
+        bingd={{ score: 8.7, ratingCount: 1234 }}
+        following={{ score: null, ratingCount: 0 }}
+      />,
+    );
+    for (const id of ['immersive-score-you', 'immersive-score-bingd', 'immersive-score-following']) {
+      const cell = StyleSheet.flatten(view.getByTestId(id).props.style);
+      // Basis 0 and the same grow: equal thirds whatever the label's length.
+      expect(cell.flexBasis).toBe(0);
+      expect(cell.flexGrow).toBe(1);
+      expect(cell.alignItems).toBe('center');
+      // Equal padding above and below.
+      expect(cell.paddingVertical).toBeGreaterThan(0);
+      expect(cell.paddingTop ?? cell.paddingVertical).toBe(cell.paddingBottom ?? cell.paddingVertical);
+      const label = StyleSheet.flatten(view.getByTestId(`${id}-label`).props.style);
+      expect(label.textAlign).toBe('center');
+    }
   });
 
   it('opens Following only when somebody is behind it', async () => {
@@ -99,6 +164,15 @@ describe('the immersive score strip', () => {
       dims.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 1 });
       const ordinary = await render(scores);
       expect(StyleSheet.flatten(ordinary.getByTestId('immersive-scores').props.style).flexDirection).toBe('row');
+
+      dims.mockReturnValue({ width: 360, height: 740, scale: 3, fontScale: 1.15 });
+      const wider = await render(scores);
+      expect(StyleSheet.flatten(wider.getByTestId('immersive-scores').props.style).flexDirection).toBe('row');
+
+      // Stacked, a label may wrap but is never truncated to one line.
+      dims.mockReturnValue({ width: 320, height: 640, scale: 2, fontScale: 2 });
+      const largest = await render(scores);
+      expect(largest.getByTestId('immersive-score-following-label').props.numberOfLines).toBe(2);
     } finally {
       dims.mockRestore();
     }

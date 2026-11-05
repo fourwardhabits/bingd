@@ -5,35 +5,42 @@ import { ScoreBadge, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
- * **The three scores as one compact strip, on the artwork** (Immersive Scroll experiment).
+ * **The three scores as one compact row on the module's Paper** (Cinematic Editorial).
  *
- * The same three values, labels and unavailable states as `ScoresSection`, which the
- * original page keeps; the inputs are the same shape so the title page builds them once.
- * What differs is only the presentation, for a dark cinematic field:
+ * Post-QA sprint 2 (2026-11-05) reworked the row, not the scores behind it:
  *
- * - one row in one hairline-framed strip, three cells divided by hairlines — not a beige
- *   card, which would be a block of Paper cut into the artwork;
- * - a score that does not exist is a dash and its existing reason ("Not enough ratings"),
- *   never an empty circle, so a title nobody has rated reads as quiet rather than broken;
- * - the reader's own score, once ranked, is the one filled Maroon badge and the widest
- *   cell. bingd and Following are numbers;
- * - side by side while the three fit, stacked into three rows when they do not — a narrow
- *   phone at a large text size — so a label is never cut to "Your sc…".
+ *        (8.4)            8.7             —
+ *     Your score       bingd. (4)    Following (0)
  *
- * Parchment on Ink throughout. The field beneath is the artwork under an Ink scrim of at
- * least 0.82, so a white sky reads as dark grey here and contrast holds on bright art.
+ * - three columns of exactly equal width, each value centred with its label centred
+ *   directly beneath it, and the same padding above and below the row;
+ * - the reader's own score keeps the filled Maroon circle once ranked; bingd and
+ *   Following are quieter numbers;
+ * - the label carries the real **rating** count in brackets, as the server reports it,
+ *   and only once it has reported it — never a 0 drawn while the number is loading;
+ * - a score that does not exist is a dash. Its reason ("Not enough ratings", "No ratings
+ *   from people you follow", "Not ranked yet", "Score loading") is what a screen reader
+ *   says for that column — it is no longer printed as a second, wrapping line;
+ * - while the three fit side by side they do; a narrow phone at a large text size
+ *   stacks them into rows, so nothing is ever clipped.
  */
 export type ImmersiveScoresProps = {
   you: { score: number | null; pending?: boolean; onPress?: () => void } | null;
-  bingd: { score: number | null; ratingCount: number } | null;
-  following: { score: number | null; ratingCount: number } | null;
+  /**
+   * `ratingCount` is null when the server has not given one; `loading` says it is still
+   * being asked, which is the only time the column says "Loading".
+   */
+  bingd: { score: number | null; ratingCount: number | null; loading?: boolean } | null;
+  following: { score: number | null; ratingCount: number | null; loading?: boolean } | null;
   onPressFollowing?: () => void;
 };
 
-const NOT_ENOUGH = 'Not enough ratings';
-const NO_FOLLOWING = 'No ratings yet';
+const NOT_ENOUGH = 'Not enough ratings yet';
+const NO_FOLLOWING = 'No ratings yet from people you follow';
 const NOT_RANKED = 'Not ranked yet';
 const SCORE_LOADING = 'Score loading';
+const COUNT_LOADING = 'Loading';
+const DASH = '—';
 
 /** Below this many points of width per unit of text scale, the three cells stack. */
 const STACK_BELOW = 290;
@@ -44,7 +51,7 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
   const { width, fontScale } = useWindowDimensions();
   if (!you && !bingd && !following) return null;
   const youRanked = you?.score != null;
-  // Three cells need about 300pt of 1x text; below that, at this text size, they stack.
+  // Three columns need about 300pt of 1x text; below that, at this text size, they stack.
   const stacked = width / fontScale < STACK_BELOW;
 
   return (
@@ -54,19 +61,23 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
           testID="immersive-score-you"
           label="Your score"
           score={you.score}
-          support={youRanked ? null : you.pending ? SCORE_LOADING : NOT_RANKED}
+          reason={youRanked ? null : you.pending ? SCORE_LOADING : NOT_RANKED}
           prominent={youRanked}
           stacked={stacked}
           onPress={you.onPress}
-          hint="Opens your rating options"
+          hint={youRanked || you.pending ? 'Opens your rating options' : 'Ranks this title'}
         />
       ) : null}
       {bingd ? (
         <Cell
           testID="immersive-score-bingd"
-          label="bingd"
+          label="bingd."
+          spokenLabel="bingd score"
+          count={bingd.ratingCount}
           score={bingd.score}
-          support={bingd.score != null ? ratings(bingd.ratingCount) : NOT_ENOUGH}
+          reason={
+            bingd.score != null ? null : bingd.loading ? COUNT_LOADING : NOT_ENOUGH
+          }
           divided={Boolean(you)}
           stacked={stacked}
         />
@@ -75,11 +86,17 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
         <Cell
           testID="immersive-score-following"
           label="Following"
+          spokenLabel="People you follow"
+          count={following.ratingCount}
           score={following.score}
-          support={following.score != null ? ratings(following.ratingCount) : NO_FOLLOWING}
+          reason={
+            following.score != null ? null : following.loading ? COUNT_LOADING : NO_FOLLOWING
+          }
           divided={Boolean(you || bingd)}
           stacked={stacked}
-          onPress={following.ratingCount > 0 && onPressFollowing ? onPressFollowing : undefined}
+          onPress={
+            (following.ratingCount ?? 0) > 0 && onPressFollowing ? onPressFollowing : undefined
+          }
           hint="Opens the people behind this score"
         />
       ) : null}
@@ -90,60 +107,74 @@ export function ImmersiveScores({ you, bingd, following, onPressFollowing }: Imm
 function Cell({
   testID,
   label,
+  spokenLabel,
+  count,
   score,
-  support,
+  reason,
   prominent = false,
   divided = false,
   stacked = false,
   onPress,
   hint,
 }: {
-  stacked?: boolean;
   testID: string;
   label: string;
+  /** What a screen reader says for the label, where the printed one is a wordmark. */
+  spokenLabel?: string;
+  /** The rating count, or null while unknown; absent for the reader's own column. */
+  count?: number | null;
   score: number | null;
-  support: string | null;
+  /** Why there is no number — spoken, never printed. */
+  reason: string | null;
   prominent?: boolean;
   divided?: boolean;
+  stacked?: boolean;
   onPress?: () => void;
   hint?: string;
 }) {
   const value = score != null ? formatScore(score) : null;
   const body = (
     <>
-      {prominent && score != null ? (
-        <ScoreBadge score={score} bucket={null} size="md" variant="filled" />
-      ) : (
-        <Text
-          variant="headline"
-          tone={value ? 'primary' : 'tertiary'}
-          style={value ? styles.value : styles.missing}
-          numberOfLines={1}
-          // The dash is a picture of "nothing here"; the reason beside it is what is read.
-          accessibilityElementsHidden={!value}
-          importantForAccessibility={value ? 'auto' : 'no-hide-descendants'}
-        >
-          {value ?? '–'}
-        </Text>
-      )}
-      <View style={styles.copy}>
-        {/* Two lines in either layout: a label is never cut ("Your sc…"), and at a large
-            text size on a narrow phone the cell grows rather than truncating. */}
-        <Text variant="footnote" tone="secondary" numberOfLines={2}>
-          {label}
-        </Text>
-        {support ? (
-          <Text variant="caption" tone="tertiary" numberOfLines={2}>
-            {support}
+      <View style={styles.valueSlot}>
+        {prominent && score != null ? (
+          <ScoreBadge score={score} bucket={null} size="md" variant="filled" />
+        ) : (
+          <Text
+            variant="headline"
+            tone={value ? 'primary' : 'tertiary'}
+            style={value ? styles.value : null}
+            numberOfLines={1}
+          >
+            {value ?? DASH}
           </Text>
-        ) : null}
+        )}
       </View>
+      {/* One line where it fits. At 320pt or a large text size the count may take a
+          second line under its label — still centred, never clipped. */}
+      <Text
+        variant="footnote"
+        tone="secondary"
+        numberOfLines={2}
+        style={stacked ? styles.labelStacked : styles.label}
+        testID={`${testID}-label`}
+      >
+        {label}
+        {count != null ? (
+          <Text variant="footnote" tone="tertiary">{` (${count})`}</Text>
+        ) : null}
+      </Text>
     </>
   );
   const style = stacked
     ? [styles.cell, styles.cellStacked, divided && styles.dividedStacked]
-    : [styles.cell, prominent && styles.cellProminent, divided && styles.divided];
-  const spoken = [label, value ? `${value} out of 10` : null, support].filter(Boolean).join('. ');
+    : [styles.cell, divided && styles.divided];
+  const spoken = [
+    spokenLabel ?? label,
+    value ? `${value} out of 10` : reason,
+    count != null ? ratings(count) : null,
+  ]
+    .filter(Boolean)
+    .join('. ');
 
   if (!onPress) {
     return (
@@ -166,11 +197,14 @@ function Cell({
   );
 }
 
+const BADGE = theme.layout.scoreBadge.md;
+
 const styles = StyleSheet.create({
   /**
-   * One row on the module's Paper (Cinematic Editorial, 2026-11-04): no panel of its own,
-   * only a hairline above it separating the scores from the actions, and hairlines between
-   * the cells. It was a tinted box on the artwork when the words sat on the picture.
+   * One row on the module's Paper: a hairline above it separating the scores from the
+   * actions, and hairlines between the columns. It is the module's last row, so it
+   * cancels the module's bottom padding and sets its own — 12pt above and below the
+   * columns' contents, which is what makes the row sit balanced on the hairline.
    */
   strip: {
     flexDirection: 'row',
@@ -178,27 +212,41 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
     marginHorizontal: -theme.space[3],
+    marginBottom: -theme.space[3],
   },
   cell: {
-    flex: 1,
+    // Equal thirds whatever the contents: basis 0, so a longer label cannot widen its own.
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
     minWidth: 0,
     minHeight: theme.layout.minTapTarget,
-    // Stacked — value, label, reason — because three cells side by side at 320pt leave
-    // about 90pt each, and a reason set beside its value would wrap to three lines.
     flexDirection: 'column',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'flex-start',
     gap: theme.space[1],
-    paddingVertical: theme.space[2] + 2,
+    paddingVertical: theme.space[3],
+    paddingHorizontal: theme.space[1],
+  },
+  /** Every value sits in a slot the badge's height, so the three labels share a baseline. */
+  valueSlot: { height: BADGE, alignItems: 'center', justifyContent: 'center' },
+  value: { fontVariant: ['tabular-nums'] },
+  label: { textAlign: 'center', alignSelf: 'stretch' },
+  stripStacked: { flexDirection: 'column' },
+  cellStacked: {
+    flexGrow: 0,
+    flexBasis: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    paddingVertical: theme.space[2],
     paddingHorizontal: theme.space[3],
   },
-  cellProminent: { flex: 1.2 },
-  stripStacked: { flexDirection: 'column' },
-  cellStacked: { flex: 0, flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
-  dividedStacked: { borderTopWidth: StyleSheet.hairlineWidth * 2, borderTopColor: theme.border.hairline },
+  labelStacked: { flexShrink: 1, textAlign: 'left' },
+  dividedStacked: {
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+  },
   divided: { borderLeftWidth: StyleSheet.hairlineWidth * 2, borderLeftColor: theme.border.hairline },
-  value: { fontVariant: ['tabular-nums'], minHeight: theme.layout.scoreBadge.md, textAlignVertical: 'center', lineHeight: theme.layout.scoreBadge.md },
-  missing: { minHeight: theme.layout.scoreBadge.md, lineHeight: theme.layout.scoreBadge.md },
-  copy: { alignSelf: 'stretch', gap: 1 },
   pressed: { opacity: 0.7 },
 });

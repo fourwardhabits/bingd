@@ -1981,13 +1981,16 @@ export default function TitleScreen() {
                   }
                 : null
             }
+            // A count is drawn only once the server has given one: never a 0 while loading.
             bingd={{
               score: community.data?.score ?? null,
-              ratingCount: community.data?.ratingCount ?? 0,
+              ratingCount: community.data ? community.data.ratingCount : null,
+              loading: community.isPending,
             }}
             following={{
               score: following.data?.score ?? null,
-              ratingCount: following.data?.ratingCount ?? 0,
+              ratingCount: following.data ? following.data.ratingCount : null,
+              loading: following.isPending,
             }}
             onPressFollowing={() => setFollowingRatingsOpen(true)}
           />

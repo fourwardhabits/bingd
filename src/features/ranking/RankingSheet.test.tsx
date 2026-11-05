@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { queryKeys } from '@/lib/query';
-import { theme } from '@/ui/tokens';
+import { theme, typography } from '@/ui/tokens';
 
 import { RankingSheet, type RankingSheetProps } from './RankingSheet';
 
@@ -1206,9 +1206,11 @@ describe('the reveal only names a placement worth naming', () => {
     const sheet = await openSheet();
 
     await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
-    const line = sheet.getByText(/^#\d+ /, { includeHiddenElements: true });
-    // Two ordinals on the line and no third, whatever the title qualifies for.
-    expect(String(line.props.children).match(/#\d+/g)).toHaveLength(2);
+    // Two genre placements and no third, whatever the title qualifies for — each its
+    // own item on the accomplishment row since post-QA sprint 2.
+    const lines = sheet.getAllByTestId('reveal-genre-rank', { includeHiddenElements: true });
+    expect(lines).toHaveLength(2);
+    expect(lines.every((line) => /^#\d+ /.test(String(line.props.children)))).toBe(true);
   });
 
   it('keeps the neighbours whatever the placement does', async () => {
@@ -1686,10 +1688,12 @@ describe('what the reveal says, and in what order', () => {
     expect(above).toBeGreaterThan(below);
   });
 
-  it('draws the placement muted, so it cannot compete with the title', async () => {
-    // Hierarchy is score, title, placement, neighbours. An ordinal at the title's weight
-    // is two headlines.
+  it('draws the placement as the accomplishment, louder than the neighbours', async () => {
+    // Post-QA sprint 2 (2026-11-05), the founder's approved reversal of 2026-09-06:
+    // score, title, then the placement in Maroon at the headline face; the neighbours'
+    // names drop to footnote, so they can no longer out-weigh it.
     ranked([
+      { mediaItemId: 'm2', position: 2, kind: 'movie', title: 'Sicario', genres: [] },
       { mediaItemId: 'film-a', position: 3, kind: 'movie', title: 'Film A', genres: [] },
     ]);
     answering(placement);
@@ -1698,7 +1702,14 @@ describe('what the reveal says, and in what order', () => {
     // Hidden from the accessibility tree — the panel speaks the whole placement once —
     // so the query has to say so.
     const line = await sheet.findByText('#3 in Movies', { includeHiddenElements: true });
-    expect(StyleSheet.flatten(line.props.style).color).toBe(theme.text.secondary);
+    const style = StyleSheet.flatten(line.props.style);
+    expect(style.color).toBe(theme.semantic.action);
+    expect(style.fontSize).toBe(typography.headline.fontSize);
+    // The neighbour is the quieter thing now: footnote, not the subhead it was.
+    const neighbour = sheet.getByText('Sicario', { includeHiddenElements: true });
+    expect(StyleSheet.flatten(neighbour.props.style).fontSize).toBe(
+      typography.footnote.fontSize,
+    );
   });
 
   it('closes the gap entirely when nothing qualifies', async () => {
@@ -1806,6 +1817,64 @@ describe('celebrating what the ranking earned', () => {
 
     expect(mockPush).not.toHaveBeenCalled();
     expect(sheet.onClose).toHaveBeenCalled();
+  });
+
+  /**
+   * **The reveal names what was earned** (post-QA sprint 2, 2026-11-05), from the same
+   * diff the celebration uses, under the neighbours — and draws nothing at all otherwise.
+   */
+  it('names a newly earned award on the reveal, after the neighbours', async () => {
+    mockRanked.mockReturnValue({
+      data: [
+        { mediaItemId: 'm2', position: 2, kind: 'movie', title: 'Sicario', genres: [] },
+        { mediaItemId: 'film-a', position: 3, kind: 'movie', title: 'Film A', genres: [] },
+      ],
+    });
+    mockUnlockQueue = [{ rows: [] }, { rows: [unlock('movie-muncher', 'bronze')] }];
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies. Below Sicario.');
+
+    const award = await sheet.findByTestId('reveal-award');
+    expect(within(award).getByText('Movie Muncher')).toBeTruthy();
+    expect(within(award).getByText('New award')).toBeTruthy();
+    expect(award.props.accessibilityLabel).toMatch(/^New award: Movie Muncher\. /);
+
+    // Score, title, placement, neighbours, then the award.
+    const order = (node: unknown): string[] => {
+      if (node == null) return [];
+      if (typeof node === 'string') return [node];
+      if (Array.isArray(node)) return node.flatMap(order);
+      return order((node as { children?: unknown[] }).children ?? []);
+    };
+    const texts = order(sheet.toJSON());
+    const at = (needle: string) => texts.findIndex((t) => t.includes(needle));
+    expect(at('#3 in Movies')).toBeLessThan(at('Sicario'));
+    expect(at('Sicario')).toBeLessThan(at('Movie Muncher'));
+    expect(at('Movie Muncher')).toBeLessThan(at('Done'));
+
+    // Naming it on the reveal takes nothing from the celebration: Done still plays it.
+    await waitFor(() => expect(mockUnlockReads).toBe(2));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/awards/celebrate',
+        params: { awards: 'movie-muncher:bronze' },
+      }),
+    );
+  });
+
+  it('reserves no award space when nothing was earned, or the read failed', async () => {
+    mockUnlockQueue = [
+      { rows: [unlock('movie-muncher', 'bronze')] },
+      { rows: [unlock('movie-muncher', 'bronze')] },
+    ];
+    answering(placement);
+    const nothing = await openSheet();
+    await nothing.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    await waitFor(() => expect(mockUnlockReads).toBe(2));
+    expect(nothing.queryByTestId('reveal-awards')).toBeNull();
+    expect(nothing.queryByText('New award')).toBeNull();
   });
 
   it('never re-celebrates a tier the reader already had', async () => {

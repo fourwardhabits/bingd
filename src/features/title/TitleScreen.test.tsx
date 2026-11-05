@@ -3659,10 +3659,12 @@ describe('the immersive title page (experiment)', () => {
       expect(view.getAllByTestId('title-action-rank')).toHaveLength(1);
       expect(view.getAllByText(film.overview)).toHaveLength(1);
       // The three labels the brief names, inside the one module.
-      const scores = within(view.getByTestId('immersive-scores'));
-      expect(scores.getByText('Your score')).toBeTruthy();
-      expect(scores.getByText('bingd')).toBeTruthy();
-      expect(scores.getByText('Following')).toBeTruthy();
+      // Compact since post-QA sprint 2: the rating count rides in the label.
+      expect(view.getByTestId('immersive-score-you-label')).toHaveTextContent('Your score');
+      expect(view.getByTestId('immersive-score-bingd-label')).toHaveTextContent(/^bingd\.( \(\d+\))?$/);
+      expect(view.getByTestId('immersive-score-following-label')).toHaveTextContent(
+        /^Following( \(\d+\))?$/,
+      );
     });
 
     it('says why a score is missing, and never draws an empty circle', async () => {
@@ -3670,9 +3672,20 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByTestId('immersive-scores')).toBeTruthy());
       const scores = within(view.getByTestId('immersive-scores'));
 
-      expect(scores.getByText('Not ranked yet')).toBeTruthy();
-      expect(scores.getByText('Not enough ratings')).toBeTruthy();
-      expect(scores.getByText('No ratings yet')).toBeTruthy();
+      // A dash in each column; the reason is what each column says, not a wrapped line.
+      expect(scores.getAllByText('—')).toHaveLength(3);
+      expect(view.getByTestId('immersive-score-you').props.accessibilityLabel).toBe(
+        'Your score. Not ranked yet',
+      );
+      await waitFor(() =>
+        expect(view.getByTestId('immersive-score-bingd').props.accessibilityLabel).toMatch(
+          /^bingd score\. Not enough ratings yet(\. \d+ ratings?)?$/,
+        ),
+      );
+      expect(view.getByTestId('immersive-score-following').props.accessibilityLabel).toMatch(
+        /^People you follow\. No ratings yet from people you follow(\. \d+ ratings?)?$/,
+      );
+      expect(scores.queryByText('Not ranked yet')).toBeNull();
       expect(scores.queryAllByLabelText(/out of 10/)).toHaveLength(0);
     });
 

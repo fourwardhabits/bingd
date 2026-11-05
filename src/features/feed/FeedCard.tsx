@@ -54,8 +54,9 @@ export type FeedCardProps = {
  *     │  backdrop, 150–190pt                 (9.2)│
  *     └──────────────────────────────────────────┘
  *     "The review, if one was published…"            ← absent, not empty, without one
- *     ❤️😂 4                                          ← absent with no reactions
- *     ♡ Like    💬 Comment    🔖 Save    ➤ Share
+ *     ❤️😂 4 reactions                                ← absent with no reactions
+ *     ──────────────────────────────────────────      ← hairline, only under a summary
+ *     ♡ Like      💬 Comment      🔖 Save      ➤ Share
  *
  * Feed only. The profile's Recent activity and the conversation page keep `ActivityRow`,
  * which is the compact form those surfaces were designed around.
@@ -239,36 +240,53 @@ export function FeedCard({
         </View>
       ) : null}
 
-      {/* 5. The reaction summary, then the four actions. */}
-      {reaction.count > 0 ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}. See who reacted.`}
-          onPress={reaction.onPressSummary}
-          disabled={!reaction.onPressSummary}
-          style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
-        >
-          <View style={styles.glyphs} accessibilityElementsHidden>
-            {(mine ? [mine, ...othersGlyphs] : othersGlyphs).slice(0, 3).map((glyph, index) => (
-              <Text
-                key={glyph}
-                variant="caption"
-                allowFontScaling={false}
-                style={[styles.glyph, index > 0 && styles.glyphOverlap]}
+      {/*
+       * 5. One social area: the reaction summary, a hairline, then the actions — all on
+       * the card's gutters, so the cluster's first glyph, the hairline and the Like icon
+       * share one left edge and Share ends on the artwork's right edge (post-QA sprint 2,
+       * 2026-11-05). With no reactions there is no summary and no hairline: just the row.
+       */}
+      <View style={styles.social} testID="feed-card-social">
+        {reaction.count > 0 ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${reactionCountLabel(reaction.count)}. See who reacted.`}
+              onPress={reaction.onPressSummary}
+              disabled={!reaction.onPressSummary}
+              hitSlop={{ top: 6, bottom: 6 }}
+              style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
+              testID="feed-card-reactions"
+            >
+              <View
+                style={styles.glyphs}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
               >
-                {glyph}
+                {(mine ? [mine, ...othersGlyphs] : othersGlyphs)
+                  .slice(0, 3)
+                  .map((glyph, index) => (
+                    <Text
+                      key={glyph}
+                      variant="footnote"
+                      allowFontScaling={false}
+                      style={[styles.glyph, index > 0 && styles.glyphOverlap]}
+                    >
+                      {glyph}
+                    </Text>
+                  ))}
+              </View>
+              <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>
+                {reactionCountLabel(reaction.count)}
               </Text>
-            ))}
-          </View>
-          <Text variant="caption" tone="secondary">
-            {reaction.count}
-          </Text>
-        </Pressable>
-      ) : null}
+            </Pressable>
+            <View style={styles.socialDivider} testID="feed-card-social-divider" />
+          </>
+        ) : null}
 
-      {reaction.picker ? <View style={styles.picker}>{reaction.picker}</View> : null}
+        {reaction.picker ? <View style={styles.picker}>{reaction.picker}</View> : null}
 
-      <View style={styles.actions}>
+        <View style={styles.actions}>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ selected: Boolean(mine) }}
@@ -296,7 +314,12 @@ export function FeedCard({
               color={mine ? theme.semantic.action : theme.text.secondary}
             />
           )}
-          <Text variant="caption" tone={mine ? 'action' : 'secondary'} numberOfLines={1}>
+          <Text
+            variant="footnote"
+            tone={mine ? 'action' : 'secondary'}
+            numberOfLines={1}
+            style={styles.shrink}
+          >
             {mine ? (mine === HEART ? 'Liked' : (reaction.mineLabel ?? 'Reacted')) : 'Like'}
           </Text>
         </Pressable>
@@ -338,10 +361,15 @@ export function FeedCard({
             testID="feed-card-share"
           />
         ) : null}
+        </View>
       </View>
-
     </View>
   );
+}
+
+/** "1 reaction", "4 reactions" — a count only; who reacted is the detail sheet's job. */
+export function reactionCountLabel(count: number) {
+  return `${count} ${count === 1 ? 'reaction' : 'reactions'}`;
 }
 
 const HEART = '❤️';
@@ -380,7 +408,12 @@ function Action({
         size={theme.layout.icon.sm}
         color={active ? theme.semantic.action : theme.text.secondary}
       />
-      <Text variant="caption" tone={active ? 'action' : 'secondary'} numberOfLines={1}>
+      <Text
+        variant="footnote"
+        tone={active ? 'action' : 'secondary'}
+        numberOfLines={1}
+        style={styles.shrink}
+      >
         {label}
       </Text>
     </Pressable>
@@ -444,33 +477,52 @@ const styles = StyleSheet.create({
     backgroundColor: paperAlpha(0.92),
   },
   review: { paddingHorizontal: theme.layout.gutter },
+  /**
+   * The social area holds its own rhythm rather than the card's 12pt gap: summary,
+   * hairline and actions read as one group, 8pt under the artwork or the review.
+   */
+  social: { marginTop: -theme.space[1] },
   summary: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    gap: theme.space[1],
+    gap: theme.space[2],
     marginHorizontal: theme.layout.gutter,
-    marginBottom: -theme.space[2],
-    minHeight: 28,
+    minHeight: 32,
   },
   glyphs: { flexDirection: 'row', alignItems: 'center' },
-  glyph: { fontSize: 13, lineHeight: undefined, includeFontPadding: false },
-  glyphOverlap: { marginLeft: -2 },
-  picker: { paddingHorizontal: theme.layout.gutter },
+  glyph: { fontSize: 15, lineHeight: undefined, includeFontPadding: false },
+  glyphOverlap: { marginLeft: -3 },
+  socialDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: theme.layout.gutter,
+    backgroundColor: theme.border.hairline,
+  },
+  picker: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  /**
+   * The actions sit on the gutters too: each target is padded 8pt either side, and the
+   * row is inset 8pt less than the gutter, so the Like icon starts on the same edge as
+   * the reaction cluster and Share ends on the artwork's right edge. Each keeps a 44pt
+   * minimum in both directions; under large text a label shortens before anything
+   * leaves the row.
+   */
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.space[2],
-    marginTop: -theme.space[1],
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.layout.gutter - theme.space[2],
   },
   action: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 1,
     gap: theme.space[1] + 2,
     minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+    paddingHorizontal: theme.space[2],
   },
+  shrink: { flexShrink: 1 },
   mineGlyph: { fontSize: 17, lineHeight: undefined, includeFontPadding: false },
   pressed: { opacity: 0.7 },
 });
