@@ -10,7 +10,7 @@ The summary is here.
 |---|---|
 | §19 Rewatch and repeated viewing history | Watch History (#196): multiple watches, `log_rewatch`, per-watch semantics |
 | §22 Per-title watch history | The Watch History screen (`Watched N times ›`), with per-watch date and watched-with (#196). Its note field writes the title's one note since #210 |
-| §36 A visibility preference for the last note or review | Built as a remembered habit, not a setting (#111, 2026-09-06; restored in #210): first-ever new note opens shared, later new notes open on the last choice, stored per account on the device; existing notes never change |
+| §36 A visibility preference for the last note or review | Built as a remembered habit (#111, 2026-09-06; restored in #210), **reworked 2026-11-04**: a first-ever note opens private, and later new notes open on the reader's last explicit *Share as a review* tap; saving or ranking never changes it; existing notes never change |
 | §42 A watch-date sort axis for your own collection | **Recently watched** on Watched and Unranked (#208, 2026-09-24), over the maintained latest watch date; undated titles sink; the Watchlist keeps Recently added |
 | §49 The historical unranked exception | The Unified Backlog (#203): Unranked is a first-class state with *Start ranking* |
 | §50 Lists | Native Lists v1 (#196), mixed media, privacy, custom order, share, Add to list |
@@ -1713,6 +1713,11 @@ of real activity to size a cap against.
 > later new note opens on the reader's last explicit choice. The choice is stored per account on
 > the device (`note-visibility-pref`), is not synced, and is never a setting. A note that already
 > exists always opens on its stored value.
+>
+> **Reworked 2026-11-04 (founder).** A first-ever note opens private. After that a new note opens
+> on the reader's last explicit *Share as a review* tap, which is the only thing that writes the
+> memory (new key `notes.share-choice`; the old `notes.share-default` is no longer read). See
+> `note-visibility-pref.ts`.
 
 **Status (historical): deferred, 2026-08-30.**
 

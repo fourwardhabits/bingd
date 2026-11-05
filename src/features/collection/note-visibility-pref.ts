@@ -3,66 +3,71 @@ import { readPref, writePref } from '@/lib/prefs';
 import type { NoteVisibility } from './writes';
 
 /**
- * Which visibility a **new** note opens on, remembered per account.
+ * Which visibility a **new** note opens on (founder, 2026-11-04, amending `94c789a`).
  *
  * ---------------------------------------------------------------------------
- * THE RULE, AND THE ONE THING IT MUST NEVER DO
+ * THE RULES
  *
- * The founder's decision: the first note anybody ever writes opens with *Share as a
- * review* **on**, because a review nobody can read is not what most people mean when
- * they write about a film. After that the app follows them — turn it off and save, and
- * the next new note opens off; turn it back on, and the next opens on.
+ * - **A first-ever note opens private.** Nothing becomes a public review unless its reader
+ *   turns *Share as a review* on.
+ * - **That explicit tap is remembered** for later new notes — turning sharing on, and
+ *   turning it off, on any note. It is the only thing that writes the preference: opening
+ *   a note, saving one and finishing a ranking never change it (`rememberShareChoice` has
+ *   one caller per surface, the toggle's own handler).
+ * - **A note that already exists opens on its own stored visibility**, whatever the
+ *   preference says. Published reviews stay published; private notes stay private.
+ * - **"Write a review"** on a title's Reviews still opens ready to share
+ *   (`noteIntent: 'review'`): it is the one entry point that asks for a review before
+ *   anything is written, and it does not by itself change the preference.
+ * - **The state is on screen before anything can be saved.** Both note surfaces keep the
+ *   composer shut until this preference has been read, so a composer can never open
+ *   private and turn shared under somebody who is already typing — and the chip, with its
+ *   "Only you can read this." or "Shown with your rating…" line, sits beside the field
+ *   the autosave reads from.
  *
- * **It never touches writing that already exists.** A note that has been saved opens on
- * the visibility it was saved with, full stop. This preference is consulted only for a
- * note with no stored value to contradict, which is what makes it impossible for a
- * general habit to retroactively publish something somebody kept private. `LogSheet`
- * enforces that ordering; this module holds no opinion about it and could not, because
- * it is never told whether a note exists.
  * ---------------------------------------------------------------------------
+ * WHY A NEW KEY
  *
- * Local and per account, through the same `readPref`/`writePref` pair the Collection's
- * remembered medium uses: it is a device habit rather than a fact about the account, so
- * it needs no column, no migration and no sync. A device that has never been used to
- * write anything gets the default, which is the right answer for a new device too.
+ * Builds from 2026-09-06 stored `notes.share-default` on every successful save of a new
+ * note, with sharing on by default — so a stored "public" there usually means "saved under
+ * the old default", not "chose to share". Reading it would quietly reintroduce the public
+ * default this exists to remove. `notes.share-choice` holds only explicit taps; the old key
+ * is left alone and never read.
+ *
+ * Local and per account, through `readPref`/`writePref`: a device habit rather than a
+ * fact about the account, so no column, no migration and no sync.
  */
-const KEY = 'notes.share-default';
+const KEY = 'notes.share-choice';
 
-/** ON, and deliberately. See the header. */
-export const DEFAULT_NOTE_VISIBILITY: NoteVisibility = 'public';
+/** What a reader who has never chosen gets: private. */
+export const DEFAULT_NEW_NOTE_VISIBILITY: NoteVisibility = 'private';
 
 const isVisibility = (value: unknown): value is NoteVisibility =>
   value === 'public' || value === 'private';
 
 /**
- * What a new note should open on for this reader.
- *
- * A stored value that will not parse — a key left by an older build — is ignored rather
- * than trusted, the same way the remembered medium validates its own.
+ * What a new note should open on for this reader. A store that cannot be read, or a value
+ * that will not parse, is the default — private — never a guess at sharing.
  */
-export async function readNoteVisibilityDefault(userId: string): Promise<NoteVisibility> {
+export async function readNewNoteVisibility(userId: string): Promise<NoteVisibility> {
   try {
     const stored = await readPref<unknown>(`${userId}.${KEY}`);
-    return isVisibility(stored) ? stored : DEFAULT_NOTE_VISIBILITY;
+    return isVisibility(stored) ? stored : DEFAULT_NEW_NOTE_VISIBILITY;
   } catch {
-    // A store that cannot be read is not a reader who chose privately. The product
-    // default stands, which is the same answer a fresh install gets.
-    return DEFAULT_NOTE_VISIBILITY;
+    return DEFAULT_NEW_NOTE_VISIBILITY;
   }
 }
 
 /**
- * Remember what they chose, on a successful save of a **new** note.
+ * Remember an explicit *Share as a review* tap, for the next **new** note.
  *
- * Only on success, and only for a new one: a save that failed says nothing about intent,
- * and an edit to existing writing is a decision about *that note* rather than a change
- * of habit. Both conditions are the caller's to establish — see `LogSheet`.
+ * Called from the toggle and from nowhere else. It never changes a note that already
+ * exists: those open on their own stored visibility.
  */
-export async function rememberNoteVisibility(userId: string, visibility: NoteVisibility) {
+export async function rememberShareChoice(userId: string, visibility: NoteVisibility) {
   try {
     await writePref(`${userId}.${KEY}`, visibility);
   } catch {
-    // A preference that could not be stored costs the next note its memory and nothing
-    // else. Never worth failing a save that already landed.
+    // Losing the memory costs the next note its default and nothing else.
   }
 }
