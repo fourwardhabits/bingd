@@ -163,6 +163,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   genres: { flexShrink: 1 },
   more: { marginLeft: theme.space[1] },
-  sheet: { gap: theme.space[3], paddingBottom: theme.space[4] },
+  // `Sheet` does not pad its children; every sheet in the app brings its own gutter.
+  sheet: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   pressed: { opacity: 0.7 },
 });

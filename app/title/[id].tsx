@@ -3279,9 +3279,9 @@ const styles = StyleSheet.create({
   },
   immersiveCircleCopy: { flex: 1, gap: 2 },
   immersiveCircleName: { fontFamily: fontFamily.sansSemibold },
-  castSheet: { paddingBottom: theme.space[2] },
+  castSheet: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   castScroll: { maxHeight: Math.round(Dimensions.get('window').height * 0.6) },
-  castList: { gap: theme.space[2] },
+  castList: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
   castRow: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3], minHeight: theme.layout.minTapTarget },
   /**
    * **The row starts where the hero ends** (founder, final direction, 2026-09-07).
