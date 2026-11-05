@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
+import { resetCommentPreviews } from '@/features/feed/use-latest-comments';
 import { nudgePushDelivery } from '@/features/notifications/push';
 import { offerPushPermission } from '@/features/notifications/push-permission';
 import { track, type Surface } from '@/lib/analytics';
@@ -134,11 +135,24 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
   const queryClient = useQueryClient();
 
   const refresh = async () => {
+    // First and synchronously: the Feed's comment previews are dropped, not merely marked
+    // stale, so a blocked person's words cannot stay on screen while the refetch runs.
+    const previews = resetCommentPreviews(queryClient, viewerId);
     await Promise.all(
       [
         ['relationships', viewerId],
         ['my-blocks', viewerId],
         ['feed', viewerId],
+        /**
+         * **Comments and their counts** (cinematic Feed, 2026-11-04). The Feed now previews
+         * the newest comment under a card, read through `activity_comments`, which drops an
+         * author the reader may no longer see. Blocking or unfollowing changes that answer,
+         * and without these keys a blocked commenter's words stayed under the card until the
+         * next pull — while the sheet, which reads fresh, already hid them. The count is the
+         * same fact and must move with it.
+         */
+        ['comments', viewerId],
+        ['comment-counts', viewerId],
         ['profile'],
         ['profile-follows'],
         ['actor-activity'],
@@ -219,6 +233,7 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
          */
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
+    await previews;
     // Mutual Mania is an intersection of the follow graph, so following back somebody
     // who already follows you moves it from 4 to 5 — and blocking moves it down, since
     // `block` deletes both edges. Not folded into the list above because that list is
