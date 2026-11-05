@@ -1,5 +1,6 @@
 import { artworkHeight, feedArtwork, takesFeedCard } from './feed-artwork';
-import { latestReadable } from './use-latest-comments';
+import type { Comment } from './use-comments';
+import { latestOf } from './use-latest-comments';
 
 describe('feedArtwork', () => {
   it('prefers the title’s own backdrop, at the card bucket', () => {
@@ -48,59 +49,64 @@ describe('takesFeedCard', () => {
   });
 });
 
-describe('latestReadable', () => {
-  const row = (
+describe('latestOf', () => {
+  const comment = (
     id: string,
     at: string,
     body: string | null,
-    deleted = false,
-    parent_id: string | null = null,
-  ) => ({
+    { deleted = false, parentId = null }: { deleted?: boolean; parentId?: string | null } = {},
+  ): Comment => ({
     id,
-    parent_id,
-    author_id: `a-${id}`,
-    username: `u${id}`,
-    display_name: null,
-    avatar_path: null,
+    eventId: 'e1',
+    parentId,
+    authorId: `a-${id}`,
+    authorUsername: `u${id}`,
+    authorName: `u${id}`,
+    authorAvatarUri: null,
     body,
-    has_spoilers: false,
-    created_at: at,
-    deleted_at: deleted ? at : null,
+    hasSpoilers: false,
+    createdAt: at,
+    editedAt: null,
+    deleted,
+    reactionCount: 0,
+    reactedByMe: false,
+    reactionKinds: [],
+    myReaction: null,
+    mentions: [],
   });
 
   it('is the newest comment by time, replies included', () => {
-    const latest = latestReadable([
-      row('root', '2026-11-04T10:00:00Z', 'first'),
-      row('reply', '2026-11-04T10:05:00Z', 'answer', false, 'root'),
-      row('root2', '2026-11-04T10:02:00Z', 'second'),
+    const latest = latestOf([
+      comment('root', '2026-11-04T10:00:00Z', 'first'),
+      comment('reply', '2026-11-04T10:05:00Z', 'answer', { parentId: 'root' }),
+      comment('root2', '2026-11-04T10:02:00Z', 'second'),
     ]);
     expect(latest?.id).toBe('reply');
     expect(latest?.authorName).toBe('ureply');
   });
 
   it('never previews a retracted comment', () => {
-    const latest = latestReadable([
-      row('kept', '2026-11-04T10:00:00Z', 'kept'),
-      row('gone', '2026-11-04T10:09:00Z', null, true),
+    const latest = latestOf([
+      comment('kept', '2026-11-04T10:00:00Z', 'kept'),
+      comment('gone', '2026-11-04T10:09:00Z', null, { deleted: true }),
     ]);
     expect(latest?.id).toBe('kept');
-    expect(latestReadable([row('gone', '2026-11-04T10:09:00Z', null, true)])).toBeNull();
+    expect(latestOf([comment('gone', '2026-11-04T10:09:00Z', null, { deleted: true })])).toBeNull();
+    expect(latestOf(undefined)).toBeNull();
   });
 
   it('skips a reply whose root the server withheld, as the sheet does', () => {
-    // The root's author is hidden from this reader, so `activity_comments` returned the
-    // reply alone. `threadsOf` drops it; the preview must not show it either.
-    const latest = latestReadable([
-      row('visible', '2026-11-04T10:00:00Z', 'visible root'),
-      row('orphan', '2026-11-04T10:09:00Z', 'reply to a hidden root', false, 'hidden-root'),
+    const latest = latestOf([
+      comment('visible', '2026-11-04T10:00:00Z', 'visible root'),
+      comment('orphan', '2026-11-04T10:09:00Z', 'reply to a hidden root', { parentId: 'hidden-root' }),
     ]);
     expect(latest?.id).toBe('visible');
   });
 
   it('keeps a reply under a retracted root, as the sheet does', () => {
-    const latest = latestReadable([
-      row('tomb', '2026-11-04T10:00:00Z', null, true),
-      row('reply', '2026-11-04T10:09:00Z', 'still here', false, 'tomb'),
+    const latest = latestOf([
+      comment('tomb', '2026-11-04T10:00:00Z', null, { deleted: true }),
+      comment('reply', '2026-11-04T10:09:00Z', 'still here', { parentId: 'tomb' }),
     ]);
     expect(latest?.id).toBe('reply');
   });

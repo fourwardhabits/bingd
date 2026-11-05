@@ -87,7 +87,7 @@ describe('a follow', () => {
     // Awaited: everything in this library is async as of v14, `renderHook` included.
     const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), { wrapper });
     for (const key of [...KEYS, ...PEOPLE_KEYS]) client.setQueryData(key, 'seeded');
-    client.setQueryData(['comments', 'viewer', 'event-1', 'latest'], 'seeded preview');
+    client.setQueryData(['comments', 'someone-else', 'event-1'], 'seeded');
 
     // Inside act: the hook flips its own busy flag either side of the RPC, and a state
     // update outside act is a warning that would eventually become a flake.
@@ -133,16 +133,17 @@ describe('a follow', () => {
   });
 
   /**
-   * **The Feed's comment previews are dropped, not just marked stale** (cinematic Feed
-   * re-check). A stale query keeps drawing its last answer while it refetches, and after a
-   * block that answer can be the blocked person's words. Only the previews are reset: the
-   * sheet's own thread is merely invalidated, as before.
+   * **Every thread is dropped, not just marked stale** (cinematic Feed). A stale query
+   * keeps drawing its last answer while it refetches, and after a block that answer can be
+   * the blocked person's words. The Feed card's preview and the conversation are one query
+   * per thread now, so resetting the threads resets both — and cancels anything in flight.
    */
-  it('drops the Feed’s comment previews so none outlives a visibility change', async () => {
+  it('drops every comment thread so nothing outlives a visibility change', async () => {
     const { client } = await followAnna();
 
-    expect(client.getQueryData(['comments', 'viewer', 'event-1', 'latest'])).toBeUndefined();
-    expect(client.getQueryData(['comments', 'viewer', 'event-1'])).toBe('seeded');
+    expect(client.getQueryData(['comments', 'viewer', 'event-1'])).toBeUndefined();
+    // Another reader's threads are not this reader's to drop.
+    expect(client.getQueryData(['comments', 'someone-else', 'event-1'])).toBe('seeded');
   });
 
   /**
