@@ -55,7 +55,18 @@ jest.mock('@/features/collection/use-log-state', () => ({
   useLogState: (...args: unknown[]) => mockLogState(...(args as [])),
 }));
 
+/** The local store behind the remembered Share choice (`note-visibility-pref`). */
+const mockPrefs = new Map<string, unknown>();
+jest.mock('@/lib/prefs', () => ({
+  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  writePref: (name: string, value: unknown) => {
+    mockPrefs.set(name, value);
+    return Promise.resolve();
+  },
+}));
+
 beforeEach(() => {
+  mockPrefs.clear();
   mockRewatch.mockClear();
   mockSaveNote.mockClear();
 });
@@ -96,6 +107,29 @@ it('opens a first-ever note private, the same as the log sheet', async () => {
   expect(mockSaveNote).not.toHaveBeenCalled();
 });
 
+it('opens a new note on the reader’s remembered Share choice, shown before any typing', async () => {
+  mockPrefs.set('user-1.notes.share-choice', 'public');
+  const view = await draw();
+
+  await fireEvent.press(view.getByLabelText(/^Note/));
+
+  await waitFor(() =>
+    expect(
+      view.getByLabelText('Share this note as a public review').props.accessibilityState.checked,
+    ).toBe(true),
+  );
+  expect(mockSaveNote).not.toHaveBeenCalled();
+});
+
+it('remembers a Share tap on a new note, and nothing about a save without one', async () => {
+  const view = await draw();
+  await fireEvent.press(view.getByLabelText(/^Note/));
+  await fireEvent.changeText(view.getByPlaceholderText('What did you think?'), 'Held up.');
+  await fireEvent.press(view.getByLabelText('I liked it'));
+  await waitFor(() => expect(mockSaveNote).toHaveBeenCalled());
+  expect(mockPrefs.has('user-1.notes.share-choice')).toBe(false);
+});
+
 it('shares a new note only when the reader turns Share as a review on', async () => {
   const view = await draw();
 
@@ -107,6 +141,7 @@ it('shares a new note only when the reader turns Share as a review on', async ()
   await waitFor(() =>
     expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ noteVisibility: 'public' })),
   );
+  expect(mockPrefs.get('user-1.notes.share-choice')).toBe('public');
 });
 
 it('writes the note to the title, not to the watch', async () => {

@@ -1,10 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useCurrentProfile } from '@/features/auth';
 
 import { invalidateAfterCollectionChange } from './invalidate';
-import { NEW_NOTE_VISIBILITY } from './note-visibility-pref';
+import {
+  DEFAULT_NEW_NOTE_VISIBILITY,
+  readNewNoteVisibility,
+  rememberShareChoice,
+} from './note-visibility-pref';
 import { useLogState } from './use-log-state';
 import { newOperationId, saveNote, type NoteVisibility } from './writes';
 
@@ -38,14 +42,29 @@ export function useTitleNote(mediaItemId: string | null) {
   const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(null);
   const [spoilersEdit, setSpoilersEdit] = useState<boolean | null>(null);
 
+  /**
+   * The reader's last explicit *Share* tap on a new note, or private — the log sheet's
+   * rule, from the same preference. Null until read; `loaded` waits for it, so the
+   * composer cannot open on one value and turn to the other under typing.
+   */
+  const [remembered, setRemembered] = useState<NoteVisibility | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readNewNoteVisibility(profile.id).then((value) => {
+      if (live) setRemembered(value);
+    });
+    return () => {
+      live = false;
+    };
+  }, [profile.id]);
+
   const stored = state.data;
   const note = noteEdit ?? stored?.note ?? '';
 
   /**
    * Three sources, in priority order: what the reader just chose, then what the note was
-   * *saved* with, then private for writing that does not exist yet — the log sheet's rule
-   * (founder, 2026-11-04; `note-visibility-pref.ts`): a note is public only once its reader
-   * turns *Share as a review* on.
+   * *saved* with, then the reader's remembered *Share* choice for writing that does not
+   * exist yet — private until they have made one (`note-visibility-pref.ts`).
    *
    * The middle term is the promise, and it is the one that has survived every reversal of
    * the other two: a note that already exists opens on its stored value and nothing else,
@@ -53,11 +72,12 @@ export function useTitleNote(mediaItemId: string | null) {
    *
    * There is no `noteIntent` here and there should not be. "Write a review" is a door on
    * the title page into the log sheet; a reader who opened *Another watch* or went to edit
-   * a watch did not press it, so this surface has nothing explicit to honour and opens
-   * private.
+   * a watch did not press it, so this surface has nothing explicit to honour and falls to
+   * the remembered choice.
    */
   const visibility: NoteVisibility =
-    visibilityEdit ?? (stored?.note ? stored.noteVisibility : NEW_NOTE_VISIBILITY);
+    visibilityEdit ??
+    (stored?.note ? stored.noteVisibility : (remembered ?? DEFAULT_NEW_NOTE_VISIBILITY));
   const spoilers = spoilersEdit ?? stored?.noteSpoilers ?? false;
 
   /** The newest version this surface has seen, so a second save does not fight the first. */
@@ -91,7 +111,7 @@ export function useTitleNote(mediaItemId: string | null) {
   };
 
   return {
-    loaded: Boolean(stored),
+    loaded: Boolean(stored) && remembered !== null,
     note,
     visibility,
     spoilers,
@@ -102,6 +122,8 @@ export function useTitleNote(mediaItemId: string | null) {
     /** A claim is an act, so it saves the moment it is made — as in the log sheet. */
     onVisibility: (next: NoteVisibility) => {
       setVisibilityEdit(next);
+      // The explicit act, and the only writer of the remembered choice for new notes.
+      void rememberShareChoice(profile.id, next);
       void write({ visibility: next });
     },
     onSpoilers: (next: boolean) => {

@@ -9,7 +9,11 @@ import { queryKeys } from '@/lib/query';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
-import { NEW_NOTE_VISIBILITY } from './note-visibility-pref';
+import {
+  DEFAULT_NEW_NOTE_VISIBILITY,
+  readNewNoteVisibility,
+  rememberShareChoice,
+} from './note-visibility-pref';
 import { theme } from '@/ui/tokens';
 import {
   BucketChoices,
@@ -284,6 +288,24 @@ function Body({
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const logState = useLogState(profile.id, title.id);
+  /**
+   * What a new note opens on for this reader: their last explicit *Share as a review*
+   * tap on a new note, or private if they have never made one (`note-visibility-pref`).
+   *
+   * Null until the local store answers, and the Note row stays shut until it has — see
+   * `notesReady`. A composer that opened private and turned shared a frame later, under
+   * somebody already typing, is exactly the publication this rule exists to prevent.
+   */
+  const [rememberedVisibility, setRememberedVisibility] = useState<NoteVisibility | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void readNewNoteVisibility(profile.id).then((stored) => {
+      if (!cancelled) setRememberedVisibility(stored);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
   const { data: existing } = logState;
   const state = existing ?? emptyLogState;
   /**
@@ -309,6 +331,8 @@ function Body({
    * leaves `existing` defined and must not close the editor under the user.
    */
   const loaded = existing !== undefined;
+  /** The note can be opened: what is stored has been read, and so has the share preference. */
+  const notesReady = loaded && rememberedVisibility !== null;
 
   /**
    * Three states, not two.
@@ -537,7 +561,9 @@ function Body({
     (state.note
       ? state.noteVisibility
       : (openWriting ??
-        (noteIntent === 'review' ? 'public' : NEW_NOTE_VISIBILITY)));
+        (noteIntent === 'review'
+          ? 'public'
+          : (rememberedVisibility ?? DEFAULT_NEW_NOTE_VISIBILITY))));
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
   /**
@@ -968,7 +994,7 @@ function Body({
     // read lands, so this should be unreachable; it is here because "unreachable"
     // is a claim about the current layout, and what it guards against is writing a
     // note, or a decision about one, against a baseline nobody has seen.
-    if (!loaded) return;
+    if (!notesReady) return;
 
     const noteChanged = trimmed !== (knownNote.current ?? state.note);
     const dateChanged = nextDate != null && nextDate !== state.watchedOn;
@@ -1431,7 +1457,7 @@ function Body({
    * The row's value carries the shared state, so a published note says so before
    * the composer is even opened.
    */
-  const noteValue = loaded
+  const noteValue = notesReady
     ? wordCount
       ? visibility === 'public'
         ? `Shared · ${wordCount}`
@@ -1596,10 +1622,10 @@ function Body({
             label="Note"
             value={noteValue}
             expanded={expanded === 'notes'}
-            onPress={loaded ? toggleNotes : undefined}
-            disabledReason={GATE_REASON[fieldState]}
+            onPress={notesReady ? toggleNotes : undefined}
+            disabledReason={loaded && !notesReady ? 'Loading' : GATE_REASON[fieldState]}
           />
-          {loaded && expanded === 'notes' ? (
+          {notesReady && expanded === 'notes' ? (
             <View style={[styles.expanded, styles.noteBox]}>
               <NoteInput
                 value={note}
@@ -1625,6 +1651,10 @@ function Body({
                 }}
                 onVisibility={(next) => {
                   setVisibilityEdit(next);
+                  // The reader's explicit act, and the only thing that moves the remembered
+                  // choice. It decides how the next *new* note opens; this note's own
+                  // visibility is the value just chosen, and stored notes open on theirs.
+                  void rememberShareChoice(profile.id, next);
                   void saveDetails({ visibility: next });
                 }}
               />
