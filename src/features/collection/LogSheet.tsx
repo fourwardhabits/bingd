@@ -994,9 +994,13 @@ function Body({
     // read lands, so this should be unreachable; it is here because "unreachable"
     // is a claim about the current layout, and what it guards against is writing a
     // note, or a decision about one, against a baseline nobody has seen.
-    if (!notesReady) return;
+    if (!loaded) return;
 
-    const noteChanged = trimmed !== (knownNote.current ?? state.note);
+    // The note and its claims also wait for the remembered Share choice, which decides
+    // the visibility a new note is written with. The date does not: it carries no
+    // visibility, and holding it behind a note preference dropped a date picked in the
+    // instant before that local read landed (Codex review of the combined candidate).
+    const noteChanged = notesReady && trimmed !== (knownNote.current ?? state.note);
     const dateChanged = nextDate != null && nextDate !== state.watchedOn;
     // The two claims travel with the note and are meaningless without one, so a
     // toggle flipped against an empty field is held locally and written by the
@@ -1010,6 +1014,7 @@ function Body({
     const storedVisibility = knownClaims.current?.visibility ?? state.noteVisibility;
     const storedSpoilers = knownClaims.current?.spoilers ?? state.noteSpoilers;
     const claimsChanged =
+      notesReady &&
       Boolean(trimmed) &&
       (nextVisibility !== storedVisibility || nextSpoilers !== storedSpoilers);
 
