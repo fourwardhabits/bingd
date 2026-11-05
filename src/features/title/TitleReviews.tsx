@@ -40,6 +40,12 @@ export type TitleReviewsProps = {
    * button whose only outcome is an error.
    */
   viewerId: string;
+  /**
+   * Show only this many reviews, without the sort control: the immersive title page's
+   * preview (2026-11-04), which expands into the full list in place. Absent, everything
+   * shows, as on the original page.
+   */
+  limit?: number;
 };
 
 /**
@@ -75,6 +81,7 @@ export function TitleReviews({
   onWrite,
   noun,
   viewerId,
+  limit,
 }: TitleReviewsProps) {
   // Which review's reason sheet is open, by `user_media.id`.
   const [reporting, setReporting] = useState<string | null>(null);
@@ -104,7 +111,7 @@ export function TitleReviews({
       {/* Offered once there is an order to choose. Kept while Following is active even
           when it returns nothing, so the reader can see which filter emptied the list
           rather than meeting a bare empty state with no way back. */}
-      {reviews.length > 1 || sort === 'following' ? (
+      {limit === undefined && (reviews.length > 1 || sort === 'following') ? (
         <View style={styles.sort}>
           <SegmentedTabs
             options={SORT_OPTIONS.map((option) => ({
@@ -138,7 +145,7 @@ export function TitleReviews({
           />
         )
       ) : (
-        reviews.map((review) => (
+        (limit === undefined ? reviews : reviews.slice(0, limit)).map((review) => (
           <View key={`${review.userId}-${review.updatedAt}`} style={styles.review}>
             <View style={styles.head}>
               <Pressable

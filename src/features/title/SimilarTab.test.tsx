@@ -93,6 +93,7 @@ jest.mock('@/lib/supabase', () => ({
 
 let mockOpenId = 'film-1';
 jest.mock('expo-router', () => ({
+  useIsFocused: () => true,
   useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => ({ id: mockOpenId }),
   Stack: { Screen: () => null },

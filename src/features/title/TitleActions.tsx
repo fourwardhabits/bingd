@@ -4,7 +4,7 @@ import { Animated, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '@/ui/components';
 import { hapticSelection } from '@/ui/haptics';
 import { usePressScale, usePulse } from '@/ui/press';
-import { theme } from '@/ui/tokens';
+import { brand, paperAlpha, theme } from '@/ui/tokens';
 
 /**
  * The icon controls' own width; `hitSlop` makes up the rest of the 44pt target.
@@ -56,6 +56,13 @@ export type RankAction = {
    * control that guessed would be the founder's Terrace House bug rebuilt.
    */
   onPress: () => void;
+  /**
+   * Overrides for the immersive title page (2026-11-04), which keeps a smaller *Edit
+   * ranking* in place of the *Ranked* pill. Absent, the control reads Rank or Ranked
+   * exactly as it always has.
+   */
+  label?: string;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
 };
 
 export type IconAction = {
@@ -78,6 +85,12 @@ export type TitleActionsProps = {
   list?: IconAction | null;
   /** Absent for a series, which cannot be recommended (PRD §10). */
   recommend: IconAction | null;
+  /**
+   * `paper`, the default, is the original page: Ink glyphs on Paper. `artwork` is the
+   * immersive page, where the cluster sits on the darkened artwork and the same
+   * controls draw in Parchment. Nothing else about them changes.
+   */
+  tone?: 'paper' | 'artwork';
 };
 
 /**
@@ -128,7 +141,13 @@ export type TitleActionsProps = {
  * Ranked draws outlined — it is a fact you may edit. That pair is the app's standing
  * button hierarchy (design-system.md §8) and is unchanged from before this redesign.
  */
-export function TitleActions({ rank, save, list = null, recommend }: TitleActionsProps) {
+export function TitleActions({
+  rank,
+  save,
+  list = null,
+  recommend,
+  tone = 'paper',
+}: TitleActionsProps) {
   /**
    * **The page's primary act gives under a thumb** (founder premium pass, 2026-09-08).
    *
@@ -138,6 +157,7 @@ export function TitleActions({ rank, save, list = null, recommend }: TitleAction
    * one animated control standing next to two that do not move.
    */
   const rankPress = usePressScale();
+  const onArtwork = tone === 'artwork';
 
   return (
     <View testID="title-actions" style={styles.cluster}>
@@ -154,14 +174,22 @@ export function TitleActions({ rank, save, list = null, recommend }: TitleAction
             onPressOut={rankPress.onPressOut}
             style={({ pressed }) => [
               styles.rank,
-              rank.ranked ? styles.ranked : styles.unranked,
+              rank.ranked ? (onArtwork ? styles.rankedOnArtwork : styles.ranked) : styles.unranked,
+              // On the artwork the label is never truncated: the icons wrap instead.
+              onArtwork && styles.rankOnArtwork,
               pressed && styles.pressed,
             ]}
           >
             <Ionicons
-              name={rank.ranked ? 'checkmark-circle' : 'star-outline'}
+              name={rank.icon ?? (rank.ranked ? 'checkmark-circle' : 'star-outline')}
               size={theme.layout.icon.sm}
-              color={rank.ranked ? theme.semantic.action : theme.semantic.actionText}
+              color={
+                rank.ranked
+                  ? onArtwork
+                    ? brand.parchment
+                    : theme.semantic.action
+                  : theme.semantic.actionText
+              }
             />
             {/* One line, always. The button is content-sized with a ceiling, so the only
               way the label could break is at a text size where it meets that ceiling —
@@ -170,26 +198,28 @@ export function TitleActions({ rank, save, list = null, recommend }: TitleAction
             <Text
               variant="headline"
               numberOfLines={1}
-              tone={rank.ranked ? 'action' : 'inverse'}
+              tone={rank.ranked && !onArtwork ? 'action' : 'inverse'}
             >
-              {rank.ranked ? 'Ranked' : 'Rank'}
+              {rank.label ?? (rank.ranked ? 'Ranked' : 'Rank')}
             </Text>
           </Pressable>
         </Animated.View>
       ) : null}
 
       <IconControl
+        onArtwork={onArtwork}
         testID="title-action-save"
         icon={save.selected ? 'bookmark' : 'bookmark-outline'}
         action={save}
       />
 
       {list ? (
-        <IconControl testID="title-action-list" icon="list-outline" badge="add" action={list} />
+        <IconControl onArtwork={onArtwork} testID="title-action-list" icon="list-outline" badge="add" action={list} />
       ) : null}
 
       {recommend ? (
         <IconControl
+          onArtwork={onArtwork}
           testID="title-action-recommend"
           icon="paper-plane-outline"
           action={recommend}
@@ -210,7 +240,9 @@ function IconControl({
   icon,
   action,
   badge,
+  onArtwork = false,
 }: {
+  onArtwork?: boolean;
   testID: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
   action: IconAction;
@@ -260,11 +292,17 @@ function IconControl({
             size={theme.layout.icon.md}
             // Maroon when held, neutral otherwise — the app's one selected-control treatment,
             // the same pair the feed row and the search row draw.
-            color={action.selected ? theme.semantic.action : theme.text.secondary}
+            color={
+              onArtwork
+                ? brand.parchment
+                : action.selected
+                  ? theme.semantic.action
+                  : theme.text.secondary
+            }
           />
           {badge ? (
-            <View style={styles.badge} pointerEvents="none">
-              <Ionicons name="add" size={11} color={theme.text.secondary} />
+            <View style={[styles.badge, onArtwork && styles.badgeOnArtwork]} pointerEvents="none">
+              <Ionicons name="add" size={11} color={onArtwork ? brand.parchment : theme.text.secondary} />
             </View>
           ) : null}
         </Animated.View>
@@ -345,6 +383,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.semantic.action,
   },
+  /** Edit ranking on the artwork: a quiet outline, so Rank stays the only filled control. */
+  rankedOnArtwork: {
+    backgroundColor: paperAlpha(0.08),
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: paperAlpha(0.5),
+  },
+  badgeOnArtwork: { backgroundColor: brand.ink },
+  rankOnArtwork: { flexShrink: 0, maxWidth: '100%' },
   // 32pt boxes with a 6pt hitSlop each side, so every glyph still clears the 44pt target.
   icon: {
     width: ICON_BOX,

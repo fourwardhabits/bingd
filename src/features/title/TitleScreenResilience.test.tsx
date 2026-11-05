@@ -96,6 +96,7 @@ let mockOpenId = 'film-1';
 let mockParams: Record<string, string> = {};
 
 jest.mock('expo-router', () => ({
+  useIsFocused: () => true,
   useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace }),
   useLocalSearchParams: () => ({ id: mockOpenId, ...mockParams }),
   Stack: {

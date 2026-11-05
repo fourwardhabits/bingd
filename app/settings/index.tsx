@@ -17,6 +17,11 @@ import { openLegal } from '@/lib/legal';
 import { openSupportEmail } from '@/lib/support';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+import {
+  isTitleLayoutAvailable,
+  setTitleLayout,
+  useStoredTitleLayout,
+} from '@/features/title/title-layout';
 
 /**
  * Settings, as an information architecture rather than a single scroll.
@@ -41,6 +46,7 @@ import { theme } from '@/ui/tokens';
 export default function SettingsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
+  const titleLayout = useStoredTitleLayout();
 
   const leave = async () => {
     await signOut();
@@ -212,6 +218,26 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Labs: opt-in experiments, never in production (Immersive Scroll, 2026-11-04).
+            One row per experiment, and the row is the whole switch: tap it to swap, and
+            the next title page opens in the other layout. `title-layout.ts` and
+            docs/release/immersive-title-experiment.md say what it changes and how to
+            put Original back for everyone. */}
+        {isTitleLayoutAvailable() ? (
+          <View style={styles.section}>
+            <SectionHeader title="Labs" />
+            <View style={[styles.group, styles.sectionGroup]}>
+              <Row
+                icon="flask-outline"
+                label="Title page"
+                detail={titleLayout === 'immersive' ? 'Immersive' : 'Original'}
+                hint={titleLayout === 'immersive' ? 'Switches to the original title page' : 'Switches to the immersive title page'}
+                onPress={() => void setTitleLayout(titleLayout === 'immersive' ? 'original' : 'immersive')}
+                last
+              />
+            </View>
+          </View>
+        ) : null}
         {/* Privacy and Terms, under a heading of their own since 2026-09-05.
 
             **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a
