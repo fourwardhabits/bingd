@@ -2,6 +2,7 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { brand, theme } from '@/ui/tokens';
 
 import {
   ALL_CATEGORIES,
@@ -426,5 +427,32 @@ describe('the screen', () => {
 
     expect(view.queryByText(/first ten/i)).toBeNull();
     expect(view.queryByText(/ten titles/i)).toBeNull();
+  });
+});
+
+/**
+ * **The switches use the brand's colours on Android** (founder, nav cohesion sprint,
+ * 2026-11-06). With no thumb colour, Android painted the ON thumb in the AppCompat
+ * theme's default accent, Material teal (#009688), which is not a bingd. colour. ON is a
+ * Parchment thumb on the Maroon track; OFF a neutral grey thumb on the grey track.
+ */
+describe('the switch colours', () => {
+  it('draws ON as Parchment on Maroon and OFF as grey on grey, never the platform teal', async () => {
+    const view = await renderLoaded();
+
+    const on = view.getByLabelText('Comments');
+    const off = view.getByLabelText('Reactions');
+    expect(on.props.value).toBe(true);
+    expect(off.props.value).toBe(false);
+
+    expect(on.props.thumbTintColor).toBe(theme.semantic.actionText);
+    expect(off.props.thumbTintColor).toBe(theme.text.tertiary);
+    for (const control of [on, off]) {
+      expect(control.props.onTintColor).toBe(theme.semantic.action);
+      expect(control.props.tintColor).toBe(theme.border.strong);
+    }
+    // Both from the palette: Parchment is the brand's, the grey is tertiary text.
+    expect(theme.semantic.actionText).toBe(brand.parchment);
+    expect(theme.semantic.action).toBe(brand.maroon);
   });
 });
