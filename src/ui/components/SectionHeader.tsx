@@ -31,6 +31,12 @@ export type SectionHeaderProps = {
    * the same components drawn on somebody else's profile, keeps the standard size.
    */
   size?: SectionHeaderSize;
+  /**
+   * One line, shrinking to fit rather than wrapping. For a one-word heading beside a
+   * control, which cannot wrap at a word: the Feed's LEADERBOARD at a large text size
+   * (nav cohesion sprint, 2026-11-06). Every other heading wraps as before.
+   */
+  fit?: boolean;
 };
 
 export type SectionHeaderSize = 'standard' | 'large';
@@ -54,6 +60,7 @@ export function SectionHeader({
   onPressAction,
   exactCase = false,
   size = 'standard',
+  fit = false,
 }: SectionHeaderProps) {
   return (
     <View
@@ -68,7 +75,10 @@ export function SectionHeader({
         tone="action"
         // The token itself uppercases, so printing the title as given is not enough: the
         // style has to be undone as well, or the exception quietly does nothing.
-        style={exactCase ? styles.exactCase : undefined}
+        style={[exactCase ? styles.exactCase : undefined, fit && styles.fit]}
+        numberOfLines={fit ? 1 : undefined}
+        adjustsFontSizeToFit={fit}
+        minimumFontScale={fit ? FIT_FLOOR : undefined}
       >
         {exactCase ? title : title.toUpperCase()}
       </Text>
@@ -92,7 +102,11 @@ export function SectionHeader({
   );
 }
 
+/** LEADERBOARD at 200% text in the space a 320pt phone leaves it needs about 0.69. */
+const FIT_FLOOR = 0.6;
+
 const styles = StyleSheet.create({
+  fit: { flexShrink: 1 },
   row: {
     minHeight: theme.layout.minTapTarget,
     flexDirection: 'row',

@@ -59,6 +59,12 @@ export type SegmentedTabsProps<T extends string> = {
   variant?: SegmentedTabsVariant;
   /** Announced to screen readers as the name of the tab set. */
   accessibilityLabel?: string;
+  /**
+   * `nav` only: 14pt labels and tighter padding, for four segments on a 320pt phone (the
+   * Leaderboard's categories, nav cohesion sprint, 2026-11-06). Collection's two or three
+   * keep the 15pt default.
+   */
+  dense?: boolean;
 };
 
 /**
@@ -95,6 +101,7 @@ export function SegmentedTabs<T extends string>({
   onChange,
   variant = 'secondary',
   accessibilityLabel,
+  dense = false,
 }: SegmentedTabsProps<T>) {
   const primary = variant === 'primary';
 
@@ -123,6 +130,7 @@ export function SegmentedTabs<T extends string>({
                   <View
                     style={[
                       styles.navFill,
+                      dense && styles.navFillDense,
                       selected && styles.navFillSelected,
                       pressed && !selected && styles.navPressed,
                     ]}
@@ -145,7 +153,7 @@ export function SegmentedTabs<T extends string>({
                       adjustsFontSizeToFit
                       minimumFontScale={0.7}
                       maxFontSizeMultiplier={NAV_MAX_SCALE}
-                      style={styles.navLabel}
+                      style={[styles.navLabel, dense && styles.navLabelDense]}
                     >
                       {option.label}
                     </Text>
@@ -279,6 +287,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   navFillSelected: { backgroundColor: theme.surface.sunken },
+  navFillDense: { paddingHorizontal: theme.space[1] },
+  navLabelDense: { fontSize: 14, lineHeight: 18 },
   navLabel: { fontFamily: fontFamily.sansMedium, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   navPressed: { opacity: 0.6 },
 });
