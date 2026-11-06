@@ -123,7 +123,8 @@ Details → Similar**, each once.
 ## Verification
 
 - **Typecheck:** clean. **Lint:** 0 errors, 81 warnings (the same as the base).
-- **Jest:** 286/286 suites, 5,478 passed, 1 skipped at e12fce8 (the same env-gated skip; the base ran 285 suites, 5,472).
+- **Jest:** 286/286 suites, 5,478 passed, 1 skipped at `e12fce8` (the same env-gated skip;
+  the base ran 285 suites, 5,472).
 - **New and updated tests:** the hero (only the sharp band, drawn once and unblurred; the 22%
   overlap at three band heights; the 12pt inset and content line; Paper with no border or
   shadow; poster-only and no-artwork bands); the page (as tall as its contents, no chevron;
@@ -143,7 +144,10 @@ Details → Similar**, each once.
   shim applies a token's cap but not a `maxFontSizeMultiplier` prop, so at 200% it draws the
   module title at 2× where the app caps it at 1.3× (the app's `Text` spreads the prop after the
   token's cap; pinned by a test). iOS was not checked.
-- **Runtime:** eas fingerprint:generate --platform android --build-profile preview in the real-npm-ci checkout gives 2503ffaa54ee67d81ce4ddcf8028715dbd4a0543 at eacbe80 and again at the record head: the installed Preview APK runtime. Only app/ and src/ changed: no migration, native, config or server change.
+- **Runtime:** `eas fingerprint:generate --platform android --build-profile preview` in the
+  real-`npm ci` checkout gives `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` at `eacbe80` and again
+  at `ebf1fa3`: the installed Preview APK's runtime. Only `app/` and `src/` changed: no
+  migration, native, config or server change.
 
 ## Independent review
 
@@ -169,7 +173,21 @@ read-only sandbox; the suite above is the implementer's.
 
 ## Android Preview
 
-To be published to Android Preview only, by this session as the one publisher, from the real-npm-ci checkout ../worktrees/visual2-preview-publish detached at this record commit.
+**Live on 2026-11-06**, published by this session as the one publisher from the real-`npm ci`
+checkout `../worktrees/visual2-preview-publish` (left detached at `ebf1fa3`), after a
+fingerprint check at that commit and a `BINGD_RELEASE_DRY_RUN=1` dry run. Verified with
+`eas update:list --branch preview`; no iOS group was published.
+
+| | |
+| --- | --- |
+| Channel / branch | `preview` |
+| Platform | Android only |
+| Update group | `8c8dfb90-7fd8-4e32-9cd5-3c613c66f498` |
+| Android update | `01a1b2d9-e941-70a6-9953-d50758c19537` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (the installed Preview APK's) |
+| Source commit | `ebf1fa3` (code `e12fce8` plus this record) |
+| Rollback group | `9906ddd5-b789-4497-bd42-a0c28b67d8eb` (nav cohesion, `d11433e`), still listed |
+| Dashboard | https://expo.dev/accounts/fourward/projects/bingd/updates/8c8dfb90-7fd8-4e32-9cd5-3c613c66f498 |
 
 ## Rollback
 
