@@ -166,8 +166,21 @@ read-only sandbox; the full suite above is the implementer's.
 
 ## Android Preview
 
-To be published to Android Preview only, by this session as the one publisher, from the
-real-`npm ci` checkout `../worktrees/visual2-preview-publish` detached at this record's commit.
+**Live on 2026-11-06**, published by this session as the one publisher from the real-`npm ci`
+checkout `../worktrees/visual2-preview-publish` (left detached at `d11433e`), after a fingerprint
+check at that commit and a `BINGD_RELEASE_DRY_RUN=1` dry run. Verified with
+`eas update:list --branch preview`; no iOS group was published.
+
+| | |
+| --- | --- |
+| Channel / branch | `preview` |
+| Platform | Android only |
+| Update group | `9906ddd5-b789-4497-bd42-a0c28b67d8eb` |
+| Android update | `01a1b282-d6cb-7999-8a6a-6d79a6a706d1` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (the installed Preview APK's) |
+| Source commit | `d11433e` (code `7f535b6` plus this record) |
+| Rollback group | `d27b8144-cfad-49d4-ad98-d527cfd6104a` (QA corrections, `147b55c`), still listed |
+| Dashboard | https://expo.dev/accounts/fourward/projects/bingd/updates/9906ddd5-b789-4497-bd42-a0c28b67d8eb |
 
 ## Rollback
 
