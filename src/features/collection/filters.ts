@@ -183,18 +183,21 @@ export const COLLECTION_SORT_AXES = {
   watched: {
     axis: 'watched',
     label: 'Recently watched',
+    shortLabel: 'Recent',
     directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },
   added: {
     axis: 'added',
     label: 'Recently added',
+    shortLabel: 'Added',
     directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },
   year: {
     axis: 'year',
     label: 'Release year',
+    shortLabel: 'Year',
     directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },

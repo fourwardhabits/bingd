@@ -936,6 +936,58 @@ describe('the header and the tabs', () => {
     expect(label('Watchlist').color).not.toBe(theme.semantic.action);
   });
 
+  /**
+   * **One segmented control, the page's primary navigation** (founder, QA corrections,
+   * 2026-11-06): one outlined track, halves or thirds, the chosen segment filled
+   * Parchment with its word in Maroon — no separate pills, nothing else filled.
+   */
+  it('draws the tabs as one control, the chosen segment filled Parchment', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
+
+    const track = StyleSheet.flatten(view.getByTestId('nav-tabs').props.style);
+    expect(track.flexDirection).toBe('row');
+    expect(track.borderColor).toBe(theme.border.hairline);
+    expect(track.borderWidth).toBeGreaterThan(0);
+
+    const fill = (id: string) => StyleSheet.flatten(view.getByTestId(`nav-fill-${id}`).props.style);
+    expect(fill('watched').backgroundColor).toBe(theme.surface.sunken);
+    expect(fill('watchlist').backgroundColor).toBeUndefined();
+    expect(fill('unranked').backgroundColor).toBeUndefined();
+
+    await choose(view, 'Watchlist');
+    expect(fill('watchlist').backgroundColor).toBe(theme.surface.sunken);
+    expect(fill('watched').backgroundColor).toBeUndefined();
+  });
+
+  it('splits the width in halves for two tabs and thirds for three, each 44pt tall', async () => {
+    const view = await open();
+    // Nothing unranked on this side: two tabs.
+    await waitFor(async () => expect(await offered(view)).toEqual(['Watched', 'Watchlist']));
+    const tabs = within(view.getByTestId('nav-tabs')).getAllByRole('tab');
+    expect(tabs).toHaveLength(2);
+    for (const tab of tabs) {
+      const style = StyleSheet.flatten(tab.props.style);
+      expect(style.flex).toBe(1);
+      expect(style.flexBasis).toBe(0);
+      expect(style.minHeight).toBe(theme.layout.minTapTarget);
+    }
+  });
+
+  it('keeps every label on one line, shrinking before it would truncate', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
+    for (const name of SEGMENTS) {
+      const label = within(view.getByRole('tab', { name })).getByText(name);
+      expect(label.props.numberOfLines).toBe(1);
+      expect(label.props.adjustsFontSizeToFit).toBe(true);
+      // Its growth stops at 1.5× so three segments still fit a 320pt phone at 300% text.
+      expect(label.props.maxFontSizeMultiplier).toBe(1.5);
+    }
+  });
+
   it('keeps the tab when the side changes and the new side has it too', async () => {
     const view = await open();
     await choose(view, 'Watchlist');

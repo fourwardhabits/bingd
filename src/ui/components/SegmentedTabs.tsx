@@ -32,10 +32,14 @@ export type SegmentOption<T extends string> = {
  * selected, and a 3pt rule.
  *
  * `nav` — a page's own sections across the full width: Collection's Watched | Watchlist |
- * Unranked (founder, UI cohesion pass, 2026-11-06). Equal columns, each label centred;
- * the chosen one in Maroon over a thin Maroon rule the width of its word, the others in
- * secondary Ink. Inter Medium at 15pt, so it reads as navigation rather than as a title,
- * and no fill, outline or pill anywhere.
+ * Unranked. **One segmented control** (founder, QA corrections, 2026-11-06), replacing the
+ * underlined text tabs of the cohesion pass, which read as quieter than the Filter & Sort
+ * row beneath them. One hairline-outlined track across the gutters, split into equal
+ * segments — halves for two, thirds for three; the chosen segment filled Parchment with
+ * its label in Maroon, the others in secondary Ink on the Paper ground. Inter Medium
+ * throughout, so choosing does not change a word's width. It is `CompactSwitch`'s
+ * grammar (outline, inset fill, `surface.sunken`) at the size of a page's primary
+ * navigation: no separate pills, no heavy border, no new colour.
  *
  * **The distinction is semantic, not decorative** (founder addendum, 2026-09-06). A
  * reader should be able to tell "take me to this content" from "narrow what I am looking
@@ -96,44 +100,59 @@ export function SegmentedTabs<T extends string>({
 
   if (variant === 'nav') {
     return (
-      <View
-        style={styles.navRow}
-        accessibilityRole="tablist"
-        accessibilityLabel={accessibilityLabel}
-        testID="nav-tabs"
-      >
-        {options.map((option) => {
-          const selected = option.id === value;
-          return (
-            <Pressable
-              key={option.id}
-              accessibilityRole="tab"
-              accessibilityLabel={option.accessibilityLabel}
-              accessibilityState={{ selected }}
-              onPress={() => onChange(option.id)}
-              style={({ pressed }) => [styles.navTab, pressed && !selected && styles.navPressed]}
-              testID={`nav-tab-${option.id}`}
-            >
-              {/* The rule is the word's width: a stretch inside a box that shrinks to the
-                  label, so it underlines what is chosen rather than the whole column. */}
-              <View style={styles.navLabelBox}>
-                <Text
-                  variant="callout"
-                  tone={selected ? 'action' : 'secondary'}
-                  numberOfLines={1}
-                  // A long word at a large system text size shrinks a little before it
-                  // would truncate; three columns on a 320pt phone are 96pt each.
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.8}
-                  style={styles.navLabel}
-                >
-                  {option.label}
-                </Text>
-                <View style={[styles.navRule, selected && styles.underlineActive]} />
-              </View>
-            </Pressable>
-          );
-        })}
+      <View style={styles.navRow}>
+        <View
+          style={styles.navTrack}
+          accessibilityRole="tablist"
+          accessibilityLabel={accessibilityLabel}
+          testID="nav-tabs"
+        >
+          {options.map((option) => {
+            const selected = option.id === value;
+            return (
+              <Pressable
+                key={option.id}
+                accessibilityRole="tab"
+                accessibilityLabel={option.accessibilityLabel}
+                accessibilityState={{ selected }}
+                onPress={() => onChange(option.id)}
+                style={styles.navTab}
+                testID={`nav-tab-${option.id}`}
+              >
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      styles.navFill,
+                      selected && styles.navFillSelected,
+                      pressed && !selected && styles.navPressed,
+                    ]}
+                    testID={`nav-fill-${option.id}`}
+                  >
+                    <Text
+                      variant="callout"
+                      tone={selected ? 'action' : 'secondary'}
+                      numberOfLines={1}
+                      /**
+                       * **One line, always.** A long word at a large system text size
+                       * shrinks before it would truncate — three segments on a 320pt
+                       * phone are about 92pt each — and the label's own growth stops at
+                       * 1.5×, so the control keeps one row and the page keeps its
+                       * posters. The tabs' meaning never depends on reading a word at
+                       * 300%: the chosen one is also the filled one.
+                       */
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.7}
+                      maxFontSizeMultiplier={NAV_MAX_SCALE}
+                      style={styles.navLabel}
+                    >
+                      {option.label}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     );
   }
@@ -189,6 +208,11 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
+/** Hairline outline, the inset between the outline and a fill, and the label's ceiling. */
+const NAV_STROKE = StyleSheet.hairlineWidth * 2;
+const NAV_INSET = 3;
+const NAV_MAX_SCALE = 1.5;
+
 const styles = StyleSheet.create({
   // `flexGrow: 0` so the scroll view takes its height from the tabs. A ScrollView
   // otherwise expands into whatever a flexible parent offers it, which on the title
@@ -224,19 +248,35 @@ const styles = StyleSheet.create({
   underlinePrimary: { height: 3 },
   underlineActive: { backgroundColor: theme.semantic.action },
 
-  /** Full width, the gutters as its edges, the columns equal however many there are. */
-  navRow: { flexDirection: 'row', paddingHorizontal: theme.layout.gutter },
+  /** Full width, the gutters as its edges. */
+  navRow: { paddingHorizontal: theme.layout.gutter },
+  // The one shared control: a hairline outline around every segment, as CompactSwitch
+  // draws its own, and the segments equal however many there are.
+  navTrack: {
+    flexDirection: 'row',
+    paddingHorizontal: NAV_INSET / 2,
+    borderRadius: theme.radius.card,
+    borderWidth: NAV_STROKE,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.base,
+  },
+  // Each segment is its whole slice of the track, 44pt tall, so the target is the fill
+  // and the inset around it; at a large text size it grows with its word.
   navTab: {
     flex: 1,
     flexBasis: 0,
     minHeight: theme.layout.minTapTarget,
+    paddingVertical: NAV_INSET,
+    paddingHorizontal: NAV_INSET / 2,
+  },
+  navFill: {
+    flexGrow: 1,
+    borderRadius: theme.radius.card - NAV_INSET,
+    paddingHorizontal: theme.space[2],
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: theme.space[1],
   },
-  navLabelBox: { alignItems: 'stretch', gap: theme.space[1] + 2, maxWidth: '100%' },
+  navFillSelected: { backgroundColor: theme.surface.sunken },
   navLabel: { fontFamily: fontFamily.sansMedium, fontSize: 15, lineHeight: 20, textAlign: 'center' },
-  // Always present, so choosing a tab does not move its word by two points.
-  navRule: { height: 2, borderRadius: theme.radius.full, backgroundColor: 'transparent' },
   navPressed: { opacity: 0.6 },
 });

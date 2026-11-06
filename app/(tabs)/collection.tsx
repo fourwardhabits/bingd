@@ -459,11 +459,12 @@ export default function CollectionScreen() {
       />
       <HeaderBoundary />
       {/**
-       * **Watched | Watchlist | Unranked, as the page's own tabs** (founder, UI cohesion
-       * pass, 2026-11-06). They replace the serif Watched ▾ dropdown: equal columns across
-       * the full width, Maroon and a thin rule for the one showing. Unranked is drawn only
-       * while this side has an unranked title, as it always was, and the other two then
-       * share the width between them.
+       * **Watched | Watchlist | Unranked, as the page's primary navigation** (founder, UI
+       * cohesion pass, then QA corrections, 2026-11-06). One segmented control across the
+       * full width, halves or thirds, the one showing filled Parchment with its word in
+       * Maroon — heavier than the Filter & Sort row under it, quieter than the posters.
+       * Unranked is drawn only while this side has an unranked title, as it always was,
+       * and the other two then share the width between them.
        */}
       <View style={styles.nav}>
         <SegmentedTabs
@@ -880,7 +881,7 @@ function ListsOnly({ lists }: { lists?: React.ReactNode }) {
 
 const styles = StyleSheet.create({
   /** The tabs, 4pt under the header's divider; the toolbar keeps its own 8pt under them. */
-  nav: { paddingTop: theme.space[1] },
+  nav: { paddingTop: theme.space[2], paddingBottom: theme.space[1] },
   listsLink: {
     flexDirection: 'row',
     alignItems: 'center',

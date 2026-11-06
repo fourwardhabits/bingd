@@ -251,4 +251,48 @@ describe('the status line', () => {
       filterSortStatus(sortAxesFor('watched'), { axis: 'shuffle', direction: 'desc' }, 3),
     ).toBe('Shuffle · 3 filters');
   });
+
+  /**
+   * **A short word, never an ellipsis** (QA corrections, 2026-11-06). `Recently watched ↓`
+   * ran out of room beside Filter & Sort and ended in "…" on the phone.
+   */
+  it('names each long axis by its short word', () => {
+    // Every axis, whichever segment offers it: Recently added is the Watchlist's.
+    const axes = Object.values(COLLECTION_SORT_AXES);
+    const status = (axis: 'watched' | 'added' | 'year', direction: 'asc' | 'desc' = 'desc') =>
+      filterSortStatus(axes, { axis, direction }, 0);
+    expect(status('watched')).toBe('Recent ↓');
+    expect(status('watched', 'asc')).toBe('Recent ↑');
+    expect(status('added')).toBe('Added ↓');
+    expect(status('year')).toBe('Year ↓');
+    expect(filterSortStatus(axes, { axis: 'watched', direction: 'desc' }, 2)).toBe(
+      'Recent ↓ · 2 filters',
+    );
+    // The short axes are already their own word.
+    expect(filterSortStatus(axes, { axis: 'rating', direction: 'desc' }, 0)).toBe('Rating ↓');
+  });
+
+  it('keeps the full name in the sheet and in what a screen reader hears', async () => {
+    const view = await draw({ initial: { sort: { axis: 'watched', direction: 'desc' } } });
+    await fireEvent.press(view.getByTestId('collection-filter-sort'));
+    await waitFor(() => expect(view.getByTestId('collection-sort-section')).toBeTruthy());
+    expect(view.getByTestId('collection-filter-sort-status', BEHIND).props.children).toBe(
+      'Recent ↓',
+    );
+    expect(view.getByTestId('collection-filter-sort', BEHIND).props.accessibilityLabel).toMatch(
+      /Sorted by Recently watched, newest first/,
+    );
+    const offered = within(view.getByTestId('collection-sort-section'))
+      .getAllByRole('radio')
+      .map((radio) => radio.props.accessibilityLabel.split(',')[0]);
+    expect(offered).toContain('Recently watched');
+    expect(offered).not.toContain('Recent');
+  });
+
+  it('shrinks a little at a large text size rather than end in an ellipsis', async () => {
+    const view = await draw();
+    const status = view.getByTestId('collection-filter-sort-status');
+    expect(status.props.numberOfLines).toBe(1);
+    expect(status.props.adjustsFontSizeToFit).toBe(true);
+  });
 });

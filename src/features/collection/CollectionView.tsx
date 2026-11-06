@@ -195,6 +195,9 @@ export function CollectionView({
               variant="footnote"
               tone={filtered ? 'action' : 'tertiary'}
               numberOfLines={1}
+              // At a large text size it gives up a little size before it would end in "…".
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               style={styles.filterSortStatus}
               testID="collection-filter-sort-status"
             >
@@ -362,17 +365,26 @@ const LIST_POSITION = { disabled: true } as const;
 const DOWN = '\u2193';
 const UP = '\u2191';
 
-/** `Rating ↓`, `Shuffle`, `Rating ↓ · 2 filters`: what is in force, beside the action. */
+/**
+ * `Rating ↓`, `Recent ↓`, `Shuffle`, `Rating ↓ · 2 filters`: what is in force, beside the
+ * action.
+ *
+ * **The axis in its short word** (QA corrections, 2026-11-06). The full label put
+ * `Recently watched ↓` beside Filter & Sort, which ran out of room and ended in an
+ * ellipsis on most phones. The status only has to say which order is on; the sheet one
+ * tap away names it in full, and so does the spoken form.
+ */
 export function filterSortStatus<Axis extends string>(
   axes: readonly SortAxisSpec<Axis>[],
   sort: { axis: Axis; direction: 'asc' | 'desc' },
   activeFilters: number,
 ): string {
   const spec = axes.find((option) => option.axis === sort.axis);
+  const name = spec ? (spec.shortLabel ?? spec.label) : '';
   const order = spec
     ? isDirectional(spec)
-      ? `${spec.label} ${sort.direction === 'desc' ? DOWN : UP}`
-      : spec.label
+      ? `${name} ${sort.direction === 'desc' ? DOWN : UP}`
+      : name
     : '';
   const filters = activeFilters
     ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'}`

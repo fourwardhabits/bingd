@@ -64,6 +64,13 @@ export type SortAxisSpec<Axis extends string> = {
   axis: Axis;
   /** The whole label. Names the axis; never mentions a direction. */
   label: string;
+  /**
+   * The axis in one word, for a status line with room for one: `Recent` for *Recently
+   * watched* (QA corrections, 2026-11-06). Display only, and only where the full label is
+   * one tap away — the sort menu and every spoken form keep `label`. Absent means the
+   * label is already short enough.
+   */
+  shortLabel?: string;
   /** How each direction reads aloud, and `defaultDirection` picks the one a fresh choice starts in. */
   directions?: { desc: string; asc: string };
   /** Where rule 2 lands. Required when `directions` is present. */
