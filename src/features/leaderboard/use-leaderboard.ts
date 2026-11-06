@@ -4,7 +4,12 @@ import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 /**
- * The four metrics, in the order the chips draw them.
+ * The four metrics, in the order the categories draw them.
+ *
+ * **All | Movies | TV | Reviews on screen, the full names spoken** (founder, nav cohesion
+ * sprint, 2026-11-06): four equal segments across a 320pt phone leave no room for
+ * "All Titles" and "TV Shows", so `short` is what the control draws and `label` is
+ * what a screen reader hears. Neither is sent anywhere; `value` is.
  *
  * **All Titles | Movies | TV | Reviews**, which is the founder's correction of 2026-08-28,
  * named All Titles in the final polish (2026-11-04). It is the union of the two beside it, so the row reads as a total followed by its
@@ -17,10 +22,10 @@ import { supabase } from '@/lib/supabase';
  * here is a visible failure rather than a board about the wrong question.
  */
 export const LEADERBOARD_METRICS = [
-  { value: 'titles', label: 'All Titles' },
-  { value: 'movies', label: 'Movies' },
-  { value: 'tv', label: 'TV Shows' },
-  { value: 'reviews', label: 'Reviews' },
+  { value: 'titles', label: 'All Titles', short: 'All' },
+  { value: 'movies', label: 'Movies', short: 'Movies' },
+  { value: 'tv', label: 'TV Shows', short: 'TV' },
+  { value: 'reviews', label: 'Reviews', short: 'Reviews' },
 ] as const;
 
 export type LeaderboardMetric = (typeof LEADERBOARD_METRICS)[number]['value'];

@@ -56,7 +56,6 @@ import {
   DEFAULT_METRIC,
   DEFAULT_TIMEFRAME,
   isLeaderboardTimeframe,
-  LEADERBOARD_TIMEFRAMES,
   useLeaderboard,
   useMyStanding,
   type LeaderboardMetric,
@@ -78,7 +77,6 @@ import {
   EmptyState,
   HeaderBoundary,
   IconToggle,
-  MediumSelector,
   Screen,
   SectionHeader,
   SkeletonRow,
@@ -719,7 +717,7 @@ export default function FeedScreen() {
          * **The content header row** (founder follow-up §1).
          *
          *     TRENDING NOW                    [Feed] [Trophy] [People]
-         *     THIS MONTH ▼                    [Feed] [Trophy] [People]
+         *     LEADERBOARD                     [Feed] [Trophy] [People]
          *     PEOPLE YOU MAY KNOW             [Feed] [Trophy] [People]
          *
          * One row, drawn in every mode, so the toggle keeps its position while the thing
@@ -727,7 +725,8 @@ export default function FeedScreen() {
          * content* rather than as chrome: it sits at the head of the list it switches.
          *
          * The left side is the heading of whatever is immediately below — the shelf's
-         * name in Feed mode, the timeframe selector in Leaderboard mode, and since
+         * name in Feed mode, LEADERBOARD in Leaderboard mode (whose time range has been a
+         * filter under its categories since 2026-11-06), and since
          * 2026-09-08 (§A3) `PEOPLE YOU MAY KNOW` in People mode, in the same slot with the
          * same treatment. In Feed mode it is drawn only when the shelf will actually
          * render: `TrendingShelf` returns null when it has nothing, and a heading over an
@@ -742,27 +741,17 @@ export default function FeedScreen() {
          * — so the row does not move if a second list ever makes it a selector.
          */}
         <View style={styles.contentHeader}>
-          {/* The gutter is applied here, on the board's side only. `SectionHeader` pads
-              itself and a section-sized `MediumSelector` deliberately does not, so a
-              single inset on the row would double-pad TRENDING NOW while an inset on
-              neither leaves the timeframe flush against the screen edge — which is what
-              the founder photographed. Padding on the existing flex child, so the row's
-              height and the toggle's position are untouched. */}
-          <View style={[styles.contentHeaderLeft, showingBoard && styles.contentHeaderInset]}>
+          {/* Every occupant is a `SectionHeader`, which pads itself to the gutter. */}
+          <View style={styles.contentHeaderLeft}>
             {showingBoard ? (
-              <MediumSelector
-                size="section"
-                value={timeframe}
-                onChange={changeTimeframe}
-                options={LEADERBOARD_TIMEFRAMES}
-              />
+              // The section, named like TRENDING NOW (nav cohesion sprint, 2026-11-06). The
+              // time range is a filter under the categories now, in `LeaderboardView`.
+              <SectionHeader title="Leaderboard" size="large" fit />
             ) : showingPeople ? (
-              // `SectionHeader` pads itself, which is why People does not take
-              // `contentHeaderInset` above — the same reason Trending does not.
               <SectionHeader title="People you may know" />
             ) : trendingHasItems ? (
-              // 15pt, like ACTIVITY below (founder final polish, 2026-11-04). People's
-              // heading and the board's timeframe keep the standard 12pt.
+              // 15pt (founder final polish, 2026-11-04), as LEADERBOARD is. People's longer
+              // heading keeps the standard 12pt, which is what fits beside the toggle.
               <SectionHeader title="Trending now" size="large" />
             ) : null}
           </View>
@@ -787,6 +776,7 @@ export default function FeedScreen() {
             metric={metric}
             onChangeMetric={changeMetric}
             timeframe={timeframe}
+            onChangeTimeframe={changeTimeframe}
             entries={leaderboard.data}
             // Only beside a board that is current. While the rows on screen are the previous
             // metric's, a standing for either metric would be drawn under the wrong list.
@@ -821,25 +811,26 @@ export default function FeedScreen() {
             </View>
 
             {/**
-             * Where discovery ends and the social feed begins.
+             * Where discovery ends and the social feed begins: **whitespace, and no
+             * visible heading** (founder, nav cohesion sprint, 2026-11-06).
              *
-             * The founder's note: Trending stays at the top, must **not** be sticky, and a
-             * reader should scroll naturally past it into activity — but there was nothing
-             * marking the boundary, so the first activity row read as one more thing in
-             * the shelf's section.
+             * Trending stays at the top and is not sticky; a reader scrolls past it into
+             * activity. A hairline and an ACTIVITY heading marked the boundary for a while,
+             * and read as a redundant label and an awkward stop before the first post. The
+             * Cinematic cards already open on 28pt of their own and close on a hairline,
+             * so a short spacer above the first one is the whole transition: the rail's
+             * artwork, then a person's. No rule, no card, no other heading.
              *
-             * A hairline and a heading, which is the app's existing vocabulary for exactly
-             * this. **ACTIVITY** rather than "From your network": the feed also carries the
-             * reader's own rankings, so "your network" would be false on the row somebody
-             * is most likely to recognise.
-             *
-             * Drawn even while the feed is loading or empty, because its job is to say
-             * what the rest of the screen is — and an empty state under a heading is
-             * legible where the same empty state floating below a shelf is not.
+             * The spacer is still a heading to a screen reader, so the two sections stay
+             * navigable by heading; it draws nothing.
              */}
-            <View style={styles.boundary}>
-              <SectionHeader title="Activity" size="large" />
-            </View>
+            <View
+              style={styles.boundary}
+              accessible
+              accessibilityRole="header"
+              accessibilityLabel="Activity"
+              testID="feed-activity-start"
+            />
 
             {/* The confirmation, on the screen the reader is still looking at rather than in
             an alert they have to dismiss. It names the person, because "Sent" on its own
@@ -1294,10 +1285,8 @@ const styles = StyleSheet.create({
   /**
    * The content header row: a heading on the left, the mode toggle on the right.
    *
-   * The gutter lives here rather than on the children, because the two left-hand
-   * occupants are different components — a `SectionHeader`, which pads itself, and a
-   * section-sized `MediumSelector`, which deliberately does not. Padding the row is what
-   * makes them line up with each other and with the list below.
+   * The right gutter lives here; the left one is the `SectionHeader`'s own, which every
+   * mode's heading is.
    */
   contentHeader: {
     flexDirection: 'row',
@@ -1310,21 +1299,11 @@ const styles = StyleSheet.create({
   // Takes the space the toggle leaves, so a long heading truncates rather than pushing
   // the control off the row.
   contentHeaderLeft: { flex: 1, justifyContent: 'center' },
-  // Only the timeframe selector carries it — see the call site.
-  contentHeaderInset: { paddingLeft: theme.layout.gutter },
   /**
-   * The rule between discovery and activity.
-   *
-   * Full-bleed rather than inset to the text column, unlike a row divider: this
-   * separates two *sections*, and a rule that stops short would read as belonging to
-   * whichever one it touched.
+   * The space between discovery and activity: 12pt here plus the first card's own 28pt,
+   * a little more than the 28pt between two posts, so the rail ends as a section.
    */
-  boundary: {
-    marginTop: theme.space[4],
-    paddingTop: theme.space[2],
-    borderTopWidth: StyleSheet.hairlineWidth * 2,
-    borderTopColor: theme.border.hairline,
-  },
+  boundary: { height: theme.space[3] },
 });
 
 // `metadataFor` and `relativeTime` used to be defined here. Both now live in

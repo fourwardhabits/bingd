@@ -238,10 +238,10 @@ const toBoard = async (view: View, expecting = 'This month') => {
   await waitFor(() => expect(view.getByLabelText(`Showing ${expecting}`)).toBeTruthy());
 };
 
-/** Open the timeframe dropdown and choose. The same two-step MediumSelector everywhere. */
+/** Open the time-range filter's menu and choose (nav cohesion sprint, 2026-11-06). */
 const chooseTimeframe = async (view: View, from: string, to: string) => {
   await fireEvent.press(view.getByLabelText(`Showing ${from}`));
-  await fireEvent.press(view.getByText(to));
+  await fireEvent.press(await view.findByRole('menuitem', { name: to }));
   await waitFor(() => expect(view.getByLabelText(`Showing ${to}`)).toBeTruthy());
 };
 
@@ -356,7 +356,9 @@ describe('the timeframe, remembered — and the mode, not', () => {
     await toBoard(view);
     await fireEvent.press(view.getByLabelText('Showing This month'));
 
-    expect(view.getByText('All time')).toBeTruthy();
+    expect(
+      (await view.findAllByRole('menuitem')).map((item) => item.props.accessibilityLabel),
+    ).toEqual(['This month', 'All time']);
     expect(view.queryByText('This week')).toBeNull();
     expect(view.queryByText('This year')).toBeNull();
   });
@@ -470,12 +472,17 @@ describe('the timeframe, remembered — and the mode, not', () => {
  * tab row or its read quietly coming back.
  */
 describe('the board is people only', () => {
-  it('draws no Top Titles tab and no board tab row at all', async () => {
+  it('draws no Top Titles tab: its only tabs are the four categories', async () => {
     const view = await open();
     await toBoard(view);
 
     expect(view.queryByText('Top Titles')).toBeNull();
-    expect(view.queryAllByRole('tab')).toHaveLength(0);
+    expect(view.getAllByRole('tab').map((tab) => tab.props.accessibilityLabel)).toEqual([
+      'All Titles',
+      'Movies',
+      'TV Shows',
+      'Reviews',
+    ]);
     // The Feed's own three icons, with Leaderboard the chosen one.
     expect(
       within(view.getByLabelText('Feed mode'))
@@ -485,7 +492,7 @@ describe('the board is people only', () => {
     // The People board's own furniture is all still there.
     expect(view.getByLabelText('Showing This month')).toBeTruthy();
     for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
-      expect(view.getByText(label)).toBeTruthy();
+      expect(view.getByLabelText(label)).toBeTruthy();
     }
   });
 
@@ -534,7 +541,7 @@ describe('switching metrics keeps the board still', () => {
     expect(styleOf(withRows).paddingTop ?? 0).toBe(0);
     expect(styleOf(withRows).marginTop ?? 0).toBe(0);
 
-    await fireEvent.press(view.getByText('Reviews'));
+    await fireEvent.press(view.getByLabelText('Reviews'));
     await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
 
     const empty = view.getByTestId('leaderboard-content');
@@ -733,7 +740,7 @@ describe('the metrics', () => {
     await toBoard(view);
 
     for (const label of ['All Titles', 'Movies', 'TV Shows', 'Reviews']) {
-      expect(view.getByText(label)).toBeTruthy();
+      expect(view.getByLabelText(label)).toBeTruthy();
     }
     expect(view.queryByText('Watched')).toBeNull();
   });
@@ -747,7 +754,7 @@ describe('the metrics', () => {
     await toBoard(view, 'All time');
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Reviews'));
+    await fireEvent.press(view.getByLabelText('Reviews'));
 
     await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
     expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
@@ -1066,7 +1073,7 @@ describe('an empty and sparse beta', () => {
     await waitFor(() => expect(view.getByText('No watches yet this month.')).toBeTruthy());
     expect(view.getByText('You could take the first spot.')).toBeTruthy();
 
-    await fireEvent.press(view.getByText('Reviews'));
+    await fireEvent.press(view.getByLabelText('Reviews'));
     await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
     expect(view.getByText('Yours could be the first.')).toBeTruthy();
   });
@@ -1102,7 +1109,7 @@ describe('the two analytics events', () => {
     await toBoard(view);
     mockTrack.mockClear();
 
-    await fireEvent.press(view.getByText('All Titles'));
+    await fireEvent.press(view.getByLabelText('All Titles'));
     expect(mockTrack).not.toHaveBeenCalled();
 
     await fireEvent.press(view.getByText('Movies'));
@@ -1255,7 +1262,7 @@ describe('the content header gutter', () => {
     return total;
   };
 
-  it('puts the timeframe selector on the page gutter', async () => {
+  it('puts the time-range filter on the page gutter', async () => {
     const view = await open();
     await toBoard(view);
 
@@ -1470,7 +1477,7 @@ describe('the Feed headings', () => {
   const sizeOf = (node: { props: { style?: unknown } }) =>
     (StyleSheet.flatten(node.props.style as TextStyle) as TextStyle).fontSize;
 
-  it('draws TRENDING NOW and ACTIVITY at 15pt', async () => {
+  it('draws TRENDING NOW at 15pt, and no visible ACTIVITY heading under it', async () => {
     mockTrendingItems = [
       {
         mediaItemId: 'film-1',
@@ -1486,13 +1493,29 @@ describe('the Feed headings', () => {
 
     await waitFor(() => expect(view.getAllByText('TRENDING NOW').length).toBeGreaterThan(0));
     expect(sizeOf(view.getAllByText('TRENDING NOW')[0]!)).toBe(15);
-    expect(sizeOf(view.getByText('ACTIVITY'))).toBe(15);
+    // Removed (nav cohesion sprint, 2026-11-06): whitespace is the transition now. The
+    // spacer is still a heading to a screen reader, and draws nothing.
+    expect(view.queryByText('ACTIVITY')).toBeNull();
+    const start = view.getByTestId('feed-activity-start');
+    expect(start.props.accessibilityRole).toBe('header');
+    expect(start.props.accessibilityLabel).toBe('Activity');
+    expect(start.props.children).toBeUndefined();
   });
 
-  it('keeps the timeframe and PEOPLE YOU MAY KNOW at 12pt', async () => {
+  it('names the board LEADERBOARD at 15pt, like TRENDING NOW', async () => {
     const view = await open();
     await toBoard(view);
-    expect(sizeOf(within(view.getByLabelText('Showing This month')).getByText(/this month/i))).toBe(12);
+    const heading = view.getByText('LEADERBOARD');
+    expect(sizeOf(heading)).toBe(15);
+    // One word cannot wrap, so at a large text size it shrinks onto its line instead.
+    expect(heading.props).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true });
+    // TRENDING NOW and the others still wrap.
+  });
+
+  it('draws the time filter at 14pt and keeps PEOPLE YOU MAY KNOW at 12pt', async () => {
+    const view = await open();
+    await toBoard(view);
+    expect(sizeOf(within(view.getByLabelText('Showing This month')).getByText('This month'))).toBe(14);
 
     await toPeople(view);
     expect(sizeOf(view.getByText('PEOPLE YOU MAY KNOW'))).toBe(12);

@@ -8,9 +8,12 @@ import { LeaderboardView } from './LeaderboardView';
 import type { LeaderboardEntry } from './use-leaderboard';
 
 /**
- * **The Leaderboard's final polish** (founder, 2026-11-04): the metric chips are one row
- * that scrolls sideways, led by All Titles, and first place carries a small Amber trophy
- * that leaves the row exactly as it was.
+ * **The Leaderboard's final polish** (founder, 2026-11-04): first place carries a small
+ * Amber trophy that leaves the row exactly as it was.
+ *
+ * **Its categories and time range** (founder, nav cohesion sprint, 2026-11-06): All |
+ * Movies | TV | Reviews as four equal segments that always fit, the full names spoken, and
+ * This month / All time as a compact filter under them.
  */
 
 const person = (over: Partial<LeaderboardEntry> = {}): LeaderboardEntry => ({
@@ -28,12 +31,17 @@ const person = (over: Partial<LeaderboardEntry> = {}): LeaderboardEntry => ({
   ...over,
 });
 
-const board = (entries: LeaderboardEntry[], onChangeMetric = jest.fn()) =>
+const board = (
+  entries: LeaderboardEntry[],
+  onChangeMetric = jest.fn(),
+  onChangeTimeframe = jest.fn(),
+) =>
   render(
     <LeaderboardView
       metric="titles"
       onChangeMetric={onChangeMetric}
       timeframe="month"
+      onChangeTimeframe={onChangeTimeframe}
       entries={entries}
       standing={undefined}
       loading={false}
@@ -41,42 +49,102 @@ const board = (entries: LeaderboardEntry[], onChangeMetric = jest.fn()) =>
     />,
   );
 
-const chipNames = (view: Awaited<ReturnType<typeof board>>) =>
-  within(view.getByLabelText('Leaderboard metric'))
-    .getAllByRole('button')
-    .map((chip) => String(within(chip).getByText(/\S/).props.children));
+const tabs = (view: Awaited<ReturnType<typeof board>>) => view.getAllByRole('tab');
 
-describe('the metric chips', () => {
-  it('are All Titles, Movies, TV Shows and Reviews, in that order', async () => {
+describe('the categories', () => {
+  it('read All, Movies, TV and Reviews, and are spoken in full', async () => {
     const view = await board([]);
 
-    expect(chipNames(view)).toEqual(['All Titles', 'Movies', 'TV Shows', 'Reviews']);
-    expect(view.queryByText('Titles')).toBeNull();
+    expect(tabs(view).map((tab) => String(within(tab).getByText(/\S/).props.children))).toEqual([
+      'All',
+      'Movies',
+      'TV',
+      'Reviews',
+    ]);
+    expect(tabs(view).map((tab) => tab.props.accessibilityLabel)).toEqual([
+      'All Titles',
+      'Movies',
+      'TV Shows',
+      'Reviews',
+    ]);
   });
 
-  it('sit in one row that scrolls sideways and never wraps', async () => {
+  it('are four equal 44pt segments, so all four fit with nothing to scroll', async () => {
     const view = await board([]);
-    const row = view.getByLabelText('Leaderboard metric');
 
-    expect(row.props.horizontal).toBe(true);
-    const content = StyleSheet.flatten(row.props.contentContainerStyle) as ViewStyle;
-    expect(content.flexDirection).toBe('row');
-    expect(content.flexWrap ?? 'nowrap').toBe('nowrap');
+    // One track, not the old sideways-scrolling chip row.
+    expect(view.queryByLabelText('Leaderboard metric')).toBeNull();
+    expect(view.getByLabelText('Leaderboard category').props.horizontal).toBeUndefined();
+    for (const tab of tabs(view)) {
+      const style = StyleSheet.flatten(tab.props.style) as ViewStyle;
+      expect(style).toMatchObject({ flex: 1, flexBasis: 0, minHeight: theme.layout.minTapTarget });
+    }
+    // The dense labels: 14pt, shrinking to fit rather than clipping at a large text size.
+    const label = within(tabs(view)[3]!).getByText('Reviews');
+    expect((StyleSheet.flatten(label.props.style) as TextStyle).fontSize).toBe(14);
+    expect(label.props.adjustsFontSizeToFit).toBe(true);
+    expect(label.props.numberOfLines).toBe(1);
   });
 
-  it('keep Reviews reachable and choosable, and mark the current one', async () => {
+  it('mark the current one in Maroon on Parchment, and choose another', async () => {
     const onChangeMetric = jest.fn();
     const view = await board([], onChangeMetric);
-    const chips = within(view.getByLabelText('Leaderboard metric')).getAllByRole('button');
 
-    expect(chips.map((chip) => Boolean(chip.props.accessibilityState?.selected))).toEqual([
+    expect(tabs(view).map((tab) => Boolean(tab.props.accessibilityState?.selected))).toEqual([
       true,
       false,
       false,
       false,
     ]);
-    await fireEvent.press(view.getByText('Reviews'));
+    const fill = view.getByTestId('nav-fill-titles');
+    expect((StyleSheet.flatten(fill.props.style) as ViewStyle).backgroundColor).toBe(
+      theme.surface.sunken,
+    );
+    expect(
+      (StyleSheet.flatten(within(fill).getByText('All').props.style) as TextStyle).color,
+    ).toBe(theme.semantic.action);
+
+    await fireEvent.press(view.getByLabelText('Reviews'));
     expect(onChangeMetric).toHaveBeenCalledWith('reviews');
+  });
+
+  it('does not report a re-tap of the current one as a change', async () => {
+    const onChangeMetric = jest.fn();
+    const view = await board([], onChangeMetric);
+
+    await fireEvent.press(view.getByLabelText('All Titles'));
+    expect(onChangeMetric).not.toHaveBeenCalled();
+  });
+});
+
+describe('the time range', () => {
+  it('is a compact filter that opens a two-line menu, and chooses All time', async () => {
+    const onChangeTimeframe = jest.fn();
+    const view = await board([], jest.fn(), onChangeTimeframe);
+
+    const filter = view.getByLabelText('Showing This month');
+    expect(filter.props.accessibilityHint).toBe('Choose a time range');
+    expect(
+      (StyleSheet.flatten(within(filter).getByText('This month').props.style) as TextStyle)
+        .fontSize,
+    ).toBe(14);
+
+    await fireEvent.press(filter);
+    const items = await view.findAllByRole('menuitem');
+    expect(items.map((item) => item.props.accessibilityLabel)).toEqual(['This month', 'All time']);
+    expect(items[0]!.props.accessibilityState).toMatchObject({ selected: true });
+
+    await fireEvent.press(items[1]!);
+    expect(onChangeTimeframe).toHaveBeenCalledWith('all_time');
+  });
+
+  it('does not report the chosen range again as a change', async () => {
+    const onChangeTimeframe = jest.fn();
+    const view = await board([], jest.fn(), onChangeTimeframe);
+
+    await fireEvent.press(view.getByLabelText('Showing This month'));
+    await fireEvent.press((await view.findAllByRole('menuitem'))[0]!);
+    expect(onChangeTimeframe).not.toHaveBeenCalled();
   });
 });
 

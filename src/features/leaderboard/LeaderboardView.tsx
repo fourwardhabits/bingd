@@ -1,13 +1,22 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { Avatar, Chip, Divider, EmptyState, SkeletonRow, Text } from '@/ui/components';
+import {
+  Avatar,
+  Divider,
+  EmptyState,
+  MediumSelector,
+  SegmentedTabs,
+  SkeletonRow,
+  Text,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import {
   countLabel,
   emptyCopy,
   LEADERBOARD_METRICS,
+  LEADERBOARD_TIMEFRAMES,
   type LeaderboardEntry,
   type LeaderboardMetric,
   type LeaderboardTimeframe,
@@ -18,6 +27,7 @@ export type LeaderboardViewProps = {
   metric: LeaderboardMetric;
   onChangeMetric: (next: LeaderboardMetric) => void;
   timeframe: LeaderboardTimeframe;
+  onChangeTimeframe: (next: LeaderboardTimeframe) => void;
   entries: readonly LeaderboardEntry[] | undefined;
   standing: MyStanding | undefined;
   loading: boolean;
@@ -72,6 +82,7 @@ export function LeaderboardView({
   metric,
   onChangeMetric,
   timeframe,
+  onChangeTimeframe,
   entries,
   standing,
   loading,
@@ -84,33 +95,52 @@ export function LeaderboardView({
 
   return (
     <View style={styles.body}>
-      {/* The heading is the timeframe selector, and it lives in the screen's content
-          header row rather than here — see `app/(tabs)/feed.tsx`. This component draws
-          the board beneath it, so there is exactly one place the timeframe is named
-          (founder §3). */}
+      {/* LEADERBOARD is the section's heading, in the screen's content header row — see
+          `app/(tabs)/feed.tsx`. This component draws the board beneath it. */}
 
-      {/* The same chips Search and Collection filters use, so a reader who has met one
-          has met all three. **One row that scrolls sideways, never wrapping** (founder
-          final polish, 2026-11-04): with All Titles the four no longer fit at 360pt, and a
-          second line of chips would be a second navigation row. All Titles leads and is
-          always whole on arrival; Reviews is reached by scrolling. */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        alwaysBounceHorizontal={false}
-        style={styles.chipScroller}
-        contentContainerStyle={styles.chips}
-        accessibilityLabel="Leaderboard metric"
-      >
-        {LEADERBOARD_METRICS.map((option) => (
-          <Chip
-            key={option.value}
-            label={option.label}
-            selected={option.value === metric}
-            onPress={() => onChangeMetric(option.value)}
-          />
-        ))}
-      </ScrollView>
+      {/**
+       * **All | Movies | TV | Reviews, four equal segments that always fit** (founder, nav
+       * cohesion sprint, 2026-11-06). The chips ran past the screen edge at 360pt and
+       * Reviews was reached by scrolling. Collection's Watched | Watchlist control, in its
+       * dense form: one hairline track, the chosen segment Parchment with a Maroon word,
+       * each a 44pt target. At a large text size a word shrinks to fit its segment rather
+       * than clipping. The spoken names stay whole: All Titles, TV Shows.
+       *
+       * Re-choosing the segment already chosen is not a change, as before.
+       */}
+      <View style={styles.categories}>
+        <SegmentedTabs
+          variant="nav"
+          dense
+          accessibilityLabel="Leaderboard category"
+          options={LEADERBOARD_METRICS.map((option) => ({
+            id: option.value,
+            label: option.short,
+            accessibilityLabel: option.label,
+          }))}
+          value={metric}
+          onChange={(next) => {
+            if (next !== metric) onChangeMetric(next);
+          }}
+        />
+      </View>
+
+      {/**
+       * **The time range, as a secondary filter** (same sprint): a compact
+       * text-and-chevron under the categories, opening a two-line menu beside it rather
+       * than a sheet. It was the row's uppercase Maroon heading. The one place the
+       * timeframe is named, still (founder §3), and the same remembered preference.
+       */}
+      <View style={styles.timeframe}>
+        <MediumSelector
+          size="filter"
+          value={timeframe}
+          onChange={onChangeTimeframe}
+          options={LEADERBOARD_TIMEFRAMES}
+          accessibilityHint="Choose a time range"
+          testID="leaderboard-timeframe"
+        />
+      </View>
 
       {/**
         * **One content container for every state and every metric** (founder physical QA,
@@ -383,13 +413,12 @@ const styles = StyleSheet.create({
   body: { paddingBottom: theme.space[6] },
   heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
   // Its own height and no more: a horizontal ScrollView otherwise grows in a column.
-  chipScroller: { flexGrow: 0, flexShrink: 0 },
-  chips: {
+  categories: { paddingTop: theme.space[2] },
+  // The filter's 44pt target, on the gutter, close under the categories.
+  timeframe: {
     flexDirection: 'row',
-    gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
+    paddingTop: theme.space[1],
   },
   row: {
     flexDirection: 'row',
