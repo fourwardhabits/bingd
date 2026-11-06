@@ -983,8 +983,8 @@ describe('the header and the tabs', () => {
       const label = within(view.getByRole('tab', { name })).getByText(name);
       expect(label.props.numberOfLines).toBe(1);
       expect(label.props.adjustsFontSizeToFit).toBe(true);
-      // Its growth stops at 1.5× so three segments still fit a 320pt phone at 300% text.
-      expect(label.props.maxFontSizeMultiplier).toBe(1.5);
+      // Its growth stops at 1.3× so three segments still fit a 320pt phone at 200% text.
+      expect(label.props.maxFontSizeMultiplier).toBe(1.3);
     }
   });
 

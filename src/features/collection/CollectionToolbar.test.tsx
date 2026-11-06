@@ -294,5 +294,8 @@ describe('the status line', () => {
     const status = view.getByTestId('collection-filter-sort-status');
     expect(status.props.numberOfLines).toBe(1);
     expect(status.props.adjustsFontSizeToFit).toBe(true);
+    // With no room beside the label it wraps under it, never squeezed to nothing.
+    expect(StyleSheet.flatten(view.getByTestId('collection-filter-sort').props.style).flexWrap).toBe('wrap');
+    expect(StyleSheet.flatten(status.props.style).flexShrink).toBe(0);
   });
 });

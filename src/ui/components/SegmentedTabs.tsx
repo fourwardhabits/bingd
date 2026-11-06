@@ -136,8 +136,10 @@ export function SegmentedTabs<T extends string>({
                        * **One line, always.** A long word at a large system text size
                        * shrinks before it would truncate — three segments on a 320pt
                        * phone are about 92pt each — and the label's own growth stops at
-                       * 1.5×, so the control keeps one row and the page keeps its
-                       * posters. The tabs' meaning never depends on reading a word at
+                       * 1.3×, the ceiling the type scale already gives display sizes, so
+                       * the control keeps one row and the page keeps its posters. At 1.5×
+                       * the three words needed nearly all of that shrink at 320pt; at 1.3×
+                       * they need about a sixth of it. The tabs' meaning never depends on reading a word at
                        * 300%: the chosen one is also the filled one.
                        */
                       adjustsFontSizeToFit
@@ -211,7 +213,7 @@ export function SegmentedTabs<T extends string>({
 /** Hairline outline, the inset between the outline and a fill, and the label's ceiling. */
 const NAV_STROKE = StyleSheet.hairlineWidth * 2;
 const NAV_INSET = 3;
-const NAV_MAX_SCALE = 1.5;
+const NAV_MAX_SCALE = 1.3;
 
 const styles = StyleSheet.create({
   // `flexGrow: 0` so the scroll view takes its height from the tabs. A ScrollView

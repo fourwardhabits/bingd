@@ -436,16 +436,20 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[2],
   },
   toolbarStart: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  // The status wraps under the label when the row has no room for both, rather than being
+  // squeezed to nothing: at 200% text on a 320pt phone "Filter & Sort" alone fills the row
+  // (QA corrections, 2026-11-06).
   filterSort: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: theme.space[2],
+    columnGap: theme.space[2],
     minHeight: theme.layout.minTapTarget,
     flexShrink: 1,
     paddingRight: theme.space[2],
   },
   filterSortLabel: { flexShrink: 0 },
-  filterSortStatus: { flexShrink: 1 },
+  filterSortStatus: { flexShrink: 0, maxWidth: '100%' },
   reshuffle: {
     width: theme.layout.minTapTarget,
     height: theme.layout.minTapTarget,
