@@ -179,9 +179,20 @@ read-only sandbox, as before; the suite above is the implementer's.
 
 ## Android Preview
 
-Published to the `preview` channel, Android only, by this session as the one publisher, from
-the commit that adds this record (code `8e6eef8`). The update and group IDs are recorded in the
-commit after it.
+**Live on 2026-11-06**, published by this session as the one publisher from the real-`npm ci`
+checkout `../worktrees/visual2-preview-publish` (left detached at `ed8d410`). Verified with
+`eas update:view`; no iOS group was published.
+
+| | |
+| --- | --- |
+| Channel / branch | `preview` |
+| Platform | Android only |
+| Update group | `2724ce75-6244-460e-8488-1a1a62a35b84` |
+| Android update | `01a1b04b-158b-7ac7-8cd8-fe5fec5cd9a1` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (the installed Preview APK's) |
+| Source commit | `ed8d410da35f92401f5cf6a5cb5951323f9ef38d` (code `8e6eef8` plus this record) |
+| Rollback group | `1f99a23b-01d4-497e-b89b-15470b53f393` (Sprint 2, `0681248`), still listed |
+| Dashboard | https://expo.dev/accounts/fourward/projects/bingd/updates/2724ce75-6244-460e-8488-1a1a62a35b84 |
 
 ## Rollback
 
