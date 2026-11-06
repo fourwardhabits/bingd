@@ -512,8 +512,11 @@ describe('the actions', () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('user-1', 'funny')];
     const view = await renderWithProviders(<FeedScreen />);
-    const like = await waitFor(() => view.getByTestId('feed-card-like'));
-    expect(within(like).getByText('Laugh')).toBeTruthy();
+    // Waits for the reaction itself, not just the card: the card draws before the
+    // reactions read lands, and under load the label was asserted in between.
+    await waitFor(() =>
+      expect(within(view.getByTestId('feed-card-like')).getByText('Laugh')).toBeTruthy(),
+    );
     expect(view.queryByText('Funny')).toBeNull();
   });
 
