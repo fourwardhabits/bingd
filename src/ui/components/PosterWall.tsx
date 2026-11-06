@@ -142,6 +142,11 @@ export type PosterGridProps = {
   onDismissTile?: (tile: PosterTile) => void;
   /** Long-press, for anything a wall of unlabelled artwork cannot say. */
   onLongPressTile?: (tile: PosterTile) => void;
+  /**
+   * The grid's side inset, when the page's content line is not the gutter: the Cinematic
+   * title page's sheet (title-page sprint, 2026-11-06). Columns are sized inside it.
+   */
+  gutter?: number;
 };
 
 /**
@@ -159,13 +164,12 @@ export function PosterGrid({
   onToggleSave,
   onDismissTile,
   onLongPressTile,
+  gutter = theme.layout.gutter,
 }: PosterGridProps) {
   const { width } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
 
-  const cardWidth = Math.floor(
-    (width - theme.layout.gutter * 2 - gap * (columns - 1)) / columns,
-  );
+  const cardWidth = Math.floor((width - gutter * 2 - gap * (columns - 1)) / columns);
 
   if (tiles.length === 0) return null;
 
@@ -178,7 +182,7 @@ export function PosterGrid({
           onPressAction={onPressAll}
         />
       ) : null}
-      <View style={[styles.gridRows, { gap }]}>
+      <View style={[styles.gridRows, { gap, paddingHorizontal: gutter }]}>
         {tiles.map((tile) => (
           <Tile
             key={tile.id}

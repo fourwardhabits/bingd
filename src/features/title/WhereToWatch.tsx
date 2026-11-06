@@ -1,7 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { providerLogoUri } from '@/lib/images';
 import { SectionHeader, Sheet, SheetDone, Text } from '@/ui/components';
@@ -13,6 +20,12 @@ export type WhereToWatchProps = {
   mediaItemId: string | null;
   /** The title's name, for the sheet's label and nothing else. */
   titleName: string;
+  /**
+   * The row's outer spacing and inset, which go with it when there is nothing to show — the
+   * Cinematic page's section rhythm (title-page sprint, 2026-11-06), so a title with no
+   * providers leaves no gap behind.
+   */
+  style?: StyleProp<ViewStyle>;
 };
 
 /** How many logos the collapsed row shows before it starts counting. */
@@ -67,7 +80,7 @@ const OFFERS: { offer: WatchOffer; label: string }[] = [
  * own, so two Maroon labels and a section's worth of air between them do the separating,
  * and the page's one remaining hairline is above the tab row.
  */
-export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
+export function WhereToWatch({ mediaItemId, titleName, style }: WhereToWatchProps) {
   const [open, setOpen] = useState(false);
   const availability = useWatchProviders(mediaItemId);
 
@@ -80,7 +93,7 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
   const overflow = providers.length - shown.length;
 
   return (
-    <>
+    <View style={style}>
       {/**
        * **The hairline is gone, and the air replaced it** (founder, 2026-09-07).
        *
@@ -177,7 +190,7 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
           onClose={() => setOpen(false)}
         />
       ) : null}
-    </>
+    </View>
   );
 }
 

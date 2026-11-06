@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Alert, StyleSheet } from 'react-native';
+import { Alert, Linking, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -3622,11 +3622,11 @@ describe('the immersive title page (experiment)', () => {
     });
 
     /**
-     * **One opening screen** (founder, UI cohesion pass, 2026-11-06): the hero fills the
-     * page's measured visible height, with the module and a chevron in it and About below
-     * the fold; the page then scrolls normally.
+     * **The head of the page, then the page** (founder, title-page sprint, 2026-11-06): the
+     * hero is the sharp artwork and the module and nothing else — no viewport-high floor, no
+     * chevron — and About follows the module directly.
      */
-    it('fills the visible height, with the chevron under the module and About after it', async () => {
+    it('is only as tall as its contents, with no chevron, and About right after the module', async () => {
       const view = await open();
       await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
       await act(async () => {
@@ -3636,10 +3636,12 @@ describe('the immersive title page (experiment)', () => {
       });
 
       const hero = view.getByTestId('immersive-hero');
-      expect(StyleSheet.flatten(hero.props.style).minHeight).toBe(744);
-      const more = within(hero).getByRole('button', { name: 'More about this title' });
-      expect(more).toBeTruthy();
-      // Depth-first, the order the screen is read in (props are not walked; see above).
+      expect(StyleSheet.flatten(hero.props.style).minHeight).toBeUndefined();
+      expect(view.queryByRole('button', { name: 'More about this title' })).toBeNull();
+      expect(view.queryByTestId('immersive-more')).toBeNull();
+      expect(view.queryByTestId('immersive-extension')).toBeNull();
+      // About is a section after the hero, never inside it.
+      expect(within(hero).queryByTestId('immersive-section-about')).toBeNull();
       const ids: string[] = [];
       const walk = (node: unknown): void => {
         if (Array.isArray(node)) return node.forEach(walk);
@@ -3649,13 +3651,7 @@ describe('the immersive title page (experiment)', () => {
         walk(children);
       };
       walk(view.toJSON());
-      expect(ids.indexOf('immersive-more')).toBeGreaterThan(-1);
-      expect(ids.indexOf('immersive-module')).toBeLessThan(ids.indexOf('immersive-more'));
-      // About is a section after the hero, never inside it.
-      expect(within(hero).queryByTestId('immersive-section-about')).toBeNull();
-      await act(async () => {
-        await fireEvent.press(more);
-      });
+      expect(ids.indexOf('immersive-module')).toBeLessThan(ids.indexOf('immersive-section-about'));
     });
 
     it('opens on the cinematic first screen, with none of the original identity block', async () => {
@@ -3726,45 +3722,117 @@ describe('the immersive title page (experiment)', () => {
       expect(scores.queryAllByLabelText(/out of 10/)).toHaveLength(0);
     });
 
-    it('lays the page out in the brief’s order: About, Cast, then the lower tabs', async () => {
-      tableRows.media_cache = [credits];
+    /**
+     * **One column of sections and no tabs** (founder, title-page sprint, 2026-11-06): About,
+     * Where to Watch, Cast, Reviews, Trailers, Details and Similar, each once, in that order.
+     */
+    it('lays the page out in the brief’s order, with no tabs', async () => {
+      tableRows.media_cache = [credits, videos];
       const view = await open();
       await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
+      await waitFor(() => expect(view.getByTestId('immersive-section-trailers')).toBeTruthy());
 
-      for (const key of ['about', 'cast', 'reviews']) {
+      for (const key of ['about', 'cast', 'reviews', 'trailers', 'details', 'similar']) {
         expect(view.getAllByTestId(`immersive-section-${key}`)).toHaveLength(1);
       }
-      // Similar and Details are tabs, not stacked sections as well.
-      for (const key of ['similar', 'details']) {
-        expect(view.queryByTestId(`immersive-section-${key}`)).toBeNull();
-      }
-      // Post-QA sprint 2: Reviews left the tabs — Similar | Trailers | Details.
-      const tabs = within(view.getByTestId('immersive-tabs'));
-      expect(tabs.getByRole('tab', { name: 'Similar' })).toBeTruthy();
-      expect(tabs.queryByRole('tab', { name: /^Reviews/ })).toBeNull();
-      expect(tabs.getByRole('tab', { name: 'Details' })).toBeTruthy();
-      // Similar leads and is selected.
-      expect(tabs.getByRole('tab', { name: 'Similar' })).toBeSelected();
+      expect(view.queryByTestId('immersive-tabs')).toBeNull();
+      expect(view.queryAllByRole('tab')).toHaveLength(0);
 
       const order = readingOrder(view.toJSON());
       const at = (word: string) => order.indexOf(word);
       // Section headings print in capitals; the spoken name keeps the title's case.
-      expect(at('ABOUT')).toBeGreaterThan(-1);
-      expect(at('ABOUT')).toBeLessThan(at('CAST'));
-      expect(at('CAST')).toBeLessThan(at('REVIEWS'));
-      expect(at('REVIEWS')).toBeLessThan(at('Similar'));
+      const headings = ['ABOUT', 'CAST', 'REVIEWS', 'TRAILERS', 'DETAILS', 'SIMILAR'];
+      for (const heading of headings) expect(at(heading)).toBeGreaterThan(-1);
+      for (let i = 1; i < headings.length; i++) {
+        expect(at(headings[i - 1]!)).toBeLessThan(at(headings[i]!));
+      }
       // The cast is on the page, not behind a tab.
       expect(view.getByText('Leonardo DiCaprio')).toBeTruthy();
     });
 
-    it('opens each lower tab in place, Details among them', async () => {
+    it('says who directed a film in the module, once, and leaves it and the genres out of Details', async () => {
       tableRows.media_cache = [credits];
       const view = await open();
-      await waitFor(() => expect(view.getByTestId('immersive-tabs')).toBeTruthy());
+      const director = await waitFor(() => view.getByTestId('title-director'));
 
-      await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
-      await waitFor(() => expect(view.getByRole('tab', { name: 'Details' })).toBeSelected());
-      expect(view.getByText('Christopher Nolan')).toBeTruthy();
+      expect(director).toHaveTextContent('Directed by Christopher Nolan');
+      expect(within(view.getByTestId('immersive-module')).getByTestId('title-director')).toBeTruthy();
+      // Under the metadata, and the genres above both.
+      const order = readingOrder(view.toJSON());
+      const at = (text: string) => order.findIndex((t) => t.includes(text));
+      expect(at('Science Fiction')).toBeLessThan(at('2010 · '));
+      expect(at('2010 · ')).toBeLessThan(at('Directed by'));
+      // Details states what the module does not.
+      const details = within(view.getByTestId('immersive-section-details'));
+      // Labels print in capitals, so these match either case.
+      expect(details.queryByText('Christopher Nolan')).toBeNull();
+      expect(details.queryByText(/^director$/i)).toBeNull();
+      expect(details.queryByText(/^genres$/i)).toBeNull();
+      expect(details.getByText(/^released$/i)).toBeTruthy();
+      expect(details.getByText(/^original language$/i)).toBeTruthy();
+      expect(view.getAllByText(/Christopher Nolan/)).toHaveLength(1);
+    });
+
+    it('draws no director line when there is no Director credit', async () => {
+      tableRows.media_cache = [
+        {
+          ...credits,
+          payload: {
+            ...credits.payload,
+            crew: [{ id: 1, name: 'An Assistant', job: 'First Assistant Director', department: 'Directing' }],
+          },
+        },
+      ];
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-section-cast')).toBeTruthy());
+      expect(view.queryByTestId('title-director')).toBeNull();
+      expect(view.queryByText(/Directed by/)).toBeNull();
+    });
+
+    /**
+     * **Trailers ask before they load anything from YouTube** (title-page sprint,
+     * 2026-11-06): a thumbnail is a request to `i.ytimg.com`. The Trailers tab only made
+     * them once opened; the always-visible section makes them only after Show previews.
+     */
+    it('draws trailer cards without YouTube thumbnails until previews are asked for', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      const section = await waitFor(() => view.getByTestId('immersive-section-trailers'));
+      const ytimg = () => {
+        const found: string[] = [];
+        const walk = (node: unknown): void => {
+          if (Array.isArray(node)) return node.forEach(walk);
+          if (!node || typeof node !== 'object') return;
+          const { props, children } = node as { props?: { source?: unknown }; children?: unknown };
+          const source = props?.source as { uri?: string } | { uri?: string }[] | undefined;
+          for (const item of Array.isArray(source) ? source : [source]) {
+            if (item?.uri?.includes('ytimg')) found.push(item.uri);
+          }
+          walk(children);
+        };
+        walk(view.toJSON());
+        return found;
+      };
+
+      expect(within(section).getAllByRole('link').length).toBeGreaterThan(0);
+      expect(ytimg()).toEqual([]);
+
+      await fireEvent.press(
+        view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+      );
+      await waitFor(() => expect(ytimg().length).toBeGreaterThan(0));
+      expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
+    });
+
+    it('opens a trailer on YouTube from its card, before or without previews', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      const section = await waitFor(() => view.getByTestId('immersive-section-trailers'));
+      const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+      await fireEvent.press(within(section).getAllByRole('link')[0]!);
+      expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//));
+      openURL.mockRestore();
     });
 
     it('ranks an unranked title from Rank, through the log sheet', async () => {
@@ -3888,10 +3956,11 @@ describe('the immersive title page (experiment)', () => {
           'title_reviews_v2',
           expect.objectContaining({ p_sort: 'top_desc', p_limit: 100 }),
         );
-        // Reviews sits after the Cast and before the lower tabs.
+        // Reviews sits after the Cast and before Details and Similar.
         const order = readingOrder(view.toJSON());
         expect(order.indexOf('CAST')).toBeLessThan(order.indexOf('REVIEWS'));
-        expect(order.indexOf('REVIEWS')).toBeLessThan(order.indexOf('Similar'));
+        expect(order.indexOf('REVIEWS')).toBeLessThan(order.indexOf('DETAILS'));
+        expect(order.indexOf('DETAILS')).toBeLessThan(order.indexOf('SIMILAR'));
         expect(view.getByRole('button', { name: 'See all 3 reviews' })).toBeTruthy();
       });
 

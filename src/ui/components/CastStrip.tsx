@@ -20,6 +20,12 @@ export type CastStripProps = {
    * preview). The Original page keeps the default.
    */
   compact?: boolean;
+  /**
+   * Where the first portrait starts, when the page's content line is not the gutter: the
+   * Cinematic title page's sheet (title-page sprint, 2026-11-06). The rail still scrolls
+   * to the screen edge. Absent, the gutter.
+   */
+  gutter?: number;
 };
 
 /**
@@ -35,11 +41,15 @@ export type CastStripProps = {
  * would be half-empty for every title; both forms are the same size and shape, and a
  * row can mix them without looking broken.
  */
-export function CastStrip({ cast, onPressMember, compact = false }: CastStripProps) {
+export function CastStrip({ cast, onPressMember, compact = false, gutter }: CastStripProps) {
   if (!cast.length) return null;
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.row, compact && styles.rowCompact]}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[
+        styles.row,
+        compact && styles.rowCompact,
+        gutter !== undefined && { paddingHorizontal: gutter },
+      ]}>
       {cast.map((member) => {
         const label = member.character
           ? `${member.name}, who plays ${member.character}`

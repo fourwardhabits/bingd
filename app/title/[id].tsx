@@ -61,7 +61,8 @@ import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { GenreRow } from '@/features/title/GenreRow';
 import { Synopsis } from '@/features/title/Synopsis';
 import { TitleActions, titleActionsFit } from '@/features/title/TitleActions';
-import { ImmersiveHero } from '@/features/title/ImmersiveHero';
+import { ImmersiveHero, SHEET_CONTENT_INSET, SHEET_INSET } from '@/features/title/ImmersiveHero';
+import { directedBy } from '@/features/title/directors';
 import { ImmersiveScores } from '@/features/title/ImmersiveScores';
 import { useTitleLayout } from '@/features/title/title-layout';
 import { NAV_BAR_HEIGHT, TitleTopBar } from '@/features/title/TitleTopBar';
@@ -120,7 +121,6 @@ import {
   ScoresSection,
   SectionHeader,
   SegmentedTabs,
-  type SegmentOption,
   Sheet,
   SheetDone,
   SheetRow,
@@ -150,8 +150,6 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons' | 'similar';
-/** The immersive page's lower tabs. `videos` is labelled Trailers there. */
-type LowerTab = 'similar' | 'reviews' | 'videos' | 'details';
 /** Cast portraits the immersive preview fits across a 360pt screen; See all past it. */
 const CAST_VISIBLE = 4;
 /** How many the preview strip holds before the sheet takes over. */
@@ -281,17 +279,21 @@ export default function TitleScreen() {
   /** The first screen's measured height, which decides when the bar turns solid. */
   const [immersiveHeight, setImmersiveHeight] = useState(0);
   /** The two previews that expand in place rather than opening anything. */
-  /** The immersive page's lower tabs. Similar leads (Cinematic Editorial brief, §5). */
-  const [lowerTab, setLowerTab] = useState<LowerTab>('similar');
+  /**
+   * Whether the reader has asked for the Trailers section's YouTube thumbnails on this page
+   * (title-page sprint, 2026-11-06). Each one is a request to `i.ytimg.com`; as a tab they
+   * waited for a tap, and as an always-visible section they wait for this one.
+   */
+  const [trailerPreviews, setTrailerPreviews] = useState(false);
   /** The full cast, in a sheet, from the immersive Cast preview's See all. */
   const [castOpen, setCastOpen] = useState(false);
   /** Where the immersive module's top edge sits; the top bar's reveal ends there. */
   const [immersiveModuleTop, setImmersiveModuleTop] = useState(0);
   /**
    * **The page's visible height**, from its scroll view (UI cohesion pass, 2026-11-06): the
-   * immersive opening screen fills it, so About starts below the fold. Measured rather than
-   * read from the window, so the status bar, the navigation bar and the bottom inset the
-   * screen keeps are all already accounted for.
+   * Cinematic hero's sharp band grows toward a share of it on a tall phone. Measured rather
+   * than read from the window, so the status bar, the navigation bar and the bottom inset
+   * the screen keeps are all already accounted for.
    */
   const [viewportHeight, setViewportHeight] = useState(0);
   /** The page's scroller, for the opening screen's chevron. */
@@ -1638,7 +1640,18 @@ export default function TitleScreen() {
    */
   const tabContent = (
     which: Tab | null | undefined,
-    { similarLimit }: { similarLimit?: number } = {},
+    {
+      similarLimit,
+      cinematic = false,
+    }: {
+      similarLimit?: number;
+      /**
+       * The Cinematic page's sections (title-page sprint, 2026-11-06): Details leaves out
+       * what the module already says (genres, director) and adds Created by for television;
+       * Similar sits on the page's content line.
+       */
+      cinematic?: boolean;
+    } = {},
   ) => {
     const activeTab = which;
     return (
@@ -1760,9 +1773,20 @@ export default function TitleScreen() {
               label="Runtime"
               value={title.runtime_minutes ? `${title.runtime_minutes} minutes` : null}
             />
-            <Detail label="Genres" value={descriptive.genres.join(', ') || null} />
-            <Detail label="Language" value={languageName(descriptive.language)} />
-            <Detail label="Director" value={credits.data?.director ?? null} />
+            {cinematic ? null : (
+              <Detail label="Genres" value={descriptive.genres.join(', ') || null} />
+            )}
+            <Detail
+              label={cinematic ? 'Original language' : 'Language'}
+              value={languageName(descriptive.language)}
+            />
+            {cinematic ? (
+              title.kind === 'movie' ? null : (
+                <Detail label="Created by" value={credits.data?.showrunner ?? null} />
+              )
+            ) : (
+              <Detail label="Director" value={credits.data?.director ?? null} />
+            )}
             {/* The ordinal with its denominator. The panel above shows the short
                 form, which is the one people read; this is the one that says what
                 it is two of (PRD §10). */}
@@ -1835,6 +1859,7 @@ export default function TitleScreen() {
           similar.tiles.length ? (
             <PosterGrid
               tiles={similarLimit ? similar.tiles.slice(0, similarLimit) : similar.tiles}
+              gutter={cinematic ? SHEET_CONTENT_INSET : undefined}
               onPressTile={(tile) => {
                 track({
                   name: 'similar_title_opened',
@@ -1885,12 +1910,12 @@ export default function TitleScreen() {
    * It reads the values the original page computes above and calls the same handlers, so
    * ranking, scoring and every sheet behave identically; only the arrangement differs:
    *
-   *   1. `ImmersiveHero` — a sharp backdrop, and over its foot one Paper module holding
-   *      the title, the genre line, the metadata, the actions and the three scores;
-   *   2. About, Where to Watch, Episodes or Seasons where they apply, and Cast — each once,
-   *      on Paper, never inside the module;
-   *   3. the tab row the original page uses, now Similar | Reviews | Trailers | Details,
-   *      with one optional line above it from people the reader follows.
+   *   1. `ImmersiveHero` — a sharp backdrop, and over its lower part one Paper module
+   *      holding the title, the genre line, the metadata, the director, the actions and
+   *      the three scores. The module is the top of the page's Paper (title-page sprint,
+   *      2026-11-06): no blurred field, no chevron, no filler height;
+   *   2. then, on the same content line and with no tabs: About, Where to Watch, Episodes
+   *      or Seasons where they apply, Cast, Reviews, Trailers, Details and Similar.
    *
    * No second title, poster, Rank or score block anywhere below the module.
    */
@@ -1926,8 +1951,9 @@ export default function TitleScreen() {
   });
   /**
    * The module's metadata line: `2023 · R · 125m`, or `Season 1 · 2023 · TV-MA · 9
-   * episodes`. The year leads, as the brief asks; the director moves to Details, so the
-   * line stays one statement about the title rather than a credit roll.
+   * episodes`. The year leads, as the brief asks. A film's director has its own quiet line
+   * under it (`directedBy`); a season or series has none, because a season's Director
+   * credit is an episode's and TMDB has no single director for a show.
    */
   const moduleMeta = [
     isSeason ? identitySubtitle : year ? String(year) : null,
@@ -1936,25 +1962,37 @@ export default function TitleScreen() {
   ]
     .filter(Boolean)
     .join(SEP);
-  const immersiveSection = (key: string, heading: string, body: ReactNode) => (
+  const directorLine = title.kind === 'movie' ? directedBy(credits.data?.directors ?? []) : null;
+  /**
+   * One section of the Cinematic page: its heading on the page's content line, then its
+   * body, which is either on that line too (`column`) or a rail that starts on it and
+   * scrolls to the screen edge. 12pt above each heading, so two sections are about 24pt
+   * apart once the heading's own row is counted, and the body follows the heading directly.
+   */
+  const immersiveSection = (
+    key: string,
+    heading: string,
+    body: ReactNode,
+    {
+      rail = false,
+      action,
+    }: {
+      rail?: boolean;
+      action?: { label: string; accessibilityLabel?: string; onPress: () => void };
+    } = {},
+  ) => (
     <View key={key} style={styles.immersiveSection} testID={`immersive-section-${key}`}>
-      <SectionHeader title={heading} />
-      {body}
+      <View style={styles.sheetColumn}>
+        <SectionHeader
+          title={heading}
+          actionLabel={action?.label}
+          actionAccessibilityLabel={action?.accessibilityLabel}
+          onPressAction={action?.onPress}
+        />
+      </View>
+      {rail ? body : <View style={styles.sheetColumn}>{body}</View>}
     </View>
   );
-
-  /**
-   * The lower tabs: Similar | Trailers | Details (post-QA sprint 2, 2026-11-05). Reviews
-   * left them for its own section after Cast and the sheet behind its See all.
-   */
-  const lowerTabs: SegmentOption<LowerTab>[] = [
-    { id: 'similar', label: 'Similar' },
-    ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Trailers' }] : []),
-    { id: 'details', label: 'Details' },
-  ];
-  const lowerActive: LowerTab = lowerTabs.some((option) => option.id === lowerTab)
-    ? lowerTab
-    : 'similar';
 
   /** Spoiler masking for one review, against this viewer and this exact media item. */
   const reviewMasked = (review: TitleReview) =>
@@ -2004,14 +2042,6 @@ export default function TitleScreen() {
         title={displayTitle ?? title.title}
         topInset={insets.top}
         viewportHeight={viewportHeight || undefined}
-        // The chevron: to the first thing under the opening screen, which lands just under
-        // the bar once it has turned solid. A plain scroll, no snapping.
-        onPressMore={() =>
-          pageScroller.current?.scrollTo?.({
-            y: Math.max(0, immersiveHeight - barHeight),
-            animated: true,
-          })
-        }
         onHeight={setImmersiveHeight}
         onModuleTop={setImmersiveModuleTop}
       >
@@ -2032,6 +2062,19 @@ export default function TitleScreen() {
           {moduleMeta ? (
             <Text testID="title-meta" variant="footnote" tone="secondary" numberOfLines={2}>
               {moduleMeta}
+            </Text>
+          ) : null}
+          {/* Quiet, like the metadata above it, and absent when there is no Director credit
+              (title-page sprint, 2026-11-06). Genres stay above it: they decide more. */}
+          {directorLine ? (
+            <Text
+              testID="title-director"
+              variant="footnote"
+              tone="tertiary"
+              numberOfLines={1}
+              accessibilityLabel={directorLine.label}
+            >
+              {directorLine.text}
             </Text>
           ) : null}
           {contextLine ? (
@@ -2081,98 +2124,132 @@ export default function TitleScreen() {
         ) : null}
       </ImmersiveHero>
 
-      <View style={styles.immersiveNotices}>{notices}</View>
+      <View style={[styles.immersiveNotices, styles.sheetColumn]}>{notices}</View>
 
+      {/**
+       * **The sections, in one column and with no tabs** (title-page sprint, 2026-11-06):
+       * About, Where to Watch, Episodes or Seasons, Cast, Reviews, Trailers, Details and
+       * Similar — each once, each on the content line the module's own text sits on.
+       */}
       {title.overview
-        ? immersiveSection('about', 'About', <Synopsis text={title.overview} />)
+        ? immersiveSection('about', 'About', <Synopsis text={title.overview} flush />)
         : null}
 
-      <WhereToWatch mediaItemId={title.id} titleName={title.title} />
+      {/* Its spacing travels with it: a title with no providers draws nothing, gap included. */}
+      <WhereToWatch
+        mediaItemId={title.id}
+        titleName={title.title}
+        style={[styles.immersiveSection, styles.sheetColumn]}
+      />
 
       {isSeason ? immersiveSection('episodes', 'Episodes', tabContent('episodes')) : null}
       {isSeries ? immersiveSection('seasons', 'Seasons', tabContent('seasons')) : null}
 
-      {cast.length ? (
-        <View style={styles.immersiveSection} testID="immersive-section-cast">
-          <SectionHeader
-            title="Cast"
-            actionLabel={cast.length > CAST_VISIBLE ? 'See all' : undefined}
-            actionAccessibilityLabel={`See all ${cast.length} cast members`}
-            onPressAction={cast.length > CAST_VISIBLE ? () => setCastOpen(true) : undefined}
-          />
-          <CastStrip
-            compact
-            cast={cast.slice(0, CAST_PREVIEW)}
-            onPressMember={(member) => router.push(`/person/${member.id}`)}
-          />
-        </View>
-      ) : null}
+      {cast.length
+        ? immersiveSection(
+            'cast',
+            'Cast',
+            <CastStrip
+              compact
+              gutter={SHEET_CONTENT_INSET}
+              cast={cast.slice(0, CAST_PREVIEW)}
+              onPressMember={(member) => router.push(`/person/${member.id}`)}
+            />,
+            {
+              rail: true,
+              action:
+                cast.length > CAST_VISIBLE
+                  ? {
+                      label: 'See all',
+                      accessibilityLabel: `See all ${cast.length} cast members`,
+                      onPress: () => setCastOpen(true),
+                    }
+                  : undefined,
+            },
+          )
+        : null}
 
       {/**
        * **Reviews, after Cast** (post-QA sprint 2, 2026-11-05): one or two on the page,
        * yours first, and every review behind See all. Not for a series, which nobody can
        * rank and so nobody can review.
        */}
-      {!isSeries ? (
-        <View style={styles.immersiveSection} testID="immersive-section-reviews">
-          <SectionHeader
-            title="Reviews"
-            actionLabel={reviewTotal > 0 ? 'See all' : undefined}
-            actionAccessibilityLabel={
-              reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`
-            }
-            onPressAction={reviewTotal > 0 ? openReviews : undefined}
-          />
-          <ReviewsPreview
-            reviews={helpfulReviews.data ?? []}
-            loading={helpfulReviews.isPending}
-            failed={helpfulReviews.isError && !helpfulReviews.data}
-            onRetry={() => void helpfulReviews.refetch()}
-            maskedFor={reviewMasked}
-            viewerId={profile.id}
-            viewerRanked={Boolean(data.ranked)}
-            ownReview={ownPublishedReview}
-            onWrite={() => openLog('review')}
-            onSeeAll={openReviews}
-            noun={title.kind === 'season' ? 'season' : 'movie'}
-            // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
-            // own name and picture on your review, and the same thumbs-up the sheet offers
-            // under everybody else's. Your score is the module's, so it is not repeated.
-            onToggleHelpful={toggleHelpful}
-            viewer={{
-              name: profile.display_name || profile.username,
-              avatarUri: avatarUri(profile.avatar_path),
-            }}
-          />
-        </View>
-      ) : null}
+      {!isSeries
+        ? immersiveSection(
+            'reviews',
+            'Reviews',
+            <ReviewsPreview
+              reviews={helpfulReviews.data ?? []}
+              loading={helpfulReviews.isPending}
+              failed={helpfulReviews.isError && !helpfulReviews.data}
+              onRetry={() => void helpfulReviews.refetch()}
+              maskedFor={reviewMasked}
+              viewerId={profile.id}
+              viewerRanked={Boolean(data.ranked)}
+              ownReview={ownPublishedReview}
+              onWrite={() => openLog('review')}
+              onSeeAll={openReviews}
+              noun={title.kind === 'season' ? 'season' : 'movie'}
+              // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
+              // own name and picture on your review, and the same thumbs-up the sheet offers
+              // under everybody else's. Your score is the module's, so it is not repeated.
+              onToggleHelpful={toggleHelpful}
+              viewer={{
+                name: profile.display_name || profile.username,
+                avatarUri: avatarUri(profile.avatar_path),
+              }}
+            />,
+            {
+              action:
+                reviewTotal > 0
+                  ? {
+                      label: 'See all',
+                      accessibilityLabel:
+                        reviewTotal === 1 ? 'See the review' : `See all ${reviewTotal} reviews`,
+                      onPress: openReviews,
+                    }
+                  : undefined,
+            },
+          )
+        : null}
 
-      <View style={styles.tabs} testID="immersive-tabs">
-        <SegmentedTabs
-          options={lowerTabs}
-          value={lowerActive}
-          onChange={(next) => {
-            // The same event the original page sends, for the same deliberate move.
-            if (next === 'similar' && lowerActive !== 'similar') {
-              track({
-                name: 'similar_tab_opened',
-                props: { medium: title.kind === 'movie' ? 'movies' : 'tv' },
-              });
-            }
-            setLowerTab(next);
-          }}
-        />
-      </View>
+      {/**
+       * **Trailers, on the page** (title-page sprint, 2026-11-06). The cards draw at once;
+       * YouTube's thumbnails wait for Show previews, because each is a request to Google
+       * that the Trailers tab used to make only when it was opened. A tap on a card opens
+       * the video, as it always did.
+       */}
+      {videos.data?.length
+        ? immersiveSection(
+            'trailers',
+            'Trailers',
+            <TrailerRail
+              videos={videos.data}
+              label={videoTitle}
+              sub={(video) =>
+                [SITE_LABEL[video.site] ?? video.site, video.type].filter(Boolean).join(' · ')
+              }
+              previews={trailerPreviews}
+              gutter={SHEET_CONTENT_INSET}
+            />,
+            {
+              rail: true,
+              action: trailerPreviews
+                ? undefined
+                : {
+                    label: 'Show previews',
+                    accessibilityLabel: 'Show trailer previews. Loads images from YouTube.',
+                    onPress: () => setTrailerPreviews(true),
+                  },
+            },
+          )
+        : null}
 
-      {lowerActive === 'videos' ? (
-        <TrailerRail
-          videos={videos.data ?? []}
-          label={videoTitle}
-          sub={(video) => [SITE_LABEL[video.site] ?? video.site, video.type].filter(Boolean).join(' · ')}
-        />
-      ) : (
-        tabContent(lowerActive)
-      )}
+      {immersiveSection('details', 'Details', tabContent('details', { cinematic: true }))}
+
+      {immersiveSection('similar', 'Similar', tabContent('similar', { cinematic: true }), {
+        rail: true,
+      })}
 
       {castOpen ? (
         <Sheet visible onClose={() => setCastOpen(false)} label={`Cast of ${title.title}`}>
@@ -3406,8 +3483,10 @@ const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   // ---- Immersive Scroll experiment (2026-11-04)
   immersiveIdentity: { gap: theme.space[1] },
-  immersiveNotices: { paddingTop: theme.space[2] },
-  immersiveSection: { paddingTop: theme.space[5], gap: theme.space[1] },
+  immersiveNotices: {},
+  immersiveSection: { paddingTop: theme.space[3] },
+  /** The page's content line under the hero: the module's inset, so text shares its edge. */
+  sheetColumn: { paddingHorizontal: SHEET_INSET },
   // One quiet line above the tabs, on Paper: no card of its own.
 
   immersiveCircleCopy: { flex: 1, gap: 2 },
