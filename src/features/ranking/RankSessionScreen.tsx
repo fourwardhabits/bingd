@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
@@ -36,6 +36,41 @@ import { seedPivotCard } from './pivot-card';
 import { useSettledStanding } from './settled-standing';
 
 export type RankSessionSource = 'backlog' | 'refine';
+
+/**
+ * **How wide the "How was it?" poster is, on this device** (founder, QA corrections,
+ * 2026-11-06).
+ *
+ * It was a fixed `poster.md`, 88pt, while the comparison that follows draws two posters
+ * of up to 156pt (`useCardWidth`), so the opening read as a smaller, separate step. It
+ * now aims for `poster.lg`, 132pt — one and a half times the old size — and gives way,
+ * the way the comparison cards do, to the room the screen actually has:
+ *
+ * - **Height first.** The poster takes at most 30% of the screen's height, so the
+ *   question, the title, the three choices and Skip title keep their places below it.
+ * - **Text size next.** That share is divided by the system font scale, because the
+ *   words around the poster grow with it and the poster is the one thing that can give.
+ * - **A floor.** Never below the old 88pt at ordinary text sizes, so no phone is worse
+ *   off than it was; above 130% text it may go down to `poster.sm` (56pt) rather than
+ *   push the choices off the screen.
+ *
+ * 2:3 always: the poster is sized by width and `Poster` keeps the aspect.
+ */
+export function askPosterWidth({
+  width,
+  height,
+  fontScale = 1,
+}: {
+  width: number;
+  height: number;
+  fontScale?: number;
+}) {
+  const scale = Math.max(1, fontScale);
+  const byHeight = ((height * 0.3) / scale) * theme.layout.aspect.poster;
+  const room = width - theme.layout.gutter * 2;
+  const floor = scale > 1.3 ? theme.poster.sm.width : theme.poster.md.width;
+  return Math.max(floor, Math.floor(Math.min(theme.poster.lg.width, byHeight, room)));
+}
 
 /**
  * **One ranking session, two sources** (unified Backlog + Refine, founder-approved
@@ -113,6 +148,7 @@ function BacklogSession({
   const withIntent = useOperationIntent();
   const analyticsMedium = medium === 'movies' ? 'movies' : 'tv';
   const mediaKind = medium === 'movies' ? 'movie' : 'tv_season';
+  const askPoster = askPosterWidth(useWindowDimensions());
 
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
@@ -469,10 +505,12 @@ function BacklogSession({
             How was it?
           </Text>
           <View style={styles.askPoster} testID="backlog-ask-poster">
+            {/* Sized like the comparison's cards, which it opens onto: see `askPosterWidth`. */}
             <Poster
               uri={posterUri(phase.target.posterPath, 'card')}
               title={phase.target.title}
               size="md"
+              width={askPoster}
             />
             <Text variant="callout" style={styles.centre} numberOfLines={2}>
               {phase.target.title}

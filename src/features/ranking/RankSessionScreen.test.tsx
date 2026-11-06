@@ -1,9 +1,10 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Dimensions, StyleSheet } from 'react-native';
 
 import { rankingOf } from '@/test-utils/ranked-standing';
 import { renderWithProviders } from '@/test-utils/render';
 
-import { RankSessionScreen } from './RankSessionScreen';
+import { askPosterWidth, RankSessionScreen } from './RankSessionScreen';
 
 /**
  * The ranking session's backlog source (unified Backlog + Refine, 2026-09-21). The server
@@ -306,6 +307,81 @@ it('shows the target poster on How was it?', async () => {
 
   await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
   expect(view.getByTestId('backlog-ask-poster')).toBeTruthy();
+});
+
+/**
+ * **A poster the size of the comparison's** (founder, QA corrections, 2026-11-06): about
+ * one and a half times the old fixed 88pt, giving way to a short screen or large text so
+ * the choices below it stay on screen.
+ */
+describe('the "How was it?" poster', () => {
+  it('is about 1.45–1.5× the old 88pt on ordinary phones', () => {
+    expect(askPosterWidth({ width: 320, height: 640 })).toBe(128);
+    expect(askPosterWidth({ width: 360, height: 780 })).toBe(132);
+    expect(askPosterWidth({ width: 412, height: 915 })).toBe(132);
+    for (const [width, height] of [
+      [320, 640],
+      [360, 780],
+      [412, 915],
+    ]) {
+      const ratio = askPosterWidth({ width, height }) / 88;
+      expect(ratio).toBeGreaterThanOrEqual(1.4);
+      expect(ratio).toBeLessThanOrEqual(1.5);
+    }
+  });
+
+  it('gives way to a short screen, but never below the old size at ordinary text', () => {
+    expect(askPosterWidth({ width: 360, height: 560 })).toBe(112);
+    expect(askPosterWidth({ width: 320, height: 400 })).toBe(88);
+  });
+
+  it('scales down with larger system text so the choices keep their place', () => {
+    expect(askPosterWidth({ width: 360, height: 780, fontScale: 1.3 })).toBe(120);
+    expect(askPosterWidth({ width: 360, height: 780, fontScale: 2 })).toBe(78);
+    // At the largest sizes on a small phone it may go to poster.sm rather than the floor.
+    expect(askPosterWidth({ width: 320, height: 568, fontScale: 2 })).toBe(56);
+  });
+
+  it('draws at that width, 2:3, between the question and the title, buckets and Skip below', async () => {
+    serve({ ranking_backlog: [queue([{ ...UNTOUCHED, poster_path: '/heat.jpg' }])] });
+    const view = await open();
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+
+    const box = view.getByTestId('backlog-ask-poster');
+    const frame = StyleSheet.flatten((box.children[0] as { props: { style: unknown } }).props.style);
+    const { width, height, fontScale } = Dimensions.get('window');
+    expect(frame.width).toBe(askPosterWidth({ width, height, fontScale }));
+    expect(frame.aspectRatio).toBe(2 / 3);
+    expect(frame.height).toBeUndefined();
+
+    // The title stays under the poster, inside the same block; the order down the screen
+    // is question, poster, title, choices, Skip title.
+    expect(within(box).getByText('Heat')).toBeTruthy();
+    const tree = JSON.stringify(view.toJSON());
+    const at = ['"How was it?"', '"Heat"', '"I liked it"', '"Skip title"'].map((text) =>
+      tree.indexOf(text),
+    );
+    expect(at.every((index) => index >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(view.getByTestId('backlog-bucket-choices')).toBeTruthy();
+  });
+
+  it('is the same for a TV season', async () => {
+    serve({
+      ranking_backlog: [
+        queue([{ ...UNTOUCHED, kind: 'season', title: 'Severance, S1', poster_path: '/s.jpg' }]),
+      ],
+    });
+    const onExit = jest.fn();
+    const view = await renderWithProviders(
+      <RankSessionScreen medium="tv_seasons" start="backlog" onExit={onExit} />,
+    );
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    const box = view.getByTestId('backlog-ask-poster');
+    const frame = StyleSheet.flatten((box.children[0] as { props: { style: unknown } }).props.style);
+    const { width, height, fontScale } = Dimensions.get('window');
+    expect(frame.width).toBe(askPosterWidth({ width, height, fontScale }));
+  });
 });
 
 /** Founder QA, 2026-09-22: the two escapes must read as different acts on the pair screen. */
