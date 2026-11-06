@@ -1,5 +1,6 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 
+import { rankingOf } from '@/test-utils/ranked-standing';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { RefineScreen } from './RefineScreen';
@@ -52,6 +53,16 @@ jest.mock('@/lib/analytics', () => ({
  * in the file (the RNTL double-press trap). Forcing the round's own stopping rule is how
  * one press reaches the summary; everything downstream of it is the real code.
  */
+/**
+ * **The summary's numbers come from a fresh read of the ranking** (QA corrections,
+ * 2026-11-06), not from the placement's own answer. Each test says what the ranking is.
+ */
+const mockReadRanked = jest.fn();
+jest.mock('@/features/collection/use-collection', () => ({
+  ...jest.requireActual('@/features/collection/use-collection'),
+  readRankedCollection: (...a: unknown[]) => mockReadRanked(...a),
+}));
+
 let mockForceCheckpoint = false;
 jest.mock('./refine', () => {
   const actual = jest.requireActual('./refine');
@@ -96,6 +107,9 @@ const callsTo = (fn: string) => mockRpc.mock.calls.filter((c) => c[0] === fn);
 
 beforeEach(() => {
   mockForceCheckpoint = false;
+  // Heat fifteenth of thirty-six in I liked it: #15, 8.8, where the fixture's move lands.
+  mockReadRanked.mockReset();
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 36 }, { heat: 15 }));
   mockRpc.mockReset();
   mockTrack.mockReset();
   mockWritePref.mockClear();
@@ -193,6 +207,7 @@ it('a title that did not move reads the same way as one that did', async () => {
       },
     ],
   });
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 33 }, { heat: 21 }));
   const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
   await waitFor(() => expect(view.getByLabelText('Choose Collateral')).toBeTruthy());
   await fireEvent.press(view.getByLabelText('Choose Collateral'));
@@ -216,6 +231,7 @@ it('names the medium the way TV is named everywhere else', async () => {
       },
     ],
   });
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 11 }, { heat: 4 }));
   const view = await renderWithProviders(
     <RefineScreen medium="tv_seasons" onExit={jest.fn()} />,
   );
@@ -224,11 +240,16 @@ it('names the medium the way TV is named everywhere else', async () => {
   await fireEvent.press(view.getByLabelText('Choose Heat'));
 
   await waitFor(() => expect(view.getByText('#4 in TV')).toBeTruthy());
+  expect(view.getByLabelText('9.1 out of 10, I liked it')).toBeTruthy();
+  // The season ranking, never the movie one: the two are separate lists.
+  expect(mockReadRanked).toHaveBeenCalledWith('user-1', 'tv_seasons');
 });
 
-it('claims no position when the server reports none', async () => {
+it('claims no position the ranking cannot vouch for', async () => {
   // A row with a blank where a position should be is worse than a row that does not
-  // claim one, so the line is omitted rather than rendered empty.
+  // claim one, so the line is omitted rather than rendered empty. The ranking is the
+  // authority now (QA corrections, 2026-11-06): a title it no longer holds — another
+  // device unranked it mid-sitting — gets neither a position nor the earlier score.
   serve({
     refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
     refine_start: [comparing],
@@ -236,14 +257,36 @@ it('claims no position when the server reports none', async () => {
       { done: true, category: 'movies', bucket: 'fine', score: 6.2, movement: null },
     ],
   });
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 3, fine: 4 }, {}));
   const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
   await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
 
   await fireEvent.press(view.getByLabelText('Choose Heat'));
 
-  await waitFor(() => expect(view.getByLabelText('6.2 out of 10, It was fine')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+  await waitFor(() => expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(1));
+  expect(view.getByText('Heat')).toBeTruthy();
   expect(view.queryByText(/in Movies/)).toBeNull();
   expect(view.queryByText(/^#/)).toBeNull();
+  expect(view.queryByLabelText(/out of 10/)).toBeNull();
+});
+
+it('takes the position from the ranking even when the step named none', async () => {
+  serve({
+    refine_candidates: [{ status: 'ready', candidates: [HEAT] }],
+    refine_start: [comparing],
+    rank_answer: [
+      { done: true, category: 'movies', bucket: 'fine', score: 6.2, movement: null },
+    ],
+  });
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 2, fine: 6 }, { heat: 4 }));
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+
+  await waitFor(() => expect(view.getByText('#4 in Movies')).toBeTruthy());
+  expect(view.getByLabelText('6.2 out of 10, It was fine')).toBeTruthy();
 });
 
 it('Done with nothing refined cancels the provisional session and leaves', async () => {

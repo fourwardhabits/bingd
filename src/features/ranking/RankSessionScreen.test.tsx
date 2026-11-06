@@ -1,5 +1,6 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 
+import { rankingOf } from '@/test-utils/ranked-standing';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { RankSessionScreen } from './RankSessionScreen';
@@ -44,6 +45,16 @@ const mockTrack = jest.fn();
 jest.mock('@/lib/analytics', () => ({
   ...jest.requireActual('@/lib/analytics'),
   track: (...a: unknown[]) => mockTrack(...a),
+}));
+
+/**
+ * **The summary's numbers come from a fresh read of the ranking** (QA corrections,
+ * 2026-11-06), not from the placement's own answer. Each test says what the ranking is.
+ */
+const mockReadRanked = jest.fn();
+jest.mock('@/features/collection/use-collection', () => ({
+  ...jest.requireActual('@/features/collection/use-collection'),
+  readRankedCollection: (...a: unknown[]) => mockReadRanked(...a),
 }));
 
 const UNTOUCHED = {
@@ -111,6 +122,10 @@ const open = async (start: 'backlog' | 'refine' = 'backlog') => {
 beforeEach(() => {
   mockRpc.mockReset();
   mockTrack.mockReset();
+  // Heat second of six in It was fine, under two in I liked it: #4, 6.2 — the same
+  // standing the `placed` fixture reports, so a one-title sitting reads as it did.
+  mockReadRanked.mockReset();
+  mockReadRanked.mockResolvedValue(rankingOf({ loved: 2, fine: 6 }, { heat: 4 }));
 });
 
 it('asks "How was it?" first for a title with no bingd opinion, and opens nothing yet', async () => {

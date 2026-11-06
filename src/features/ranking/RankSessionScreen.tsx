@@ -33,6 +33,7 @@ import {
 import { Comparison as ComparisonView, SkipTitleLink } from './RankingSheet';
 import { outcomeUnknown, rankAnswer, rankBack, rankSkip, type SessionStep } from './session';
 import { seedPivotCard } from './pivot-card';
+import { useSettledStanding } from './settled-standing';
 
 export type RankSessionSource = 'backlog' | 'refine';
 
@@ -410,6 +411,16 @@ function BacklogSession({
       ? phase.target
       : null;
 
+  // The summary's numbers, from a read made after this sitting's last placement — not
+  // the position and score each placement returned, which later ones shift.
+  const standing = useSettledStanding({
+    userId: profile.id,
+    medium,
+    sitting,
+    titles: ranked,
+    enabled: phase.kind === 'summary',
+  });
+
   return (
     <Screen includeBottomInset>
       {/* The summary draws its own foot; a Done in the header there would be two. */}
@@ -552,7 +563,9 @@ function BacklogSession({
       ) : phase.kind === 'summary' ? (
         <RankedSummary
           heading={rankedHeading(ranked.length, 'ranked')}
-          titles={ranked}
+          titles={standing.titles}
+          standing={standing.state}
+          onRetry={standing.retry}
           medium={medium}
           actions={
             <>
