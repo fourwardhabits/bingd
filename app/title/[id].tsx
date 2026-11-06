@@ -20,6 +20,7 @@ import {
   StyleSheet,
   View,
   useWindowDimensions,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -93,7 +94,7 @@ import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
 import { track } from '@/lib/analytics';
 import { hapticSelection } from '@/ui/haptics';
-import { posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
+import { avatarUri, posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -286,6 +287,15 @@ export default function TitleScreen() {
   const [castOpen, setCastOpen] = useState(false);
   /** Where the immersive module's top edge sits; the top bar's reveal ends there. */
   const [immersiveModuleTop, setImmersiveModuleTop] = useState(0);
+  /**
+   * **The page's visible height**, from its scroll view (UI cohesion pass, 2026-11-06): the
+   * immersive opening screen fills it, so About starts below the fold. Measured rather than
+   * read from the window, so the status bar, the navigation bar and the bottom inset the
+   * screen keeps are all already accounted for.
+   */
+  const [viewportHeight, setViewportHeight] = useState(0);
+  /** The page's scroller, for the opening screen's chevron. */
+  const pageScroller = useRef<ScrollView>(null);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   /**
    * The title the open ranking is about, and what it scored — the two halves of
@@ -1520,6 +1530,24 @@ export default function TitleScreen() {
   );
 
   /**
+   * The thumbs-up, from the sheet, the original tab or the preview alike.
+   *
+   * One write at a time, and a second tap while it is in flight does nothing. Not
+   * throttling for its own sake: a queued mutation runs its `onMutate` immediately, so a
+   * second tap would take a snapshot of the first tap's optimistic state and a double
+   * failure would roll back to a mark the server never accepted. Refusing to start the
+   * second write keeps exactly one optimistic change alive, which is the condition the
+   * rollback in `useSetReviewHelpful` is correct under.
+   */
+  const toggleHelpful = (review: TitleReview) => {
+    if (setHelpful.isPending) return;
+    // The premium interaction vocabulary, at its quietest weight: this is a selection,
+    // not an achievement.
+    hapticSelection();
+    setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
+  };
+
+  /**
    * The full list of reviews: the original page's Reviews tab, and the Cinematic
    * Editorial page's Reviews sheet (post-QA sprint 2, 2026-11-05). One element, so the
    * two cannot disagree about spoilers, Helpful, reporting or who sees what.
@@ -1552,23 +1580,7 @@ export default function TitleScreen() {
             setReviewSort(next);
             track({ name: 'reviews_sort_changed', props: { sort: next } });
           }}
-          onToggleHelpful={(review: TitleReview) => {
-            /**
-             * One write at a time, and a second tap while it is in flight does nothing.
-             *
-             * Not throttling for its own sake: a queued mutation runs its `onMutate`
-             * immediately, so a second tap would take a snapshot of the first tap's
-             * optimistic state and a double failure would roll back to a mark the
-             * server never accepted. Refusing to start the second write keeps exactly
-             * one optimistic change alive, which is the condition the rollback in
-             * `useSetReviewHelpful` is correct under.
-             */
-            if (setHelpful.isPending) return;
-            // The premium interaction vocabulary, at its quietest weight: this is a
-            // selection, not an achievement.
-            hapticSelection();
-            setHelpful.mutate({ reviewId: review.id, helpful: !review.viewerHelpful });
-          }}
+          onToggleHelpful={toggleHelpful}
           // Against this viewer's watched set and this exact media item: having seen
           // Season 1 does not unmask Season 2.
           maskedFor={(review) =>
@@ -1988,6 +2000,15 @@ export default function TitleScreen() {
         }
         title={displayTitle ?? title.title}
         topInset={insets.top}
+        viewportHeight={viewportHeight || undefined}
+        // The chevron: to the first thing under the opening screen, which lands just under
+        // the bar once it has turned solid. A plain scroll, no snapping.
+        onPressMore={() =>
+          pageScroller.current?.scrollTo?.({
+            y: Math.max(0, immersiveHeight - barHeight),
+            animated: true,
+          })
+        }
         onHeight={setImmersiveHeight}
         onModuleTop={setImmersiveModuleTop}
       >
@@ -2111,6 +2132,14 @@ export default function TitleScreen() {
             onWrite={() => openLog('review')}
             onSeeAll={openReviews}
             noun={title.kind === 'season' ? 'season' : 'movie'}
+            // A person's opinion, not a block of text (UI cohesion pass, 2026-11-06): your
+            // own name and picture on your review, and the same thumbs-up the sheet offers
+            // under everybody else's. Your score is the module's, so it is not repeated.
+            onToggleHelpful={toggleHelpful}
+            viewer={{
+              name: profile.display_name || profile.username,
+              avatarUri: avatarUri(profile.avatar_path),
+            }}
           />
         </View>
       ) : null}
@@ -2276,6 +2305,12 @@ export default function TitleScreen() {
       />
 
       <Animated.ScrollView
+        ref={pageScroller}
+        testID="title-scroll"
+        onLayout={(event: LayoutChangeEvent) => {
+          const next = Math.round(event.nativeEvent.layout.height);
+          setViewportHeight((was) => (was === next ? was : next));
+        }}
         contentContainerStyle={styles.content}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           // Opacity is one of the properties the native driver can carry, so the bar's

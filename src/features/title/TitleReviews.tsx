@@ -336,30 +336,7 @@ export function TitleReviews({
                   </Text>
                 ) : null
               ) : (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: review.viewerHelpful }}
-                  accessibilityLabel={
-                    review.viewerHelpful
-                      ? `Helpful, marked by you. ${helpfulWords(review.helpfulCount)}`
-                      : `Mark ${review.name}'s review helpful. ${helpfulWords(review.helpfulCount)}`
-                  }
-                  accessibilityHint={
-                    review.viewerHelpful ? 'Takes your mark back' : 'Tells them it helped'
-                  }
-                  onPress={() => onToggleHelpful(review)}
-                  hitSlop={theme.space[2]}
-                  style={({ pressed }) => [styles.helpful, pressed && styles.pressed]}
-                >
-                  <Ionicons
-                    name={review.viewerHelpful ? 'thumbs-up' : 'thumbs-up-outline'}
-                    size={theme.layout.icon.sm}
-                    color={review.viewerHelpful ? theme.semantic.action : theme.text.tertiary}
-                  />
-                  <Text variant="caption" tone={review.viewerHelpful ? 'primary' : 'tertiary'}>
-                    {review.helpfulCount > 0 ? `Helpful \u00b7 ${review.helpfulCount}` : 'Helpful'}
-                  </Text>
-                </Pressable>
+                <HelpfulButton review={review} onToggle={onToggleHelpful} />
               )}
 
               {/* Reactions on the ranking this note belongs to. Kept, and kept
@@ -423,6 +400,10 @@ export type ReviewsPreviewProps = {
   /** Opens the full Reviews sheet, which is also where a clamped review reads in full. */
   onSeeAll: () => void;
   noun: string;
+  /** The thumbs-up on somebody else's review: the same write the sheet makes. */
+  onToggleHelpful?: (review: TitleReview) => void;
+  /** Who "Your review" is: the reader's own name and picture, from their profile. */
+  viewer?: { name: string; avatarUri: string | null };
 };
 
 /** How many reviews the title page shows before See all, the reader's own included. */
@@ -450,6 +431,8 @@ export function ReviewsPreview({
   onWrite,
   onSeeAll,
   noun,
+  onToggleHelpful,
+  viewer,
 }: ReviewsPreviewProps) {
   const showOwn = Boolean(ownReview && viewerRanked);
   const others = reviews
@@ -468,9 +451,13 @@ export function ReviewsPreview({
     <View style={styles.preview} testID="reviews-preview">
       {showOwn && ownReview ? (
         <View style={styles.own} testID="your-review">
-          <Text variant="caption" tone="tertiary">
-            {['Your review', formatDate(ownReview.updatedAt)].filter(Boolean).join(' · ')}
-          </Text>
+          <ReviewerHead
+            name="Your review"
+            avatar={viewer ? { uri: viewer.avatarUri, name: viewer.name } : null}
+            subline={[viewer?.name, formatDate(ownReview.updatedAt)].filter(Boolean).join(' · ')}
+            // Never a score here: yours is the module's, a screen above.
+            score={null}
+          />
           <SpoilerNote
             text={ownReview.text}
             hasSpoilers={ownReview.hasSpoilers}
@@ -504,38 +491,45 @@ export function ReviewsPreview({
       ) : null}
 
       {others.map((review) => (
-        <Pressable
-          key={review.id}
-          accessibilityRole="button"
-          // One spoken summary for the row. A masked review says so and never its words;
-          // its Show control is the sheet's, where each review is its own element.
-          accessibilityLabel={[
-            review.name,
-            review.score !== null ? `${formatScore(review.score)} out of 10` : null,
-            maskedFor(review) ? 'Contains spoilers' : review.text,
-          ]
-            .filter(Boolean)
-            .join('. ')}
-          accessibilityHint="Opens all reviews"
-          onPress={onSeeAll}
-          style={({ pressed }) => [styles.previewRow, pressed && styles.pressed]}
-          testID="review-preview"
-        >
-          <View style={styles.previewHead}>
-            <Avatar size="xs" uri={review.avatarUri} name={review.name} />
-            <Text variant="callout" numberOfLines={1} style={styles.previewName}>
-              {review.name}
-            </Text>
-            {review.score !== null ? <ScoreBadge score={review.score} size="sm" /> : null}
-          </View>
-          <SpoilerNote
-            text={review.text}
-            hasSpoilers={review.hasSpoilers}
-            masked={maskedFor(review)}
-            numberOfLines={3}
-            titleForLabel={noun}
-          />
-        </Pressable>
+        <View key={review.id} style={styles.previewRow} testID="review-preview-row">
+          <Pressable
+            accessibilityRole="button"
+            // One spoken summary for the opinion. A masked review says so and never its
+            // words; its Show control is the sheet's, where each review is its own element.
+            accessibilityLabel={[
+              review.name,
+              review.score !== null ? `${formatScore(review.score)} out of 10` : null,
+              maskedFor(review) ? 'Contains spoilers' : review.text,
+            ]
+              .filter(Boolean)
+              .join('. ')}
+            accessibilityHint="Opens all reviews"
+            onPress={onSeeAll}
+            style={({ pressed }) => [styles.previewBody, pressed && styles.pressed]}
+            testID="review-preview"
+          >
+            <ReviewerHead
+              name={review.name}
+              avatar={{ uri: review.avatarUri, name: review.name }}
+              subline={formatDate(review.updatedAt) ?? `@${review.username}`}
+              score={review.score}
+            />
+            <SpoilerNote
+              text={review.text}
+              hasSpoilers={review.hasSpoilers}
+              masked={maskedFor(review)}
+              numberOfLines={3}
+              titleForLabel={noun}
+            />
+          </Pressable>
+          {/* Its own control, outside the opinion's press, so a screen reader reaches it
+              and a tap on it marks the review rather than opening the sheet. */}
+          {onToggleHelpful ? (
+            <View style={styles.previewFoot}>
+              <HelpfulButton review={review} onToggle={onToggleHelpful} />
+            </View>
+          ) : null}
+        </View>
       ))}
 
       {failed && others.length === 0 ? (
@@ -587,6 +581,79 @@ export function ReviewsPreview({
         </Text>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * **Who wrote it** (UI cohesion pass, 2026-11-06): a face, a name, the date under it and
+ * their number at the right — so a preview reads as a person's opinion, in the same shape
+ * the full sheet gives every review.
+ */
+function ReviewerHead({
+  name,
+  avatar,
+  subline,
+  score,
+}: {
+  name: string;
+  avatar: { uri: string | null; name: string } | null;
+  subline: string | null;
+  score: number | null;
+}) {
+  return (
+    <View style={styles.previewHead} testID="reviewer-head">
+      {avatar ? <Avatar size="sm" uri={avatar.uri} name={avatar.name} /> : null}
+      <View style={styles.personCopy}>
+        <Text variant="callout" numberOfLines={1}>
+          {name}
+        </Text>
+        {subline ? (
+          <Text variant="caption" tone="tertiary" numberOfLines={1}>
+            {subline}
+          </Text>
+        ) : null}
+      </View>
+      {score !== null ? <ScoreBadge score={score} size="sm" /> : null}
+    </View>
+  );
+}
+
+/**
+ * The thumbs-up, the one reaction a review shows: the sheet's and the preview's, so the two
+ * cannot disagree about what it says or what it does. Never drawn on the reader's own
+ * review, because the server refuses a self-vote.
+ */
+function HelpfulButton({
+  review,
+  onToggle,
+}: {
+  review: TitleReview;
+  onToggle: (review: TitleReview) => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: review.viewerHelpful }}
+      accessibilityLabel={
+        review.viewerHelpful
+          ? `Helpful, marked by you. ${helpfulWords(review.helpfulCount)}`
+          : `Mark ${review.name}'s review helpful. ${helpfulWords(review.helpfulCount)}`
+      }
+      accessibilityHint={review.viewerHelpful ? 'Takes your mark back' : 'Tells them it helped'}
+      onPress={() => onToggle(review)}
+      hitSlop={theme.space[2]}
+      style={({ pressed }) => [styles.helpful, pressed && styles.pressed]}
+      testID="review-helpful"
+    >
+      <Ionicons
+        name={review.viewerHelpful ? 'thumbs-up' : 'thumbs-up-outline'}
+        size={theme.layout.icon.sm}
+        color={review.viewerHelpful ? theme.semantic.action : theme.text.tertiary}
+      />
+      <Text variant="caption" tone={review.viewerHelpful ? 'primary' : 'tertiary'}>
+        {review.helpfulCount > 0 ? `Helpful \u00b7 ${review.helpfulCount}` : 'Helpful'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -767,7 +834,8 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   preview: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
   previewRow: { gap: theme.space[1] },
+  previewBody: { gap: theme.space[2] },
   previewHead: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
-  previewName: { flex: 1 },
+  previewFoot: { flexDirection: 'row', paddingTop: 2 },
   previewEmpty: { gap: theme.space[1] },
 });

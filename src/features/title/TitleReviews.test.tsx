@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -359,6 +359,73 @@ describe('the reviews preview', () => {
     expect(view.getByText('2 people found this helpful')).toBeTruthy();
     expect(view.queryByText('Mine, from the list.')).toBeNull();
     expect(view.getAllByTestId('review-preview')).toHaveLength(1);
+  });
+
+  /**
+   * **A person's opinion, not a block of text** (UI cohesion pass, 2026-11-06): who wrote
+   * it, when, their score, and the thumbs-up as its own control.
+   */
+  it('names the author with a face, the date and their score', async () => {
+    const view = await renderWithProviders(<ReviewsPreview {...base} reviews={others.slice(0, 1)} />);
+    const head = within(view.getByTestId('review-preview')).getByTestId('reviewer-head');
+    expect(within(head).getByText('Author a')).toBeTruthy();
+    expect(within(head).getByText(/2026/)).toBeTruthy();
+    expect(within(head).getByLabelText('8.4 out of 10')).toBeTruthy();
+  });
+
+  it('marks a review helpful from the preview, without opening the sheet', async () => {
+    const onSeeAll = jest.fn();
+    const onToggleHelpful = jest.fn();
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[review({ id: 'a', userId: 'other-1', helpfulCount: 3 })]}
+        onSeeAll={onSeeAll}
+        onToggleHelpful={onToggleHelpful}
+      />,
+    );
+    const helpful = view.getByRole('button', { name: /^Mark Author a's review helpful/ });
+    expect(within(helpful).getByText('Helpful · 3')).toBeTruthy();
+    // Its own control, not inside the press that opens the sheet.
+    expect(within(view.getByTestId('review-preview')).queryByTestId('review-helpful')).toBeNull();
+    await fireEvent.press(helpful);
+    expect(onToggleHelpful).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+    expect(onSeeAll).not.toHaveBeenCalled();
+  });
+
+  it('shows the marked state on a review the reader already found helpful', async () => {
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[review({ id: 'a', userId: 'other-1', helpfulCount: 1, viewerHelpful: true })]}
+        onToggleHelpful={() => {}}
+      />,
+    );
+    const helpful = view.getByTestId('review-helpful');
+    expect(helpful.props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it('says whose your review is, with no Helpful control and no score on it', async () => {
+    const view = await renderWithProviders(
+      <ReviewsPreview
+        {...base}
+        reviews={[]}
+        onToggleHelpful={() => {}}
+        viewer={{ name: 'Sai', avatarUri: null }}
+        ownReview={{
+          text: 'Mine.',
+          hasSpoilers: true,
+          updatedAt: '2026-10-02T10:00:00.000Z',
+          helpfulCount: 0,
+        }}
+      />,
+    );
+    const mine = within(view.getByTestId('your-review'));
+    expect(mine.getByText('Your review')).toBeTruthy();
+    expect(mine.getByText(/^Sai · /)).toBeTruthy();
+    expect(mine.queryAllByLabelText(/out of 10/)).toHaveLength(0);
+    expect(mine.queryByTestId('review-helpful')).toBeNull();
+    expect(mine.getByTestId('edit-review')).toBeTruthy();
   });
 
   it('says only yours exists when nobody else has written one', async () => {

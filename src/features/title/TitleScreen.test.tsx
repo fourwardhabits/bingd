@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -3619,6 +3619,43 @@ describe('the immersive title page (experiment)', () => {
       const view = await open();
       await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
       expect(mockStatusBars).toEqual([]);
+    });
+
+    /**
+     * **One opening screen** (founder, UI cohesion pass, 2026-11-06): the hero fills the
+     * page's measured visible height, with the module and a chevron in it and About below
+     * the fold; the page then scrolls normally.
+     */
+    it('fills the visible height, with the chevron under the module and About after it', async () => {
+      const view = await open();
+      await waitFor(() => expect(view.getByTestId('immersive-hero')).toBeTruthy());
+      await act(async () => {
+        fireEvent(view.getByTestId('title-scroll'), 'layout', {
+          nativeEvent: { layout: { x: 0, y: 0, width: 360, height: 744 } },
+        });
+      });
+
+      const hero = view.getByTestId('immersive-hero');
+      expect(StyleSheet.flatten(hero.props.style).minHeight).toBe(744);
+      const more = within(hero).getByRole('button', { name: 'More about this title' });
+      expect(more).toBeTruthy();
+      // Depth-first, the order the screen is read in (props are not walked; see above).
+      const ids: string[] = [];
+      const walk = (node: unknown): void => {
+        if (Array.isArray(node)) return node.forEach(walk);
+        if (!node || typeof node !== 'object') return;
+        const { props, children } = node as { props?: { testID?: string }; children?: unknown };
+        if (props?.testID) ids.push(props.testID);
+        walk(children);
+      };
+      walk(view.toJSON());
+      expect(ids.indexOf('immersive-more')).toBeGreaterThan(-1);
+      expect(ids.indexOf('immersive-module')).toBeLessThan(ids.indexOf('immersive-more'));
+      // About is a section after the hero, never inside it.
+      expect(within(hero).queryByTestId('immersive-section-about')).toBeNull();
+      await act(async () => {
+        await fireEvent.press(more);
+      });
     });
 
     it('opens on the cinematic first screen, with none of the original identity block', async () => {
