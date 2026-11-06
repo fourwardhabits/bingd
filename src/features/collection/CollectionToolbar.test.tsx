@@ -155,6 +155,17 @@ describe('the Filter & Sort sheet', () => {
     expect(view.getByLabelText('Filter and sort your collection')).toBeTruthy();
   });
 
+  it('scrolls Sort and Filter together, so neither can take the other\u2019s height', async () => {
+    const view = await openSheet();
+    const scroller = view.getByTestId('collection-filter-scroll');
+    expect(within(scroller).getByTestId('collection-sort-section')).toBeTruthy();
+    expect(within(scroller).getByRole('checkbox', { name: 'Drama, 2' })).toBeTruthy();
+    // Free to shrink inside the sheet's cap; the footer stays outside the scroller.
+    expect(StyleSheet.flatten(scroller.props.style).flexShrink).toBe(1);
+    expect(within(scroller).queryByText('Apply')).toBeNull();
+    expect(view.getByText('Apply')).toBeTruthy();
+  });
+
   it('offers the sort choices this segment has, Rating first on Watched', async () => {
     const watchedView = await openSheet();
     const offered = within(watchedView.getByTestId('collection-sort-section'))

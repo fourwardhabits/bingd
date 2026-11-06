@@ -93,27 +93,38 @@ export function CollectionFilterSheet<Axis extends string = string>({
       onClose={onClose}
       label={sort ? 'Filter and sort your collection' : 'Filter your collection'}
     >
-      {sort ? (
-        <View style={styles.sortSection} testID="collection-sort-section">
-          <Text variant="headline" accessibilityRole="header" style={styles.part}>
-            Sort
+      {/**
+       * **Sort and Filter scroll together** (independent review, UI cohesion pass). Sort was
+       * a fixed block above the scroller, so at the largest text sizes on a small phone it
+       * could take the whole sheet and leave the filters no height at all. One scroller,
+       * allowed to shrink inside the sheet's 90% cap, keeps every choice reachable, and
+       * Clear all / Apply stay below it, always on screen.
+       */}
+      <ScrollView
+        style={sort ? styles.bodyWithSort : styles.body}
+        contentContainerStyle={styles.content}
+        testID="collection-filter-scroll"
+      >
+        {sort ? (
+          <View style={styles.sortSection} testID="collection-sort-section">
+            <Text variant="headline" accessibilityRole="header" style={styles.part}>
+              Sort
+            </Text>
+            <SortMenu
+              axes={sort.axes}
+              value={sort.value}
+              onChange={sort.onChange}
+              // Stays open: the order changes behind the sheet, and a second press reverses.
+              onClose={() => {}}
+              onRepeatUndirected={sort.onRepeatUndirected}
+            />
+          </View>
+        ) : null}
+        {sort ? (
+          <Text variant="headline" accessibilityRole="header" style={[styles.part, styles.filterPart]}>
+            Filter
           </Text>
-          <SortMenu
-            axes={sort.axes}
-            value={sort.value}
-            onChange={sort.onChange}
-            // Stays open: the order changes behind the sheet, and a second press reverses.
-            onClose={() => {}}
-            onRepeatUndirected={sort.onRepeatUndirected}
-          />
-        </View>
-      ) : null}
-      {sort ? (
-        <Text variant="headline" accessibilityRole="header" style={[styles.part, styles.filterPart]}>
-          Filter
-        </Text>
-      ) : null}
-      <ScrollView style={sort ? styles.bodyWithSort : styles.body} contentContainerStyle={styles.content}>
+        ) : null}
         {showBuckets ? (
           <Section title="Rating">
             {BUCKETS.map((bucket) => (
@@ -230,12 +241,14 @@ function Option({
 const styles = StyleSheet.create({
   // Bounded, so a collection with thirty genres does not make the sheet the page.
   body: { maxHeight: 420 },
-  // Shorter under the Sort section, so the sheet as a whole still fits a small phone.
-  bodyWithSort: { maxHeight: 340 },
-  sortSection: { paddingBottom: theme.space[2] },
+  // With Sort inside it, taller, and free to shrink to whatever the sheet's cap leaves
+  // above the footer.
+  bodyWithSort: { maxHeight: 560, flexShrink: 1 },
+  sortSection: { paddingBottom: theme.space[1] },
   /** The two parts' names: Sort, then Filter, each on the gutter. */
   part: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
-  filterPart: { paddingBottom: theme.space[3] },
+  // The content's 20pt gap less 8: the Filter heading sits closer to its own sections.
+  filterPart: { marginBottom: -theme.space[2] },
   content: { paddingBottom: theme.space[4], gap: theme.space[5] },
   section: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
@@ -251,8 +264,11 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.raised,
   },
   selected: { backgroundColor: theme.semantic.action, borderColor: theme.semantic.action },
+  // Wraps, so at the largest text sizes Apply drops under Clear all instead of running
+  // off the edge.
   actions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
