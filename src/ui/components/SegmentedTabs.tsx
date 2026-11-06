@@ -65,6 +65,14 @@ export type SegmentedTabsProps<T extends string> = {
    * keep the 15pt default.
    */
   dense?: boolean;
+  /**
+   * `nav` only: the page's primary navigation at full weight (final title refinement,
+   * 2026-11-06). Collection's Watched | Watchlist | Unranked read as secondary to the
+   * Filter & Sort row under it, so the chosen segment is filled Maroon with its word in
+   * Parchment — the Feed mode toggle's grammar — and the others are Ink on Paper, at 16pt
+   * Inter Medium. The Leaderboard's categories keep the quieter default.
+   */
+  solid?: boolean;
 };
 
 /**
@@ -102,6 +110,7 @@ export function SegmentedTabs<T extends string>({
   variant = 'secondary',
   accessibilityLabel,
   dense = false,
+  solid = false,
 }: SegmentedTabsProps<T>) {
   const primary = variant === 'primary';
 
@@ -131,14 +140,14 @@ export function SegmentedTabs<T extends string>({
                     style={[
                       styles.navFill,
                       dense && styles.navFillDense,
-                      selected && styles.navFillSelected,
+                      selected && (solid ? styles.navFillSolid : styles.navFillSelected),
                       pressed && !selected && styles.navPressed,
                     ]}
                     testID={`nav-fill-${option.id}`}
                   >
                     <Text
                       variant="callout"
-                      tone={selected ? 'action' : 'secondary'}
+                      tone={solid ? 'primary' : selected ? 'action' : 'secondary'}
                       numberOfLines={1}
                       /**
                        * **One line, always.** A long word at a large system text size
@@ -153,7 +162,12 @@ export function SegmentedTabs<T extends string>({
                       adjustsFontSizeToFit
                       minimumFontScale={0.7}
                       maxFontSizeMultiplier={NAV_MAX_SCALE}
-                      style={[styles.navLabel, dense && styles.navLabelDense]}
+                      style={[
+                        styles.navLabel,
+                        dense && styles.navLabelDense,
+                        solid && styles.navLabelSolid,
+                        solid && selected && styles.navLabelOnFill,
+                      ]}
                     >
                       {option.label}
                     </Text>
@@ -287,6 +301,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   navFillSelected: { backgroundColor: theme.surface.sunken },
+  navFillSolid: { backgroundColor: theme.semantic.action },
+  navLabelSolid: { fontSize: 16, lineHeight: 20 },
+  navLabelOnFill: { color: theme.semantic.actionText },
   navFillDense: { paddingHorizontal: theme.space[1] },
   navLabelDense: { fontSize: 14, lineHeight: 18 },
   navLabel: { fontFamily: fontFamily.sansMedium, fontSize: 15, lineHeight: 20, textAlign: 'center' },

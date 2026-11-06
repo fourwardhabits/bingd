@@ -183,12 +183,14 @@ export function CollectionView({
             style={({ pressed }) => [styles.filterSort, pressed && styles.pressed]}
             testID="collection-filter-sort"
           >
+            {/* Footnote, secondary: a tool under the page's navigation, not a peer of it
+                (final title refinement, 2026-11-06). The 44pt row is unchanged. */}
             <Ionicons
               name="options-outline"
               size={theme.layout.icon.sm}
-              color={filtered ? theme.semantic.action : theme.text.secondary}
+              color={filtered ? theme.semantic.action : theme.text.tertiary}
             />
-            <Text variant="callout" style={styles.filterSortLabel}>
+            <Text variant="footnote" tone="secondary" style={styles.filterSortLabel}>
               Filter & Sort
             </Text>
             <Text

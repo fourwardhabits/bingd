@@ -922,7 +922,7 @@ describe('the header and the tabs', () => {
     expect(view.queryByLabelText('Notifications')).toBeNull();
   });
 
-  it('marks the chosen tab in Maroon and gives every tab an equal column', async () => {
+  it('writes the chosen tab in Parchment, the others in Ink, every tab an equal column', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
     await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
@@ -932,16 +932,20 @@ describe('the header and the tabs', () => {
     }
     const label = (name: string) =>
       StyleSheet.flatten(within(view.getByRole('tab', { name })).getByText(name).props.style);
-    expect(label('Watched').color).toBe(theme.semantic.action);
-    expect(label('Watchlist').color).not.toBe(theme.semantic.action);
+    expect(label('Watched').color).toBe(theme.semantic.actionText);
+    expect(label('Watchlist').color).toBe(theme.text.primary);
+    expect(label('Unranked').color).toBe(theme.text.primary);
+    // Slightly larger than the Leaderboard's 15pt, at Inter Medium.
+    expect(label('Watched').fontSize).toBe(16);
   });
 
   /**
    * **One segmented control, the page's primary navigation** (founder, QA corrections,
-   * 2026-11-06): one outlined track, halves or thirds, the chosen segment filled
-   * Parchment with its word in Maroon — no separate pills, nothing else filled.
+   * 2026-11-06): one outlined track, halves or thirds — no separate pills, nothing else
+   * filled. Since the final title refinement the chosen segment is filled Maroon, the
+   * Feed mode toggle's grammar, so the navigation outweighs Filter & Sort.
    */
-  it('draws the tabs as one control, the chosen segment filled Parchment', async () => {
+  it('draws the tabs as one control, the chosen segment filled Maroon', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
     await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
@@ -952,12 +956,12 @@ describe('the header and the tabs', () => {
     expect(track.borderWidth).toBeGreaterThan(0);
 
     const fill = (id: string) => StyleSheet.flatten(view.getByTestId(`nav-fill-${id}`).props.style);
-    expect(fill('watched').backgroundColor).toBe(theme.surface.sunken);
+    expect(fill('watched').backgroundColor).toBe(theme.semantic.action);
     expect(fill('watchlist').backgroundColor).toBeUndefined();
     expect(fill('unranked').backgroundColor).toBeUndefined();
 
     await choose(view, 'Watchlist');
-    expect(fill('watchlist').backgroundColor).toBe(theme.surface.sunken);
+    expect(fill('watchlist').backgroundColor).toBe(theme.semantic.action);
     expect(fill('watched').backgroundColor).toBeUndefined();
   });
 

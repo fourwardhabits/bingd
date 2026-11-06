@@ -1,6 +1,8 @@
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { SegmentedTabs } from './SegmentedTabs';
 
@@ -157,5 +159,45 @@ describe('the tab row', () => {
 
     expect(view.getAllByRole('tab')).toHaveLength(2);
     expect(view.getByRole('tab', { name: 'Ranked' }).props.accessibilityState.selected).toBe(true);
+  });
+});
+
+/**
+ * **`nav`, quiet and solid** (final title refinement, 2026-11-06). Collection opts into the
+ * solid treatment — Maroon fill, Parchment word, Ink for the rest, 16pt — and every other
+ * `nav` caller, the Leaderboard's categories, keeps the Parchment fill and Maroon word.
+ */
+describe('the nav control', () => {
+  const NAV = [
+    { id: 'watched' as const, label: 'Watched' },
+    { id: 'watchlist' as const, label: 'Watchlist' },
+  ];
+  const draw = (solid: boolean) =>
+    renderWithProviders(
+      <SegmentedTabs variant="nav" solid={solid} options={NAV} value="watched" onChange={jest.fn()} />,
+    );
+  const fill = (view: Awaited<ReturnType<typeof draw>>, id: string) =>
+    StyleSheet.flatten(view.getByTestId(`nav-fill-${id}`).props.style);
+  const label = (view: Awaited<ReturnType<typeof draw>>, name: string) =>
+    StyleSheet.flatten(within(view.getByRole('tab', { name })).getByText(name).props.style);
+
+  it('keeps the quiet default: Parchment fill, Maroon word, 15pt', async () => {
+    const view = await draw(false);
+    expect(fill(view, 'watched').backgroundColor).toBe(theme.surface.sunken);
+    expect(label(view, 'Watched')).toMatchObject({ color: theme.semantic.action, fontSize: 15 });
+    expect(label(view, 'Watchlist').color).toBe(theme.text.secondary);
+  });
+
+  it('draws the solid one Maroon with a Parchment word, the rest Ink, at 16pt', async () => {
+    const view = await draw(true);
+    expect(fill(view, 'watched').backgroundColor).toBe(theme.semantic.action);
+    expect(fill(view, 'watchlist').backgroundColor).toBeUndefined();
+    expect(label(view, 'Watched')).toMatchObject({ color: theme.semantic.actionText, fontSize: 16 });
+    expect(label(view, 'Watchlist')).toMatchObject({ color: theme.text.primary, fontSize: 16 });
+    // Still 44pt targets, still one line that shrinks before it truncates.
+    expect(StyleSheet.flatten(view.getByRole('tab', { name: 'Watched' }).props.style).minHeight).toBe(
+      theme.layout.minTapTarget,
+    );
+    expect(within(view.getByRole('tab', { name: 'Watched' })).getByText('Watched').props.numberOfLines).toBe(1);
   });
 });

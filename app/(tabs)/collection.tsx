@@ -461,14 +461,16 @@ export default function CollectionScreen() {
       {/**
        * **Watched | Watchlist | Unranked, as the page's primary navigation** (founder, UI
        * cohesion pass, then QA corrections, 2026-11-06). One segmented control across the
-       * full width, halves or thirds, the one showing filled Parchment with its word in
-       * Maroon — heavier than the Filter & Sort row under it, quieter than the posters.
+       * full width, halves or thirds. Since the final title refinement (2026-11-06) the one
+       * showing is filled Maroon with its word in Parchment and the others are Ink, at 16pt
+       * (`solid`): on the phone the Parchment fill read as quieter than Filter & Sort.
        * Unranked is drawn only while this side has an unranked title, as it always was,
        * and the other two then share the width between them.
        */}
       <View style={styles.nav}>
         <SegmentedTabs
           variant="nav"
+          solid
           options={segments}
           value={active}
           onChange={setSegment}
