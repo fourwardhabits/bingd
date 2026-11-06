@@ -39,6 +39,14 @@ export type PeoplePickerProps = {
   searchPlaceholder: string;
   /** Bounded, so a long list of friends does not turn the sheet into a page. */
   listMaxHeight?: number;
+  /**
+   * Draw the rows without a scroller of their own, for a caller that scrolls the picker
+   * together with what is above it (the group sheet, independent review 2, title-page
+   * sprint, 2026-11-06): one scroller rather than one inside another, so at a large text
+   * size the rows cannot be squeezed to nothing under a long heading. `listMaxHeight` does
+   * not apply then.
+   */
+  inline?: boolean;
 };
 
 /**
@@ -88,6 +96,7 @@ export function PeoplePicker({
   max,
   searchPlaceholder,
   listMaxHeight = 300,
+  inline = false,
 }: PeoplePickerProps) {
   const [query, setQuery] = useState('');
   const shown = filterPeople([...people], query);
@@ -130,13 +139,9 @@ export function PeoplePicker({
         </View>
       ) : null}
 
-      <ScrollView
-        style={{ maxHeight: listMaxHeight }}
-        contentContainerStyle={styles.listContent}
-        // The search field above is always shown, so the usual way to reach a row is with
-        // the keyboard up. At the default `never` the first tap on a name only lowered the
-        // keyboard and selected nobody, the goal-Save defect in a new place (2026-09-16).
-        keyboardShouldPersistTaps="handled"
+      <List
+        inline={inline}
+        maxHeight={listMaxHeight}
       >
         {shown.length === 0 ? (
           <Text variant="footnote" tone="tertiary" style={styles.status}>
@@ -196,8 +201,33 @@ export function PeoplePicker({
             );
           })
         )}
-      </ScrollView>
+      </List>
     </>
+  );
+}
+
+/** The rows' container: their own bounded scroller, or a plain column for an outer one. */
+function List({
+  inline,
+  maxHeight,
+  children,
+}: {
+  inline: boolean;
+  maxHeight: number;
+  children: React.ReactNode;
+}) {
+  if (inline) return <View style={styles.listContent}>{children}</View>;
+  return (
+    <ScrollView
+      style={{ maxHeight }}
+      contentContainerStyle={styles.listContent}
+      // The search field above is always shown, so the usual way to reach a row is with
+      // the keyboard up. At the default `never` the first tap on a name only lowered the
+      // keyboard and selected nobody, the goal-Save defect in a new place (2026-09-16).
+      keyboardShouldPersistTaps="handled"
+    >
+      {children}
+    </ScrollView>
   );
 }
 

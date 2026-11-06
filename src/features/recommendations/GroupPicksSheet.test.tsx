@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -189,6 +190,26 @@ describe('choosing the group', () => {
     ).toBeTruthy();
     // The instruction for the control underneath survives it.
     expect(screen.getByText("Who's watching?")).toBeTruthy();
+  });
+
+  /**
+   * **One scroller above the action** (independent review 2, 2026-11-06): at a large text
+   * size on a short phone the heading and sentence crowded a bounded list of rows down to
+   * nothing and pushed the action out of the sheet. The intro and the rows scroll together
+   * and give way first; the action is outside them.
+   */
+  it('scrolls the intro and the rows together, and keeps the action outside them', async () => {
+    await renderWithProviders(<GroupPicksSheet {...props()} />);
+    await waitFor(() => expect(screen.getByText('Abby')).toBeTruthy());
+
+    const choosing = screen.getByTestId('group-choosing');
+    expect(StyleSheet.flatten(choosing.props.style)).toMatchObject({ flexShrink: 1 });
+    // Everything a reader chooses with is inside it…
+    expect(within(choosing).getByText('Group Recommendations')).toBeTruthy();
+    expect(within(choosing).getByText('Abby')).toBeTruthy();
+    // …and the action is not.
+    expect(within(choosing).queryByRole('button', { name: /get picks/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /get picks/i })).toBeTruthy();
   });
 
   it('says the same sentence when it was opened from the TV wall', async () => {

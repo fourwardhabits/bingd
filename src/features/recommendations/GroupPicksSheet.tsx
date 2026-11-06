@@ -142,8 +142,24 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
     const groupSize = selected.size + 1;
     return (
       <Sheet visible onClose={onClose} label="Group Recommendations">
+        {/**
+         * **One scroller for everything above the action** (independent review 2,
+         * title-page sprint, 2026-11-06). At a large text size on a short phone the heading
+         * and the sentence take several lines each; with the rows in a bounded list of their
+         * own, the list was squeezed to nothing and the action pushed out of the sheet. Now
+         * the heading, the question, the search, You and the rows scroll together and give
+         * way first, and the action below them always stays in the sheet. Where everything
+         * fits, nothing scrolls and nothing moves.
+         */}
+        <ScrollView
+          style={styles.choosing}
+          keyboardShouldPersistTaps="handled"
+          testID="group-choosing"
+        >
         <View style={styles.header}>
-          <Text variant="headline">Group Recommendations</Text>
+          <Text variant="headline" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
+            Group Recommendations
+          </Text>
           {/**
            * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
            *
@@ -209,9 +225,10 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
             pinned={{ name: 'You' }}
             max={6}
             searchPlaceholder="Search your friends"
-            listMaxHeight={340}
+            inline
           />
         )}
+        </ScrollView>
 
         {people.length > 0 ? (
           <View style={styles.actions}>
@@ -268,7 +285,9 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   return (
     <Sheet visible onClose={onClose} label="Group Recommendations">
       <View style={styles.header}>
-        <Text variant="headline">Group Recommendations</Text>
+        <Text variant="headline" maxFontSizeMultiplier={HEADING_MAX_SCALE}>
+          Group Recommendations
+        </Text>
         {/* The group, restated as names, so the list underneath has a visible subject.
             Labels rather than controls: the group is spent when the sheet closes. */}
         <View style={styles.members} accessibilityRole="text">
@@ -415,7 +434,16 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   );
 }
 
+/**
+ * The sheet's heading grows with the system text size only to 1.5×: at 2× on a 320pt
+ * phone "Recommendations" no longer fits a line and broke mid-word (title-page sprint,
+ * 2026-11-06). Still well above the body text it heads.
+ */
+const HEADING_MAX_SCALE = 1.5;
+
 const styles = StyleSheet.create({
+  // Gives way first when the sheet's 90% runs out, so the action below always shows.
+  choosing: { flexGrow: 0, flexShrink: 1 },
   header: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[3],
