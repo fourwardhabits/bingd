@@ -628,21 +628,24 @@ function Watched({
   // and the view needs both.
   if (ranked.isError || logged.isError) {
     return (
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not load"
-        body="Check your connection and try again."
-        action={{
-          label: 'Try again',
-          onPress: () => {
-            void ranked.refetch();
-            void logged.refetch();
-          },
-        }}
-      />
+      <>
+        <ListsOnly lists={lists} />
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load"
+          body="Check your connection and try again."
+          action={{
+            label: 'Try again',
+            onPress: () => {
+              void ranked.refetch();
+              void logged.refetch();
+            },
+          }}
+        />
+      </>
     );
   }
-  if (ranked.isPending || logged.isPending) return <Loading />;
+  if (ranked.isPending || logged.isPending) return <Loading lists={lists} />;
 
   return (
     <CollectionView
@@ -691,15 +694,18 @@ function Watchlist({
 
   if (isError) {
     return (
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not load"
-        body="Check your connection and try again."
-        action={{ label: 'Try again', onPress: () => void refetch() }}
-      />
+      <>
+        <ListsOnly lists={lists} />
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void refetch() }}
+        />
+      </>
     );
   }
-  if (isPending) return <Loading />;
+  if (isPending) return <Loading lists={lists} />;
 
   return (
     <CollectionView
@@ -741,15 +747,18 @@ function Unranked({
 
   if (isError) {
     return (
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not load"
-        body="Check your connection and try again."
-        action={{ label: 'Try again', onPress: () => void refetch() }}
-      />
+      <>
+        <ListsOnly lists={lists} />
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void refetch() }}
+        />
+      </>
     );
   }
-  if (isPending) return <Loading />;
+  if (isPending) return <Loading lists={lists} />;
 
   return (
     <CollectionView
@@ -850,12 +859,23 @@ function backlogCountLine(total: number, medium: Medium) {
   return `${total} ${noun} to rank`;
 }
 
-function Loading() {
+function Loading({ lists }: { lists?: React.ReactNode }) {
   return (
     <View style={styles.body}>
+      <ListsOnly lists={lists} />
       <SkeletonRow count={7} />
     </View>
   );
+}
+
+/**
+ * `My lists ›` on its own line, where there is no count row to sit in: while a segment
+ * loads and when its read fails (independent review, UI cohesion pass). The lists are their
+ * own read, so a collection that cannot load must not take the way to them with it.
+ */
+function ListsOnly({ lists }: { lists?: React.ReactNode }) {
+  if (!lists) return null;
+  return <View style={styles.listsOnly}>{lists}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -869,6 +889,12 @@ const styles = StyleSheet.create({
     paddingLeft: theme.space[3],
   },
   listsLinkLabel: { fontFamily: fontFamily.sansMedium },
+  listsOnly: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
+  },
   pressed: { opacity: 0.6 },
 
   // A column now. As a row it put the copy and the dismissal at opposite edges,

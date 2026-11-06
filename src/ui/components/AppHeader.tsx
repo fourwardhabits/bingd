@@ -135,20 +135,31 @@ const styles = StyleSheet.create({
    * Only the bottom grew: the top inset is what keeps the logo clear of the Android
    * status bar, so the bar breathes below its content rather than moving it up.
    */
+  /**
+   * **Wraps, and only when it must** (independent review, UI cohesion pass, 2026-11-06).
+   * Movies | TV beside the lockup fits every phone at ordinary text sizes; at the largest
+   * system sizes on a 320–360pt phone the two together are wider than the row. The right
+   * side then moves to a line of its own, still right-aligned and wholly inside the header,
+   * rather than overlapping the logo or leaving part of a target outside its parent.
+   */
   wrap: {
     minHeight: theme.layout.control.headerHeight,
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[2],
     paddingBottom: theme.space[2] + theme.space[1],
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    rowGap: theme.space[2],
   },
-  // Flexed so a screen can hand `right` a control that fills the rest of the
-  // row. With nothing wide inside, the icons end up exactly where
-  // `space-between` used to leave them.
+  // Grows into the rest of the row, from its own content's width rather than from zero:
+  // a zero basis would let it shrink under its control instead of wrapping. With nothing
+  // wide inside, the icons end up exactly where `space-between` used to leave them.
   right: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 0,
+    flexBasis: 'auto',
     minHeight: ACTIONS_BOX,
     marginVertical: -ACTIONS_BLEED,
     justifyContent: 'flex-end',

@@ -113,6 +113,17 @@ describe('the header bar', () => {
    * to answer on Android; the bleed into the header's padding keeps the row, and so the
    * logo, exactly where it was.
    */
+  it('moves the right side to its own line rather than out of the header, at any text size', async () => {
+    const { bar, right } = barOf(await render(<AppHeader right={<></>} />));
+
+    expect(bar.flexWrap).toBe('wrap');
+    // Its own width as the basis, so it wraps whole instead of being squeezed under its
+    // control; it still grows into the rest of the row.
+    expect(right.flexBasis).toBe('auto');
+    expect(right.flexShrink).toBe(0);
+    expect(right.flexGrow).toBe(1);
+  });
+
   it('gives the right side a 44pt box that still lays out at 34pt', async () => {
     const { right } = barOf(await render(<AppHeader right={<></>} />));
 

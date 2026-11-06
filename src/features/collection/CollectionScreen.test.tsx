@@ -879,6 +879,18 @@ describe('the way to Lists', () => {
     expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
   });
 
+  it('stays there while a segment loads and when its read fails', async () => {
+    mockFailing.add('rankings');
+    mockFailing.add('watchlist');
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load')).toBeTruthy());
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+  });
+
   it('is there on the Watchlist', async () => {
     const view = await open();
     await choose(view, 'Watchlist');
