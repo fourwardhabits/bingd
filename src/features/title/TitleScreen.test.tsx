@@ -3824,6 +3824,22 @@ describe('the immersive title page (experiment)', () => {
       expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
     });
 
+    /**
+     * **At a large text size** (independent review 1): a section's action drops under its
+     * heading rather than running off a 320pt screen — Show previews is the reader's one way
+     * to ask for thumbnails — and the module's title grows only to the display ceiling.
+     */
+    it('lets a section action wrap under its heading, and caps the title at 1.3×', async () => {
+      tableRows.media_cache = [credits, videos];
+      const view = await open();
+      const section = await waitFor(() => view.getByTestId('immersive-section-trailers'));
+
+      const heading = within(section).getByLabelText('Trailers');
+      expect(StyleSheet.flatten(heading.props.style)).toMatchObject({ flexWrap: 'wrap' });
+      expect(view.getByTestId('title-name').props.maxFontSizeMultiplier).toBe(1.3);
+      expect(view.getByTestId('title-director').props.numberOfLines).toBe(2);
+    });
+
     it('opens a trailer on YouTube from its card, before or without previews', async () => {
       tableRows.media_cache = [credits, videos];
       const view = await open();

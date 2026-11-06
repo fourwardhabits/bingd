@@ -154,6 +154,12 @@ type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons' | 
 const CAST_VISIBLE = 4;
 /** How many the preview strip holds before the sheet takes over. */
 const CAST_PREVIEW = 10;
+/**
+ * The Cinematic module's 28pt title grows with the system text size only to 1.3×, the type
+ * scale's ceiling for display type (title-page sprint, 2026-11-06): at 2× a long first
+ * word such as "Everything" no longer fits a 320pt phone's line and broke mid-word.
+ */
+const TITLE_MAX_SCALE = 1.3;
 
 /**
  * How many episodes a season page draws before it offers to show the rest.
@@ -1920,7 +1926,12 @@ export default function TitleScreen() {
    * No second title, poster, Rank or score block anywhere below the module.
    */
   const immersiveName = (
-    <Text testID="title-name" variant="title1" numberOfLines={3}>
+    <Text
+      testID="title-name"
+      variant="title1"
+      numberOfLines={3}
+      maxFontSizeMultiplier={TITLE_MAX_SCALE}
+    >
       {primaryName}
     </Text>
   );
@@ -1988,6 +1999,7 @@ export default function TitleScreen() {
           actionLabel={action?.label}
           actionAccessibilityLabel={action?.accessibilityLabel}
           onPressAction={action?.onPress}
+          wrap
         />
       </View>
       {rail ? body : <View style={styles.sheetColumn}>{body}</View>}
@@ -2071,7 +2083,7 @@ export default function TitleScreen() {
               testID="title-director"
               variant="footnote"
               tone="tertiary"
-              numberOfLines={1}
+              numberOfLines={2}
               accessibilityLabel={directorLine.label}
             >
               {directorLine.text}

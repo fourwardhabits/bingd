@@ -37,6 +37,13 @@ export type SectionHeaderProps = {
    * (nav cohesion sprint, 2026-11-06). Every other heading wraps as before.
    */
   fit?: boolean;
+  /**
+   * Let the action drop under the heading when the two do not fit on one line, rather than
+   * running off the screen: the Cinematic title page's sections at a large text size, whose
+   * Trailers action is the reader's one way to ask for previews (title-page sprint,
+   * 2026-11-06). Where both fit, nothing moves.
+   */
+  wrap?: boolean;
 };
 
 export type SectionHeaderSize = 'standard' | 'large';
@@ -61,10 +68,11 @@ export function SectionHeader({
   exactCase = false,
   size = 'standard',
   fit = false,
+  wrap = false,
 }: SectionHeaderProps) {
   return (
     <View
-      style={styles.row}
+      style={[styles.row, wrap && styles.wrap]}
       accessibilityRole="header"
       // Uppercasing is a style, not a spelling. Without this a screen reader
       // spells out "T O P  R A N K E D".
@@ -107,6 +115,7 @@ const FIT_FLOOR = 0.6;
 
 const styles = StyleSheet.create({
   fit: { flexShrink: 1 },
+  wrap: { flexWrap: 'wrap', columnGap: theme.space[3] },
   row: {
     minHeight: theme.layout.minTapTarget,
     flexDirection: 'row',
