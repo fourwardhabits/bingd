@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -140,6 +140,23 @@ export default function LogScreen() {
       field.current?.focus();
     }, []),
   );
+
+  /**
+   * **Arriving on Users** (`memberSearch()`, People's empty state). Applied during render
+   * against the last request seen and cleared in the effect, as Collection applies
+   * `show: 'unranked'`: Search is a tab and stays mounted, so a second arrival is a second
+   * request rather than a param that never changed. The query is left as it was.
+   */
+  const { show: showParam } = useLocalSearchParams<{ show?: string }>();
+  const [askedFor, setAskedFor] = useState<string | undefined>(undefined);
+  if (showParam !== askedFor) {
+    setAskedFor(showParam);
+    if (showParam === 'users') setFilter('users');
+  }
+  useEffect(() => {
+    if (showParam !== 'users') return;
+    router.setParams({ show: undefined });
+  }, [showParam, router]);
 
   const queryClient = useQueryClient();
   /** Drains the post-ranking celebration queue when the log flow ends. */
@@ -774,7 +791,17 @@ function Results({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {recent.length > 0 ? (
+        {peopleOnly ? (
+          // Arrived on Users with nothing typed, from People's "Find people" (nav cohesion
+          // sprint, 2026-11-06): the prompt is about members, not titles, and the title
+          // searches under Recent are not what was asked for.
+          <EmptyState
+            kind="nothingYet"
+            compact
+            title="Find people"
+            body="Search by name or @username."
+          />
+        ) : recent.length > 0 ? (
           <>
             <SectionHeader
               title="Recent searches"

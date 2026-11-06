@@ -93,9 +93,13 @@ const pressSearchTab = () => {
   handler();
 };
 
+// The route's own params: `show: 'users'` is People's "Find people" (`memberSearch()`).
+let mockParams: Record<string, string | undefined> = {};
+const mockSetParams = jest.fn();
 jest.mock('expo-router', () => ({
   useNavigation: () => mockNavigation,
-  useRouter: () => ({ push: mockPush }),
+  useLocalSearchParams: () => mockParams,
+  useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
 }));
 
 // The wider search, which is a real network call in production and must be a decision
@@ -195,6 +199,8 @@ beforeEach(() => {
   mockSearchCast.mockResolvedValue([]);
   mockRpc.mockReset();
   mockPush.mockReset();
+  mockParams = {};
+  mockSetParams.mockReset();
   mockPrefs.clear();
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   mockRpc.mockImplementation((fn: string) =>
@@ -318,6 +324,50 @@ describe('a film in the results', () => {
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
+  });
+});
+
+/**
+ * **Arriving from People's "Find people"** (founder, nav cohesion sprint, 2026-11-06):
+ * Search opens on its Users list, says so before anything is typed, and consumes the
+ * param so a later visit is an ordinary one.
+ */
+describe('arriving on Users', () => {
+  it('opens on Users with a prompt about people, and clears the request', async () => {
+    mockParams = { show: 'users' };
+    const view = await renderWithProviders(<LogScreen />);
+
+    expect(view.getByText('Find people')).toBeTruthy();
+    expect(view.getByText('Search by name or @username.')).toBeTruthy();
+    expect(view.queryByText('What did you watch?')).toBeNull();
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
+  });
+
+  it('searches members alone once something is typed', async () => {
+    mockParams = { show: 'users' };
+    mockRpc.mockImplementation((fn: string) =>
+      Promise.resolve({
+        data:
+          fn === 'search_users'
+            ? [{ id: 'user-anna', username: 'anna', display_name: 'Anna Rivers', avatar_path: null, visibility: 'public' }]
+            : fn === 'follow_state_with'
+              ? []
+              : [],
+        error: null,
+      }),
+    );
+    const view = await renderWithProviders(<LogScreen />);
+
+    await fireEvent.changeText(view.getByLabelText('Search'), 'ann');
+    await waitFor(() => expect(view.getByText('Anna Rivers')).toBeTruthy());
+    const users = view.getByRole('button', { name: 'Users' });
+    expect(users.props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it('is an ordinary Search without the param', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    expect(view.getByText('What did you watch?')).toBeTruthy();
+    expect(mockSetParams).not.toHaveBeenCalled();
   });
 });
 
