@@ -18,7 +18,7 @@ import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
+import { useReactions, useSetReaction, REACTION_GLYPH, REACTION_LABEL } from '@/features/feed/use-reactions';
 import {
   feedItems,
   trimActorActivityToFirstPage,
@@ -569,6 +569,7 @@ export default function ProfileScreen() {
                 reaction={{
                   count: summary?.total ?? 0,
                   mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+                  mineLabel: summary?.mine ? REACTION_LABEL[summary.mine] : null,
                   glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
                   onPress: () => void setReaction(event.id, summary?.mine ? null : 'love'),
                 }}

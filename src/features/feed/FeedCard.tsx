@@ -35,7 +35,7 @@ export type FeedCardProps = {
    */
   review?: { text: string; hasSpoilers: boolean; masked: boolean } | null;
   onPressTitle: () => void;
-  reaction: ActivityReaction & { mineLabel?: string | null };
+  reaction: ActivityReaction;
   onPressComments?: () => void;
   commentCount?: number;
   /** Save to the reader's watchlist. Absent on their own activity. */
@@ -292,7 +292,7 @@ export function FeedCard({
           accessibilityState={{ selected: Boolean(mine) }}
           accessibilityLabel={
             mine
-              ? `You reacted to ${filmName}. Tap to remove, long press to change.`
+              ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${filmName}. Tap to remove, long press to change.`
               : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
           }
           accessibilityHint={
@@ -303,16 +303,15 @@ export function FeedCard({
           style={({ pressed }) => [styles.action, pressed && styles.pressed]}
           testID="feed-card-like"
         >
-          {mine && mine !== HEART ? (
+          {/* Every selected state is its emoji and its word, a Like included: the ❤️ and
+              Liked, the way 😂 Laugh and 😮 Wow are drawn (founder, nav cohesion sprint,
+              2026-11-06). The filled Maroon heart was a seventh look for one of six. */}
+          {mine ? (
             <Text variant="caption" allowFontScaling={false} style={styles.mineGlyph}>
               {mine}
             </Text>
           ) : (
-            <Ionicons
-              name={mine ? 'heart' : 'heart-outline'}
-              size={theme.layout.icon.sm}
-              color={mine ? theme.semantic.action : theme.text.secondary}
-            />
+            <Ionicons name="heart-outline" size={theme.layout.icon.sm} color={theme.text.secondary} />
           )}
           <Text
             variant="footnote"
@@ -320,7 +319,7 @@ export function FeedCard({
             numberOfLines={1}
             style={styles.shrink}
           >
-            {mine ? (mine === HEART ? 'Liked' : (reaction.mineLabel ?? 'Reacted')) : 'Like'}
+            {mine ? (reaction.mineLabel ?? 'Reacted') : 'Like'}
           </Text>
         </Pressable>
 
@@ -371,8 +370,6 @@ export function FeedCard({
 export function reactionCountLabel(count: number) {
   return `${count} ${count === 1 ? 'reaction' : 'reactions'}`;
 }
-
-const HEART = '❤️';
 
 /** The frame for a title with no artwork at all: a 64×96 initials poster and the score. */
 const NO_ARTWORK_HEIGHT = 120;

@@ -1000,7 +1000,7 @@ describe('reacting to a comment', () => {
     const reply = controls[1];
     if (!reply) throw new Error('expected a control on the reply');
     await act(async () => fireEvent(reply, 'longPress'));
-    await fireEvent.press(view.getByLabelText('Moved'));
+    await fireEvent.press(view.getByLabelText('Sad'));
 
     await waitFor(() => expect(reactionCalls()).toHaveLength(1));
     expect(reactionArgs()).toMatchObject({ p_comment_id: 'c2', p_kind: 'moved' });
@@ -1051,9 +1051,9 @@ describe('who reacted to a comment', () => {
     // Person and meaning together — the founder's "Abisola ❤️" list, as the feed
     // already draws it.
     await waitFor(() =>
-      expect(view.getByLabelText('Abisola, reacted Laugh. Open their profile.')).toBeTruthy(),
+      expect(view.getByLabelText('Abisola, Laugh. Open their profile.')).toBeTruthy(),
     );
-    expect(view.getByLabelText('Ravi, reacted Love. Open their profile.')).toBeTruthy();
+    expect(view.getByLabelText('Ravi, Liked. Open their profile.')).toBeTruthy();
     expect(
       mockRpcCalls.filter((call) => call.name === 'comment_reactors').map((call) => call.args),
     ).toEqual([{ p_comment_id: 'c1' }]);
@@ -1067,7 +1067,7 @@ describe('who reacted to a comment', () => {
     await fireEvent.press(view.getByLabelText('2 reactions. See who reacted.'));
 
     await waitFor(() =>
-      expect(view.getByLabelText('Abisola, reacted Laugh. Open their profile.')).toBeTruthy(),
+      expect(view.getByLabelText('Abisola, Laugh. Open their profile.')).toBeTruthy(),
     );
   });
 
@@ -1092,7 +1092,7 @@ describe('who reacted to a comment', () => {
     await act(async () => fireEvent(view.getByLabelText('1 reaction. See who reacted.'), 'longPress'));
 
     await waitFor(() =>
-      expect(view.getByLabelText('Silky, reacted Wow. Open their profile.')).toBeTruthy(),
+      expect(view.getByLabelText('Silky, Wow. Open their profile.')).toBeTruthy(),
     );
     expect(
       mockRpcCalls.filter((call) => call.name === 'comment_reactors').map((call) => call.args),

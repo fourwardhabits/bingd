@@ -78,7 +78,7 @@ export function ReactionDetail({ summary, loading, onClose, onPressPerson }: Rea
           <Pressable
             key={`${person.userId}-${person.kind}`}
             accessibilityRole="button"
-            accessibilityLabel={`${person.name}, reacted ${labelOf(person.kind)}. Open their profile.`}
+            accessibilityLabel={`${person.name}, ${labelOf(person.kind)}. Open their profile.`}
             onPress={() => onPressPerson(person.username)}
             style={({ pressed }) => [styles.person, pressed && styles.pressed]}
           >

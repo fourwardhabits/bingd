@@ -16,6 +16,8 @@ export type ActivityReaction = {
   count: number;
   /** The reader's own glyph, or null. Its presence is what fills the control. */
   mineGlyph?: string | null;
+  /** The word for the reader's own reaction (Liked, Laugh…), or null. Spoken with it. */
+  mineLabel?: string | null;
   /** The distinct glyphs present, most common first (PRD §14). */
   glyphs?: string[];
   /** A plain tap: toggles the default reaction on or off. */
@@ -445,7 +447,7 @@ export function ActivityRow({
           <ReactionControl
             label={
               reaction.mineGlyph
-                ? `You reacted to ${filmName}. Tap to remove, long press to change.`
+                ? `${reaction.mineLabel ? `${reaction.mineLabel}. ` : ''}You reacted to ${filmName}. Tap to remove, long press to change.`
                 : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
             }
             active={Boolean(reaction.mineGlyph)}

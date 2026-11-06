@@ -1,5 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { BackHandler, StyleSheet } from 'react-native';
+import { BackHandler, StyleSheet, type TextStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -379,6 +379,39 @@ describe('the actions', () => {
     await waitFor(() => expect(view.getByLabelText('Laugh')).toBeTruthy());
   });
 
+  /**
+   * **Every selected state is its emoji and its word** (founder, nav cohesion sprint,
+   * 2026-11-06), a Like included: ❤️ Liked, not a filled Maroon heart. The stored kinds
+   * are unchanged — `love` and `moved` are drawn Liked and Sad.
+   */
+  it.each([
+    ['love', '❤️', 'Liked'],
+    ['agree', '👍', 'Agree'],
+    ['disagree', '👎', 'Disagree'],
+    ['funny', '😂', 'Laugh'],
+    ['wow', '😮', 'Wow'],
+    ['moved', '😢', 'Sad'],
+  ])('draws the viewer’s %s as %s %s, in Maroon, and says so', async (kind, glyph, word) => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [
+      { feed_event_id: 'e1', user_id: 'user-1', kind, profiles: { id: 'user-1', username: 'sai', display_name: 'Sai', avatar_path: null } },
+    ];
+    const view = await renderWithProviders(<FeedScreen />);
+
+    const like = await waitFor(() => {
+      const control = view.getByTestId('feed-card-like');
+      expect(within(control).getByText(word)).toBeTruthy();
+      return control;
+    });
+    expect(within(like).getByText(glyph)).toBeTruthy();
+    expect(
+      (StyleSheet.flatten(within(like).getByText(word).props.style) as TextStyle).color,
+    ).toBe(theme.semantic.action);
+    expect(like.props.accessibilityLabel).toMatch(new RegExp(`^${word}\\. You reacted to `));
+    expect(like.props.accessibilityState).toMatchObject({ selected: true });
+    expect(within(like).queryByText('Like')).toBeNull();
+  });
+
   it('shows who reacted above the actions', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [
@@ -490,7 +523,7 @@ describe('the actions', () => {
     const view = await renderWithProviders(<FeedScreen />);
     fireEvent.press(await waitFor(() => view.getByTestId('feed-card-reactions')));
     await waitFor(() =>
-      expect(view.getByLabelText('THEO, reacted Love. Open their profile.')).toBeTruthy(),
+      expect(view.getByLabelText('THEO, Liked. Open their profile.')).toBeTruthy(),
     );
   });
 
