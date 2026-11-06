@@ -50,7 +50,7 @@ describe('the filters', () => {
 
     expect(view.getByLabelText('All, 4')).toBeTruthy();
     expect(view.getByLabelText('Love, 3')).toBeTruthy();
-    expect(view.getByLabelText('Funny, 1')).toBeTruthy();
+    expect(view.getByLabelText('Laugh, 1')).toBeTruthy();
   });
 
   it('does not offer a reaction nobody used', async () => {
@@ -80,7 +80,7 @@ describe('the filters', () => {
 describe('the people', () => {
   it('names each one and says which reaction they used', async () => {
     const view = await open();
-    expect(view.getByLabelText('Raj, reacted Funny. Open their profile.')).toBeTruthy();
+    expect(view.getByLabelText('Raj, reacted Laugh. Open their profile.')).toBeTruthy();
   });
 
   it('opens a profile when tapped', async () => {

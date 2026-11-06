@@ -29,17 +29,21 @@ export type AppHeaderProps = {
 };
 
 /**
- * The top of a root tab.
+ * The top of a root tab: the bingd. lockup on the left, one screen's own control on the
+ * right, at the same height on all five.
  *
- * The bell is here rather than on one screen because the founder's correction is that
- * the inbox should be **discoverable**, and a control three taps into Settings is not.
- * It appears on every root tab and on none of the pushed screens, which is exactly what
- * keeps it from displacing a Back control: a pushed screen uses `Stack.Screen`'s own
- * header and never this component.
+ * **What sits on the right** (founder, UI cohesion pass, 2026-11-06):
+ * - Feed: the notification bell, which is where the inbox lives.
+ * - Collection and For You: their Movies | TV switch, passed as `right`.
+ * - Profile: the Settings gear alone. Its second bell went; notifications stay on Feed.
+ * - Search: nothing.
+ *
+ * Pushed screens use `Stack.Screen`'s own header and never this component, so nothing
+ * here can displace a Back control.
  */
 export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
   return (
-    <View style={styles.wrap} accessibilityRole="header">
+    <View style={styles.wrap} accessibilityRole="header" testID="app-header">
       <BrandLockup size="sm" />
       <View style={styles.right}>
         {settings ? (
@@ -110,6 +114,19 @@ export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
  * centred in it and its hit area (`hitSlop`) is unchanged.
  */
 const ACTIONS_HEIGHT = 34;
+/**
+ * **The right side's box is a full 44pt, and still takes 34pt of the row.**
+ *
+ * Collection's and For You's Movies | TV halves are 44pt presses, and a press never
+ * answers outside its parent's bounds: in a 34pt box their top and bottom 5pt were dead
+ * on Android. So the box is 44pt tall with 5pt pulled back above and below, into the
+ * header's own padding. The row lays out exactly as it did, the logo stays where it was
+ * on every tab, and the presses sit wholly inside a parent that contains them. A minimum
+ * rather than a fixed height, so a switch grown by a large system text size enlarges the
+ * header instead of being cut.
+ */
+const ACTIONS_BOX = 44;
+const ACTIONS_BLEED = (ACTIONS_BOX - ACTIONS_HEIGHT) / 2;
 
 const styles = StyleSheet.create({
   /**
@@ -132,7 +149,8 @@ const styles = StyleSheet.create({
   // `space-between` used to leave them.
   right: {
     flex: 1,
-    height: ACTIONS_HEIGHT,
+    minHeight: ACTIONS_BOX,
+    marginVertical: -ACTIONS_BLEED,
     justifyContent: 'flex-end',
     marginLeft: theme.space[4],
     flexDirection: 'row',

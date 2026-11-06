@@ -197,8 +197,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Semibold: the three answers are the sheet's one decision and should read as such.
-  label: { textAlign: 'center', fontFamily: fontFamily.sansSemibold },
+  // Inter Regular (founder, UI cohesion pass, 2026-11-06): the tinted circles carry the
+  // choice, and the labels name it without competing with them.
+  label: { textAlign: 'center', fontFamily: fontFamily.sans },
   /**
    * Three equal columns, always. The gap is the sheet's own rhythm rather than a
    * number chosen here, and at a 320pt width it still leaves each column 88pt —

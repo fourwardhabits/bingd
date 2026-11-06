@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { languageName } from '@/lib/language';
-import { Button, Sheet, Text } from '@/ui/components';
+import { Button, Sheet, SortMenu, Text } from '@/ui/components';
+import type { SortAxisSpec, SortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 import {
@@ -14,7 +15,7 @@ import {
 } from './filters';
 import { BUCKET_LABEL, type Bucket } from './score';
 
-export type CollectionFilterSheetProps = {
+export type CollectionFilterSheetProps<Axis extends string = string> = {
   /** Every item *before* filtering, so the options describe the whole collection. */
   items: readonly CollectionItem[];
   /**
@@ -33,6 +34,21 @@ export type CollectionFilterSheetProps = {
   showBuckets: boolean;
   onApply: (next: CollectionFilters) => void;
   onClose: () => void;
+  /**
+   * **Sort, as the sheet's first section** — Collection's one Filter & Sort entry (founder,
+   * UI cohesion pass, 2026-11-06). Absent for every other caller, whose sheet is unchanged.
+   *
+   * It applies as it always did: on the press, with no Apply. The sheet stays open so the
+   * reader sees the order change and can press the same axis again to reverse it; only the
+   * filters below wait for Apply, because only they ever did.
+   */
+  sort?: {
+    axes: readonly SortAxisSpec<Axis>[];
+    value: SortState<Axis>;
+    onChange: (next: SortState<Axis>) => void;
+    /** Pressing Shuffle while on it reshuffles. */
+    onRepeatUndirected?: () => void;
+  };
 };
 
 const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
@@ -56,13 +72,14 @@ const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
  * under the reader while they were still choosing, and Clear all would have no
  * meaning distinct from unticking everything.
  */
-export function CollectionFilterSheet({
+export function CollectionFilterSheet<Axis extends string = string>({
   items,
   value,
   showBuckets,
   onApply,
   onClose,
-}: CollectionFilterSheetProps) {
+  sort,
+}: CollectionFilterSheetProps<Axis>) {
   const [draft, setDraft] = useState<CollectionFilters>(value);
 
   const options = facetOptions(items);
@@ -71,8 +88,32 @@ export function CollectionFilterSheet({
     list.includes(entry) ? list.filter((one) => one !== entry) : [...list, entry];
 
   return (
-    <Sheet visible onClose={onClose} label="Filter your collection">
-      <ScrollView style={styles.body} contentContainerStyle={styles.content}>
+    <Sheet
+      visible
+      onClose={onClose}
+      label={sort ? 'Filter and sort your collection' : 'Filter your collection'}
+    >
+      {sort ? (
+        <View style={styles.sortSection} testID="collection-sort-section">
+          <Text variant="headline" accessibilityRole="header" style={styles.part}>
+            Sort
+          </Text>
+          <SortMenu
+            axes={sort.axes}
+            value={sort.value}
+            onChange={sort.onChange}
+            // Stays open: the order changes behind the sheet, and a second press reverses.
+            onClose={() => {}}
+            onRepeatUndirected={sort.onRepeatUndirected}
+          />
+        </View>
+      ) : null}
+      {sort ? (
+        <Text variant="headline" accessibilityRole="header" style={[styles.part, styles.filterPart]}>
+          Filter
+        </Text>
+      ) : null}
+      <ScrollView style={sort ? styles.bodyWithSort : styles.body} contentContainerStyle={styles.content}>
         {showBuckets ? (
           <Section title="Rating">
             {BUCKETS.map((bucket) => (
@@ -189,6 +230,12 @@ function Option({
 const styles = StyleSheet.create({
   // Bounded, so a collection with thirty genres does not make the sheet the page.
   body: { maxHeight: 420 },
+  // Shorter under the Sort section, so the sheet as a whole still fits a small phone.
+  bodyWithSort: { maxHeight: 340 },
+  sortSection: { paddingBottom: theme.space[2] },
+  /** The two parts' names: Sort, then Filter, each on the gutter. */
+  part: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  filterPart: { paddingBottom: theme.space[3] },
   content: { paddingBottom: theme.space[4], gap: theme.space[5] },
   section: { gap: theme.space[2], paddingHorizontal: theme.layout.gutter },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },

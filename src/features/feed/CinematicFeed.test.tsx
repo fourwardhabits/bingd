@@ -376,7 +376,7 @@ describe('the actions', () => {
     );
 
     fireEvent(like, 'longPress');
-    await waitFor(() => expect(view.getByLabelText('Funny')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Laugh')).toBeTruthy());
   });
 
   it('shows who reacted above the actions', async () => {
@@ -400,17 +400,16 @@ describe('the actions', () => {
     profiles: { id: user, username: user, display_name: user.toUpperCase(), avatar_path: null },
   });
 
-  it('draws no summary and no hairline with no reactions, just the actions', async () => {
+  it('draws no summary with no reactions, just the actions', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     const view = await renderWithProviders(<FeedScreen />);
     await waitFor(() => expect(view.getByTestId('feed-card-like')).toBeTruthy());
     expect(view.queryByTestId('feed-card-reactions')).toBeNull();
-    expect(view.queryByTestId('feed-card-social-divider')).toBeNull();
     expect(view.queryByText(/reactions?$/)).toBeNull();
     expect(view.getByText('Like')).toBeTruthy();
   });
 
-  it('says 1 reaction, in the singular, with its glyph and a hairline', async () => {
+  it('says 1 reaction, in the singular, with its glyph and no line under it', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'wow')];
     const view = await renderWithProviders(<FeedScreen />);
@@ -418,7 +417,8 @@ describe('the actions', () => {
     expect(within(summary).getByText('1 reaction')).toBeTruthy();
     expect(within(summary).getByText('😮', { includeHiddenElements: true })).toBeTruthy();
     expect(summary.props.accessibilityLabel).toBe('1 reaction. See who reacted.');
-    expect(view.getByTestId('feed-card-social-divider')).toBeTruthy();
+    // The summary and the actions are one group: nothing is drawn between them.
+    expect(view.queryByTestId('feed-card-social-divider')).toBeNull();
   });
 
   it('clusters up to three kinds and counts every reaction', async () => {
@@ -457,7 +457,31 @@ describe('the actions', () => {
     expect(within(like).getByText('Wow')).toBeTruthy();
     // Long press still opens the six to change it.
     fireEvent(like, 'longPress');
-    await waitFor(() => expect(view.getByLabelText('Funny')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Laugh')).toBeTruthy());
+  });
+
+  it('keeps one line between posts and more air above the next one', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('theo', 'love')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const card = StyleSheet.flatten(
+      (await waitFor(() => view.getAllByTestId('feed-card')))[0]!.props.style,
+    );
+    // 12pt more above the avatar than the 16pt it had; the post's own rhythm unchanged.
+    expect(card.paddingTop).toBe(28);
+    expect(card.gap).toBe(theme.space[3]);
+    // The separator is the card's own foot, and the only one.
+    expect(card.borderBottomWidth).toBeGreaterThan(0);
+    expect(card.borderTopWidth ?? 0).toBe(0);
+  });
+
+  it('names the laughing reaction Laugh everywhere, and still stores it as funny', async () => {
+    mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
+    mockReactions = [reactor('user-1', 'funny')];
+    const view = await renderWithProviders(<FeedScreen />);
+    const like = await waitFor(() => view.getByTestId('feed-card-like'));
+    expect(within(like).getByText('Laugh')).toBeTruthy();
+    expect(view.queryByText('Funny')).toBeNull();
   });
 
   it('opens the list of who reacted from anywhere on the summary', async () => {
@@ -470,14 +494,13 @@ describe('the actions', () => {
     );
   });
 
-  it('puts the summary, hairline and actions on the card’s gutters, 44pt targets each', async () => {
+  it('puts the summary and actions on the card’s gutters, 44pt targets each', async () => {
     mockRows = [event('e1', 'title_ranked', OPPENHEIMER)];
     mockReactions = [reactor('theo', 'love')];
     const view = await renderWithProviders(<FeedScreen />);
     const summary = await waitFor(() => view.getByTestId('feed-card-reactions'));
     const gutter = theme.layout.gutter;
     expect(StyleSheet.flatten(summary.props.style).marginHorizontal).toBe(gutter);
-    expect(StyleSheet.flatten(view.getByTestId('feed-card-social-divider').props.style).marginHorizontal).toBe(gutter);
     for (const id of ['feed-card-like', 'feed-card-comment', 'feed-card-save', 'feed-card-share']) {
       const style = StyleSheet.flatten(view.getByTestId(id).props.style);
       expect(style.minHeight).toBeGreaterThanOrEqual(44);

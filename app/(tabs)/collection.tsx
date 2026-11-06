@@ -1,6 +1,7 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -25,18 +26,17 @@ import { useRefineCard } from '@/features/ranking/use-refine';
 import { track } from '@/lib/analytics';
 import { readPref, writePref } from '@/lib/prefs';
 import { useTabReset } from '@/ui/use-tab-reset';
-import { theme } from '@/ui/tokens';
+import { fontFamily, theme } from '@/ui/tokens';
 import {
   AppHeader,
   Button,
   HeaderBoundary,
   EmptyState,
-  MediumSelector,
   Screen,
+  SegmentedTabs,
   SkeletonRow,
   Text,
 } from '@/ui/components';
-import { MyLists } from '@/features/lists/MyLists';
 import { CompactSwitch, type CompactSwitchOption } from '@/ui/components/CompactSwitch';
 
 type Segment = 'watched' | 'watchlist' | 'unranked';
@@ -69,26 +69,23 @@ const isMedium = (value: unknown): value is Medium =>
   value === 'movies' || value === 'tv_seasons';
 
 /**
- * **Movies, TV or Lists** — the mode this tab remembers (founder QA, 2026-09-21).
+ * **Movies or TV** — the side this tab remembers.
  *
- * Lists was a `My lists ›` link, reached by a push. It is a first-class mode, remembered
- * like the two media under the same key: a reader who left Collection on Lists comes back
- * to Lists. Since the final polish (2026-11-04) it is the last entry of the page's
- * dropdown, after Watched, Watchlist and Unranked, and the Movies | TV switch is not drawn
- * while it is showing, because a list mixes media.
+ * Lists was a third mode here, an entry of the page's dropdown, from 2026-09-21 to the UI
+ * cohesion pass (2026-11-06). It is the `My lists ›` link at the right of the count row
+ * now, a push to the same screen Profile's manage link opens, so this tab has exactly the
+ * two media to remember. A `'lists'` left in the store by the build before is not a side
+ * and is ignored, like any other value this tab cannot draw: that reader opens on Movies.
  */
-type CollectionMode = Medium | 'lists';
+type CollectionMode = Medium;
 
-const isMode = (value: unknown): value is CollectionMode => isMedium(value) || value === 'lists';
+const isMode = isMedium;
 
-/** The medium, in the compact switch For You uses too. */
+/** The medium, in the compact switch For You uses too, in the header's right corner. */
 const COLLECTION_MEDIA: readonly CompactSwitchOption<Medium>[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv_seasons', label: 'TV' },
 ];
-
-/** What the page's dropdown chooses: a segment of the medium, or Lists. */
-type CollectionChoice = Segment | 'lists';
 
 /**
  * Poster or List, per account, across launches (founder §11).
@@ -161,15 +158,7 @@ export default function CollectionScreen() {
      */
     medium: isMedium(mediumParam) ? mediumParam : 'movies',
   }));
-  const mode: CollectionMode = mediumPref.profileId === profile.id ? mediumPref.medium : 'movies';
-  const inLists = mode === 'lists';
-  // The medium the three sections read. In Lists mode none of them is drawn, so the
-  // value only has to be a valid one for the hooks above them.
-  const medium: Medium = mode === 'lists' ? 'movies' : mode;
-  // The side to come back to from Lists; see `changeMedium`. State rather than a ref,
-  // because the dropdown reads it while drawn on Lists: whether it offers Unranked is a
-  // question about the side that leaving Lists will open.
-  const [mediumBeforeLists, setMediumBeforeLists] = useState<Medium>('movies');
+  const medium: Medium = mediumPref.profileId === profile.id ? mediumPref.medium : 'movies';
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
   /**
    * Filters, sort, view mode and shuffle seed, owned here rather than by either
@@ -347,9 +336,7 @@ export default function CollectionScreen() {
    */
   const unrankedFor = (which: Medium) =>
     filterByMedium(loggedSummary?.unranked ?? [], which).length;
-  // On Lists, the side the reader will return to: the dropdown offers Unranked there, and
-  // choosing it must open Unranked rather than fall back to Watched.
-  const unrankedCount = unrankedFor(inLists ? mediumBeforeLists : medium);
+  const unrankedCount = unrankedFor(medium);
   const rankedCount = loggedSummary?.rankedCount ?? 0;
 
   const segments: { id: Segment; label: string }[] = useMemo(
@@ -361,10 +348,6 @@ export default function CollectionScreen() {
       ...(unrankedCount > 0 ? [{ id: 'unranked' as const, label: 'Unranked' }] : []),
     ],
     [unrankedCount],
-  );
-  const views: { id: CollectionChoice; label: string }[] = useMemo(
-    () => [...segments, { id: 'lists', label: 'Lists' }],
-    [segments],
   );
 
   // Ranking the last unranked title — or switching to a category with none — removes
@@ -388,10 +371,9 @@ export default function CollectionScreen() {
    * opening on Movies next time.
    */
   const changeMedium = (next: CollectionMode) => {
-    if (next === 'lists' && !inLists) setMediumBeforeLists(medium);
     chosenMedium.current = true;
     setMediumPref({ profileId: profile.id, medium: next });
-    if (next !== 'lists' && segment === 'unranked' && unrankedFor(next) === 0) {
+    if (segment === 'unranked' && unrankedFor(next) === 0) {
       setSegment('watched');
     }
     void writePref(`${profile.id}.${MEDIUM_PREF_KEY}`, next).catch(() => {});
@@ -440,6 +422,14 @@ export default function CollectionScreen() {
     rankedCap: !backlogOn,
   });
 
+  /**
+   * **My lists**, the one secondary way in (founder, UI cohesion pass, 2026-11-06): the
+   * same screen Profile's manage link pushes, with this door's own `entry`, so the
+   * discoverability event still tells the two apart. Every list control lives there and is
+   * unchanged: New list, each list, and everything inside one.
+   */
+  const openLists = () => router.push('/lists?entry=collection');
+
   const dismissNudge = async () => {
     const next: UnrankedNudgePref = {
       dismissedAt: new Date().toISOString(),
@@ -452,50 +442,38 @@ export default function CollectionScreen() {
 
   return (
     <Screen>
-      <AppHeader />
+      {/**
+       * **Movies | TV in the header's right corner** (founder, UI cohesion pass,
+       * 2026-11-06), where Feed keeps its bell. The same switch, the same state and the
+       * same one tap; it is simply no longer a row of its own under the header.
+       */}
+      <AppHeader
+        right={
+          <CompactSwitch
+            accessibilityLabel="Medium"
+            options={COLLECTION_MEDIA}
+            value={medium}
+            onChange={changeMedium}
+          />
+        }
+      />
       <HeaderBoundary />
       {/**
-       * **Watched ▾ on the left, Movies | TV on the right** (founder final polish,
-       * 2026-11-04), under the header's divider.
-       *
-       * The same dropdown and switch, at the same sizes and spacing, as For You's row, so
-       * the two screens share one navigation pattern. The dropdown replaces the Watched /
-       * Watchlist tab row and holds every state that row and the old Movies / TV Shows /
-       * Lists dropdown reached between them: Watched, Watchlist, Unranked (only while
-       * this side has an unranked title, as the tab was) and Lists. The switch is not
-       * drawn on Lists, which mixes media. Where both do not fit one line the switch
-       * wraps under the dropdown, right-aligned.
-       *
-       * Picking a segment from Lists returns to the medium the reader was on before.
+       * **Watched | Watchlist | Unranked, as the page's own tabs** (founder, UI cohesion
+       * pass, 2026-11-06). They replace the serif Watched ▾ dropdown: equal columns across
+       * the full width, Maroon and a thin rule for the one showing. Unranked is drawn only
+       * while this side has an unranked title, as it always was, and the other two then
+       * share the width between them.
        */}
-      <View style={styles.titleRow}>
-        <View style={styles.titleRowSelector}>
-          <MediumSelector<CollectionChoice>
-            size="nav"
-            value={inLists ? 'lists' : active}
-            options={views}
-            onChange={(next) => {
-              if (next === 'lists') {
-                changeMedium('lists');
-                return;
-              }
-              if (inLists) changeMedium(mediumBeforeLists);
-              setSegment(next);
-            }}
-          />
-        </View>
-        {inLists ? null : (
-          <View style={styles.titleRowSwitch}>
-            <CompactSwitch
-              accessibilityLabel="Medium"
-              options={COLLECTION_MEDIA}
-              value={medium}
-              onChange={changeMedium}
-            />
-          </View>
-        )}
+      <View style={styles.nav}>
+        <SegmentedTabs
+          variant="nav"
+          options={segments}
+          value={active}
+          onChange={setSegment}
+          accessibilityLabel="Collection"
+        />
       </View>
-      {inLists ? <MyLists entry="collection" /> : null}
 
       {/* **Two answers to one question, side by side.**
 
@@ -516,7 +494,7 @@ export default function CollectionScreen() {
       {/* **One card slot on Watched, and unranked wins** (unified design §1). The
           Refine card below is drawn only when this one is not — and the server only lets
           it show when nothing in the medium is left to rank, so the two never compete. */}
-      {!inLists && active === 'watched' && showNudge ? (
+      {active === 'watched' && showNudge ? (
         backlogOn ? (
           <View style={styles.nudge} testID="collection-unranked-card">
             {/* No count on Watched (founder decision 3): this view is a collection, not a
@@ -560,25 +538,32 @@ export default function CollectionScreen() {
         )
       ) : null}
 
-      {!inLists && active === 'watched' && !showNudge ? (
+      {active === 'watched' && !showNudge ? (
         <RefineCard userId={profile.id} medium={medium} />
       ) : null}
 
-      {!inLists && active === 'watched' ? (
-        <Watched userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
+      {active === 'watched' ? (
+        <Watched
+          userId={profile.id}
+          medium={medium}
+          state={viewState}
+          onChange={changeView}
+          lists={<MyListsLink onPress={openLists} />}
+        />
       ) : null}
-      {!inLists && active === 'watchlist' ? (
+      {active === 'watchlist' ? (
         <Watchlist
           userId={profile.id}
           medium={medium}
           state={viewState}
           onChange={changeView}
+          lists={<MyListsLink onPress={openLists} />}
         />
       ) : null}
       {/* **Start ranking, persistent on Unranked** (unified design §1): no dismiss, and
           the ordinary one-title-at-a-time ranking stays below it. The exact count is
           useful here, because the reader chose to come and look (founder decision 3). */}
-      {!inLists && active === 'unranked' && backlogOn && backlogTotal > 0 ? (
+      {active === 'unranked' && backlogOn && backlogTotal > 0 ? (
         <View style={styles.nudge} testID="collection-start-ranking-card">
           <Text variant="callout">Rank your unranked titles</Text>
           {/* No explanatory line: the heading, the count and the button already say it
@@ -595,8 +580,14 @@ export default function CollectionScreen() {
           </View>
         </View>
       ) : null}
-      {!inLists && active === 'unranked' ? (
-        <Unranked userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
+      {active === 'unranked' ? (
+        <Unranked
+          userId={profile.id}
+          medium={medium}
+          state={viewState}
+          onChange={changeView}
+          lists={<MyListsLink onPress={openLists} />}
+        />
       ) : null}
     </Screen>
   );
@@ -614,11 +605,13 @@ function Watched({
   medium,
   state,
   onChange,
+  lists,
 }: {
   userId: string;
   medium: Medium;
   state: CollectionViewState;
   onChange: (next: CollectionViewState) => void;
+  lists: React.ReactNode;
 }) {
   const router = useRouter();
   const ranked = useRankedCollection(userId, medium);
@@ -657,6 +650,7 @@ function Watched({
       segment="watched"
       state={state}
       onChange={onChange}
+      countAccessory={lists}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         logged.data.loggedCount === 0 ? (
@@ -683,11 +677,13 @@ function Watchlist({
   medium,
   state,
   onChange,
+  lists,
 }: {
   userId: string;
   medium: Medium;
   state: CollectionViewState;
   onChange: (next: CollectionViewState) => void;
+  lists: React.ReactNode;
 }) {
   const router = useRouter();
   const { data, isPending, isError, refetch } = useWatchlist(userId);
@@ -711,6 +707,7 @@ function Watchlist({
       segment="watchlist"
       state={state}
       onChange={onChange}
+      countAccessory={lists}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         <EmptyState
@@ -730,11 +727,13 @@ function Unranked({
   medium,
   state,
   onChange,
+  lists,
 }: {
   userId: string;
   medium: Medium;
   state: CollectionViewState;
   onChange: (next: CollectionViewState) => void;
+  lists: React.ReactNode;
 }) {
   const router = useRouter();
   const { data, isPending, isError, refetch } = useLoggedCollection(userId);
@@ -758,6 +757,7 @@ function Unranked({
       segment="unranked"
       state={state}
       onChange={onChange}
+      countAccessory={lists}
       onPressItem={(id) => router.push(`/title/${id}`)}
       empty={
         <EmptyState
@@ -819,6 +819,30 @@ function RefineCard({ userId, medium }: { userId: string; medium: Medium }) {
   );
 }
 
+/**
+ * `My lists ›`, at the right of the count row: a labelled link in the app's action tone,
+ * the size of the count beside it, with a full 44pt target. Words rather than a glyph,
+ * because the list glyph is already the List view's, one row up.
+ */
+function MyListsLink({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel="My lists"
+      accessibilityHint="Opens your lists"
+      onPress={onPress}
+      hitSlop={{ top: 6, bottom: 6 }}
+      style={({ pressed }) => [styles.listsLink, pressed && styles.pressed]}
+      testID="collection-my-lists"
+    >
+      <Text variant="footnote" tone="action" style={styles.listsLinkLabel}>
+        My lists
+      </Text>
+      <Ionicons name="chevron-forward" size={14} color={theme.semantic.action} />
+    </Pressable>
+  );
+}
+
 /** "18 movies to rank" — the exact count, on Unranked only (founder decision 3). */
 function backlogCountLine(total: number, medium: Medium) {
   const noun =
@@ -835,23 +859,17 @@ function Loading() {
 }
 
 const styles = StyleSheet.create({
-  /**
-   * The dropdown and the switch: For You's `header` row, to the point.
-   *
-   * `MediumSelector` renders a fragment — a `Pressable` and its `Modal` — so it is
-   * wrapped rather than dropped straight into the row, which keeps the zero-sized modal
-   * out of the layout. The switch wraps to a second line, right-aligned, where the two
-   * do not fit; the 12pt column gap is the least space between them.
-   */
-  titleRow: {
+  /** The tabs, 4pt under the header's divider; the toolbar keeps its own 8pt under them. */
+  nav: { paddingTop: theme.space[1] },
+  listsLink: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    columnGap: theme.space[3],
-    paddingRight: theme.layout.gutter,
+    gap: 2,
+    minHeight: theme.layout.minTapTarget - theme.space[3],
+    paddingLeft: theme.space[3],
   },
-  titleRowSelector: { flexShrink: 0 },
-  titleRowSwitch: { flexShrink: 0, marginLeft: 'auto' },
+  listsLinkLabel: { fontFamily: fontFamily.sansMedium },
+  pressed: { opacity: 0.6 },
 
   // A column now. As a row it put the copy and the dismissal at opposite edges,
   // which is what made them read as unrelated to each other.

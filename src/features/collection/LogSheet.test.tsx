@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { AppState } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
@@ -3035,20 +3035,36 @@ describe('the ranking-start order', () => {
   };
   const ascending = (xs: number[]) => xs.every((x, i) => i === 0 || (xs[i - 1] ?? Infinity) < x);
 
-  it('puts the note, the date and the companions first, and the buckets last', async () => {
+  it('puts who, then the date, then the note first, and the buckets last', async () => {
     const sheet = await open(filmA);
     await waitFor(() => expect(sheet.getByTestId('bucket-choices')).toBeTruthy());
 
     expect(
       ascending(
         order(sheet, [
-          '"accessibilityLabel":"Note"',
-          '"accessibilityLabel":"Watch date"',
           '"accessibilityLabel":"Who I watched with"',
+          '"accessibilityLabel":"Watch date"',
+          '"accessibilityLabel":"Note"',
           '"testID":"bucket-choices"',
         ]),
       ),
     ).toBe(true);
+  });
+
+  it('ends just under the buckets: no second margin beneath the labels', async () => {
+    const sheet = await open(filmA);
+    await waitFor(() => expect(sheet.getByTestId('bucket-choices')).toBeTruthy());
+    const scroller = sheet.getByTestId('log-sheet-scroll');
+    const content = StyleSheet.flatten(scroller.props.contentContainerStyle);
+    // The sheet adds the navigation inset and its own 16pt; the content keeps only 4.
+    expect(content.paddingBottom).toBe(4);
+  });
+
+  it('keeps its ordinary foot after a ranking, where Done is last', async () => {
+    const sheet = await open(filmA, { postRank: { score: 8.7, position: 3, category: 'movies' } });
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+    const scroller = sheet.getByTestId('log-sheet-scroll');
+    expect(StyleSheet.flatten(scroller.props.contentContainerStyle).paddingBottom).toBe(16);
   });
 
   it('draws no question above the buckets, and still names the group with it', async () => {
@@ -3073,9 +3089,9 @@ describe('the ranking-start order', () => {
     expect(
       ascending(
         order(sheet, [
-          '"accessibilityLabel":"Note"',
-          '"accessibilityLabel":"Watch date"',
           '"accessibilityLabel":"Who I watched with"',
+          '"accessibilityLabel":"Watch date"',
+          '"accessibilityLabel":"Note"',
           '"children":["Done"]',
         ]),
       ),

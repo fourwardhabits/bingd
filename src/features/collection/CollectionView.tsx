@@ -1,22 +1,20 @@
+import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
-import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
   EmptyState,
-  FilterChip,
   IconToggle,
   type IconToggleOption,
   PosterGridList,
-  SortChip,
-  SortMenu,
   Text,
   TitleMetadata,
   TitleRow,
 } from '@/ui/components';
-import { coerceSortState } from '@/ui/sort';
+import { coerceSortState, isDirectional, type SortAxisSpec } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 import { CollectionFilterSheet } from './CollectionFilterSheet';
@@ -107,6 +105,12 @@ export type CollectionViewProps = {
   onPressItem: (mediaItemId: string) => void;
   /** Shown when the collection itself is empty, before any filtering. */
   empty: React.ReactNode;
+  /**
+   * Drawn at the right of the count row: Collection's `My lists ›` (UI cohesion pass,
+   * 2026-11-06). Also drawn above an empty collection, where there is no count row, so the
+   * way to the lists never depends on there being titles.
+   */
+  countAccessory?: ReactNode;
 };
 
 /**
@@ -130,9 +134,9 @@ export function CollectionView({
   onChange,
   onPressItem,
   empty,
+  countAccessory,
 }: CollectionViewProps) {
   const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
 
   const axes = sortAxesFor(segment);
   // A sort the current segment does not offer — Rating on a watchlist — falls back
@@ -147,29 +151,69 @@ export function CollectionView({
   // stable, which it reports rather than silently ignoring.
   const visible = sortItems(applyFilters(items, state.filters), sort, state.seed);
 
-  if (items.length === 0) return <>{empty}</>;
+  if (items.length === 0) {
+    return (
+      <>
+        {countAccessory ? <View style={styles.accessoryOnly}>{countAccessory}</View> : null}
+        {empty}
+      </>
+    );
+  }
 
   const activeCount = activeFilterCount(state.filters);
+  const filtered = isFiltered(state.filters);
+  const reshuffle = () => onChange({ ...state, seed: state.seed + 1 });
 
   return (
     <View style={styles.body}>
-      <View style={styles.controls}>
-        <FilterChip
-          icon="options-outline"
-          label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
-          selected={isFiltered(state.filters)}
-          onPress={() => setFilterOpen(true)}
-        />
-        <SortChip axes={axes} value={sort} onPress={() => setSortOpen((open) => !open)} />
-        {sort.axis === 'shuffle' ? (
-          <FilterChip
-            icon="shuffle"
-            label="Shuffle"
-            onPress={() => onChange({ ...state, seed: state.seed + 1 })}
-          />
-        ) : null}
-
-        <View style={styles.spacer} />
+      {/**
+       * **One quiet toolbar: Filter & Sort on the left, Grid / List on the right** (founder,
+       * UI cohesion pass, 2026-11-06). It replaced a row of outlined chips and a filled
+       * segmented pair, which read as competing controls. Filter & Sort is one
+       * text-and-icon action that opens one sheet; what is in force is said beside it in
+       * tertiary text, so nothing needs a third row to show its state.
+       */}
+      <View style={styles.controls} testID="collection-toolbar">
+        <View style={styles.toolbarStart}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={filterSortSpoken(axes, sort, activeCount)}
+            accessibilityHint="Opens filters and the sort order"
+            onPress={() => setFilterOpen(true)}
+            style={({ pressed }) => [styles.filterSort, pressed && styles.pressed]}
+            testID="collection-filter-sort"
+          >
+            <Ionicons
+              name="options-outline"
+              size={theme.layout.icon.sm}
+              color={filtered ? theme.semantic.action : theme.text.secondary}
+            />
+            <Text variant="callout" style={styles.filterSortLabel}>
+              Filter & Sort
+            </Text>
+            <Text
+              variant="footnote"
+              tone={filtered ? 'action' : 'tertiary'}
+              numberOfLines={1}
+              style={styles.filterSortStatus}
+              testID="collection-filter-sort-status"
+            >
+              {filterSortStatus(axes, sort, activeCount)}
+            </Text>
+          </Pressable>
+          {/* Shuffle's reshuffle, one press from the toolbar rather than three. */}
+          {sort.axis === 'shuffle' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Shuffle again"
+              onPress={reshuffle}
+              style={({ pressed }) => [styles.reshuffle, pressed && styles.pressed]}
+              testID="collection-reshuffle"
+            >
+              <Ionicons name="shuffle" size={theme.layout.icon.sm} color={theme.semantic.action} />
+            </Pressable>
+          ) : null}
+        </View>
 
         {/* The view control, not a third collection state.
 
@@ -181,6 +225,7 @@ export function CollectionView({
             Poster while still drawing List first. */}
         <IconToggle
           label="View"
+          appearance="quiet"
           value={state.mode}
           onChange={(mode) => onChange({ ...state, mode })}
           options={VIEW_MODES}
@@ -188,24 +233,14 @@ export function CollectionView({
         />
       </View>
 
-      {sortOpen ? (
-        <SortMenu
-          axes={axes}
-          value={sort}
-          onChange={(next) => onChange({ ...state, sort: next })}
-          onClose={() => setSortOpen(false)}
-          // Shuffle is the one axis with no direction, so choosing it again reseeds
-          // rather than reversing anything. The reshuffle chip beside the control stays,
-          // because reseeding from a closed menu is one press instead of three.
-          onRepeatUndirected={() => onChange({ ...state, seed: state.seed + 1 })}
-        />
-      ) : null}
-
-      <Text variant="footnote" tone="secondary" style={styles.count}>
-        {visible.length === items.length
-          ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
-          : `${visible.length} of ${items.length}`}
-      </Text>
+      <View style={styles.countRow}>
+        <Text variant="footnote" tone="secondary" style={styles.countText} testID="collection-count">
+          {visible.length === items.length
+            ? `${items.length} ${items.length === 1 ? 'title' : 'titles'}`
+            : `${visible.length} of ${items.length}`}
+        </Text>
+        {countAccessory}
+      </View>
 
       {visible.length === 0 ? (
         <View style={styles.padded}>
@@ -308,6 +343,14 @@ export function CollectionView({
             onChange({ ...state, filters });
           }}
           onClose={() => setFilterOpen(false)}
+          // The sort choices this segment offers, applied on the press as they always were.
+          // Shuffle is the one axis with no direction, so choosing it again reseeds.
+          sort={{
+            axes,
+            value: sort,
+            onChange: (next) => onChange({ ...state, sort: next }),
+            onRepeatUndirected: reshuffle,
+          }}
         />
       ) : null}
     </View>
@@ -315,6 +358,45 @@ export function CollectionView({
 }
 
 const LIST_POSITION = { disabled: true } as const;
+
+const DOWN = '\u2193';
+const UP = '\u2191';
+
+/** `Rating ↓`, `Shuffle`, `Rating ↓ · 2 filters`: what is in force, beside the action. */
+export function filterSortStatus<Axis extends string>(
+  axes: readonly SortAxisSpec<Axis>[],
+  sort: { axis: Axis; direction: 'asc' | 'desc' },
+  activeFilters: number,
+): string {
+  const spec = axes.find((option) => option.axis === sort.axis);
+  const order = spec
+    ? isDirectional(spec)
+      ? `${spec.label} ${sort.direction === 'desc' ? DOWN : UP}`
+      : spec.label
+    : '';
+  const filters = activeFilters
+    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'}`
+    : null;
+  return [order, filters].filter(Boolean).join(' \u00b7 ');
+}
+
+/** The sentence a screen reader is given instead of the arrow. */
+function filterSortSpoken<Axis extends string>(
+  axes: readonly SortAxisSpec<Axis>[],
+  sort: { axis: Axis; direction: 'asc' | 'desc' },
+  activeFilters: number,
+): string {
+  const spec = axes.find((option) => option.axis === sort.axis);
+  const order = spec
+    ? spec.directions
+      ? `Sorted by ${spec.label}, ${spec.directions[sort.direction]}`
+      : `Sorted by ${spec.label}`
+    : null;
+  const filters = activeFilters
+    ? `${activeFilters} ${activeFilters === 1 ? 'filter' : 'filters'} on`
+    : 'No filters';
+  return ['Filter and sort', order, filters].filter(Boolean).join('. ');
+}
 
 /** A ranked TV list is otherwise a column of rows called "Season 2". */
 const nameOf = (item: CollectionItem) =>
@@ -327,26 +409,55 @@ const nameOf = (item: CollectionItem) =>
 
 const styles = StyleSheet.create({
   body: { flex: 1 },
-  // Wraps, so at a large system text size the view toggle drops to its own line,
-  // right-aligned, instead of running off the screen (Visual 2.1 check, 2026-11-03).
-  // The row gap clears the chips' 6pt slop on both lines. At 100% nothing wraps.
+  /**
+   * Two groups on one line: the action at the gutter, the view glyphs ending on it. The
+   * glyphs' 44pt targets are wider than their 20pt glyphs by 12pt a side, so the row is
+   * inset 12pt less on the right and the last glyph's edge lands on the gutter. The
+   * status text is what gives way on a narrow phone or at a large text size: it
+   * truncates before either control moves.
+   */
   controls: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    columnGap: theme.space[2],
-    rowGap: theme.space[3],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
+    paddingLeft: theme.layout.gutter,
+    paddingRight: theme.layout.gutter - (theme.layout.minTapTarget - theme.layout.icon.sm) / 2,
+    paddingTop: theme.space[2],
   },
-  spacer: { flex: 1 },
-  toggle: { marginLeft: 'auto' },
+  toolbarStart: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
+  filterSort: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[2],
+    minHeight: theme.layout.minTapTarget,
+    flexShrink: 1,
+    paddingRight: theme.space[2],
+  },
+  filterSortLabel: { flexShrink: 0 },
+  filterSortStatus: { flexShrink: 1 },
+  reshuffle: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggle: { marginLeft: theme.space[2] },
+  pressed: { opacity: 0.6 },
 
-  // The sort menu's own styles moved to `ui/components/SortControl` with the menu.
-  count: {
+  /** `37 titles` on the left and the lists link on the right, one line under the toolbar. */
+  countRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
     paddingBottom: theme.space[1],
+    minHeight: theme.layout.minTapTarget - theme.space[2],
+  },
+  countText: { flexShrink: 1 },
+  accessoryOnly: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
   },
   list: { paddingBottom: theme.space[10] },
   wall: { paddingBottom: theme.space[10], paddingTop: theme.space[2] },

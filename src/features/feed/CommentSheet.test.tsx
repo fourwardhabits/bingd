@@ -914,7 +914,7 @@ describe('reacting to a comment', () => {
     const view = await open();
 
     await act(async () => fireEvent(control(view), 'longPress'));
-    await fireEvent.press(view.getByLabelText('Funny'));
+    await fireEvent.press(view.getByLabelText('Laugh'));
 
     await waitFor(() => expect(reactionCalls()).toHaveLength(1));
     expect(reactionArgs()).toMatchObject({ p_kind: 'funny' });
@@ -1051,7 +1051,7 @@ describe('who reacted to a comment', () => {
     // Person and meaning together — the founder's "Abisola ❤️" list, as the feed
     // already draws it.
     await waitFor(() =>
-      expect(view.getByLabelText('Abisola, reacted Funny. Open their profile.')).toBeTruthy(),
+      expect(view.getByLabelText('Abisola, reacted Laugh. Open their profile.')).toBeTruthy(),
     );
     expect(view.getByLabelText('Ravi, reacted Love. Open their profile.')).toBeTruthy();
     expect(
@@ -1067,7 +1067,7 @@ describe('who reacted to a comment', () => {
     await fireEvent.press(view.getByLabelText('2 reactions. See who reacted.'));
 
     await waitFor(() =>
-      expect(view.getByLabelText('Abisola, reacted Funny. Open their profile.')).toBeTruthy(),
+      expect(view.getByLabelText('Abisola, reacted Laugh. Open their profile.')).toBeTruthy(),
     );
   });
 
@@ -1175,7 +1175,7 @@ describe('a comment reaction whose answer was lost', () => {
     await waitFor(() => expect(reactionIds()).toHaveLength(1));
 
     await act(async () => fireEvent(control(view), 'longPress'));
-    await fireEvent.press(view.getByLabelText('Funny'));
+    await fireEvent.press(view.getByLabelText('Laugh'));
     await waitFor(() => expect(reactionIds()).toHaveLength(2));
 
     expect(reactionIds()[1]).not.toBe(reactionIds()[0]);

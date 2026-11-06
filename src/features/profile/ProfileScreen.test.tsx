@@ -370,13 +370,12 @@ describe('the profile controls', () => {
     );
   });
 
-  it('keeps the bell in its corner and puts settings beside it as a gear', async () => {
+  it('offers settings as a gear, and no second bell (UI cohesion pass)', async () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Settings')).toBeTruthy());
-    // The bell sits in the same place on every root tab. A text button next to it was
-    // pushing it out of that corner on this one.
-    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+    // The inbox's door is Feed's bell; Profile's header carries the gear alone.
+    expect(view.queryByLabelText(/^Notifications/)).toBeNull();
   });
 
   it('opens settings from the gear', async () => {

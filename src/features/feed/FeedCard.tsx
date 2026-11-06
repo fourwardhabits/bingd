@@ -105,7 +105,7 @@ export function FeedCard({
   const othersGlyphs = (reaction.glyphs ?? []).filter((glyph) => glyph !== mine).slice(0, 3);
 
   return (
-    <View style={styles.card}>
+    <View style={styles.card} testID="feed-card">
       {/* 1. Who did what, and when. */}
       <View style={styles.header}>
         {onPressActor ? (
@@ -241,10 +241,11 @@ export function FeedCard({
       ) : null}
 
       {/*
-       * 5. One social area: the reaction summary, a hairline, then the actions — all on
-       * the card's gutters, so the cluster's first glyph, the hairline and the Like icon
-       * share one left edge and Share ends on the artwork's right edge (post-QA sprint 2,
-       * 2026-11-05). With no reactions there is no summary and no hairline: just the row.
+       * 5. One social area: the reaction summary, then the actions — on the card's
+       * gutters, so the cluster's first glyph and the Like icon share one left edge and
+       * Share ends on the artwork's right edge (post-QA sprint 2, 2026-11-05). No line
+       * between the two (UI cohesion pass, 2026-11-06): they are one group, and proximity
+       * says so. With no reactions there is no summary: just the row.
        */}
       <View style={styles.social} testID="feed-card-social">
         {reaction.count > 0 ? (
@@ -280,7 +281,6 @@ export function FeedCard({
                 {reactionCountLabel(reaction.count)}
               </Text>
             </Pressable>
-            <View style={styles.socialDivider} testID="feed-card-social-divider" />
           </>
         ) : null}
 
@@ -428,8 +428,14 @@ function companionNames(names: string[]) {
 }
 
 const styles = StyleSheet.create({
+  /**
+   * **28pt above each post, 12pt more than before** (UI cohesion pass, 2026-11-06). The
+   * one hairline between posts stays; the extra air above the next avatar is what makes
+   * a post read as the end of one thing and the start of another, while everything
+   * inside a post keeps its compact 12pt rhythm.
+   */
   card: {
-    paddingTop: theme.space[4],
+    paddingTop: theme.space[4] + theme.space[3],
     paddingBottom: theme.space[2],
     gap: theme.space[3],
     borderBottomWidth: StyleSheet.hairlineWidth * 2,
@@ -478,8 +484,8 @@ const styles = StyleSheet.create({
   },
   review: { paddingHorizontal: theme.layout.gutter },
   /**
-   * The social area holds its own rhythm rather than the card's 12pt gap: summary,
-   * hairline and actions read as one group, 8pt under the artwork or the review.
+   * The social area holds its own rhythm rather than the card's 12pt gap: summary and
+   * actions read as one group, 8pt under the artwork or the review.
    */
   social: { marginTop: -theme.space[1] },
   summary: {
@@ -493,11 +499,6 @@ const styles = StyleSheet.create({
   glyphs: { flexDirection: 'row', alignItems: 'center' },
   glyph: { fontSize: 15, lineHeight: undefined, includeFontPadding: false },
   glyphOverlap: { marginLeft: -3 },
-  socialDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginHorizontal: theme.layout.gutter,
-    backgroundColor: theme.border.hairline,
-  },
   picker: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   /**
    * The actions sit on the gutters too: each target is padded 8pt either side, and the

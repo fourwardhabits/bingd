@@ -1533,7 +1533,8 @@ function Body({
   return (
     <Sheet visible onClose={close} label={`Log ${heading}`}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        testID="log-sheet-scroll"
+        contentContainerStyle={[styles.content, !postRank && styles.contentBucketFoot]}
         keyboardShouldPersistTaps="handled"
         bounces={false}
       >
@@ -1616,56 +1617,6 @@ function Body({
             </View>
           ) : null}
 
-          {/* Inert until the read lands, rather than absent: the rows are the
-              sheet's shape, and having them appear a beat after the buckets would
-              make the sheet resize under the thumb that just tapped one. What is
-              withheld is the ability to act on a baseline that is not there yet. */}
-          {/* **One row.** See `noteValue` above for what happened to the Review /
-              Private note pair. */}
-          <SheetRow
-            icon="create-outline"
-            label="Note"
-            value={noteValue}
-            expanded={expanded === 'notes'}
-            onPress={notesReady ? toggleNotes : undefined}
-            disabledReason={loaded && !notesReady ? 'Loading' : GATE_REASON[fieldState]}
-          />
-          {notesReady && expanded === 'notes' ? (
-            <View style={[styles.expanded, styles.noteBox]}>
-              <NoteInput
-                value={note}
-                label="Note"
-                onChangeText={(next) => {
-                  setNoteEdit(next);
-                  // Typing is what saves — see the autosave block. The dirty flag
-                  // and the timer are refs, so this costs no render beyond the
-                  // overlay's own. (Disabled rule: an event handler, not render;
-                  // flagged transitively via the unmount effect.)
-                  // eslint-disable-next-line react-hooks/immutability
-                  dirtyNote.current = true;
-                  scheduleAutosave();
-                }}
-                onBlur={flushNote}
-              />
-              <NoteClaims
-                visibility={visibility}
-                spoilers={spoilers}
-                onSpoilers={(next) => {
-                  setSpoilersEdit(next);
-                  void saveDetails({ spoilers: next });
-                }}
-                onVisibility={(next) => {
-                  setVisibilityEdit(next);
-                  // The reader's explicit act, and the only thing that moves the remembered
-                  // choice. It decides how the next *new* note opens; this note's own
-                  // visibility is the value just chosen, and stored notes open on theirs.
-                  void rememberShareChoice(profile.id, next);
-                  void saveDetails({ visibility: next });
-                }}
-              />
-            </View>
-          ) : null}
-
           {/* A "Photos — Coming soon" row used to sit here. It was the last dead
               control in the app: permanently disabled, in the middle of the primary
               logging flow, for a feature nothing in the schema, the API or the PRD
@@ -1673,7 +1624,34 @@ function Body({
               it is an invitation with nothing behind it, and it had been read as a
               promise for long enough. */}
 
-          {/* Gated for the same reason, and for one of its own: `log_watched`
+          <SheetRow
+            icon="people-outline"
+            label="Who I watched with"
+            value={loaded ? companionValue : undefined}
+            expanded={expanded === 'who'}
+            onPress={
+              loaded
+                ? () => {
+                    setDateAutoOpen(false);
+                    setExpanded(expanded === 'who' ? null : 'who');
+                  }
+                : undefined
+            }
+            disabledReason={GATE_REASON[fieldState]}
+          />
+          {loaded && expanded === 'who' ? (
+            <View style={styles.expanded}>
+              <CompanionPicker
+                people={taggable}
+                selected={chosen}
+                onToggle={toggleCompanion}
+                max={MAX_COMPANIONS}
+                loading={people.isPending}
+              />
+            </View>
+          ) : null}
+
+          {/* Gated like the other two rows, and for a reason of its own: `log_watched`
               assigns the watch date rather than coalescing it, so a date picked
               against the default would overwrite a real one already recorded. */}
           {/**
@@ -1760,32 +1738,62 @@ function Body({
             </View>
           ) : null}
 
+          {/**
+           * **Who, then when, then the note** (founder, UI cohesion pass, 2026-11-06): the
+           * optional details in the order the founder fixed, above the buckets. Each row
+           * moved with its own disclosure, so what opens under a row is still the thing it
+           * names; nothing about how they save changed.
+           */}
+          {/* Inert until the read lands, rather than absent: the rows are the
+              sheet's shape, and having them appear a beat after the buckets would
+              make the sheet resize under the thumb that just tapped one. What is
+              withheld is the ability to act on a baseline that is not there yet. */}
+          {/* **One row.** See `noteValue` above for what happened to the Review /
+              Private note pair. */}
           <SheetRow
-            icon="people-outline"
-            label="Who I watched with"
-            value={loaded ? companionValue : undefined}
-            expanded={expanded === 'who'}
-            onPress={
-              loaded
-                ? () => {
-                    setDateAutoOpen(false);
-                    setExpanded(expanded === 'who' ? null : 'who');
-                  }
-                : undefined
-            }
-            disabledReason={GATE_REASON[fieldState]}
+            icon="create-outline"
+            label="Note"
+            value={noteValue}
+            expanded={expanded === 'notes'}
+            onPress={notesReady ? toggleNotes : undefined}
+            disabledReason={loaded && !notesReady ? 'Loading' : GATE_REASON[fieldState]}
           />
-          {loaded && expanded === 'who' ? (
-            <View style={styles.expanded}>
-              <CompanionPicker
-                people={taggable}
-                selected={chosen}
-                onToggle={toggleCompanion}
-                max={MAX_COMPANIONS}
-                loading={people.isPending}
+          {notesReady && expanded === 'notes' ? (
+            <View style={[styles.expanded, styles.noteBox]}>
+              <NoteInput
+                value={note}
+                label="Note"
+                onChangeText={(next) => {
+                  setNoteEdit(next);
+                  // Typing is what saves — see the autosave block. The dirty flag
+                  // and the timer are refs, so this costs no render beyond the
+                  // overlay's own. (Disabled rule: an event handler, not render;
+                  // flagged transitively via the unmount effect.)
+                  // eslint-disable-next-line react-hooks/immutability
+                  dirtyNote.current = true;
+                  scheduleAutosave();
+                }}
+                onBlur={flushNote}
+              />
+              <NoteClaims
+                visibility={visibility}
+                spoilers={spoilers}
+                onSpoilers={(next) => {
+                  setSpoilersEdit(next);
+                  void saveDetails({ spoilers: next });
+                }}
+                onVisibility={(next) => {
+                  setVisibilityEdit(next);
+                  // The reader's explicit act, and the only thing that moves the remembered
+                  // choice. It decides how the next *new* note opens; this note's own
+                  // visibility is the value just chosen, and stored notes open on theirs.
+                  void rememberShareChoice(profile.id, next);
+                  void saveDetails({ visibility: next });
+                }}
               />
             </View>
           ) : null}
+
         </View>
 
         {/**
@@ -1813,7 +1821,7 @@ function Body({
              * **The three buckets come last** (founder, Option A, 2026-11-04).
              *
              * The optional details sit above them so the screen reads top to bottom:
-             * what you thought, when, with whom, then how it was. The tap that starts
+             * with whom, when, what you thought, then how it was. The tap that starts
              * the comparisons is the last thing on it, and it still goes straight into
              * them: no Done, no extra step, nothing required.
              *
@@ -1849,6 +1857,13 @@ export { NoteInput };
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[4], gap: theme.space[4] },
+  /**
+   * **The sheet ends just under the bucket labels** (UI cohesion pass, 2026-11-06). The
+   * sheet already adds the navigation inset and 16pt of its own below everything, so
+   * the content's own 16pt on top of that was a second margin under the last row. 4pt
+   * is left, which keeps the chips' 8pt slop inside the scroll view.
+   */
+  contentBucketFoot: { paddingBottom: theme.space[1] },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

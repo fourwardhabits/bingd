@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { theme } from '../tokens';
+import { fontFamily, theme } from '../tokens';
 import { Text } from './Text';
 
 export type SegmentOption<T extends string> = {
@@ -31,12 +31,18 @@ export type SegmentOption<T extends string> = {
  * it has to hold the position and the weight a screen title held: `title2`, ink when
  * selected, and a 3pt rule.
  *
+ * `nav` — a page's own sections across the full width: Collection's Watched | Watchlist |
+ * Unranked (founder, UI cohesion pass, 2026-11-06). Equal columns, each label centred;
+ * the chosen one in Maroon over a thin Maroon rule the width of its word, the others in
+ * secondary Ink. Inter Medium at 15pt, so it reads as navigation rather than as a title,
+ * and no fill, outline or pill anywhere.
+ *
  * **The distinction is semantic, not decorative** (founder addendum, 2026-09-06). A
  * reader should be able to tell "take me to this content" from "narrow what I am looking
  * at" without reading the labels, which is also why Search's All/Movies/TV/People stayed
  * filter *chips* and did not become either of these.
  */
-export type SegmentedTabsVariant = 'primary' | 'secondary';
+export type SegmentedTabsVariant = 'primary' | 'secondary' | 'nav';
 
 export type SegmentedTabsProps<T extends string> = {
   options: readonly SegmentOption<T>[];
@@ -87,6 +93,50 @@ export function SegmentedTabs<T extends string>({
   accessibilityLabel,
 }: SegmentedTabsProps<T>) {
   const primary = variant === 'primary';
+
+  if (variant === 'nav') {
+    return (
+      <View
+        style={styles.navRow}
+        accessibilityRole="tablist"
+        accessibilityLabel={accessibilityLabel}
+        testID="nav-tabs"
+      >
+        {options.map((option) => {
+          const selected = option.id === value;
+          return (
+            <Pressable
+              key={option.id}
+              accessibilityRole="tab"
+              accessibilityLabel={option.accessibilityLabel}
+              accessibilityState={{ selected }}
+              onPress={() => onChange(option.id)}
+              style={({ pressed }) => [styles.navTab, pressed && !selected && styles.navPressed]}
+              testID={`nav-tab-${option.id}`}
+            >
+              {/* The rule is the word's width: a stretch inside a box that shrinks to the
+                  label, so it underlines what is chosen rather than the whole column. */}
+              <View style={styles.navLabelBox}>
+                <Text
+                  variant="callout"
+                  tone={selected ? 'action' : 'secondary'}
+                  numberOfLines={1}
+                  // A long word at a large system text size shrinks a little before it
+                  // would truncate; three columns on a 320pt phone are 96pt each.
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={styles.navLabel}
+                >
+                  {option.label}
+                </Text>
+                <View style={[styles.navRule, selected && styles.underlineActive]} />
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  }
 
   return (
     <ScrollView
@@ -173,4 +223,20 @@ const styles = StyleSheet.create({
   // heavier of the two when both rows are stacked on Collection.
   underlinePrimary: { height: 3 },
   underlineActive: { backgroundColor: theme.semantic.action },
+
+  /** Full width, the gutters as its edges, the columns equal however many there are. */
+  navRow: { flexDirection: 'row', paddingHorizontal: theme.layout.gutter },
+  navTab: {
+    flex: 1,
+    flexBasis: 0,
+    minHeight: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: theme.space[1],
+  },
+  navLabelBox: { alignItems: 'stretch', gap: theme.space[1] + 2, maxWidth: '100%' },
+  navLabel: { fontFamily: fontFamily.sansMedium, fontSize: 15, lineHeight: 20, textAlign: 'center' },
+  // Always present, so choosing a tab does not move its word by two points.
+  navRule: { height: 2, borderRadius: theme.radius.full, backgroundColor: 'transparent' },
+  navPressed: { opacity: 0.6 },
 });

@@ -94,16 +94,30 @@ describe('the header bar', () => {
 
   it('reserves the same height on the right with a bell, a gear and bell, or nothing', async () => {
     const heights = [
-      barOf(await render(<AppHeader />)).right.height,
-      barOf(await render(<AppHeader notifications={{ count: 0, onPress: () => {} }} />)).right.height,
+      barOf(await render(<AppHeader />)).right.minHeight,
+      barOf(await render(<AppHeader notifications={{ count: 0, onPress: () => {} }} />)).right.minHeight,
       barOf(
         await render(
           <AppHeader settings={{ onPress: () => {} }} notifications={{ count: 2, onPress: () => {} }} />,
         ),
-      ).right.height,
+      ).right.minHeight,
     ];
 
     expect(typeof heights[0]).toBe('number');
     expect(new Set(heights).size).toBe(1);
+  });
+
+  /**
+   * **A 44pt box that takes 34pt of the row** (UI cohesion pass, 2026-11-06). Collection's
+   * and For You's Movies | TV halves are 44pt presses, which must lie inside their parent
+   * to answer on Android; the bleed into the header's padding keeps the row, and so the
+   * logo, exactly where it was.
+   */
+  it('gives the right side a 44pt box that still lays out at 34pt', async () => {
+    const { right } = barOf(await render(<AppHeader right={<></>} />));
+
+    expect(right.minHeight).toBe(44);
+    expect(right.marginVertical).toBe(-5);
+    expect((right.minHeight as number) + 2 * (right.marginVertical as number)).toBe(34);
   });
 });

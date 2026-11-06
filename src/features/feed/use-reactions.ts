@@ -17,7 +17,9 @@ export const REACTIONS = [
   { kind: 'love', label: 'Love', glyph: '❤️' },
   { kind: 'agree', label: 'Agree', glyph: '👍' },
   { kind: 'disagree', label: 'Disagree', glyph: '👎' },
-  { kind: 'funny', label: 'Funny', glyph: '😂' },
+  // Laugh, not Funny (founder, UI cohesion pass, 2026-11-06): the word for what the
+  // reader did. The stored kind stays `funny`, so no row and no notification changes.
+  { kind: 'funny', label: 'Laugh', glyph: '😂' },
   { kind: 'wow', label: 'Wow', glyph: '😮' },
   { kind: 'moved', label: 'Moved', glyph: '😢' },
 ] as const;

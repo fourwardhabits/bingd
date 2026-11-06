@@ -1,6 +1,8 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -185,10 +187,11 @@ beforeEach(() => {
 type View = Awaited<ReturnType<typeof renderWithProviders>>;
 
 /**
- * **The page's dropdown** (founder final polish, 2026-11-04): Watched, Watchlist, Unranked
- * while this side has an unranked title, and Lists. Its label names what is showing.
+ * **The page's tabs** (founder, UI cohesion pass, 2026-11-06): Watched, Watchlist, and
+ * Unranked while this side has an unranked title, as a full-width tab row under the header.
  */
-const menu = (view: View) => view.getByLabelText(/^Showing /);
+const SEGMENTS = ['Watched', 'Watchlist', 'Unranked'] as const;
+const menu = (view: View) => view.getByTestId('nav-tabs');
 
 const open = async () => {
   const view = await renderWithProviders(<CollectionScreen />);
@@ -196,29 +199,17 @@ const open = async () => {
   return view;
 };
 
-/** What the dropdown is showing: a segment, or Lists. */
-const shown = (view: View) => menu(view).props.accessibilityLabel.replace(/^Showing /, '');
+/** Which tab is showing. */
+const shown = (view: View) =>
+  SEGMENTS.find((name) => view.queryByRole('tab', { name })?.props.accessibilityState?.selected);
 
-/** An entry by its word; the chosen one's name also carries its checkmark. */
-const entry = (name: string) => new RegExp(`^${name}(\\s|$)`);
+/** The tabs on offer, in order. Async so the call sites read as they always did. */
+const offered = async (view: View) =>
+  SEGMENTS.filter((name) => view.queryByRole('tab', { name }) !== null);
 
-/**
- * The entries the dropdown offers. It is opened to read them and closed again, so the
- * screen is left as it was found; the entries are the old tab row's, plus Lists.
- */
-const offered = async (view: View) => {
-  await fireEvent.press(menu(view));
-  const names = ['Watched', 'Watchlist', 'Unranked', 'Lists'].filter(
-    (name) => view.queryByRole('button', { name: entry(name) }) !== null,
-  );
-  await fireEvent.press(view.getByLabelText('Close'));
-  return names;
-};
-
-/** Choose an entry from the dropdown. */
-const choose = async (view: View, name: 'Watched' | 'Watchlist' | 'Unranked' | 'Lists') => {
-  await fireEvent.press(menu(view));
-  await fireEvent.press(view.getByRole('button', { name: entry(name) }));
+/** Choose a tab. */
+const choose = async (view: View, name: (typeof SEGMENTS)[number]) => {
+  await fireEvent.press(view.getByRole('tab', { name }));
 };
 
 /** The medium is the Movies | TV switch beside the dropdown. */
@@ -859,85 +850,86 @@ describe('re-tapping the Collection tab', () => {
 });
 
 /**
- * **Lists** is a first-class mode (founder QA, 2026-09-21), replacing the `My lists ›`
- * link. Since the final polish (2026-11-04) it is the dropdown's last entry, after Watched,
- * Watchlist and Unranked; the Movies | TV switch is not drawn on it, because a list mixes
- * media, and the choice is remembered like the two media.
+ * **Lists, as one labelled secondary link** (founder, UI cohesion pass, 2026-11-06).
+ *
+ * It was the dropdown's last entry and an inline mode. With the dropdown replaced by
+ * Watched | Watchlist | Unranked tabs, Lists is not a fourth tab: it is `My lists ›` at
+ * the right of the count row, a push to the screen Profile's manage link opens, with this
+ * door's own `entry`.
  */
-describe('the Lists mode', () => {
-  it('is the last entry of the dropdown, and replaces the old link', async () => {
+describe('the way to Lists', () => {
+  it('is not a tab', async () => {
     const view = await open();
-    expect(view.queryByRole('button', { name: 'My lists' })).toBeNull();
-    expect(await offered(view)).toEqual(['Watched', 'Watchlist', 'Lists']);
+    expect(view.queryByRole('tab', { name: 'Lists' })).toBeNull();
+    expect(await offered(view)).toEqual(['Watched', 'Watchlist']);
   });
 
-  it('shows the lists in place, with no medium switch and no push', async () => {
-    const view = await open();
-    await choose(view, 'Lists');
-
-    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
-    expect(view.queryByRole('radiogroup', { name: 'Medium' })).toBeNull();
-    expect(shown(view)).toBe('Lists');
-    expect(mockPush).not.toHaveBeenCalled();
-    expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'lists' });
-  });
-
-  it('reopens on Lists when that was the last choice', async () => {
-    // One render per test (the RNTL trap this file's neighbours document): the write is
-    // asserted above, and here the stored value is seeded as a restart would find it.
-    mockPrefStore[MEDIUM_KEY] = 'lists';
-    const view = await renderWithProviders(<CollectionScreen />);
-    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
-    expect(view.queryByRole('radiogroup', { name: 'Medium' })).toBeNull();
-  });
-
-  it('returns to the side the reader was on when they leave it', async () => {
-    mockTables.user_media = [watched('s1', 'season')];
-    const view = await open();
-    await switchTo(view, 'TV');
-    await choose(view, 'Lists');
-    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
-
-    await choose(view, 'Watchlist');
-
-    await waitFor(() => expect(side(view)).toBe('TV'));
-    expect(shown(view)).toBe('Watchlist');
-    expect(mockPrefWrites.at(-1)).toEqual({ name: MEDIUM_KEY, value: 'tv_seasons' });
-  });
-
-  /**
-   * **On Lists, Unranked is offered for the side leaving Lists will open** (independent
-   * review, 2026-11-04). It was asked of Movies, which Lists stands in for, so a reader who
-   * came from TV was offered a Movies backlog that then fell back to Watched on TV.
-   */
-  it('offers Unranked on Lists only when the side it returns to has one', async () => {
+  it('is a labelled link that pushes My lists from this door', async () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
-    await switchTo(view, 'TV');
-    await choose(view, 'Lists');
-    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
+    const link = await waitFor(() => view.getByRole('link', { name: 'My lists' }));
 
-    expect(await offered(view)).not.toContain('Unranked');
+    await fireEvent.press(link);
+    expect(mockPush).toHaveBeenCalledWith('/lists?entry=collection');
   });
 
-  it('opens Unranked from Lists on the side the reader came from', async () => {
-    mockTables.user_media = [watched('s1', 'season')];
+  it('is there on an empty collection too', async () => {
     const view = await open();
-    await switchTo(view, 'TV');
+    await waitFor(() => expect(view.getByText('Your watched list starts here')).toBeTruthy());
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+  });
+
+  it('is there on the Watchlist', async () => {
+    const view = await open();
+    await choose(view, 'Watchlist');
+    await waitFor(() => expect(shown(view)).toBe('Watchlist'));
+    expect(view.getByRole('link', { name: 'My lists' })).toBeTruthy();
+  });
+
+  it('opens on Movies when the build before left Lists as the remembered mode', async () => {
+    mockPrefStore[MEDIUM_KEY] = 'lists';
+    const view = await open();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(side(view)).toBe('Movies');
+    expect(shown(view)).toBe('Watched');
+  });
+});
+
+/**
+ * **Movies | TV in the header, Watched | Watchlist | Unranked under it** (founder, UI
+ * cohesion pass, 2026-11-06): one switch, not repeated in the body, and tabs in equal
+ * columns with the chosen one in Maroon.
+ */
+describe('the header and the tabs', () => {
+  it('draws one Movies | TV switch, in the header', async () => {
+    const view = await open();
+    const switches = view.getAllByLabelText('Medium');
+    expect(switches).toHaveLength(1);
+    expect(view.queryByLabelText('Notifications')).toBeNull();
+  });
+
+  it('marks the chosen tab in Maroon and gives every tab an equal column', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
     await waitFor(async () => expect(await offered(view)).toContain('Unranked'));
-    await choose(view, 'Lists');
-    await waitFor(() => expect(view.getByText('No lists yet')).toBeTruthy());
-    expect(await offered(view)).toContain('Unranked');
-
-    await choose(view, 'Unranked');
-
-    await waitFor(() => expect(shown(view)).toBe('Unranked'));
-    expect(side(view)).toBe('TV');
+    for (const name of SEGMENTS) {
+      const tab = view.getByRole('tab', { name });
+      expect(StyleSheet.flatten(tab.props.style).flex).toBe(1);
+    }
+    const label = (name: string) =>
+      StyleSheet.flatten(within(view.getByRole('tab', { name })).getByText(name).props.style);
+    expect(label('Watched').color).toBe(theme.semantic.action);
+    expect(label('Watchlist').color).not.toBe(theme.semantic.action);
   });
 
-  it('leaves no tab row behind', async () => {
+  it('keeps the tab when the side changes and the new side has it too', async () => {
     const view = await open();
-    expect(view.queryAllByRole('tab')).toHaveLength(0);
+    await choose(view, 'Watchlist');
+    await switchTo(view, 'TV');
+    await waitFor(() => expect(side(view)).toBe('TV'));
+    expect(shown(view)).toBe('Watchlist');
   });
 });
 
@@ -1135,19 +1127,4 @@ describe('the backlog and Refine cards', () => {
     });
   });
 
-  it('Lists: no ranking or refinement cards', async () => {
-    mockTables.user_media = [watched('m1', 'movie')];
-    mockRpcAnswers.ranking_backlog = backlog(3);
-    mockRpcAnswers.refine_candidates = strongRefine();
-    mockPrefStore[MEDIUM_KEY] = 'lists';
-    const view = await renderWithProviders(<CollectionScreen />);
-
-    await waitFor(() => expect(view.getByLabelText('Showing Lists')).toBeTruthy());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(view.queryByText('You have titles left to rank')).toBeNull();
-    expect(view.queryByText('Fine-tune your rankings')).toBeNull();
-    expect(view.queryByTestId('collection-start-ranking-card')).toBeNull();
-  });
 });

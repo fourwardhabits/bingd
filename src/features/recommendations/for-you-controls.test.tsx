@@ -1,4 +1,4 @@
-import { waitFor, within } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -143,6 +143,30 @@ describe('the header carries no bell', () => {
 
     expect(view.queryByLabelText('Settings')).toBeNull();
     expect(view.queryByLabelText(/^Notifications/)).toBeNull();
+  });
+
+  /**
+   * **Movies | TV in the header's corner, once** (founder, UI cohesion pass, 2026-11-06).
+   * It sat at the right of the Recommended row; it moved up rather than being repeated.
+   */
+  it('holds the one Movies | TV switch, inside the header', async () => {
+    const view = await open();
+
+    expect(view.getAllByLabelText('Medium')).toHaveLength(1);
+    const header = view.getByTestId('app-header');
+    expect(within(header).getByRole('radio', { name: 'Movies' })).toBeTruthy();
+    expect(within(header).getByRole('radio', { name: 'TV' })).toBeTruthy();
+  });
+
+  it('switches the wall from the header and keeps the choice across Top Rated', async () => {
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('radio', { name: 'TV' }));
+    await waitFor(() =>
+      expect(view.getByRole('radio', { name: 'TV' }).props.accessibilityState).toMatchObject({
+        selected: true,
+      }),
+    );
   });
 });
 

@@ -674,23 +674,33 @@ export default function RecommendationsScreen() {
        * add it to the two screens that never had it.
        *
        * Nothing about notifications changed. The inbox is still reached from Feed, which
-       * is the social surface it belongs to, and from Profile beside the gear. This is a
-       * header losing a control, not a navigation redesign.
+       * is the social surface it belongs to. This is a header losing a control, not a
+       * navigation redesign.
+       *
+       * **Its corner holds Movies | TV now** (founder, UI cohesion pass, 2026-11-06), as
+       * Collection's does: the same switch, value and handler that sat at the right of the
+       * row below, moved up into the header rather than repeated.
        */}
-      <AppHeader />
+      <AppHeader
+        right={
+          <CompactSwitch
+            accessibilityLabel="Medium"
+            options={FOR_YOU_MEDIA}
+            value={topMedium ?? medium}
+            onChange={(next) =>
+              changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
+            }
+          />
+        }
+      />
       <HeaderBoundary />
 
       {/**
-       * **Recommended / Top Rated on the left, Movies | TV on the right** (founder final
-       * polish, 2026-11-04), under the header's divider rather than above it.
-       *
-       * Which wall is the page's dropdown, and the medium is the compact switch: the same
-       * two components, sizes and spacing as Collection's row, so the two screens share
-       * one navigation pattern. Together they are still the four `ForYouMode`s, so nothing
-       * below the row changed, and each control keeps the other's value. No For You
-       * heading, because the tab bar already says where the reader is. Where both do not
-       * fit one line (about 330pt, so a 320pt phone) the switch wraps under the dropdown,
-       * right-aligned, rather than either shrinking.
+       * **Recommended / Top Rated, the page's dropdown** (founder final polish,
+       * 2026-11-04), under the header's divider. The medium is the header's switch since
+       * the UI cohesion pass (2026-11-06); together they are still the four `ForYouMode`s,
+       * so nothing below the row changed, and each control keeps the other's value. No For
+       * You heading, because the tab bar already says where the reader is.
        */}
       <View style={styles.header}>
         <View style={styles.headerWall}>
@@ -702,16 +712,6 @@ export default function RecommendationsScreen() {
               const showing = topMedium ?? medium;
               changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
             }}
-          />
-        </View>
-        <View style={styles.headerMedium}>
-          <CompactSwitch
-            accessibilityLabel="Medium"
-            options={FOR_YOU_MEDIA}
-            value={topMedium ?? medium}
-            onChange={(next) =>
-              changeMode(onTopRated ? (next === 'movies' ? 'topMovies' : 'topTv') : next)
-            }
           />
         </View>
       </View>
@@ -1319,21 +1319,13 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  /**
-   * One row where it fits, which is 360pt and wider. Below that the switch wraps to a
-   * second line, right-aligned, rather than covering the dropdown or shrinking. The 12pt
-   * column gap is the least space between the dropdown's chevron and the switch.
-   * Collection's `titleRow` is the same row.
-   */
+  /** The dropdown alone, on its gutter; the medium switch is in the header above. */
   header: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    columnGap: theme.space[3],
     paddingRight: theme.layout.gutter,
   },
-  headerWall: { flexShrink: 0 },
-  headerMedium: { flexShrink: 0, marginLeft: 'auto' },
+  headerWall: { flexShrink: 1 },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
   exhausted: {
     paddingHorizontal: theme.layout.gutter,

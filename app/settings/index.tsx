@@ -103,7 +103,7 @@ export default function SettingsScreen() {
             {/* **The inbox is not reachable from here, and that is the founder's
                 Preview correction.** There was a Notifications row above this one going
                 to `/settings/notifications`, and it was a second door to a room with a
-                door already: the bell in the Feed and Profile headers opens the same
+                door already: the bell in the Feed header opens the same
                 inbox, from the screens somebody is actually on when they wonder who
                 reacted. Two entry points to one inbox, one of them three taps deep inside
                 Settings, made the pair read as two different features.

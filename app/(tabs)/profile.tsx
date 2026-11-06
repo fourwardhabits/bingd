@@ -14,7 +14,6 @@ import {
 
 import { RankingBatchSheet } from '@/features/feed/RankingBatchSheet';
 import { useCurrentProfile } from '@/features/auth';
-import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
@@ -83,7 +82,6 @@ export default function ProfileScreen() {
   const feed = useActorActivity(profile.id);
   const watched = useWatched(profile.id);
   const stats = useProfileStats(profile.id);
-  const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   /** The grouped ranking post whose titles are open, if any (20261020000100). */
   const [rankingBatchFor, setRankingBatchFor] = useState<{ id: string; medium: string } | null>(
@@ -252,14 +250,9 @@ export default function ProfileScreen() {
   return (
     <Screen>
       <AppHeader
-        // A gear rather than the word, and to the left of the bell rather than in
-        // place of it. The bell is meant to sit in the same corner on every root tab;
-        // a text button beside it was pushing it out of that corner on this one.
+        // The gear alone (founder, UI cohesion pass, 2026-11-06). The bell that sat
+        // beside it was a second door to the inbox; the inbox's door is Feed's bell.
         settings={{ onPress: () => router.push('/settings') }}
-        notifications={{
-          count: unreadCount(notifications.data),
-          onPress: () => router.push('/settings/notifications'),
-        }}
       />
       {/* The divider every main tab draws under its header (founder final polish,
           2026-11-04). Profile was the one without it. */}

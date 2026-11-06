@@ -152,12 +152,22 @@ describe('the three choices, polished', () => {
     }
   });
 
-  it('sets the labels semibold, beneath their circles', async () => {
+  it('sets the labels in Inter Regular, beneath their circles', async () => {
     await draw();
     for (const id of ['loved', 'fine', 'notForMe']) {
       const label = flatten(screen.getByTestId(`bucket-label-${id}`).props.style);
-      expect(label.fontFamily).toBe(fontFamily.sansSemibold);
+      expect(label.fontFamily).toBe(fontFamily.sans);
       expect(label.textAlign).toBe('center');
     }
+  });
+
+  it('keeps the circles at 44pt and the row at three equal columns', async () => {
+    await draw();
+    for (const id of ['loved', 'fine', 'notForMe'] as const) {
+      expect(circle(id).width).toBe(44);
+      expect(circle(id).height).toBe(44);
+    }
+    const choices = flatten(screen.getByTestId('choices').props.style);
+    expect(choices.flexDirection).toBe('row');
   });
 });
