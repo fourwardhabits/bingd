@@ -14,6 +14,14 @@ export type CreditsResult = {
   cast: CreditPerson[];
   director: string | null;
   /**
+   * Everyone credited with the job **Director**, in TMDB's order, each once — and nobody
+   * from the Directing department under another job (an assistant director is not the
+   * film's director). Empty when there is no such credit. The Cinematic title module's
+   * "Directed by" line reads this (title-page sprint, 2026-11-06), so it is only ever as
+   * confident as the credit itself.
+   */
+  directors: string[];
+  /**
    * The television equivalent of a director: an explicit **Creator**, and nothing else.
    *
    * ---------------------------------------------------------------------------
@@ -83,8 +91,15 @@ export function useCredits(mediaItemId: string | null) {
       // Creator or nothing. See the type above for why an Executive Producer is not an
       // acceptable stand-in for the person whose show it is.
       const showrunner = payload.crew?.find((person) => person.job === 'Creator')?.name ?? null;
+      const directors = [
+        ...new Set(
+          (payload.crew ?? [])
+            .filter((person) => person.job === 'Director' && person.name?.trim())
+            .map((person) => person.name.trim()),
+        ),
+      ];
 
-      return { cast, director, showrunner };
+      return { cast, director, directors, showrunner };
     },
   });
 }
