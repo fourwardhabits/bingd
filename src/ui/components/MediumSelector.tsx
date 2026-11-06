@@ -1,6 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
@@ -115,8 +122,18 @@ export function MediumSelector<T extends string = Medium>({
   const anchored = size === 'heading' || size === 'filter';
   /** Where the anchored menu opens: just under the control, in window coordinates. */
   const [anchor, setAnchor] = useState<{ x: number; y: number; height: number } | null>(null);
+  /** The open menu's own height, once laid out, so it can be placed inside the window. */
+  const [menuHeight, setMenuHeight] = useState<number | null>(null);
   const trigger = useRef<View>(null);
   const win = useWindowDimensions();
+  /**
+   * A window that changes size while the menu is open (a rotation, split screen) makes the
+   * measured anchor wrong, so the menu closes rather than hanging where the control was
+   * (independent review 1). Adjusted during render, against the size it was opened at.
+   */
+  const windowKey = `${win.width}x${win.height}`;
+  const [openedAt, setOpenedAt] = useState(windowKey);
+  if (open && openedAt !== windowKey) setOpen(false);
   /**
    * The foot of the option sheet, by `Sheet`'s rule (2026-09-07).
    *
@@ -156,6 +173,8 @@ export function MediumSelector<T extends string = Medium>({
             if (settled) return;
             settled = true;
             setAnchor(at);
+            setMenuHeight(null);
+            setOpenedAt(windowKey);
             setOpen(true);
           };
           const node = trigger.current;
@@ -234,43 +253,52 @@ export function MediumSelector<T extends string = Medium>({
           <View
             accessibilityRole="menu"
             testID={testID ? `${testID}-menu` : undefined}
-            style={[styles.menu, menuPosition(anchor, win.width)]}
+            onLayout={(event) => setMenuHeight(event.nativeEvent.layout.height)}
+            style={[
+              styles.menu,
+              menuPosition(anchor, win, insets, menuHeight),
+              // Unseen for the one frame before its height is known, so it never shows
+              // in a place it is about to leave.
+              menuHeight === null && styles.unplaced,
+            ]}
           >
-            {table.map((option) => {
-              const selected = option.id === value;
-              return (
-                <Pressable
-                  key={option.id}
-                  accessibilityRole="menuitem"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={labelFor(option.id, table, labels)}
-                  onPress={() => {
-                    setOpen(false);
-                    if (!selected) onChange(option.id);
-                  }}
-                  style={({ pressed }) => [
-                    styles.menuOption,
-                    selected && styles.optionSelected,
-                    pressed && styles.menuPressed,
-                  ]}
-                >
-                  <Text
-                    variant="callout"
-                    tone={selected ? 'action' : 'primary'}
-                    style={styles.title}
+            <ScrollView bounces={false} contentContainerStyle={styles.menuList}>
+              {table.map((option) => {
+                const selected = option.id === value;
+                return (
+                  <Pressable
+                    key={option.id}
+                    accessibilityRole="menuitem"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={labelFor(option.id, table, labels)}
+                    onPress={() => {
+                      setOpen(false);
+                      if (!selected) onChange(option.id);
+                    }}
+                    style={({ pressed }) => [
+                      styles.menuOption,
+                      selected && styles.optionSelected,
+                      pressed && styles.menuPressed,
+                    ]}
                   >
-                    {labelFor(option.id, table, labels)}
-                  </Text>
-                  {selected ? (
-                    <Ionicons
-                      name="checkmark"
-                      size={theme.layout.icon.sm}
-                      color={theme.semantic.action}
-                    />
-                  ) : null}
-                </Pressable>
-              );
-            })}
+                    <Text
+                      variant="callout"
+                      tone={selected ? 'action' : 'primary'}
+                      style={styles.title}
+                    >
+                      {labelFor(option.id, table, labels)}
+                    </Text>
+                    {selected ? (
+                      <Ionicons
+                        name="checkmark"
+                        size={theme.layout.icon.sm}
+                        color={theme.semantic.action}
+                      />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </Modal>
       ) : (
@@ -339,20 +367,44 @@ const MENU_WIDTH = 220;
 const MENU_GAP = theme.space[1];
 
 /**
- * Under the control, its left edge on the control's, kept inside the gutters. An
- * unmeasured control (a test renderer, a view not laid out yet) opens near the top.
+ * Where the anchored menu goes: under the control, its left edge on the control's, inside
+ * the gutters — and always inside the window (independent review 1). If it does not fit
+ * below the control it opens above it; if it fits neither way it is pinned to the window's
+ * foot and scrolls, its height capped by the safe area. An unmeasured control (a test
+ * renderer, a view not laid out yet) opens near the top.
  */
-function menuPosition(
+export function menuPosition(
   anchor: { x: number; y: number; height: number } | null,
-  windowWidth: number,
+  window: { width: number; height: number },
+  insets: { top: number; bottom: number },
+  menuHeight: number | null,
 ) {
-  const width = Math.min(MENU_WIDTH, windowWidth - theme.layout.gutter * 2);
-  if (!anchor) return { top: theme.space[10] * 2, left: theme.layout.gutter, width };
+  const width = Math.min(MENU_WIDTH, window.width - theme.layout.gutter * 2);
+  const topBound = insets.top + MENU_GAP;
+  const bottomBound = window.height - insets.bottom - MENU_GAP;
+  const maxHeight = Math.max(0, bottomBound - topBound);
+  const height = Math.min(menuHeight ?? 0, maxHeight);
+  if (!anchor) {
+    return {
+      top: Math.max(topBound, Math.min(theme.space[10] * 2, bottomBound - height)),
+      left: theme.layout.gutter,
+      width,
+      maxHeight,
+    };
+  }
   const left = Math.max(
     theme.layout.gutter,
-    Math.min(anchor.x, windowWidth - theme.layout.gutter - width),
+    Math.min(anchor.x, window.width - theme.layout.gutter - width),
   );
-  return { top: anchor.y + anchor.height + MENU_GAP, left, width };
+  const below = anchor.y + anchor.height + MENU_GAP;
+  const above = anchor.y - MENU_GAP - height;
+  const top =
+    below + height <= bottomBound
+      ? below
+      : above >= topBound
+        ? above
+        : Math.max(topBound, bottomBound - height);
+  return { top, left, width, maxHeight };
 }
 
 const styles = StyleSheet.create({
@@ -399,14 +451,15 @@ const styles = StyleSheet.create({
   optionSelected: { backgroundColor: theme.surface.sunken },
   menu: {
     position: 'absolute',
-    padding: theme.space[1],
-    gap: 2,
+    overflow: 'hidden',
     backgroundColor: theme.surface.raised,
     borderRadius: theme.radius.card,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.border.hairline,
     ...theme.elevation.e2,
   },
+  menuList: { padding: theme.space[1], gap: 2 },
+  unplaced: { opacity: 0 },
   menuOption: {
     flexDirection: 'row',
     alignItems: 'center',

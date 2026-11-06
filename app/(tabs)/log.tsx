@@ -147,7 +147,11 @@ export default function LogScreen() {
    * `show: 'unranked'`: Search is a tab and stays mounted, so a second arrival is a second
    * request rather than a param that never changed. The query is left as it was.
    */
-  const { show: showParam } = useLocalSearchParams<{ show?: string }>();
+  const { show: showRaw } = useLocalSearchParams<{ show?: string | string[] }>();
+  // A repeated param (`?show=users&show=users`) arrives as an array that is new on every
+  // render; compared as-is it would set state on every render (independent review 1). One
+  // string, compared by value.
+  const showParam = Array.isArray(showRaw) ? showRaw[0] : showRaw;
   const [askedFor, setAskedFor] = useState<string | undefined>(undefined);
   if (showParam !== askedFor) {
     setAskedFor(showParam);

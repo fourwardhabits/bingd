@@ -94,7 +94,7 @@ const pressSearchTab = () => {
 };
 
 // The route's own params: `show: 'users'` is People's "Find people" (`memberSearch()`).
-let mockParams: Record<string, string | undefined> = {};
+let mockParams: Record<string, string | string[] | undefined> = {};
 const mockSetParams = jest.fn();
 jest.mock('expo-router', () => ({
   useNavigation: () => mockNavigation,
@@ -362,6 +362,18 @@ describe('arriving on Users', () => {
     await waitFor(() => expect(view.getByText('Anna Rivers')).toBeTruthy());
     const users = view.getByRole('button', { name: 'Users' });
     expect(users.props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it('takes a repeated param once, rather than re-rendering for ever', async () => {
+    // A new array on every render, as the router hands a repeated query param over
+    // (independent review 1): compared as-is, it set state on every render.
+    let reads = 0;
+    Object.defineProperty(mockParams, 'show', { get: () => { reads += 1; return ['users', 'users']; }, enumerable: true, configurable: true });
+    const view = await renderWithProviders(<LogScreen />);
+
+    expect(view.getByText('Find people')).toBeTruthy();
+    expect(mockSetParams).toHaveBeenCalledWith({ show: undefined });
+    expect(reads).toBeLessThan(20);
   });
 
   it('is an ordinary Search without the param', async () => {
