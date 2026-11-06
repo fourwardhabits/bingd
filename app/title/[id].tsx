@@ -2169,8 +2169,9 @@ export default function TitleScreen() {
         : null}
 
       {/* Its spacing travels with it: a title with no providers draws nothing, gap included.
-          The row draws its own heading, so its own top padding is the seam. */}
-      <WhereToWatch mediaItemId={title.id} titleName={title.title} style={styles.immersiveWatch} />
+          The row draws its own heading, so the seam is its own top padding, inside its own
+          touch area — never a negative margin over the synopsis above it. */}
+      <WhereToWatch mediaItemId={title.id} titleName={title.title} topSpace={SECTION_SEAM} />
 
       {isSeason
         ? immersiveSection('episodes', 'Episodes', tabContent('episodes'), { gap: 0 })
@@ -3578,8 +3579,6 @@ const styles = StyleSheet.create({
    * of one body to the next heading, inside the founder's 20–24.
    */
   immersiveSection: { paddingTop: SECTION_SEAM },
-  /** Where to Watch's row carries its own 28pt; this brings its seam back to the others'. */
-  immersiveWatch: { marginTop: SECTION_SEAM - theme.space[7] },
   /** More details: a heading-sized disclosure with a 44pt target, its facts beneath. */
   moreDetailsToggle: {
     flexDirection: 'row',

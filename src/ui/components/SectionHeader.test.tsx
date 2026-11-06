@@ -69,3 +69,36 @@ describe('SectionHeader sizes', () => {
     expect(style.textTransform).toBe('none');
   });
 });
+
+/**
+ * **`tight`** (final title refinement, 2026-11-06): the heading's own line rather than a
+ * 44pt row, with the action's 44pt target kept by its slop, and the row raised above the
+ * body drawn right after it so that body cannot take the slop's lower half (independent
+ * review 1). Every other header keeps its 44pt row.
+ */
+describe('SectionHeader tight', () => {
+  it('keeps a 44pt row by default', async () => {
+    const view = await render(<SectionHeader title="Cast" actionLabel="See all" onPressAction={jest.fn()} />);
+
+    expect(StyleSheet.flatten(view.getByLabelText('Cast').props.style).minHeight).toBe(
+      theme.layout.minTapTarget,
+    );
+  });
+
+  it('draws one line, raised over what follows, with a 44pt slop on the action', async () => {
+    const onPress = jest.fn();
+    const view = await render(
+      <SectionHeader title="Cast" actionLabel="See all" onPressAction={onPress} tight />,
+    );
+
+    const row = StyleSheet.flatten(view.getByLabelText('Cast').props.style);
+    expect(row.minHeight).toBe(0);
+    expect(row.zIndex).toBe(1);
+    const action = view.getByRole('button');
+    // A footnote line (18pt) plus 13pt above and below.
+    expect(action.props.hitSlop).toMatchObject({ top: 13, bottom: 13 });
+    expect(18 + action.props.hitSlop.top + action.props.hitSlop.bottom).toBeGreaterThanOrEqual(
+      theme.layout.minTapTarget,
+    );
+  });
+});

@@ -3961,6 +3961,32 @@ describe('the immersive title page (experiment)', () => {
       expect(body('cast')).toMatchObject({ paddingTop: 0 });
     });
 
+    /**
+     * **Where to Watch keeps to its own space** (independent review 1): its 20pt seam is its
+     * own row's top padding. It was a negative margin, which laid the row's Pressable over
+     * the synopsis above it and its More control.
+     */
+    it('spaces Where to Watch inside its own row, never over the synopsis', async () => {
+      mockFetchWatchProviders.mockResolvedValue({
+        region: 'US',
+        link: null,
+        providers: [{ provider_id: 8, name: 'Netflix', logo_path: '/n.jpg', offers: ['stream'] }],
+      });
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const row = await waitFor(() => view.getByTestId('where-to-watch'));
+
+      expect(StyleSheet.flatten(row.props.style)).toMatchObject({ paddingTop: 20 });
+      // Nothing between the row and the page pulls it upward.
+      let node = row.parent;
+      while (node && node.props?.testID !== 'immersive-section-cast') {
+        const style = StyleSheet.flatten(node.props?.style) ?? {};
+        expect(Number(style.marginTop ?? 0)).toBeGreaterThanOrEqual(0);
+        node = node.parent;
+        if (node?.props?.testID === 'immersive-hero') break;
+      }
+    });
+
     it('ranks an unranked title from Rank, through the log sheet', async () => {
       const view = await open();
       await waitFor(() => expect(view.getByTestId('title-action-rank')).toBeTruthy());

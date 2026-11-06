@@ -26,6 +26,13 @@ export type WhereToWatchProps = {
    * providers leaves no gap behind.
    */
   style?: StyleProp<ViewStyle>;
+  /**
+   * The air above the heading, inside the row's own touch area: the page's section interval
+   * by default. The Cinematic page passes its 20pt seam (final title refinement,
+   * 2026-11-06) rather than pulling the row up with a negative margin, which laid the row's
+   * Pressable over the bottom of the synopsis and its More control (independent review).
+   */
+  topSpace?: number;
 };
 
 /** How many logos the collapsed row shows before it starts counting. */
@@ -80,7 +87,7 @@ const OFFERS: { offer: WatchOffer; label: string }[] = [
  * own, so two Maroon labels and a section's worth of air between them do the separating,
  * and the page's one remaining hairline is above the tab row.
  */
-export function WhereToWatch({ mediaItemId, titleName, style }: WhereToWatchProps) {
+export function WhereToWatch({ mediaItemId, titleName, style, topSpace }: WhereToWatchProps) {
   const [open, setOpen] = useState(false);
   const availability = useWatchProviders(mediaItemId);
 
@@ -119,7 +126,11 @@ export function WhereToWatch({ mediaItemId, titleName, style }: WhereToWatchProp
         )}`}
         accessibilityHint="Opens the full list of services"
         onPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+        style={({ pressed }) => [
+          styles.row,
+          topSpace !== undefined && { paddingTop: topSpace },
+          pressed && styles.pressed,
+        ]}
       >
         <View style={styles.copy}>
           {/**

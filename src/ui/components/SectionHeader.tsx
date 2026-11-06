@@ -48,7 +48,10 @@ export type SectionHeaderProps = {
    * The heading's own line height rather than a 44pt row, so the content under it starts
    * about 8pt below the words rather than 14pt plus whatever the content adds: the
    * Cinematic title page, where the gap under ABOUT read as too large on the phone (final
-   * title refinement, 2026-11-06). An action keeps a 44pt target through its slop.
+   * title refinement, 2026-11-06). An action keeps a 44pt target through its slop, and the
+   * row is raised above the body that follows (`zIndex`): both platforms hit-test siblings
+   * in z order and, with nothing clipped, honour slop outside the row, so a rail drawn right
+   * under the heading cannot take the lower half of See all or Show previews.
    */
   tight?: boolean;
 };
@@ -125,7 +128,7 @@ const FIT_FLOOR = 0.6;
 const TIGHT_SLOP = { top: 13, bottom: 13, left: theme.space[2], right: theme.space[2] };
 
 const styles = StyleSheet.create({
-  tight: { minHeight: 0 },
+  tight: { minHeight: 0, zIndex: 1 },
   fit: { flexShrink: 1 },
   wrap: { flexWrap: 'wrap', columnGap: theme.space[3] },
   row: {
