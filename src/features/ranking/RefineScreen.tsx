@@ -440,7 +440,8 @@ export function RefineScreen({
   const standing = useSettledStanding({
     userId: profile.id,
     medium,
-    sitting: `refine:${seed}`,
+    // The round is in the key: the finished count starts again with every round.
+    sitting: `refine:${seed}:${sitting.round}`,
     titles: finishedTitles,
     enabled: phase.kind === 'checkpoint',
   });

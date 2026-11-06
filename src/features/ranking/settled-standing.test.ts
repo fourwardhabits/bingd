@@ -1,6 +1,6 @@
 import { rankingOf } from '@/test-utils/ranked-standing';
 
-import { settleStanding } from './settled-standing';
+import { isOneRanking, readOneRanking, settleStanding } from './settled-standing';
 import type { RankedSummaryTitle } from './RankedSummary';
 
 /**
@@ -72,6 +72,15 @@ describe('settleStanding', () => {
     expect(settled[0]).toMatchObject({ mediaItemId: 'gone', position: null, score: null });
   });
 
+  it('scores a midpoint the way score_for does: 0.85 is 0.9', () => {
+    // I didn't like it, 40th of 53: exactly 0.85, which a floating-point copy printed 0.8.
+    const settled = settleStanding(
+      [title('x', 1, 1, 'not_for_me')],
+      rankingOf({ not_for_me: 53 }, { x: 40 }),
+    );
+    expect(settled[0]!.score).toBe(0.9);
+  });
+
   it('keeps the sitting order, poster and title untouched', () => {
     const snapshots = [
       { ...title('b', 1, 10), posterPath: '/b.jpg' },
@@ -82,5 +91,40 @@ describe('settleStanding', () => {
       ['b', '/b.jpg'],
       ['a', '/a.jpg'],
     ]);
+  });
+});
+
+/**
+ * **A read assembled from pages is checked before it is believed** (independent review, QA
+ * corrections). Each page is its own request, so a placement elsewhere between two pages can
+ * produce a list no database could hold.
+ */
+describe('one read, one ranking', () => {
+  const row = (position: number, bucket: 'loved' | 'fine' | 'not_for_me') => ({ position, bucket });
+
+  it('accepts positions 1…n once each with the bands in order', () => {
+    expect(isOneRanking(rankingOf({ loved: 3, fine: 2, not_for_me: 2 }, {}))).toBe(true);
+    expect(isOneRanking([])).toBe(true);
+  });
+
+  it('refuses a duplicate, a gap, or bands out of order', () => {
+    expect(isOneRanking([row(1, 'loved'), row(1, 'loved'), row(2, 'loved')])).toBe(false);
+    expect(isOneRanking([row(1, 'loved'), row(3, 'loved')])).toBe(false);
+    expect(isOneRanking([row(1, 'fine'), row(2, 'loved')])).toBe(false);
+  });
+
+  it('reads again when a read is torn, and takes the first whole one', async () => {
+    const torn = [...rankingOf({ loved: 3 }, {}), ...rankingOf({ loved: 1 }, { dup: 1 })];
+    const whole = rankingOf({ loved: 4 }, {});
+    const read = jest.fn().mockResolvedValueOnce(torn).mockResolvedValueOnce(whole);
+    await expect(readOneRanking(read)).resolves.toBe(whole);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after three torn reads, so the summary withholds its numbers', async () => {
+    const torn = [...rankingOf({ loved: 2 }, {}), ...rankingOf({ loved: 1 }, {})];
+    const read = jest.fn().mockResolvedValue(torn);
+    await expect(readOneRanking(read)).rejects.toThrow(/changed while it was being read/);
+    expect(read).toHaveBeenCalledTimes(3);
   });
 });

@@ -448,6 +448,58 @@ it('Undo at a title’s first comparison sets it aside and deals the next', asyn
  * again — excluding what this sitting has already shown — and only then decides whether
  * there is another round worth offering.
  */
+/**
+ * **A second round never shows the first round's read** (independent review, QA
+ * corrections). The finished count starts again every round, so the summary's key carries
+ * the round; without it a second round finishing on the same count joined a first-round
+ * read still in flight and showed positions from before its own move.
+ */
+it('reads the ranking again for each round, even at the same count', async () => {
+  mockForceCheckpoint = true;
+  serve({
+    refine_candidates: [
+      { status: 'ready', candidates: [HEAT], placements_total: 40, cta: { show: true, count: 5, strong: 5 } },
+      {
+        status: 'ready',
+        candidates: [{ ...HEAT, media_item_id: 'ronin', title: 'Ronin', position: 30 }],
+        placements_total: 40,
+        cta: { show: true, count: 3, strong: 3 },
+      },
+      {
+        status: 'ready',
+        candidates: [{ ...HEAT, media_item_id: 'ronin', title: 'Ronin', position: 30 }],
+        placements_total: 40,
+        cta: { show: true, count: 3, strong: 3 },
+      },
+      { status: 'nothing_waiting', candidates: [], placements_total: 41 },
+    ],
+    refine_start: [comparing, { ...comparing, session_id: 'session-2' }],
+    rank_answer: [
+      { done: true, position: 15, category: 'movies', bucket: 'loved', score: 8.8,
+        movement: { outcome: 'moved', from_position: 21, kind: 'refine' } },
+      { done: true, position: 12, category: 'movies', bucket: 'loved', score: 9.1,
+        movement: { outcome: 'moved', from_position: 30, kind: 'refine' } },
+    ],
+  });
+  // Round one's read never answers; round two's must be a read of its own.
+  mockReadRanked.mockReturnValueOnce(new Promise(() => {}));
+  mockReadRanked.mockResolvedValueOnce(rankingOf({ loved: 36 }, { ronin: 12, heat: 16 }));
+  const view = await renderWithProviders(<RefineScreen medium="movies" onExit={jest.fn()} />);
+
+  await waitFor(() => expect(view.getByLabelText('Choose Heat')).toBeTruthy());
+  await fireEvent.press(view.getByLabelText('Choose Heat'));
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+  await waitFor(() => expect(view.getByRole('button', { name: 'Keep going' })).toBeTruthy());
+  await fireEvent.press(view.getByRole('button', { name: 'Keep going' }));
+
+  await waitFor(() => expect(view.getByLabelText('Choose Ronin')).toBeTruthy());
+  await fireEvent.press(view.getByLabelText('Choose Ronin'));
+  await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('#12 in Movies')).toBeTruthy());
+  expect(view.getByText('Ronin')).toBeTruthy();
+  expect(mockReadRanked).toHaveBeenCalledTimes(2);
+});
+
 it('asks the server what is left before offering another round', async () => {
   mockForceCheckpoint = true;
   serve({

@@ -306,6 +306,33 @@ describe('the backlog summary', () => {
     expect(view.queryByTestId('ranked-summary-retry')).toBeNull();
   });
 
+  it('a torn read is read again, and never shown as two titles at one position', async () => {
+    serve({
+      ranking_backlog: [queue([PITCH_BLACK, ALLIED]), queue([ALLIED]), queue([])],
+      rank_backlog_start: [landed(9, 8.9), landed(9, 8.9)],
+      refine_candidates: [{ status: 'empty', candidates: [], cta: { show: false } }],
+    });
+    // Page one before a move elsewhere, page two after it: both titles at #9.
+    const torn = rankingOf({ loved: 23 }, { allied: 9, 'pitch-black': 10 }).map((row) =>
+      row.mediaItemId === 'pitch-black' ? { ...row, position: 9 } : row,
+    );
+    mockReadRanked.mockResolvedValueOnce(torn);
+    mockReadRanked.mockResolvedValueOnce(rankingOf({ loved: 23 }, { allied: 9, 'pitch-black': 10 }));
+    const view = await renderWithProviders(
+      <RankSessionScreen medium="movies" start="backlog" onExit={jest.fn()} />,
+    );
+
+    await likeIt(view, 'Pitch Black');
+    await likeIt(view, 'Allied');
+
+    await waitFor(() => expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(2));
+    expect(rowText(view)).toEqual([
+      'Pitch Black · #10 in Movies · 8.8',
+      'Allied · #9 in Movies · 8.9',
+    ]);
+    expect(mockReadRanked).toHaveBeenCalledTimes(2);
+  });
+
   it('TV seasons read the season ranking and say "in TV"', async () => {
     const season = (id: string, title: string) => ({ ...target(id, title), kind: 'season' });
     serve({

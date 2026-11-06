@@ -495,6 +495,7 @@ describe('the completion summary', () => {
     // The actions are siblings of the scroll view rather than children of it.
     expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
     expect(view.getByRole('button', { name: 'Done' })).toBeTruthy();
-    expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(1);
+    // The rows wait for the fresh read of the ranking (settled-standing.ts).
+    await waitFor(() => expect(view.getAllByTestId('ranked-summary-row')).toHaveLength(1));
   });
 });

@@ -55,6 +55,40 @@ export function settleStanding(
   });
 }
 
+/**
+ * **Whether one read is one ranking** (independent review, QA corrections). The category is
+ * read in pages of up to a thousand rows, each its own request, so a placement on another
+ * device between two pages can assemble a list in which two titles share a position — the
+ * very defect this module exists to remove, recreated from mixed snapshots. A ranking the
+ * database can hold has positions 1…n exactly once each, and its bands in order: every
+ * I liked it above every It was fine above every I didn't like it.
+ */
+export function isOneRanking(rows: readonly Pick<RankedEntry, 'bucket' | 'position'>[]) {
+  const ORDER = { loved: 0, fine: 1, not_for_me: 2 } as const;
+  const byPosition = [...rows].sort((a, b) => a.position - b.position);
+  return byPosition.every(
+    (row, i) =>
+      row.position === i + 1 &&
+      ORDER[row.bucket] !== undefined &&
+      (i === 0 || ORDER[byPosition[i - 1]!.bucket] <= ORDER[row.bucket]),
+  );
+}
+
+/** How many times a torn read is asked again before the summary gives up on its numbers. */
+const CONSISTENT_ATTEMPTS = 3;
+
+/** Reads until one read is one ranking; throws, so the summary withholds, if none is. */
+export async function readOneRanking(
+  read: () => Promise<RankedEntry[]>,
+  attempts = CONSISTENT_ATTEMPTS,
+): Promise<RankedEntry[]> {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const rows = await read();
+    if (isOneRanking(rows)) return rows;
+  }
+  throw new Error('The ranking changed while it was being read');
+}
+
 /** The same titles with their numbers withheld, while a read is out or after it failed. */
 const withheld = (titles: readonly RankedSummaryTitle[]): RankedSummaryTitle[] =>
   titles.map((title) => ({ ...title, position: null, score: null }));
@@ -76,6 +110,12 @@ export type SettledStanding = {
  * holds is a read issued after that placement. A sitting that places more and returns
  * to the summary asks under a new count, so a second summary is never the first one's
  * copy. `gcTime: 0` keeps these one-off copies out of the cache once the summary goes.
+ *
+ * **`sitting` must change whenever the count can repeat.** The backlog's count only ever
+ * grows, so its sitting id is enough. Refine's count starts again at every round, so
+ * Refine passes an id with the round in it: otherwise a second round finishing on the
+ * same count could be handed a first-round read that is still in flight (independent
+ * review, QA corrections).
  */
 export function useSettledStanding({
   userId,
@@ -94,7 +134,7 @@ export function useSettledStanding({
 }): SettledStanding {
   const query = useQuery({
     queryKey: ['ranked-summary', userId, medium, sitting, titles.length] as const,
-    queryFn: () => readRankedCollection(userId, medium),
+    queryFn: () => readOneRanking(() => readRankedCollection(userId, medium)),
     enabled: enabled && titles.length > 0,
     staleTime: Infinity,
     gcTime: 0,
