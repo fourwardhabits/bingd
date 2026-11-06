@@ -1,5 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet, type ViewStyle } from 'react-native';
 
 import { rankingOf } from '@/test-utils/ranked-standing';
 import { renderWithProviders } from '@/test-utils/render';
@@ -314,6 +314,10 @@ it('shows the target poster on How was it?', async () => {
  * one and a half times the old fixed 88pt, giving way to a short screen or large text so
  * the choices below it stay on screen.
  */
+/** The poster's own frame: the first child of the block that holds it and its title. */
+const posterFrame = (box: { children: unknown[] }) =>
+  StyleSheet.flatten((box.children[0] as { props: { style: ViewStyle } }).props.style);
+
 describe('the "How was it?" poster', () => {
   it('is about 1.45–1.5× the old 88pt on ordinary phones', () => {
     expect(askPosterWidth({ width: 320, height: 640 })).toBe(128);
@@ -323,7 +327,7 @@ describe('the "How was it?" poster', () => {
       [320, 640],
       [360, 780],
       [412, 915],
-    ]) {
+    ] as const) {
       const ratio = askPosterWidth({ width, height }) / 88;
       expect(ratio).toBeGreaterThanOrEqual(1.4);
       expect(ratio).toBeLessThanOrEqual(1.5);
@@ -348,7 +352,7 @@ describe('the "How was it?" poster', () => {
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
 
     const box = view.getByTestId('backlog-ask-poster');
-    const frame = StyleSheet.flatten((box.children[0] as { props: { style: unknown } }).props.style);
+    const frame = posterFrame(box);
     const { width, height, fontScale } = Dimensions.get('window');
     expect(frame.width).toBe(askPosterWidth({ width, height, fontScale }));
     expect(frame.aspectRatio).toBe(2 / 3);
@@ -378,7 +382,7 @@ describe('the "How was it?" poster', () => {
     );
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     const box = view.getByTestId('backlog-ask-poster');
-    const frame = StyleSheet.flatten((box.children[0] as { props: { style: unknown } }).props.style);
+    const frame = posterFrame(box);
     const { width, height, fontScale } = Dimensions.get('window');
     expect(frame.width).toBe(askPosterWidth({ width, height, fontScale }));
   });
@@ -422,7 +426,7 @@ describe('the completion summary', () => {
 
     await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
     // The canonical label, the score badge, and nothing about movement or watching.
-    expect(view.getByText('#4 in Movies')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('#4 in Movies')).toBeTruthy());
     expect(view.getByLabelText('6.2 out of 10, It was fine')).toBeTruthy();
     expect(view.queryByText(/→/)).toBeNull();
     expect(view.queryByText(/Still #/)).toBeNull();
@@ -466,7 +470,7 @@ describe('the completion summary', () => {
     // The queue empties by itself: the same component, the same heading and rows.
     await waitFor(() => expect(view.getByText('1 title ranked')).toBeTruthy());
     expect(view.getByTestId('ranked-summary-scroll')).toBeTruthy();
-    expect(view.getByText('#4 in Movies')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('#4 in Movies')).toBeTruthy());
     /**
      * **No helper sentence** (founder, 2026-09-25). "You're caught up." restated what the
      * heading and the rows already said. That there is nothing left is expressed by the

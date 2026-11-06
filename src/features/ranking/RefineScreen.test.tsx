@@ -616,7 +616,7 @@ it('Done part-way through a batch summarises only what was refined', async () =>
   await fireEvent.press(view.getByLabelText('Done'));
 
   await waitFor(() => expect(view.getByText('1 title checked')).toBeTruthy());
-  expect(view.getByText('#15 in Movies')).toBeTruthy();
+  await waitFor(() => expect(view.getByText('#15 in Movies')).toBeTruthy());
   expect(view.getByLabelText('8.8 out of 10, I liked it')).toBeTruthy();
   // The target that was on screen is cancelled, not counted.
   expect(view.queryByText('Ronin')).toBeNull();
