@@ -1911,6 +1911,9 @@ export default function TitleScreen() {
           label: data.ranked ? 'Edit ranking' : undefined,
           icon: data.ranked ? 'create-outline' : undefined,
           compact: Boolean(data.ranked),
+          // The card is the full width less 12pt a side: Rank and Edit ranking are never
+          // truncated there, at any text size; the icons wrap under them instead.
+          unclamped: true,
           accessibilityLabel: data.ranked
             ? `Edit your ranking of ${displayTitle ?? title.title}`
             : `Rank ${displayTitle ?? title.title}`,

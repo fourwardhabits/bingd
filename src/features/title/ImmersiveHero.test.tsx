@@ -92,11 +92,37 @@ describe('the picture behind it', () => {
     expect(field.top).toBe(band);
     expect(field.bottom).toBe(0);
 
+    // The band's frame, band-high, reflected at its foot and back again below.
     const image = view.getByTestId('immersive-extension-image');
     expect(image.props.blurRadius).toBeGreaterThan(0);
     expect(style(image).transform).toEqual([{ scaleY: -1 }]);
+    expect(style(image).top).toBe(0);
+    expect(style(image).height).toBe(band);
+    const next = view.getByTestId('immersive-extension-tile-1');
+    expect(style(next).top).toBe(band);
+    expect(style(next).transform).toBeUndefined();
+    expect(style(view.getByTestId('immersive-extension-tile-2')).transform).toEqual([{ scaleY: -1 }]);
     expect(view.getByTestId('immersive-band-fade')).toBeTruthy();
     expect(view.getByTestId('immersive-field-seam')).toBeTruthy();
+  });
+
+  it('softens the sharp band into the field over its last 48pt, more opaque toward the foot', async () => {
+    const view = await draw();
+    const band = style(view.getByTestId('immersive-art')).height as number;
+    const steps = [48, 40, 32, 24, 16, 8];
+    const strips = steps.map((from) => style(view.getByTestId(`immersive-crossfade-${from}`)));
+    expect(strips.map((strip) => strip.top)).toEqual(steps.map((from) => band - from));
+    const opacities = strips.map((strip) => strip.opacity as number);
+    expect([...opacities].sort((a, b) => a - b)).toEqual(opacities);
+  });
+
+  it('draws no cross-fade over a poster-only band, which is already soft', async () => {
+    const view = await draw({ artwork: POSTER as never, posterUri: POSTER.uri });
+    expect(view.queryByTestId('immersive-crossfade-16')).toBeNull();
+    expect(view.getByTestId('immersive-extension-image').props.blurRadius).toBe(30);
+    // The band is already soft: the field continues it exactly, with no fade and no seam.
+    expect(view.queryByTestId('immersive-band-fade')).toBeNull();
+    expect(view.queryByTestId('immersive-field-seam')).toBeNull();
   });
 
   it('uses the poster the same way for a poster-only title', async () => {

@@ -70,6 +70,13 @@ export type RankAction = {
    * through its slop. Absent everywhere else, so every other Rank is unchanged.
    */
   compact?: boolean;
+  /**
+   * **The label is never cut** (UI cohesion pass, 2026-11-06): the control may take the
+   * whole width of its row, and the icons wrap under it instead — the rule this control
+   * already follows on artwork. For the immersive page's floating card, which is wide
+   * enough for it; the original page's narrow identity column keeps its ceiling.
+   */
+  unclamped?: boolean;
 };
 
 export type IconAction = {
@@ -184,7 +191,7 @@ export function TitleActions({
               styles.rank,
               rank.ranked ? (onArtwork ? styles.rankedOnArtwork : styles.ranked) : styles.unranked,
               // On the artwork the label is never truncated: the icons wrap instead.
-              onArtwork && styles.rankOnArtwork,
+              (onArtwork || rank.unclamped) && styles.rankOnArtwork,
               rank.compact && styles.rankCompact,
               pressed && styles.pressed,
             ]}

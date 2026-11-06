@@ -3776,6 +3776,24 @@ describe('the immersive title page (experiment)', () => {
       await waitFor(() => expect(view.getByLabelText('How was it?')).toBeTruthy());
     });
 
+    /**
+     * **Rank and Edit ranking are never cut** (UI cohesion pass, 2026-11-06): in the card the
+     * control may take the row's full width and the icons wrap, at any text size; the
+     * original page's narrow column keeps its ceiling.
+     */
+    it('lets Edit ranking take the card’s width rather than truncating', async () => {
+      ranked();
+      const view = await open();
+      const control = await waitFor(() => view.getByTestId('title-action-ranked'));
+      const style = StyleSheet.flatten(
+        typeof control.props.style === 'function'
+          ? control.props.style({ pressed: false })
+          : control.props.style,
+      );
+      expect(style.maxWidth).toBe('100%');
+      expect(style.flexShrink).toBe(0);
+    });
+
     it('keeps a smaller Edit ranking on a ranked title, and no second Rank', async () => {
       ranked();
       const view = await open();
