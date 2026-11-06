@@ -1,14 +1,21 @@
-import { fireEvent, render, within } from '@testing-library/react-native';
+import { render } from '@testing-library/react-native';
 import { StyleSheet, Text } from 'react-native';
 
-import { paperAlpha, theme } from '@/ui/tokens';
+import { theme } from '@/ui/tokens';
 
-import { ImmersiveHero, bandHeight } from './ImmersiveHero';
+import {
+  ImmersiveHero,
+  SHEET_CONTENT_INSET,
+  SHEET_INSET,
+  bandHeight,
+  moduleOverlap,
+} from './ImmersiveHero';
 
 /**
- * **The opening screen** (founder, UI cohesion pass, 2026-11-06): one viewport holding the
- * artwork, the floating module and a quiet chevron, with the picture continuing behind
- * the module to the foot of the screen and About below the fold.
+ * **The Cinematic title page's head** (founder direction, title-page sprint, 2026-11-06):
+ * the large sharp artwork, the Paper module overlapping its lower part, and nothing else —
+ * no blurred extension, no filler height, no chevron. The page goes on from the module on
+ * the same Paper.
  */
 
 const BACKDROP = { treatment: 'backdrop', uri: 'https://image.tmdb.org/t/p/w1280/b.jpg' } as const;
@@ -32,119 +39,103 @@ const draw = (props: Partial<React.ComponentProps<typeof ImmersiveHero>> = {}) =
 const style = (node: { props: { style?: unknown } }) =>
   StyleSheet.flatten(node.props.style as never) as Record<string, unknown>;
 
-describe('the opening screen', () => {
-  it('is at least as tall as the visible area it is given', async () => {
-    const view = await draw({ viewportHeight: 812 });
-    expect(style(view.getByTestId('immersive-hero')).minHeight).toBe(812);
+describe('the head of the page', () => {
+  it('is the sharp band and the module, and nothing to fill the rest of the screen', async () => {
+    const view = await draw();
+
+    expect(view.getByTestId('immersive-art')).toBeTruthy();
+    expect(view.getByTestId('immersive-module')).toBeTruthy();
+    // The blurred field, its cross-fade, the band's dark foot and the chevron are gone.
+    for (const gone of [
+      'immersive-extension',
+      'immersive-extension-image',
+      'immersive-crossfade-48',
+      'immersive-band-fade',
+      'immersive-field-seam',
+      'immersive-more',
+      'immersive-space-above',
+      'immersive-space-below',
+    ]) {
+      expect(view.queryByTestId(gone)).toBeNull();
+    }
+    // As tall as its contents: no floor of a whole viewport.
+    expect(style(view.getByTestId('immersive-hero')).minHeight).toBeUndefined();
   });
 
-  it('holds the module, then spare space, then the chevron, in that order', async () => {
-    const view = await draw({ onPressMore: () => {} });
-    const tree = JSON.stringify(view.toJSON());
-    const at = (id: string) => tree.indexOf(`"testID":"${id}"`);
-    expect(at('immersive-space-above')).toBeLessThan(at('immersive-module'));
-    expect(at('immersive-module')).toBeLessThan(at('immersive-space-below'));
-    expect(at('immersive-space-below')).toBeLessThan(at('immersive-more'));
-    // More of the spare height above the module than below it.
-    expect(style(view.getByTestId('immersive-space-above')).flexGrow).toBeGreaterThan(
-      style(view.getByTestId('immersive-space-below')).flexGrow as number,
+  it('draws the backdrop once, sharp', async () => {
+    const view = await draw();
+    type Node = { props?: Record<string, unknown>; children?: (Node | string)[] | null };
+    const found: Record<string, unknown>[] = [];
+    const walk = (node: Node | string | null) => {
+      if (!node || typeof node === 'string') return;
+      const source = node.props?.source as { uri?: string } | { uri?: string }[] | undefined;
+      const uris = Array.isArray(source) ? source.map((s) => s.uri) : [source?.uri];
+      if (uris.includes(BACKDROP.uri)) found.push(node.props!);
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(view.toJSON() as Node);
+
+    expect(found).toHaveLength(1);
+    expect(found[0]!.blurRadius ?? 0).toBe(0);
+  });
+
+  it('rises the module over the band’s lower 22%, whatever the band’s height', async () => {
+    const view = await draw();
+    const band = style(view.getByTestId('immersive-art')).height as number;
+    const row = style(view.getByTestId('immersive-module-row'));
+
+    expect(row.marginTop).toBe(-moduleOverlap(band));
+    for (const height of [250, 284, 324]) {
+      const share = moduleOverlap(height) / height;
+      expect(share).toBeGreaterThanOrEqual(0.2);
+      expect(share).toBeLessThanOrEqual(0.25);
+    }
+  });
+
+  it('keeps the module 12pt in from each edge, its content on the page’s one content line', async () => {
+    const view = await draw();
+    expect(style(view.getByTestId('immersive-module-row')).paddingHorizontal).toBe(SHEET_INSET);
+    expect(SHEET_INSET).toBe(12);
+    expect(SHEET_INSET + (style(view.getByTestId('immersive-module')).paddingHorizontal as number)).toBe(
+      SHEET_CONTENT_INSET,
     );
-    expect(within(view.getByTestId('immersive-module')).getByText('Module contents')).toBeTruthy();
   });
 
-  it('keeps the module 12pt in from each edge', async () => {
-    const view = await draw();
-    expect(style(view.getByTestId('immersive-module-row')).paddingHorizontal).toBe(theme.space[3]);
-  });
+  it('is the top of the page’s Paper: rounded above, square below, no border or shadow', async () => {
+    const module = style((await draw()).getByTestId('immersive-module'));
 
-  it('scrolls on from the chevron, which is a labelled 44pt control', async () => {
-    const onPressMore = jest.fn();
-    const view = await draw({ onPressMore });
-    const more = view.getByRole('button', { name: 'More about this title' });
-    const box = style(more);
-    expect(box.width).toBe(44);
-    expect(box.height).toBe(44);
-    await fireEvent.press(more);
-    expect(onPressMore).toHaveBeenCalledTimes(1);
-  });
-
-  it('draws the chevron as a hint only when there is nowhere to scroll it to', async () => {
-    const view = await draw();
-    expect(view.queryByRole('button', { name: 'More about this title' })).toBeNull();
-    expect(view.getByTestId('immersive-more', { includeHiddenElements: true })).toBeTruthy();
+    expect(module.backgroundColor).toBe(theme.surface.base);
+    expect(module.borderTopLeftRadius).toBe(theme.radius.card);
+    expect(module.borderTopRightRadius).toBe(theme.radius.card);
+    expect(module.borderRadius).toBeUndefined();
+    expect(module.borderBottomLeftRadius).toBeUndefined();
+    expect(module.borderWidth).toBeUndefined();
+    expect(module.elevation).toBeUndefined();
+    expect(module.shadowOpacity).toBeUndefined();
   });
 
   it('reports where the module starts, for the top bar', async () => {
     const onModuleTop = jest.fn();
     const view = await draw({ onModuleTop });
-    fireEvent(view.getByTestId('immersive-module-row'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 301.4, width: 360, height: 340 } },
+
+    view.getByTestId('immersive-module-row').props.onLayout({
+      nativeEvent: { layout: { y: 222.4, height: 300, x: 0, width: 360 } },
     });
-    expect(onModuleTop).toHaveBeenCalledWith(301);
+    expect(onModuleTop).toHaveBeenCalledWith(222);
   });
 });
 
-describe('the picture behind it', () => {
-  it('continues the artwork from the band to the foot of the screen, mirrored and softened', async () => {
-    const view = await draw();
-    const band = style(view.getByTestId('immersive-art')).height as number;
-    const field = style(view.getByTestId('immersive-extension'));
-    expect(field.top).toBe(band);
-    expect(field.bottom).toBe(0);
-
-    // The band's frame, band-high, reflected at its foot and back again below.
-    const image = view.getByTestId('immersive-extension-image');
-    expect(image.props.blurRadius).toBeGreaterThan(0);
-    expect(style(image).transform).toEqual([{ scaleY: -1 }]);
-    expect(style(image).top).toBe(0);
-    expect(style(image).height).toBe(band);
-    const next = view.getByTestId('immersive-extension-tile-1');
-    expect(style(next).top).toBe(band);
-    expect(style(next).transform).toBeUndefined();
-    expect(style(view.getByTestId('immersive-extension-tile-2')).transform).toEqual([{ scaleY: -1 }]);
-    expect(view.getByTestId('immersive-band-fade')).toBeTruthy();
-    expect(view.getByTestId('immersive-field-seam')).toBeTruthy();
-  });
-
-  it('softens the sharp band into the field over its last 48pt, more opaque toward the foot', async () => {
-    const view = await draw();
-    const band = style(view.getByTestId('immersive-art')).height as number;
-    const steps = [48, 40, 32, 24, 16, 8];
-    const strips = steps.map((from) => style(view.getByTestId(`immersive-crossfade-${from}`)));
-    expect(strips.map((strip) => strip.top)).toEqual(steps.map((from) => band - from));
-    const opacities = strips.map((strip) => strip.opacity as number);
-    expect([...opacities].sort((a, b) => a - b)).toEqual(opacities);
-  });
-
-  it('draws no cross-fade over a poster-only band, which is already soft', async () => {
-    const view = await draw({ artwork: POSTER as never, posterUri: POSTER.uri });
-    expect(view.queryByTestId('immersive-crossfade-16')).toBeNull();
-    expect(view.getByTestId('immersive-extension-image').props.blurRadius).toBe(30);
-    // The band is already soft: the field continues it exactly, with no fade and no seam.
-    expect(view.queryByTestId('immersive-band-fade')).toBeNull();
-    expect(view.queryByTestId('immersive-field-seam')).toBeNull();
-  });
-
-  it('uses the poster the same way for a poster-only title', async () => {
+describe('a title without a backdrop', () => {
+  it('stands a sharp poster on its own soft ground, under the bar', async () => {
     const view = await draw({ artwork: POSTER as never, posterUri: POSTER.uri });
     expect(view.getByTestId('immersive-poster')).toBeTruthy();
-    expect(JSON.stringify(view.getByTestId('immersive-extension-image').props.source)).toContain(
-      POSTER.uri,
-    );
+    expect(view.queryByTestId('immersive-extension')).toBeNull();
   });
 
-  it('falls back to Parchment with no artwork, and a chevron that reads on it', async () => {
-    const view = await draw({ artwork: NONE as never, onPressMore: () => {} });
-    expect(view.queryByTestId('immersive-extension-image')).toBeNull();
-    expect(view.queryByTestId('immersive-band-fade')).toBeNull();
-    const glyph = view.getByTestId('immersive-more-glyph');
-    expect(style(glyph).color ?? glyph.props.color).toBe(theme.text.secondary);
-  });
-
-  it('draws the chevron in Paper over artwork', async () => {
-    const view = await draw({ onPressMore: () => {} });
-    const glyph = view.getByTestId('immersive-more-glyph');
-    expect(style(glyph).color ?? glyph.props.color).toBe(paperAlpha(0.88));
+  it('falls back to Parchment and the initials frame with no artwork', async () => {
+    const view = await draw({ artwork: NONE as never });
+    expect(view.getByTestId('immersive-poster')).toBeTruthy();
+    expect(style(view.getByTestId('immersive-art')).backgroundColor).toBe(theme.surface.sunken);
   });
 });
 
