@@ -3956,9 +3956,14 @@ describe('the immersive title page (experiment)', () => {
       expect(StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight).toBe(0);
       expect(body('about')).toMatchObject({ paddingTop: 4 });
       expect(body('similar')).toMatchObject({ paddingTop: 8 });
-      // The cast strip brings its own 8pt above the portraits.
+      // A rail's space is outside its scroll view, where See all's slop can use it without
+      // a coasting rail taking the press (independent review 2).
       await waitFor(() => expect(view.getByTestId('immersive-body-cast')).toBeTruthy());
-      expect(body('cast')).toMatchObject({ paddingTop: 0 });
+      expect(body('cast')).toMatchObject({ paddingTop: 8 });
+      const strip = view.getByTestId('cast-strip');
+      expect(StyleSheet.flatten(strip.props.contentContainerStyle)).toMatchObject({
+        paddingVertical: 0,
+      });
     });
 
     /**

@@ -159,7 +159,10 @@ const CAST_PREVIEW = 10;
  * refinement, 2026-11-06). The rest of the same nine follow in place.
  */
 const SIMILAR_PREVIEW = 6;
-/** Between two Cinematic sections: from one body's end to the next heading. */
+/**
+ * Between two Cinematic sections: from one body's end to the next heading. Never less than
+ * a tight heading action's upward slop, which lies in it (`TIGHT_SLOP.top`).
+ */
 const SECTION_SEAM = theme.space[5];
 /**
  * The Cinematic module's 28pt title grows with the system text size only to 1.3×, the type
@@ -1994,6 +1997,12 @@ export default function TitleScreen() {
    * **Vertically efficient.** The heading is its own line, not a 44pt row (`tight`), and
    * the body starts `gap` below it: 8pt by default, less a component's own top padding
    * where it has one, so the words under every heading start the same distance down.
+   *
+   * **An action's target stays off the rails.** A heading action's slop reaches into the
+   * 20pt seam above and the body's 8pt padding below (`TIGHT_SLOP`), so the Cast and
+   * Trailers rails carry no top padding of their own and start under that 8pt: a rail
+   * still coasting from a fling cannot take a press meant for See all or Show previews
+   * (independent review 2). A section with an action must keep `gap` at 8pt or more.
    */
   const immersiveSection = (
     key: string,
@@ -2188,8 +2197,6 @@ export default function TitleScreen() {
               onPressMember={(member) => router.push(`/person/${member.id}`)}
             />,
             {
-              // The strip has 8pt of its own above the portraits.
-              gap: 0,
               action:
                 cast.length > CAST_VISIBLE
                   ? {
@@ -2220,8 +2227,6 @@ export default function TitleScreen() {
               previews={trailerPreviews}
             />,
             {
-              // The rail has 8pt of its own above the cards.
-              gap: 0,
               action: trailerPreviews
                 ? undefined
                 : {

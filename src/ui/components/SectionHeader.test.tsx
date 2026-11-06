@@ -72,9 +72,9 @@ describe('SectionHeader sizes', () => {
 
 /**
  * **`tight`** (final title refinement, 2026-11-06): the heading's own line rather than a
- * 44pt row, with the action's 44pt target kept by its slop, and the row raised above the
- * body drawn right after it so that body cannot take the slop's lower half (independent
- * review 1). Every other header keeps its 44pt row.
+ * 44pt row, with the action's target kept by its slop — 20pt up into the section's seam
+ * and 8pt down into the body's padding, never over a rail (independent reviews 1 and 2) —
+ * and the row raised above the body drawn after it. Every other header keeps its 44pt row.
  */
 describe('SectionHeader tight', () => {
   it('keeps a 44pt row by default', async () => {
@@ -85,7 +85,7 @@ describe('SectionHeader tight', () => {
     );
   });
 
-  it('draws one line, raised over what follows, with a 44pt slop on the action', async () => {
+  it('draws one line, raised over what follows, with a 46pt slop on the action', async () => {
     const onPress = jest.fn();
     const view = await render(
       <SectionHeader title="Cast" actionLabel="See all" onPressAction={onPress} tight />,
@@ -95,8 +95,8 @@ describe('SectionHeader tight', () => {
     expect(row.minHeight).toBe(0);
     expect(row.zIndex).toBe(1);
     const action = view.getByRole('button');
-    // A footnote line (18pt) plus 13pt above and below.
-    expect(action.props.hitSlop).toMatchObject({ top: 13, bottom: 13 });
+    // A footnote line (18pt) plus 20pt above and 8pt below.
+    expect(action.props.hitSlop).toMatchObject({ top: 20, bottom: 8 });
     expect(18 + action.props.hitSlop.top + action.props.hitSlop.bottom).toBeGreaterThanOrEqual(
       theme.layout.minTapTarget,
     );

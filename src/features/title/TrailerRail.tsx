@@ -125,10 +125,11 @@ const THUMB_WIDTH = 184;
 const PLAY_SIZE = 40;
 
 const styles = StyleSheet.create({
+  // No top padding: the section's space above the rail is outside the scroll view, where the
+  // heading's Show previews slop can use it (final title refinement, 2026-11-06).
   rail: {
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
   },
   card: { width: THUMB_WIDTH, gap: theme.space[1] },
   thumb: {

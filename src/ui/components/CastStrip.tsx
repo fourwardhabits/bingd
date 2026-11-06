@@ -45,7 +45,7 @@ export function CastStrip({ cast, onPressMember, compact = false, gutter }: Cast
   if (!cast.length) return null;
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} testID="cast-strip" contentContainerStyle={[
         styles.row,
         compact && styles.rowCompact,
         gutter !== undefined && { paddingHorizontal: gutter },
@@ -107,9 +107,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   // 76pt columns with 8pt gaps: four across a 360pt screen with the gutter, the fifth
-  // peeking to say the row scrolls. Nothing under the names: the Cinematic page's section
-  // seam is the space below (final title refinement, 2026-11-06).
-  rowCompact: { gap: theme.space[2], paddingBottom: 0 },
+  // peeking to say the row scrolls. No padding above or below: the Cinematic page's section
+  // puts its space outside the rail, where a heading action's slop can use it without
+  // reaching into a scroll view (final title refinement, 2026-11-06).
+  rowCompact: { gap: theme.space[2], paddingVertical: 0 },
   itemCompact: { width: 76 },
   center: { textAlign: 'center' },
   pressed: { opacity: 0.7 },
