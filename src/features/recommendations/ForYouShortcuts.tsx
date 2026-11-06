@@ -6,8 +6,8 @@ import { hapticSelection } from '@/ui/haptics';
 import { theme } from '@/ui/tokens';
 
 /**
- * For You's two feature entry points, **Sent to You and Watch Together** (founder, nav
- * cohesion sprint, 2026-11-06).
+ * For You's two feature entry points, **Sent to You and Find for a Group** (founder, nav
+ * cohesion sprint, 2026-11-06; Find for a Group since the title-page sprint the same day).
  *
  * They are features, not filters, and they used to be drawn as two more chips in the
  * Filters row. Now they are a pair of their own under the page's heading row: equal
@@ -16,9 +16,11 @@ import { theme } from '@/ui/tokens';
  * as equivalent pills, and the page is still two rows of controls above the wall.
  *
  * Sent to You keeps its toggle (Parchment and a Maroon outline while the wall shows the
- * sent list) and its unread count, now a badge drawn like the bell's. Watch Together opens
- * its sheet. Each is a 44pt target. At a large text size the pair stacks rather than
- * squeezing two labels into two halves.
+ * sent list) and its unread count, now a badge drawn like the bell's. Find for a Group opens
+ * its sheet. Each is a 44pt target. At a large text size, or on a phone narrower than
+ * 360pt, the pair stacks rather than squeezing two labels into two halves: "Find for a
+ * Group" needs about 125pt and half of a 320pt phone leaves about 108, and the founder
+ * ruled out clipping it or abbreviating it to fit.
  */
 export type ForYouShortcut = {
   key: string;
@@ -34,10 +36,12 @@ export type ForYouShortcut = {
 
 /** Above this text size the two halves stack, one full-width row each. */
 const STACK_AT_FONT_SCALE = 1.2;
+/** Below this width too: the narrowest at which both labels fit their halves. */
+const STACK_BELOW_WIDTH = 360;
 
 export function ForYouShortcuts({ shortcuts }: { shortcuts: readonly ForYouShortcut[] }) {
-  const { fontScale } = useWindowDimensions();
-  const stacked = fontScale >= STACK_AT_FONT_SCALE;
+  const { fontScale, width } = useWindowDimensions();
+  const stacked = fontScale >= STACK_AT_FONT_SCALE || width < STACK_BELOW_WIDTH;
   if (shortcuts.length === 0) return null;
 
   return (

@@ -29,9 +29,9 @@ const shortcuts = (over: Partial<Record<'sent' | 'together', Partial<ForYouShort
       ...over.sent,
     },
     {
-      key: 'watch-together',
+      key: 'group',
       icon: 'people-outline',
-      label: 'Watch Together',
+      label: 'Find for a Group',
       onPress: together,
       ...over.together,
     },
@@ -42,20 +42,37 @@ const shortcuts = (over: Partial<Record<'sent' | 'together', Partial<ForYouShort
 // The window, with the text size each case asks for. Jest's own mock reports a font scale
 // of 2, which is the large-text case, so every case says which it means.
 let mockFontScale = 1;
+let mockWidth = 360;
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
   __esModule: true,
-  default: () => ({ width: 360, height: 780, scale: 2, fontScale: mockFontScale }),
+  default: () => ({ width: mockWidth, height: 780, scale: 2, fontScale: mockFontScale }),
 }));
-const withFontScale = (fontScale: number) => {
+const withFontScale = (fontScale: number, width = 360) => {
   mockFontScale = fontScale;
+  mockWidth = width;
 };
+
+/**
+ * "Find for a Group" needs about 125pt and half of a 320pt phone leaves about 108, so a
+ * phone narrower than 360pt stacks the pair rather than clipping or abbreviating the label
+ * (founder, title-page sprint, 2026-11-06).
+ */
+it('stacks them on a phone narrower than 360pt, so neither label is clipped', async () => {
+  withFontScale(1, 320);
+  await render(<ForYouShortcuts shortcuts={shortcuts().list} />);
+
+  expect(flatten(screen.getByTestId('for-you-shortcuts').props.style).flexDirection).toBe(
+    'column',
+  );
+  expect(screen.getByText('Find for a Group')).toBeTruthy();
+});
 
 it('draws both features as equal halves of one row', async () => {
   withFontScale(1);
   await render(<ForYouShortcuts shortcuts={shortcuts().list} />);
 
   expect(flatten(screen.getByTestId('for-you-shortcuts').props.style).flexDirection).toBe('row');
-  for (const id of ['for-you-shortcut-sent', 'for-you-shortcut-watch-together']) {
+  for (const id of ['for-you-shortcut-sent', 'for-you-shortcut-group']) {
     expect(flatten(screen.getByTestId(id).props.style)).toMatchObject({ flex: 1, flexBasis: 0 });
   }
 });
@@ -89,7 +106,7 @@ it('draws no badge at zero', async () => {
   expect(screen.queryByText('0')).toBeNull();
 });
 
-it('marks Sent to You while it is on, and gives Watch Together no toggle state', async () => {
+it('marks Sent to You while it is on, and gives Find for a Group no toggle state', async () => {
   withFontScale(1);
   await render(<ForYouShortcuts shortcuts={shortcuts({ sent: { selected: true } }).list} />);
 
@@ -100,7 +117,7 @@ it('marks Sent to You while it is on, and gives Watch Together no toggle state',
     backgroundColor: theme.surface.sunken,
   });
   expect(
-    screen.getByTestId('for-you-shortcut-watch-together').props.accessibilityState?.selected,
+    screen.getByTestId('for-you-shortcut-group').props.accessibilityState?.selected,
   ).toBeUndefined();
 });
 
@@ -109,7 +126,7 @@ it('runs each one’s own action', async () => {
   const { list, sent, together } = shortcuts();
   await render(<ForYouShortcuts shortcuts={list} />);
 
-  await fireEvent.press(screen.getByRole('button', { name: 'Watch Together' }));
+  await fireEvent.press(screen.getByRole('button', { name: 'Find for a Group' }));
   expect(together).toHaveBeenCalledTimes(1);
   expect(sent).not.toHaveBeenCalled();
 });

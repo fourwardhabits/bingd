@@ -351,13 +351,13 @@ describe('crossing between the two categories', () => {
  * group to pick over. The flow itself is exercised in `GroupPicksSheet.test.tsx`; what
  * this file owns is the entry point.
  */
-describe('Watch Together', () => {
+describe('Find for a Group', () => {
   it('is a feature shortcut, and opens the flow', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('Watch Together')).toBeTruthy());
-    expect(within(view.getByTestId('for-you-shortcuts')).getByText('Watch Together')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('Find for a Group')).toBeTruthy());
+    expect(within(view.getByTestId('for-you-shortcuts')).getByText('Find for a Group')).toBeTruthy();
 
-    await fireEvent.press(view.getByText('Watch Together'));
+    await fireEvent.press(view.getByText('Find for a Group'));
     await waitFor(() => expect(view.getByText("Who's watching?")).toBeTruthy());
   });
 
@@ -372,12 +372,12 @@ describe('Watch Together', () => {
 describe('the top controls', () => {
   it('fit without scrolling: Filters by the heading, the features under it', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('Watch Together')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Find for a Group')).toBeTruthy());
 
     expect(view.queryByTestId('for-you-controls-scroller')).toBeNull();
     expect(within(view.getByTestId('for-you-controls')).getByText(/^Filters/)).toBeTruthy();
     const features = view.getByTestId('for-you-shortcuts');
     expect(within(features).getByText('Sent to You')).toBeTruthy();
-    expect(within(features).getByText('Watch Together')).toBeTruthy();
+    expect(within(features).getByText('Find for a Group')).toBeTruthy();
   });
 });

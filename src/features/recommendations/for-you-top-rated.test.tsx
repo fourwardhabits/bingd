@@ -209,10 +209,10 @@ describe('choosing Top Rated', () => {
     expect(showing(view)).toBe('Showing Top Rated TV');
   });
 
-  it('takes Sent to You and Watch Together away, and keeps Filters', async () => {
+  it('takes Sent to You and Find for a Group away, and keeps Filters', async () => {
     const view = await open();
     expect(view.getByLabelText(/^Sent to You/)).toBeTruthy();
-    expect(view.getByText('Watch Together')).toBeTruthy();
+    expect(view.getByText('Find for a Group')).toBeTruthy();
 
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('The Highest, 2014')).toBeTruthy());
@@ -220,7 +220,7 @@ describe('choosing Top Rated', () => {
     // Both are statements about particular people, and this wall's whole claim is that
     // the order belongs to everybody.
     expect(view.queryByLabelText(/^Sent to You/)).toBeNull();
-    expect(view.queryByText('Watch Together')).toBeNull();
+    expect(view.queryByText('Find for a Group')).toBeNull();
     // Filters narrow *which titles*, which is a question this wall can answer.
     expect(view.getByText('Filters')).toBeTruthy();
   });

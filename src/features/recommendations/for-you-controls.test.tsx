@@ -17,7 +17,7 @@ import RecommendationsScreen from '../../../app/(tabs)/recommendations';
  *   1. **No bell.** For You carried one, Collection and Search did not, and the one it
  *      carried did not optically centre against the wordmark. The resolution is
  *      subtractive — the inbox stays on Feed and Profile, where it already was.
- *   2. **Feature, feature, utility.** Sent to You and Watch Together (Group Picks until
+ *   2. **Feature, feature, utility.** Sent to You and Find for a Group (Group Picks, then Watch Together, until
  *      2026-11-06) are two of the things this app has that others do not. They are Maroon,
  *      and since the nav cohesion sprint a pair of their own; Filters is a quiet action.
  *   3. **Air under the row.** The first row of posters sat against the chips, so the
@@ -173,7 +173,7 @@ describe('the header carries no bell', () => {
 /**
  * **Two rows of controls, each saying what kind of control it is** (founder, nav cohesion
  * sprint, 2026-11-06). The heading row: Recommended / Top Rated, and Filters opposite it
- * as a quiet text action. Under it, Sent to You and Watch Together as a pair of features.
+ * as a quiet text action. Under it, Sent to You and Find for a Group as a pair of features.
  * The old single chip row drew all three as equivalent pills.
  */
 describe('the controls', () => {
@@ -186,7 +186,7 @@ describe('the controls', () => {
 
     const features = view.getByTestId('for-you-shortcuts');
     expect(within(features).getByRole('button', { name: /^Sent to You/ })).toBeTruthy();
-    expect(within(features).getByRole('button', { name: 'Watch Together' })).toBeTruthy();
+    expect(within(features).getByRole('button', { name: 'Find for a Group' })).toBeTruthy();
     expect(within(features).queryByRole('button', { name: 'Filters' })).toBeNull();
     // Gone under its old name everywhere on the screen.
     expect(view.queryByText('Group Picks')).toBeNull();
@@ -197,7 +197,7 @@ describe('the controls', () => {
 
     for (const [testID, word] of [
       ['for-you-shortcut-sent', 'Sent to You'],
-      ['for-you-shortcut-watch-together', 'Watch Together'],
+      ['for-you-shortcut-group', 'Find for a Group'],
     ] as const) {
       const feature = view.getByTestId(testID);
       expect(flatten(feature.props.style).borderColor).toBe(theme.semantic.actionSubtle);
@@ -218,7 +218,7 @@ describe('the controls', () => {
   it('gives every control a 44pt target', async () => {
     const view = await open();
 
-    for (const testID of ['for-you-shortcut-sent', 'for-you-shortcut-watch-together']) {
+    for (const testID of ['for-you-shortcut-sent', 'for-you-shortcut-group']) {
       const feature = view.getByTestId(testID);
       const slop = feature.props.hitSlop as { top: number; bottom: number };
       expect((flatten(feature.props.style).minHeight as number) + slop.top + slop.bottom).toBe(
@@ -237,13 +237,13 @@ describe('the controls', () => {
     expect(row.paddingBottom).toBe(theme.space[4]);
   });
 
-  it('opens Watch Together from its shortcut', async () => {
+  it('opens Find for a Group from its shortcut', async () => {
     const view = await open();
 
-    await fireEvent.press(view.getByRole('button', { name: 'Watch Together' }));
+    await fireEvent.press(view.getByRole('button', { name: 'Find for a Group' }));
 
     await waitFor(() =>
-      expect(view.getByText('Choose who’s watching, and find something everyone can enjoy.')).toBeTruthy(),
+      expect(view.getByText('Choose who’s watching, and get recommendations based on everyone’s tastes.')).toBeTruthy(),
     );
   });
 });

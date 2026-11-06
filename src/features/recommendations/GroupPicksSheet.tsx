@@ -141,14 +141,14 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   if (confirmed === null) {
     const groupSize = selected.size + 1;
     return (
-      <Sheet visible onClose={onClose} label="Watch Together">
+      <Sheet visible onClose={onClose} label="Group Recommendations">
         <View style={styles.header}>
-          <Text variant="headline">Watch Together</Text>
+          <Text variant="headline">Group Recommendations</Text>
           {/**
            * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
            *
            * The sheet opened on a title, a question and a list of faces, which assumes
-           * the reader already knows what Watch Together does. It is one of the few things
+           * the reader already knows what this feature does. It is one of the few things
            * in bingd. that has no equivalent elsewhere, so it is precisely the screen
            * that cannot assume it — and the cost of explaining it is one line.
            *
@@ -156,14 +156,15 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
            * the question rather than replacing it: this line says what will happen, and
            * `Who's watching?` is still the instruction for the control underneath.
            *
-           * **Watch Together, not Group Picks** (founder, nav cohesion sprint, 2026-11-06):
-           * the name says what the feature is for. Only the words changed; the endpoint,
-           * analytics names and selected-person rules are still `group_picks`. The sentence
-           * is the founder's and names no medium; the wall the sheet was opened from still
-           * decides which medium the picks answer for.
+           * **Find for a Group, and Group Recommendations in here** (founder, title-page
+           * sprint, 2026-11-06), after Group Picks and then Watch Together, which read as
+           * watching in sync rather than recommendations for several people. Only the words
+           * changed; the endpoint, analytics names and selected-person rules are still
+           * `group_picks`. The sentence is the founder's and names no medium; the wall the
+           * sheet was opened from still decides which medium the picks answer for.
            */}
           <Text variant="footnote" tone="secondary">
-            Choose who’s watching, and find something everyone can enjoy.
+            Choose who’s watching, and get recommendations based on everyone’s tastes.
           </Text>
           <Text variant="footnote" tone="tertiary">
             Who&apos;s watching?
@@ -265,9 +266,9 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   ];
 
   return (
-    <Sheet visible onClose={onClose} label="Watch Together">
+    <Sheet visible onClose={onClose} label="Group Recommendations">
       <View style={styles.header}>
-        <Text variant="headline">Watch Together</Text>
+        <Text variant="headline">Group Recommendations</Text>
         {/* The group, restated as names, so the list underneath has a visible subject.
             Labels rather than controls: the group is spent when the sheet closes. */}
         <View style={styles.members} accessibilityRole="text">

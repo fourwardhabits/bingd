@@ -169,21 +169,23 @@ describe('choosing the group', () => {
     expect(you.props.accessibilityState.disabled).toBe(true);
   });
 
-  it('is called Watch Together, and says what it does before asking who is in it', async () => {
+  it('is headed Group Recommendations, and says what it does before asking who is in it', async () => {
     /**
      * **The founder's first-screen finding** (physical QA, 2026-09-08): the sheet opened on
      * a title, a question and a list of faces, assuming the reader knew what it does. One
      * sentence, above the question and not in place of it.
      *
-     * **Watch Together, not Group Picks** (nav cohesion sprint, 2026-11-06), with the
-     * founder's sentence, which names no medium.
+     * **Group Recommendations** (title-page sprint, 2026-11-06), after Group Picks and Watch
+     * Together, with the founder's sentence, which names no medium.
      */
     await renderWithProviders(<GroupPicksSheet {...props()} />);
 
-    expect(screen.getByText('Watch Together')).toBeTruthy();
-    expect(screen.queryByText('Group Picks')).toBeNull();
+    expect(screen.getByText('Group Recommendations')).toBeTruthy();
+    for (const old of ['Group Picks', 'Watch Together']) {
+      expect(screen.queryByText(old)).toBeNull();
+    }
     expect(
-      screen.getByText('Choose who’s watching, and find something everyone can enjoy.'),
+      screen.getByText('Choose who’s watching, and get recommendations based on everyone’s tastes.'),
     ).toBeTruthy();
     // The instruction for the control underneath survives it.
     expect(screen.getByText("Who's watching?")).toBeTruthy();
@@ -195,7 +197,7 @@ describe('choosing the group', () => {
     await renderWithProviders(<GroupPicksSheet {...props()} medium="tv" />);
 
     expect(
-      screen.getByText('Choose who’s watching, and find something everyone can enjoy.'),
+      screen.getByText('Choose who’s watching, and get recommendations based on everyone’s tastes.'),
     ).toBeTruthy();
     expect(screen.queryByText(/movies/)).toBeNull();
   });

@@ -712,7 +712,8 @@ export default function RecommendationsScreen() {
        *    **Filters** opposite it as a quiet text action: secondary, because it narrows
        *    whatever wall is showing. Clear appears beside it only when there is something
        *    to clear, and clears the filters alone, as before.
-       * 2. **Sent to You and Watch Together**, the screen's two features, as a pair of
+       * 2. **Sent to You and Find for a Group** (Watch Together until the title-page sprint,
+       *    2026-11-06), the screen's two features, as a pair of
        *    their own (`ForYouShortcuts`). They are about particular people, so they are
        *    absent on Top Rated, as they always were (founder, 2026-09-09).
        *
@@ -794,9 +795,9 @@ export default function RecommendationsScreen() {
                   onPress: () => setSentOnly((on) => !on),
                 },
                 {
-                  key: 'watch-together',
+                  key: 'group',
                   icon: 'people-outline',
-                  label: 'Watch Together',
+                  label: 'Find for a Group',
                   // The analytics name stays the feature's original one.
                   onPress: () => {
                     track({ name: 'group_picks_opened' });
