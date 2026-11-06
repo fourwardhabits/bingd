@@ -171,25 +171,20 @@ read-only sandbox, as before; the suite above is the implementer's.
 
 ## Android Preview
 
-PCodex (`codex-companion adversarial-review`), read-only, three passes. Reports are in
-`.agent-workflow/codex-reviews/qa-corrections-review{1,2,3}.md` (gitignored).
+**Live on 2026-11-06**, published by this session as the one publisher from the real-`npm ci`
+checkout `../worktrees/visual2-preview-publish` (left detached at `147b55c`), after a
+`BINGD_RELEASE_DRY_RUN=1` dry run. Verified with `eas update:view`; no iOS group was published.
 
-1. **`b868e33..e5aa834` — needs attention, three MEDIUM, all fixed in `af18f1a`.** It
-   independently confirmed the snapshot diagnosis and that no prohibited area changed.
-   - Refine's summary key could repeat across rounds and join a first-round read in flight:
-     the round is now in the key.
-   - A paged read could be assembled across another device's move into two titles at one
-     position: reads are now checked as one ranking, re-read, then refused.
-   - `scoreFor`'s floating-point rounding disagreed with `score_for` at an exact 0.85: it now
-     rounds exactly, pinned against the database.
-2. **Whole branch at `af18f1a` — needs attention, one MEDIUM, fixed in `918f925`:** a summary
-   revisited at the same count (Done, Keep ranking, Done again; or a committed placement whose
-   reply was lost) reused the first visit's read. Every visit now reads under a new generation.
-3. **`af18f1a..918f925` — approve, no material findings,** including StrictMode checks of
-   cached and in-flight reads, reopening, failures, retries and empty titles.
-
-No HIGH or CRITICAL finding was raised at any pass. Codex's own Jest run is blocked by its
-read-only sandbox, as before; the suite above is the implementer's.
+| | |
+| --- | --- |
+| Channel / branch | `preview` |
+| Platform | Android only |
+| Update group | `d27b8144-cfad-49d4-ad98-d527cfd6104a` |
+| Android update | `01a1b136-1bec-7519-8865-3e6b3d2df030` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` (the installed Preview APK's) |
+| Source commit | `147b55c` (code `918f925` plus this record) |
+| Rollback group | `2724ce75-6244-460e-8488-1a1a62a35b84` (UI cohesion, `ed8d410`), still listed |
+| Dashboard | https://expo.dev/accounts/fourward/projects/bingd/updates/d27b8144-cfad-49d4-ad98-d527cfd6104a |
 
 ## Rollback
 
