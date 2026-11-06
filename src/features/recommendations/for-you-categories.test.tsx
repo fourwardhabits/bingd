@@ -213,15 +213,13 @@ describe('the one selector', () => {
       'TV',
     ]);
 
-    // Which wall: the page's dropdown. Exactly two, in this order — presence alone would
-    // pass a third entry, or a swap. Scoped to the sheet by its scrim, because RNTL
-    // renders a modal's siblings; the rows carry their label as text.
+    // Which wall: the page's dropdown, a small menu under it since the nav cohesion sprint
+    // (2026-11-06). Exactly two, in this order — presence alone would pass a third entry,
+    // or a swap.
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    const sheet = within(view.getByLabelText('Close'));
-    const options = sheet
-      .getAllByRole('button')
-      .map((node) => within(node).getAllByText(/\S/)[0]?.props.children)
-      .map((label) => String(label ?? ''));
+    const options = (await view.findAllByRole('menuitem')).map(
+      (node) => node.props.accessibilityLabel,
+    );
     expect(options).toEqual(['Recommended', 'Top Rated']);
     // §A16. People is a mode of the Feed tab now, gone rather than hidden.
     expect(view.queryByRole('button', { name: /^People/ })).toBeNull();
@@ -353,45 +351,33 @@ describe('crossing between the two categories', () => {
  * group to pick over. The flow itself is exercised in `GroupPicksSheet.test.tsx`; what
  * this file owns is the entry point.
  */
-describe('the Group Picks chip', () => {
-  it('sits in the chip row and opens the flow', async () => {
+describe('Watch Together', () => {
+  it('is a feature shortcut, and opens the flow', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('Group Picks')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Watch Together')).toBeTruthy());
+    expect(within(view.getByTestId('for-you-shortcuts')).getByText('Watch Together')).toBeTruthy();
 
-    await fireEvent.press(view.getByText('Group Picks'));
+    await fireEvent.press(view.getByText('Watch Together'));
     await waitFor(() => expect(view.getByText("Who's watching?")).toBeTruthy());
   });
 
 });
 
 /**
- * **The top controls are one row, and never two** (founder, physical Android, 2026-09-07).
- *
- * `Sent to you · N`, `Group Picks` and `Filters · N` wrapped onto two rows on a 360pt
- * phone, and the arithmetic does not allow them to fit at footnote size with counts. The
- * row is `nowrap` inside a horizontal scroller now — the same arrangement as the tab row —
- * so on every ordinary phone nothing changes and on a narrow one the row scrolls rather
- * than reflows. This test pins the contract rather than a width: no layout engine runs
- * here, so what can be asserted is that wrapping is structurally impossible and that the
- * overflow has somewhere to go.
+ * **The top controls are two rows, each one line** (founder, nav cohesion sprint,
+ * 2026-11-06). Three chips with counts did not fit a 360pt phone, so they scrolled
+ * sideways; now Filters sits opposite the heading and the two features share a row of
+ * equal halves, so nothing scrolls and nothing is hidden off the edge.
  */
 describe('the top controls', () => {
-  it('are one row that scrolls sideways rather than wrapping', async () => {
+  it('fit without scrolling: Filters by the heading, the features under it', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('Group Picks')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Watch Together')).toBeTruthy());
 
-    const row = view.getByTestId('for-you-controls');
-    const style = Array.isArray(row.props.style)
-      ? Object.assign({}, ...row.props.style)
-      : row.props.style;
-    expect(style.flexDirection).toBe('row');
-    expect(style.flexWrap).toBe('nowrap');
-
-    const scroller = view.getByTestId('for-you-controls-scroller');
-    expect(scroller.props.horizontal).toBe(true);
-    // All three, in the row, in the founder's order.
-    expect(within(row).getByText(/^Sent to You/)).toBeTruthy();
-    expect(within(row).getByText('Group Picks')).toBeTruthy();
-    expect(within(row).getByText(/^Filters/)).toBeTruthy();
+    expect(view.queryByTestId('for-you-controls-scroller')).toBeNull();
+    expect(within(view.getByTestId('for-you-controls')).getByText(/^Filters/)).toBeTruthy();
+    const features = view.getByTestId('for-you-shortcuts');
+    expect(within(features).getByText('Sent to You')).toBeTruthy();
+    expect(within(features).getByText('Watch Together')).toBeTruthy();
   });
 });

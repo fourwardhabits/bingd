@@ -143,7 +143,7 @@ const choose = async (view: Awaited<ReturnType<typeof open>>, category: string) 
   if (!wall || !medium) throw new Error(`not a For You wall: ${category}`);
   if (view.getByLabelText(/^Showing /).props.accessibilityLabel !== `Showing ${wall}`) {
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: new RegExp(`^${wall}`) }));
+    await fireEvent.press(await view.findByRole('menuitem', { name: new RegExp(`^${wall}`) }));
   }
   await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: medium }));
 };
@@ -209,10 +209,10 @@ describe('choosing Top Rated', () => {
     expect(showing(view)).toBe('Showing Top Rated TV');
   });
 
-  it('takes Sent to you and Group Picks away, and keeps Filters', async () => {
+  it('takes Sent to You and Watch Together away, and keeps Filters', async () => {
     const view = await open();
     expect(view.getByLabelText(/^Sent to You/)).toBeTruthy();
-    expect(view.getByText('Group Picks')).toBeTruthy();
+    expect(view.getByText('Watch Together')).toBeTruthy();
 
     await choose(view, 'Top Rated Movies');
     await waitFor(() => expect(view.getByLabelText('The Highest, 2014')).toBeTruthy());
@@ -220,7 +220,7 @@ describe('choosing Top Rated', () => {
     // Both are statements about particular people, and this wall's whole claim is that
     // the order belongs to everybody.
     expect(view.queryByLabelText(/^Sent to You/)).toBeNull();
-    expect(view.queryByText('Group Picks')).toBeNull();
+    expect(view.queryByText('Watch Together')).toBeNull();
     // Filters narrow *which titles*, which is a question this wall can answer.
     expect(view.getByText('Filters')).toBeTruthy();
   });
@@ -537,14 +537,14 @@ describe('the dropdown and the switch together', () => {
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended TV'));
 
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: /^Top Rated/ }));
+    await fireEvent.press(await view.findByRole('menuitem', { name: /^Top Rated/ }));
     await waitFor(() => expect(showing(view)).toBe('Showing Top Rated TV'));
 
     await fireEvent.press(within(view.getByLabelText('Medium')).getByRole('radio', { name: 'Movies' }));
     await waitFor(() => expect(showing(view)).toBe('Showing Top Rated Movies'));
 
     await fireEvent.press(view.getByLabelText(/^Showing /));
-    await fireEvent.press(view.getByRole('button', { name: /^Recommended/ }));
+    await fireEvent.press(await view.findByRole('menuitem', { name: /^Recommended/ }));
     await waitFor(() => expect(showing(view)).toBe('Showing Recommended Movies'));
   });
 });

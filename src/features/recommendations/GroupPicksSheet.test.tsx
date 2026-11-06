@@ -169,35 +169,35 @@ describe('choosing the group', () => {
     expect(you.props.accessibilityState.disabled).toBe(true);
   });
 
-  it('says what Group Picks does before asking who is in it', async () => {
+  it('is called Watch Together, and says what it does before asking who is in it', async () => {
     /**
-     * **The founder's first-screen finding** (physical QA, 2026-09-08). The sheet opened
-     * on a title, a question and a list of faces, which assumes the reader already knows
-     * what Group Picks is — and it is one of the few things in this app with no
-     * equivalent anywhere else, so it is exactly the screen that cannot assume it.
+     * **The founder's first-screen finding** (physical QA, 2026-09-08): the sheet opened on
+     * a title, a question and a list of faces, assuming the reader knew what it does. One
+     * sentence, above the question and not in place of it.
      *
-     * One sentence, above the question and not in place of it. Deliberately not a
-     * carousel, a tutorial or a dismissible tip.
+     * **Watch Together, not Group Picks** (nav cohesion sprint, 2026-11-06), with the
+     * founder's sentence, which names no medium.
      */
     await renderWithProviders(<GroupPicksSheet {...props()} />);
 
+    expect(screen.getByText('Watch Together')).toBeTruthy();
+    expect(screen.queryByText('Group Picks')).toBeNull();
     expect(
-      screen.getByText('Pick who’s watching and bingd will find movies you can all agree on.'),
+      screen.getByText('Choose who’s watching, and find something everyone can enjoy.'),
     ).toBeTruthy();
     // The instruction for the control underneath survives it.
     expect(screen.getByText("Who's watching?")).toBeTruthy();
   });
 
-  it('promises shows rather than movies when it was opened from the TV wall', async () => {
-    // A sentence promising movies over a list of series answers a different question
-    // from the one being asked. The wall the sheet was opened from decides the noun, the
-    // same way it already decides what the server is asked for.
+  it('says the same sentence when it was opened from the TV wall', async () => {
+    // It promises no medium, so it is true over a list of series too. The wall still
+    // decides what the server is asked for.
     await renderWithProviders(<GroupPicksSheet {...props()} medium="tv" />);
 
     expect(
-      screen.getByText('Pick who’s watching and bingd will find shows you can all agree on.'),
+      screen.getByText('Choose who’s watching, and find something everyone can enjoy.'),
     ).toBeTruthy();
-    expect(screen.queryByText(/will find movies/)).toBeNull();
+    expect(screen.queryByText(/movies/)).toBeNull();
   });
 
   it('asks for a second person rather than offering to work for one', async () => {

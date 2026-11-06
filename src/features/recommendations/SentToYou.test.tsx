@@ -224,14 +224,18 @@ describe('the wall and the list', () => {
     expect(view.queryByText(/^Inspired by/)).toBeNull();
   });
 
-  it('counts what has not been opened on the chip itself', async () => {
+  it('counts what has not been opened on the shortcut itself', async () => {
     mockRpcResults.recommendations_to_me = [
       recommendation(),
       recommendation({ id: 'r2', media_item_id: 'film-2', opened_at: '2026-08-16T10:00:00.000Z' }),
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Sent to You · 1')).toBeTruthy());
+    // The count is the shortcut's badge now, and its label says it in full.
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Sent to You, 1 unopened' })).toBeTruthy(),
+    );
+    expect(view.getByText('1', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('names the sender and how long ago, which is what the row is for', async () => {
@@ -430,9 +434,9 @@ describe('the shared filter state', () => {
     // Everything is filtered out, and the empty state points at the control rather
     // than growing a second one beside it.
     await waitFor(() => expect(view.getByText('Nothing matches your filters')).toBeTruthy());
-    expect(view.getAllByText('Clear all')).toHaveLength(1);
+    expect(view.getAllByLabelText('Clear all')).toHaveLength(1);
 
-    await fireEvent.press(view.getByText('Clear all'));
+    await fireEvent.press(view.getByLabelText('Clear all'));
     await waitFor(() => expect(view.getByText('Hereditary (2010)')).toBeTruthy());
   });
 

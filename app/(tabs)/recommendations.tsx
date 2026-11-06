@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { CollectionFilterSheet } from '@/features/collection/CollectionFilterSheet';
@@ -16,6 +17,7 @@ import { useLoggedCollection, useWatchlist } from '@/features/collection/use-col
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { SLATE_SIZE } from '@/features/recommendations/rank';
 import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
+import { ForYouShortcuts } from '@/features/recommendations/ForYouShortcuts';
 import { RequestAlertRow } from '@/features/recommendations/RequestAlertRow';
 import {
   useRecommendationRequests,
@@ -59,7 +61,6 @@ import { theme } from '@/ui/tokens';
 import {
   AppHeader,
   EmptyState,
-  FilterChip,
   HeaderBoundary,
   PosterGrid,
   Screen,
@@ -702,10 +703,25 @@ export default function RecommendationsScreen() {
        * so nothing below the row changed, and each control keeps the other's value. No For
        * You heading, because the tab bar already says where the reader is.
        */}
+      {/**
+       * **Two rows of controls, each saying what kind of control it is** (founder, nav
+       * cohesion sprint, 2026-11-06).
+       *
+       * 1. The page's content mode — Recommended / Top Rated, unchanged in what it does —
+       *    at the interface's headline size rather than a 22pt serif dropdown, with
+       *    **Filters** opposite it as a quiet text action: secondary, because it narrows
+       *    whatever wall is showing. Clear appears beside it only when there is something
+       *    to clear, and clears the filters alone, as before.
+       * 2. **Sent to You and Watch Together**, the screen's two features, as a pair of
+       *    their own (`ForYouShortcuts`). They are about particular people, so they are
+       *    absent on Top Rated, as they always were (founder, 2026-09-09).
+       *
+       * The medium is the header's switch (UI cohesion pass). Nothing below this changed.
+       */}
       <View style={styles.header}>
         <View style={styles.headerWall}>
           <MediumSelector
-            size="nav"
+            size="heading"
             value={onTopRated ? 'top' : 'recommended'}
             options={FOR_YOU_WALLS}
             onChange={(next) => {
@@ -714,144 +730,82 @@ export default function RecommendationsScreen() {
             }}
           />
         </View>
+        <View style={styles.headerTools} testID="for-you-controls">
+          {/* The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
+              stay off, because nothing on either wall has been ranked by this reader. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={activeCount ? `Filters, ${activeCount} on` : 'Filters'}
+            accessibilityState={{ selected: activeCount > 0 }}
+            onPress={() => setFiltering(true)}
+            style={({ pressed }) => [styles.tool, pressed && styles.toolPressed]}
+            testID="for-you-filters"
+          >
+            <Ionicons
+              name="options-outline"
+              size={theme.layout.icon.sm}
+              color={activeCount ? theme.semantic.action : theme.text.secondary}
+            />
+            <Text variant="subhead" tone={activeCount ? 'action' : 'secondary'} numberOfLines={1}>
+              {activeCount ? `Filters · ${activeCount}` : 'Filters'}
+            </Text>
+          </Pressable>
+          {isFiltered(filters) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear all"
+              accessibilityHint="Turns every filter off"
+              onPress={() => changeFilters(emptyFilters())}
+              style={({ pressed }) => [styles.clear, pressed && styles.toolPressed]}
+              testID="for-you-clear-filters"
+            >
+              <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
-          {/* Above the filters, and only when something is waiting.
+          {/* Above the features, and only when something is waiting.
 
-          It sits here rather than in the filter row because it is not a filter: the
-          chips narrow what is on screen, and this says that there is something *not*
-          on screen yet which needs a decision. Absent at zero, with no placeholder and
-          no empty state — a row that is always there stops being a signal. */}
+          It is not a filter: it says that there is something *not* on screen yet which
+          needs a decision. Absent at zero, with no placeholder and no empty state — a row
+          that is always there stops being a signal. */}
           {requestCount > 0 ? (
             <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
           ) : null}
 
-          {/**
-           * **One row, and never two** (founder, physical Android, 2026-09-07).
-           *
-           * Sent to you leads because it is the only chip that changes what kind of thing
-           * is on screen; the rest narrow whatever is. Clear all appears only when there is
-           * something to clear, and clears the *filters*: turning off Sent to you as well
-           * would make one control mean two things.
-           *
-           * The row used to wrap, and on a 360pt phone with a Sent to you count and a
-           * Filters count it did — three controls became two rows and the wall moved down
-           * to make room. The arithmetic does not allow a fit: `Sent to you · 12+`,
-           * `Group Picks` and `Filters · 2` at footnote size with their glyphs and chip
-           * padding come to more than the 328pt a 360pt screen has between its gutters,
-           * before Clear all is even drawn. So the row scrolls sideways instead. When the
-           * chips fit — every ordinary phone with no counts — the content is narrower than
-           * the viewport, it stays left-aligned and nothing about the layout changes;
-           * when they do not, the row scrolls rather than reflows, and the wall below it
-           * holds still. `alwaysBounceHorizontal={false}` so a row with nowhere to go
-           * does not rubber-band. The same arrangement `SegmentedTabs` uses, for the same
-           * reason.
-           */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            alwaysBounceHorizontal={false}
-            style={styles.filterScroller}
-            testID="for-you-controls-scroller"
-          >
-            <View style={styles.filterRow} testID="for-you-controls">
-              {/**
-               * **Sent to you and Group Picks are absent on Top Rated** (founder,
-               * 2026-09-09), and Filters is not.
-               *
-               * The rule that separates them is what each control is *about*. Sent to
-               * you narrows the wall to things people sent this reader, and Group Picks
-               * asks what a named group should watch: both are statements about
-               * particular people, and there is no honest way to apply either to a wall
-               * whose whole claim is that the order belongs to everybody. Offering them
-               * here would mean either a control that quietly leaves Top Rated the
-               * moment it is pressed, or one that does nothing.
-               *
-               * Filters are different in kind. Genre, Language and Decade narrow *which
-               * titles* are on screen and say nothing about whose opinion put them
-               * there, so `Horror, top rated` is a question this wall can answer
-               * without changing what it is. The rating filters stay off on both walls,
-               * for the reason they were always off here: nothing on either has been
-               * ranked by this reader.
-               */}
-              {onTopRated ? null : (
-              <FilterChip
-                icon={sentOnly ? 'mail-open' : 'mail-outline'}
-                label={
-                  unopened > 0
-                    ? `Sent to You · ${unopened}${atLeast ? '+' : ''}`
-                    : 'Sent to You'
-                }
-                accessibilityLabel={
-                  unopened > 0
-                    ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-                    : 'Sent to You'
-                }
-                selected={sentOnly}
-                // A social feature, not a filter — see the note above `emphasis` on
-                // `FilterChip`, and `Group Picks` two chips down, which is the other one.
-                emphasis="social"
-                onPress={() => setSentOnly((on) => !on)}
-              />
-              )}
-              {/* People is not a chip in this row (founder, 2026-09-07). It replaces the
-                entire wall, and every other control here narrows the wall that is
-                already showing — it belongs in the selector at the top with the other
-                answers to "what am I looking at", and that is where it lives again. */}
-              {/* An action chip rather than a filter: it opens the flow that answers "what
-            should this group watch together". Deliberately not a fourth MediumSelector
-            segment and not a tab — a group is a momentary question, and this row is
-            where the screen keeps its questions. The wall the chip sits on decides the
-            medium the picks answer for. */}
-              {onTopRated ? null : (
-                <FilterChip
-                  icon="people-outline"
-                  label="Group Picks"
-                  // The row's other social feature. It shares Sent to you's treatment
-                  // exactly, so the two read as one family and Filters reads as the
-                  // utility beside them.
-                  emphasis="social"
-                  onPress={() => {
+          {/* Not on Top Rated: both are statements about particular people, and that wall's
+              whole claim is that its order belongs to everybody (founder, 2026-09-09). */}
+          {onTopRated ? (
+            <View style={styles.topRatedGap} />
+          ) : (
+            <ForYouShortcuts
+              shortcuts={[
+                {
+                  key: 'sent',
+                  icon: sentOnly ? 'mail-open' : 'mail-outline',
+                  label: 'Sent to You',
+                  badge: unopened > 0 ? `${unopened}${atLeast ? '+' : ''}` : null,
+                  accessibilityLabel:
+                    unopened > 0
+                      ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                      : 'Sent to You',
+                  selected: sentOnly,
+                  onPress: () => setSentOnly((on) => !on),
+                },
+                {
+                  key: 'watch-together',
+                  icon: 'people-outline',
+                  label: 'Watch Together',
+                  // The analytics name stays the feature's original one.
+                  onPress: () => {
                     track({ name: 'group_picks_opened' });
                     setGroupPicking(true);
-                  }}
-                />
-              )}
-              {/* The collection's own sheet, which its header always intended this screen to
-            reuse rather than growing a second one. Genre, Language, Decade and Anime
-            come with it. Rating filters are off: nothing on either list has been ranked
-            by this reader. */}
-              <FilterChip
-                icon="options-outline"
-                label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
-                selected={activeCount > 0}
-                onPress={() => setFiltering(true)}
-              />
-              {/* **The Refresh chip was here, and it is gone** (founder §18).
-
-            It existed because the wall could not rotate by itself: exposure was module
-            state, so every launch drew from an un-penalised pool and produced the same
-            first slate, and pressing Refresh was the only way past it. That was the
-            reader having to know a mechanism, which is exactly what §18 asks to remove —
-            "the user should not have to think: I need to press Refresh to make
-            recommendations work".
-
-            Two changes let it go rather than a decision that the row looked busy, which
-            the founder ruled out as a reason on its own. `recommendation_exposure`
-            (20260828000500) makes the rotation survive a relaunch, so the *default*
-            behaviour is now what Refresh used to buy. And an explicit way to ask for a
-            new slate still exists: pull-to-refresh on the wall, which runs the same
-            `refreshRecommendations` this chip did. A gesture the screen already had for
-            Sent to you, rather than a control competing with the filters. */}
-              {isFiltered(filters) ? (
-                <FilterChip
-                  icon="close"
-                  label="Clear all"
-                  onPress={() => changeFilters(emptyFilters())}
-                />
-              ) : null}
-            </View>
-          </ScrollView>
+                  },
+                },
+              ]}
+            />
+          )}
 
           {sentOnly ? (
             <SentList
@@ -1319,45 +1273,42 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  /** The dropdown alone, on its gutter; the medium switch is in the header above. */
+  /**
+   * Recommended / Top Rated on the left gutter, Filters on the right one. It wraps rather
+   * than truncating at a large text size, Filters moving under the heading.
+   */
   header: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    paddingRight: theme.layout.gutter,
+    justifyContent: 'space-between',
+    columnGap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[1],
   },
   headerWall: { flexShrink: 1 },
+  headerTools: { flexDirection: 'row', alignItems: 'center', marginRight: -theme.space[2] },
+  // Filters: a 44pt text action with no outline, so it reads as secondary to the features.
+  tool: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[1],
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.space[2],
+  },
+  clear: {
+    minHeight: theme.layout.minTapTarget,
+    minWidth: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolPressed: { opacity: 0.6 },
+  // Top Rated has no features row; this is the seam the row's foot would have given.
+  topRatedGap: { height: theme.space[3] },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
   exhausted: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
     textAlign: 'center',
-  },
-  // `flexGrow: 0` so the scroller takes its height from the chips rather than expanding
-  // into whatever the page offers it — the note `SegmentedTabs` carries.
-  // `flexShrink: 0` because a ScrollView shrinks by default: on a short phone the row gave
-  // up height to the wall and cut the tops off the chips (Visual 2.1 check, 320 x 568).
-  filterScroller: { flexGrow: 0, flexShrink: 0 },
-  /**
-   * `nowrap` is the contract. A wrapped chip row is the founder's rejected state, and
-   * the scroller around this is what makes one row possible at every width instead of a
-   * promise the arithmetic cannot keep on a 360pt phone.
-   */
-  filterRow: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    alignItems: 'center',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    /**
-     * **16, and it was 8** (founder, physical QA, 2026-09-08).
-     *
-     * On the device the first row of posters sat directly under the chips with no seam
-     * between them, so the controls read as part of the wall rather than as the thing
-     * that governs it. `space[4]` is the top of the design system's *control row → the
-     * content it governs* interval (design-system.md §5), which is what this seam is:
-     * the wall has no top padding of its own, so this padding is the whole gap.
-     */
-    paddingBottom: theme.space[4],
   },
 });

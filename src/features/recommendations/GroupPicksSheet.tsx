@@ -141,14 +141,14 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   if (confirmed === null) {
     const groupSize = selected.size + 1;
     return (
-      <Sheet visible onClose={onClose} label="Group Picks">
+      <Sheet visible onClose={onClose} label="Watch Together">
         <View style={styles.header}>
-          <Text variant="headline">Group Picks</Text>
+          <Text variant="headline">Watch Together</Text>
           {/**
            * **One sentence saying what this is** (founder, physical QA, 2026-09-08).
            *
            * The sheet opened on a title, a question and a list of faces, which assumes
-           * the reader already knows what Group Picks does. It is one of the few things
+           * the reader already knows what Watch Together does. It is one of the few things
            * in bingd. that has no equivalent elsewhere, so it is precisely the screen
            * that cannot assume it — and the cost of explaining it is one line.
            *
@@ -156,14 +156,14 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
            * the question rather than replacing it: this line says what will happen, and
            * `Who's watching?` is still the instruction for the control underneath.
            *
-           * The noun follows the wall the sheet was opened from, because a sentence
-           * promising movies over a list of series answers a different question from the
-           * one being asked.
+           * **Watch Together, not Group Picks** (founder, nav cohesion sprint, 2026-11-06):
+           * the name says what the feature is for. Only the words changed; the endpoint,
+           * analytics names and selected-person rules are still `group_picks`. The sentence
+           * is the founder's and names no medium; the wall the sheet was opened from still
+           * decides which medium the picks answer for.
            */}
           <Text variant="footnote" tone="secondary">
-            {medium === 'tv'
-              ? 'Pick who’s watching and bingd will find shows you can all agree on.'
-              : 'Pick who’s watching and bingd will find movies you can all agree on.'}
+            Choose who’s watching, and find something everyone can enjoy.
           </Text>
           <Text variant="footnote" tone="tertiary">
             Who&apos;s watching?
@@ -265,9 +265,9 @@ export function GroupPicksSheet({ viewerId, medium, onClose }: GroupPicksSheetPr
   ];
 
   return (
-    <Sheet visible onClose={onClose} label="Group Picks">
+    <Sheet visible onClose={onClose} label="Watch Together">
       <View style={styles.header}>
-        <Text variant="headline">Group Picks</Text>
+        <Text variant="headline">Watch Together</Text>
         {/* The group, restated as names, so the list underneath has a visible subject.
             Labels rather than controls: the group is spent when the sheet closes. */}
         <View style={styles.members} accessibilityRole="text">
