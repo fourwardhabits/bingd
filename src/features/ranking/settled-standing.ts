@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import {
@@ -111,11 +112,14 @@ export type SettledStanding = {
  * to the summary asks under a new count, so a second summary is never the first one's
  * copy. `gcTime: 0` keeps these one-off copies out of the cache once the summary goes.
  *
- * **`sitting` must change whenever the count can repeat.** The backlog's count only ever
- * grows, so its sitting id is enough. Refine's count starts again at every round, so
- * Refine passes an id with the round in it: otherwise a second round finishing on the
- * same count could be handed a first-round read that is still in flight (independent
- * review, QA corrections).
+ * **And every time the summary opens, a read of its own** (independent review 2, QA
+ * corrections). The count alone can repeat: Done, Keep ranking, then Done again before
+ * the next title finishes, or a placement that committed while its reply was lost, both
+ * come back to the summary at the same count — and the hook stays mounted between, so
+ * the first visit's copy would still be cached and never re-read. So the key also
+ * carries a generation that goes up each time `enabled` turns on, and the numbers are
+ * withheld until that generation's read is in. Refine passes the round in `sitting`
+ * too, because its count starts again every round.
  */
 export function useSettledStanding({
   userId,
@@ -132,10 +136,23 @@ export function useSettledStanding({
   /** True while the summary is on screen. */
   enabled: boolean;
 }): SettledStanding {
+  // A new generation each time the summary opens, set during render (React's "adjusting
+  // state when a prop changes"), so the very first render already asks under the new key.
+  const [entry, setEntry] = useState({ enabled: false, generation: 0 });
+  if (entry.enabled !== enabled) {
+    setEntry({ enabled, generation: enabled ? entry.generation + 1 : entry.generation });
+  }
   const query = useQuery({
-    queryKey: ['ranked-summary', userId, medium, sitting, titles.length] as const,
+    queryKey: [
+      'ranked-summary',
+      userId,
+      medium,
+      sitting,
+      titles.length,
+      entry.generation,
+    ] as const,
     queryFn: () => readOneRanking(() => readRankedCollection(userId, medium)),
-    enabled: enabled && titles.length > 0,
+    enabled: enabled && entry.enabled && titles.length > 0,
     staleTime: Infinity,
     gcTime: 0,
   });

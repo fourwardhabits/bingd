@@ -254,6 +254,39 @@ describe('the backlog summary', () => {
     expect(mockReadRanked).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * **Back at the same count, read again** (independent review 2). Done, Keep ranking, then
+   * Done before the next title finishes returns to the summary with nothing new placed
+   * here — but the ranking may have moved (another device, or a placement that committed
+   * while its reply was lost), and the first visit's copy must not be reused.
+   */
+  it('reads again every time the summary opens, even at the same count', async () => {
+    serve({
+      ranking_backlog: [queue([HEAT, ALLIED]), queue([ALLIED]), queue([ALLIED])],
+      rank_backlog_start: [landed(4, 9.1)],
+    });
+    mockReadRanked.mockResolvedValueOnce(rankingOf({ loved: 11 }, { heat: 4 }));
+    // By the second visit Allied was placed above Heat elsewhere.
+    mockReadRanked.mockResolvedValueOnce(rankingOf({ loved: 12 }, { allied: 4, heat: 5 }));
+    const view = await renderWithProviders(
+      <RankSessionScreen medium="movies" start="backlog" onExit={jest.fn()} />,
+    );
+
+    await likeIt(view, 'Heat');
+    await waitFor(() => expect(view.getByLabelText('Done')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Done'));
+    await waitFor(() => expect(view.getByText('#4 in Movies')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Keep ranking' }));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    // Done again before Allied is answered: the same count, one title.
+    await fireEvent.press(view.getByLabelText('Done'));
+
+    await waitFor(() => expect(view.getByText('#5 in Movies')).toBeTruthy());
+    expect(rowText(view)).toEqual(['Heat · #5 in Movies · 8.9']);
+    expect(mockReadRanked).toHaveBeenCalledTimes(2);
+  });
+
   it('holds the numbers back while the read is out, rather than showing the snapshots', async () => {
     serve({
       ranking_backlog: [queue([PITCH_BLACK, ALLIED]), queue([ALLIED]), queue([])],
