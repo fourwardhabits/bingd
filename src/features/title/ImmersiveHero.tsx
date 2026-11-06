@@ -37,13 +37,14 @@ export type ImmersiveHeroProps = {
  *     │   sharp backdrop             │  ← the band: the title's own image, unblurred
  *     │                              │
  *     │  ┌────────────────────────┐  │  ← the module rises over the band's lower 22%,
- *     │  │ Title                  │  │    12pt in from each edge, top corners rounded
+ *     │  │ Title                  │  │    12pt in from each edge, corners rounded
  *     └──┤ Genre · Genre · +2     ├──┘  ← the band ends; Paper from edge to edge
  *        │ 2023 · R · 125 min     │
- *        │ Directed by …          │     The module has no border, shadow or lower
- *        │ [Rank] ▢ ▢ ▢           │     corners: below the artwork it is simply the top
- *        │ You | bingd. | Follow. │     of the page's Paper, and About follows on it
- *          About …                      on the same content line.
+ *        │ Directed by …          │     The module is closed by one hairline and no
+ *        │ [Rank] ▢ ▢ ▢           │     shadow (final title refinement, 2026-11-06):
+ *        │ You | bingd. | Follow. │     the card that rose over the picture. The
+ *        └────────────────────────┘     sections below it are the page's own full
+ *     About …                           width, on the app's 16pt gutter.
  *
  * **What went** (same brief): the blurred, darkened reflection of the backdrop that filled
  * the rest of the first screen, the strips that softened the band into it, the band's dark
@@ -213,17 +214,20 @@ const styles = StyleSheet.create({
   posterSlot: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   moduleRow: { paddingHorizontal: SHEET_INSET },
   /**
-   * The top of the page's one Paper surface. Rounded where it meets the artwork and square
-   * below, with no border or shadow: over the picture its edge is the picture's, and once
-   * the band ends it is indistinguishable from the Paper page it continues into.
+   * **The title card** (final title refinement, 2026-11-06). Paper, rounded, inset 12pt, and
+   * closed by one hairline — the app's quietest edge, no shadow — so it reads as the card
+   * that rose over the artwork, and the page under it as ordinary full-width Paper. Without
+   * the line the card vanished below the band and its 28pt text line read as misaligned
+   * against the sections' 16pt gutter.
    */
   module: {
     backgroundColor: theme.surface.base,
-    borderTopLeftRadius: theme.radius.card,
-    borderTopRightRadius: theme.radius.card,
+    borderRadius: theme.radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border.hairline,
     paddingHorizontal: SHEET_PADDING,
     paddingTop: theme.space[4],
-    paddingBottom: 0,
+    paddingBottom: theme.space[4],
     gap: theme.space[3],
   },
 });

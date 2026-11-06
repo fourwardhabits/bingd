@@ -44,6 +44,13 @@ export type SectionHeaderProps = {
    * 2026-11-06). Where both fit, nothing moves.
    */
   wrap?: boolean;
+  /**
+   * The heading's own line height rather than a 44pt row, so the content under it starts
+   * about 8pt below the words rather than 14pt plus whatever the content adds: the
+   * Cinematic title page, where the gap under ABOUT read as too large on the phone (final
+   * title refinement, 2026-11-06). An action keeps a 44pt target through its slop.
+   */
+  tight?: boolean;
 };
 
 export type SectionHeaderSize = 'standard' | 'large';
@@ -69,10 +76,11 @@ export function SectionHeader({
   size = 'standard',
   fit = false,
   wrap = false,
+  tight = false,
 }: SectionHeaderProps) {
   return (
     <View
-      style={[styles.row, wrap && styles.wrap]}
+      style={[styles.row, wrap && styles.wrap, tight && styles.tight]}
       accessibilityRole="header"
       // Uppercasing is a style, not a spelling. Without this a screen reader
       // spells out "T O P  R A N K E D".
@@ -98,8 +106,8 @@ export function SectionHeader({
           accessibilityRole="button"
           accessibilityLabel={actionAccessibilityLabel}
           onPress={onPressAction}
-          hitSlop={theme.space[2]}
-          style={styles.action}
+          hitSlop={tight ? TIGHT_SLOP : theme.space[2]}
+          style={tight ? undefined : styles.action}
         >
           <Text variant="footnote" tone="action">
             {actionLabel}
@@ -113,7 +121,11 @@ export function SectionHeader({
 /** LEADERBOARD at 200% text in the space a 320pt phone leaves it needs about 0.69. */
 const FIT_FLOOR = 0.6;
 
+/** A footnote line is about 18pt; 13pt above and below it makes the 44pt target. */
+const TIGHT_SLOP = { top: 13, bottom: 13, left: theme.space[2], right: theme.space[2] };
+
 const styles = StyleSheet.create({
+  tight: { minHeight: 0 },
   fit: { flexShrink: 1 },
   wrap: { flexWrap: 'wrap', columnGap: theme.space[3] },
   row: {

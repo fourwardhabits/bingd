@@ -107,8 +107,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   // 76pt columns with 8pt gaps: four across a 360pt screen with the gutter, the fifth
-  // peeking to say the row scrolls.
-  rowCompact: { gap: theme.space[2] },
+  // peeking to say the row scrolls. Nothing under the names: the Cinematic page's section
+  // seam is the space below (final title refinement, 2026-11-06).
+  rowCompact: { gap: theme.space[2], paddingBottom: 0 },
   itemCompact: { width: 76 },
   center: { textAlign: 'center' },
   pressed: { opacity: 0.7 },

@@ -2,6 +2,7 @@ import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { Alert, Linking, StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { brand } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -3741,7 +3742,9 @@ describe('the immersive title page (experiment)', () => {
       const order = readingOrder(view.toJSON());
       const at = (word: string) => order.indexOf(word);
       // Section headings print in capitals; the spoken name keeps the title's case.
-      const headings = ['ABOUT', 'CAST', 'REVIEWS', 'TRAILERS', 'DETAILS', 'SIMILAR'];
+      // Final title refinement (2026-11-06): Trailers before Reviews, Similar before the
+      // details, which are a closed disclosure at the foot.
+      const headings = ['ABOUT', 'CAST', 'TRAILERS', 'REVIEWS', 'SIMILAR', 'MORE DETAILS'];
       for (const heading of headings) expect(at(heading)).toBeGreaterThan(-1);
       for (let i = 1; i < headings.length; i++) {
         expect(at(headings[i - 1]!)).toBeLessThan(at(headings[i]!));
@@ -3754,6 +3757,7 @@ describe('the immersive title page (experiment)', () => {
       tableRows.media_cache = [credits];
       const view = await open();
       const director = await waitFor(() => view.getByTestId('title-director'));
+      await fireEvent.press(view.getByRole('button', { name: 'More details' }));
 
       expect(director).toHaveTextContent('Directed by Christopher Nolan');
       expect(within(view.getByTestId('immersive-module')).getByTestId('title-director')).toBeTruthy();
@@ -3849,6 +3853,112 @@ describe('the immersive title page (experiment)', () => {
       await fireEvent.press(within(section).getAllByRole('link')[0]!);
       expect(openURL).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/(www\.)?youtube\.com\//));
       openURL.mockRestore();
+    });
+
+    /**
+     * **A video tile, not an empty box** (final title refinement, 2026-11-06): before
+     * previews, while one loads and when YouTube has no still, each card is the same Ink
+     * frame with its kind and a play button — never a blank rectangle.
+     */
+    describe('trailer tiles', () => {
+      const twoVideos = {
+        ...videos,
+        payload: {
+          results: [
+            ...videos.payload.results,
+            { id: 'v2', key: 'abcdefghijk', name: 'Teaser', type: 'Teaser', site: 'YouTube', official: true },
+          ],
+        },
+      };
+      const tiles = (section: ReturnType<typeof within>) => section.getAllByTestId('trailer-thumb');
+
+      it('draws each trailer as a video frame with its kind, before any preview', async () => {
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+
+        expect(tiles(section)).toHaveLength(2);
+        for (const tile of tiles(section)) {
+          expect(StyleSheet.flatten(tile.props.style).backgroundColor).toBe(brand.ink);
+        }
+        expect(within(tiles(section)[0]!).getByText('Trailer')).toBeTruthy();
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.queryAllByTestId('trailer-still')).toHaveLength(0);
+        // Where it plays, under the name, once.
+        expect(section.getAllByText('YouTube')).toHaveLength(2);
+      });
+
+      it('keeps the frame for a trailer whose still YouTube cannot serve', async () => {
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        await fireEvent.press(
+          view.getByRole('button', { name: 'Show trailer previews. Loads images from YouTube.' }),
+        );
+        const stills = await waitFor(() => {
+          const found = section.getAllByTestId('trailer-still');
+          expect(found).toHaveLength(2);
+          return found;
+        });
+        // The image mock hands its source on as a list.
+        expect([stills[0]!.props.source].flat()[0]).toMatchObject({
+          uri: 'https://i.ytimg.com/vi/YoHD9XEInc0/hqdefault.jpg',
+        });
+
+        await act(async () => stills[1]!.props.onError?.({ nativeEvent: { error: 'HTTP 404' } }));
+
+        expect(section.getAllByTestId('trailer-still')).toHaveLength(1);
+        // The failed card is still the frame, its kind and its link.
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.getAllByRole('link')).toHaveLength(2);
+      });
+    });
+
+    /**
+     * **More details, closed** (final title refinement, 2026-11-06): the facts the module
+     * does not state, behind one disclosure at the foot of the page, after Similar.
+     */
+    it('keeps the details behind a closed More details until asked for', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const toggle = await waitFor(() => view.getByRole('button', { name: 'More details' }));
+
+      expect(toggle.props.accessibilityState).toMatchObject({ expanded: false });
+      expect(view.queryByTestId('more-details')).toBeNull();
+
+      await fireEvent.press(toggle);
+
+      expect(view.getByRole('button', { name: 'More details' }).props.accessibilityState).toMatchObject({
+        expanded: true,
+      });
+      const facts = within(view.getByTestId('more-details'));
+      expect(facts.getByLabelText(/^Released: /)).toBeTruthy();
+      expect(facts.getByLabelText(/^Original language: /)).toBeTruthy();
+      // A film's runtime is already on the module's metadata line.
+      expect(facts.queryByLabelText(/^Runtime: /)).toBeNull();
+
+      await fireEvent.press(view.getByRole('button', { name: 'More details' }));
+      expect(view.queryByTestId('more-details')).toBeNull();
+    });
+
+    /**
+     * **Efficient vertically** (final title refinement, 2026-11-06): a section heading is its
+     * own line rather than a 44pt row. The synopsis starts 4pt under ABOUT, because two
+     * lines of text add their own leading; everything else 8pt, less a rail's own padding.
+     */
+    it('sets each section heading on its own line, the body just under it', async () => {
+      tableRows.media_cache = [credits];
+      const view = await open();
+      const about = await waitFor(() => view.getByTestId('immersive-section-about'));
+      const body = (key: string) =>
+        StyleSheet.flatten(view.getByTestId(`immersive-body-${key}`).props.style);
+
+      expect(StyleSheet.flatten(within(about).getByLabelText('About').props.style).minHeight).toBe(0);
+      expect(body('about')).toMatchObject({ paddingTop: 4 });
+      expect(body('similar')).toMatchObject({ paddingTop: 8 });
+      // The cast strip brings its own 8pt above the portraits.
+      await waitFor(() => expect(view.getByTestId('immersive-body-cast')).toBeTruthy());
+      expect(body('cast')).toMatchObject({ paddingTop: 0 });
     });
 
     it('ranks an unranked title from Rank, through the log sheet', async () => {
@@ -3972,11 +4082,11 @@ describe('the immersive title page (experiment)', () => {
           'title_reviews_v2',
           expect.objectContaining({ p_sort: 'top_desc', p_limit: 100 }),
         );
-        // Reviews sits after the Cast and before Details and Similar.
+        // Reviews sits after the Cast, and before Similar and the details.
         const order = readingOrder(view.toJSON());
         expect(order.indexOf('CAST')).toBeLessThan(order.indexOf('REVIEWS'));
-        expect(order.indexOf('REVIEWS')).toBeLessThan(order.indexOf('DETAILS'));
-        expect(order.indexOf('DETAILS')).toBeLessThan(order.indexOf('SIMILAR'));
+        expect(order.indexOf('REVIEWS')).toBeLessThan(order.indexOf('SIMILAR'));
+        expect(order.indexOf('SIMILAR')).toBeLessThan(order.indexOf('MORE DETAILS'));
         expect(view.getByRole('button', { name: 'See all 3 reviews' })).toBeTruthy();
       });
 

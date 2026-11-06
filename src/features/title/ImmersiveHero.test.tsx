@@ -101,15 +101,18 @@ describe('the head of the page', () => {
     );
   });
 
-  it('is the top of the page’s Paper: rounded above, square below, no border or shadow', async () => {
+  /**
+   * The title card (final title refinement, 2026-11-06): Paper, rounded all round and closed
+   * by one hairline, with no shadow, so the full-width page under it reads as the page.
+   */
+  it('is a Paper card closed by one hairline, with no shadow', async () => {
     const module = style((await draw()).getByTestId('immersive-module'));
 
     expect(module.backgroundColor).toBe(theme.surface.base);
-    expect(module.borderTopLeftRadius).toBe(theme.radius.card);
-    expect(module.borderTopRightRadius).toBe(theme.radius.card);
-    expect(module.borderRadius).toBeUndefined();
-    expect(module.borderBottomLeftRadius).toBeUndefined();
-    expect(module.borderWidth).toBeUndefined();
+    expect(module.borderRadius).toBe(theme.radius.card);
+    expect(module.borderColor).toBe(theme.border.hairline);
+    expect(module.borderWidth).toBeGreaterThan(0);
+    expect(module.borderWidth).toBeLessThanOrEqual(1);
     expect(module.elevation).toBeUndefined();
     expect(module.shadowOpacity).toBeUndefined();
   });
