@@ -3,6 +3,8 @@ import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { theme } from '../tokens';
 import { AppHeader } from './AppHeader';
+import { LOCKUP_TOP_MARGIN } from './BrandLockup';
+import { Text } from './Text';
 
 /**
  * **The unread badge, after the founder's correction.**
@@ -130,5 +132,30 @@ describe('the header bar', () => {
     expect(right.minHeight).toBe(44);
     expect(right.marginVertical).toBe(-5);
     expect((right.minHeight as number) + 2 * (right.marginVertical as number)).toBe(34);
+  });
+});
+
+/**
+ * **The right-hand control on the logo's centre line** (founder, nav cohesion sprint,
+ * 2026-11-06). The lockup carries a top margin, so a centred row put Movies | TV half
+ * that margin above the mark's centre. A transform moves it down by exactly that half,
+ * leaving the header's height and every touch target where they were; the bell and the
+ * gear, which have their own boxes, are not moved.
+ */
+describe('the right-hand control', () => {
+  it('sits on the logo’s centre line, moved by half the lockup’s top margin', async () => {
+    const view = await render(<AppHeader right={<Text testID="slot-content">Movies</Text>} />);
+
+    const slot = view.getByTestId('slot-content').parent!;
+    expect(StyleSheet.flatten(slot.props.style)).toEqual({
+      transform: [{ translateY: LOCKUP_TOP_MARGIN / 2 }],
+    });
+    expect(LOCKUP_TOP_MARGIN / 2).toBe(theme.space[1] / 2);
+  });
+
+  it('draws no slot, and moves nothing, without one', async () => {
+    const view = await render(<AppHeader notifications={{ count: 0, onPress: () => {} }} />);
+    const bell = view.getByLabelText('Notifications');
+    expect(StyleSheet.flatten(bell.parent?.props.style)?.transform).toBeUndefined();
   });
 });

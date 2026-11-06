@@ -18,8 +18,13 @@ export type CompactSwitchProps<T extends string> = {
  *
  * `Movies | TV` on For You and Collection, right of the page's dropdown (founder final
  * polish, 2026-11-04). Deliberately lighter than `SegmentedTabs` and the filled controls:
- * a hairline outline with 8pt corners (no pills), the chosen half on Parchment with Ink
- * text, the other in secondary text, in Inter Medium at 14pt.
+ * a hairline outline with 8pt corners (no pills), the chosen half on Parchment with
+ * Maroon text, the other in secondary text, in Inter Medium at 14pt.
+ *
+ * **Maroon for the chosen word** (founder, nav cohesion sprint, 2026-11-06): the selected
+ * state Collection's Watched | Watchlist control and the Leaderboard's categories use, so
+ * one choice looks chosen the same way everywhere. Not the Feed mode toggle's solid
+ * Maroon fill, which would make the switch louder than the logo beside it.
  *
  * **Each half is a 44pt press, and the 32pt outline is drawn behind them.** It used to be
  * the outline's own box, with `hitSlop` making up the height; but a press never answers
@@ -54,7 +59,7 @@ export function CompactSwitch<T extends string>({
               <View style={[styles.fill, selected && styles.selected, pressed && !selected && styles.pressed]}>
                 <Text
                   variant="footnote"
-                  tone={selected ? 'primary' : 'secondary'}
+                  tone={selected ? 'action' : 'secondary'}
                   numberOfLines={1}
                   style={styles.label}
                 >
@@ -112,7 +117,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { fontFamily: fontFamily.sansMedium, fontSize: 14, lineHeight: 18 },
+  // Centred in its fill on Android too: Inter's font padding otherwise sets the word
+  // about a point low in a 28pt fill (nav cohesion sprint, 2026-11-06). No effect on iOS.
+  label: {
+    fontFamily: fontFamily.sansMedium,
+    fontSize: 14,
+    lineHeight: 18,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
   selected: { backgroundColor: theme.surface.sunken },
   pressed: { opacity: 0.6 },
 });

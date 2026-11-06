@@ -23,10 +23,17 @@ export function BrandLockup({ size = 'md' }: BrandLockupProps) {
   );
 }
 
+/**
+ * How far the lockup sits below the centre of whatever row it is centred in: its top
+ * margin, of which a centred row gives back half. Exported so a control beside it in the
+ * app header can sit on the logo's centre line rather than the row's.
+ */
+export const LOCKUP_TOP_MARGIN = theme.space[1];
+
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.space[1],
+    marginTop: LOCKUP_TOP_MARGIN,
   },
 });

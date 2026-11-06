@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
-import { BrandLockup } from './BrandLockup';
+import { BrandLockup, LOCKUP_TOP_MARGIN } from './BrandLockup';
 import { Text } from './Text';
 
 export type AppHeaderProps = {
@@ -95,7 +95,11 @@ export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
             ) : null}
           </Pressable>
         ) : null}
-        {right}
+        {/* On the logo's centre line, not the row's (founder, nav cohesion sprint,
+            2026-11-06). The lockup carries a top margin, so a centred row puts the
+            mark half that margin below the switch's centre. A transform, so the header's
+            height and every touch target stay where they were. Collection and For You. */}
+        {right ? <View style={styles.rightSlot}>{right}</View> : null}
       </View>
     </View>
   );
@@ -169,6 +173,7 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
   },
   bell: { padding: theme.space[1] },
+  rightSlot: { transform: [{ translateY: LOCKUP_TOP_MARGIN / 2 }] },
   /**
    * Parchment carrying Maroon, outlined in it — the founder's correction, and the
    * inverse of the pair it replaced.
