@@ -287,7 +287,113 @@ pushed.
    nothing.
 2. Approve, no material findings.
 
-## Phase C — research only (nothing built, no migration)
+## Final polish — after founder Preview QA (2026-11-07)
+
+From the founder's Android Preview QA of Phase B: one tightly scoped pass on this branch, then
+one final Preview review before release integration.
+
+| Commit | Area | What |
+| --- | --- | --- |
+| `d5dda1c` | Feed | 20pt under RECENT ACTIVITY (12pt before; posts stay 28pt apart) |
+| `51c6aa8` | Collection | The action reads **Filters & Sort**; For You keeps Filters |
+| `8321ab9` | My Lists | The bingd. header with a back chevron, then MY LISTS with + New list |
+| `8399e61` | Trailers | Stills load with the page outside production; production keeps Show previews |
+| `8e57a87` | Leaderboard | Filled gold, silver and bronze medals; one centred rank column; two dropdowns |
+| `e0c819f` | Profile | One profile card; centred actions; Set a goal beside the streak |
+| `9639b17` | Review fix | My lists' Back goes to Collection when the page was opened cold |
+
+- **Feed:** the first post sits 20pt under RECENT ACTIVITY.
+- **Collection:** "Filters & Sort", same sheet and behaviour. It shares the marquee's line from
+  360pt up; on a 320pt phone it moves to a line of its own, right-aligned, as designed.
+- **My Lists:** the stack's plain header is off for this route (`app/_layout.tsx`); the page
+  draws the tabs' bingd. header with a new optional back chevron (`AppHeader back`, a 44pt
+  target), then MY LISTS in the 15pt section label with **+ New list** opposite. Back returns to
+  where it was pushed from, or to Collection when it was opened cold from a link (review 1).
+  The poster fans, the sheet, the empty and error states are unchanged.
+- **Leaderboard:**
+  - Ranks 1–3 are filled badges with the number centred: gold (Amber) and silver with an Ink
+    numeral, bronze a deeper bronze (`#8C5A2E`) with a Paper numeral, because the tier's own
+    bronze cannot reach AA with either. All three pairs pass 4.5:1 and are pinned in
+    `contrast.test.ts` (`medal` tokens: 6.97, 5.70, 5.48).
+  - Every rank, medal or number, centres in one column; tied ranks and their order are
+    unchanged (1, 2, 2, 4; handle then id).
+  - **All Titles ▾ · This month ▾**: the four category segments and the separate time dropdown
+    are two adjacent dropdowns in the same compact text-and-chevron control, each a 44pt
+    target opening the small menu, names in full. They share one line at 320pt.
+- **Profile (own):** the avatar, name, handle, bio, links, stats and the two actions sit on one
+  raised card with a hairline edge; the stats centre in their quarters; Share Profile and
+  Invite friends are centred side by side (still on one line at 320pt). With no goal set, Set a
+  goal and the streak share one row from 360pt and wrap below it on a 320pt phone; with goals,
+  the streak stays under the bars. Somebody else's profile is unchanged. Checked with a full
+  fixture in the local mock (a three-line bio and all five links) — no live data touched.
+
+**Verified:** typecheck clean; lint 0 errors (36 warnings, as before); Jest 287/287 suites,
+5,511 passed, 1 skipped at `9639b17` (the test-only `9c24e91` after it removes two unused
+names); Android fingerprint `2503ffaa` at `9c24e91`. New tests: the Preview default and the
+production opt-in for stills (`trailer-previews.test.ts`, and the title page with stills and no
+Show previews); the medal fills, numerals and one centred column, with the three colour pairs
+pinned at AA; the two dropdowns (names, menu, re-tap, a 44pt target); My lists' header, Back
+and its cold-entry fallback; the owner's profile card with centred actions, and its absence on
+somebody else's profile. Renders at 320, 360 and 412pt: the profile card with a full fixture,
+new and established accounts; My Lists; Collection; the Feed boundary; the Leaderboard with ties
+and without; trailers against the real YouTube host.
+
+**Codex** (against `f3ad7f0`): review 1, one MEDIUM — Back on My lists did nothing when the page
+was opened cold — fixed in `9639b17`; review 2 approve, confirming production keeps the trailer
+opt-in. No HIGH or CRITICAL.
+
+**Final phone QA** (relaunch once; Cinematic via Labs):
+1. Feed: a little more room under RECENT ACTIVITY before the first post.
+2. Collection: **Filters & Sort** opens the sheet; on a narrow phone it sits on its own line.
+3. My Lists (Collection → My lists): bingd. header with ‹ back, MY LISTS with + New list;
+   back returns to Collection; New list opens the sheet; posters still fanned.
+4. Trailers: stills appear on opening a title, no Show previews; tapping still opens YouTube.
+5. Leaderboard: gold, silver, bronze discs with the number on them; 4 and up centred under
+   them; ties share a medal; All Titles ▾ and This month ▾ side by side, both open menus.
+6. Profile: one card holding photo, name, bio, links, stats and the two buttons, centred;
+   Set a goal with the streak beside it; somebody else's profile as before.
+7. Largest system font on Profile and the Leaderboard: nothing clipped; the second dropdown and
+   the streak drop to a line of their own rather than squeezing.
+
+### Trailer thumbnails by default — privacy
+
+**What changed.** `trailerPreviewsByDefault()` (`src/features/title/trailer-previews.ts`) is
+true in every lane except production. In Preview, Beta and development the Trailers section
+draws YouTube's stills as soon as the title page renders, with no Show previews; production
+keeps the opt-in. The Trailers section is drawn only on the Cinematic title page, which
+production does not offer (`isTitleLayoutAvailable`), so **production makes no request to
+YouTube either way today**. Counted in the render: three `i.ytimg.com` requests on opening a
+title with three trailers, no tap; a removed video still keeps its dark frame.
+
+**What it means.** Each still is a request from the device to Google's image host
+(`i.ytimg.com`), carrying the reader's IP address, user agent and the video's id — so Google
+can see that a device viewed a title page that has that trailer. No account id, handle or
+cookie of ours is sent. Today's disclosures do not cover it: the policy at
+https://bingd.app/privacy says images load directly from TMDB's servers, and
+`docs/release/store-privacy-inventory.md` lists only the TMDB CDN under image requests.
+
+**Required before production turns it on** (prepared here, not published — founder approval
+needed for each):
+
+1. **Privacy policy** (bingd.app/privacy, third parties). Proposed addition after the TMDB
+   paragraph:
+   > Trailer previews come from YouTube. When a title page shows its trailers, your device
+   > loads each trailer's still image directly from YouTube's image servers
+   > (`i.ytimg.com`), which means Google sees that request — your IP address and which
+   > video's image was asked for — the way any website you load an image from would. Bingd
+   > does not send your account or anything about you to YouTube. Playing a trailer opens it
+   > on YouTube, under YouTube's own terms and Google's privacy policy.
+2. **Store inventory** (`docs/release/store-privacy-inventory.md` §1), a row beside the TMDB
+   one: `| Image requests | **YouTube image host (i.ytimg.com)**, direct from the device | no |
+   trailer stills on the title page |`. In App Store Connect and Play Data safety this is the
+   same category as the TMDB images: data the device sends to a third party in the course of
+   loading content, not linked to the account, not used for tracking; confirm against the
+   forms' current wording when entering it.
+3. **Code:** once both are live, change `trailerPreviewsByDefault` to return true in
+   production too (and keep Show previews only if the founder wants an opt-out). Until then
+   production keeps the opt-in, so nothing is weakened silently.
+
+ (nothing built, no migration)
 
 ### Ten titles added to a Watchlist: what the Feed does today
 
@@ -362,9 +468,9 @@ pushed.
 - **Somebody else's profile actions.** The owner's Share Profile / Invite friends are compact now;
   a visitor's Share / Follow keep their approved half-row layout. Matching them needs
   `FollowControl`'s compact size to gain a 44pt target first (small, not done here).
-- **Trailer previews across pages.** Today Show previews is per title page. Remembering it for
-  the session, or as a setting, would remove the dark frames after the first tap but makes
-  requests to YouTube on opening later titles.
+- **Trailer stills in production** (superseded the per-page question): approve the policy and
+  store-inventory wording under "Trailer thumbnails by default — privacy", then flip
+  `trailerPreviewsByDefault` for production.
 - **Grouped Watchlist posts** need a product decision first: a reaction or comment on a grouped
   post is about the batch, not one title (Phase C).
 
