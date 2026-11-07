@@ -2,7 +2,7 @@ import { fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet, type TextStyle, type ViewStyle } from 'react-native';
 
 import { renderWithProviders as render } from '@/test-utils/render';
-import { medal as medalTokens, theme } from '@/ui/tokens';
+import { medal as medalTokens } from '@/ui/tokens';
 
 import { LeaderboardView } from './LeaderboardView';
 import { orderBoard, type LeaderboardEntry } from './use-leaderboard';
@@ -48,8 +48,6 @@ const board = (
       onPressPerson={() => {}}
     />,
   );
-
-const tabs = (view: Awaited<ReturnType<typeof board>>) => view.getAllByRole('tab');
 
 /**
  * **What and when, two dropdowns side by side** (founder Preview QA, 2026-11-07): the
