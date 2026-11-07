@@ -109,6 +109,7 @@ export function FollowControl({
           label="Unblock"
           kind="secondary"
           size={compact ? 'sm' : 'md'}
+          hitSlop={compact ? COMPACT_SLOP : undefined}
           fit={!compact}
           disabled={busy}
           disabledReason="Saving your last change."
@@ -164,6 +165,7 @@ export function FollowControl({
          */
         kind={following || requested ? 'outline' : 'primary'}
         size={compact ? 'sm' : 'md'}
+          hitSlop={compact ? COMPACT_SLOP : undefined}
         /**
          * The half-row rule, which this control is now subject to.
          *
@@ -214,6 +216,12 @@ export function FollowControl({
     </View>
   );
 }
+
+/**
+ * The rest of a 44pt target around the 36pt small button (2026-11-07). The compact size was
+ * left to its rows' padding; on the profile card it stands alone, so it carries its own.
+ */
+const COMPACT_SLOP = { top: 4, bottom: 4 } as const;
 
 const styles = StyleSheet.create({
   // The shape of the slot it sits in, whatever that slot is: half of `ProfileActions`'

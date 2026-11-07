@@ -29,9 +29,9 @@ export type ProfileActionsProps = {
    * **Two compact buttons rather than two halves of the row** (founder, marquee cohesion
    * sprint, 2026-11-07): the owner's Share Profile and Invite friends were the largest
    * things on the page. Each hugs its label at the small size (36pt drawn, 44pt to press),
-   * left-aligned on the gutter; Invite friends keeps the one fill. **Own profile only**, as
-   * the brief scoped it: somebody else's profile keeps its approved half-row Share and
-   * Follow. Whether it follows is a founder decision (the parity rule above).
+   * centred; the trailing act keeps the one fill. **Both profiles** since the release
+   * pass (founder, 2026-11-07), by the parity rule above: Invite friends on your own, the
+   * relationship (`FollowControl size="compact"`, the same 44pt target) on somebody else's.
    */
   compact?: boolean;
 };
