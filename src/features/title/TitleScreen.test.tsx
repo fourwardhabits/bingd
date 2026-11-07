@@ -130,6 +130,15 @@ let mockParams: Record<string, string> = {};
 let mockFocused = true;
 // Every status-bar style the screen asks for, in render order.
 const mockStatusBars: string[] = [];
+/**
+ * Production's opt-in by default, so the Show previews tests below keep testing it; the
+ * Preview default (stills with the page) is its own test (founder Preview QA, 2026-11-07).
+ */
+let mockPreviewsByDefault = false;
+jest.mock('@/features/title/trailer-previews', () => ({
+  trailerPreviewsByDefault: () => mockPreviewsByDefault,
+}));
+
 jest.mock('expo-status-bar', () => ({
   StatusBar: ({ style }: { style: string }) => {
     mockStatusBars.push(style);
@@ -282,6 +291,7 @@ const videos = {
 };
 
 beforeEach(() => {
+  mockPreviewsByDefault = false;
   mockHeaderOptions = {};
   mockOpenId = 'film-1';
   mockParams = {};
@@ -3871,6 +3881,18 @@ describe('the immersive title page (experiment)', () => {
         },
       };
       const tiles = (section: ReturnType<typeof within>) => section.getAllByTestId('trailer-thumb');
+
+      it('draws the stills with the page outside production, with no Show previews', async () => {
+        mockPreviewsByDefault = true;
+        tableRows.media_cache = [credits, twoVideos];
+        const view = await open();
+        const section = within(await waitFor(() => view.getByTestId('immersive-section-trailers')));
+        expect(section.getAllByTestId('trailer-still')).toHaveLength(2);
+        expect(view.queryByRole('button', { name: /Show trailer previews/ })).toBeNull();
+        // The frame, kind and link are unchanged under the still.
+        expect(within(tiles(section)[1]!).getByText('Teaser')).toBeTruthy();
+        expect(section.getAllByRole('link')).toHaveLength(2);
+      });
 
       it('draws each trailer as a video frame with its kind, before any preview', async () => {
         tableRows.media_cache = [credits, twoVideos];

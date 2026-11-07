@@ -71,6 +71,7 @@ import { StatusBar } from 'expo-status-bar';
 import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { GenreLine } from '@/features/title/GenreLine';
 import { TrailerRail } from '@/features/title/TrailerRail';
+import { trailerPreviewsByDefault } from '@/features/title/trailer-previews';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
 import { ReviewsPreview, TitleReviews } from '@/features/title/TitleReviews';
@@ -303,11 +304,12 @@ export default function TitleScreen() {
   const [similarExpanded, setSimilarExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   /**
-   * Whether the reader has asked for the Trailers section's YouTube thumbnails on this page
-   * (title-page sprint, 2026-11-06). Each one is a request to `i.ytimg.com`; as a tab they
-   * waited for a tap, and as an always-visible section they wait for this one.
+   * Whether the Trailers section draws YouTube's thumbnails on this page. Each one is a
+   * request to `i.ytimg.com`. On by default outside production since the founder's Preview
+   * QA (2026-11-07); production keeps Show previews until its privacy disclosures name
+   * YouTube — see `trailerPreviewsByDefault`.
    */
-  const [trailerPreviews, setTrailerPreviews] = useState(false);
+  const [trailerPreviews, setTrailerPreviews] = useState(trailerPreviewsByDefault);
   /** The full cast, in a sheet, from the immersive Cast preview's See all. */
   const [castOpen, setCastOpen] = useState(false);
   /** Where the immersive module's top edge sits; the top bar's reveal ends there. */
