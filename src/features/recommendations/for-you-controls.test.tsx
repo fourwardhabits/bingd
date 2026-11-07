@@ -192,7 +192,11 @@ describe('the controls', () => {
     expect(view.queryByText('Group Picks')).toBeNull();
   });
 
-  it('marks the two features Maroon on a feature hairline, and leaves Filters quiet', async () => {
+  /**
+   * **Quieter features** (founder, marquee cohesion sprint, 2026-11-07): a hairline outline,
+   * a 13pt label in ink, 34pt drawn. The Maroon is the glyph's alone.
+   */
+  it('draws the two features quietly on a hairline, and leaves Filters quiet', async () => {
     const view = await open();
 
     for (const [testID, word] of [
@@ -200,12 +204,13 @@ describe('the controls', () => {
       ['for-you-shortcut-group', 'Find for a Group'],
     ] as const) {
       const feature = view.getByTestId(testID);
-      expect(flatten(feature.props.style).borderColor).toBe(theme.semantic.actionSubtle);
+      expect(flatten(feature.props.style).borderColor).toBe(theme.border.hairline);
+      expect(flatten(feature.props.style).minHeight).toBe(34);
       // No card fill: a tinted ground would read as a selected state.
       expect(flatten(feature.props.style).backgroundColor).toBeUndefined();
-      expect(flatten(within(feature).getByText(word).props.style).color).toBe(
-        theme.semantic.action,
-      );
+      const label = flatten(within(feature).getByText(word).props.style);
+      expect(label.color).toBe(theme.text.primary);
+      expect(label.fontSize).toBe(13);
     }
 
     const filters = view.getByTestId('for-you-filters');
@@ -234,7 +239,7 @@ describe('the controls', () => {
     // The wall has no top padding of its own, so this padding is the whole gap: the
     // design system's control row → content interval (founder, physical QA, 2026-09-08).
     const row = flatten((await open()).getByTestId('for-you-shortcuts').props.style);
-    expect(row.paddingBottom).toBe(theme.space[4]);
+    expect(row.paddingBottom).toBe(theme.space[3]);
   });
 
   it('opens Find for a Group from its shortcut', async () => {

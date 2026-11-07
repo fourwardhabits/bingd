@@ -60,7 +60,9 @@ import { useTabReset } from '@/ui/use-tab-reset';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  ContentToolbar,
   EmptyState,
+  FiltersAction,
   HeaderBoundary,
   PosterGrid,
   Screen,
@@ -663,6 +665,101 @@ export default function RecommendationsScreen() {
   // list — see `useRecommendationRequests`.
   const requestCount = requests.data?.total ?? 0;
 
+  /**
+   * **The page's toolbar: Recommended ▾ or Top Rated ▾, Filters opposite** (founder,
+   * marquee cohesion sprint, 2026-11-07) — Collection's toolbar, at the same height, padding
+   * and marquee size, so the two pages read as siblings. Under it, the request alert when
+   * something is waiting and the two features, Sent to You and Find for a Group (absent on
+   * Top Rated, as they always were).
+   *
+   * It scrolls away with the wall rather than standing over it: it is the first thing in the
+   * wall's scroller, and in Sent to You's. Where there is nothing to scroll (loading, empty,
+   * a failed read) it is drawn above the state instead, so it is always reachable. The
+   * medium stays the header's switch.
+   */
+  const toolbar = (
+    <View testID="for-you-toolbar">
+      <ContentToolbar
+        title={
+          <MediumSelector
+            size="marquee"
+            value={onTopRated ? 'top' : 'recommended'}
+            options={FOR_YOU_WALLS}
+            accessibilityHint="Choose Recommended or Top Rated"
+            testID="for-you-mode"
+            onChange={(next) => {
+              const showing = topMedium ?? medium;
+              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
+            }}
+          />
+        }
+      >
+        {/* The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
+            stay off, because nothing on either wall has been ranked by this reader. */}
+        <View style={styles.tools} testID="for-you-controls">
+          <FiltersAction
+            activeCount={activeCount}
+            onPress={() => setFiltering(true)}
+            testID="for-you-filters"
+          />
+          {isFiltered(filters) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear all"
+              accessibilityHint="Turns every filter off"
+              onPress={() => changeFilters(emptyFilters())}
+              style={({ pressed }) => [styles.clear, pressed && styles.toolPressed]}
+              testID="for-you-clear-filters"
+            >
+              <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
+            </Pressable>
+          ) : null}
+        </View>
+      </ContentToolbar>
+
+      {/* Above the features, and only when something is waiting. Not a filter: it says
+          that something not on screen yet needs a decision. Absent at zero. */}
+      {requestCount > 0 ? (
+        <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
+      ) : null}
+
+      {/* Not on Top Rated: both are statements about particular people, and that wall's
+          whole claim is that its order belongs to everybody (founder, 2026-09-09). */}
+      {onTopRated ? (
+        <View style={styles.topRatedGap} />
+      ) : (
+        <ForYouShortcuts
+          shortcuts={[
+            {
+              key: 'sent',
+              icon: sentOnly ? 'mail-open' : 'mail-outline',
+              label: 'Sent to You',
+              badge: unopened > 0 ? `${unopened}${atLeast ? '+' : ''}` : null,
+              accessibilityLabel:
+                unopened > 0
+                  ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                  : 'Sent to You',
+              selected: sentOnly,
+              onPress: () => setSentOnly((on) => !on),
+            },
+            {
+              key: 'group',
+              icon: 'people-outline',
+              label: 'Find for a Group',
+              // The analytics name stays the feature's original one.
+              onPress: () => {
+                track({ name: 'group_picks_opened' });
+                setGroupPicking(true);
+              },
+            },
+          ]}
+        />
+      )}
+    </View>
+  );
+  /** Whether the wall's own scroller is drawn, and so carries the toolbar. */
+  const wallScrolls = !wall.isError && !wall.isPending && items.length > 0;
+
   return (
     <Screen>
       {/**
@@ -696,120 +793,10 @@ export default function RecommendationsScreen() {
       />
       <HeaderBoundary />
 
-      {/**
-       * **Recommended / Top Rated, the page's dropdown** (founder final polish,
-       * 2026-11-04), under the header's divider. The medium is the header's switch since
-       * the UI cohesion pass (2026-11-06); together they are still the four `ForYouMode`s,
-       * so nothing below the row changed, and each control keeps the other's value. No For
-       * You heading, because the tab bar already says where the reader is.
-       */}
-      {/**
-       * **Two rows of controls, each saying what kind of control it is** (founder, nav
-       * cohesion sprint, 2026-11-06).
-       *
-       * 1. The page's content mode — Recommended / Top Rated, unchanged in what it does —
-       *    at the interface's headline size rather than a 22pt serif dropdown, with
-       *    **Filters** opposite it as a quiet text action: secondary, because it narrows
-       *    whatever wall is showing. Clear appears beside it only when there is something
-       *    to clear, and clears the filters alone, as before.
-       * 2. **Sent to You and Find for a Group** (Watch Together until the title-page sprint,
-       *    2026-11-06), the screen's two features, as a pair of
-       *    their own (`ForYouShortcuts`). They are about particular people, so they are
-       *    absent on Top Rated, as they always were (founder, 2026-09-09).
-       *
-       * The medium is the header's switch (UI cohesion pass). Nothing below this changed.
-       */}
-      <View style={styles.header}>
-        <View style={styles.headerWall}>
-          <MediumSelector
-            size="heading"
-            value={onTopRated ? 'top' : 'recommended'}
-            options={FOR_YOU_WALLS}
-            onChange={(next) => {
-              const showing = topMedium ?? medium;
-              changeMode(next === 'top' ? (showing === 'movies' ? 'topMovies' : 'topTv') : showing);
-            }}
-          />
-        </View>
-        <View style={styles.headerTools} testID="for-you-controls">
-          {/* The collection's own sheet: Genre, Language, Decade and Anime. Rating filters
-              stay off, because nothing on either wall has been ranked by this reader. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={activeCount ? `Filters, ${activeCount} on` : 'Filters'}
-            accessibilityState={{ selected: activeCount > 0 }}
-            onPress={() => setFiltering(true)}
-            style={({ pressed }) => [styles.tool, pressed && styles.toolPressed]}
-            testID="for-you-filters"
-          >
-            <Ionicons
-              name="options-outline"
-              size={theme.layout.icon.sm}
-              color={activeCount ? theme.semantic.action : theme.text.secondary}
-            />
-            <Text variant="subhead" tone={activeCount ? 'action' : 'secondary'} numberOfLines={1}>
-              {activeCount ? `Filters · ${activeCount}` : 'Filters'}
-            </Text>
-          </Pressable>
-          {isFiltered(filters) ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Clear all"
-              accessibilityHint="Turns every filter off"
-              onPress={() => changeFilters(emptyFilters())}
-              style={({ pressed }) => [styles.clear, pressed && styles.toolPressed]}
-              testID="for-you-clear-filters"
-            >
-              <Ionicons name="close" size={theme.layout.icon.sm} color={theme.text.secondary} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-
-          {/* Above the features, and only when something is waiting.
-
-          It is not a filter: it says that there is something *not* on screen yet which
-          needs a decision. Absent at zero, with no placeholder and no empty state — a row
-          that is always there stops being a signal. */}
-          {requestCount > 0 ? (
-            <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
-          ) : null}
-
-          {/* Not on Top Rated: both are statements about particular people, and that wall's
-              whole claim is that its order belongs to everybody (founder, 2026-09-09). */}
-          {onTopRated ? (
-            <View style={styles.topRatedGap} />
-          ) : (
-            <ForYouShortcuts
-              shortcuts={[
-                {
-                  key: 'sent',
-                  icon: sentOnly ? 'mail-open' : 'mail-outline',
-                  label: 'Sent to You',
-                  badge: unopened > 0 ? `${unopened}${atLeast ? '+' : ''}` : null,
-                  accessibilityLabel:
-                    unopened > 0
-                      ? `Sent to You, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-                      : 'Sent to You',
-                  selected: sentOnly,
-                  onPress: () => setSentOnly((on) => !on),
-                },
-                {
-                  key: 'group',
-                  icon: 'people-outline',
-                  label: 'Find for a Group',
-                  // The analytics name stays the feature's original one.
-                  onPress: () => {
-                    track({ name: 'group_picks_opened' });
-                    setGroupPicking(true);
-                  },
-                },
-              ]}
-            />
-          )}
-
+          {!sentOnly && !wallScrolls ? toolbar : null}
           {sentOnly ? (
             <SentList
+              header={toolbar}
               query={sent}
               rows={sentVisible}
               total={sentRows.length}
@@ -972,6 +959,8 @@ export default function RecommendationsScreen() {
                 />
               }
             >
+              {toolbar}
+              <View style={styles.wallBody}>
               {/* No line above the wall about how well bingd. knows the reader's taste
                   (founder, 2026-11-03). Until then a thin taste printed "Popular right now
                   while bingd learns your taste" or "bingd is still learning your taste". */}
@@ -1040,6 +1029,7 @@ export default function RecommendationsScreen() {
                   Rank a few more titles to sharpen your recommendations.
                 </Text>
               ) : null}
+              </View>
             </ScrollView>
           )}
 
@@ -1146,7 +1136,10 @@ function SentList({
   busyId,
   onOpen,
   onToggleSave,
+  header,
 }: {
+  /** The page's toolbar: first in the list's scroller, or above a state with none. */
+  header: React.ReactNode;
   query: ReturnType<typeof useSentToYou>;
   rows: SentRecommendation[];
   total: number;
@@ -1155,26 +1148,38 @@ function SentList({
   onOpen: (row: SentRecommendation) => void;
   onToggleSave: (row: SentRecommendation) => void;
 }) {
-  if (query.isPending) return <SkeletonRow count={5} />;
+  if (query.isPending)
+    return (
+      <>
+        {header}
+        <SkeletonRow count={5} />
+      </>
+    );
 
   if (query.isError) {
     return (
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not load these"
-        body="Check your connection and try again."
-        action={{ label: 'Try again', onPress: () => void query.refetch() }}
-      />
+      <>
+        {header}
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not load these"
+          body="Check your connection and try again."
+          action={{ label: 'Try again', onPress: () => void query.refetch() }}
+        />
+      </>
     );
   }
 
   if (total === 0) {
     return (
-      <EmptyState
-        kind="nothingYet"
-        title="Nothing sent your way yet"
-        body="When someone you follow back recommends a film or a season, it lands here."
-      />
+      <>
+        {header}
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing sent your way yet"
+          body="When someone you follow back recommends a film or a season, it lands here."
+        />
+      </>
     );
   }
 
@@ -1184,11 +1189,14 @@ function SentList({
       // this, and a second one with the same label is the duplicated state the founder
       // rejected on the Feed: the reader would have to work out whether the two do the
       // same thing.
-      <EmptyState
-        kind="nothingYet"
-        title="Nothing matches your filters"
-        body="Clear your filters to see everything people have sent you."
-      />
+      <>
+        {header}
+        <EmptyState
+          kind="nothingYet"
+          title="Nothing matches your filters"
+          body="Clear your filters to see everything people have sent you."
+        />
+      </>
     );
   }
 
@@ -1204,6 +1212,8 @@ function SentList({
         />
       }
     >
+      {header}
+      <View style={styles.wallBody}>
       <SentToYouList
         rows={rows}
         saved={saved}
@@ -1211,6 +1221,7 @@ function SentList({
         onOpen={onOpen}
         onToggleSave={onToggleSave}
       />
+      </View>
     </ScrollView>
   );
 }
@@ -1274,29 +1285,8 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  /**
-   * Recommended / Top Rated on the left gutter, Filters on the right one. It wraps rather
-   * than truncating at a large text size, Filters moving under the heading.
-   */
-  header: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[1],
-  },
-  headerWall: { flexShrink: 1 },
-  headerTools: { flexDirection: 'row', alignItems: 'center', marginRight: -theme.space[2] },
-  // Filters: a 44pt text action with no outline, so it reads as secondary to the features.
-  tool: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[1],
-    minHeight: theme.layout.minTapTarget,
-    paddingHorizontal: theme.space[2],
-  },
+  // Filters (`FiltersAction`) and, while filters are on, Clear beside it.
+  tools: { flexDirection: 'row', alignItems: 'center' },
   clear: {
     minHeight: theme.layout.minTapTarget,
     minWidth: theme.layout.minTapTarget,
@@ -1306,7 +1296,9 @@ const styles = StyleSheet.create({
   toolPressed: { opacity: 0.6 },
   // Top Rated has no features row; this is the seam the row's foot would have given.
   topRatedGap: { height: theme.space[3] },
-  content: { paddingBottom: theme.space[10], gap: theme.space[3] },
+  content: { paddingBottom: theme.space[10] },
+  // The wall and its end line, under the toolbar, 12pt apart as they always were.
+  wallBody: { gap: theme.space[3] },
   exhausted: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
