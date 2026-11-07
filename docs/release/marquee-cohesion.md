@@ -175,7 +175,15 @@ sandbox; the suite above is the implementer's. Codex did not exercise native tou
 
 ## Android Preview
 
-Recorded after publishing; see the commit after this one.
+| | Phase A |
+| --- | --- |
+| Published | 2026-11-07, this session the only publisher |
+| Commit | `688a007` (code `1ee5646`) |
+| Update group | `404c12c7-6397-4cc5-9c23-e81c190d5b20` |
+| Android update | `01a1b44e-c3f9-766b-821b-636fcb402ba9` |
+| Runtime | `2503ffaa54ee67d81ce4ddcf8028715dbd4a0543` |
+| Branch / platform | `preview`, Android only |
+| Previous (rollback) | `29b60018-595c-4862-88c7-5d6c551f2a25` |
 
 ## Rollback
 
