@@ -545,6 +545,71 @@ Not legal advice and not a claim of store-policy compliance; what was checked, a
 - **Grouped Watchlist posts** need a product decision first: a reaction or comment on a grouped
   post is about the batch, not one title (Phase C).
 
+## Android production — LIVE (2026-11-07)
+
+| | |
+| --- | --- |
+| Release PR | #234, `release/2026-11-07-ui` → `main`, merged with a merge commit |
+| Merge commit | `a9d91f695886c8208eabe219705b32ef2928a3a5` |
+| Published commit | `028566385a79e65cda48aef51f78344a528b3b1c` (the PR head, on `main` through the merge) |
+| CI on the published commit | "Typecheck, lint, test, database" passed (pull_request); Release gate "Full suite, real Postgres, export" passed (push to `release/**`) |
+| Production check (before merge) | EAS workflow `01a1b4e7-66a1-7d23-94f1-7d329e64e584`: fingerprints Android `ec79e181…`, iOS `8ea562b7…` — both the live 1.1.0 (15) store binaries |
+| Production publish | EAS workflow `01a1b4ea-e0ef-7f60-8179-49207671dc04`, all four jobs succeeded |
+| **Android update group** | **`322bd3bb-d75c-4fc1-a76c-5536ec04d7f3`** |
+| **Android update** | **`01a1b4ee-af4d-7aa9-9bb2-c4cccf8a0a05`**, runtime `ec79e1818e57bb6ea8f21e1296286bca881f8aef`, 2026-11-07 07:35 UTC |
+| iOS production | **Unchanged** — still the security update, group `ffbb473c` (update `01a19ede-f160-7e0d-8c94-9e3cfe34ab31`) |
+
+**Verified after publishing** (2026-11-07):
+- The update service answers an Android production client on runtime `ec79e181` with update
+  `01a1b4ee-af4d-7aa9-9bb2-c4cccf8a0a05`, and an iOS production client on runtime `8ea562b7`
+  with the previous `01a19ede-f160-7e0d-8c94-9e3cfe34ab31` — Android only, as intended.
+- **The privacy policy is live** at https://bingd.app/privacy/ (200), "Last updated 7 November
+  2026", with "YouTube (Google) supplies trailer still images. When a title page shows its
+  trailers, your device loads each trailer's still image directly from YouTube's image servers,
+  which means Google sees that request — your IP address and which video's image was asked for
+  … Bingd sends YouTube nothing about your account." Deployed by Cloudflare Pages from `main`
+  about a minute after the merge.
+- Not verified here: the update installed on a real phone, and crash-free sessions after it
+  (`eas update:insights` needs time and installs).
+
+**What production users get:** the Cinematic title page by default (Original in Settings ›
+Labs), the marquee navigation, RECENT ACTIVITY, the leaderboard medals and dropdowns, the
+profile cards on both profiles, the My Lists and Watch history pages. **Trailer stills in
+production wait for Show previews** (the fallback) until the founder confirms the store forms.
+
+**Rollback** (a production change; needs the founder's authorization, `safe-update-runbook.md` §4):
+
+```
+npx eas update:republish --group 04afb993-be18-42f2-965a-9e6e933c650f \
+  --message "rollback to the security release (eab83c9)" --non-interactive
+```
+
+That republishes the previous Android production update (the security release) as a newer
+one; iOS is unaffected. To keep the rest and return only the title page, publish an update with
+`DEFAULT_LAYOUT = 'original'`; any reader can also switch in Settings › Labs.
+
+**iOS QA build:** EAS build `907b83a5-2ad5-42cc-9af8-51d026209cde`, iOS Preview 1.1.0 (8) from
+`0285663`, internal distribution to the registered iPhone 11 and iPad mini:
+https://expo.dev/accounts/fourward/projects/bingd/builds/907b83a5-2ad5-42cc-9af8-51d026209cde.
+It carries this release's JavaScript; Preview updates are Android-only, so it stays on it.
+
+**Status, distinguished:**
+
+| Item | State |
+| --- | --- |
+| Other-profile card, tests, review | DONE |
+| Cinematic default in production | VERIFIED LIVE (in the update served to Android) |
+| Privacy policy names YouTube | VERIFIED LIVE (https://bingd.app/privacy/) |
+| Store inventory document | DONE (repository only) |
+| Google Play Data safety | REQUIRES FOUNDER ACTION — confirm against the inventory |
+| Apple App Privacy | REQUIRES FOUNDER ACTION — confirm against the inventory |
+| Automatic trailer stills in production | NOT ENABLED (fallback); one-line change after the two confirmations |
+| Android production | VERIFIED LIVE (served); on-device check REQUIRES FOUNDER ACTION |
+| iOS QA build | DONE (built); smoke test REQUIRES FOUNDER ACTION |
+| iOS production | HELD — workflow is Android-only until a reviewed change back to `all` |
+| Watch-date race | Accepted for this release; migration fix next |
+| M-5, M-6, M-3 residual | Open; REQUIRES FOUNDER ACTION (M-5, M-6) / design pass (M-3) |
+
 ## Remaining before production
 
 Not production. Before it:
