@@ -400,6 +400,74 @@ needed for each):
 
  (nothing built, no migration)
 
+## Release pass — production candidate (2026-11-07)
+
+Founder briefs "Final Profile Consistency, Automatic Trailers & Production Release" and
+"Overnight Production Release Authorization" (2026-11-07). Founder decisions, recorded as given:
+
+1. **The Cinematic title page is the production default**; Original stays in Settings › Labs.
+2. **The cross-device default watch-date race is accepted for this release** and recorded for a
+   later migration fix (below).
+3. **Android production now; iOS production only after an iOS build passes QA.**
+
+| Commit | Area | What |
+| --- | --- | --- |
+| `cef8835` | Profiles | The profile card on somebody else's profile and on the locked private shell; compact Follow a 44pt target |
+| `8eb38d3` | Title page | Cinematic is the default in every lane; a stored Original is honoured; Labs offered in production |
+| `26598b0` | Privacy | The privacy policy names YouTube's image servers (`web/build.mjs`, dated 7 November 2026) |
+| `ed47e72` | Privacy | The store inventory lists the YouTube image request beside TMDB's |
+| `8b44bca` | Review fix | The saved title-page choice is read at launch; trailer stills wait for it |
+| `c833ef0` | Release | OTA workflows publish Android only; production keeps the trailer opt-in |
+
+- **Other people's profiles:** the owner's card — identity, bio, links, centred stats, the
+  centred compact pair — now on `/u/<handle>` too, Share beside the relationship (Follow,
+  Following, Requested, Unblock, unchanged in behaviour), and on the locked private shell with
+  Follow centred. Nothing owner-only is drawn; blocking, visibility and the self case are
+  unchanged. `FollowControl`'s compact size carries a 4pt slop, so it is a 44pt target on the
+  card and in the rows that already used it.
+- **Cinematic default:** `DEFAULT_LAYOUT = 'immersive'` in `title-layout.ts`; an unset,
+  unknown or unreadable choice is Cinematic, a stored `original` is kept, and the Labs row
+  ("Title page: Cinematic / Original") is offered in production. The choice is read at launch
+  (`app/_layout.tsx`). **Rollback** without a binary: an update with `DEFAULT_LAYOUT` back to
+  `'original'`, or a reader switches in Labs.
+- **Trailer stills in production — the fallback.** The founder approved automatic stills in
+  production *only with accurate, verified disclosures*. The privacy policy is updated and goes
+  live with this merge. The **App Store App Privacy and Google Play Data safety forms cannot be
+  read or changed from here**, so they cannot be verified tonight; by the founder's explicit
+  fallback, **production keeps Show previews** (`trailerPreviewsByDefault` is false in the
+  production lane) and every other lane loads stills automatically. Turning production on is
+  a one-line update after the founder confirms the forms.
+- **Android only.** Both OTA workflows publish `platform: android`, a fixed value pinned by
+  `config/ota-workflows.test.mjs`, so this release cannot reach iOS; the `runtimes` stage
+  still checks both binaries. Returning to `all` is a reviewed one-word change after iOS QA.
+
+### Compliance status — trailer stills and the privacy disclosures
+
+Not legal advice and not a claim of store-policy compliance; what was checked, and how.
+
+| Item | State | Evidence / action |
+| --- | --- | --- |
+| What the app sends | DONE (code read, render-counted) | `TrailerRail` requests `https://i.ytimg.com/vi/<id>/hqdefault.jpg` per trailer; no account id, cookie or header of Bingd's; production requests only after Show previews |
+| Privacy policy text | DONE | `web/build.mjs` "Who else sees it": YouTube (Google), the IP address and which video's image, nothing about the account; `router.test.mjs` pins it |
+| Privacy policy live at https://bingd.app/privacy | see "Android production" below | Deploys from `main` (Cloudflare Pages) with the merge; checked after it |
+| Store inventory (`store-privacy-inventory.md`) | DONE | YouTube row beside TMDB's, with the reasoning |
+| Google Play Data safety | **REQUIRES FOUNDER ACTION** | No console access here. Confirm the form still matches the inventory for third-party image loading (TMDB and now YouTube). The inventory's reasoning declares no new data type; that is an assessment, not a verified console state |
+| Apple App Privacy | **REQUIRES FOUNDER ACTION** | Same, in App Store Connect › App Privacy |
+| Automatic stills in production | **NOT ENABLED** (fallback) | Enable after the two confirmations: `trailerPreviewsByDefault => true` and a production update |
+
+### Accepted and residual risks
+
+| Item | Classification | Evidence | Owner |
+| --- | --- | --- | --- |
+| Cross-device default watch-date race | **Accepted for this release** (founder) | Production-readiness audit: Option A's note-first path reads then writes (`LogSheet.tsx` ~912–939) while production's `log_title` decides the date server-side; same user only, a wrong date, no privacy or ranking effect; the fix needs a migration | Next: a reviewed migration |
+| M-6 — production key in repository secrets | Deferrable for this UI release (unchanged by it), **open** | Audit 2026-11-07: Environments still empty, 6 repo secrets remain; every scheduled run since #219 passed with `environment:` set, so step 1 of the hardening plan is proven | Founder: move the secrets (plan `15-hardening-plan.md`) |
+| M-5 — query strings in Sentry | Deferrable, **open** | Founder-only Sentry rule, unconfirmed | Founder: add the four scrubbing rules |
+| M-3 residual — no throttle on a signed-in account | Deferrable, **open** | Design pass; this release adds no table or RPC, so it is not widened | Design pass |
+| iOS | Held | No iOS build of this UI has run on a device; production iOS OTA blocked by the workflow | Founder: QA the iOS Preview build |
+| Data integrity / migrations | No change | The release diff touches `app/`, `src/`, `web/`, `config/`, `.eas/` and docs, plus one Supabase test file; no migration. Every RPC and table it calls exists on `main` (audit) | — |
+
+ (nothing built, no migration)
+
 ### Ten titles added to a Watchlist: what the Feed does today
 
 1. **Ten additions make ten cards.** `set_watchlist` (latest definition
