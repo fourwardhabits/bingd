@@ -114,6 +114,9 @@ describe('the toolbar', () => {
     const bar = view.getByTestId('collection-toolbar');
     expect(StyleSheet.flatten(bar.props.style).flexWrap).toBe('wrap');
     expect(within(bar).getByText('Watched marquee').props.numberOfLines).toBeUndefined();
+    // The tools never outgrow the row: they wrap among themselves (independent review 2).
+    const tools = StyleSheet.flatten(bar.children[1] && typeof bar.children[1] !== 'string' ? bar.children[1].props.style : undefined);
+    expect(tools).toMatchObject({ flexWrap: 'wrap', maxWidth: '100%', flexShrink: 1 });
   });
 
   it('heads the list: marquee, then the cards, then the count', async () => {

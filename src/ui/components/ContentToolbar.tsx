@@ -103,7 +103,17 @@ const styles = StyleSheet.create({
   // Its own width, up to the whole row: a long title at a large text size wraps inside it.
   title: { flexShrink: 1, maxWidth: '100%' },
   // `auto` keeps the tools on the right gutter on the title's line and on a line of their own.
-  tools: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 },
+  // Never wider than the row: at the largest text sizes the tools wrap among themselves, right
+  // aligned, so no target is pushed past the screen's edge (independent review 2).
+  tools: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginLeft: 'auto',
+    flexShrink: 1,
+    maxWidth: '100%',
+  },
   filters: {
     flexDirection: 'row',
     alignItems: 'center',
