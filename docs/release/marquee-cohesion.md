@@ -437,7 +437,9 @@ Founder briefs "Final Profile Consistency, Automatic Trailers & Production Relea
   a one-line update after the founder confirms the forms.
 - **Android only.** Both OTA workflows publish `platform: android`, a fixed value pinned by
   `config/ota-workflows.test.mjs`, so this release cannot reach iOS; the `runtimes` stage
-  still checks both binaries. Returning to `all` is a reviewed one-word change after iOS QA.
+  still checks both binaries. The follow-up is not a return to `all`. Once the iOS build
+  passed phone QA, production publishes `ios` alone, so Android is not republished. Preview
+  stays `android`. See [`cloud-ota.md`](./cloud-ota.md).
 
 ### Compliance status — trailer stills and the privacy disclosures
 
@@ -606,7 +608,7 @@ It carries this release's JavaScript; Preview updates are Android-only, so it st
 | Automatic trailer stills in production | NOT ENABLED (fallback); one-line change after the two confirmations |
 | Android production | VERIFIED LIVE (served); on-device check REQUIRES FOUNDER ACTION |
 | iOS QA build | DONE (built); smoke test REQUIRES FOUNDER ACTION |
-| iOS production | HELD — workflow is Android-only until a reviewed change back to `all` |
+| iOS production | HELD on this release. Superseded: production publishes `ios`, not `all`. See [`cloud-ota.md`](./cloud-ota.md) |
 | Watch-date race | Accepted for this release; migration fix next |
 | M-5, M-6, M-3 residual | Open; REQUIRES FOUNDER ACTION (M-5, M-6) / design pass (M-3) |
 

@@ -149,19 +149,32 @@ describe('the OTA workflows', () => {
   }
 
   /**
-   * **Android only until iOS passes QA** (founder, 2026-11-07): no iOS build of this UI has
-   * been tested on a device, so neither lane publishes to iOS. A fixed value in the file,
-   * like the branch, so nothing typed at dispatch can widen it.
+   * Production publishes iOS only (founder, 2026-11-07): the iOS build passed phone QA,
+   * and `all` would republish Android. Preview stays Android, because no iOS Preview
+   * binary is listed for this runtime. Each platform is a fixed value in the file, like
+   * the branch, so nothing typed at dispatch can widen it.
    */
-  it('publishes to Android only, fixed in each file', () => {
-    for (const lane of ['preview', 'production']) {
-      assert.match(job(read(lane), 'publish'), /\n {6}platform: android\n/);
-    }
+  it('production publishes iOS only, fixed in the file', () => {
+    const publish = job(read('production'), 'publish');
+    assert.match(publish, /\n {6}platform: ios\n/);
+    assert.doesNotMatch(publish, /\n {6}platform: (?:android|all)\n/);
   });
 
-  it('the two differ only in the lane, once the comments are gone', () => {
-    const normal = (lane) => withoutComments(read(lane)).replaceAll(lane, 'LANE');
-    assert.equal(normal('production'), normal('preview'));
+  it('preview publishes Android only, fixed in the file', () => {
+    const publish = job(read('preview'), 'publish');
+    assert.match(publish, /\n {6}platform: android\n/);
+    assert.doesNotMatch(publish, /\n {6}platform: (?:ios|all)\n/);
+  });
+
+  it('the two differ only in the lane and the publish platform, once the comments are gone', () => {
+    const normal = (lane, platform) => {
+      const yaml = withoutComments(read(lane));
+      assert.match(yaml, new RegExp(`\\n {6}platform: ${platform}\\n`));
+      return yaml
+        .replaceAll(lane, 'LANE')
+        .replace(`\n      platform: ${platform}\n`, '\n      platform: PLATFORM\n');
+    };
+    assert.equal(normal('production', 'ios'), normal('preview', 'android'));
   });
 
   it('names both live store binaries by full runtime', () => {

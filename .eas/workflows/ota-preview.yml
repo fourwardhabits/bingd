@@ -1,5 +1,6 @@
 # The Preview twin of ota-production.yml, so the cloud path is exercised where only the
-# founder's own build can receive it. `config/ota-workflows.test.mjs` holds the two in step.
+# founder's own build can receive it. `config/ota-workflows.test.mjs` holds the two in
+# step apart from the lane and the publish platform.
 #
 #   eas workflow:run .eas/workflows/ota-preview.yml --ref <full sha> \
 #     -F sha=<full sha> -F message="what changed (<short sha>)" --non-interactive --wait
@@ -65,8 +66,8 @@ jobs:
       BINGD_LANE: preview
     params:
       branch: preview
-      # Android only until an iOS build has passed QA (founder, 2026-11-07). Returning to
-      # all is a one-word change, reviewed like this one, once iOS is cleared.
+      # Android only. No iOS Preview binary is on this runtime, so Preview does not follow
+      # production to iOS. Fixed in the file, like the branch.
       platform: android
       message: ${{ inputs.message }}
       upload_sentry_sourcemaps: false
